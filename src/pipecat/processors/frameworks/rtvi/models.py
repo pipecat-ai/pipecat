@@ -29,6 +29,12 @@ from pipecat.frames.frames import (
 from pipecat.utils.deprecation import deprecated
 
 RTVIFileSourceType = Literal["bytes", "url"]
+"""Source type for an RTVI ``send-file`` message.
+
+Matches :data:`~pipecat.frames.frames.FileSourceType`: a file arrives either
+as inline base64 bytes or as a URL, and both flow through to a
+:class:`~pipecat.frames.frames.UserFileRawFrame` unresolved.
+"""
 
 # -- Constants --
 PROTOCOL_VERSION = "2.2.0"
@@ -262,14 +268,14 @@ class FileUrl(FileSource):
     """File source as a URL.
 
     Parameters:
-        url: The file's URL. An ``s3://`` or ``gs://`` URI is passed straight
-            to the LLM provider, which resolves it via its own cloud IAM
-            (e.g. Bedrock reading from S3). Otherwise, a publicly-routable
-            `url` is passed straight to the LLM provider, which fetches it
-            itself; a non-public `url` has the bot server fetch it and send
-            the LLM the bytes instead, if the resolved address is allowed —
-            see ``allowed_file_url_networks`` in
-            :class:`~pipecat.processors.frameworks.rtvi.processor.RTVIProcessor`.
+        url: The file's URL: whatever the ``POST /files`` upload endpoint
+            returned (``pipecat:<id>`` with the default local storage, or a
+            URL minted by a custom storage backend), a cloud-storage URI
+            (``s3://``, ``gs://``), or a plain ``http(s)`` URL. The URL is
+            resolved at completion time: the LLM provider fetches it itself
+            when it can (public URLs, its own cloud IAM), and otherwise the
+            LLM service's :class:`~pipecat.utils.file_resolver.FileResolver`
+            downloads the bytes and inlines them.
     """
 
     type: RTVIFileSourceType = "url"

@@ -447,6 +447,8 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
             await self.push_frame(LLMFullResponseStartFrame())
             await self.start_processing_metrics()
 
+            await self.resolve_context_files(context)
+
             await self.start_ttfb_metrics()
 
             params_from_context = self._get_llm_invocation_params(context)

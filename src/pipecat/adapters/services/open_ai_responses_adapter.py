@@ -264,6 +264,10 @@ class OpenAIResponsesLLMAdapter(BaseLLMAdapter[OpenAIResponsesLLMInvocationParam
             return cast(ResponseInputItemParam, item)
         return cast(ResponseInputItemParam, payload)
 
+    def supports_file_url(self, url: str, mime_type: str) -> bool:
+        """The Responses API fetches image and file URLs itself."""
+        return url.startswith(("http://", "https://"))
+
     def _convert_multimodal_content(self, content: list) -> list:
         """Convert multimodal content parts to Responses API format.
 
@@ -289,13 +293,21 @@ class OpenAIResponsesLLMAdapter(BaseLLMAdapter[OpenAIResponsesLLMInvocationParam
                 )
             elif part_type == "file_base64":
                 f_data = part["file"]
-                result.append(
-                    {
-                        "type": "input_file",
-                        "filename": f_data["filename"],
-                        "file_data": f_data["file_data"],
-                    }
-                )
+                if f_data["mime_type"].startswith("image/"):
+                    result.append(
+                        {
+                            "type": "input_image",
+                            "image_url": f_data["file_data"],
+                        }
+                    )
+                else:
+                    result.append(
+                        {
+                            "type": "input_file",
+                            "filename": f_data["filename"],
+                            "file_data": f_data["file_data"],
+                        }
+                    )
             elif part_type == "file_url":
                 f_data = part["file"]
                 if f_data["mime_type"].startswith("image/"):

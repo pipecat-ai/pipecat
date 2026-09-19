@@ -32,7 +32,7 @@ async def _context_with_file_message() -> LLMContext:
     context = LLMContext()
     context.add_message({"role": "user", "content": "hello"})
     await context.add_file_frame_message(
-        type="bytes", format="application/pdf", file="data:application/pdf;base64,abc123"
+        type="bytes", format="application/pdf", file="data:application/pdf;base64,ZmFrZSBwZGY="
     )
     return context
 

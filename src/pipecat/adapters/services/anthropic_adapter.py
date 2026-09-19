@@ -150,6 +150,12 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
             messages_for_logging.append(msg)
         return messages_for_logging
 
+    def supports_file_url(self, url: str, mime_type: str) -> bool:
+        """Anthropic fetches image and PDF URLs itself; other files must be inlined."""
+        return url.startswith(("http://", "https://")) and (
+            mime_type.startswith("image/") or mime_type == "application/pdf"
+        )
+
     @dataclass
     class ConvertedMessages:
         """Container for Anthropic-formatted messages converted from universal context."""
@@ -424,18 +430,26 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
                         )
                 if item["type"] == "file_base64":
                     f_data = item["file"]
-                    if f_data["mime_type"] != "application/pdf":
+                    if f_data["mime_type"].startswith("image/"):
+                        item["type"] = "image"
+                        item["source"] = {
+                            "type": "base64",
+                            "media_type": f_data["mime_type"],
+                            "data": f_data["file_data"].split(",")[1],
+                        }
+                        del item["file"]
+                    elif f_data["mime_type"] == "application/pdf":
+                        item["type"] = "document"
+                        item["source"] = {
+                            "type": "base64",
+                            "media_type": f_data["mime_type"],
+                            "data": f_data["file_data"].split(",")[1],
+                        }
+                        del item["file"]
+                    else:
                         # Wrapped as LLMContextConversionError by the caller in
                         # _from_universal_context_messages.
                         raise ValueError(f"Unsupported 'file' MIME type: {f_data['mime_type']}")
-
-                    item["type"] = "document"
-                    item["source"] = {
-                        "type": "base64",
-                        "media_type": f_data["mime_type"],
-                        "data": f_data["file_data"].split(",")[1],
-                    }
-                    del item["file"]
                 new_content.append(item)
             content = new_content
             msg["content"] = content

@@ -189,6 +189,13 @@ class AWSBedrockLLMAdapter(BaseLLMAdapter[AWSBedrockLLMInvocationParams]):
             messages_for_logging.append(msg)
         return messages_for_logging
 
+    # Bedrock's Converse API takes raw bytes for inline content.
+    prefers_raw_file_bytes = True
+
+    def supports_file_url(self, url: str, mime_type: str) -> bool:
+        """Bedrock resolves ``s3://`` URIs through AWS IAM; other URLs must be inlined."""
+        return url.startswith("s3://")
+
     @dataclass
     class ConvertedMessages:
         """Container for Bedrock-formatted messages converted from universal context."""
@@ -395,8 +402,9 @@ class AWSBedrockLLMAdapter(BaseLLMAdapter[AWSBedrockLLMInvocationParams]):
                 elif item["type"] == "file_base64":
                     f_data = item["file"]
                     mime_type = f_data["mime_type"]
-                    file_data_url = f_data["file_data"]
-                    raw_bytes = base64.b64decode(file_data_url.split(",")[1])
+                    raw_bytes = f_data.get("_raw_bytes")
+                    if raw_bytes is None:
+                        raw_bytes = base64.b64decode(f_data["file_data"].split(",")[1])
                     image_format = _MIME_TO_BEDROCK_IMAGE_FORMAT.get(mime_type)
                     if image_format is not None:
                         new_content.append(
