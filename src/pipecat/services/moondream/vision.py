@@ -11,6 +11,7 @@ for image analysis and description generation.
 """
 
 import asyncio
+import importlib
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 
@@ -31,7 +32,8 @@ from pipecat.utils.types import assert_given
 
 try:
     import torch
-    from transformers import AutoModelForCausalLM
+    from transformers import AutoConfig
+    from transformers.dynamic_module_utils import get_class_from_dynamic_module
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error('In order to use Moondream, you need to `uv add "pipecat-ai[moondream]"`.')
@@ -61,6 +63,63 @@ def detect_device():
         return torch.device("mps"), torch.float16
     else:
         return torch.device("cpu"), torch.float32
+
+
+def load_model(model_path: str, revision: str | None, device: torch.device, dtype: torch.dtype):
+    """Load a Moondream model from the Hugging Face Hub.
+
+    Transformers builds models on the meta device and relies on two hooks that
+    Moondream's remote model class does not provide: calling ``post_init()``
+    from the constructor, and recomputing non-persistent buffers in
+    ``_init_weights()``. The remote class is
+    subclassed here to provide both; without them, loading fails on an
+    accelerator and the attention mask and rotary embedding buffers are left
+    uninitialized.
+
+    Args:
+        model_path: Hugging Face model identifier or local path.
+        revision: Specific model revision to use.
+        device: Device to load the model on.
+        dtype: Data type to load the model weights as.
+
+    Returns:
+        The loaded model, in evaluation mode.
+    """
+    config = AutoConfig.from_pretrained(model_path, trust_remote_code=True, revision=revision)
+    model_class = get_class_from_dynamic_module(
+        config.auto_map["AutoModelForCausalLM"], model_path, revision=revision
+    )
+    rope = importlib.import_module(f"{model_class.__module__.rpartition('.')[0]}.rope")
+
+    class Transformers5Moondream(model_class):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.post_init()
+
+        def _init_weights(self, module):
+            super()._init_weights(module)
+            model = self.model
+            if module is model:
+                max_context = model.config.text.max_context
+                patch_w = model.config.vision.crop_size // model.config.vision.enc_patch_size
+                prefix_attn_len = 1 + patch_w**2
+                attn_mask = torch.tril(torch.ones(max_context, max_context, dtype=torch.bool))
+                attn_mask[:prefix_attn_len, :prefix_attn_len] = True
+                module.attn_mask.copy_(attn_mask)
+            elif module is model.text:
+                text_config = model.config.text
+                freqs_cis = rope.precompute_freqs_cis(
+                    text_config.dim // (2 * text_config.n_heads), text_config.max_context
+                )
+                module.freqs_cis.copy_(freqs_cis)
+
+    return Transformers5Moondream.from_pretrained(
+        model_path,
+        config=config,
+        revision=revision,
+        device_map={"": device},
+        dtype=dtype,
+    ).eval()
 
 
 @dataclass
@@ -132,13 +191,7 @@ class MoondreamService(VisionService):
         model_path = assert_given(self._settings.model)
         if model_path is None:
             raise ValueError("Moondream model must be specified")
-        self._model = AutoModelForCausalLM.from_pretrained(
-            model_path,
-            trust_remote_code=True,
-            revision=revision,
-            device_map={"": device},
-            dtype=dtype,
-        ).eval()
+        self._model = load_model(model_path, revision, device, dtype)
 
         logger.debug("Loaded Moondream model")
 
