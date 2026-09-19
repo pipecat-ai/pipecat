@@ -148,17 +148,24 @@ class PerplexityLLMAdapter(OpenAILLMAdapter):
             if current["role"] == next_msg["role"] == "system":
                 # Perplexity allows multiple initial system messages, don't merge
                 i += 1
-            elif current["role"] == next_msg["role"]:
+            # A tool message names the call its result answers in tool_call_id,
+            # so merging two of them would leave both results on the first
+            # call's id. Leave consecutive tool messages as they are.
+            elif current["role"] == next_msg["role"] and "tool_call_id" not in next_msg:
                 # Convert string content to list-of-dicts format for merging
                 if isinstance(current.get("content"), str):
                     current["content"] = [{"type": "text", "text": current["content"]}]
                 if isinstance(next_msg.get("content"), str):
                     next_msg["content"] = [{"type": "text", "text": next_msg["content"]}]
                 # Merge content from next message into current
-                if isinstance(current.get("content"), list) and isinstance(
-                    next_msg.get("content"), list
-                ):
-                    current["content"].extend(next_msg["content"])
+                if isinstance(next_msg.get("content"), list):
+                    if isinstance(current.get("content"), list):
+                        current["content"].extend(next_msg["content"])
+                    else:
+                        current["content"] = next_msg["content"]
+                # tool_calls are carried outside "content", so merge those too
+                if next_msg.get("tool_calls"):
+                    current.setdefault("tool_calls", []).extend(next_msg["tool_calls"])
                 msgs.pop(i + 1)
             else:
                 i += 1
