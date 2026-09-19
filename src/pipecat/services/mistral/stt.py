@@ -202,9 +202,9 @@ class MistralSTTService(STTService):
         if not self._connection or self._connection.is_closed:
             await self._connect()
 
-        # `_connect` swallows exceptions and may leave `_connection` unset;
-        # drop the audio chunk rather than crashing if reconnect failed.
-        if self._connection is None:
+        # `_connect` swallows exceptions and leaves whatever `_connection` held;
+        # drop the audio chunk rather than crashing if the reconnect failed.
+        if self._connection is None or self._connection.is_closed:
             logger.warning(f"{self}: dropping audio chunk — Mistral STT not connected")
             yield None
             return
@@ -238,20 +238,25 @@ class MistralSTTService(STTService):
             await self.push_error(error_msg=f"Error connecting to Mistral STT: {e}", exception=e)
 
     async def _disconnect(self):
-        """Close the connection and cancel the receive task."""
+        """Release the connection and cancel the receive task."""
         if self._receive_task:
             await self.cancel_task(self._receive_task)
             self._receive_task = None
 
-        if self._connection and not self._connection.is_closed:
+        connection = self._connection
+        if connection is None:
+            return
+
+        # Let go of it first: a connection the server already closed still has
+        # to be released and announced, it just has nothing left to close.
+        self._connection = None
+        if not connection.is_closed:
             try:
                 logger.debug(f"{self}: Disconnecting from Mistral STT")
-                await self._connection.close()
+                await connection.close()
             except Exception as e:
                 logger.warning(f"{self}: Error closing connection: {e}")
-            finally:
-                self._connection = None
-                await self._call_event_handler("on_disconnected")
+        await self._call_event_handler("on_disconnected")
 
     async def _receive_events(self):
         """Background task: iterate connection events and handle them."""
