@@ -100,6 +100,7 @@ class SlowWorkerTask(BaseWorker):
         super().__init__(name)
         self.started = asyncio.Event()
         self.was_cancelled = False
+        self.cancelled = asyncio.Event()
 
     async def on_job_request(self, message):
         await super().on_job_request(message)
@@ -109,6 +110,7 @@ class SlowWorkerTask(BaseWorker):
             await asyncio.Event().wait()
         except asyncio.CancelledError:
             self.was_cancelled = True
+            self.cancelled.set()
 
 
 async def create_test_env():
@@ -744,6 +746,53 @@ class TestJobContext(unittest.IsolatedAsyncioTestCase):
         for m in cancel_msgs:
             self.assertEqual(m.reason, "tool cancelled")
         self.assertEqual(len(parent.job_groups), 0)
+
+    async def test_job_cancels_while_waiting_on_context_exit(self):
+        await self._assert_cancellation_during_context_exit(single_worker=True)
+
+    async def test_job_group_cancels_while_waiting_on_context_exit(self):
+        await self._assert_cancellation_during_context_exit(single_worker=False)
+
+    async def _assert_cancellation_during_context_exit(self, *, single_worker: bool):
+        sent = capture_bus(self.bus)
+        parent = StubTask("parent")
+        await setup_task(self.bus, self.registry, parent)
+        names = ("worker",) if single_worker else ("worker-1", "worker-2")
+        workers = [SlowWorkerTask(name) for name in names]
+        for worker in workers:
+            await setup_task(self.bus, self.registry, worker)
+
+        context = parent.job(names[0]) if single_worker else parent.job_group(*names)
+        exiting = asyncio.Event()
+
+        async def run_job():
+            async with context:
+                # No await after set(): the caller reaches __aexit__ before the test resumes.
+                exiting.set()
+
+        task = self.tm.create_task(run_job(), "job-context-exit")
+        try:
+            await asyncio.wait_for(exiting.wait(), timeout=2.0)
+            await asyncio.wait_for(
+                asyncio.gather(*(worker.started.wait() for worker in workers)), timeout=2.0
+            )
+            group = parent.job_groups[context.job_id]
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+
+            cancel_msgs = [message for message in sent if isinstance(message, BusJobCancelMessage)]
+            self.assertEqual(len(cancel_msgs), len(workers))
+            self.assertEqual({message.target for message in cancel_msgs}, set(names))
+            self.assertTrue(all(message.job_id == context.job_id for message in cancel_msgs))
+            self.assertNotIn(context.job_id, parent.job_groups)
+            self.assertTrue(group.is_done)
+            await asyncio.wait_for(
+                asyncio.gather(*(worker.cancelled.wait() for worker in workers)), timeout=2.0
+            )
+        finally:
+            await self.tm.cancel_task(task)
+            await parent.cancel_job_group(context.job_id, reason="test cleanup")
 
     async def test_cancel_interrupts_running_handler(self):
         """Cancelling a job interrupts a handler that is currently executing."""
