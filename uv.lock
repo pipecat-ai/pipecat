@@ -2912,6 +2912,11 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/fe/d1/a0c72b0e006df654709fbc366cc5bcb53e5aee13e1e3395152c6dd293376/httpx2-2.13.0-py3-none-any.whl", hash = "sha256:fc12720cedf72faa26cca6b4ca394e05c894e7d7933fc45cafe767960804e49a", size = 95565, upload-time = "2026-09-14T14:18:03.553Z" },
 ]
 
+[package.optional-dependencies]
+http2 = [
+    { name = "h2" },
+]
+
 [[package]]
 name = "httpx2-jsfetch"
 version = "1.0"
@@ -5709,6 +5714,7 @@ deepgram = [
     { name = "deepgram-sdk" },
 ]
 evals = [
+    { name = "httpx2", extra = ["http2"] },
     { name = "jinja2" },
     { name = "kokoro-onnx" },
     { name = "moonshine-voice" },
@@ -5926,6 +5932,7 @@ requires-dist = [
     { name = "google-genai", marker = "(python_full_version != '3.13.*' and extra == 'google') or (sys_platform != 'linux' and extra == 'google')", specifier = ">=2.19.0,<3" },
     { name = "google-genai", marker = "extra == 'google'", specifier = ">=1.68.0,<3" },
     { name = "groq", marker = "extra == 'groq'", specifier = ">=0.23.0,<2" },
+    { name = "httpx2", extras = ["http2"], marker = "extra == 'evals'", specifier = ">=2.7.0,<3" },
     { name = "hume", marker = "extra == 'hume'", specifier = ">=0.11.2,<1" },
     { name = "jinja2", marker = "extra == 'cli'", specifier = ">=3.1.0,<4" },
     { name = "kokoro-onnx", marker = "extra == 'kokoro'", specifier = ">=0.5.0,<1" },

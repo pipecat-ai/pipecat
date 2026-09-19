@@ -141,7 +141,7 @@ Supported expectation fields (per event):
 
 ``eval: <str>``
     natural-language criterion the event's text content must satisfy, evaluated
-    by a judge LLM (see :mod:`pipecat.evals.judge`).
+    by the judge (see :mod:`pipecat.evals.base_judge`).
 
     On ``function_call`` the criterion is about the call instead: each call
     ``calls:`` (or the ``name:``/``args:`` shorthand) matches is put to the
@@ -260,6 +260,8 @@ Top-level optional fields:
             model: gemma4:12b
             # or, for any other LLM: factory: my_evals.judge (a callable
             # taking this mapping and returning an OpenAI-compatible service)
+            # or, for TypeSafe's Jev: service: typesafe, with an optional
+            # explainer: LLM block (see pipecat.evals.jev_judge)
           transcription:           # required when modality is audio
             service: moonshine     # STT for the bot's audio (or whisper, or a factory)
             model: small-streaming # optional

@@ -17,8 +17,8 @@ import time
 
 from loguru import logger
 
+from pipecat.evals.base_judge import BaseEvalJudge
 from pipecat.evals.events import EvalEventStream
-from pipecat.evals.judge import EvalJudge
 from pipecat.evals.results import EvalAssertionFailure, EvalTrace
 from pipecat.evals.script import FUNCTION_CALL_EVENTS, EvalExpectation
 
@@ -37,7 +37,7 @@ class ExpectationMatcher:
     order.
     """
 
-    def __init__(self, *, stream: EvalEventStream, judge: EvalJudge | None, trace: EvalTrace):
+    def __init__(self, *, stream: EvalEventStream, judge: BaseEvalJudge | None, trace: EvalTrace):
         """Initialize the matcher.
 
         Args:

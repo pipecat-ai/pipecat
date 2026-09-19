@@ -27,9 +27,9 @@ from collections.abc import Callable
 from loguru import logger
 
 from pipecat.evals.base_driver import BaseEvalDriver
+from pipecat.evals.base_judge import BaseEvalJudge, judge_from_config
 from pipecat.evals.client import EvalClient, EvalClientParams
 from pipecat.evals.events import EvalEventStream
-from pipecat.evals.judge import EvalJudge
 from pipecat.evals.results import EvalScriptResult, EvalScriptTurnProgress
 from pipecat.evals.scenario import EvalKind
 from pipecat.evals.scenario_config import describe_config
@@ -61,7 +61,7 @@ class EvalScriptSession(EvalSession[EvalScriptResult]):
         *,
         params: EvalSessionParams | None = None,
         on_progress: Callable[[EvalScriptTurnProgress], None] | None = None,
-        judge: EvalJudge | None = None,
+        judge: BaseEvalJudge | None = None,
         user_tts: CachingTTSService | None = None,
         bot_stt: STTService | None = None,
     ):
@@ -81,7 +81,7 @@ class EvalScriptSession(EvalSession[EvalScriptResult]):
                     Use the ``on_progress`` event handler instead.
                     Will be removed in 2.0.0.
 
-            judge: The :class:`~pipecat.evals.judge.EvalJudge` for ``eval:``
+            judge: The :class:`~pipecat.evals.base_judge.BaseEvalJudge` for ``eval:``
                 assertions, or ``None`` if the scenario has none.
             user_tts: The user-audio TTS, or ``None`` for text mode.
             bot_stt: The bot-audio STT for the ``response`` transcription, or
@@ -134,7 +134,7 @@ class EvalScriptSession(EvalSession[EvalScriptResult]):
         *,
         params: EvalSessionParams | None = None,
         on_progress: Callable[[EvalScriptTurnProgress], None] | None = None,
-        judge: EvalJudge | None = None,
+        judge: BaseEvalJudge | None = None,
         user_tts: CachingTTSService | None = None,
         bot_stt: STTService | None = None,
         connect_timeout_s: float | None = None,
@@ -221,7 +221,7 @@ class EvalScriptSession(EvalSession[EvalScriptResult]):
         turns = scenario.turns
         if judge is None and any(exp.eval is not None for turn in turns for exp in turn.expect):
             with logger.contextualize(eval_pipeline="judge"):
-                judge = EvalJudge.from_config(scenario.judge)
+                judge = judge_from_config(scenario.judge)
 
         if user_tts is None and scenario.user_speech is not None:
             with logger.contextualize(eval_pipeline="speech"):

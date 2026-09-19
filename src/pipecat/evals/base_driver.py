@@ -16,9 +16,9 @@ from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 from typing import Generic, TypeVar
 
+from pipecat.evals.base_judge import BaseEvalJudge
 from pipecat.evals.client import EvalClient
 from pipecat.evals.events import EvalEventStream
-from pipecat.evals.judge import EvalJudge
 from pipecat.evals.results import EvalAssertionFailure, EvalProgress, EvalTrace
 
 R = TypeVar("R")
@@ -36,7 +36,7 @@ class BaseEvalDriver(ABC, Generic[R]):
         *,
         client: EvalClient,
         stream: EvalEventStream,
-        judge: EvalJudge | None,
+        judge: BaseEvalJudge | None,
         trace: EvalTrace,
         progress: Callable[[EvalProgress], Awaitable[None]],
     ):
@@ -61,6 +61,11 @@ class BaseEvalDriver(ABC, Generic[R]):
     @abstractmethod
     async def run(self) -> list[EvalAssertionFailure]:
         """Drive the conversation to its end and return the failures."""
+
+    async def close(self) -> None:
+        """Close the judge, once the run has ended."""
+        if self._judge is not None:
+            await self._judge.close()
 
     @abstractmethod
     def result(

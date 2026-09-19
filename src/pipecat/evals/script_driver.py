@@ -11,9 +11,9 @@ import time
 from collections.abc import Awaitable, Callable
 
 from pipecat.evals.base_driver import BaseEvalDriver
+from pipecat.evals.base_judge import BaseEvalJudge
 from pipecat.evals.client import EvalClient
 from pipecat.evals.events import EvalEventStream
-from pipecat.evals.judge import EvalJudge
 from pipecat.evals.matcher import ExpectationMatcher
 from pipecat.evals.results import (
     EvalAssertionFailure,
@@ -50,7 +50,7 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
         default_timeout_ms: int,
         client: EvalClient,
         stream: EvalEventStream,
-        judge: EvalJudge | None,
+        judge: BaseEvalJudge | None,
         trace: EvalTrace,
         progress: Callable[[EvalProgress], Awaitable[None]],
     ):
