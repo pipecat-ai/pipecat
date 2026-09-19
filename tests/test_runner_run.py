@@ -5,6 +5,7 @@
 #
 
 import argparse
+import asyncio
 import io
 import sys
 import tempfile
@@ -13,6 +14,7 @@ import unittest
 from contextlib import contextmanager, redirect_stdout
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi import FastAPI
@@ -28,6 +30,7 @@ from pipecat.runner.run import (
     _parse_ice_servers,
     _print_startup_message,
     _read_flow_config,
+    _run_eval,
     _setup_daily_routes,
     _setup_telephony_routes,
     _setup_unified_start_route,
@@ -1023,3 +1026,62 @@ class TestSessionFlowConfig(unittest.TestCase):
         runner_args = RunnerArguments()
         _apply_cli_args(runner_args, argparse.Namespace(flow_config="from: --flow"))
         self.assertEqual(runner_args.flow_config, "from: --flow")
+
+
+class TestEvalRunnerBodyFlowConfig(unittest.TestCase):
+    """Under the eval transport the runner body stands in for the /start request.
+
+    An eval manifest sets ``spawn:`` once for every bot in the suite, so
+    ``--flow`` cannot differ between entries; ``runner_body:`` is an entry's
+    own, which is where a suite puts the flow that entry runs.
+    """
+
+    def _run_eval(self, body: str | None, flow_arg: str | None = None) -> RunnerArguments:
+        """Run the eval path against a stub bot, and return what it was given."""
+        seen: dict[str, RunnerArguments] = {}
+
+        async def bot(runner_args):
+            seen["args"] = runner_args
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = None
+            if body is not None:
+                path = Path(directory) / "body.json"
+                path.write_text(body)
+            args = argparse.Namespace(
+                host="localhost",
+                port=7860,
+                runner_body=str(path) if path else None,
+                flow_config=flow_arg,
+            )
+            with patch(
+                "pipecat.runner.run._get_bot_module",
+                return_value=SimpleNamespace(bot=bot),
+            ):
+                asyncio.run(_run_eval(args))
+        return seen["args"]
+
+    def test_a_flow_in_the_body_is_the_session_flow(self):
+        runner_args = self._run_eval('{"flow_config": "initial_node: greeting\\n"}')
+        self.assertEqual(runner_args.flow_config, "initial_node: greeting\n")
+
+    def test_the_body_flow_beats_the_cli_default(self):
+        runner_args = self._run_eval('{"flow_config": "from: the entry"}', "from: --flow")
+        self.assertEqual(runner_args.flow_config, "from: the entry")
+
+    def test_the_cli_default_fills_in_for_a_body_naming_no_flow(self):
+        runner_args = self._run_eval('{"image": "cat.png"}', "from: --flow")
+        self.assertEqual(runner_args.flow_config, "from: --flow")
+
+    def test_the_cli_default_fills_in_without_a_body_at_all(self):
+        runner_args = self._run_eval(None, "from: --flow")
+        self.assertEqual(runner_args.flow_config, "from: --flow")
+
+    def test_the_rest_of_the_body_still_reaches_the_bot(self):
+        runner_args = self._run_eval('{"flow_config": "a: b", "image": "cat.png"}')
+        self.assertEqual(runner_args.body["image"], "cat.png")
+
+    def test_a_body_that_is_not_a_mapping_is_left_alone(self):
+        runner_args = self._run_eval("[1, 2, 3]", "from: --flow")
+        self.assertEqual(runner_args.flow_config, "from: --flow")
+        self.assertEqual(runner_args.body, [1, 2, 3])

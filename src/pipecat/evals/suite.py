@@ -65,6 +65,17 @@ with the file's directory as its working directory, so relative paths inside
 the body (like an image) resolve next to the file; a body that holds such
 paths belongs in a file for that reason.
 
+A ``flow_config:`` key in that body is the flow the entry's bot runs, as
+Pipecat Flows YAML or JSON text -- the same key a ``/start`` request carries,
+and the only way to give entries different flows, since ``spawn:`` (and so
+``--flow``) is set once for the whole manifest::
+
+    suite:
+      - bot: bots/reservations.py
+        name: reservations-v2
+        runner_body: {path: flows/v2.json}   # {"flow_config": "<the flow>"}
+        scenarios: [books_a_table]
+
 .. deprecated:: 1.11.0
     Use ``runner_body: {path: <file>}`` instead of a bare ``runner_body: <file>``.
     Will be removed in 2.0.0.

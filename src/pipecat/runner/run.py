@@ -1608,7 +1608,6 @@ async def _run_eval(args: argparse.Namespace):
         session_id=str(uuid.uuid4()),
     )
     runner_args.handle_sigint = True
-    _apply_cli_args(runner_args, args)
 
     # A bot may need session data it would normally receive in the /start request
     # body (e.g. a vision bot's image path). The eval transport has no such
@@ -1616,6 +1615,17 @@ async def _run_eval(args: argparse.Namespace):
     # --runner-body.
     if args.runner_body:
         runner_args.body = yaml.safe_load(Path(args.runner_body).read_text())
+        # That file stands in for the /start request, so a flow named in it is
+        # this session's flow, exactly as it would be over HTTP. This is how a
+        # suite gives each entry its own flow: an eval manifest sets `spawn:`
+        # once for every bot it runs, so `--flow` cannot vary per entry, while
+        # `runner_body:` is an entry's own.
+        if isinstance(runner_args.body, dict):
+            runner_args.flow_config = runner_args.body.get("flow_config")
+
+    # Read after the body, so --flow stays the default for a session that named
+    # no flow of its own — the same rule the /start route follows.
+    _apply_cli_args(runner_args, args)
 
     bot_module = _get_bot_module()
     await bot_module.bot(runner_args)
