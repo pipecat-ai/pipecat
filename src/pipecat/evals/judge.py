@@ -35,11 +35,11 @@ import json
 import re
 import warnings
 from collections.abc import Sequence
-from dataclasses import dataclass
 from typing import Any, cast
 
 from loguru import logger
 
+from pipecat.evals.base_judge import BaseEvalJudge, JudgeVerdict, RunVerdicts
 from pipecat.evals.services import llm_service_from_config
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.services.llm_service import LLMService
@@ -79,6 +79,34 @@ JUDGE_ASK_TEMPLATE = (
     "Does the bot's most recent reply satisfy this criterion?\n\n"
     "Criterion: {criterion}\n\n"
     "Answer yes, no, or continue."
+)
+
+# The judge's instructions for a reply when ``continue`` isn't allowed: every
+# judged reply is a final answer, so the verdict is yes or no.
+JUDGE_FINAL_SYSTEM_INSTRUCTION = (
+    "You are a strict but fair judge evaluating a conversation between a user and a "
+    "bot under test. The 'user' messages are the user; the 'assistant' messages are "
+    "the bot's replies. Judge only the bot's most recent reply — which may have "
+    "arrived as several consecutive 'assistant' messages — against the given "
+    "criterion, using the earlier turns only as context. The reply is the bot's final "
+    "answer. "
+    "When the bot spoke its reply, the 'assistant' text is an automatic speech-to-text "
+    "transcription, so it may contain homophones, misspellings, split or merged words, and "
+    "missing punctuation. Always judge it by the intended spoken meaning, never by its exact "
+    "spelling. In particular, treat a number as the same value whether it is spelled out, "
+    "written as a digit, or transcribed as a homophone: 'for' and 'fore' mean 'four' (4), and "
+    "'to' and 'too' mean 'two' (2). Never answer 'no' solely because of a transcription error "
+    "when the intended spoken meaning satisfies the criterion. "
+    "Respond ONLY with a JSON object on a single line containing two fields: "
+    '{"verdict": "yes" | "no", "reason": "<one short sentence>"}. '
+    'Use "yes" if the reply satisfies the criterion and "no" if it does not. '
+    "Do not include any other text, explanation, or markdown."
+)
+
+JUDGE_FINAL_ASK_TEMPLATE = (
+    "Does the bot's most recent reply satisfy this criterion?\n\n"
+    "Criterion: {criterion}\n\n"
+    "Answer yes or no."
 )
 
 # The judge's instructions for an ``eval:`` on a function call. The call is
@@ -146,42 +174,7 @@ RUN_JUDGE_ASK_TEMPLATE = (
 )
 
 
-@dataclass
-class JudgeVerdict:
-    """Outcome of a single judge call.
-
-    Parameters:
-        verdict: ``"yes"`` (satisfies), ``"no"`` (substantive answer that fails),
-            or ``"continue"`` (interim/filler/incomplete — re-judge once more text
-            arrives).
-        reason: One-sentence justification.
-        raw_response: The judge LLM's raw text, for diagnostics.
-    """
-
-    verdict: str
-    reason: str
-    raw_response: str
-
-    @property
-    def passed(self) -> bool:
-        """True only when the verdict is a definite ``"yes"``."""
-        return self.verdict == "yes"
-
-
-@dataclass
-class RunVerdicts:
-    """A whole simulation run's verdicts, from one judge call.
-
-    Parameters:
-        goal: The verdict on the goal, over the whole conversation.
-        turns: Per criterion name, a verdict per bot turn, in order.
-    """
-
-    goal: JudgeVerdict
-    turns: dict[str, list[JudgeVerdict]]
-
-
-class EvalJudge:
+class EvalJudge(BaseEvalJudge):
     """Wraps a pipecat LLM service and runs single-shot evaluations.
 
     Args:
@@ -191,20 +184,20 @@ class EvalJudge:
             for a JSON verdict + short reason.
     """
 
-    def __init__(self, service: LLMService[Any], *, max_tokens: int = 200):
+    def __init__(
+        self, service: LLMService[Any], *, max_tokens: int = 200, allow_continue: bool = True
+    ):
         """Initialize the judge with a configured pipecat LLM service.
 
         Args:
             service: A pipecat LLM service exposing ``run_inference()``.
             max_tokens: Cap on the judge's response length.
+            allow_continue: Whether a reply may be judged ``continue``; when
+                ``False``, a reply is ``yes`` or ``no``.
         """
+        super().__init__(allow_continue=allow_continue)
         self._service = service
         self._max_tokens = max_tokens
-        # The conversation the judge evaluates against, grown by the harness over
-        # the scenario (one EvalJudge per scenario, so this starts empty): dicts
-        # with a ``role`` of ``user``, ``assistant`` (a segment of a reply), or
-        # ``tool`` (a call the bot made, one line), and the ``content``.
-        self._transcript: list[dict] = []
         self._cache: dict[str, JudgeVerdict] = {}
         self._run_cache: dict[str, RunVerdicts] = {}
 
@@ -220,9 +213,10 @@ class EvalJudge:
         Args:
             judge_config: Mapping with keys ``service`` (default ``"ollama"``),
                 ``model`` (default ``"gemma4:12b"``), optional ``endpoint``
-                (service-specific default if omitted), and an optional ``extra``
-                mapping forwarded to the model as top-level request parameters.
-                ``None`` uses all defaults.
+                (service-specific default if omitted), an optional ``extra``
+                mapping forwarded to the model as top-level request parameters,
+                and an optional ``allow_continue`` (``false`` judges a reply
+                yes or no only). ``None`` uses all defaults.
 
         Returns:
             A configured EvalJudge.
@@ -238,38 +232,10 @@ class EvalJudge:
             def make_judge_llm(config):
                 return TogetherLLMService(...)  # any service exposing run_inference()
         """
-        return cls(llm_service_from_config(judge_config, where="judge.eval"))
-
-    def add_user_message(self, text: str | None) -> None:
-        """Record a user turn, so a later reply is judged in context.
-
-        Args:
-            text: The user's utterance, or ``None`` for a bot-first turn (ignored).
-        """
-        if text and text.strip():
-            self._transcript.append({"role": "user", "content": text})
-
-    def add_assistant_message(self, text: str | None) -> None:
-        """Add a segment of the bot's current reply to the conversation the judge sees.
-
-        Consecutive segments are one reply: a judged run counts them as one
-        bot turn.
-
-        Args:
-            text: The new reply segment; empty or ``None`` is ignored.
-        """
-        if text and text.strip():
-            self._transcript.append({"role": "assistant", "content": text})
-
-    def add_tool_call(self, text: str | None) -> None:
-        """Record a tool call the bot made, as evidence for a judged run.
-
-        Args:
-            text: The call on one line, e.g. ``book({"time": "6pm"})`` or
-                ``book was cancelled``; empty or ``None`` is ignored.
-        """
-        if text and text.strip():
-            self._transcript.append({"role": "tool", "content": text})
+        return cls(
+            llm_service_from_config(judge_config, where="judge.eval"),
+            allow_continue=(judge_config or {}).get("allow_continue", True) is not False,
+        )
 
     async def evaluate(self, criterion: str) -> JudgeVerdict:
         """Judge whether the bot's latest reply satisfies ``criterion``, in the conversation so far.
@@ -282,8 +248,17 @@ class EvalJudge:
             justification. Cached by ``(criterion, conversation)`` so the same
             assertion over the same conversation hits the judge only once.
         """
-        ask = JUDGE_ASK_TEMPLATE.format(criterion=criterion)
-        return await self._evaluate(criterion, JUDGE_SYSTEM_INSTRUCTION, ask)
+        if self._allow_continue:
+            ask = JUDGE_ASK_TEMPLATE.format(criterion=criterion)
+            return await self._evaluate(criterion, JUDGE_SYSTEM_INSTRUCTION, ask)
+        ask = JUDGE_FINAL_ASK_TEMPLATE.format(criterion=criterion)
+        verdict = await self._evaluate(criterion, JUDGE_FINAL_SYSTEM_INSTRUCTION, ask)
+        if verdict.verdict == "continue":
+            # An answer that ignored the yes/no instructions counts as a no.
+            return JudgeVerdict(
+                verdict="no", reason=verdict.reason, raw_response=verdict.raw_response
+            )
+        return verdict
 
     async def evaluate_call(self, name: str, args: dict | None, criterion: str) -> JudgeVerdict:
         """Judge whether a function call the bot made satisfies ``criterion``, in the conversation so far.
@@ -450,6 +425,8 @@ class EvalJudge:
 
 # The reason a verdict carries when the judge gave none.
 _NO_VERDICT = "(judge gave no verdict)"
+# The reason a verdict carries when the judge gave the verdict without one.
+NO_REASON = "(no reason given)"
 
 
 def _parse_run_verdicts(response: str, names: list[str], turn_count: int) -> RunVerdicts:
@@ -471,7 +448,7 @@ def _parse_run_verdicts(response: str, names: list[str], turn_count: int) -> Run
     if goal_verdict == "none":
         goal_reason = _NO_VERDICT
     elif goal_verdict == "no" and not goal_reason:
-        goal_reason = "(no reason given)"
+        goal_reason = NO_REASON
     return RunVerdicts(
         goal=JudgeVerdict(verdict=goal_verdict, reason=goal_reason, raw_response=response),
         turns={name: _turn_verdicts(obj, name, turn_count, response) for name in names},
@@ -525,7 +502,7 @@ def _turn_verdicts(obj: dict, name: str, turn_count: int, response: str) -> list
         verdict = "yes" if str(answer).strip().lower() == "yes" else "no"
         reason = str(reasons.get(str(index + 1), "")).strip()
         if verdict == "no" and not reason:
-            reason = "(no reason given)"
+            reason = NO_REASON
         verdicts.append(JudgeVerdict(verdict=verdict, reason=reason, raw_response=response))
     return verdicts
 
@@ -560,7 +537,7 @@ def _parse_verdict(response: str) -> JudgeVerdict:
             reason = str(obj.get("reason", "")).strip()
             return JudgeVerdict(
                 verdict=verdict,
-                reason=reason or "(no reason given)",
+                reason=reason or NO_REASON,
                 raw_response=response,
             )
         except (json.JSONDecodeError, AttributeError):

@@ -347,6 +347,7 @@ def moonshine_service(config: dict) -> STTService:
 
 DEFAULT_OLLAMA_JUDGE_MODEL = "gemma4:12b"
 DEFAULT_OPENAI_MODEL = "gpt-4o"
+DEFAULT_JEV_MODEL = "jev-latest"
 
 # The default judge is thinking-capable, and only its JSON verdict is ever read,
 # so reasoning buys nothing while costing latency and eating into the token

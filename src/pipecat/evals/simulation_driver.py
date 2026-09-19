@@ -11,6 +11,7 @@ import time
 from collections.abc import Awaitable, Callable
 
 from pipecat.evals.base_driver import BaseEvalDriver
+from pipecat.evals.base_judge import BaseEvalJudge
 from pipecat.evals.client import (
     BOT_ENDED_EVENT,
     HARNESS_ERROR_EVENT,
@@ -18,7 +19,6 @@ from pipecat.evals.client import (
     EvalClient,
 )
 from pipecat.evals.events import EvalEventStream
-from pipecat.evals.judge import EvalJudge
 from pipecat.evals.persona import EvalPersona
 from pipecat.evals.results import (
     EvalAssertionFailure,
@@ -73,7 +73,7 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
         persona: EvalPersona,
         client: EvalClient,
         stream: EvalEventStream,
-        judge: EvalJudge | None,
+        judge: BaseEvalJudge | None,
         trace: EvalTrace,
         progress: Callable[[EvalProgress], Awaitable[None]],
     ):

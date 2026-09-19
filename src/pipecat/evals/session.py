@@ -43,9 +43,9 @@ from pipecat.utils.base_object import BaseObject
 
 if TYPE_CHECKING:
     from pipecat.evals.base_driver import BaseEvalDriver
+    from pipecat.evals.base_judge import BaseEvalJudge
     from pipecat.evals.client import EvalClient
     from pipecat.evals.events import EvalEventStream
-    from pipecat.evals.judge import EvalJudge
     from pipecat.evals.script_session import EvalScriptSession
     from pipecat.evals.simulation_session import EvalSimulationSession
     from pipecat.evals.tts import CachingTTSService
@@ -177,7 +177,7 @@ class EvalSession(BaseObject, Generic[R]):
         bot_url: str,
         *,
         params: EvalSessionParams | None = None,
-        judge: "EvalJudge | None" = None,
+        judge: "BaseEvalJudge | None" = None,
         user_tts: "CachingTTSService | None" = None,
         bot_stt: "STTService | None" = None,
         on_progress: "Callable[[EvalScriptTurnProgress], None] | None" = None,
@@ -199,7 +199,7 @@ class EvalSession(BaseObject, Generic[R]):
         *,
         params: EvalSessionParams | None = None,
         persona_llm: "LLMService | None" = None,
-        judge: "EvalJudge | None" = None,
+        judge: "BaseEvalJudge | None" = None,
         user_tts: "CachingTTSService | None" = None,
         bot_stt: "STTService | None" = None,
         connect_timeout_s: float | None = None,
@@ -220,7 +220,7 @@ class EvalSession(BaseObject, Generic[R]):
         *,
         params: EvalSessionParams | None = None,
         persona_llm: "LLMService | None" = None,
-        judge: "EvalJudge | None" = None,
+        judge: "BaseEvalJudge | None" = None,
         user_tts: "CachingTTSService | None" = None,
         bot_stt: "STTService | None" = None,
         on_progress: "Callable[[EvalScriptTurnProgress], None] | None" = None,
@@ -241,7 +241,7 @@ class EvalSession(BaseObject, Generic[R]):
         *,
         params: EvalSessionParams | None = None,
         persona_llm: "LLMService | None" = None,
-        judge: "EvalJudge | None" = None,
+        judge: "BaseEvalJudge | None" = None,
         user_tts: "CachingTTSService | None" = None,
         bot_stt: "STTService | None" = None,
         on_progress: "Callable[[EvalScriptTurnProgress], None] | None" = None,
@@ -385,21 +385,28 @@ class EvalSession(BaseObject, Generic[R]):
         for line in self._describe().splitlines():
             self._trace.log(line)
 
-        skipped = self._skip_reason()
-        if skipped is not None:
-            logger.warning(f"Eval '{self._name}': {skipped}; skipping")
-            return self._result(started, [], skipped=skipped)
-
-        # A bot that never accepts is a clean <connect> failure.
+        # The judge is closed however the run ends, including the runs that are
+        # skipped or never reach the bot.
         try:
-            await self._client.wait_for_bot()
-        except (OSError, TimeoutError) as e:
-            reason = f"failed to connect to {self._bot_url}: {e.__class__.__name__}"
-            return self._result(started, [self._failure("<connect>", reason, "connect_failed")])
+            skipped = self._skip_reason()
+            if skipped is not None:
+                logger.warning(f"Eval '{self._name}': {skipped}; skipping")
+                return self._result(started, [], skipped=skipped)
 
-        failures = await self._drive()
-        self._trace.log(f"done: {'PASS' if not failures else 'FAIL'} ({len(failures)} failure(s))")
-        return self._result(started, failures)
+            # A bot that never accepts is a clean <connect> failure.
+            try:
+                await self._client.wait_for_bot()
+            except (OSError, TimeoutError) as e:
+                reason = f"failed to connect to {self._bot_url}: {e.__class__.__name__}"
+                return self._result(started, [self._failure("<connect>", reason, "connect_failed")])
+
+            failures = await self._drive()
+            self._trace.log(
+                f"done: {'PASS' if not failures else 'FAIL'} ({len(failures)} failure(s))"
+            )
+            return self._result(started, failures)
+        finally:
+            await self._driver.close()
 
     async def _drive(self) -> list[EvalAssertionFailure]:
         """Start the client, converse, and tear down.

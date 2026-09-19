@@ -16,9 +16,9 @@ Example::
 from loguru import logger
 
 from pipecat.evals.base_driver import BaseEvalDriver
+from pipecat.evals.base_judge import BaseEvalJudge, judge_from_config
 from pipecat.evals.client import EvalClient, EvalClientParams
 from pipecat.evals.events import EvalEventStream
-from pipecat.evals.judge import EvalJudge
 from pipecat.evals.persona import EvalPersona
 from pipecat.evals.results import EvalSimulationResult
 from pipecat.evals.scenario import EvalKind
@@ -51,7 +51,7 @@ class EvalSimulationSession(EvalSession[EvalSimulationResult]):
         *,
         params: EvalSessionParams | None = None,
         persona_llm: LLMService,
-        judge: EvalJudge | None,
+        judge: BaseEvalJudge | None,
         user_tts: CachingTTSService | None = None,
         bot_stt: STTService | None = None,
     ):
@@ -111,7 +111,7 @@ class EvalSimulationSession(EvalSession[EvalSimulationResult]):
         *,
         params: EvalSessionParams | None = None,
         persona_llm: LLMService | None = None,
-        judge: EvalJudge | None = None,
+        judge: BaseEvalJudge | None = None,
         user_tts: CachingTTSService | None = None,
         bot_stt: STTService | None = None,
     ) -> "EvalSimulationSession":
@@ -140,7 +140,7 @@ class EvalSimulationSession(EvalSession[EvalSimulationResult]):
                 persona_llm = llm_service_from_config(scenario.simulator, where="simulator")
         if judge is None:
             with logger.contextualize(eval_pipeline="judge"):
-                judge = EvalJudge.from_config(scenario.judge)
+                judge = judge_from_config(scenario.judge)
         if user_tts is None and scenario.user_speech is not None:
             with logger.contextualize(eval_pipeline="speech"):
                 user_tts = tts_service_from_config(
