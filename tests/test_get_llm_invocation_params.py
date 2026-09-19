@@ -2364,6 +2364,108 @@ class TestPerplexityGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(params["messages"][2]["content"], "Sunny, 72F")
         self.assertEqual(params["messages"][3]["role"], "user")
 
+    def test_merging_assistants_keeps_tool_calls(self):
+        """Merging a text assistant message with a tool-call-only one keeps the call.
+
+        Some conversation histories carry the assistant's text and its tool call
+        as two consecutive assistant messages; the tool message that follows
+        answers the call carried by the second one.
+        """
+        messages: list[LLMStandardMessage] = [
+            {"role": "user", "content": "Weather in LA?"},
+            {"role": "assistant", "content": "Let me check on that."},
+            {
+                "role": "assistant",
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "get_weather", "arguments": '{"location": "LA"}'},
+                    }
+                ],
+            },
+            {"role": "tool", "content": '{"temperature": "75"}', "tool_call_id": "call_1"},
+            {"role": "user", "content": "Thanks!"},
+        ]
+
+        context = LLMContext(messages=messages)
+        params = self.adapter.get_llm_invocation_params(context, convert_developer_to_user=True)
+
+        self.assertEqual(len(params["messages"]), 4)
+        merged = params["messages"][1]
+        self.assertEqual(merged["role"], "assistant")
+        self.assertEqual([part["text"] for part in merged["content"]], ["Let me check on that."])
+        self.assertEqual([call["id"] for call in merged["tool_calls"]], ["call_1"])
+        self.assertEqual(params["messages"][2]["role"], "tool")
+        self.assertEqual(params["messages"][2]["tool_call_id"], "call_1")
+        self.assertEqual(params["messages"][3]["role"], "user")
+
+    def test_merging_tool_call_only_assistant_keeps_content(self):
+        """A history can carry the call before the assistant's text.
+
+        Merging then has to move the text into the tool-call message rather
+        than drop it, since the message holding it is the one that is removed.
+        """
+        messages: list[LLMStandardMessage] = [
+            {"role": "user", "content": "Weather in LA?"},
+            {
+                "role": "assistant",
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "get_weather", "arguments": '{"location": "LA"}'},
+                    }
+                ],
+            },
+            {"role": "assistant", "content": "Looks sunny."},
+            {"role": "user", "content": "Thanks!"},
+        ]
+
+        context = LLMContext(messages=messages)
+        params = self.adapter.get_llm_invocation_params(context, convert_developer_to_user=True)
+
+        self.assertEqual(len(params["messages"]), 3)
+        merged = params["messages"][1]
+        self.assertEqual(merged["role"], "assistant")
+        self.assertEqual([call["id"] for call in merged["tool_calls"]], ["call_1"])
+        self.assertEqual([part["text"] for part in merged["content"]], ["Looks sunny."])
+        self.assertEqual(params["messages"][2]["role"], "user")
+
+    def test_consecutive_tool_messages_keep_their_own_ids(self):
+        """Tool results for different calls are left apart rather than merged."""
+        messages: list[LLMStandardMessage] = [
+            {"role": "user", "content": "Weather in LA and SF?"},
+            {
+                "role": "assistant",
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "get_weather", "arguments": '{"location": "LA"}'},
+                    },
+                    {
+                        "id": "call_2",
+                        "type": "function",
+                        "function": {"name": "get_weather", "arguments": '{"location": "SF"}'},
+                    },
+                ],
+            },
+            {"role": "tool", "content": '{"temperature": "75"}', "tool_call_id": "call_1"},
+            {"role": "tool", "content": '{"temperature": "62"}', "tool_call_id": "call_2"},
+            {"role": "user", "content": "Thanks!"},
+        ]
+
+        context = LLMContext(messages=messages)
+        params = self.adapter.get_llm_invocation_params(context, convert_developer_to_user=True)
+
+        self.assertEqual(len(params["messages"]), 5)
+        self.assertEqual(params["messages"][2]["tool_call_id"], "call_1")
+        self.assertEqual(params["messages"][2]["content"], '{"temperature": "75"}')
+        self.assertEqual(params["messages"][3]["tool_call_id"], "call_2")
+        self.assertEqual(params["messages"][3]["content"], '{"temperature": "62"}')
+        self.assertEqual(params["messages"][4]["role"], "user")
+
     def test_developer_message_converted_to_user(self):
         """Developer messages are converted to user role."""
         messages: list[LLMStandardMessage] = [
