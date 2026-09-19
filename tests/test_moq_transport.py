@@ -6,7 +6,7 @@
 
 """Tests for the MoQ (Media over QUIC) transport.
 
-Four areas covered:
+Areas covered:
 
 1. **``_downmix_s16_to_mono``** — the workaround for ``@moq/publish``'s
    browser-side encoder publishing stereo even when the source mic
@@ -31,11 +31,24 @@ Four areas covered:
    future refactor moves either into ``_run()``, the bot will lose its
    first few hundred ms of audio (this was a real bug PR #4557's
    self-review fixed).
+
+5. **Transcript record metadata** — every published record carries
+   ``seq`` and ``epoch``, and a subscriber drops the replay it gets on
+   every (re)subscribe while passing records without them through.
+
+6. **``MOQRunnerArguments.relay_url``** — reaches the transport unchanged,
+   query string included, and host/port still compose a URL.
+
+7. **Client-mode reconnect** — the session loop redials a dropped
+   session within ``reconnect_timeout``, never retries a refused dial,
+   reports the peer gone exactly once, and pushes errors with the
+   category and permanence the pipeline acts on.
 """
 
 import argparse
+import asyncio
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -46,13 +59,22 @@ pytest.importorskip("moq")
 
 import moq  # noqa: E402
 
+import pipecat.transports.moq.transport as moq_transport  # noqa: E402
+from pipecat.runner.types import MOQRunnerArguments  # noqa: E402
+from pipecat.runner.utils import create_transport  # noqa: E402
 from pipecat.transports.moq.transport import (  # noqa: E402
+    TRANSCRIPT_EPOCH_FIELD,
+    TRANSCRIPT_SEQ_FIELD,
+    MOQCallbacks,
     MOQParams,
     MOQTransport,
+    MOQTransportClient,
     _downmix_s16_to_mono,
     _is_normal_close,
     _is_peer_gone,
 )
+from pipecat.utils.asyncio.task_manager import TaskManager  # noqa: E402
+from pipecat.utils.errors import ErrorCategory  # noqa: E402
 
 # ----------------------------------------------------------------------
 # _downmix_s16_to_mono
@@ -754,6 +776,827 @@ class TestIsNormalClose(unittest.TestCase):
 
     def test_non_moq_exception_is_not_normal(self):
         self.assertFalse(_is_normal_close(RuntimeError("moq: remote error: code=24")))
+
+
+# ----------------------------------------------------------------------
+# Transcript record metadata and replay dedupe
+# ----------------------------------------------------------------------
+
+
+def _fake_origin(**_kwargs):
+    """A stand-in ``moq.OriginProducer`` whose broadcast hands out mock producers."""
+    origin = MagicMock(name="origin")
+    broadcast = MagicMock(name="broadcast")
+    broadcast.publish_json_stream.return_value = MagicMock(name="transcript_stream")
+    broadcast.publish_audio.return_value = MagicMock(name="audio_track")
+    origin.create_broadcast.return_value = broadcast
+    return origin
+
+
+def _client_with_fake_moq(params: MOQParams | None = None, url: str = "https://relay/moq"):
+    """Build a ``MOQTransportClient`` whose moq origins and producers are mocks.
+
+    Returns the client and the transcript stream mock its records land on.
+    """
+    params = params or MOQParams(audio_in_enabled=True, audio_out_enabled=True)
+    callbacks = MOQCallbacks(
+        on_connected=AsyncMock(),
+        on_disconnected=AsyncMock(),
+        on_reconnecting=AsyncMock(),
+        on_reconnected=AsyncMock(),
+        on_client_connected=AsyncMock(),
+        on_client_disconnected=AsyncMock(),
+        on_track_subscribed=AsyncMock(),
+        on_error=AsyncMock(),
+        on_audio_received=AsyncMock(),
+        on_message_received=AsyncMock(),
+    )
+    with patch.object(moq_transport.moq, "OriginProducer") as origin_cls:
+        stream = MagicMock(name="transcript_stream")
+        broadcast = MagicMock(name="broadcast")
+        broadcast.publish_json_stream.return_value = stream
+        origin_cls.return_value.create_broadcast.return_value = broadcast
+        client = MOQTransportClient(params=params, url=url, bind=None, callbacks=callbacks)
+    return client, stream
+
+
+class TestTranscriptRecords(unittest.TestCase):
+    """Every published record carries ``seq`` and ``epoch``; a subscriber
+    uses them to drop the replay it gets on every (re)subscribe."""
+
+    def test_records_are_numbered_from_zero_per_instance(self):
+        client, stream = _client_with_fake_moq()
+        client.publish_transcript({"label": "rtvi-ai", "type": "a"})
+        client.publish_transcript({"label": "rtvi-ai", "type": "b"})
+        first, second = (call.args[0] for call in stream.append.call_args_list)
+        self.assertEqual(first[TRANSCRIPT_SEQ_FIELD], 0)
+        self.assertEqual(second[TRANSCRIPT_SEQ_FIELD], 1)
+        self.assertEqual(first[TRANSCRIPT_EPOCH_FIELD], second[TRANSCRIPT_EPOCH_FIELD])
+        self.assertEqual(first["type"], "a")
+
+    def test_epoch_differs_between_instances(self):
+        """A restarted bot is a new peer, so its count must not collide with
+        the watermark a subscriber kept from the previous one."""
+        a, stream_a = _client_with_fake_moq()
+        b, stream_b = _client_with_fake_moq()
+        a.publish_transcript({"type": "x"})
+        b.publish_transcript({"type": "x"})
+        self.assertNotEqual(
+            stream_a.append.call_args.args[0][TRANSCRIPT_EPOCH_FIELD],
+            stream_b.append.call_args.args[0][TRANSCRIPT_EPOCH_FIELD],
+        )
+
+    def test_the_message_itself_is_not_modified(self):
+        client, _stream = _client_with_fake_moq()
+        message = {"label": "rtvi-ai", "type": "a"}
+        client.publish_transcript(message)
+        self.assertEqual(message, {"label": "rtvi-ai", "type": "a"})
+
+    def test_new_records_are_delivered_with_the_fields_stripped(self):
+        client, _stream = _client_with_fake_moq()
+        record = {"label": "rtvi-ai", "type": "a", "seq": 0, "epoch": "e1"}
+        self.assertEqual(client._accept_peer_record(record), {"label": "rtvi-ai", "type": "a"})
+
+    def test_replayed_records_are_dropped(self):
+        client, _stream = _client_with_fake_moq()
+        for seq in (0, 1, 2):
+            self.assertIsNotNone(
+                client._accept_peer_record({"type": "a", "seq": seq, "epoch": "e"})
+            )
+        # The whole log comes back on a resubscribe.
+        for seq in (0, 1, 2):
+            self.assertIsNone(client._accept_peer_record({"type": "a", "seq": seq, "epoch": "e"}))
+        self.assertIsNotNone(client._accept_peer_record({"type": "a", "seq": 3, "epoch": "e"}))
+
+    def test_a_new_epoch_starts_the_count_over(self):
+        client, _stream = _client_with_fake_moq()
+        client._accept_peer_record({"type": "a", "seq": 5, "epoch": "old"})
+        self.assertIsNotNone(client._accept_peer_record({"type": "a", "seq": 0, "epoch": "new"}))
+        self.assertIsNone(client._accept_peer_record({"type": "a", "seq": 0, "epoch": "new"}))
+
+    def test_records_without_a_sequence_pass_through_unchanged(self):
+        """A peer that predates the fields cannot be deduplicated, but it
+        must keep working."""
+        client, _stream = _client_with_fake_moq()
+        record = {"label": "rtvi-ai", "type": "client-ready"}
+        self.assertIs(client._accept_peer_record(record), record)
+        self.assertIs(client._accept_peer_record(record), record)
+
+    def test_a_boolean_sequence_is_not_a_sequence(self):
+        client, _stream = _client_with_fake_moq()
+        record = {"type": "a", "seq": True}
+        self.assertIs(client._accept_peer_record(record), record)
+
+
+# ----------------------------------------------------------------------
+# Runner arguments: relay_url
+# ----------------------------------------------------------------------
+
+
+class TestRunnerRelayUrl(unittest.IsolatedAsyncioTestCase):
+    """``MOQRunnerArguments.relay_url`` reaches the transport unchanged."""
+
+    async def _transport_for(self, args: MOQRunnerArguments) -> MOQTransport:
+        with patch("pipecat.transports.moq.transport.moq") as moq_mock:
+            moq_mock.BroadcastProducer.return_value = MagicMock()
+            transport = await create_transport(
+                args, {"moq": lambda: MOQParams(audio_in_enabled=True)}
+            )
+        return transport
+
+    async def test_relay_url_is_dialed_as_given_query_string_included(self):
+        url = "https://relay.example.com/?jwt=eyJhbGciOi.eyJyb290Ijo.sig"
+        transport = await self._transport_for(MOQRunnerArguments(relay_url=url, namespace="ns"))
+        self.assertEqual(transport._client._url, url)
+        self.assertEqual(transport._params.relay_url, url)
+        self.assertEqual(transport._params.namespace, "ns")
+
+    async def test_host_and_port_still_compose_the_url(self):
+        transport = await self._transport_for(MOQRunnerArguments("relay.example.com", 4443))
+        self.assertEqual(transport._client._url, "https://relay.example.com:4443/moq")
+
+    def test_client_mode_needs_a_dial_target(self):
+        with self.assertRaises(ValueError):
+            MOQRunnerArguments()
+        with self.assertRaises(ValueError):
+            MOQRunnerArguments(host="relay.example.com")
+
+    def test_serve_mode_needs_no_dial_target(self):
+        self.assertTrue(MOQRunnerArguments(serve=True).serve)
+
+
+# ----------------------------------------------------------------------
+# Client-mode reconnect
+# ----------------------------------------------------------------------
+
+
+class _FakeSession:
+    """A dialed session that closes when the test says so, with or without an error."""
+
+    def __init__(self, closed: bool = False, error: Exception | None = None):
+        self._closed = asyncio.Event()
+        self._error = error
+        if closed:
+            self._closed.set()
+
+    async def closed(self):
+        await self._closed.wait()
+        if self._error is not None:
+            raise self._error
+
+    def drop(self, error: Exception | None = None):
+        self._error = error
+        self._closed.set()
+
+
+# What moq-ffi raises from ``Session.closed()`` when the relay refused the token.
+_UNAUTHORIZED_CLOSE = "transport: webtransport error: closed: code=6 reason=unauthorized"
+
+
+class _FakeClient:
+    """Stands in for ``moq.Client``: each dial takes the next scripted outcome.
+
+    An outcome is a :class:`_FakeSession` (the dial succeeds and yields it)
+    or an exception (the dial raises it). Every dial's URL is recorded.
+    """
+
+    def __init__(self, script: list, dials: list, url: str, **kwargs):
+        self._script = script
+        self._dials = dials
+        self._url = url
+        self.session = None
+
+    async def __aenter__(self):
+        self._dials.append(self._url)
+        outcome = self._script.pop(0)
+        if isinstance(outcome, BaseException):
+            raise outcome
+        self.session = outcome
+        return self
+
+    async def __aexit__(self, *exc):
+        return None
+
+
+class TestClientReconnect(unittest.IsolatedAsyncioTestCase):
+    """The client-mode session loop: redial on a dropped session, stop on a
+    refused dial, give up at the end of the window.
+
+    ``_consume_peer`` is replaced by a stand-in that reports the peer
+    available the way the real one does and then either waits (the peer
+    stays) or returns (the peer left); the real one is exercised against
+    a relay, not here.
+    """
+
+    URL = "https://relay.example.com/?jwt=tok.en"
+
+    async def asyncSetUp(self):
+        self.dials: list[str] = []
+        self.script: list = []
+        patches = [
+            patch.object(moq_transport.moq, "OriginProducer", side_effect=_fake_origin),
+            patch.object(moq_transport, "_RECONNECT_BACKOFF_INITIAL_S", 0.001),
+            patch.object(moq_transport, "_RECONNECT_BACKOFF_MAX_S", 0.002),
+            patch.object(moq_transport, "_SESSION_CLOSE_GRACE_S", 0.01),
+            patch.object(
+                moq_transport.moq,
+                "Client",
+                side_effect=lambda url, **kw: _FakeClient(self.script, self.dials, url, **kw),
+            ),
+        ]
+        for p in patches:
+            p.start()
+            self.addCleanup(p.stop)
+
+    def _make_client(self, **params) -> MOQTransportClient:
+        client, _stream = _client_with_fake_moq(
+            MOQParams(audio_in_enabled=True, audio_out_enabled=True, **params), url=self.URL
+        )
+        client._task_manager = TaskManager()
+        return client
+
+    @staticmethod
+    def _peer_stays(client: MOQTransportClient):
+        """A stand-in ``_consume_peer``: the peer is seen and never leaves."""
+
+        async def consume(_origin):
+            await client._on_peer_available()
+            await client._on_peer_data()
+            await asyncio.Event().wait()
+
+        client._consume_peer = consume  # type: ignore[method-assign]
+
+    @staticmethod
+    def _peer_leaves_after(client: MOQTransportClient, sessions_seen: int):
+        """A stand-in ``_consume_peer`` whose peer says goodbye and leaves during session N."""
+        seen = 0
+
+        async def consume(_origin):
+            nonlocal seen
+            seen += 1
+            await client._on_peer_available()
+            await client._on_peer_data()
+            if seen >= sessions_seen:
+                client._peer_goodbye = True
+                return True
+            await asyncio.Event().wait()
+
+        client._consume_peer = consume  # type: ignore[method-assign]
+
+    @staticmethod
+    def _peer_tracks_end_without_goodbye(client: MOQTransportClient, comes_back: bool):
+        """A stand-in ``_consume_peer``: in the first session the peer is seen and
+        its tracks keep ending without the marker, so the session is dropped.
+        On the next session the peer either comes back and then says goodbye,
+        or never appears."""
+        seen = 0
+
+        async def consume(_origin):
+            nonlocal seen
+            seen += 1
+            if seen == 1:
+                await client._on_peer_available()
+                await client._on_peer_data()
+                return False
+            if comes_back:
+                await client._on_peer_available()
+                await client._on_peer_data()
+                client._peer_goodbye = True
+            return True
+
+        client._consume_peer = consume  # type: ignore[method-assign]
+
+    @staticmethod
+    def _peer_never_returns(client: MOQTransportClient):
+        """A stand-in ``_consume_peer``: the peer is seen in the first session only."""
+        seen = 0
+
+        async def consume(_origin):
+            nonlocal seen
+            seen += 1
+            if seen == 1:
+                await client._on_peer_available()
+                await client._on_peer_data()
+            await asyncio.Event().wait()
+
+        client._consume_peer = consume  # type: ignore[method-assign]
+
+    async def _wait_for_dials(self, n: int):
+        for _ in range(200):
+            if len(self.dials) >= n:
+                return
+            await asyncio.sleep(0.005)
+        self.fail(f"expected {n} dials, saw {len(self.dials)}")
+
+    async def test_a_dropped_session_is_redialed_and_the_peer_survives_it(self):
+        first, second = _FakeSession(), _FakeSession()
+        self.script[:] = [first, second]
+        client = self._make_client()
+        self._peer_leaves_after(client, sessions_seen=2)
+
+        run = asyncio.create_task(client._run())
+        await self._wait_for_dials(1)
+        first.drop()
+        await asyncio.wait_for(run, timeout=2)
+
+        cb = client._callbacks
+        cb.on_connected.assert_awaited_once()
+        cb.on_reconnecting.assert_awaited_once_with(1)
+        cb.on_reconnected.assert_awaited_once()
+        # The peer joined once; its return after the redial is a
+        # reconnect, not a second client. It was reported gone exactly
+        # once, when it left the second session, not when the first
+        # session dropped.
+        cb.on_client_connected.assert_awaited_once()
+        cb.on_client_disconnected.assert_awaited_once()
+        cb.on_error.assert_not_awaited()
+        cb.on_disconnected.assert_awaited_once()
+        self.assertEqual(self.dials, [self.URL, self.URL])
+
+    async def test_the_url_is_dialed_unchanged_on_every_attempt(self):
+        """The relay token rides in the query string, so the redial must send
+        the URL byte for byte."""
+        self.script[:] = [ConnectionError("refused"), ConnectionError("refused"), _FakeSession()]
+        client = self._make_client()
+        self._peer_leaves_after(client, sessions_seen=1)
+        await asyncio.wait_for(client._run(), timeout=2)
+        self.assertEqual(self.dials, [self.URL] * 3)
+
+    async def test_a_refused_first_dial_is_not_retried(self):
+        self.script[:] = [moq.Error.Forbidden("403 denied")]
+        client = self._make_client()
+        self._peer_stays(client)
+        await asyncio.wait_for(client._run(), timeout=2)
+
+        cb = client._callbacks
+        self.assertEqual(self.dials, [self.URL])
+        cb.on_reconnecting.assert_not_awaited()
+        cb.on_client_disconnected.assert_not_awaited()
+        cb.on_error.assert_awaited_once()
+        _message, exc, category, permanent = cb.on_error.await_args.args
+        self.assertIsInstance(exc, moq.Error.Forbidden)
+        self.assertIs(category, ErrorCategory.AUTHORIZATION)
+        self.assertFalse(permanent)
+        cb.on_disconnected.assert_awaited_once()
+
+    async def test_a_refused_redial_ends_the_call(self):
+        """The token expired mid-session: the relay closed the session and
+        refuses the redial. The peer it had is reported gone, then the
+        refusal."""
+        first = _FakeSession()
+        self.script[:] = [first, moq.Error.Unauthorized("401 expired")]
+        client = self._make_client()
+        self._peer_stays(client)
+
+        run = asyncio.create_task(client._run())
+        await self._wait_for_dials(1)
+        first.drop()
+        await asyncio.wait_for(run, timeout=2)
+
+        cb = client._callbacks
+        cb.on_reconnecting.assert_awaited_once_with(1)
+        cb.on_reconnected.assert_not_awaited()
+        cb.on_client_disconnected.assert_awaited_once()
+        _message, exc, category, _permanent = cb.on_error.await_args.args
+        self.assertIsInstance(exc, moq.Error.Unauthorized)
+        self.assertIs(category, ErrorCategory.AUTHENTICATION)
+
+    async def test_an_unauthorized_session_close_is_not_retried(self):
+        """The relay accepts the connection and then closes the session as
+        unauthorized, so the refusal is read off the close, not the dial."""
+        first = _FakeSession()
+        self.script[:] = [first, _FakeSession(), _FakeSession()]
+        client = self._make_client()
+        self._peer_stays(client)
+
+        run = asyncio.create_task(client._run())
+        await self._wait_for_dials(1)
+        first.drop(moq.Error.Protocol(_UNAUTHORIZED_CLOSE))
+        await asyncio.wait_for(run, timeout=2)
+
+        cb = client._callbacks
+        self.assertEqual(self.dials, [self.URL])
+        cb.on_reconnecting.assert_not_awaited()
+        cb.on_client_disconnected.assert_awaited_once()
+        _message, exc, category, _permanent = cb.on_error.await_args.args
+        self.assertIsInstance(exc, moq.Error.Protocol)
+        self.assertIs(category, ErrorCategory.AUTHENTICATION)
+
+    async def test_sessions_that_close_before_the_peer_is_back_keep_the_window_running(self):
+        """A relay that accepts every dial and closes the session at once
+        must not restart the window on each dial, or the loop never ends."""
+        first = _FakeSession()
+        self.script[:] = [first] + [_FakeSession(closed=True) for _ in range(1000)]
+        client = self._make_client(reconnect_timeout=0.05)
+        self._peer_never_returns(client)
+
+        run = asyncio.create_task(client._run())
+        await self._wait_for_dials(1)
+        first.drop()
+        await asyncio.wait_for(run, timeout=2)
+
+        cb = client._callbacks
+        self.assertGreater(len(self.dials), 2)
+        self.assertLess(len(self.dials), 1000)
+        cb.on_reconnected.assert_not_awaited()
+        cb.on_client_disconnected.assert_awaited_once()
+        _message, _exc, category, permanent = cb.on_error.await_args.args
+        self.assertIs(category, ErrorCategory.CONNECTIVITY)
+        self.assertTrue(permanent)
+
+    async def test_the_window_bounds_the_redials(self):
+        first = _FakeSession()
+        self.script[:] = [first] + [ConnectionError("refused")] * 1000
+        client = self._make_client(reconnect_timeout=0.05)
+        self._peer_stays(client)
+
+        run = asyncio.create_task(client._run())
+        await self._wait_for_dials(1)
+        first.drop()
+        await asyncio.wait_for(run, timeout=2)
+
+        cb = client._callbacks
+        self.assertGreater(cb.on_reconnecting.await_count, 0)
+        self.assertLess(len(self.dials), 1000)
+        cb.on_client_disconnected.assert_awaited_once()
+        _message, exc, category, permanent = cb.on_error.await_args.args
+        self.assertIsInstance(exc, ConnectionError)
+        self.assertIsInstance(exc.__cause__, ConnectionError)
+        self.assertIs(category, ErrorCategory.CONNECTIVITY)
+        self.assertTrue(permanent)
+        cb.on_disconnected.assert_awaited_once()
+
+    async def test_reconnect_disabled_treats_a_drop_as_a_hangup(self):
+        first = _FakeSession()
+        self.script[:] = [first]
+        client = self._make_client(reconnect_timeout=0)
+        self._peer_stays(client)
+
+        run = asyncio.create_task(client._run())
+        await self._wait_for_dials(1)
+        first.drop()
+        await asyncio.wait_for(run, timeout=2)
+
+        cb = client._callbacks
+        self.assertEqual(self.dials, [self.URL])
+        cb.on_reconnecting.assert_not_awaited()
+        cb.on_error.assert_not_awaited()
+        cb.on_client_disconnected.assert_awaited_once()
+        cb.on_disconnected.assert_awaited_once()
+
+    async def test_a_redial_presents_a_fresh_publisher_and_replays_the_log(self):
+        """A relay that still holds a dead route for the old publisher never
+        serves a re-announce under that identity, so every redial publishes
+        from a new origin, with the log replayed and the audio track reopened."""
+        first, second = _FakeSession(), _FakeSession()
+        self.script[:] = [first, second]
+        client = self._make_client()
+        self._peer_leaves_after(client, sessions_seen=2)
+        client.open_audio_track(24000)
+        client.publish_transcript({"type": "a"})
+        client.publish_transcript({"type": "b"})
+        old_origin, old_stream = client._publish_origin, client._transcript_out
+        old_audio = client._audio_out
+
+        run = asyncio.create_task(client._run())
+        await self._wait_for_dials(1)
+        self.assertIs(client._publish_origin, old_origin)
+        first.drop()
+        await asyncio.wait_for(run, timeout=2)
+
+        self.assertIsNot(client._publish_origin, old_origin)
+        old_stream.finish.assert_called_once()
+        old_audio.finish.assert_called()
+        new_stream = client._transcript_out
+        self.assertIsNot(new_stream, old_stream)
+        self.assertEqual([call.args[0]["seq"] for call in new_stream.append.call_args_list], [0, 1])
+        self.assertEqual(new_stream.append.call_args_list[1].args[0]["type"], "b")
+        self.assertIsNot(client._audio_out, old_audio)
+        client._publish_broadcast.publish_audio.assert_called_once()
+
+    async def test_peer_tracks_ending_without_goodbye_redial_and_the_peer_comes_back(self):
+        """A relay between the peers failing ends the peer's tracks the way a
+        hangup does; without the marker the transport redials and the peer
+        reappears on the new session."""
+        self.script[:] = [_FakeSession(), _FakeSession()]
+        client = self._make_client()
+        self._peer_tracks_end_without_goodbye(client, comes_back=True)
+        await asyncio.wait_for(client._run(), timeout=2)
+
+        cb = client._callbacks
+        self.assertEqual(self.dials, [self.URL, self.URL])
+        cb.on_reconnecting.assert_awaited_once_with(1)
+        cb.on_reconnected.assert_awaited_once()
+        cb.on_client_connected.assert_awaited_once()
+        cb.on_client_disconnected.assert_awaited_once()
+        cb.on_error.assert_not_awaited()
+
+    async def test_peer_tracks_ending_without_goodbye_and_no_return_report_the_peer_gone(self):
+        """A hard hangup also ends the tracks without the marker; the peer
+        then fails to appear on the redialed session and is reported gone."""
+        self.script[:] = [_FakeSession(), _FakeSession()]
+        client = self._make_client()
+        self._peer_tracks_end_without_goodbye(client, comes_back=False)
+        await asyncio.wait_for(client._run(), timeout=2)
+
+        cb = client._callbacks
+        self.assertEqual(self.dials, [self.URL, self.URL])
+        cb.on_reconnecting.assert_awaited_once_with(1)
+        cb.on_reconnected.assert_not_awaited()
+        cb.on_client_disconnected.assert_awaited_once()
+        cb.on_error.assert_not_awaited()
+        cb.on_disconnected.assert_awaited_once()
+
+    async def test_a_peer_that_leaves_ends_the_loop_without_redialing(self):
+        self.script[:] = [_FakeSession()]
+        client = self._make_client()
+        self._peer_leaves_after(client, sessions_seen=1)
+        await asyncio.wait_for(client._run(), timeout=2)
+
+        cb = client._callbacks
+        self.assertEqual(self.dials, [self.URL])
+        cb.on_reconnecting.assert_not_awaited()
+        cb.on_client_disconnected.assert_awaited_once()
+        cb.on_error.assert_not_awaited()
+
+
+class _FakeJsonStream:
+    """Stands in for a ``JsonStreamConsumer``: yields scripted records, then ends."""
+
+    def __init__(self, records):
+        self._records = list(records)
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        if not self._records:
+            raise StopAsyncIteration
+        return self._records.pop(0)
+
+    def cancel(self):
+        pass
+
+
+class _FakeAnnounced:
+    """Stands in for ``AnnouncedBroadcast``: resolves to a broadcast token at
+    once, or never when ``broadcast`` is ``None``."""
+
+    def __init__(self, broadcast):
+        self._broadcast = broadcast
+
+    async def available(self):
+        if self._broadcast is None:
+            await asyncio.Event().wait()
+        return self._broadcast
+
+    def cancel(self):
+        pass
+
+
+class TestConsumePeer(unittest.IsolatedAsyncioTestCase):
+    """``_consume_peer`` in client mode: one more subscription on the same
+    session when the peer's tracks end without its marker, and a
+    subscription that serves nothing is given up on."""
+
+    async def asyncSetUp(self):
+        p = patch.object(moq_transport, "_PEER_DATA_GRACE_S", 0.05)
+        p.start()
+        self.addCleanup(p.stop)
+
+    def _client(self, **params) -> MOQTransportClient:
+        client, _stream = _client_with_fake_moq(
+            MOQParams(audio_in_enabled=True, audio_out_enabled=True, **params)
+        )
+        client._task_manager = TaskManager()
+        return client
+
+    @staticmethod
+    def _origin(*broadcasts):
+        """An origin whose announcements resolve to each broadcast in turn;
+        ``None`` never resolves. The last one repeats."""
+        broadcasts = list(broadcasts) or ["peer-broadcast"]
+        origin = MagicMock(name="subscribe_origin")
+
+        def announced(_path):
+            broadcast = broadcasts.pop(0) if len(broadcasts) > 1 else broadcasts[0]
+            return _FakeAnnounced(broadcast)
+
+        origin.consume.return_value.announced_broadcast.side_effect = announced
+        return origin
+
+    @staticmethod
+    def _tracks(client: MOQTransportClient, outcomes: list[str]):
+        """Script ``_forward_peer_tracks``: ``data`` delivers then ends,
+        ``silent`` delivers nothing and never ends, ``goodbye`` delivers the
+        marker then ends."""
+        calls: list[str] = []
+
+        async def forward(_broadcast):
+            outcome = outcomes[len(calls)]
+            calls.append(outcome)
+            if outcome == "silent":
+                # Like a real pump: it ends only when its moq consumer is
+                # cancelled, which is what the watchdog does.
+                ended = asyncio.Event()
+                consumer = MagicMock(name="silent_consumer")
+                consumer.cancel.side_effect = ended.set
+                client._active_consumers.append(consumer)
+                await ended.wait()
+                return
+            await client._on_peer_data()
+            if outcome == "goodbye":
+                client._peer_goodbye = True
+
+        client._forward_peer_tracks = forward  # type: ignore[method-assign]
+        return calls
+
+    async def test_tracks_ending_twice_without_goodbye_drop_the_session(self):
+        client = self._client()
+        calls = self._tracks(client, ["data", "data"])
+        gone = await asyncio.wait_for(client._consume_peer(self._origin()), timeout=2)
+        self.assertEqual(calls, ["data", "data"])
+        self.assertFalse(gone)
+        client._callbacks.on_client_connected.assert_awaited_once()
+
+    async def test_a_peer_that_redialed_carries_on_after_one_more_subscription(self):
+        """The peer's tracks end once (its redial), then it says goodbye at
+        the end of the call: one retry, then the peer is gone."""
+        client = self._client()
+        calls = self._tracks(client, ["data", "goodbye"])
+        gone = await asyncio.wait_for(client._consume_peer(self._origin()), timeout=2)
+        self.assertEqual(calls, ["data", "goodbye"])
+        self.assertTrue(gone)
+
+    async def test_goodbye_ends_without_another_subscription(self):
+        client = self._client()
+        calls = self._tracks(client, ["goodbye", "data"])
+        gone = await asyncio.wait_for(client._consume_peer(self._origin()), timeout=2)
+        self.assertEqual(calls, ["goodbye"])
+        self.assertTrue(gone)
+
+    async def test_a_peer_that_does_not_reappear_is_gone(self):
+        """After a hangup without the marker the broadcast never comes
+        back; waiting ``connection_timeout`` on this session settles it
+        without a redial."""
+        client = self._client(connection_timeout=0.05)
+        calls = self._tracks(client, ["data"])
+        gone = await asyncio.wait_for(
+            client._consume_peer(self._origin("peer-broadcast", None)), timeout=2
+        )
+        self.assertEqual(calls, ["data"])
+        self.assertTrue(gone)
+
+    async def test_a_silent_subscription_is_given_up_on(self):
+        """A relay keeps announcing a path whose route died and serves
+        nothing on it; waiting on it forever would hide the outage."""
+        client = self._client()
+        calls = self._tracks(client, ["data", "silent"])
+        gone = await asyncio.wait_for(client._consume_peer(self._origin()), timeout=2)
+        self.assertEqual(calls, ["data", "silent"])
+        self.assertFalse(gone)
+        self.assertFalse(client._peer_data_seen)
+
+    async def test_the_first_subscription_of_a_fresh_call_has_no_watchdog(self):
+        """A client may hold its first message until it is ready to hear
+        the bot, so silence on a fresh call is not a failure; during an
+        outage, and on any retry, it is."""
+        flags: list[bool] = []
+        client = self._client()
+        real = client._forward_peer
+
+        async def spy(broadcast, watchdog):
+            flags.append(watchdog)
+            return await real(broadcast, watchdog)
+
+        client._forward_peer = spy  # type: ignore[method-assign]
+        self._tracks(client, ["data", "goodbye"])
+        await asyncio.wait_for(client._consume_peer(self._origin()), timeout=2)
+        self.assertEqual(flags, [False, True])
+
+        flags.clear()
+        client = self._client()
+        client._outage_started = 1.0
+        real = client._forward_peer
+        client._forward_peer = spy  # type: ignore[method-assign]
+        self._tracks(client, ["goodbye"])
+        await asyncio.wait_for(client._consume_peer(self._origin()), timeout=2)
+        self.assertEqual(flags, [True])
+
+    async def test_serve_mode_takes_the_tracks_ending_at_face_value(self):
+        client = self._client(serve=True)
+        calls = self._tracks(client, ["data", "data"])
+        gone = await asyncio.wait_for(client._consume_peer(self._origin()), timeout=2)
+        self.assertEqual(calls, ["data"])
+        self.assertTrue(gone)
+
+
+class TestPeerGoodbye(unittest.IsolatedAsyncioTestCase):
+    """The peer's session-ending marker is read off its transcript stream and
+    never reaches the pipeline."""
+
+    async def test_marker_sets_goodbye_and_is_not_forwarded(self):
+        client, _stream = _client_with_fake_moq()
+        peer_broadcast = MagicMock()
+        peer_broadcast.subscribe_json_stream = AsyncMock(
+            return_value=_FakeJsonStream(
+                [
+                    {"label": "rtvi-ai", "type": "client-ready", "seq": 0, "epoch": "e"},
+                    {"label": "moq-transport", "type": "session-ending", "seq": 1, "epoch": "e"},
+                ]
+            )
+        )
+
+        await client._forward_peer_transcript(peer_broadcast)
+
+        client._callbacks.on_message_received.assert_awaited_once_with(
+            {"label": "rtvi-ai", "type": "client-ready"}
+        )
+        self.assertTrue(client._peer_goodbye)
+
+    async def test_tracks_ending_without_the_marker_leave_goodbye_unset(self):
+        client, _stream = _client_with_fake_moq()
+        peer_broadcast = MagicMock()
+        peer_broadcast.subscribe_json_stream = AsyncMock(
+            return_value=_FakeJsonStream([{"label": "rtvi-ai", "type": "client-ready"}])
+        )
+
+        await client._forward_peer_transcript(peer_broadcast)
+
+        self.assertFalse(client._peer_goodbye)
+
+
+class TestIsUnauthorized(unittest.TestCase):
+    """A refused token shows up either as an HTTP status on the dial or as
+    the session closing with moq-net's ``Unauthorized`` code."""
+
+    def test_http_refusals_count(self):
+        self.assertTrue(moq_transport._is_unauthorized(moq.Error.Unauthorized("401")))
+        self.assertTrue(moq_transport._is_unauthorized(moq.Error.Forbidden("403")))
+
+    def test_unauthorized_session_close_counts(self):
+        self.assertTrue(moq_transport._is_unauthorized(moq.Error.Protocol(_UNAUTHORIZED_CLOSE)))
+
+    def test_other_closes_do_not(self):
+        for message in (
+            "transport: webtransport error: closed: code=4 reason=transport",
+            "transport: webtransport error: closed: code=0 reason=remote err",
+            "webtransport error: closed",
+        ):
+            with self.subTest(message=message):
+                self.assertFalse(moq_transport._is_unauthorized(moq.Error.Protocol(message)))
+
+    def test_non_moq_errors_do_not(self):
+        self.assertFalse(moq_transport._is_unauthorized(ConnectionError(_UNAUTHORIZED_CLOSE)))
+
+
+# ----------------------------------------------------------------------
+# Errors reach the pipeline
+# ----------------------------------------------------------------------
+
+
+class TestErrorsReachThePipeline(unittest.IsolatedAsyncioTestCase):
+    """A transport error fires ``on_error`` and pushes an ``ErrorFrame`` from
+    the input transport, with the category and permanence the session loop
+    worked out."""
+
+    def _transport(self) -> MOQTransport:
+        with patch("pipecat.transports.moq.transport.moq") as moq_mock:
+            moq_mock.BroadcastProducer.return_value = MagicMock()
+            transport = MOQTransport(
+                params=MOQParams(audio_in_enabled=True), host="localhost", port=4080
+            )
+        transport.input()
+        transport._input.push_error = AsyncMock()  # type: ignore[method-assign]
+        return transport
+
+    async def test_error_is_pushed_from_the_input_transport(self):
+        transport = self._transport()
+        seen = []
+        fired = asyncio.Event()
+
+        @transport.event_handler("on_error")
+        async def on_error(_transport, message, exception):
+            seen.append((message, exception))
+            fired.set()
+
+        exc = moq.Error.Unauthorized("401")
+        await transport._on_error("401", exc, ErrorCategory.AUTHENTICATION, False)
+
+        # Event handlers run in a background task.
+        await asyncio.wait_for(fired.wait(), timeout=1)
+        self.assertEqual(seen, [("401", exc)])
+        transport._input.push_error.assert_awaited_once_with(
+            "401", exc, category=ErrorCategory.AUTHENTICATION, force_treat_as_permanent=False
+        )
+
+    async def test_permanence_is_forwarded(self):
+        transport = self._transport()
+        exc = ConnectionError("gave up")
+        await transport._on_error("gave up", exc, ErrorCategory.CONNECTIVITY, True)
+        transport._input.push_error.assert_awaited_once_with(
+            "gave up", exc, category=ErrorCategory.CONNECTIVITY, force_treat_as_permanent=True
+        )
 
 
 if __name__ == "__main__":
