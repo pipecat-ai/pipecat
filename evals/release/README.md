@@ -32,30 +32,25 @@ both kinds listed the same way; each scenario says which it is.
 
 ## Prerequisites
 
-The harness runs the judge, the user's voice, and the bot-speech transcriber
-*locally* by default, so you need a few things in place:
+The harness runs the judge, the user's voice, and the bot-speech transcriber,
+so you need a few things in place:
 
-- **A judge LLM.** Scenarios judge with [Ollama](https://ollama.com) by default
-  (`http://localhost:11434`). Install Ollama, start it, and pull the model the
-  scenarios use: `ollama pull gemma4:12b`. The judge is called once per `eval:`
-  expectation of a scripted scenario and once per run of a simulation, and every
-  concurrent run shares one resident copy of it, so judge
-  latency sets the pace of the whole suite — a judge has to be accurate *and*
-  fast, and has to return the same verdict on the same input. `gemma4:12b`
-  answers in under a second and is stable across repeats. Smaller judges keep up
-  on speed but misread short interim replies: a bot that has so far only said
-  "Let me check on that." should score `continue` (wait for the rest), and
-  scoring it `yes` passes a turn in which the bot said nothing. Older judges also
-  reject correct spoken answers the transcriber mangled into a homophone — "four"
-  heard as "for".
-
-  The judge config passes `reasoning_effort: none` through its `extra:` block.
-  `gemma4` is thinking-capable, and only the JSON verdict is ever read, so
-  reasoning costs several times the latency per call — enough to stall a `-c 4`
-  run — while eating into the token budget the verdict itself needs. Leaving it
-  on is both slower and less accurate. (A scenario's `judge.eval:` block can
-  point at any other LLM through a `factory:`, a dotted path to a callable that
-  takes the block and returns an OpenAI-compatible service.)
+- **The judge: TypeSafe's Jev, with a local LLM for reasons.** Scenarios are
+  judged by [Jev](https://typesafe.ai), a hosted classifier (`service:
+  typesafe` in `judge_text.yaml`, `judge_audio.yaml`, and the audio scenario of
+  `language_switch.yaml`; see `pipecat.evals.judge`). It needs
+  `TYPESAFE_API_KEY` **exported in the shell that runs the suite**: the harness
+  doesn't read `.env` (the bots do). Jev answers each `eval:` in a few hundred
+  milliseconds but gives no reasons, so a local LLM, the *explainer*, gives the
+  reason for every `no` and every verdict Jev is unsure of; Jev's verdict stands
+  either way.
+- **A local LLM.** The explainer, and the caller in simulations, run
+  `gemma4:12b` on [Ollama](https://ollama.com) (`http://localhost:11434`).
+  Install Ollama, start it, and pull the model: `ollama pull gemma4:12b`. Its
+  config passes `reasoning_effort: none` through its `extra:` block: `gemma4`
+  is thinking-capable, and only its JSON answer is ever read, so reasoning
+  costs several times the latency per call while eating into the token budget
+  the answer itself needs.
 - **Local audio models** (audio-mode scenarios only). By default the user's
   voice is synthesized with Kokoro TTS and the bot's speech is transcribed with
   [Moonshine](https://github.com/moonshine-ai/moonshine); a scenario's
@@ -81,9 +76,31 @@ Ollama, and the services the bots use):
 uv sync --group dev --all-extras --no-extra gstreamer --no-extra local
 ```
 
+### Judging locally
+
+To judge with the local LLM alone (no key, no network for the judge), replace
+the `eval:` block in `judge_text.yaml`, `judge_audio.yaml`, and
+`language_switch.yaml`'s audio scenario with the explainer's own block
+(`service: ollama`, `model: gemma4:12b`, and its `extra:`). The local judge is
+then called once per `eval:` expectation of a scripted scenario and once per run
+of a simulation, and every concurrent run shares one resident copy of it, so
+its latency sets the pace of the whole suite: it has to be accurate *and* fast,
+and has to return the same verdict on the same input. `gemma4:12b` answers in
+under a second and is stable across repeats. Smaller models keep up on speed
+but misread short interim replies: a bot that has so far only said "Let me
+check on that." should score `continue` (wait for the rest), and scoring it
+`yes` passes a turn in which the bot said nothing. Older models also reject
+correct spoken answers the transcriber mangled into a homophone ("four" heard
+as "for"). A scenario's `judge.eval:` block can also point at any other LLM
+through a `factory:`, a dotted path to a callable that takes the block and
+returns an OpenAI-compatible service.
+
 ## Running
 
+Export the Jev key first; the harness doesn't read `.env`:
+
 ```sh
+export TYPESAFE_API_KEY=...
 ./run.sh                  # everything in the manifest
 ./run.sh -p voice-openai  # only bots whose path contains "voice-openai"
 ./run.sh -s capital_question  # only the capital_question scenario
@@ -167,16 +184,17 @@ of what the bot actually did, which is usually where a root cause is found.
 
 ### Concurrency and GPU
 
-Only the judge LLM runs on the GPU. Ollama keeps one copy of the judge model
+Only the local LLM (the explainer, and the caller in simulations) runs on the
+GPU. Ollama keeps one copy of the model
 resident (`gemma4:12b` is ~8.9GB, much of it the large context window it loads),
 so GPU use is roughly constant (~9GB peak) regardless of `-c/--concurrency`. The
 user's voice (Kokoro) and the bot-speech transcriber (Moonshine by default) both
 run on the CPU via ONNX Runtime, so they cost no GPU memory; concurrency is
 bounded by CPU and RAM rather than GPU. A 16GB GPU (e.g. an RTX A4000) runs the
-default setup with room to spare; swapping in a much larger judge is what would
+default setup with room to spare; swapping in a much larger model is what would
 pressure GPU memory, and an out-of-memory run surfaces as a harness error in
-that run's `.eval.log`. On a tighter card, `num_ctx` in the judge's `extra:`
-block trims the context — the judge never needs more than a few thousand tokens.
+that run's `.eval.log`. On a tighter card, `num_ctx` in the model's `extra:`
+block trims the context — it never needs more than a few thousand tokens.
 
 Whisper is available as an alternative transcriber (`transcription: {service:
 whisper}`); it also defaults to the CPU (`device: cpu`, see `whisper_service`),
