@@ -7,7 +7,7 @@
 
 bots_dir: .
 scenarios_dir: scenarios
-concurrency: 8
+concurrency: 32                  # models at once; each runs its scenarios one at a time
 runs_dir: test-runs
 record: false
 spawn: "{python} {bot} -t eval --port {port}"
@@ -153,12 +153,6 @@ suite:
       data: {kwargs: {api_key: $GROQ_API_KEY}, model: openai/gpt-oss-20b, service: pipecat.services.groq.llm.GroqLLMService, settings: {reasoning_effort: low}}
     scenarios: *all
   - bot: bot.py
-    name: groq/qwen/qwen3.6-27b
-    concurrency: 2
-    runner_body:
-      data: {developer_role: false, kwargs: {api_key: $GROQ_API_KEY}, model: qwen/qwen3.6-27b, service: pipecat.services.groq.llm.GroqLLMService, settings: {reasoning_effort: none}}
-    scenarios: *all
-  - bot: bot.py
     name: cerebras/gpt-oss-120b
     runner_body:
       data: {kwargs: {api_key: $CEREBRAS_API_KEY}, model: gpt-oss-120b, service: pipecat.services.cerebras.llm.CerebrasLLMService}
@@ -230,11 +224,6 @@ suite:
       data: {kwargs: {api_key: $NOVITA_API_KEY}, model: moonshotai/kimi-k2.5, service: pipecat.services.novita.llm.NovitaLLMService, tools: false}
     scenarios: *no_tools
   - bot: bot.py
-    name: novita/mistralai/mistral-nemo
-    runner_body:
-      data: {developer_role: false, kwargs: {api_key: $NOVITA_API_KEY}, model: mistralai/mistral-nemo, service: pipecat.services.novita.llm.NovitaLLMService, tools: false}
-    scenarios: *no_tools
-  - bot: bot.py
     name: novita/qwen/qwen3.8-flash
     runner_body:
       data: {developer_role: false, kwargs: {api_key: $NOVITA_API_KEY}, model: qwen/qwen3.8-flash, service: pipecat.services.novita.llm.NovitaLLMService, tools: false}
@@ -252,23 +241,11 @@ suite:
       data: {kwargs: {api_key: $NVIDIA_API_KEY}, model: nvidia/nemotron-3.5-lightning-30b-a3b, service: pipecat.services.nvidia.llm.NvidiaLLMService, system_suffix: /no_think}
     scenarios: *all
   - bot: bot.py
-    name: nvidia/openai/gpt-oss-20b
-    concurrency: 2
-    runner_body:
-      data: {kwargs: {api_key: $NVIDIA_API_KEY}, model: openai/gpt-oss-20b, service: pipecat.services.nvidia.llm.NvidiaLLMService}
-    scenarios: *all
-  - bot: bot.py
     name: ollama/gemma4:12b
     concurrency: 1
     runner_body:
       data: {kwargs: {}, model: 'gemma4:12b', service: pipecat.services.ollama.llm.OLLamaLLMService, settings: {extra: {reasoning_effort: none}}}
     scenarios: *all
-  - bot: bot.py
-    name: ollama/gemma2:9b
-    concurrency: 1
-    runner_body:
-      data: {kwargs: {}, model: 'gemma2:9b', service: pipecat.services.ollama.llm.OLLamaLLMService, tools: false}
-    scenarios: *no_tools
   - bot: bot.py
     name: openrouter/meta-llama/llama-3.3-70b-instruct
     runner_body:
