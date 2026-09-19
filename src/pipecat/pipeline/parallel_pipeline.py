@@ -11,11 +11,14 @@ sub-pipelines concurrently, with coordination for system frames and proper
 handling of pipeline lifecycle events.
 """
 
+from copy import copy
+from functools import partial
 from itertools import chain
+from weakref import ReferenceType, ref
 
 from loguru import logger
 
-from pipecat.frames.frames import CancelFrame, EndFrame, Frame, StartFrame
+from pipecat.frames.frames import CancelFrame, EndFrame, Frame, PipelineFlushFrame, StartFrame
 from pipecat.pipeline.base_pipeline import BasePipeline
 from pipecat.pipeline.pipeline import Pipeline, PipelineSink, PipelineSource
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
@@ -50,6 +53,9 @@ class ParallelPipeline(BasePipeline):
         self._pipelines = []
 
         self._seen_ids = set()
+        self._flush_branches: dict[
+            tuple[int, FrameDirection, bool], tuple[ReferenceType[object], set[int]]
+        ] = {}
         self._frame_counter: dict[int, int] = {}
         self._synchronizing: bool = False
         self._buffered_frames: list[tuple[Frame, FrameDirection]] = []
@@ -65,9 +71,13 @@ class ParallelPipeline(BasePipeline):
             # We add a source before the pipeline and a sink after so we control
             # the frames that are pushed upstream and downstream.
             source = PipelineSource(
-                self._parallel_push_frame, name=f"{self}::Source{num_pipelines}"
+                partial(self._parallel_push_frame, branch=num_pipelines),
+                name=f"{self}::Source{num_pipelines}",
             )
-            sink = PipelineSink(self._pipeline_sink_push_frame, name=f"{self}::Sink{num_pipelines}")
+            sink = PipelineSink(
+                partial(self._pipeline_sink_push_frame, branch=num_pipelines),
+                name=f"{self}::Sink{num_pipelines}",
+            )
 
             # Create pipeline
             pipeline = Pipeline(processors, source=source, sink=sink)
@@ -129,6 +139,7 @@ class ParallelPipeline(BasePipeline):
         """Clean up the parallel pipeline and all its branches."""
         await super().cleanup()
         await self._cleanup_processors(self._pipelines)
+        self._flush_branches.clear()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames through all parallel branches with lifecycle coordination.
@@ -138,6 +149,21 @@ class ParallelPipeline(BasePipeline):
             direction: The direction of frame flow.
         """
         await super().process_frame(frame, direction)
+
+        if isinstance(frame, PipelineFlushFrame):
+            key = (frame.id, direction, frame.returning)
+            if key in self._seen_ids or key in self._flush_branches:
+                return
+
+            # The event follows copies of a probe. Release bookkeeping when
+            # neither a branch nor the caller holds the flush anymore.
+            self._flush_branches[key] = (
+                ref(
+                    frame.event if frame.event is not None else frame,
+                    lambda _: self._flush_branches.pop(key, None),
+                ),
+                set(range(len(self._pipelines))),
+            )
 
         # Parallel pipeline synchronized frames.
         #
@@ -163,21 +189,42 @@ class ParallelPipeline(BasePipeline):
         for p in self._pipelines:
             await p.queue_frame(frame, direction)
 
-    async def _parallel_push_frame(self, frame: Frame, direction: FrameDirection):
+    async def _parallel_push_frame(
+        self, frame: Frame, direction: FrameDirection, *, branch: int | None = None
+    ):
         """Push frames while avoiding duplicates using frame ID tracking.
 
         During lifecycle frame synchronization, non-lifecycle frames are buffered
         to prevent them from escaping the parallel pipeline before all branches
         have finished processing the lifecycle frame.
+
+        Flush probes wait for each branch on every leg without pausing other frames.
         """
-        if frame.id not in self._seen_ids:
-            self._seen_ids.add(frame.id)
+        key = frame.id
+        if isinstance(frame, PipelineFlushFrame):
+            key = (frame.id, direction, frame.returning)
+            pending = self._flush_branches.get(key)
+            if pending is not None:
+                if branch is None:
+                    return
+                pending[1].discard(branch)
+                if pending[1]:
+                    return
+                del self._flush_branches[key]
+            # The worker mutates returning at the source. Keep that mutation
+            # separate from copies of this leg still held inside the branches.
+            frame = copy(frame)
+
+        if key not in self._seen_ids:
+            self._seen_ids.add(key)
             if self._synchronizing:
                 self._buffered_frames.append((frame, direction))
             else:
                 await self.push_frame(frame, direction)
 
-    async def _pipeline_sink_push_frame(self, frame: Frame, direction: FrameDirection):
+    async def _pipeline_sink_push_frame(
+        self, frame: Frame, direction: FrameDirection, *, branch: int | None = None
+    ):
         # Parallel pipeline synchronized frames.
         if isinstance(frame, (StartFrame, EndFrame, CancelFrame)):
             # Decrement counter.
@@ -199,7 +246,7 @@ class ParallelPipeline(BasePipeline):
                 await self.resume_processing_system_frames()
                 await self.resume_processing_frames()
         else:
-            await self._parallel_push_frame(frame, direction)
+            await self._parallel_push_frame(frame, direction, branch=branch)
 
     async def _flush_buffered_frames(self):
         """Flush frames that were buffered during lifecycle frame synchronization."""
