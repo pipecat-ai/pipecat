@@ -73,13 +73,16 @@ TURN_COMPLETION_PROMPT=v3 evals/turn-completion/run.sh -n v3  # a prompt variant
 ```
 
 `run.sh` is `pipecat eval suite` over the manifest, which spawns a bot per
-scenario run, eight at a time, taking the queue round-robin across the models
-so a slow provider holds only its share of the slots. A full sweep of about
-8,500 runs takes around an hour. Entries whose provider rate-limits (Groq,
-NVIDIA, Mistral Large) cap their own concurrency; Ollama is capped at one
-because the judge's explainer shares it, and is usually left out. The models'
-keys come from the repo's `.env`; the judge's `TYPESAFE_API_KEY` must be
-exported in the shell, since the harness doesn't read `.env`.
+scenario run. Up to 20 models run at once, each working through its own
+scenarios one at a time, so a slow provider holds only its own slot; a full
+sweep is about 8,500 runs. An expectation without its own `within_ms` times out
+after 30 s (`run.sh` passes `-t 30`, and a `-t` of your own overrides it),
+since a model that follows the protocol answers within seconds. Entries whose
+provider rate-limits (Groq, NVIDIA, Mistral Large) cap their own concurrency;
+Ollama is capped at one because the judge's explainer shares it, and is
+usually left out. The models' keys come from the repo's `.env`; the judge's
+`TYPESAFE_API_KEY` must be exported in the shell, since the harness doesn't
+read `.env`.
 
 A run writes `test-runs/<name>/results.jsonl` (one record per scenario run: the
 model, the scenario, pass or fail, each expectation and what it matched, and
