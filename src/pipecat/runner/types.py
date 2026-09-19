@@ -153,6 +153,9 @@ class RunnerArguments:
             otherwise. Lives on the base so any bot can read ``runner_args.call_data``
             uniformly, mirroring ``body``.
         session_id: Identifier for this bot session.
+        flow_config: The Pipecat Flows config this session runs, as YAML or
+            JSON text: load it with ``FlowConfig.from_yaml``. ``None`` when the
+            session named none, and the bot runs whichever flow it ships with.
         cli_args: Parsed CLI arguments from the runner, when launched via the
             development runner.
     """
@@ -162,6 +165,7 @@ class RunnerArguments:
     handle_sigterm: bool = field(init=False, kw_only=True)
     pipeline_idle_timeout_secs: float | None = field(init=False, kw_only=True)
     body: Any | None = field(default_factory=dict, kw_only=True)
+    flow_config: str | None = field(default=None, kw_only=True)
     call_data: CallData | None = field(default=None, kw_only=True)
     session_id: str | None = field(default=None, kw_only=True)
     cli_args: argparse.Namespace | None = field(default=None, init=False, kw_only=True)

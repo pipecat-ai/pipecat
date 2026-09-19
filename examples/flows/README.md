@@ -9,7 +9,7 @@
 **Write the flow in Python when it needs code.** The reasons are few and specific:
 
 - **Schema control.** A direct function's parameters come from its signature and docstring. When a tool needs an `enum`, a numeric range, or another JSON Schema constraint, define it with `FlowsFunctionSchema`.
-- **Structure from runtime data.** A prompt can read state, but a node whose *shape* depends on the conversation, offering different tools or routing somewhere the graph doesn't name, has to be built in code.
+- **Structure from runtime data.** A prompt can read state, but a node whose _shape_ depends on the conversation, offering different tools or routing somewhere the graph doesn't name, has to be built in code.
 - **A flow driven from outside the conversation.** Nodes set from transport events, a parallel pipeline playing hold music, another worker handing off over the bus.
 - **The flow is incidental.** When the example is about a pipeline feature, the flow stays in Python beside it.
 
@@ -45,6 +45,33 @@ The Python examples support multiple LLM providers (OpenAI, Anthropic, Google Ge
 - [`yaml/patient_intake/`](./yaml/patient_intake) — data-capture tools, a branch on a boolean result, and session facts such as the practice and patient names read from state
 - [`yaml/insurance_quote/`](./yaml/insurance_quote) — prompts built from computed values: the handlers store each quote in state, the results node reads it with `{{ quote.monthly_premium }}`, and adjusting the coverage re-enters the node with the new figures
 - [`yaml/podcast_interview/`](./yaml/podcast_interview) — a node that transitions back to itself
+
+### Running a different flow
+
+Each YAML bot runs the flow the session names, and the `flow.yaml` beside it otherwise. A session names one as its flow config — the YAML itself — which reaches the bot as `runner_args.flow_config`:
+
+```python
+config = (
+    FlowConfig.from_yaml(runner_args.flow_config)
+    if runner_args.flow_config
+    else FlowConfig.from_file(FLOW_CONFIG_PATH)
+)
+```
+
+A session names its flow in its `/start` request, beside `body` rather than inside it — the flow is the runner's to act on, `body` is the bot's:
+
+```json
+{ "transport": "webrtc", "flow_config": "initial_node: greeting\nnodes: {...}" }
+```
+
+So one running bot serves many flows, a session at a time. Locally, `--flow` sets the default for the sessions that name none, with any transport:
+
+```bash
+uv run python examples/flows/yaml/food_ordering/bot.py --flow my_flow.yaml
+uv run python examples/flows/yaml/food_ordering/bot.py -t eval --flow my_other_flow.yaml
+```
+
+The flow reaches the bot as text and `FlowConfig.from_yaml` validates it, so a flow that doesn't match the schema fails the same way whether it came from a file or from a platform that started the session. A flow that names a tool the handlers don't define fails when `Flow` joins the two, with every unresolved name reported at once.
 
 ## Flows in Python
 

@@ -7,22 +7,27 @@
 import argparse
 import io
 import sys
+import tempfile
 import types
 import unittest
-from contextlib import redirect_stdout
+from contextlib import contextmanager, redirect_stdout
 from dataclasses import dataclass
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from loguru import logger
 from pydantic import BaseModel
 from starlette.testclient import WebSocketDisconnect
 
 from pipecat.runner.run import (
+    _apply_cli_args,
     _extract_ws_token,
     _generate_ws_token,
     _parse_ice_servers,
     _print_startup_message,
+    _read_flow_config,
     _setup_daily_routes,
     _setup_telephony_routes,
     _setup_unified_start_route,
@@ -32,6 +37,7 @@ from pipecat.runner.run import (
     _transport_routes_enabled,
     _verify_and_consume_ws_token,
 )
+from pipecat.runner.types import RunnerArguments
 
 try:
     import jwt as _jwt  # noqa: F401
@@ -140,7 +146,7 @@ class TestRunnerRun(unittest.TestCase):
             patch("pipecat.runner.run._transport_routes_enabled", return_value=False),
             patch("pipecat.runner.run.logger") as logger,
         ):
-            _setup_webrtc_routes(app, args, {})
+            _setup_webrtc_routes(app, args, {}, {})
 
         paths = {route.path for route in app.routes}
         self.assertNotIn("/api/offer", paths)
@@ -155,7 +161,7 @@ class TestRunnerRun(unittest.TestCase):
             patch("pipecat.runner.run._transport_routes_enabled", return_value=True),
             patch.dict(sys.modules, _fake_smallwebrtc_modules()),
         ):
-            _setup_webrtc_routes(app, args, {})
+            _setup_webrtc_routes(app, args, {}, {})
 
         paths = {route.path for route in app.routes}
         self.assertIn("/api/offer", paths)
@@ -171,7 +177,7 @@ class TestRunnerRun(unittest.TestCase):
             patch("pipecat.runner.run._transport_routes_enabled", return_value=True),
             patch.dict(sys.modules, _fake_smallwebrtc_modules(handler_kwargs)),
         ):
-            _setup_webrtc_routes(app, args, {})
+            _setup_webrtc_routes(app, args, {}, {})
 
         self.assertIsNone(handler_kwargs[0]["ice_servers"])
 
@@ -200,7 +206,7 @@ class TestRunnerRun(unittest.TestCase):
             patch("pipecat.runner.run._transport_routes_enabled", return_value=True),
             patch.dict(sys.modules, fake_modules),
         ):
-            _setup_webrtc_routes(app, args, {})
+            _setup_webrtc_routes(app, args, {}, {})
 
         self.assertEqual(
             handler_kwargs[0]["ice_servers"],
@@ -318,7 +324,7 @@ class TestRunnerRun(unittest.TestCase):
     def test_start_rejects_disabled_transport_before_running_bot(self):
         app = FastAPI()
         args = argparse.Namespace(transport=None, ice_servers=[])
-        _setup_unified_start_route(app, args, {})
+        _setup_unified_start_route(app, args, {}, {})
 
         with patch("pipecat.runner.run._transport_routes_enabled", return_value=False):
             response = TestClient(app).post("/start", json={"transport": "daily"})
@@ -601,7 +607,7 @@ class TestWsAuthStartEndpoint(unittest.TestCase):
             port=7860,
             ice_servers=[],
         )
-        _setup_unified_start_route(app, args, {})
+        _setup_unified_start_route(app, args, {}, {})
         return app
 
     def test_start_websocket_returns_none_when_auth_disabled(self):
@@ -899,7 +905,7 @@ class TestStartIceConfig(unittest.TestCase):
     def _post_start(self, ice_servers: list, body: dict) -> dict:
         app = FastAPI()
         args = argparse.Namespace(transport=None, ice_servers=ice_servers)
-        _setup_unified_start_route(app, args, {})
+        _setup_unified_start_route(app, args, {}, {})
         with patch("pipecat.runner.run._transport_routes_enabled", return_value=True):
             response = TestClient(app).post("/start", json={"transport": "webrtc", **body})
         self.assertEqual(response.status_code, 200)
@@ -930,3 +936,90 @@ class TestStartIceConfig(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestFlowConfig(unittest.TestCase):
+    """``--flow`` gives every session the runner starts a flow config to run."""
+
+    def test_reads_the_file_as_text(self):
+        with tempfile.TemporaryDirectory() as directory:
+            flow = Path(directory) / "flow.yaml"
+            flow.write_text("initial_node: greeting\nnodes: {}\n")
+            self.assertEqual(_read_flow_config(str(flow)), "initial_node: greeting\nnodes: {}\n")
+
+    def test_is_none_without_the_flag(self):
+        self.assertIsNone(_read_flow_config(None))
+
+    def test_a_missing_file_raises_for_the_caller_to_report(self):
+        with self.assertRaises(OSError):
+            _read_flow_config("/nonexistent/flow.yaml")
+
+    def test_sessions_get_what_was_read_at_startup(self):
+        args = argparse.Namespace(flow_config="initial_node: greeting\n")
+        runner_args = RunnerArguments()
+        _apply_cli_args(runner_args, args)
+        self.assertEqual(runner_args.flow_config, "initial_node: greeting\n")
+        self.assertIs(runner_args.cli_args, args)
+
+    def test_no_flow_config_without_the_flag(self):
+        runner_args = RunnerArguments()
+        _apply_cli_args(runner_args, argparse.Namespace())
+        self.assertIsNone(runner_args.flow_config)
+
+
+class TestSessionFlowConfig(unittest.TestCase):
+    """A session names the flow it runs; ``--flow`` is the default for the rest."""
+
+    def _post_start(self, body: dict, session_flows: dict) -> dict:
+        app = FastAPI()
+        args = argparse.Namespace(transport=None, ice_servers=[])
+        _setup_unified_start_route(app, args, {}, session_flows)
+        with patch("pipecat.runner.run._transport_routes_enabled", return_value=True):
+            response = TestClient(app).post("/start", json={"transport": "webrtc", **body})
+        self.assertEqual(response.status_code, 200)
+        return response.json()
+
+    def test_a_named_flow_is_kept_for_the_bot_the_offer_will_start(self):
+        flows: dict[str, str] = {}
+        result = self._post_start({"flow_config": "initial_node: greeting\n"}, flows)
+        self.assertEqual(flows, {result["sessionId"]: "initial_node: greeting\n"})
+
+    def test_a_session_that_names_none_stores_nothing(self):
+        flows: dict[str, str] = {}
+        self._post_start({}, flows)
+        self.assertEqual(flows, {})
+
+    @contextmanager
+    def _warnings(self):
+        """Pipecat logs through loguru, which stdlib assertLogs cannot see."""
+        sink = io.StringIO()
+        handler_id = logger.add(sink, level="WARNING", format="{message}")
+        try:
+            yield sink
+        finally:
+            logger.remove(handler_id)
+
+    def test_a_flow_id_is_warned_about_and_ignored(self):
+        flows: dict[str, str] = {}
+        with self._warnings() as warned:
+            self._post_start({"flow_id": "wf_26f19591f1f40bbe"}, flows)
+        self.assertEqual(flows, {})
+        self.assertIn("flow_id", warned.getvalue())
+
+    def test_a_flow_id_does_not_displace_a_flow_the_session_also_sent(self):
+        flows: dict[str, str] = {}
+        with self._warnings():
+            result = self._post_start(
+                {"flow_id": "wf_26f19591f1f40bbe", "flow_config": "initial_node: greeting"}, flows
+            )
+        self.assertEqual(flows, {result["sessionId"]: "initial_node: greeting"})
+
+    def test_the_session_keeps_its_flow_over_the_cli_default(self):
+        runner_args = RunnerArguments(flow_config="from: the session")
+        _apply_cli_args(runner_args, argparse.Namespace(flow_config="from: --flow"))
+        self.assertEqual(runner_args.flow_config, "from: the session")
+
+    def test_the_cli_default_fills_in_for_a_session_without_one(self):
+        runner_args = RunnerArguments()
+        _apply_cli_args(runner_args, argparse.Namespace(flow_config="from: --flow"))
+        self.assertEqual(runner_args.flow_config, "from: --flow")

@@ -108,7 +108,7 @@ class FlowManager:
     def __init__(
         self,
         *,
-        llm: LLMService | LLMSwitcher,
+        llm: LLMService[Any] | LLMSwitcher[Any],
         context_aggregator: Any,
         worker: PipelineWorker | None = None,
         task: PipelineWorker | None = None,
@@ -119,7 +119,7 @@ class FlowManager:
         """Initialize the flow manager.
 
         Args:
-            llm: LLM service or LLMSwitcher.
+            llm: The LLM service the flow runs on, or an LLMSwitcher over several.
             context_aggregator: Context aggregator for updating user context.
             worker: PipelineWorker instance for queueing frames.
             task: PipelineWorker instance for queueing frames.
