@@ -24,9 +24,13 @@ composed:
   - email_to_speech      "user@example.com" → "user at example dot com"
   - expand_currency      "$42.50" → "forty-two dollars and fifty cents"
   - expand_percentages   "3.5%" → "three point five percent"
-  - replace_text         Custom substitutions (e.g. "Dr." → "Doctor"), including
-                          an SSML phoneme tag for a word ElevenLabs would
-                          otherwise mispronounce.
+  - replace_text         Custom substitutions (e.g. "Dr." → "Doctor")
+  - pronounce_ipa        Say a name as its IPA describes ("Siobhan" → ʃɪˈvɔːn)
+  - pronounce_arpabet    The same with CMU Arpabet ("Nexora" → N EH0 K S AO1 R AH0)
+
+pronounce_ipa and pronounce_arpabet are classmethods of the TTS service: the
+service writes each pronunciation in its own markup, so the same mapping works
+with any service that supports the alphabet.
 
 Run locally:
     python features-text-transforms.py
@@ -100,23 +104,24 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     stt = CartesiaSTTService(api_key=os.environ["CARTESIA_API_KEY"])
 
-    # Custom substitution rules applied after all other transforms.
-    # Patterns are regular expressions; use re.escape() for literal strings.
-    #
-    # The last rule wraps a name in an SSML phoneme tag so ElevenLabs
-    # pronounces it correctly.
+    # Custom substitution rules. Patterns are regular expressions; use
+    # re.escape() for literal strings.
     custom_subs = replace_text(
         [
             (r"\bDr\.", "Doctor"),
             (r"\bSt\.", "Street"),
             (r"\bApt\.", "Apartment"),
             (r"\bvs\b", "versus"),
-            # IPA phoneme tags are only supported on ElevenLabs v2 models, and you need to set enable_ssml_parsing=True.
-            # More details here: https://elevenlabs.io/docs/overview/capabilities/text-to-speech/best-practices#phoneme-tags-for-v2-models
-            # (r"(?i)\bSiobhan\b", '<phoneme alphabet="ipa" ph="ʃəˈvɔːn">Siobhan</phoneme>'),
-            # This is an alternative that works on all models.
-            (r"(?i)\bSiobhan\b", "shi-VAWN"),
         ]
+    )
+
+    # Pronunciations for words the voice would otherwise guess from spelling.
+    # Words match whole and case-insensitively. ElevenLabs writes them as SSML
+    # <phoneme> tags, which it accepts in IPA or CMU Arpabet; a service that
+    # cannot use an alphabet logs a warning and speaks those words as written.
+    pronunciations_ipa = ElevenLabsTTSService.pronounce_ipa({"Siobhan": "ʃɪˈvɔːn"})
+    pronunciations_arpabet = ElevenLabsTTSService.pronounce_arpabet(
+        {"Nexora": "N EH0 K S AO1 R AH0"}
     )
 
     # Build a transform chain for a billing-assistant use case.
@@ -128,17 +133,20 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ("*", expand_currency),
         ("*", expand_percentages),
         ("*", custom_subs),
+        # Last, so no other transform rewrites the phoneme markup.
+        ("*", pronunciations_ipa),
+        ("*", pronunciations_arpabet),
     ]
 
     tts = ElevenLabsTTSService(
         api_key=os.getenv("ELEVENLABS_API_KEY", ""),
         settings=ElevenLabsTTSService.Settings(
             voice=os.getenv("ELEVENLABS_VOICE_ID", ""),
-            # Set a v2 model when using IPA phoneme tags.
-            # model="eleven_flash_v2"
+            # Phoneme tags are honored by eleven_flash_v2.
+            # https://elevenlabs.io/docs/overview/capabilities/text-to-speech/best-practices
+            model="eleven_flash_v2",
         ),
-        # Enable SSML parsing for ElevenLabs v2 models.
-        # enable_ssml_parsing=True,
+        enable_ssml_parsing=True,
         text_transforms=billing_transforms,
     )
 

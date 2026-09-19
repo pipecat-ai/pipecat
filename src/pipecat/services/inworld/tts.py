@@ -51,6 +51,7 @@ from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TextAggregationMode, TTSService, WebsocketTTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.deprecation import deprecated
+from pipecat.utils.text.phonemes import PhonemeAlphabet, normalize_ipa
 from pipecat.utils.tracing.service_decorators import traced_tts
 from pipecat.utils.types import NOT_GIVEN, NotGiven
 
@@ -83,6 +84,28 @@ def language_to_inworld_language(language: Language) -> str:
         Language.ZH: "zh-CN",
     }
     return resolve_language(language, LANGUAGE_MAP, use_base_code=False)
+
+
+def format_inworld_pronunciation(word: str, phonemes: str, alphabet: PhonemeAlphabet) -> str | None:
+    """Render a pronunciation as IPA between slashes, as Inworld reads it.
+
+    Inworld speaks the IPA wherever it appears inline, one word per pair of
+    slashes, so a pronunciation covering several words cannot be written. Only
+    English IPA symbols are read.
+
+    Args:
+        word: The word being pronounced (unused: the IPA replaces it).
+        phonemes: The pronunciation, written in ``alphabet``.
+        alphabet: The alphabet of ``phonemes``. Only IPA is supported.
+
+    Returns:
+        The IPA wrapped in slashes, e.g. ``/kriːt/``, or None for an alphabet
+        other than IPA, an empty pronunciation, or one spanning several words.
+    """
+    if alphabet != PhonemeAlphabet.IPA:
+        return None
+    ipa = normalize_ipa(phonemes)
+    return f"/{ipa}/" if ipa and " " not in ipa else None
 
 
 @dataclass
@@ -257,6 +280,24 @@ class InworldHttpTTSService(TTSService):
         self._audio_encoding = encoding
         self._audio_sample_rate = 0  # Set in start()
         self._timestamp_transport_strategy = timestamp_transport_strategy
+
+    @classmethod
+    def format_pronunciation(
+        cls, word: str, phonemes: str, alphabet: PhonemeAlphabet
+    ) -> str | None:
+        """Render a pronunciation as IPA between slashes.
+
+        See :func:`format_inworld_pronunciation`.
+
+        Args:
+            word: The word being pronounced.
+            phonemes: The pronunciation, written in ``alphabet``.
+            alphabet: The alphabet of ``phonemes``. Only IPA is supported.
+
+        Returns:
+            The IPA wrapped in slashes, or None when the pronunciation cannot be used.
+        """
+        return format_inworld_pronunciation(word, phonemes, alphabet)
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -751,6 +792,24 @@ class InworldTTSService(WebsocketTTSService):
         self._auto_mode = auto_mode
         self._apply_text_normalization = apply_text_normalization
         self._timestamp_transport_strategy = timestamp_transport_strategy
+
+    @classmethod
+    def format_pronunciation(
+        cls, word: str, phonemes: str, alphabet: PhonemeAlphabet
+    ) -> str | None:
+        """Render a pronunciation as IPA between slashes.
+
+        See :func:`format_inworld_pronunciation`.
+
+        Args:
+            word: The word being pronounced.
+            phonemes: The pronunciation, written in ``alphabet``.
+            alphabet: The alphabet of ``phonemes``. Only IPA is supported.
+
+        Returns:
+            The IPA wrapped in slashes, or None when the pronunciation cannot be used.
+        """
+        return format_inworld_pronunciation(word, phonemes, alphabet)
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
