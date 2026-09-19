@@ -26,10 +26,15 @@ from pipecat.frames.frames import (
     FunctionCallsStartedFrame,
     InterruptionFrame,
     LLMContextFrame,
+    LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
+    LLMRunFrame,
     LLMSetToolsFrame,
     LLMUpdateSettingsFrame,
 )
+from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.aggregators.llm_context import NOT_GIVEN, LLMContext
+from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import (
     FunctionCallParams,
@@ -37,6 +42,7 @@ from pipecat.services.llm_service import (
     LLMService,
 )
 from pipecat.services.settings import LLMSettings
+from pipecat.tests.utils import SleepFrame, run_test
 from pipecat.turns.user_mute.function_call_user_mute_strategy import FunctionCallUserMuteStrategy
 from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionConfig
 from pipecat.utils.async_tool_cancellation import cancel_tool_name
@@ -1042,6 +1048,184 @@ class TestFunctionCallError(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(results[-1].result, {"ok": True})
 
         await service._cancel_sequential_runner_task()
+
+
+async def _prompt(params: FunctionCallParams):
+    # Finishes without ever yielding to the event loop, so it runs to
+    # completion before any sibling task gets its first turn.
+    await params.result_callback("prompt result")
+
+
+async def _slow(params: FunctionCallParams):
+    await asyncio.sleep(0.1)
+    await params.result_callback("slow result")
+
+
+def _batch(context: LLMContext) -> list[FunctionCallFromLLM]:
+    return [
+        FunctionCallFromLLM("prompt", "call_1", {}, context),
+        FunctionCallFromLLM("slow", "call_2", {}, context),
+        FunctionCallFromLLM("slow", "call_3", {}, context),
+    ]
+
+
+class TestFunctionCallBatchAnnouncement(unittest.IsolatedAsyncioTestCase):
+    """Every call in a batch is announced before any of them runs.
+
+    The assistant aggregator holds inference until the last call it has seen
+    an in-progress frame for settles. A result arriving ahead of a sibling's
+    in-progress frame therefore runs the LLM with the batch still pending.
+    """
+
+    SETTLE = 0.3
+
+    def _service(self, **kwargs) -> tuple[MockLLMService, list]:
+        service = MockLLMService(**kwargs)
+        service._task_manager = TaskManager()
+        service.register_function("prompt", _prompt)
+        service.register_function("slow", _slow)
+
+        frames = []
+
+        async def mock_broadcast_frame(frame_cls, **frame_kwargs):
+            frames.append(frame_cls(**frame_kwargs))
+
+        service.broadcast_frame = mock_broadcast_frame
+        return service, frames
+
+    async def _assert_batch_announced_before_first_result(self, run_in_parallel: bool):
+        service, frames = self._service(run_in_parallel=run_in_parallel)
+        if not run_in_parallel:
+            await service._create_sequential_runner_task()
+
+        await service.run_function_calls(_batch(LLMContext()))
+        await asyncio.sleep(self.SETTLE)
+
+        self.assertEqual(
+            [type(frame) for frame in frames],
+            [
+                FunctionCallsStartedFrame,
+                FunctionCallInProgressFrame,
+                FunctionCallInProgressFrame,
+                FunctionCallInProgressFrame,
+                FunctionCallResultFrame,
+                FunctionCallResultFrame,
+                FunctionCallResultFrame,
+            ],
+        )
+        self.assertEqual(
+            [f.tool_call_id for f in frames if isinstance(f, FunctionCallInProgressFrame)],
+            ["call_1", "call_2", "call_3"],
+        )
+
+        if not run_in_parallel:
+            await service._cancel_sequential_runner_task()
+
+    async def test_batch_is_announced_before_the_first_result(self):
+        await self._assert_batch_announced_before_first_result(run_in_parallel=True)
+
+    async def test_batch_is_announced_before_the_first_result_sequentially(self):
+        await self._assert_batch_announced_before_first_result(run_in_parallel=False)
+
+    async def test_announcement_carries_the_registered_cancellation_policy(self):
+        service, frames = self._service()
+        service.register_function("slow", _slow, cancel_on_interruption=False)
+
+        await service.run_function_calls(_batch(LLMContext()))
+        await asyncio.sleep(self.SETTLE)
+
+        in_progress = [f for f in frames if isinstance(f, FunctionCallInProgressFrame)]
+        self.assertEqual([f.cancel_on_interruption for f in in_progress], [True, False, False])
+
+
+class _BatchingLLM(MockLLMService):
+    """Requests a batch on its first inference and records each inference's tool messages."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.inferences: list[list[tuple[str, str]]] = []
+
+    async def process_frame(self, frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+        if not isinstance(frame, LLMContextFrame):
+            await self.push_frame(frame, direction)
+            return
+
+        self.inferences.append(
+            [
+                (message["tool_call_id"], message["content"])
+                for message in frame.context.get_messages()
+                if message.get("role") == "tool"
+            ]
+        )
+        await self.push_frame(LLMFullResponseStartFrame())
+        if len(self.inferences) == 1:
+            await self.run_function_calls(_batch(frame.context))
+        await self.push_frame(LLMFullResponseEndFrame())
+
+
+class TestFunctionCallBatchInference(unittest.IsolatedAsyncioTestCase):
+    """A batch led by a non-yielding handler runs inference once, after all results."""
+
+    async def _assert_one_inference_after_the_batch(self, run_in_parallel: bool):
+        llm = _BatchingLLM(run_in_parallel=run_in_parallel)
+        llm.register_function("prompt", _prompt)
+        llm.register_function("slow", _slow)
+        aggregators = LLMContextAggregatorPair(LLMContext())
+        pipeline = Pipeline([aggregators.user(), llm, aggregators.assistant()])
+
+        await run_test(pipeline, frames_to_send=[LLMRunFrame(), SleepFrame(0.5)])
+
+        self.assertEqual(len(llm.inferences), 2)
+        self.assertEqual(
+            llm.inferences[1],
+            [
+                ("call_1", '"prompt result"'),
+                ("call_2", '"slow result"'),
+                ("call_3", '"slow result"'),
+            ],
+        )
+
+    async def test_one_inference_after_the_batch(self):
+        await self._assert_one_inference_after_the_batch(run_in_parallel=True)
+
+    async def test_one_inference_after_the_batch_sequentially(self):
+        await self._assert_one_inference_after_the_batch(run_in_parallel=False)
+
+    async def test_yielding_announcement_does_not_duplicate_or_reopen_calls(self):
+        """Frame hooks may yield while sibling tool tasks are ready to run."""
+        llm = _BatchingLLM()
+        llm.register_function("prompt", _prompt)
+        llm.register_function("slow", _prompt)
+        announced_ids = []
+        announcement_counts_at_results = []
+
+        @llm.event_handler("on_before_push_frame")
+        async def yield_during_announcement(service, frame):
+            if isinstance(frame, FunctionCallInProgressFrame):
+                await asyncio.sleep(0)
+
+        @llm.event_handler("on_after_push_frame")
+        async def record_announcement(service, frame):
+            if isinstance(frame, FunctionCallInProgressFrame):
+                announced_ids.append(frame.tool_call_id)
+            elif isinstance(frame, FunctionCallResultFrame):
+                announcement_counts_at_results.append(len(announced_ids))
+
+        aggregators = LLMContextAggregatorPair(LLMContext())
+        pipeline = Pipeline([aggregators.user(), llm, aggregators.assistant()])
+        await run_test(pipeline, frames_to_send=[LLMRunFrame(), SleepFrame(0.5)])
+
+        # Each announcement has one downstream and one upstream copy.
+        self.assertEqual(
+            announced_ids, ["call_1", "call_1", "call_2", "call_2", "call_3", "call_3"]
+        )
+        self.assertEqual(announcement_counts_at_results, [6] * 6)
+        self.assertEqual(len(llm.inferences), 2)
+        self.assertEqual(
+            llm.inferences[1],
+            [(call_id, '"prompt result"') for call_id in ("call_1", "call_2", "call_3")],
+        )
 
 
 class TestAppendSystemInstruction(unittest.IsolatedAsyncioTestCase):
