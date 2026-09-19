@@ -89,7 +89,17 @@ class _BaresipLogBridge(logging.Handler):
         bound.opt(depth=depth, exception=record.exc_info).log(level, record.getMessage())
 
 
-logging.getLogger("baresip").addHandler(_BaresipLogBridge())
+def _install_baresip_log_bridge():
+    """Attach the bridge once, when the runtime first starts.
+
+    Deliberately not at import time: an application that configures the
+    ``baresip`` logger itself should not have handlers added just by
+    importing this module.
+    """
+    baresip_logger = logging.getLogger("baresip")
+    if not any(isinstance(h, _BaresipLogBridge) for h in baresip_logger.handlers):
+        baresip_logger.addHandler(_BaresipLogBridge())
+
 
 # The binding's log-level names mapped onto the stdlib gate the bridge
 # sits behind.
@@ -187,8 +197,9 @@ class _SharedRuntime:
         """
         async with self._lock:
             if self._runtime is None:
-                # Open the stdlib gate before the stack's first line so
-                # the requested verbosity is captured from the start.
+                # Bridge and open the stdlib gate before the stack's first
+                # line so the requested verbosity is captured from the start.
+                _install_baresip_log_bridge()
                 logging.getLogger("baresip").setLevel(settings.stdlib_log_level)
                 runtime = Runtime()
                 await runtime.start(settings.to_config())
@@ -302,13 +313,15 @@ class SIPConnection(BaseObject):
     - call_failed: an outbound call ended without establishing; receives
       a payload dict with ``error`` (the typed failure's name) and
       ``message``.
-    - dtmf: the far end pressed a key; receives the binding's DigitEvent.
+    - dtmf: the far end pressed a key; receives the binding's DigitEvent
+      and the call's session id.
     - remote_hold: the far end put the call on hold or resumed it;
       receives a payload dict with ``on`` (bool).
     - renegotiated: an established call renegotiated (a mid-call
       re-INVITE offer arrived, or the peer answered ours); receives a
       payload dict with ``sdp`` (``"offer"`` or ``"answer"``).
-    - audio_warning: the call's audio layer reported a warning.
+    - audio_warning: the call's audio layer reported a warning; receives
+      the warning, the call direction ("in"/"out"), and the session id.
     - media_restarted: a renegotiation replaced the media streams;
       receives ``"audio"`` or ``"video"``. Consumers should rebuild
       resamplers and re-read geometry.
@@ -556,6 +569,12 @@ class SIPConnection(BaseObject):
         release.
         """
         self._connected = False
+        # A still-ringing dial's establishment watcher must not fire
+        # call_failed after teardown. (On a natural close the watcher
+        # finishes by itself and delivers call_failed first.)
+        if self._establish_task is not None:
+            self._establish_task.cancel()
+            self._establish_task = None
         call = self._call
         if call is not None:
             try:
@@ -681,8 +700,9 @@ class SIPConnection(BaseObject):
     def read_audio(self, max_bytes: int) -> bytes:
         """Read received PCM from the active call.
 
-        Non-blocking. Returns empty bytes when there is no call, no audio
-        yet, or fewer bytes than requested have arrived. A renegotiation
+        Non-blocking. Returns up to ``max_bytes`` of received PCM —
+        whatever has arrived, not all-or-nothing — and empty bytes when
+        there is no call or nothing has arrived yet. A renegotiation
         surfaces as the ``media_restarted`` event and an empty read.
         """
         call = self._call
@@ -859,11 +879,16 @@ class SIPConnection(BaseObject):
         def on_event(event: StackEvent):
             self._on_call_event(call, event)
 
+        # Capture direction and session id now: _emit runs handlers as
+        # tasks, and the call may have detached by the time one executes.
+        direction = "in" if incoming else "out"
+        session_id = str(call.handle)
+
         def on_dtmf(digit_event):
-            self._emit("dtmf", digit_event)
+            self._emit("dtmf", digit_event, session_id)
 
         def on_warning(warning):
-            self._emit("audio_warning", warning)
+            self._emit("audio_warning", warning, direction, session_id)
 
         self._call_listener = on_event
         self._dtmf_listener = on_dtmf

@@ -1568,7 +1568,14 @@ async def _run_sip(args: argparse.Namespace):
             config = await configure(session)
         except Exception as e:
             logger.error(f"SIP transport: {e}")
-            return
+            raise SystemExit(1)
+
+        try:
+            reg_interval = int(os.getenv("SIP_REG_INTERVAL", "600"))
+            rtp_timeout = int(os.getenv("SIP_RTP_TIMEOUT", "0"))
+        except ValueError:
+            logger.error("SIP_REG_INTERVAL and SIP_RTP_TIMEOUT must be integers (seconds).")
+            raise SystemExit(1)
 
         codecs = os.getenv("SIP_AUDIO_CODECS")
         runner_args = SIPRunnerArguments(
@@ -1580,8 +1587,8 @@ async def _run_sip(args: argparse.Namespace):
             if codecs
             else None,
             auth_user=os.getenv("SIP_AUTH_USER"),
-            reg_interval=int(os.getenv("SIP_REG_INTERVAL", "600")),
-            rtp_timeout=int(os.getenv("SIP_RTP_TIMEOUT", "0")),
+            reg_interval=reg_interval,
+            rtp_timeout=rtp_timeout,
             instance_id=os.getenv("SIP_INSTANCE_ID"),
             native_log_level=os.getenv("SIP_NATIVE_LOG_LEVEL", "warning"),
             sip_trace=os.getenv("SIP_TRACE", "").lower() in ("1", "true", "yes"),
@@ -1592,10 +1599,10 @@ async def _run_sip(args: argparse.Namespace):
 
         # A bot may need session data it would normally receive in the /start
         # request body (e.g. a dial-out destination). The SIP transport has no
-        # such endpoint, so the body is read from a JSON file passed with
-        # --runner-body.
+        # such endpoint, so the body is read from a YAML or JSON file passed
+        # with --runner-body.
         if args.runner_body:
-            runner_args.body = json.loads(Path(args.runner_body).read_text())
+            runner_args.body = yaml.safe_load(Path(args.runner_body).read_text())
 
         bot_module = _get_bot_module()
 
