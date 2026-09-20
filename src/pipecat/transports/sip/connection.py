@@ -333,6 +333,16 @@ class SIPConnection(BaseObject):
         @connection.event_handler("incoming")
         async def on_incoming(connection, data):
             await connection.answer()
+
+    Behind NAT, enable ICE with a STUN server through ``extra_params`` (raw
+    baresip account parameters)::
+
+        connection = SIPConnection(
+            user="1001",
+            domain="example.com",
+            password="...",
+            extra_params=("medianat=ice", "stunserver=stun:stun.l.google.com:19302"),
+        )
     """
 
     def __init__(
@@ -347,6 +357,7 @@ class SIPConnection(BaseObject):
         reg_interval: int = 600,
         audio_codecs: tuple | None = None,
         dtmf_mode: str = "rtpevent",
+        extra_params: tuple | None = None,
         net_interface: str | None = None,
         expose_headers: tuple = (),
         max_concurrent_calls: int | None = 2,
@@ -380,6 +391,15 @@ class SIPConnection(BaseObject):
             audio_codecs: Codec preference order by stack name; None uses
                 the binding's default.
             dtmf_mode: How DTMF is sent: "rtpevent", "info", or "auto".
+            extra_params: Extra baresip account parameters, each a
+                ``"key=value"`` string, appended verbatim to the SIP
+                address-of-record — the escape hatch for account directives
+                pipecat does not model. Media-NAT traversal is the common
+                case: ``("medianat=ice", "stunserver=stun:HOST:PORT")``
+                turns on ICE with a STUN server for calls behind NAT
+                (``stunserver`` has no effect without ``medianat``). Values
+                are passed through unchanged; None (the default) adds
+                nothing.
             net_interface: Restrict the stack to one local interface, by
                 name or address. None (the default) is correct for
                 production: the stack sees every interface and the OS
@@ -433,6 +453,8 @@ class SIPConnection(BaseObject):
         )
         if audio_codecs is not None:
             account_args["audio_codecs"] = tuple(audio_codecs)
+        if extra_params is not None:
+            account_args["extra_params"] = tuple(extra_params)
         self._account = Account(**account_args)
         self._settings = _RuntimeSettings(
             net_interface=net_interface,

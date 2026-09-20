@@ -298,6 +298,7 @@ class TestCreateTransportSIP(unittest.IsolatedAsyncioTestCase):
             password="secret",
             audio_codecs=("PCMU/8000/1",),
             auth_user="trunk-user",
+            extra_params=("medianat=ice", "stunserver=stun:stun.example.com:3478"),
             reg_interval=0,
             rtp_timeout=30,
             instance_id="0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0",
@@ -312,6 +313,10 @@ class TestCreateTransportSIP(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(transport._connection.aor, "sip:1001@example.com")
         self.assertEqual(transport._connection._account.audio_codecs, ("PCMU/8000/1",))
         self.assertEqual(transport._connection._account.auth_user, "trunk-user")
+        self.assertEqual(
+            transport._connection._account.extra_params,
+            ("medianat=ice", "stunserver=stun:stun.example.com:3478"),
+        )
         self.assertEqual(transport._connection._account.reg_interval, 0)
         self.assertEqual(transport._connection._settings.rtp_timeout, 30)
         self.assertEqual(
