@@ -156,6 +156,20 @@ async def test_debug_logging_settings_reach_config(env):
     assert logging.getLogger("baresip").level == logging.DEBUG
 
 
+def test_extra_params_render_into_the_account_aor():
+    connection = make_connection(
+        extra_params=("medianat=ice", "stunserver=stun:stun.example.com:3478")
+    )
+
+    assert connection._account.extra_params == (
+        "medianat=ice",
+        "stunserver=stun:stun.example.com:3478",
+    )
+    aor = connection._account.aor()
+    assert "medianat=ice" in aor
+    assert "stunserver=stun:stun.example.com:3478" in aor
+
+
 @pytest.mark.asyncio
 async def test_trunk_mode_skips_registration(env):
     connection = make_connection(reg_interval=0)
