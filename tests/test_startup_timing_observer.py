@@ -1,5 +1,4 @@
 import asyncio
-import time
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -239,11 +238,11 @@ class TestStartupTimingObserver(unittest.IsolatedAsyncioTestCase):
         self.assertGreaterEqual(report.total_duration_secs, report.setup_phase_secs)
 
     async def test_phases_split_the_span_where_setting_up_ends(self):
-        """Setting up ends with the last of the concurrent work, warming included.
+        """Setting up ends with the last processor to finish connecting.
 
-        Three processors connect together and warming outlasts them, so the
-        concurrent phase runs to warming and the StartFrame's trip through the
-        pipeline is what follows.
+        Three processors connect together, so the concurrent phase runs to the
+        last of them and the StartFrame's trip through the pipeline is what
+        follows.
         """
         clock = _FakeClock()
         with patch.object(startup_timing_observer, "time", clock.as_time_module()):
@@ -258,11 +257,8 @@ class TestStartupTimingObserver(unittest.IsolatedAsyncioTestCase):
             processors = [FastProcessor() for _ in range(3)]
             for processor in processors:
                 await observer.on_processor_setup(
-                    ProcessorSetUp(processor=processor, started_at_ns=0, finished_at_ns=_ns(0.2))
+                    ProcessorSetUp(processor=processor, started_at_ns=0, finished_at_ns=_ns(0.5))
                 )
-            await observer.on_startup_warmup(
-                StartupWarmup(started_at_ns=0, finished_at_ns=_ns(0.5))
-            )
             await self._walk_start_frame(observer, processors, first_arrival=0.5, each=0.1)
 
             clock.set(0.9)
@@ -271,22 +267,55 @@ class TestStartupTimingObserver(unittest.IsolatedAsyncioTestCase):
 
         report = reports[0]
         self.assertAlmostEqual(report.total_duration_secs, 0.9, places=6)
-        # Warming outlasted the processors, so it decides where setting up ends.
         self.assertAlmostEqual(report.setup_phase_secs, 0.5, places=6)
         # Everything after that is the frame's trip, the 0.3s the processors
         # spent on it and the 0.1s the pipeline spent carrying it between them.
         self.assertAlmostEqual(report.start_phase_secs, 0.4, places=6)
-        self.assertAlmostEqual(report.warmup.duration_secs, 0.5, places=6)
-        self.assertAlmostEqual(report.warmup.blocking_duration_secs, 0.3, places=6)
+        self.assertIsNone(report.warmup)
 
         # The frame reached them one after another, so their offsets step.
         for index, timing in enumerate(report.processor_timings):
-            self.assertAlmostEqual(timing.setup_duration_secs, 0.2, places=6)
+            self.assertAlmostEqual(timing.setup_duration_secs, 0.5, places=6)
             self.assertAlmostEqual(timing.start_duration_secs, 0.1, places=6)
             self.assertAlmostEqual(timing.start_offset_secs, 0.1 * index, places=6)
 
-    async def test_warming_a_slower_setup_hides_costs_nothing(self):
-        """Warming runs alongside setup, so a pipeline slower to connect waits no longer."""
+    async def test_the_deprecated_warming_event_extends_the_setup_phase(self):
+        """A reported warming span that outlasts setup is what the phase runs to.
+
+        The framework reports no warming of its own, so this covers the
+        deprecated event for the callers still feeding one.
+        """
+        clock = _FakeClock()
+        with patch.object(startup_timing_observer, "time", clock.as_time_module()):
+            observer = StartupTimingObserver()
+            await observer.setup(TaskManager())
+            reports = []
+
+            @observer.event_handler("on_startup_timing_report")
+            async def on_report(obs, report):
+                reports.append(report)
+
+            processor = FastProcessor()
+            await observer.on_processor_setup(
+                ProcessorSetUp(processor=processor, started_at_ns=0, finished_at_ns=_ns(0.2))
+            )
+            with self.assertWarns(DeprecationWarning):
+                await observer.on_startup_warmup(
+                    StartupWarmup(started_at_ns=0, finished_at_ns=_ns(0.5))
+                )
+            await self._walk_start_frame(observer, [processor], first_arrival=0.5, each=0.1)
+
+            clock.set(0.9)
+            await observer.on_pipeline_started()
+            await asyncio.sleep(0)
+
+        report = reports[0]
+        self.assertAlmostEqual(report.setup_phase_secs, 0.5, places=6)
+        self.assertAlmostEqual(report.warmup.duration_secs, 0.5, places=6)
+        self.assertAlmostEqual(report.warmup.blocking_duration_secs, 0.3, places=6)
+
+    async def test_the_deprecated_warming_event_inside_setup_costs_nothing(self):
+        """A reported warming span that setup outlasts leaves the phase where it was."""
         clock = _FakeClock()
         with patch.object(startup_timing_observer, "time", clock.as_time_module()):
             observer = StartupTimingObserver()
@@ -301,9 +330,10 @@ class TestStartupTimingObserver(unittest.IsolatedAsyncioTestCase):
             await observer.on_processor_setup(
                 ProcessorSetUp(processor=processor, started_at_ns=0, finished_at_ns=_ns(0.5))
             )
-            await observer.on_startup_warmup(
-                StartupWarmup(started_at_ns=0, finished_at_ns=_ns(0.2))
-            )
+            with self.assertWarns(DeprecationWarning):
+                await observer.on_startup_warmup(
+                    StartupWarmup(started_at_ns=0, finished_at_ns=_ns(0.2))
+                )
             await self._walk_start_frame(observer, [processor], first_arrival=0.5, each=0.1)
 
             clock.set(0.6)

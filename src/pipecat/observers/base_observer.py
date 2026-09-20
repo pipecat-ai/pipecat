@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 
 from pipecat.frames.frames import Frame
 from pipecat.utils.base_object import BaseObject
+from pipecat.utils.deprecation import deprecated
 
 if TYPE_CHECKING:
     from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
@@ -87,14 +88,16 @@ class ProcessorSetUp:
     finished_at_ns: int
 
 
+@deprecated(
+    "`StartupWarmup` is deprecated since 1.12.0 and will be removed in 2.0.0. No replacement."
+)
 @dataclass
 class StartupWarmup:
     """Event data for the framework having warmed its deferred imports.
 
-    Warming runs alongside processor setup and the pipeline waits for it before
-    starting, so it accounts for startup time that belongs to no processor. The
-    times come from :func:`time.monotonic_ns`, since the pipeline clock only
-    starts once the pipeline does.
+    .. deprecated:: 1.12.0
+        No replacement. Nothing warms deferred imports at startup, so this
+        event is never emitted. Will be removed in 2.0.0.
 
     Parameters:
         started_at_ns: When warming began.
@@ -151,11 +154,16 @@ class BaseObserver(BaseObject):
         """
         pass
 
+    @deprecated(
+        "`BaseObserver.on_startup_warmup` is deprecated since 1.12.0 and will be removed in "
+        "2.0.0. No replacement."
+    )
     async def on_startup_warmup(self, data: StartupWarmup):
         """Handle the event when the framework has warmed its deferred imports.
 
-        Warming overlaps the processors being set up, so what it costs a
-        pipeline is the part of it that outlasts them.
+        .. deprecated:: 1.12.0
+            No replacement. Nothing warms deferred imports at startup, so this
+            is never called. Will be removed in 2.0.0.
 
         Args:
             data: The event data containing details about the warming.

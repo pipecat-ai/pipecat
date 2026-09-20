@@ -773,6 +773,61 @@
       "location": "pipecat/metrics/metrics.py"
     },
     {
+      "subject": "BaseObserver.on_startup_warmup",
+      "module": "pipecat.observers.base_observer",
+      "kind": "method",
+      "deprecated_in": "1.12.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "`BaseObserver.on_startup_warmup` is deprecated since 1.12.0 and will be removed in 2.0.0. No replacement.",
+      "location": "pipecat/observers/base_observer.py"
+    },
+    {
+      "subject": "StartupWarmup",
+      "module": "pipecat.observers.base_observer",
+      "kind": "class",
+      "deprecated_in": "1.12.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "`StartupWarmup` is deprecated since 1.12.0 and will be removed in 2.0.0. No replacement.",
+      "location": "pipecat/observers/base_observer.py"
+    },
+    {
+      "subject": "StartupTimingObserver.on_startup_warmup",
+      "module": "pipecat.observers.startup_timing_observer",
+      "kind": "method",
+      "deprecated_in": "1.12.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "`StartupTimingObserver.on_startup_warmup` is deprecated since 1.12.0 and will be removed in 2.0.0. No replacement.",
+      "location": "pipecat/observers/startup_timing_observer.py"
+    },
+    {
+      "subject": "StartupTimingReport.warmup",
+      "module": "pipecat.observers.startup_timing_observer",
+      "kind": "parameter",
+      "deprecated_in": "1.12.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "No replacement. Nothing warms deferred imports at startup. Will be removed in 2.0.0.",
+      "location": "pipecat/observers/startup_timing_observer.py"
+    },
+    {
+      "subject": "StartupWarmupTiming",
+      "module": "pipecat.observers.startup_timing_observer",
+      "kind": "class",
+      "deprecated_in": "1.12.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "`StartupWarmupTiming` is deprecated since 1.12.0 and will be removed in 2.0.0. No replacement.",
+      "location": "pipecat/observers/startup_timing_observer.py"
+    },
+    {
       "subject": "LatencyBreakdown.chronological_events",
       "module": "pipecat.observers.user_bot_latency_observer",
       "kind": "method",
@@ -859,6 +914,17 @@
       "replacement": "app_resources",
       "message": "Use ``app_resources`` instead. ``tool_resources`` will be removed in 2.0.0.",
       "location": "pipecat/pipeline/worker.py"
+    },
+    {
+      "subject": "WorkerObserver.on_startup_warmup",
+      "module": "pipecat.pipeline.worker_observer",
+      "kind": "method",
+      "deprecated_in": "1.12.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "`WorkerObserver.on_startup_warmup` is deprecated since 1.12.0 and will be removed in 2.0.0. No replacement.",
+      "location": "pipecat/pipeline/worker_observer.py"
     },
     {
       "subject": "LLMAssistantAggregatorParams.context_summarization_config",

@@ -24,6 +24,7 @@ from pipecat.observers.base_observer import (
     StartupWarmup,
 )
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
+from pipecat.utils.deprecation import deprecated
 
 
 @dataclass
@@ -171,8 +172,16 @@ class WorkerObserver(BaseObserver):
         """
         await self._send_to_proxy(data)
 
+    @deprecated(
+        "`WorkerObserver.on_startup_warmup` is deprecated since 1.12.0 and will be removed in "
+        "2.0.0. No replacement."
+    )
     async def on_startup_warmup(self, data: StartupWarmup):
         """Queue deferred-import warming timing for all managed observers.
+
+        .. deprecated:: 1.12.0
+            No replacement. Nothing warms deferred imports at startup, so this
+            is never called. Will be removed in 2.0.0.
 
         Args:
             data: The startup warmup event data to distribute to observers.
