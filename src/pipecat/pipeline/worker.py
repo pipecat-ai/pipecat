@@ -713,6 +713,10 @@ class PipelineWorker(BaseWorker):
     async def remove_observer(self, observer: BaseObserver):
         """Remove an observer from pipeline monitoring.
 
+        An observer can remove itself from a callback or event handler. When
+        removal runs in the observer's own callback task, that callback finishes
+        before its proxy exits; pending events are discarded.
+
         Args:
             observer: The observer to remove from pipeline monitoring.
         """
