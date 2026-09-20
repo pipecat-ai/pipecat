@@ -94,7 +94,7 @@ class WorkerObserver(BaseObserver):
         # If we already started, create a new proxy for the observer.
         # Otherwise, it will be created in start().
         if self._proxies is not None:
-            proxy = self._create_proxy(observer)
+            proxy = self._create_proxy(observer, setup=True)
             self._proxies[observer] = proxy
 
     async def remove_observer(self, observer: BaseObserver):
@@ -179,12 +179,18 @@ class WorkerObserver(BaseObserver):
         """
         await self._send_to_proxy(data)
 
-    def _create_proxy(self, observer: BaseObserver) -> Proxy:
+    def _create_proxy(self, observer: BaseObserver, *, setup: bool = False) -> Proxy:
         """Create a proxy for a single observer."""
         queue = asyncio.Queue()
-        task = self.create_task(self._proxy_task_handler(queue, observer))
+        handler = self._setup_and_run_proxy if setup else self._proxy_task_handler
+        task = self.create_task(handler(queue, observer))
         proxy = Proxy(queue=queue, task=task, observer=observer)
         return proxy
+
+    async def _setup_and_run_proxy(self, queue: asyncio.Queue, observer: BaseObserver):
+        """Initialize a runtime observer before consuming its queued events."""
+        await observer.setup(self.task_manager)
+        await self._proxy_task_handler(queue, observer)
 
     def _create_proxies(self, observers: list[BaseObserver]) -> dict[BaseObserver, Proxy]:
         """Create proxies for all observers."""

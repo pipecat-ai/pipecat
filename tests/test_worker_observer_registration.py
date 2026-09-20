@@ -23,6 +23,11 @@ class RecordingObserver(BaseObserver):
         self.source = source
         self.received = asyncio.Event()
         self.texts = []
+        self.setup_calls = 0
+
+    async def setup(self, task_manager):
+        await super().setup(task_manager)
+        self.setup_calls += 1
 
     async def on_push_frame(self, data: FramePushed):
         if data.source is self.source and isinstance(data.frame, TextFrame):
@@ -54,7 +59,8 @@ class TestRuntimeObserverRegistration(unittest.IsolatedAsyncioTestCase):
         async def on_pipeline_started(worker, frame):
             started.set()
 
-        run = asyncio.create_task(worker.run(WorkerParams(task_manager=TaskManager())))
+        task_manager = TaskManager()
+        run = asyncio.create_task(worker.run(WorkerParams(task_manager=task_manager)))
         try:
             await asyncio.wait_for(started.wait(), timeout=10)
             if replace_last:
@@ -66,6 +72,8 @@ class TestRuntimeObserverRegistration(unittest.IsolatedAsyncioTestCase):
             await worker.queue_frame(TextFrame(text="after registration"))
             await asyncio.wait_for(added.received.wait(), timeout=2)
             self.assertEqual(added.texts, ["after registration"])
+            self.assertEqual(added.setup_calls, 1)
+            self.assertIs(added.task_manager, task_manager)
             self.assertEqual(original.texts, ["before replacement"] if replace_last else [])
         finally:
             await worker.queue_frame(EndFrame())

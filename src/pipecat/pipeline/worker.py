@@ -705,6 +705,9 @@ class PipelineWorker(BaseWorker):
     def add_observer(self, observer: BaseObserver):
         """Add an observer to monitor pipeline execution.
 
+        Observers added to a running pipeline are set up asynchronously before
+        receiving events. Events arriving during their setup are queued.
+
         Args:
             observer: The observer to add to the pipeline monitoring.
         """
