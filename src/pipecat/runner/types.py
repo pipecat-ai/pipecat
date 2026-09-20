@@ -290,6 +290,11 @@ class SIPRunnerArguments(RunnerArguments):
             ``("opus/48000/2", "PCMU/8000/1")``); None uses the stack default.
         auth_user: Digest username when the credential store keys it
             differently from ``user`` (credential-list trunks).
+        extra_params: Extra baresip account parameters, each a
+            ``"key=value"`` string, appended verbatim to the SIP
+            address-of-record — e.g. ``("medianat=ice",
+            "stunserver=stun:HOST:PORT")`` to enable ICE behind NAT. None
+            adds nothing.
         reg_interval: Seconds between registration refreshes; 0 disables
             registration entirely (trunk mode).
         rtp_timeout: Seconds without received RTP after which a call is
@@ -309,6 +314,7 @@ class SIPRunnerArguments(RunnerArguments):
     transport: str = "udp"
     audio_codecs: tuple | None = None
     auth_user: str | None = None
+    extra_params: tuple | None = None
     reg_interval: int = 600
     rtp_timeout: int = 0
     instance_id: str | None = None

@@ -753,6 +753,7 @@ async def create_transport(
             transport=runner_args.transport,
             audio_codecs=runner_args.audio_codecs,
             auth_user=runner_args.auth_user,
+            extra_params=runner_args.extra_params,
             reg_interval=runner_args.reg_interval,
             rtp_timeout=runner_args.rtp_timeout,
             instance_id=runner_args.instance_id,
