@@ -93,7 +93,7 @@ class WorkerObserver(BaseObserver):
 
         # If we already started, create a new proxy for the observer.
         # Otherwise, it will be created in start().
-        if self._proxies:
+        if self._proxies is not None:
             proxy = self._create_proxy(observer)
             self._proxies[observer] = proxy
 
