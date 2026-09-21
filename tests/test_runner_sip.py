@@ -7,7 +7,12 @@
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from pipecat.runner.sip import SIPClientConfig, cleanup, configure
+from pipecat.runner.sip import (
+    SIPClientConfig,
+    cleanup,
+    configure,
+    resolve_media_nat_params,
+)
 from pipecat.transports.daily.utils import DailySIPClientObject
 
 CLIENT = DailySIPClientObject(
@@ -130,3 +135,39 @@ class TestCleanup(unittest.IsolatedAsyncioTestCase):
             helper.delete_sip_client = AsyncMock(side_effect=Exception("boom"))
 
             await cleanup(AsyncMock(), config)  # must not raise
+
+
+class TestResolveMediaNatParams(unittest.TestCase):
+    STUN = ("medianat=stun", "stunserver=stun:stun.l.google.com:19302")
+
+    def test_explicit_params_win_verbatim(self):
+        # SIP_EXTRA_PARAMS takes over unchanged; no default is added.
+        result = resolve_media_nat_params("medianat=ice,stunserver=stun:x:3478")
+        self.assertEqual(result, ("medianat=ice", "stunserver=stun:x:3478"))
+
+    def test_default_enables_stun(self):
+        with patch.dict("os.environ", {}, clear=True):
+            result = resolve_media_nat_params(None)
+
+        self.assertEqual(result, self.STUN)
+
+    def test_stun_server_off_disables(self):
+        with patch.dict("os.environ", {"SIP_STUN_SERVER": "off"}, clear=True):
+            result = resolve_media_nat_params(None)
+
+        self.assertIsNone(result)
+
+    def test_custom_stun_server(self):
+        with patch.dict(
+            "os.environ", {"SIP_STUN_SERVER": "stun:stun.example.com:3478"}, clear=True
+        ):
+            result = resolve_media_nat_params(None)
+
+        self.assertEqual(result, ("medianat=stun", "stunserver=stun:stun.example.com:3478"))
+
+    def test_bare_stun_server_gets_scheme(self):
+        # A server given without a URI scheme is normalized to stun:host:port.
+        with patch.dict("os.environ", {"SIP_STUN_SERVER": "stun.example.com:3478"}, clear=True):
+            result = resolve_media_nat_params(None)
+
+        self.assertEqual(result, ("medianat=stun", "stunserver=stun:stun.example.com:3478"))
