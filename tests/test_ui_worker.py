@@ -16,6 +16,12 @@ from pipecat.bus.ui.messages import (
     _UI_SNAPSHOT_BUS_EVENT_NAME,
     BusUIEventMessage,
 )
+from pipecat.classifiers.base_classifier import (
+    BaseClassifier,
+    ChoiceQuestion,
+    ChoiceResult,
+    YesNoResult,
+)
 from pipecat.frames.frames import (
     LLMContextFrame,
     LLMMessagesAppendFrame,
@@ -25,7 +31,7 @@ from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.utils.asyncio.task_manager import TaskManager
-from pipecat.workers.ui import UI_STATE_PROMPT_GUIDE, UIWorker, ui_event
+from pipecat.workers.ui import UI_STATE_PROMPT_GUIDE, BaseUIWorker, UIWorker, ui_event
 
 
 class _StubUIWorker(UIWorker):
@@ -841,3 +847,180 @@ class TestUIWorkerPromptGuide(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestUIEventDecoratorOldPath(unittest.TestCase):
+    def test_the_old_import_path_warns_and_still_works(self):
+        import importlib
+        import sys
+        import warnings
+
+        sys.modules.pop("pipecat.workers.ui.ui_event_decorator", None)
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            module = importlib.import_module("pipecat.workers.ui.ui_event_decorator")
+        self.assertTrue(any(issubclass(w.category, DeprecationWarning) for w in caught))
+        self.assertIs(module.ui_event, ui_event)
+
+
+class _FakeClassifier(BaseClassifier):
+    """Answers from a scripted probability and records what it was asked."""
+
+    def __init__(self, probability: float):
+        super().__init__()
+        self.probability = probability
+        self.choice_label = ""
+        self.asked: list = []
+        self.setup_task_manager = None
+        self.cleaned_up = False
+
+    async def setup(self, task_manager):
+        self.setup_task_manager = task_manager
+
+    async def cleanup(self):
+        self.cleaned_up = True
+
+    async def _ask(self, state, questions):
+        results = {}
+        for name, question in questions.items():
+            self.asked.append((state, question))
+            if isinstance(question, ChoiceQuestion):
+                options = question.options
+                label = self.choice_label if self.choice_label in options else next(iter(options))
+                results[name] = ChoiceResult(
+                    choice=label,
+                    probabilities={o: float(o == label) for o in options},
+                    confidence=self.probability,
+                )
+            else:
+                results[name] = YesNoResult(probability=self.probability)
+        return results, None
+
+
+class _ScreenWorker(BaseUIWorker):
+    """A screen worker with no LLM: state, events and a classifier only."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.captured: list[BusUIEventMessage] = []
+
+    @ui_event("nav_click")
+    async def _on_nav(self, message: BusUIEventMessage) -> None:
+        self.captured.append(message)
+
+
+class TestBaseUIWorkerScreen(unittest.IsolatedAsyncioTestCase):
+    async def _worker(self, classifier=None) -> _ScreenWorker:
+        worker = _ScreenWorker("screen", classifier=classifier)
+        worker._task_manager = TaskManager()
+        return worker
+
+    async def test_keeps_the_snapshot_and_dispatches_events_without_an_llm(self):
+        worker = await self._worker()
+        await worker.on_bus_message(
+            BusUIEventMessage(
+                source="client",
+                target="screen",
+                event_name=_UI_SNAPSHOT_BUS_EVENT_NAME,
+                payload=_SAMPLE_SNAPSHOT,
+            )
+        )
+        await worker.on_bus_message(
+            BusUIEventMessage(source="client", target="screen", event_name="nav_click", payload={})
+        )
+        await _settle()
+
+        self.assertTrue(worker.render_ui_state().startswith("<ui_state>"))
+        self.assertEqual(len(worker.captured), 1)
+
+    async def test_which_element_asks_over_the_named_elements(self):
+        classifier = _FakeClassifier(0.9)
+        classifier.choice_label = "e6"
+        worker = await self._worker(classifier)
+        worker._latest_snapshot = _SAMPLE_SNAPSHOT
+
+        ref = await worker.which_element("the Taylor Swift one")
+
+        self.assertEqual(ref, "e6")
+        state, question = classifier.asked[0]
+        self.assertEqual(state["utterance"], "the Taylor Swift one")
+        self.assertIn("<ui_state>", state["screen"])
+        self.assertEqual(question.options["e5"], 'button "Bad Bunny"')
+        self.assertEqual(question.options["e6"], 'button "Taylor Swift"')
+        self.assertNotIn("e1", question.options)
+        self.assertIn("referring to", question.instructions)
+
+    async def test_which_element_returns_none_below_the_threshold(self):
+        classifier = _FakeClassifier(0.2)
+        classifier.choice_label = "e5"
+        worker = await self._worker(classifier)
+        worker._latest_snapshot = _SAMPLE_SNAPSHOT
+
+        self.assertIsNone(await worker.which_element("that one"))
+
+    async def test_which_element_without_a_snapshot_asks_nothing(self):
+        classifier = _FakeClassifier(0.9)
+        worker = await self._worker(classifier)
+
+        self.assertIsNone(await worker.which_element("that one"))
+        self.assertEqual(classifier.asked, [])
+
+    async def test_should_respond_works_on_the_base_worker(self):
+        classifier = _FakeClassifier(0.9)
+        worker = await self._worker(classifier)
+        event = BusUIEventMessage(
+            source="client", target="screen", event_name="nav_click", payload={}
+        )
+
+        self.assertTrue(await worker.should_respond(event))
+
+
+class TestUIWorkerClassifier(unittest.IsolatedAsyncioTestCase):
+    async def test_should_respond_asks_with_the_event_and_the_screen(self):
+        classifier = _FakeClassifier(0.9)
+        worker = await _make_worker(classifier=classifier)
+        worker._latest_snapshot = _SAMPLE_SNAPSHOT
+        event = BusUIEventMessage(
+            source="music", target="ui", event_name="nav_click", payload={"view": "home"}
+        )
+
+        self.assertTrue(await worker.should_respond(event))
+
+        state, question = classifier.asked[0]
+        self.assertEqual(state["event"], {"name": "nav_click", "payload": {"view": "home"}})
+        self.assertTrue(state["screen"].startswith("<ui_state>"))
+        self.assertIn("say something", question.instructions)
+        self.assertIn("routine click", question.no)
+
+    async def test_should_respond_is_false_when_no_is_likelier(self):
+        worker = await _make_worker(classifier=_FakeClassifier(0.3))
+        event = BusUIEventMessage(source="music", target="ui", event_name="scroll", payload={})
+
+        self.assertFalse(await worker.should_respond(event))
+
+    async def test_should_respond_without_a_snapshot_sends_only_the_event(self):
+        classifier = _FakeClassifier(0.9)
+        worker = await _make_worker(classifier=classifier)
+        event = BusUIEventMessage(source="music", target="ui", event_name="scroll", payload={})
+
+        await worker.should_respond(event)
+        state, _ = classifier.asked[0]
+        self.assertNotIn("screen", state)
+
+    async def test_should_respond_without_a_classifier_raises(self):
+        from pipecat.classifiers.base_classifier import ClassifierError
+
+        worker = await _make_worker()
+        event = BusUIEventMessage(source="music", target="ui", event_name="scroll", payload={})
+
+        with self.assertRaises(ClassifierError):
+            await worker.should_respond(event)
+
+    async def test_activation_sets_the_classifier_up_in_the_worker(self):
+        classifier = _FakeClassifier(0.9)
+        worker = await _make_worker(classifier=classifier)
+
+        await worker.on_activated(None)
+
+        self.assertIs(classifier.setup_task_manager, worker.task_manager)
+        self.assertIs(worker.classifier, classifier)

@@ -21,10 +21,10 @@ from pipecat.bus.ui.messages import (
     BusUIJobUpdateMessage,
 )
 from pipecat.workers.base_ui_worker import BaseUIWorker
-from pipecat.workers.ui.ui_event_decorator import ui_event
 from pipecat.workers.ui.ui_prompts import UI_STATE_PROMPT_GUIDE
 from pipecat.workers.ui.ui_tools import ReplyToolMixin
 from pipecat.workers.ui.ui_worker import UIWorker
+from pipecat.workers.ui_event_decorator import ui_event
 
 # Built-in UI command payload models (Toast, Navigate, ScrollTo,
 # Highlight, Focus, Click, SetInputValue, SelectText) live in

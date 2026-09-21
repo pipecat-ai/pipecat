@@ -4810,6 +4810,17 @@
       "location": "pipecat/workers/runner.py"
     },
     {
+      "subject": "pipecat.workers.ui.ui_event_decorator",
+      "module": "pipecat.workers.ui.ui_event_decorator",
+      "kind": "module",
+      "deprecated_in": "1.12.0",
+      "removed_in": "2.0.0",
+      "relation": "move",
+      "replacement": "pipecat.workers.ui_event_decorator",
+      "message": "Moved to :mod:`pipecat.workers.ui_event_decorator`. Will be removed in 2.0.0.",
+      "location": "pipecat/workers/ui/ui_event_decorator.py"
+    },
+    {
       "subject": "UIJobGroupContext",
       "module": "pipecat.workers.ui.ui_job_context",
       "kind": "class",

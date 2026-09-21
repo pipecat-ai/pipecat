@@ -8,22 +8,11 @@
 
 import asyncio
 import json
-from dataclasses import asdict, is_dataclass
 from typing import Any
 
-from pydantic import BaseModel
-
-from pipecat.bus.messages import (
-    BusJobRequestMessage,
-    BusMessage,
-    BusTTSSpeakMessage,
-)
-from pipecat.bus.ui.messages import (
-    _UI_CANCEL_JOB_GROUP_BUS_EVENT_NAME,
-    _UI_SNAPSHOT_BUS_EVENT_NAME,
-    BusUICommandMessage,
-    BusUIEventMessage,
-)
+from pipecat.bus.messages import BusJobRequestMessage, BusTTSSpeakMessage
+from pipecat.bus.ui.messages import BusUIEventMessage
+from pipecat.classifiers.base_classifier import BaseClassifier
 from pipecat.frames.frames import LLMContextFrame, LLMMessagesAppendFrame, LLMMessagesUpdateFrame
 from pipecat.pipeline.job_context import JobGroupContext, JobGroupParams, JobStatus
 from pipecat.pipeline.job_decorator import job
@@ -31,18 +20,10 @@ from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMAssistantAggregatorParams,
 )
-from pipecat.processors.frameworks.rtvi.models import (
-    Click,
-    Highlight,
-    ScrollTo,
-    SelectText,
-    SetInputValue,
-)
 from pipecat.services.llm_service import LLMService
 from pipecat.utils.deprecation import deprecated
 from pipecat.workers.base_ui_worker import BaseUIWorker
 from pipecat.workers.llm.llm_context_worker import LLMContextWorker
-from pipecat.workers.ui.ui_event_decorator import _collect_ui_event_handlers
 from pipecat.workers.ui.ui_prompts import UI_STATE_PROMPT_GUIDE
 
 
@@ -67,6 +48,9 @@ class UIWorker(BaseUIWorker, LLMContextWorker):
       (which decides how the answer reaches the user).
     - Surface long work. ``ui_job_group`` / ``start_ui_job_group`` fan work out to
       peer workers as cancellable job-group cards on the client.
+    - Decide small things without an LLM turn, through the ``classifier`` of
+      :class:`~pipecat.workers.base_ui_worker.BaseUIWorker`, which also owns the
+      screen state, the UI events and the commands.
 
     ``PipelineWorker`` connects a UIWorker to the client automatically when RTVI
     is enabled -- no extra wiring. A working subclass needs only an LLM and a
@@ -99,6 +83,7 @@ class UIWorker(BaseUIWorker, LLMContextWorker):
         *,
         llm: LLMService[Any],
         context: LLMContext | None = None,
+        classifier: BaseClassifier | None = None,
         assistant_params: LLMAssistantAggregatorParams | None = None,
         inject_events: bool = True,
         auto_inject_ui_state: bool = True,
@@ -114,6 +99,8 @@ class UIWorker(BaseUIWorker, LLMContextWorker):
                 of the mutable history and are cleared on each
                 ``keep_history=False`` reset; put durable instructions in the
                 LLM's ``system_instruction`` instead.
+            classifier: Answers small questions about the screen without an
+                LLM turn; see :class:`~pipecat.workers.base_ui_worker.BaseUIWorker`.
             assistant_params: Optional assistant-aggregator parameters, e.g. to
                 enable context summarization for ``keep_history=True`` workers.
             inject_events: When True (the default), append each UI event to the
@@ -140,6 +127,7 @@ class UIWorker(BaseUIWorker, LLMContextWorker):
         """
         super().__init__(
             name,
+            classifier=classifier,
             llm=llm,
             active=True,
             defer_tool_frames=True,
@@ -155,11 +143,6 @@ class UIWorker(BaseUIWorker, LLMContextWorker):
         self._inject_events = inject_events
         self._auto_inject_ui_state = auto_inject_ui_state
         self._keep_history = keep_history
-        self._ui_event_handlers = _collect_ui_event_handlers(self)
-        # Latest accessibility snapshot received from the client. Updated
-        # in ``on_bus_message`` when a ``__ui_snapshot`` event arrives.
-        # Rendered into LLM context via ``inject_ui_state``.
-        self._latest_snapshot: dict[str, Any] | None = None
         # Job currently being processed by this worker. Set in
         # ``_run_llm_turn``, cleared when the job completes. Lets
         # ``@tool`` methods (and the mixin tools) close out the job
@@ -189,149 +172,6 @@ class UIWorker(BaseUIWorker, LLMContextWorker):
             content = self.render_ui_state()
             if content:
                 frame.context.add_message({"role": "developer", "content": content})
-
-    async def send_command(self, name: str, payload: Any = None) -> None:
-        """Send a named UI command to the client.
-
-        Publishes a ``BusUICommandMessage``; when RTVI is enabled,
-        ``PipelineWorker`` translates it into an ``RTVIUICommandFrame`` on the
-        pipeline. Client-side handlers subscribed to ``RTVIEvent.UICommand``
-        (or React's ``useUICommandHandler``) dispatch on the command name.
-
-        Args:
-            name: App-defined command name (e.g. ``"toast"``,
-                ``"navigate"``, or any app-specific name).
-            payload: One of:
-
-                - A pydantic ``BaseModel`` instance (including the
-                  built-in command models in
-                  ``pipecat.processors.frameworks.rtvi.models``).
-                  Converted to a plain dict with ``model_dump()``.
-                - A dataclass instance. Converted to a plain dict with
-                  ``dataclasses.asdict``.
-                - A ``dict`` forwarded as-is.
-                - ``None``, forwarded as an empty dict.
-        """
-        if payload is None:
-            serialized: Any = {}
-        elif isinstance(payload, BaseModel):
-            serialized = payload.model_dump()
-        elif is_dataclass(payload) and not isinstance(payload, type):
-            serialized = asdict(payload)
-        else:
-            serialized = payload
-
-        await self.send_bus_message(
-            BusUICommandMessage(
-                source=self.name,
-                target=None,
-                command_name=name,
-                payload=serialized,
-            )
-        )
-
-    async def scroll_to(self, ref: str) -> None:
-        """Send a ``scroll_to`` UI command to bring an element into view.
-
-        Convenience wrapper around ``send_command("scroll_to", ScrollTo(ref=ref))``.
-        These ``scroll_to`` / ``highlight`` / ``select_text`` / ``click`` /
-        ``set_input_value`` helpers are plain methods, not LLM tools: compose
-        them inside a custom ``@tool`` body, or use ``ReplyToolMixin`` for the
-        standard shape.
-
-        Args:
-            ref: Snapshot ref (e.g. ``"e42"``) from the latest ``<ui_state>``.
-        """
-        await self.send_command("scroll_to", ScrollTo(ref=ref))
-
-    async def highlight(self, ref: str) -> None:
-        """Send a ``highlight`` UI command to briefly flash an element.
-
-        Args:
-            ref: Snapshot ref (e.g. ``"e42"``) from the latest ``<ui_state>``.
-        """
-        await self.send_command("highlight", Highlight(ref=ref))
-
-    async def select_text(
-        self,
-        ref: str,
-        *,
-        start_offset: int | None = None,
-        end_offset: int | None = None,
-    ) -> None:
-        """Send a ``select_text`` UI command to select an element's text.
-
-        Selects the whole element by default, or the ``start_offset``..
-        ``end_offset`` character sub-range (over the element's concatenated
-        ``textContent``) when both are given. Used for deixis -- pointing at
-        content via the page's text selection.
-
-        Args:
-            ref: Snapshot ref (e.g. ``"e42"``) from the latest ``<ui_state>``.
-            start_offset: Optional start character offset of the selection.
-            end_offset: Optional end character offset (exclusive).
-        """
-        await self.send_command(
-            "select_text",
-            SelectText(ref=ref, start_offset=start_offset, end_offset=end_offset),
-        )
-
-    async def click(self, ref: str) -> None:
-        """Send a ``click`` UI command (checkboxes, radios, submit buttons).
-
-        The standard client handler no-ops on ``disabled`` targets, so the
-        worker can't bypass affordances meant to be user-controlled.
-
-        Args:
-            ref: Snapshot ref (e.g. ``"e42"``) from the latest ``<ui_state>``.
-        """
-        await self.send_command("click", Click(ref=ref))
-
-    async def set_input_value(
-        self,
-        ref: str,
-        value: str,
-        *,
-        replace: bool = True,
-    ) -> None:
-        """Send a ``set_input_value`` UI command to fill a text input/textarea.
-
-        Args:
-            ref: Snapshot ref (e.g. ``"e42"``) of the input or textarea.
-            value: Text to write into the field.
-            replace: When True (the default), overwrite the field; when False,
-                append (e.g. to continue a long answer in a textarea).
-        """
-        await self.send_command(
-            "set_input_value",
-            SetInputValue(ref=ref, value=value, replace=replace),
-        )
-
-    async def on_bus_message(self, message: BusMessage) -> None:
-        """Dispatch UI events alongside base lifecycle handling."""
-        await super().on_bus_message(message)
-
-        # Job-group lifecycle forwarding and the reserved cancel event
-        # are handled by ``BaseUIWorker`` (via the ``super()`` call above).
-
-        if not isinstance(message, BusUIEventMessage):
-            return
-        if message.target and message.target != self.name:
-            return
-
-        # Reserved snapshot event: store and return without dispatch or
-        # ``<ui_event>`` injection. Apps render via ``inject_ui_state``.
-        if message.event_name == _UI_SNAPSHOT_BUS_EVENT_NAME:
-            if isinstance(message.payload, dict):
-                self._latest_snapshot = message.payload
-            return
-
-        # Reserved cancel event: handled in ``BaseUIWorker``; never
-        # dispatched to app ``@ui_event`` handlers.
-        if message.event_name == _UI_CANCEL_JOB_GROUP_BUS_EVENT_NAME:
-            return
-
-        await self._handle_ui_event(message)
 
     @property
     def current_job(self) -> BusJobRequestMessage | None:
@@ -531,37 +371,6 @@ class UIWorker(BaseUIWorker, LLMContextWorker):
             ),
         )
 
-    def render_ui_state(self) -> str:
-        """Render the latest accessibility snapshot as a ``<ui_state>`` block.
-
-        Produces Playwright-MCP-style indented text with stable element
-        refs. Apps inject the output via ``inject_ui_state()`` when they
-        want the LLM to see what's on screen.
-
-        When the snapshot carries a current text selection, a nested
-        ``<selection ref="...">...</selection>`` block is appended
-        inside ``<ui_state>`` so the LLM can resolve deictic references
-        ("this paragraph", "what I selected") against on-page content.
-
-        Override to customize the rendered form.
-
-        Returns:
-            The ``<ui_state>`` block, or an empty string if no snapshot
-            has been received yet.
-        """
-        if not self._latest_snapshot:
-            return ""
-        root = self._latest_snapshot.get("root")
-        if not isinstance(root, dict):
-            return ""
-        lines = ["<ui_state>"]
-        _render_node(root, depth=0, lines=lines)
-        selection = self._latest_snapshot.get("selection")
-        if isinstance(selection, dict):
-            _render_selection(selection, lines)
-        lines.append("</ui_state>")
-        return "\n".join(lines)
-
     async def inject_ui_state(self) -> None:
         """Append the latest ``<ui_state>`` block to the LLM context.
 
@@ -595,15 +404,10 @@ class UIWorker(BaseUIWorker, LLMContextWorker):
         return f'<ui_event name="{message.event_name}">{payload_repr}</ui_event>'
 
     async def _handle_ui_event(self, message: BusUIEventMessage) -> None:
-        """Inject the event into LLM context, then dispatch to the handler.
+        """Inject the event into the LLM context, then dispatch it.
 
-        Injection runs synchronously first so the ``<ui_event>``
-        developer message lands in the context before any side effects
-        the handler triggers. The matching ``@ui_event`` handler
-        then runs in its own asyncio task so the bus dispatcher isn't
-        held open while the handler awaits downstream work (job
-        requests, network calls). Events with no registered handler
-        are a no-op after injection.
+        Injection runs first so the ``<ui_event>`` developer message lands in
+        the context before any side effects the handler triggers.
         """
         if self._inject_events:
             content = self.render_ui_event(message)
@@ -614,18 +418,7 @@ class UIWorker(BaseUIWorker, LLMContextWorker):
                         run_llm=False,
                     )
                 )
-
-        handler = self._ui_event_handlers.get(message.event_name)
-        if handler is None:
-            return
-
-        # Handlers run in their own asyncio task so the bus dispatcher
-        # is never held open while a handler awaits downstream work
-        # (job requests, network calls, etc.). Same pattern as ``@job``.
-        self.create_task(
-            handler(message),
-            f"{self.name}::ui_event_{message.event_name}",
-        )
+        await super()._handle_ui_event(message)
 
 
 def _is_user_turn(context: LLMContext) -> bool:
@@ -641,77 +434,3 @@ def _is_user_turn(context: LLMContext) -> bool:
         return False
     last = messages[-1]
     return isinstance(last, dict) and last.get("role") == "user"
-
-
-def _render_node(node: dict[str, Any], *, depth: int, lines: list[str]) -> None:
-    """Render one A11yNode dict as Playwright-MCP-style indented text.
-
-    Format per node::
-
-        - role "name" [level=N] [cols=N] [rows=N] [state1] [state2] [ref=eN]:
-
-    Trailing ``:`` when the node has children. ``name``, ``level``,
-    grid dims, and state tags are emitted only when present on the
-    node.
-    """
-    role = node.get("role", "generic")
-    name = node.get("name")
-    value = node.get("value")
-    state = node.get("state") or []
-    level = node.get("level")
-    colcount = node.get("colcount")
-    rowcount = node.get("rowcount")
-    ref = node.get("ref", "")
-    children = node.get("children") or []
-
-    parts: list[str] = [f"- {role}"]
-    if isinstance(name, str) and name:
-        parts.append(f'"{name}"')
-    if isinstance(value, str) and value:
-        parts.append(f'= "{value}"')
-    if isinstance(level, int):
-        parts.append(f"[level={level}]")
-    if isinstance(colcount, int):
-        parts.append(f"[cols={colcount}]")
-    if isinstance(rowcount, int):
-        parts.append(f"[rows={rowcount}]")
-    if isinstance(state, list):
-        for s in state:
-            if isinstance(s, str) and s:
-                parts.append(f"[{s}]")
-    if isinstance(ref, str) and ref:
-        parts.append(f"[ref={ref}]")
-
-    indent = "  " * depth
-    line = indent + " ".join(parts)
-    if children:
-        line += ":"
-    lines.append(line)
-
-    if isinstance(children, list):
-        for child in children:
-            if isinstance(child, dict):
-                _render_node(child, depth=depth + 1, lines=lines)
-
-
-def _render_selection(selection: dict[str, Any], lines: list[str]) -> None:
-    """Render an ``A11ySelection`` dict as a ``<selection>`` block.
-
-    Emitted at the root of ``<ui_state>`` (no leading indent) so the
-    LLM can spot it without parsing the tree::
-
-        <selection ref="e42">
-        the actual selected text
-        </selection>
-
-    No-op when the selection lacks a ``ref`` or ``text``.
-    """
-    ref = selection.get("ref")
-    text = selection.get("text")
-    if not isinstance(ref, str) or not ref:
-        return
-    if not isinstance(text, str) or not text:
-        return
-    lines.append(f'<selection ref="{ref}">')
-    lines.append(text)
-    lines.append("</selection>")
