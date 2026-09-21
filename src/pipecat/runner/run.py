@@ -1550,9 +1550,13 @@ async def _run_sip(args: argparse.Namespace):
     ``SIP_DOMAIN``, and ``SIP_TRANSPORT`` environment variables — plus
     ``SIP_AUDIO_CODECS`` (comma-separated codec preference list),
     ``SIP_AUTH_USER`` (credential-list digest username),
-    ``SIP_EXTRA_PARAMS`` (comma-separated ``key=value`` account parameters,
-    e.g. ``medianat=ice,stunserver=stun:HOST:PORT`` to enable ICE behind
-    NAT),
+    ``SIP_EXTRA_PARAMS`` (comma-separated ``key=value`` account parameters
+    passed verbatim to the baresip account, e.g.
+    ``medianat=stun,stunserver=stun:HOST:PORT``),
+    ``SIP_STUN_SERVER`` (STUN server for the default media-NAT traversal — when
+    ``SIP_EXTRA_PARAMS`` is not set, the runner adds ``medianat=stun`` with this
+    server, default stun.l.google.com, so a peer can reach the bot's media
+    behind NAT; set to ``off`` to disable),
     ``SIP_REG_INTERVAL`` (0 for registration-less trunk mode),
     ``SIP_RTP_TIMEOUT`` (dead-call detection, seconds; 0 disables),
     ``SIP_INSTANCE_ID`` (a stable UUID for RFC 5626 ``+sip.instance``),
@@ -1564,7 +1568,7 @@ async def _run_sip(args: argparse.Namespace):
     """
     logger.info("Running with SIP transport...")
 
-    from pipecat.runner.sip import cleanup, configure
+    from pipecat.runner.sip import cleanup, configure, resolve_media_nat_params
 
     async with aiohttp.ClientSession() as session:
         try:
@@ -1581,7 +1585,9 @@ async def _run_sip(args: argparse.Namespace):
             raise SystemExit(1)
 
         codecs = os.getenv("SIP_AUDIO_CODECS")
-        extra_params = os.getenv("SIP_EXTRA_PARAMS")
+        # SIP_EXTRA_PARAMS wins verbatim; otherwise medianat=stun is enabled by
+        # default for NAT traversal. See runner.sip.resolve_media_nat_params.
+        extra_params = resolve_media_nat_params(os.getenv("SIP_EXTRA_PARAMS"))
         runner_args = SIPRunnerArguments(
             user=config.user,
             domain=config.domain,
@@ -1591,9 +1597,7 @@ async def _run_sip(args: argparse.Namespace):
             if codecs
             else None,
             auth_user=os.getenv("SIP_AUTH_USER"),
-            extra_params=tuple(p.strip() for p in extra_params.split(",") if p.strip())
-            if extra_params
-            else None,
+            extra_params=extra_params,
             reg_interval=reg_interval,
             rtp_timeout=rtp_timeout,
             instance_id=os.getenv("SIP_INSTANCE_ID"),

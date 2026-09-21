@@ -43,10 +43,13 @@ UUID) lets a registrar replace a restarted bot's binding instead of
 stacking a stale one. To debug signaling or media-path problems,
 ``SIP_TRACE=1`` logs every SIP message verbatim (SDP included; contains
 auth material — not for production) and ``SIP_NATIVE_LOG_LEVEL=debug``
-captures the native stack's own logs. Behind NAT,
-``SIP_EXTRA_PARAMS=medianat=ice,stunserver=stun:HOST:PORT`` (comma-separated
-``key=value`` account parameters) turns on ICE with a STUN server so media
-can traverse the NAT. For knobs beyond the ``SIP_*`` environment
+captures the native stack's own logs. For NAT traversal, the runner enables
+``medianat=stun`` by default with a STUN server (``SIP_STUN_SERVER``, default
+stun.l.google.com) so the bot advertises its public media address — the
+traversal a non-ICE peer such as a PSTN trunk needs behind NAT. Set
+``SIP_EXTRA_PARAMS`` (comma-separated ``key=value`` account parameters, passed
+verbatim) to override that, or ``SIP_STUN_SERVER=off`` to disable it. For knobs
+beyond the ``SIP_*`` environment
 variables, construct ``SIPConnection(...)`` yourself and pass it to
 ``SIPTransport`` instead of using ``create_transport``::
 
@@ -62,7 +65,7 @@ variables, construct ``SIPConnection(...)`` yourself and pass it to
         dtmf_mode="info",  # DTMF as SIP INFO instead of RFC 4733
         net_interface="10.0.0.5",  # force a specific egress interface
         audio_codecs=("opus/48000/2", "PCMU/8000/1"),
-        extra_params=("medianat=ice", "stunserver=stun:stun.l.google.com:19302"),  # ICE + STUN behind NAT
+        extra_params=("medianat=stun", "stunserver=stun:stun.l.google.com:19302"),  # STUN media-NAT behind NAT
     )
     transport = SIPTransport(
         connection, SIPParams(audio_in_enabled=True, audio_out_enabled=True)
