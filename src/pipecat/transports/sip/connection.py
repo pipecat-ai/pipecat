@@ -334,14 +334,16 @@ class SIPConnection(BaseObject):
         async def on_incoming(connection, data):
             await connection.answer()
 
-    Behind NAT, enable ICE with a STUN server through ``extra_params`` (raw
-    baresip account parameters)::
+    Behind NAT, advertise the STUN-discovered public media address through
+    ``extra_params`` (raw baresip account parameters). Use ``medianat=stun``
+    for a non-ICE peer such as a PSTN SIP trunk (plain RTP); use
+    ``medianat=ice`` only when the far side also speaks ICE::
 
         connection = SIPConnection(
             user="1001",
             domain="example.com",
             password="...",
-            extra_params=("medianat=ice", "stunserver=stun:stun.l.google.com:19302"),
+            extra_params=("medianat=stun", "stunserver=stun:stun.l.google.com:19302"),
         )
     """
 
@@ -395,9 +397,11 @@ class SIPConnection(BaseObject):
                 ``"key=value"`` string, appended verbatim to the SIP
                 address-of-record — the escape hatch for account directives
                 pipecat does not model. Media-NAT traversal is the common
-                case: ``("medianat=ice", "stunserver=stun:HOST:PORT")``
-                turns on ICE with a STUN server for calls behind NAT
-                (``stunserver`` has no effect without ``medianat``). Values
+                case: ``("medianat=stun", "stunserver=stun:HOST:PORT")``
+                advertises the STUN-discovered public media address for calls
+                behind NAT (``stunserver`` has no effect without ``medianat``;
+                use ``medianat=stun`` for non-ICE peers like a PSTN trunk,
+                ``medianat=ice`` only when the peer also speaks ICE). Values
                 are passed through unchanged; None (the default) adds
                 nothing.
             net_interface: Restrict the stack to one local interface, by
