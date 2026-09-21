@@ -24,6 +24,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from enum import IntEnum
 from typing import Any, cast
+from urllib.parse import urlsplit
 
 import numpy as np
 from loguru import logger
@@ -541,6 +542,9 @@ class MOQTransportClient:
         """
         self._params = params
         self._url = url
+        # The query string can carry the relay token, so logs get the URL
+        # without it.
+        self._url_for_logs = urlsplit(url)._replace(query="", fragment="").geturl()
         self._bind = bind
         self._callbacks = callbacks
 
@@ -1074,7 +1078,7 @@ class MOQTransportClient:
         if self._connected_once:
             await self._rebuild_publish_side()
         subscribe_origin = moq.OriginProducer()
-        logger.debug(f"MOQ: connecting to {self._url} as {self._broadcast_path}")
+        logger.debug(f"MOQ: connecting to {self._url_for_logs} as {self._broadcast_path}")
         async with self._make_transport(self._publish_origin, subscribe_origin) as client:
             session = cast(moq.Client, client).session
             assert session is not None, "moq.Client exposes its session once connected"
@@ -1082,7 +1086,9 @@ class MOQTransportClient:
                 # The outage ends when the peer is back, not here: a relay
                 # that accepts the dial and closes the session at once
                 # must not restart the count (see _on_peer_available).
-                logger.info(f"MOQ: session re-established with {self._url}; waiting for the peer")
+                logger.info(
+                    f"MOQ: session re-established with {self._url_for_logs}; waiting for the peer"
+                )
             else:
                 self._connected_once = True
                 self._log_published()

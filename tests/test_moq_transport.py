@@ -1172,6 +1172,11 @@ class TestClientReconnect(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.dials, [self.URL])
         client._callbacks.on_connected.assert_awaited_once()
 
+    async def test_the_token_stays_out_of_the_logged_url(self):
+        client = self._make_client()
+        self.assertEqual(client._url, self.URL)
+        self.assertEqual(client._url_for_logs, "https://relay.example.com/")
+
     async def test_the_url_is_dialed_unchanged_on_every_attempt(self):
         """The relay token rides in the query string, so the redial must send
         the URL byte for byte."""
