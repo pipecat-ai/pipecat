@@ -3159,5 +3159,41 @@ class TestWordCompletionTrackerMarkdownTokens(unittest.TestCase):
         self._assert_tracks_to_the_end(text, words)
 
 
+class TestWordCompletionTrackerUnmatchedSymbolStaysPut(unittest.TestCase):
+    """A symbol token that matches nothing must not jump over symbols still to come.
+
+    A provider can report a symbol other than the one it was given -- ElevenLabs
+    reports ``→`` as ``-`` -- so the token is accepted without being placed. The
+    cursor may step past the unmatched symbol, but not past whitespace into the
+    symbol tokens that follow it (``###``, ``-``). Those arrive as their own
+    events, and once the cursor is past them they no longer belong here, so the
+    frame is force-completed and every later word of the turn is dropped.
+    """
+
+    def _assert_tracks_to_the_end(self, text: str, words: list[str]):
+        tracker = WordCompletionTracker(text, llm_text=text, user_facing_text=text)
+        for i, word in enumerate(words):
+            self.assertTrue(tracker.word_belongs_here(word), f"word {i} {word!r} rejected")
+            complete = tracker.add_word_and_check_complete(word)
+            is_last = i == len(words) - 1
+            self.assertEqual(complete, is_last, f"word {i} {word!r} complete={complete}")
+        self.assertEqual(tracker.get_accumulated_user_facing_text(), text)
+
+    def test_swapped_symbol_before_a_heading(self):
+        text = "Step one →\n\n### **Step two**\nDone."
+        self._assert_tracks_to_the_end(
+            text, ["Step", "one", "-", "###", "**Step", "two**", "Done."]
+        )
+
+    def test_swapped_symbol_before_a_real_one(self):
+        text = "Step one → - step two"
+        self._assert_tracks_to_the_end(text, ["Step", "one", "-", "-", "step", "two"])
+
+    def test_swapped_symbol_before_a_word(self):
+        """A letter right after the symbol already stops the step."""
+        text = "Step one → step two"
+        self._assert_tracks_to_the_end(text, ["Step", "one", "-", "step", "two"])
+
+
 if __name__ == "__main__":
     unittest.main()

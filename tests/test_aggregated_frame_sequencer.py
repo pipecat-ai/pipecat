@@ -2325,5 +2325,50 @@ class TestMarkdownResponseStaysInSync(unittest.IsolatedAsyncioTestCase):
         )
 
 
+class TestUnmatchedSymbolDoesNotDesyncTheTurn(unittest.IsolatedAsyncioTestCase):
+    """A swapped symbol followed by more symbol tokens, across two queued sentences.
+
+    ElevenLabs reports ``→`` as ``-``. If the cursor steps past the symbol tokens
+    after it, the next one is rejected, the slot is force-completed, and the
+    following words are dropped as unrecognised.
+    """
+
+    SENTENCES = [
+        "Step one →\n\n### **Step two**\nDone.",
+        "Then we finish.",
+    ]
+
+    WORDS = [
+        ["Step", "one", "-", "###", "**Step", "two**", "Done."],
+        ["Then", "we", "finish."],
+    ]
+
+    async def test_every_word_is_emitted_and_every_sentence_reaches_the_context(self):
+        seq = _seq()
+        for text in self.SENTENCES:
+            await seq.register_spoken(_spoken_frame(text, raw_text=text), "ctx1", text, True)
+
+        context_spans: list[str] = []
+        dropped: list[str] = []
+        pts = 0
+        for words in self.WORDS:
+            for word in words:
+                pts += 10
+                frames = [
+                    f
+                    for f in seq.process_word(word, pts=pts, context_id="ctx1")
+                    if isinstance(f, TTSTextFrame)
+                ]
+                if not frames:
+                    dropped.append(word)
+                context_spans += [f.raw_text for f in frames if f.append_to_context and f.raw_text]
+
+        self.assertEqual(dropped, [])
+        self.assertEqual(
+            " ".join(" ".join(context_spans).split()),
+            " ".join(" ".join(self.SENTENCES).split()),
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
