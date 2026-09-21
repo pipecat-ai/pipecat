@@ -390,10 +390,12 @@ class WorkerRunner(BaseObject, BusSubscriber):
 
         await self._load_setup_files()
 
-        for entry in self._entries.values():
-            await self._start_worker(entry)
-
+        # Running from here on, so a worker that adds another one while it
+        # starts gets it started right away through add_workers().
         self._running = True
+
+        for entry in list(self._entries.values()):
+            await self._start_worker(entry)
 
     async def _cancel_spawned_workers(self) -> None:
         """Cancel every worker still going and wait for it to finish.
