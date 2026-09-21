@@ -804,8 +804,6 @@ def _client_with_fake_moq(params: MOQParams | None = None, url: str = "https://r
     callbacks = MOQCallbacks(
         on_connected=AsyncMock(),
         on_disconnected=AsyncMock(),
-        on_reconnecting=AsyncMock(),
-        on_reconnected=AsyncMock(),
         on_client_connected=AsyncMock(),
         on_client_disconnected=AsyncMock(),
         on_track_subscribed=AsyncMock(),
@@ -1117,9 +1115,9 @@ class TestClientReconnect(unittest.IsolatedAsyncioTestCase):
         await asyncio.wait_for(run, timeout=2)
 
         cb = client._callbacks
-        cb.on_connected.assert_awaited_once()
-        cb.on_reconnecting.assert_awaited_once_with(1)
-        cb.on_reconnected.assert_awaited_once()
+        # Each relay session is a connect and a disconnect of its own.
+        self.assertEqual(cb.on_connected.await_count, 2)
+        self.assertEqual(cb.on_disconnected.await_count, 2)
         # The peer joined once; its return after the redial is a
         # reconnect, not a second client. It was reported gone exactly
         # once, when it left the second session, not when the first
@@ -1127,7 +1125,6 @@ class TestClientReconnect(unittest.IsolatedAsyncioTestCase):
         cb.on_client_connected.assert_awaited_once()
         cb.on_client_disconnected.assert_awaited_once()
         cb.on_error.assert_not_awaited()
-        cb.on_disconnected.assert_awaited_once()
         self.assertEqual(self.dials, [self.URL, self.URL])
 
     async def test_a_session_whose_inbound_traffic_stalls_is_redialed(self):
@@ -1143,7 +1140,7 @@ class TestClientReconnect(unittest.IsolatedAsyncioTestCase):
         await asyncio.wait_for(client._run(), timeout=2)
 
         self.assertEqual(self.dials, [self.URL] * 2)
-        client._callbacks.on_reconnecting.assert_awaited_once_with(1)
+        self.assertEqual(client._callbacks.on_connected.await_count, 2)
 
     async def test_a_session_with_flowing_traffic_is_not_redialed(self):
         """Keepalive/ACK traffic keeps the counter moving on a healthy
@@ -1158,7 +1155,7 @@ class TestClientReconnect(unittest.IsolatedAsyncioTestCase):
         await asyncio.wait_for(client._run(), timeout=2)
 
         self.assertEqual(self.dials, [self.URL])
-        client._callbacks.on_reconnecting.assert_not_awaited()
+        client._callbacks.on_connected.assert_awaited_once()
 
     async def test_a_session_reporting_no_counters_is_not_redialed(self):
         """The WebSocket fallback reports no counters; the watchdog stays
@@ -1172,7 +1169,7 @@ class TestClientReconnect(unittest.IsolatedAsyncioTestCase):
         await asyncio.wait_for(client._run(), timeout=2)
 
         self.assertEqual(self.dials, [self.URL])
-        client._callbacks.on_reconnecting.assert_not_awaited()
+        client._callbacks.on_connected.assert_awaited_once()
 
     async def test_the_url_is_dialed_unchanged_on_every_attempt(self):
         """The relay token rides in the query string, so the redial must send
@@ -1191,7 +1188,7 @@ class TestClientReconnect(unittest.IsolatedAsyncioTestCase):
 
         cb = client._callbacks
         self.assertEqual(self.dials, [self.URL])
-        cb.on_reconnecting.assert_not_awaited()
+        cb.on_connected.assert_not_awaited()
         cb.on_client_disconnected.assert_not_awaited()
         cb.on_error.assert_awaited_once()
         _message, exc, category, permanent = cb.on_error.await_args.args
@@ -1215,8 +1212,8 @@ class TestClientReconnect(unittest.IsolatedAsyncioTestCase):
         await asyncio.wait_for(run, timeout=2)
 
         cb = client._callbacks
-        cb.on_reconnecting.assert_awaited_once_with(1)
-        cb.on_reconnected.assert_not_awaited()
+        cb.on_connected.assert_awaited_once()
+        cb.on_disconnected.assert_awaited_once()
         cb.on_client_disconnected.assert_awaited_once()
         _message, exc, category, _permanent = cb.on_error.await_args.args
         self.assertIsInstance(exc, moq.Error.Unauthorized)
@@ -1237,7 +1234,7 @@ class TestClientReconnect(unittest.IsolatedAsyncioTestCase):
 
         cb = client._callbacks
         self.assertEqual(self.dials, [self.URL])
-        cb.on_reconnecting.assert_not_awaited()
+        cb.on_disconnected.assert_awaited_once()
         cb.on_client_disconnected.assert_awaited_once()
         _message, exc, category, _permanent = cb.on_error.await_args.args
         self.assertIsInstance(exc, moq.Error.Protocol)
@@ -1259,7 +1256,6 @@ class TestClientReconnect(unittest.IsolatedAsyncioTestCase):
         cb = client._callbacks
         self.assertGreater(len(self.dials), 2)
         self.assertLess(len(self.dials), 1000)
-        cb.on_reconnected.assert_not_awaited()
         cb.on_client_disconnected.assert_awaited_once()
         _message, _exc, category, permanent = cb.on_error.await_args.args
         self.assertIs(category, ErrorCategory.CONNECTIVITY)
@@ -1277,7 +1273,7 @@ class TestClientReconnect(unittest.IsolatedAsyncioTestCase):
         await asyncio.wait_for(run, timeout=2)
 
         cb = client._callbacks
-        self.assertGreater(cb.on_reconnecting.await_count, 0)
+        self.assertGreater(len(self.dials), 1)
         self.assertLess(len(self.dials), 1000)
         cb.on_client_disconnected.assert_awaited_once()
         _message, exc, category, permanent = cb.on_error.await_args.args
@@ -1300,7 +1296,6 @@ class TestClientReconnect(unittest.IsolatedAsyncioTestCase):
 
         cb = client._callbacks
         self.assertEqual(self.dials, [self.URL])
-        cb.on_reconnecting.assert_not_awaited()
         cb.on_error.assert_not_awaited()
         cb.on_client_disconnected.assert_awaited_once()
         cb.on_disconnected.assert_awaited_once()
@@ -1346,8 +1341,7 @@ class TestClientReconnect(unittest.IsolatedAsyncioTestCase):
 
         cb = client._callbacks
         self.assertEqual(self.dials, [self.URL, self.URL])
-        cb.on_reconnecting.assert_awaited_once_with(1)
-        cb.on_reconnected.assert_awaited_once()
+        self.assertEqual(cb.on_connected.await_count, 2)
         cb.on_client_connected.assert_awaited_once()
         cb.on_client_disconnected.assert_awaited_once()
         cb.on_error.assert_not_awaited()
@@ -1362,11 +1356,10 @@ class TestClientReconnect(unittest.IsolatedAsyncioTestCase):
 
         cb = client._callbacks
         self.assertEqual(self.dials, [self.URL, self.URL])
-        cb.on_reconnecting.assert_awaited_once_with(1)
-        cb.on_reconnected.assert_not_awaited()
+        self.assertEqual(cb.on_connected.await_count, 2)
         cb.on_client_disconnected.assert_awaited_once()
         cb.on_error.assert_not_awaited()
-        cb.on_disconnected.assert_awaited_once()
+        self.assertEqual(cb.on_disconnected.await_count, 2)
 
     async def test_a_peer_that_leaves_ends_the_loop_without_redialing(self):
         self.script[:] = [_FakeSession()]
@@ -1376,7 +1369,7 @@ class TestClientReconnect(unittest.IsolatedAsyncioTestCase):
 
         cb = client._callbacks
         self.assertEqual(self.dials, [self.URL])
-        cb.on_reconnecting.assert_not_awaited()
+        cb.on_connected.assert_awaited_once()
         cb.on_client_disconnected.assert_awaited_once()
         cb.on_error.assert_not_awaited()
 

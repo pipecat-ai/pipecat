@@ -456,12 +456,12 @@ class MOQCallbacks(BaseModel):
     pipecat frame types directly.
 
     Parameters:
-        on_connected: Called when the first MOQ session (client or server) is established.
-        on_disconnected: Called when the transport stops running sessions.
-        on_reconnecting: Called before each redial after the session dropped,
-            with the attempt number, counted from 1 for each outage.
-        on_reconnected: Called when the peer's data flows again after an
-            outage, which is what ends it; an announcement alone does not.
+        on_connected: Called when a MOQ session is established: the serve
+            bind, or each session with the relay, the first and every
+            redialed one.
+        on_disconnected: Called when an established session ends, and when
+            the transport stops without ever having had one. Client mode
+            redials after it, so it does not mean the peer is gone.
         on_client_connected: Called when the peer's broadcast is announced.
         on_client_disconnected: Called when the peer is gone: its broadcast
             went away, or the session could not be re-established in time.
@@ -475,8 +475,6 @@ class MOQCallbacks(BaseModel):
 
     on_connected: Callable[[], Awaitable[None]]
     on_disconnected: Callable[[], Awaitable[None]]
-    on_reconnecting: Callable[[int], Awaitable[None]]
-    on_reconnected: Callable[[], Awaitable[None]]
     on_client_connected: Callable[[], Awaitable[None]]
     on_client_disconnected: Callable[[], Awaitable[None]]
     on_track_subscribed: Callable[[MOQTrack], Awaitable[None]]
@@ -604,6 +602,10 @@ class MOQTransportClient:
         # gone. Set when it is announced, cleared by ``_report_peer_gone``.
         self._peer_connected = False
         self._connected_once = False
+        # Whether a session (or the serve bind) is up and reported through
+        # ``on_connected``, and whether one ever was.
+        self._session_up = False
+        self._session_reported = False
         # Client mode: when the current outage began (monotonic), ``None``
         # while the peer is reachable through a live session.
         self._outage_started: float | None = None
@@ -838,8 +840,8 @@ class MOQTransportClient:
         mode dials the relay and redials when the session drops, within
         :attr:`MOQParams.reconnect_timeout` (see :meth:`_run_client`).
         Returns once the peer is gone, the transport has given up, or
-        :meth:`disconnect` cancels it; ``on_disconnected`` fires on every
-        exit.
+        :meth:`disconnect` cancels it. ``on_disconnected`` fires on exit
+        unless the session's end was already reported.
 
         The bot publishes its broadcast through ``publish_origin`` and
         consumes the peer's broadcast through a subscribe origin. In
@@ -866,6 +868,21 @@ class MOQTransportClient:
         finally:
             self._audio_out = None
             self._cert_fingerprints = []
+            if self._session_up or not self._session_reported:
+                self._session_up = False
+                await self._callbacks.on_disconnected()
+
+    async def _report_session_up(self):
+        """Fire ``on_connected`` for a session (or the serve bind) that is now up."""
+        if not self._session_up:
+            self._session_up = True
+            self._session_reported = True
+            await self._callbacks.on_connected()
+
+    async def _report_session_down(self):
+        """Fire ``on_disconnected`` for an established session that has ended."""
+        if self._session_up:
+            self._session_up = False
             await self._callbacks.on_disconnected()
 
     def _log_published(self):
@@ -892,7 +909,7 @@ class MOQTransportClient:
                     f"MOQ: bound on {server.local_addr} (cert sha256: {self._cert_fingerprints})"
                 )
                 self._log_published()
-                await self._callbacks.on_connected()
+                await self._report_session_up()
 
                 # Drive the accept loop in the background. serve() holds
                 # each session task until the session closes, so memory
@@ -989,7 +1006,7 @@ class MOQTransportClient:
                 f"MOQ: session lost ({error or 'closed'}); redialing in {delay:.1f}s "
                 f"(attempt {attempt}; will keep redialing for up to {remaining:.0f}s)"
             )
-            await self._callbacks.on_reconnecting(attempt)
+            await self._report_session_down()
             await asyncio.sleep(delay)
 
     async def _run_client_session(self) -> bool:
@@ -1027,7 +1044,7 @@ class MOQTransportClient:
             else:
                 self._connected_once = True
                 self._log_published()
-                await self._callbacks.on_connected()
+            await self._report_session_up()
 
             self._session_close_error = None
             self._peer_data_seen = False
@@ -1126,8 +1143,7 @@ class MOQTransportClient:
     async def _on_peer_data(self):
         """Record the first record or audio frame after a subscription to the peer.
 
-        Data is the sign of life: it ends an outage in progress and fires
-        ``on_reconnected``.
+        Data is the sign of life: it ends an outage in progress.
         """
         if self._peer_data_seen:
             return
@@ -1136,7 +1152,7 @@ class MOQTransportClient:
             self._peer_data_event.set()
         if self._outage_started is not None:
             self._outage_started = None
-            await self._callbacks.on_reconnected()
+            logger.info("MOQ: peer data flowing again; outage over")
 
     async def _report_peer_gone(self):
         """Fire ``on_client_disconnected`` once for a peer that had been seen."""
@@ -1903,12 +1919,10 @@ class MOQTransport(BaseTransport):
 
     Event handlers available:
 
-    - ``on_connected`` — first session with the relay (or first bind) established
-    - ``on_disconnected`` — the transport stopped running sessions
-    - ``on_reconnecting`` — the session dropped and a redial is about to
-      start; receives the attempt number (client mode)
-    - ``on_reconnected`` — the peer's data flows again after an outage
-      (client mode)
+    - ``on_connected`` — a session with the relay is established, the
+      first and every redialed one (or the serve bind is up)
+    - ``on_disconnected`` — the session ended. Client mode redials after
+      it, so end the call from ``on_client_disconnected`` instead
     - ``on_client_connected`` — peer broadcast announced (client joined)
     - ``on_client_disconnected`` — the peer is gone: its broadcast went
       away, or the session could not be re-established within
@@ -1951,8 +1965,6 @@ class MOQTransport(BaseTransport):
         callbacks = MOQCallbacks(
             on_connected=self._on_connected,
             on_disconnected=self._on_disconnected,
-            on_reconnecting=self._on_reconnecting,
-            on_reconnected=self._on_reconnected,
             on_client_connected=self._on_client_connected,
             on_client_disconnected=self._on_client_disconnected,
             on_track_subscribed=self._on_track_subscribed,
@@ -1975,8 +1987,6 @@ class MOQTransport(BaseTransport):
 
         self._register_event_handler("on_connected")
         self._register_event_handler("on_disconnected")
-        self._register_event_handler("on_reconnecting")
-        self._register_event_handler("on_reconnected")
         self._register_event_handler("on_client_connected")
         self._register_event_handler("on_client_disconnected")
         self._register_event_handler("on_track_subscribed")
@@ -2016,24 +2026,12 @@ class MOQTransport(BaseTransport):
     # ------------------------------------------------------------------
 
     async def _on_connected(self):
-        """Handle the MOQ session (client or server) being established."""
+        """Handle a MOQ session (client or server) being established."""
         await self._call_event_handler("on_connected")
 
     async def _on_disconnected(self):
-        """Handle the transport ceasing to run sessions."""
+        """Handle the MOQ session ending."""
         await self._call_event_handler("on_disconnected")
-
-    async def _on_reconnecting(self, attempt: int):
-        """Handle a redial about to start after the session dropped.
-
-        Args:
-            attempt: The attempt number, counted from 1 for each outage.
-        """
-        await self._call_event_handler("on_reconnecting", attempt)
-
-    async def _on_reconnected(self):
-        """Handle the peer being reachable again through a redialed session."""
-        await self._call_event_handler("on_reconnected")
 
     async def _on_client_connected(self):
         """Handle the peer's broadcast being announced."""
