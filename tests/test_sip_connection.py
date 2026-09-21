@@ -295,7 +295,9 @@ async def test_call_events_relay_established_and_closed(env):
     await connection.dial("sip:9196@example.com")
     listener = call.listeners[0]
 
-    listener(StackEvent(event=Event.CALL_ESTABLISHED, call=call.handle))
+    # Connect fires on the later of answered + audio RTP, not the SIP handshake.
+    listener(StackEvent(event=Event.CALL_ANSWERED, call=call.handle))
+    listener(StackEvent(event=Event.CALL_RTPESTAB, call=call.handle, text="audio"))
     await asyncio.wait_for(established.wait(), EVENT_TIMEOUT)
     assert established_payloads[0]["destination"] == "sip:2002@example.com"
     assert established_payloads[0]["sipCallId"] == "abc123"
@@ -306,6 +308,94 @@ async def test_call_events_relay_established_and_closed(env):
     assert closed_payloads[0]["reason"] == "hangup"
     assert closed_payloads[0]["established"] is True
     assert not connection.has_active_call
+
+
+@pytest.mark.asyncio
+async def test_connect_requires_answered_and_audio_rtp(env):
+    connection = make_connection()
+    await connection.connect()
+    call = make_fake_call()
+    env.ua.dial.return_value = call
+    payloads, established = capture(connection, "call_established")
+
+    await connection.dial("sip:9196@example.com")
+    listener = call.listeners[0]
+
+    # Answered alone does not connect — media is not up yet.
+    listener(StackEvent(event=Event.CALL_ANSWERED, call=call.handle))
+    await asyncio.sleep(0.05)
+    assert not established.is_set()
+
+    # Audio RTP completes the media path → connect fires exactly once.
+    listener(StackEvent(event=Event.CALL_RTPESTAB, call=call.handle, text="audio"))
+    await asyncio.wait_for(established.wait(), EVENT_TIMEOUT)
+    assert len(payloads) == 1
+
+
+@pytest.mark.asyncio
+async def test_connect_audio_rtp_before_answered(env):
+    # Early media: RTP can arrive before the 200 OK; connect still waits for
+    # answered so the bot does not greet over ringback.
+    connection = make_connection()
+    await connection.connect()
+    call = make_fake_call()
+    env.ua.dial.return_value = call
+    payloads, established = capture(connection, "call_established")
+
+    await connection.dial("sip:9196@example.com")
+    listener = call.listeners[0]
+
+    listener(StackEvent(event=Event.CALL_RTPESTAB, call=call.handle, text="audio"))
+    await asyncio.sleep(0.05)
+    assert not established.is_set()
+
+    listener(StackEvent(event=Event.CALL_ANSWERED, call=call.handle))
+    await asyncio.wait_for(established.wait(), EVENT_TIMEOUT)
+    assert len(payloads) == 1
+
+
+@pytest.mark.asyncio
+async def test_video_rtp_does_not_connect(env):
+    # RTPESTAB fires per stream; a voice bot connects on audio, not video.
+    connection = make_connection()
+    await connection.connect()
+    call = make_fake_call()
+    env.ua.dial.return_value = call
+    payloads, established = capture(connection, "call_established")
+
+    await connection.dial("sip:9196@example.com")
+    listener = call.listeners[0]
+
+    listener(StackEvent(event=Event.CALL_ANSWERED, call=call.handle))
+    listener(StackEvent(event=Event.CALL_RTPESTAB, call=call.handle, text="video"))
+    await asyncio.sleep(0.05)
+    assert not established.is_set()
+
+    listener(StackEvent(event=Event.CALL_RTPESTAB, call=call.handle, text="audio"))
+    await asyncio.wait_for(established.wait(), EVENT_TIMEOUT)
+    assert len(payloads) == 1
+
+
+@pytest.mark.asyncio
+async def test_close_before_connect_reports_not_established(env):
+    # A call that never reaches media-up reports established=False on close
+    # (and never emitted call_established).
+    connection = make_connection()
+    await connection.connect()
+    call = make_fake_call()
+    env.ua.dial.return_value = call
+    established_payloads, established = capture(connection, "call_established")
+    closed_payloads, closed = capture(connection, "call_closed")
+
+    await connection.dial("sip:9196@example.com")
+    listener = call.listeners[0]
+
+    listener(StackEvent(event=Event.CALL_ANSWERED, call=call.handle))  # no audio RTP
+    listener(StackEvent(event=Event.CALL_CLOSED, call=call.handle, text="timeout"))
+    await asyncio.wait_for(closed.wait(), EVENT_TIMEOUT)
+
+    assert closed_payloads[0]["established"] is False
+    assert not established.is_set()
 
 
 @pytest.mark.asyncio
@@ -321,7 +411,8 @@ async def test_renegotiated_fires_only_once_established(env):
 
     # The initial answer's REMOTE_SDP is negotiation, not an update.
     listener(StackEvent(event=Event.CALL_REMOTE_SDP, call=call.handle, text="answer"))
-    listener(StackEvent(event=Event.CALL_ESTABLISHED, call=call.handle))
+    listener(StackEvent(event=Event.CALL_ANSWERED, call=call.handle))
+    listener(StackEvent(event=Event.CALL_RTPESTAB, call=call.handle, text="audio"))
     listener(StackEvent(event=Event.CALL_REMOTE_SDP, call=call.handle, text="offer"))
 
     await asyncio.wait_for(arrived.wait(), EVENT_TIMEOUT)

@@ -307,9 +307,10 @@ class SIPConnection(BaseObject):
       ``sipTo``, ``displayName``, ``sipHeaders``).
     - call_progress: the outbound call is ringing or in early dialog;
       receives a payload dict.
-    - call_established: media is up; receives a payload dict.
-    - call_closed: the call ended; receives a payload dict with
-      ``reason`` and ``established``.
+    - call_established: media is up — the call is answered and audio RTP
+      flows (not merely the SIP handshake); receives a payload dict.
+    - call_closed: the call ended; receives a payload dict with ``reason``
+      and ``established`` (whether call_established had fired).
     - call_failed: an outbound call ended without establishing; receives
       a payload dict with ``error`` (the typed failure's name) and
       ``message``.
@@ -477,7 +478,12 @@ class SIPConnection(BaseObject):
         self._connected = False
         self._call: Call | None = None
         self._call_incoming = False
+        # "Connect" for the transport means media is up — the call is answered
+        # AND audio RTP flows — not merely the SIP handshake. These track that,
+        # per call (reset in _attach_call).
         self._call_established = False
+        self._answered = False
+        self._audio_rtp = False
         self._final_stats = None
         self._establish_task: asyncio.Task | None = None
         self._call_listener = None
@@ -674,6 +680,10 @@ class SIPConnection(BaseObject):
         """
         call = self._require_call()
         await call.answer(video=video, headers=headers)
+        # Inbound "answered": we have sent the 200 OK (the outbound analog is
+        # the CALL_ANSWERED event). Connect still waits for audio RTP.
+        self._answered = True
+        self._maybe_emit_connected()
 
     async def reject(self):
         """Decline the active inbound call with 486 Busy Here."""
@@ -901,6 +911,8 @@ class SIPConnection(BaseObject):
         self._call = call
         self._call_incoming = incoming
         self._call_established = False
+        self._answered = False
+        self._audio_rtp = False
 
         def on_event(event: StackEvent):
             self._on_call_event(call, event)
@@ -944,6 +956,23 @@ class SIPConnection(BaseObject):
             return
         if event.event is Event.CALL_RINGING or event.event is Event.CALL_PROGRESS:
             self._emit("call_progress", self._call_payload())
+        elif event.event is Event.CALL_ANSWERED:
+            # Outbound: the peer answered (200 OK). Inbound sets this in
+            # answer() instead — CALL_ANSWERED is the outbound analog.
+            logger.debug("SIP: call answered (CALL_ANSWERED)")
+            self._answered = True
+            self._maybe_emit_connected()
+        elif event.event is Event.CALL_RTPESTAB:
+            # RTP established, fired once per stream with the media name — a
+            # voice bot's media path is up when audio RTP flows.
+            logger.debug(f"SIP: RTP established for {event.text!r}")
+            if (event.text or "") == "audio":
+                self._audio_rtp = True
+                self._maybe_emit_connected()
+        elif event.event is Event.CALL_ESTABLISHED:
+            # SIP handshake complete. Not the connect trigger — connect gates
+            # on media (see _maybe_emit_connected); logged for diagnostics.
+            logger.debug("SIP: SIP handshake established (CALL_ESTABLISHED)")
         elif event.event is Event.CALL_HOLD:
             self._emit("remote_hold", self._call_payload(on=True))
         elif event.event is Event.CALL_RESUME:
@@ -951,13 +980,10 @@ class SIPConnection(BaseObject):
         elif event.event is Event.CALL_REMOTE_SDP:
             # Renegotiation traffic: an incoming re-INVITE offer or the
             # peer's answer to ours (mid-call video, direction changes).
-            # Only meaningful once established — the initial offer and
+            # Only meaningful once connected — the initial offer and
             # answer fire this too and are not "updates".
             if self._call_established:
                 self._emit("renegotiated", self._call_payload(sdp=event.text or ""))
-        elif event.event is Event.CALL_ESTABLISHED:
-            self._call_established = True
-            self._emit("call_established", self._call_payload())
         elif event.event is Event.CALL_CLOSED:
             self._final_stats = call.final_stats
             payload = self._call_payload(
@@ -965,6 +991,25 @@ class SIPConnection(BaseObject):
             )
             self._detach_call()
             self._emit("call_closed", payload)
+
+    def _maybe_emit_connected(self):
+        """Emit ``call_established`` once media is up, exactly once.
+
+        "Connected" for the transport means the media path is live, not just
+        that the SIP handshake finished: it fires on the later of the call being
+        answered (``CALL_ANSWERED``, or our own :meth:`answer` for an inbound
+        call) and the first audio RTP (``CALL_RTPESTAB``). Gating here on audio
+        RTP keeps the bot's greeting from clipping into a media path that is not
+        yet up, and gating on *answered* keeps an outbound bot from greeting
+        over ringback / early media. Because it does not require the SIP
+        handshake, a call whose ACK never arrives but whose media flows still
+        signals connect — so its paired disconnect fires on close.
+        """
+        if self._call_established or not (self._answered and self._audio_rtp):
+            return
+        self._call_established = True
+        logger.debug("SIP: media connected (answered + audio RTP)")
+        self._emit("call_established", self._call_payload())
 
     async def _watch_established(self, call: Call):
         """Turn an outbound call's typed failure into the call_failed event."""
