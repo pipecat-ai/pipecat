@@ -16,6 +16,7 @@ import warnings
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field
 
 if TYPE_CHECKING:
@@ -283,8 +284,9 @@ class MOQRunnerArguments(RunnerArguments):
             from ``host`` and ``port`` (client mode).
         relay_url: Full relay URL to dial in client mode, query string
             included (e.g. ``https://relay.example.com/?jwt=…``). Takes
-            precedence over ``host``/``port``/``path``. Client mode needs
-            either this or ``host`` and ``port``.
+            precedence over ``host``/``port``/``path``, with a warning when
+            ``host`` or ``port`` is given as well. Client mode needs either
+            this or ``host`` and ``port``.
         namespace: MOQ namespace (like a room identifier).
         participant_id: This bot's participant id; it broadcasts under
             ``<namespace>/<participant_id>``.
@@ -347,3 +349,9 @@ class MOQRunnerArguments(RunnerArguments):
             raise ValueError(
                 "MOQRunnerArguments needs `relay_url`, or `host` and `port`, to dial a relay"
             )
+        if not self.serve and self.relay_url is not None:
+            if self.host is not None or self.port is not None:
+                logger.warning(
+                    "MOQRunnerArguments: `relay_url` is set, so `host`, `port` and `path` "
+                    "are ignored"
+                )

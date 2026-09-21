@@ -915,6 +915,19 @@ class TestRunnerRelayUrl(unittest.IsolatedAsyncioTestCase):
         transport = await self._transport_for(MOQRunnerArguments("relay.example.com", 4443))
         self.assertEqual(transport._client._url, "https://relay.example.com:4443/moq")
 
+    async def test_relay_url_wins_over_host_and_port_with_a_warning(self):
+        url = "https://relay.example.com/?jwt=t"
+        with patch("pipecat.runner.types.logger") as log:
+            args = MOQRunnerArguments("other.example.com", 4443, relay_url=url)
+        log.warning.assert_called_once()
+        transport = await self._transport_for(args)
+        self.assertEqual(transport._client._url, url)
+
+    def test_relay_url_alone_logs_no_warning(self):
+        with patch("pipecat.runner.types.logger") as log:
+            MOQRunnerArguments(relay_url="https://relay.example.com/")
+        log.warning.assert_not_called()
+
     def test_client_mode_needs_a_dial_target(self):
         with self.assertRaises(ValueError):
             MOQRunnerArguments()
