@@ -12,10 +12,6 @@ during pipeline startup (i.e. setup() and ``StartFrame``). It works by tracking
 (``on_process_frame``) versus when it leaves (``on_push_frame``), giving the
 exact ``start()`` duration for each processor in the pipeline.
 
-Startup also loads the framework's deferred imports, which no processor
-accounts for, so the report carries what that cost alongside the per-processor
-timings and the whole span is attributable.
-
 It also measures transport timing — the time from before ``setup()`` to the
 first ``BotConnectedFrame`` (SFU transports only) and ``ClientConnectedFrame`` —
 via a separate ``on_transport_timing_report`` event.
@@ -28,8 +24,6 @@ Example::
     async def on_report(observer, report):
         for t in report.processor_timings:
             print(f"{t.processor_name}: {t.duration_secs:.3f}s")
-        if report.warmup:
-            print(f"warmup: {report.warmup.blocking_duration_secs:.3f}s")
 
     @observer.event_handler("on_transport_timing_report")
     async def on_transport(observer, report):
@@ -58,6 +52,7 @@ from pipecat.pipeline.base_pipeline import BasePipeline
 from pipecat.pipeline.pipeline import PipelineSource
 from pipecat.processors.frame_processor import FrameProcessor
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
+from pipecat.utils.deprecation import deprecated
 
 # Internal pipeline types excluded from tracking by default.
 _INTERNAL_TYPES = (PipelineSource, BasePipeline)
@@ -104,8 +99,15 @@ class ProcessorStartupTiming(BaseModel):
     start_duration_secs: float = 0.0
 
 
+@deprecated(
+    "`StartupWarmupTiming` is deprecated since 1.12.0 and will be removed in 2.0.0. No replacement."
+)
 class StartupWarmupTiming(BaseModel):
     """What warming the framework's deferred imports cost startup.
+
+    .. deprecated:: 1.12.0
+        No replacement. Nothing warms deferred imports at startup, so this
+        timing is never reported. Will be removed in 2.0.0.
 
     Parameters:
         duration_secs: How long warming took, in seconds.
@@ -128,15 +130,17 @@ class StartupTimingReport(BaseModel):
             up until it had started, which is ``setup_phase_secs`` and
             ``start_phase_secs`` back to back.
         setup_phase_secs: How long getting every processor ready took, in
-            seconds. Setting up runs concurrently and warming runs alongside
-            it, so the longest single piece of work decides this rather than
-            their sum.
+            seconds. Setting up runs concurrently, so the longest single
+            processor decides this rather than their sum.
         start_phase_secs: How long the StartFrame took to travel the pipeline,
             in seconds. It reaches processors one after another, so what each
             spends on it adds up.
         processor_timings: Per-processor timing data, in pipeline order.
-        warmup: What warming the framework's deferred imports cost, or None
-            when the pipeline started without warming them.
+        warmup: Always None.
+
+            .. deprecated:: 1.12.0
+                No replacement. Nothing warms deferred imports at startup.
+                Will be removed in 2.0.0.
     """
 
     start_time: float
@@ -285,9 +289,9 @@ class StartupTimingObserver(BaseObserver):
         if self._startup_timing_reported:
             return
 
-        # Warming overlaps every processor, so the last one to finish is what
-        # decides how much of it the pipeline ended up waiting on. Filtered-out
-        # processors still hold setup open, so they count here.
+        # Setting up runs concurrently, so the last processor to finish is
+        # what ends the phase. Filtered-out processors still hold it open, so
+        # they count here.
         self._setup_finished_ns = max(self._setup_finished_ns, data.finished_at_ns)
 
         if not self._should_track(data.processor):
@@ -295,8 +299,16 @@ class StartupTimingObserver(BaseObserver):
 
         self._setup_durations[data.processor.id] = (data.finished_at_ns - data.started_at_ns) / 1e9
 
+    @deprecated(
+        "`StartupTimingObserver.on_startup_warmup` is deprecated since 1.12.0 and will be "
+        "removed in 2.0.0. No replacement."
+    )
     async def on_startup_warmup(self, data: StartupWarmup):
         """Record what warming the framework's deferred imports cost.
+
+        .. deprecated:: 1.12.0
+            No replacement. Nothing warms deferred imports at startup, so this
+            is never called. Will be removed in 2.0.0.
 
         Args:
             data: The startup warmup event data.
@@ -443,8 +455,8 @@ class StartupTimingObserver(BaseObserver):
         # up to wall-clock time. Report the span instead.
         total = (time.monotonic_ns() - self._setup_started_ns) / 1e9
 
-        # Getting ready ends with the last of the concurrent work, whether that
-        # is a processor still connecting or the imports still warming. What
+        # Getting ready ends with the last processor to finish connecting, or
+        # with the deprecated warming event when one extends past it. What
         # follows is the StartFrame travelling the pipeline.
         setup_phase_end_ns = max(self._setup_finished_ns, self._warmup_finished_ns)
         setup_phase_secs = max(0, setup_phase_end_ns - self._setup_started_ns) / 1e9
