@@ -204,7 +204,7 @@ TRANSCRIPT_EPOCH_FIELD = "epoch"
 
 # Client-mode redial schedule: the delay before each attempt doubles from
 # the first value up to the cap, and the outage as a whole is bounded by
-# ``MOQParams.reconnect_timeout``. The cap is what the caller feels once
+# ``MOQParams.connection_timeout``. The cap is what the caller feels once
 # the relay is back — a dial is one QUIC handshake, so it stays low.
 _RECONNECT_BACKOFF_INITIAL_S = 0.5
 _RECONNECT_BACKOFF_MAX_S = 2.0
@@ -328,26 +328,25 @@ class MOQParams(TransportParams):
             serve mode publishes its own as
             :attr:`MOQTransport.cert_fingerprints` for exactly this. Again,
             an alternative to disabling ``verify_ssl``, not a companion.
-        connection_timeout: Seconds to wait for the peer broadcast to be
-            announced before giving up, on the first session and again on
-            every redialed one.
-        reconnect_timeout: Client mode only. How long, in seconds, the
-            transport keeps redialing the relay after the session drops
-            before it gives up, counted from when the drop is detected.
-            A relay that vanishes without closing the session (killed
-            process, dead network path) is noticed by a traffic-stall
-            watchdog well before the QUIC idle timeout (~30 s) would
-            report it.
-            Attempts back off from 0.5 s to 2 s. The window must outlast
-            a load balancer failing a dead relay out (~30 s), since until
-            then redials can be pinned to the dead target.
-            While it redials the peer is not reported gone; once the
-            window expires the transport fires ``on_client_disconnected``
-            for a peer it had seen and
-            pushes a permanent connectivity error. ``0`` disables
-            redialing, so a dropped session ends the transport as a
-            normal close. A token the relay refuses, whether at the dial
-            or by closing the session, is never retried.
+        connection_timeout: How long, in seconds, the peer may be missing
+            before the transport gives up on it. It bounds the wait for
+            the peer to join, which its broadcast being announced ends.
+            In client mode it also bounds an outage: it counts from when
+            the session drops, or the peer's tracks end without its
+            ``session-ending`` marker, until the peer's data flows again,
+            and the transport redials the relay for that long, backing
+            off from 0.5 s to 2 s. A redial that succeeds does not
+            restart it. A relay that vanishes without closing the session
+            is noticed by a traffic-stall watchdog well before the QUIC
+            idle timeout (~30 s) would report it, and the count starts
+            there. It must outlast a load balancer failing a dead relay
+            out (~30 s), since until then redials can be pinned to the
+            dead target. While the peer is missing it is not reported
+            gone. Once the time is up the transport fires
+            ``on_client_disconnected`` for a peer it had seen, and pushes
+            a permanent connectivity error if it has no session with the
+            relay. A token the relay refuses, whether at the dial or by
+            closing the session, is never retried.
         serve: When ``True``, the bot binds its own UDP socket and accepts
             incoming MOQ sessions instead of dialing a relay.
         bind: Local UDP socket bind address. In serve mode it's the
@@ -412,8 +411,7 @@ class MOQParams(TransportParams):
     client_tls_key: str | None = None
     client_tls_roots: list[str] | None = None
     client_tls_fingerprints: list[str] | None = None
-    connection_timeout: float = 30.0
-    reconnect_timeout: float = 60.0
+    connection_timeout: float = 60.0
     serve: bool = False
     bind: str | None = None
     serve_bind: str | None = None
@@ -606,9 +604,12 @@ class MOQTransportClient:
         # ``on_connected``, and whether one ever was.
         self._session_up = False
         self._session_reported = False
-        # Client mode: when the current outage began (monotonic), ``None``
-        # while the peer is reachable through a live session.
-        self._outage_started: float | None = None
+        # When the peer went missing (monotonic): it has not joined yet, or
+        # an outage is in progress. ``None`` while the peer is with us.
+        # ``connection_timeout`` counts from here.
+        self._peer_missing_since: float | None = None
+        # Redials made while the peer has been missing; sets the backoff.
+        self._redial_attempt = 0
         # Why the current session closed, when the close carried an error.
         self._session_close_error: Exception | None = None
         # Whether the current subscription to the peer has delivered anything,
@@ -838,7 +839,7 @@ class MOQTransportClient:
 
         Serve mode binds once and accepts sessions until cancelled. Client
         mode dials the relay and redials when the session drops, within
-        :attr:`MOQParams.reconnect_timeout` (see :meth:`_run_client`).
+        :attr:`MOQParams.connection_timeout` (see :meth:`_run_client`).
         Returns once the peer is gone, the transport has given up, or
         :meth:`disconnect` cancels it. ``on_disconnected`` fires on exit
         unless the session's end was already reported.
@@ -939,15 +940,14 @@ class MOQTransportClient:
     async def _run_client(self):
         """Dial the relay and keep a session up until the peer is gone.
 
-        A session that drops is redialed with backoff until
-        ``reconnect_timeout`` runs out, counted from the start of the
-        outage; a successful redial ends the outage. A dial the relay
-        refuses on authentication grounds ends the loop at once, since
-        the same token would be refused again. When the loop gives up on
-        a peer it had seen, that peer is reported disconnected first, so
-        a bot's usual ``on_client_disconnected`` handling ends the call.
+        A session that drops is redialed with backoff for as long as the
+        peer may be missing (``connection_timeout``, see
+        :meth:`_peer_wait_remaining`). A dial the relay refuses on
+        authentication grounds ends the loop at once, since the same
+        token would be refused again. When the loop gives up on a peer it
+        had seen, that peer is reported disconnected first, so a bot's
+        usual ``on_client_disconnected`` handling ends the call.
         """
-        attempt = 0
         while True:
             error: Exception | None = None
             try:
@@ -969,42 +969,31 @@ class MOQTransportClient:
                 await self._fail(error, category=self._auth_category(error))
                 return
 
-            now = time.monotonic()
-            if self._outage_started is None:
-                self._outage_started = now
-                attempt = 0
-            remaining = self._params.reconnect_timeout - (now - self._outage_started)
+            remaining = self._peer_wait_remaining()
             if remaining <= 0:
                 await self._report_peer_gone()
-                if self._params.reconnect_timeout <= 0:
-                    # Redialing is off: a dropped session ends the
-                    # transport the way a hangup does.
-                    if error is None or _is_normal_close(error):
-                        logger.debug(f"MOQ transport closed: {error}")
-                    else:
-                        await self._fail(error)
-                else:
-                    gave_up = ConnectionError(
-                        f"relay session not re-established within "
-                        f"{self._params.reconnect_timeout:.0f}s"
-                    )
-                    gave_up.__cause__ = error
-                    await self._fail(gave_up, category=ErrorCategory.CONNECTIVITY, permanent=True)
+                gave_up = ConnectionError(
+                    f"relay session not re-established within "
+                    f"{self._params.connection_timeout:.0f}s"
+                )
+                gave_up.__cause__ = error
+                await self._fail(gave_up, category=ErrorCategory.CONNECTIVITY, permanent=True)
                 return
 
-            attempt += 1
+            self._redial_attempt += 1
             delay = min(
-                _RECONNECT_BACKOFF_INITIAL_S * 2 ** (attempt - 1),
+                _RECONNECT_BACKOFF_INITIAL_S * 2 ** (self._redial_attempt - 1),
                 _RECONNECT_BACKOFF_MAX_S,
                 remaining,
             )
-            # The redial window opens at detection, not at the loss
-            # itself: a relay that vanished without closing is noticed by
-            # the traffic-stall watchdog (see _session_stalled), so this
-            # line can trail the outage by up to _SESSION_STALL_S.
+            # The count opens at detection, not at the loss itself: a
+            # relay that vanished without closing is noticed by the
+            # traffic-stall watchdog (see _session_stalled), so this line
+            # can trail the outage by up to _SESSION_STALL_S.
             logger.warning(
                 f"MOQ: session lost ({error or 'closed'}); redialing in {delay:.1f}s "
-                f"(attempt {attempt}; will keep redialing for up to {remaining:.0f}s)"
+                f"(attempt {self._redial_attempt}; "
+                f"will keep redialing for up to {remaining:.0f}s)"
             )
             await self._report_session_down()
             await asyncio.sleep(delay)
@@ -1039,7 +1028,7 @@ class MOQTransportClient:
             if self._connected_once:
                 # The outage ends when the peer is back, not here: a relay
                 # that accepts the dial and closes the session at once
-                # must not restart the window (see _on_peer_available).
+                # must not restart the count (see _on_peer_available).
                 logger.info(f"MOQ: session re-established with {self._url}; waiting for the peer")
             else:
                 self._connected_once = True
@@ -1126,18 +1115,38 @@ class MOQTransportClient:
                 return
             await asyncio.sleep(_SESSION_STALL_POLL_S)
 
+    def _peer_wait_remaining(self) -> float:
+        """Return the seconds left of ``connection_timeout`` for a missing peer.
+
+        The count starts the first time this is asked while the peer is
+        missing and runs until :meth:`_peer_is_back`, across redials and
+        subscriptions, so none of them gets a fresh allowance.
+        """
+        now = time.monotonic()
+        if self._peer_missing_since is None:
+            self._peer_missing_since = now
+        return self._params.connection_timeout - (now - self._peer_missing_since)
+
+    def _peer_is_back(self):
+        """Stop the ``connection_timeout`` count: the peer is with us."""
+        self._peer_missing_since = None
+        self._redial_attempt = 0
+
     async def _on_peer_available(self):
         """Record that the peer's broadcast is announced on the current session.
 
-        The first time, the peer has joined. An announcement alone never
-        ends an outage: a relay keeps announcing a path whose route died,
-        and a relay that accepts a dial and closes the session at once
-        would otherwise restart the window on every attempt. The outage
-        ends when the peer's data flows again (see :meth:`_on_peer_data`).
+        The first time, the peer has joined, which is all a join takes: a
+        client may hold its first message until it is ready to hear the
+        bot. After that an announcement alone never ends an outage: a
+        relay keeps announcing a path whose route died, and a relay that
+        accepts a dial and closes the session at once would otherwise
+        restart the count on every attempt. An outage ends when the
+        peer's data flows again (see :meth:`_on_peer_data`).
         """
         self._peer_goodbye = False
         if not self._peer_connected:
             self._peer_connected = True
+            self._peer_is_back()
             await self._callbacks.on_client_connected()
 
     async def _on_peer_data(self):
@@ -1150,9 +1159,9 @@ class MOQTransportClient:
         self._peer_data_seen = True
         if self._peer_data_event is not None:
             self._peer_data_event.set()
-        if self._outage_started is not None:
-            self._outage_started = None
+        if self._peer_missing_since is not None:
             logger.info("MOQ: peer data flowing again; outage over")
+        self._peer_is_back()
 
     async def _report_peer_gone(self):
         """Fire ``on_client_disconnected`` once for a peer that had been seen."""
@@ -1271,7 +1280,7 @@ class MOQTransportClient:
             announced = self._track(consumer.announced_broadcast(self._peer_broadcast_path))
             try:
                 peer_broadcast = await asyncio.wait_for(
-                    announced.available(), timeout=self._params.connection_timeout
+                    announced.available(), timeout=max(self._peer_wait_remaining(), 0)
                 )
             except TimeoutError:
                 logger.warning(
@@ -1283,11 +1292,11 @@ class MOQTransportClient:
                 return True
 
             logger.debug(f"MOQ: peer broadcast {self._peer_broadcast_path!r} available")
+            # The subscription a peer joins on gets no silence watchdog: a
+            # client may hold its first message until it is ready to hear
+            # the bot. Every later subscription is checked.
+            watchdog = not self._params.serve and self._peer_connected
             await self._on_peer_available()
-            # The first subscription of a fresh call gets no silence
-            # watchdog: a client may hold its first message until it is
-            # ready to hear the bot. Later subscriptions are checked.
-            watchdog = not self._params.serve and (retried or self._outage_started is not None)
             delivered = await self._forward_peer(peer_broadcast, watchdog)
             if self._params.serve or self._peer_goodbye:
                 return True
@@ -1924,9 +1933,8 @@ class MOQTransport(BaseTransport):
     - ``on_disconnected`` — the session ended. Client mode redials after
       it, so end the call from ``on_client_disconnected`` instead
     - ``on_client_connected`` — peer broadcast announced (client joined)
-    - ``on_client_disconnected`` — the peer is gone: its broadcast went
-      away, or the session could not be re-established within
-      ``reconnect_timeout``
+    - ``on_client_disconnected`` — the peer is gone: it said goodbye, or
+      it stayed missing for ``connection_timeout``
     - ``on_track_subscribed`` — remote track subscription succeeded
     - ``on_error`` — error in the underlying transport; receives the
       message and the exception
@@ -1934,7 +1942,7 @@ class MOQTransport(BaseTransport):
     A transport error also reaches the pipeline as an ``ErrorFrame`` from
     the input transport. A relay that refuses the dial on authentication
     grounds, or that cannot be re-established within
-    ``reconnect_timeout``, leaves the transport unable to do its job, and
+    ``connection_timeout``, leaves the transport unable to do its job, and
     the pipeline worker's ``processor_unusable_policy`` decides whether
     the pipeline ends.
     """

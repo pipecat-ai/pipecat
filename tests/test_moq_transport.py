@@ -40,7 +40,7 @@ Areas covered:
    query string included, and host/port still compose a URL.
 
 7. **Client-mode reconnect** — the session loop redials a dropped
-   session within ``reconnect_timeout``, never retries a refused dial,
+   session within ``connection_timeout``, never retries a refused dial,
    reports the peer gone exactly once, and pushes errors with the
    category and permanence the pipeline acts on.
 """
@@ -48,6 +48,7 @@ Areas covered:
 import argparse
 import asyncio
 import itertools
+import time
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -1245,7 +1246,7 @@ class TestClientReconnect(unittest.IsolatedAsyncioTestCase):
         must not restart the window on each dial, or the loop never ends."""
         first = _FakeSession()
         self.script[:] = [first] + [_FakeSession(closed=True) for _ in range(1000)]
-        client = self._make_client(reconnect_timeout=0.05)
+        client = self._make_client(connection_timeout=0.05)
         self._peer_never_returns(client)
 
         run = asyncio.create_task(client._run())
@@ -1264,7 +1265,7 @@ class TestClientReconnect(unittest.IsolatedAsyncioTestCase):
     async def test_the_window_bounds_the_redials(self):
         first = _FakeSession()
         self.script[:] = [first] + [ConnectionError("refused")] * 1000
-        client = self._make_client(reconnect_timeout=0.05)
+        client = self._make_client(connection_timeout=0.05)
         self._peer_stays(client)
 
         run = asyncio.create_task(client._run())
@@ -1283,22 +1284,46 @@ class TestClientReconnect(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(permanent)
         cb.on_disconnected.assert_awaited_once()
 
-    async def test_reconnect_disabled_treats_a_drop_as_a_hangup(self):
-        first = _FakeSession()
-        self.script[:] = [first]
-        client = self._make_client(reconnect_timeout=0)
+    async def test_a_redial_that_succeeds_does_not_restart_the_count(self):
+        """Only the peer coming back stops the count, so a relay that is
+        back while the peer is not leaves what was left of it."""
+        first, second = _FakeSession(), _FakeSession()
+        self.script[:] = [first, second]
+        client = self._make_client(connection_timeout=30)
+        self._peer_never_returns(client)
+
+        run = asyncio.create_task(client._run())
+        await self._wait_for_dials(1)
+        first.drop()
+        await self._wait_for_dials(2)
+        started = client._peer_missing_since
+        self.assertIsNotNone(started)
+        await asyncio.sleep(0.02)
+        self.assertEqual(client._peer_missing_since, started)
+        self.assertLess(client._peer_wait_remaining(), 30)
+
+        run.cancel()
+        await asyncio.gather(run, return_exceptions=True)
+
+    async def test_the_peer_coming_back_stops_the_count(self):
+        first, second = _FakeSession(), _FakeSession()
+        self.script[:] = [first, second]
+        client = self._make_client()
         self._peer_stays(client)
 
         run = asyncio.create_task(client._run())
         await self._wait_for_dials(1)
         first.drop()
-        await asyncio.wait_for(run, timeout=2)
+        await self._wait_for_dials(2)
+        for _ in range(200):
+            if client._peer_missing_since is None:
+                break
+            await asyncio.sleep(0.005)
+        self.assertIsNone(client._peer_missing_since)
+        self.assertEqual(client._redial_attempt, 0)
 
-        cb = client._callbacks
-        self.assertEqual(self.dials, [self.URL])
-        cb.on_error.assert_not_awaited()
-        cb.on_client_disconnected.assert_awaited_once()
-        cb.on_disconnected.assert_awaited_once()
+        run.cancel()
+        await asyncio.gather(run, return_exceptions=True)
 
     async def test_a_redial_presents_a_fresh_publisher_and_replays_the_log(self):
         """A relay that still holds a dead route for the old publisher never
@@ -1511,10 +1536,11 @@ class TestConsumePeer(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(gone)
         self.assertFalse(client._peer_data_seen)
 
-    async def test_the_first_subscription_of_a_fresh_call_has_no_watchdog(self):
+    async def test_the_subscription_a_peer_joins_on_has_no_watchdog(self):
         """A client may hold its first message until it is ready to hear
-        the bot, so silence on a fresh call is not a failure; during an
-        outage, and on any retry, it is."""
+        the bot, so silence from a peer that has just joined is not a
+        failure; from one seen before, on a retry or a redialed session,
+        it is."""
         flags: list[bool] = []
         client = self._client()
         real = client._forward_peer
@@ -1528,14 +1554,55 @@ class TestConsumePeer(unittest.IsolatedAsyncioTestCase):
         await asyncio.wait_for(client._consume_peer(self._origin()), timeout=2)
         self.assertEqual(flags, [False, True])
 
+        # A redialed session, for a peer seen before the outage.
         flags.clear()
         client = self._client()
-        client._outage_started = 1.0
+        client._peer_connected = True
+        client._peer_missing_since = time.monotonic()
         real = client._forward_peer
         client._forward_peer = spy  # type: ignore[method-assign]
         self._tracks(client, ["goodbye"])
         await asyncio.wait_for(client._consume_peer(self._origin()), timeout=2)
         self.assertEqual(flags, [True])
+
+    async def test_a_peer_joining_after_failed_dials_has_no_watchdog(self):
+        """Dials that failed before the peer was ever seen leave the count
+        running; the peer's first subscription is still a join."""
+        flags: list[bool] = []
+        client = self._client()
+        client._peer_missing_since = time.monotonic()
+        client._redial_attempt = 2
+        real = client._forward_peer
+
+        async def spy(broadcast, watchdog):
+            flags.append(watchdog)
+            return await real(broadcast, watchdog)
+
+        client._forward_peer = spy  # type: ignore[method-assign]
+        self._tracks(client, ["goodbye"])
+        await asyncio.wait_for(client._consume_peer(self._origin()), timeout=2)
+        self.assertEqual(flags, [False])
+
+    async def test_a_join_stops_the_count_and_an_announcement_in_an_outage_does_not(self):
+        client = self._client()
+        client._peer_missing_since = time.monotonic()
+        await client._on_peer_available()
+        self.assertIsNone(client._peer_missing_since)
+
+        client._peer_missing_since = started = time.monotonic()
+        await client._on_peer_available()
+        self.assertEqual(client._peer_missing_since, started)
+        await client._on_peer_data()
+        self.assertIsNone(client._peer_missing_since)
+
+    async def test_the_wait_for_the_peer_gets_what_is_left_of_the_count(self):
+        """A redialed session does not give a missing peer a fresh
+        ``connection_timeout``."""
+        client = self._client(connection_timeout=30)
+        client._peer_connected = True
+        client._peer_missing_since = time.monotonic() - 29.95
+        gone = await asyncio.wait_for(client._consume_peer(self._origin(None)), timeout=2)
+        self.assertTrue(gone)
 
     async def test_serve_mode_takes_the_tracks_ending_at_face_value(self):
         client = self._client(serve=True)
