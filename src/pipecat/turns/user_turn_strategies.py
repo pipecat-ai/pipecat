@@ -8,6 +8,8 @@
 
 from dataclasses import dataclass
 
+from pipecat.classifiers.base_classifier import BaseClassifier
+from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.turns.user_start import (
     BaseUserTurnStartStrategy,
     ExternalUserTurnStartStrategy,
@@ -16,6 +18,7 @@ from pipecat.turns.user_start import (
 )
 from pipecat.turns.user_stop import (
     BaseUserTurnStopStrategy,
+    ClassifierUserTurnCompletionStopStrategy,
     EagerMatchPolicy,
     EagerUserTurnStopStrategy,
     ExternalUserTurnStopStrategy,
@@ -163,6 +166,56 @@ class FilterIncompleteUserTurnStrategies(UserTurnStrategies):
         gated: list[BaseUserTurnStopStrategy] = [deferred(s) for s in self.stop or []]
         gated.append(LLMTurnCompletionUserTurnStopStrategy(config=self.config))
         self.stop = gated
+
+
+@dataclass
+class ClassifierUserTurnStrategies(UserTurnStrategies):
+    """Stop strategies gated on a classifier's turn-completion verdict.
+
+    Keeps the detector chain (defaults or user-supplied) and wraps each
+    detector in a
+    :class:`~pipecat.turns.user_stop.ClassifierUserTurnCompletionStopStrategy`,
+    so a detector firing asks the classifier whether the turn is complete
+    instead of ending it. The LLM runs only when a turn is complete.
+
+    Parameters:
+        classifier: What decides whether a turn is complete. Required.
+        context: The conversation, so the classifier sees the assistant's
+            last message along with the user's turn.
+        short_timeout: Seconds to keep a turn open after a ``short`` verdict.
+        long_timeout: Seconds to keep a turn open after a ``long`` verdict.
+        classification_timeout: Seconds to wait for the classifier before
+            ending the turn without it.
+
+    Example::
+
+        user_turn_strategies=ClassifierUserTurnStrategies(
+            classifier=JevClassifier(api_key=os.getenv("TYPESAFE_API_KEY")),
+            context=context,
+        )
+    """
+
+    classifier: BaseClassifier | None = None
+    context: LLMContext | None = None
+    short_timeout: float = 5.0
+    long_timeout: float = 10.0
+    classification_timeout: float = 1.0
+
+    def __post_init__(self):
+        super().__post_init__()
+        if self.classifier is None:
+            raise ValueError("ClassifierUserTurnStrategies needs a classifier")
+        self.stop = [
+            ClassifierUserTurnCompletionStopStrategy(
+                s,
+                classifier=self.classifier,
+                context=self.context,
+                short_timeout=self.short_timeout,
+                long_timeout=self.long_timeout,
+                classification_timeout=self.classification_timeout,
+            )
+            for s in self.stop or []
+        ]
 
 
 @dataclass
