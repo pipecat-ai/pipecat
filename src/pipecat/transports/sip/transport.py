@@ -868,10 +868,12 @@ class SIPTransport(BaseTransport):
             await self._call_event_handler("on_dialin_stopped", stopped)
         else:
             self._dial_out_session_id = ""
-            if data.get("established"):
-                stopped = self._dialout_data(data)
-                stopped["reason"] = data.get("reason", "")
-                await self._call_event_handler("on_dialout_stopped", stopped)
+            # Fire unconditionally, mirroring on_dialin_stopped above: a dial-out
+            # that closes before connect (never established) must still signal its
+            # end, or a bot that tears down on this event would hang on the close.
+            stopped = self._dialout_data(data)
+            stopped["reason"] = data.get("reason", "")
+            await self._call_event_handler("on_dialout_stopped", stopped)
         if data.get("established"):
             participant = self._participant(data)
             await self._call_event_handler("on_participant_left", participant, "leftCall")
