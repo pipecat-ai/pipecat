@@ -207,6 +207,27 @@ async def test_dialout_event_sequence_and_compound_emission():
 
 
 @pytest.mark.asyncio
+async def test_dialout_stopped_fires_when_never_established():
+    # A dial-out that closes before connect (never established) must still fire
+    # on_dialout_stopped, so a bot that tears down on it does not hang; the
+    # connected-only pair (participant_left / client_disconnected) stays silent.
+    transport, connection = make_transport()
+    recorded = record_events(
+        transport,
+        ["on_dialout_stopped", "on_participant_left", "on_client_disconnected"],
+    )
+
+    closed = dict(OUT_PAYLOAD, reason="timeout", established=False)
+    await connection._call_event_handler("call_closed", closed)
+    await settle()
+
+    assert [name for name, _ in recorded] == ["on_dialout_stopped"]
+    stopped = recorded[0][1][0]
+    assert stopped["sessionId"] == "7"
+    assert stopped["reason"] == "timeout"
+
+
+@pytest.mark.asyncio
 async def test_dialin_flow_auto_answers_and_fires_connected():
     transport, connection = make_transport()
     recorded = record_events(
