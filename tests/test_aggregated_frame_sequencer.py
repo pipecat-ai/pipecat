@@ -2269,5 +2269,61 @@ class TestForceCompleteWordStream(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(progress[-1].remaining_text, "")
 
 
+class TestMarkdownResponseStaysInSync(unittest.IsolatedAsyncioTestCase):
+    """A markdown-heavy LLM response spoken by Cartesia, several sentences queued.
+
+    Cartesia keeps the markdown on each token and appends a period to the last
+    token of every line. One misplaced token force-completes its slot, and every
+    later word of the turn is then dropped as unrecognised. So every word must
+    produce a TTSTextFrame, and the context must receive every sentence in full.
+    """
+
+    SENTENCES = [
+        "Each menu lists food items under categories such as **ENTREE**, **SIDES**, "
+        "and **SELECTIONS**.",
+        "Below is a detailed description of the content across the images:\n\n---\n\n"
+        "### **General Overview**\n"
+        "- **Purpose**: These menus are designed for students, offering meals each day.",
+        "- **Structure**: Each day has a designated **ENTREE** (main course).",
+    ]
+
+    WORDS = [
+        ["Each", "menu", "lists", "food", "items", "under", "categories", "such", "as",
+         "**ENTREE**,", "**SIDES**,", "and", "**SELECTIONS**."],
+        ["Below", "is", "a", "detailed", "description", "of", "the", "content", "across",
+         "the", "images:.", "---.", "###", "**General", "Overview**.", "-", "**Purpose**:",
+         "These", "menus", "are", "designed", "for", "students,", "offering", "meals",
+         "each", "day."],
+        ["-", "**Structure**:", "Each", "day", "has", "a", "designated", "**ENTREE**",
+         "(main", "course)."],
+    ]  # fmt: skip
+
+    async def test_every_word_is_emitted_and_every_sentence_reaches_the_context(self):
+        seq = _seq()
+        for text in self.SENTENCES:
+            await seq.register_spoken(_spoken_frame(text, raw_text=text), "ctx1", text, True)
+
+        context_spans: list[str] = []
+        dropped: list[str] = []
+        pts = 0
+        for words in self.WORDS:
+            for word in words:
+                pts += 10
+                frames = [
+                    f
+                    for f in seq.process_word(word, pts=pts, context_id="ctx1")
+                    if isinstance(f, TTSTextFrame)
+                ]
+                if not frames:
+                    dropped.append(word)
+                context_spans += [f.raw_text for f in frames if f.append_to_context and f.raw_text]
+
+        self.assertEqual(dropped, [])
+        self.assertEqual(
+            " ".join(" ".join(context_spans).split()),
+            " ".join(" ".join(self.SENTENCES).split()),
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

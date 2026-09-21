@@ -3073,5 +3073,91 @@ class TestPunctuationReportedOnItsOwn(unittest.TestCase):
         self.assertEqual(tracker.get_remaining_llm_text(), "…ゼロ、いち")
 
 
+class TestWordCompletionTrackerMarkdownTokens(unittest.TestCase):
+    """Markdown sent to the TTS verbatim, reported the way Cartesia reports it.
+
+    Cartesia keeps the markdown on each whitespace-separated token (``**General``,
+    ``Overview**``) and appends a period to the last token of every line, even one
+    made only of punctuation (``---.``). Every such token must be placed where it
+    is, without the frame ending early: once a frame is force-completed, every
+    word after it is dropped for the rest of the turn.
+    """
+
+    def _assert_tracks_to_the_end(self, text: str, words: list[str]):
+        tracker = WordCompletionTracker(text, llm_text=text, user_facing_text=text)
+        for i, word in enumerate(words):
+            self.assertTrue(tracker.word_belongs_here(word), f"word {i} {word!r} rejected")
+            complete = tracker.add_word_and_check_complete(word)
+            is_last = i == len(words) - 1
+            self.assertEqual(complete, is_last, f"word {i} {word!r} complete={complete}")
+        self.assertEqual(tracker.get_accumulated_user_facing_text(), text)
+
+    def test_horizontal_rule_then_heading(self):
+        text = "Look:\n\n---\n\n### **Title**\nBody text."
+        self._assert_tracks_to_the_end(
+            text, ["Look:.", "---.", "###", "**Title**.", "Body", "text."]
+        )
+
+    def test_horizontal_rule_at_frame_start(self):
+        text = "---\n\n### **Summary**\nThe provided images are comprehensive."
+        self._assert_tracks_to_the_end(
+            text,
+            ["---.", "###", "**Summary**.", "The", "provided", "images", "are", "comprehensive."],
+        )
+
+    def test_bold_label_after_a_line_ending_in_bold(self):
+        text = "#### **Week 1 (SY 25/26)**\n- **Monday**:\n  - **ENTREE**: Chicken Sandwich"
+        self._assert_tracks_to_the_end(
+            text,
+            [
+                "####",
+                "**Week",
+                "1",
+                "(SY",
+                "25/26)**.",
+                "-",
+                "**Monday**:.",
+                "-",
+                "**ENTREE**:",
+                "Chicken",
+                "Sandwich.",
+            ],
+        )
+
+    def test_bullet_with_bold_label(self):
+        text = "- **Structure**: Each day has a designated **ENTREE** (main course)."
+        self._assert_tracks_to_the_end(
+            text,
+            [
+                "-",
+                "**Structure**:",
+                "Each",
+                "day",
+                "has",
+                "a",
+                "designated",
+                "**ENTREE**",
+                "(main",
+                "course).",
+            ],
+        )
+
+    def test_frame_from_the_log(self):
+        """The frame that fell out of step in the reported session."""
+        text = (
+            "Below is a detailed description of the content across the images:\n\n---\n\n"
+            "### **General Overview**\n"
+            "- **Purpose**: These menus are designed for elementary and high school "
+            "students, offering a variety of meals each day."
+        )
+        words = [
+            "Below", "is", "a", "detailed", "description", "of", "the", "content", "across",
+            "the", "images:.", "---.", "###", "**General", "Overview**.", "-", "**Purpose**:",
+            "These", "menus", "are", "designed", "for", "elementary", "and", "high", "school",
+            "students,", "offering", "a", "variety", "of", "meals", "each", "day.",
+        ]  # fmt: skip
+        self._assert_tracks_to_the_end(text, words)
+
+
 if __name__ == "__main__":
     unittest.main()

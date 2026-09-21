@@ -359,14 +359,29 @@ class TextSegmentMap:
 
     @staticmethod
     def _word_variants(word: str) -> tuple[str, ...]:
-        """Return *word*, then *word* with any punctuation at its end removed.
+        """Return *word*, then with its last mark removed, then with every trailing mark removed.
 
         A TTS can add punctuation the text it was given never had -- reading a
         list item ``"my account"`` as a sentence and reporting ``"account."``.
-        Matching tries the word as it arrived first, then the trimmed form.
+        Matching tries the word as it arrived first, then the trimmed forms.
+
+        Dropping only the added mark comes before dropping them all, so the
+        marks the text does have are still matched: ``"images:."`` lands past
+        the colon in ``"images:"``, and ``"---."`` keeps something to match at
+        all. The variants are tried in order and empty ones are skipped.
         """
-        trimmed = strip_trailing_punctuation(word)
-        return (word,) if trimmed == word else (word, trimmed)
+        all_marks_dropped = strip_trailing_punctuation(word)
+        # No trailing mark to drop: "hello" -> ("hello",)
+        if all_marks_dropped == word:
+            return (word,)
+
+        last_mark_dropped = word[:-1]
+        # A single trailing mark, so both trims agree: "account." -> ("account.", "account")
+        if last_mark_dropped == all_marks_dropped:
+            return (word, all_marks_dropped)
+
+        # Several trailing marks: "images:." -> ("images:.", "images:", "images")
+        return (word, last_mark_dropped, all_marks_dropped)
 
     @staticmethod
     def _literal_hop(
