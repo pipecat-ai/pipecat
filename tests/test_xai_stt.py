@@ -52,6 +52,16 @@ def test_explicit_sample_rate_overrides_setup(monkeypatch):
     assert _query(service)["sample_rate"] == ["16000"]
 
 
+def test_model_is_sent_as_query_parameter():
+    service = XAISTTService(api_key="test-key")
+    assert _query(service)["model"] == ["grok-voice-transcribe-2.0"]
+
+    service = XAISTTService(
+        api_key="test-key", settings=XAISTTService.Settings(model="grok-voice-transcribe-1.0")
+    )
+    assert _query(service)["model"] == ["grok-voice-transcribe-1.0"]
+
+
 def _collect_frames(service: XAISTTService) -> list[Frame]:
     """Record every frame the service pushes, bypassing metrics and tracing."""
     pushed: list[Frame] = []
