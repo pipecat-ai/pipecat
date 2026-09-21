@@ -1386,6 +1386,73 @@ class TestClientReconnect(unittest.IsolatedAsyncioTestCase):
         cb.on_error.assert_not_awaited()
         self.assertEqual(cb.on_disconnected.await_count, 2)
 
+    async def test_a_consumer_failure_on_a_live_session_ends_the_transport(self):
+        """The relay is reachable, so a redial would not help; the failure
+        is reported instead of being taken for the peer's tracks ending."""
+        self.script[:] = [_FakeSession(), _FakeSession()]
+        client = self._make_client()
+        boom = RuntimeError("decode failed")
+
+        async def consume(_origin):
+            await client._on_peer_available()
+            await client._on_peer_data()
+            raise boom
+
+        client._consume_peer = consume  # type: ignore[method-assign]
+        await asyncio.wait_for(client._run(), timeout=2)
+
+        cb = client._callbacks
+        self.assertEqual(self.dials, [self.URL])
+        cb.on_client_disconnected.assert_awaited_once()
+        cb.on_error.assert_awaited_once()
+        _message, exc, _category, permanent = cb.on_error.await_args.args
+        self.assertIs(exc, boom)
+        self.assertFalse(permanent)
+
+    async def test_a_consumer_failure_as_the_session_closes_is_redialed(self):
+        """A dropped connection fails the subscriptions a beat before the
+        session reports closed; that is an outage, not a consumer failure."""
+        first, second = _FakeSession(), _FakeSession()
+        self.script[:] = [first, second]
+        client = self._make_client()
+        seen = 0
+
+        async def consume(_origin):
+            nonlocal seen
+            seen += 1
+            await client._on_peer_available()
+            await client._on_peer_data()
+            if seen == 1:
+                first.drop()
+                raise RuntimeError("connection lost")
+            client._peer_goodbye = True
+            return True
+
+        client._consume_peer = consume  # type: ignore[method-assign]
+        await asyncio.wait_for(client._run(), timeout=2)
+
+        self.assertEqual(self.dials, [self.URL, self.URL])
+        client._callbacks.on_error.assert_not_awaited()
+
+    async def test_records_published_during_a_replay_keep_their_order(self):
+        """The replay yields to the event loop on a long log; a record
+        published meanwhile lands after the records before it, once."""
+        client = self._make_client()
+        for i in range(5):
+            client.publish_transcript({"type": f"r{i}"})
+
+        with patch.object(moq_transport, "_TRANSCRIPT_REPLAY_SLICE", 2):
+            rebuild = asyncio.create_task(client._rebuild_publish_side())
+            await asyncio.sleep(0)
+            self.assertTrue(client._transcript_replaying)
+            client.publish_transcript({"type": "late"})
+            await asyncio.wait_for(rebuild, timeout=2)
+
+        self.assertFalse(client._transcript_replaying)
+        appended = [call.args[0] for call in client._transcript_out.append.call_args_list]
+        self.assertEqual([r["seq"] for r in appended], [0, 1, 2, 3, 4, 5])
+        self.assertEqual(appended[-1]["type"], "late")
+
     async def test_a_peer_that_leaves_ends_the_loop_without_redialing(self):
         self.script[:] = [_FakeSession()]
         client = self._make_client()
@@ -1603,6 +1670,38 @@ class TestConsumePeer(unittest.IsolatedAsyncioTestCase):
         client._peer_missing_since = time.monotonic() - 29.95
         gone = await asyncio.wait_for(client._consume_peer(self._origin(None)), timeout=2)
         self.assertTrue(gone)
+
+    async def test_a_pump_failure_propagates(self):
+        """The pumps run as a task-manager task, whose wrapper logs and
+        drops an exception; the failure still has to reach the caller."""
+        client = self._client()
+        boom = RuntimeError("decode failed")
+
+        async def forward(_broadcast):
+            await client._on_peer_data()
+            raise boom
+
+        client._forward_peer_tracks = forward  # type: ignore[method-assign]
+        with self.assertRaises(RuntimeError) as raised:
+            await asyncio.wait_for(client._consume_peer(self._origin()), timeout=2)
+        self.assertIs(raised.exception, boom)
+
+    async def test_cancelling_a_watched_subscription_leaves_no_task_behind(self):
+        client = self._client()
+        client._peer_connected = True
+        self._tracks(client, ["silent"])
+        with patch.object(moq_transport, "_PEER_DATA_GRACE_S", 30):
+            consume = asyncio.create_task(client._consume_peer(self._origin()))
+            for _ in range(200):
+                if client._peer_data_event is not None:
+                    break
+                await asyncio.sleep(0.005)
+            await asyncio.sleep(0.01)
+            consume.cancel()
+            await asyncio.gather(consume, return_exceptions=True)
+
+        await asyncio.sleep(0)
+        self.assertEqual([t.get_name() for t in client._task_manager.current_tasks()], [])
 
     async def test_serve_mode_takes_the_tracks_ending_at_face_value(self):
         client = self._client(serve=True)
