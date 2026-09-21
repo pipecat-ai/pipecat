@@ -498,6 +498,28 @@
       "location": "pipecat/evals/suite.py"
     },
     {
+      "subject": "VoicemailDetector.custom_system_prompt",
+      "module": "pipecat.extensions.voicemail.voicemail_detector",
+      "kind": "parameter",
+      "deprecated_in": "1.12.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "classifier",
+      "message": "Use ``classifier`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/extensions/voicemail/voicemail_detector.py"
+    },
+    {
+      "subject": "VoicemailDetector.llm",
+      "module": "pipecat.extensions.voicemail.voicemail_detector",
+      "kind": "parameter",
+      "deprecated_in": "1.12.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "classifier",
+      "message": "Use ``classifier`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/extensions/voicemail/voicemail_detector.py"
+    },
+    {
       "subject": "FlowManager.task",
       "module": "pipecat.flows.manager",
       "kind": "parameter",

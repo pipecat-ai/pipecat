@@ -1,0 +1,95 @@
+name: voicemail_detection
+
+# Outbound call answered by a voicemail greeting or by a person. The bot says
+# nothing until it knows which; on a voicemail it leaves its message once the
+# greeting goes quiet, on a person it answers normally.
+
+user: !include ../user_audio.yaml
+
+judge: !include ../judge_audio.yaml
+
+scenarios:
+  # A voicemail greeting. The bot's own reply to the greeting is held back and
+  # dropped; what it says is the message from the on_voicemail_detected handler.
+  - name: voicemail
+    turns:
+      - user: "Hi, you've reached Sam. I can't take your call right now, so please leave a message after the tone and I'll get back to you."
+        expect:
+          - event: tts_response
+            text_contains: "Alex"
+            within_ms: 20000
+
+  # A business voicemail: no name, an office that is closed.
+  - name: voicemail_business
+    turns:
+      - user: "Thank you for calling Acme Dental. Our office is currently closed. Please leave your name and number after the tone and we will return your call."
+        expect:
+          - event: tts_response
+            text_contains: "Alex"
+            within_ms: 20000
+
+  # A greeting that starts the way a person would answer. The detector has to
+  # wait for the rest before deciding.
+  - name: voicemail_personal_start
+    turns:
+      - user: "Hi, this is Sam. Sorry I missed your call. Leave me a message and I'll call you back as soon as I can."
+        expect:
+          - event: tts_response
+            text_contains: "Alex"
+            within_ms: 20000
+
+  # A carrier message rather than a personal greeting.
+  - name: voicemail_carrier
+    turns:
+      - user: "The person you are trying to reach is not available. At the tone, please record your message. When you have finished recording, you may hang up."
+        expect:
+          - event: tts_response
+            text_contains: "Alex"
+            within_ms: 20000
+
+  # A person picks up. The bot answers them.
+  - name: conversation
+    turns:
+      - user: "Hello? Who is this?"
+        expect:
+          - event: response
+            eval: "the bot responds to the person who answered, for example by introducing itself, explaining why it is calling, or asking how it can help"
+            text_excludes: "Alex"
+            within_ms: 20000
+
+  # A person who says one word and waits.
+  - name: conversation_hello
+    turns:
+      - user: "Hello?"
+        expect:
+          - event: response
+            eval: "the bot responds to the person who answered, for example by introducing itself, explaining why it is calling, or asking how it can help"
+            text_excludes: "Alex"
+            within_ms: 20000
+
+  # A person answering with their name, which also opens many greetings.
+  - name: conversation_name
+    turns:
+      - user: "This is Sam speaking."
+        expect:
+          - event: response
+            eval: "the bot responds to Sam as a person on the line, for example by introducing itself, explaining why it is calling, or asking how it can help"
+            text_excludes: "Alex"
+            within_ms: 20000
+
+  # After the person is recognized, the conversation continues normally.
+  - name: conversation_two_turns
+    turns:
+      - user: "Hello? Who is this?"
+        expect:
+          - event: response
+            eval: "the bot responds to the person who answered, for example by introducing itself, explaining why it is calling, or asking how it can help"
+            text_excludes: "Alex"
+            within_ms: 20000
+      # A long answer is transcribed only once the bot stops speaking.
+      - user: "Okay, what is this about?"
+        expect:
+          - event: response
+            eval: "the bot answers the question about why it is calling, or continues the conversation with the person"
+            text_excludes: "Alex"
+            within_ms: 30000
