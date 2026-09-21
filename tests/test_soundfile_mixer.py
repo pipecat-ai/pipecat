@@ -40,7 +40,7 @@ async def test_start_loads_files_matching_sample_rate(tmp_path):
     mixer = await _started_mixer({"a": path}, "a")
 
     assert list(mixer._sounds) == ["a"]
-    assert _samples(mixer._sounds["a"].tobytes()).tolist() == [1, 2, 3]
+    assert mixer._sounds["a"].tolist() == [1, 2, 3]
 
 
 @pytest.mark.asyncio
@@ -60,6 +60,9 @@ async def test_start_ignores_missing_file(tmp_path):
     mixer = await _started_mixer({"a": str(tmp_path / "missing.wav")}, "a")
 
     assert mixer._sounds == {}
+    # With nothing loaded, mixing passes the input through untouched.
+    audio = _pcm([10, 20, 30])
+    assert await mixer.mix(audio) == audio
 
 
 @pytest.mark.asyncio
@@ -132,14 +135,15 @@ async def test_mixer_enable_frame_toggles_mixing(tmp_path):
 @pytest.mark.asyncio
 async def test_update_settings_changes_sound_and_restarts_it(tmp_path):
     a = _write_wav(tmp_path / "a.wav", [100, 200, 300, 400])
-    b = _write_wav(tmp_path / "b.wav", [5, 5, 5, 5])
+    b = _write_wav(tmp_path / "b.wav", [5, 6, 7, 8])
     mixer = await _started_mixer({"a": a, "b": b}, "a", volume=1.0)
 
     await mixer.mix(_pcm([0, 0]))
     await mixer.process_frame(MixerUpdateSettingsFrame(settings={"sound": "b"}))
     mixed = await mixer.mix(_pcm([0, 0]))
 
-    assert _samples(mixed).tolist() == [5, 5]
+    # The new sound starts from its first sample, not from the previous position.
+    assert _samples(mixed).tolist() == [5, 6]
 
 
 @pytest.mark.asyncio
