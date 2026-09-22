@@ -7,6 +7,7 @@
 import argparse
 import asyncio
 import io
+import json
 import sys
 import tempfile
 import types
@@ -937,10 +938,6 @@ class TestStartIceConfig(unittest.TestCase):
         self.assertEqual(result["iceConfig"], {"iceServers": configured})
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TestFlowConfig(unittest.TestCase):
     """``--flow`` is read once at startup and applied to each session."""
 
@@ -1027,6 +1024,117 @@ class TestSessionFlowConfig(unittest.TestCase):
         _apply_cli_args(runner_args, argparse.Namespace(flow_config="from: --flow"))
         self.assertEqual(runner_args.flow_config, "from: --flow")
 
+    def test_an_empty_flow_is_kept_so_it_fails_loudly_in_the_bot(self):
+        # Falling back here would run the shipped flow without a word;
+        # `FlowConfig.from_yaml("")` says "top level must be a mapping".
+        flows: dict[str, str] = {}
+        result = self._post_start({"flow_config": ""}, flows)
+        self.assertEqual(flows, {result["sessionId"]: ""})
+
+    def test_a_flow_sent_as_an_object_arrives_as_json_text(self):
+        flows: dict[str, str] = {}
+        result = self._post_start({"flow_config": {"initial_node": "greeting"}}, flows)
+        self.assertEqual(json.loads(flows[result["sessionId"]]), {"initial_node": "greeting"})
+
+    def test_a_flow_that_is_neither_text_nor_an_object_is_refused(self):
+        app = FastAPI()
+        _setup_unified_start_route(app, argparse.Namespace(transport=None, ice_servers=[]), {}, {})
+        with patch("pipecat.runner.run._transport_routes_enabled", return_value=True):
+            response = TestClient(app).post(
+                "/start", json={"transport": "webrtc", "flow_config": ["a", "list"]}
+            )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("flow_config", response.json()["detail"])
+
+    def _start(self, transport: str, body: dict, **extra) -> argparse.Namespace | None:
+        """The ``RunnerArguments`` a ``/start`` builds, for a transport that spawns here.
+
+        Covers the half a hosted runner depends on: that the flow reaches the
+        arguments the bot is actually constructed with, not only that
+        ``_apply_cli_args`` would have kept it.
+        """
+        app = FastAPI()
+        args = argparse.Namespace(
+            transport=None,
+            ice_servers=[],
+            host="localhost",
+            port=7860,
+            ws_auth=None,
+            moq_host="localhost",
+            moq_port=4443,
+            moq_path="/",
+            moq_namespace=None,
+            moq_bot_id="bot",
+            moq_client_id="client",
+            moq_tls_insecure=True,
+            moq_serve=False,
+            moq_bind=None,
+            moq_tls_host=None,
+            moq_tls_cert=None,
+            moq_tls_key=None,
+            **extra,
+        )
+        _setup_unified_start_route(app, args, {}, {})
+        captured: dict = {}
+
+        class _BotModule:
+            @staticmethod
+            def bot(runner_args):
+                captured["runner_args"] = runner_args
+                # MoQ waits for the bot to finish bring-up before replying.
+                if getattr(runner_args, "ready_event", None) is not None:
+                    runner_args.ready_event.set()
+
+        with (
+            patch("pipecat.runner.run._transport_routes_enabled", return_value=True),
+            patch("pipecat.runner.run._get_bot_module", return_value=_BotModule),
+            patch("pipecat.runner.run._start_bot_session"),
+            patch(
+                "pipecat.runner.livekit.livekit_credentials",
+                return_value=("wss://livekit.example", "key", "secret"),
+            ),
+            patch(
+                "pipecat.runner.livekit.generate_session_tokens",
+                return_value=("agent-token", "user-token"),
+            ),
+        ):
+            response = TestClient(app).post("/start", json={"transport": transport, **body})
+        self.assertEqual(response.status_code, 200, response.text)
+        return captured.get("runner_args")
+
+    def test_the_flow_reaches_the_arguments_every_spawning_transport_builds(self):
+        for transport in ("daily", "livekit", "moq"):
+            with self.subTest(transport=transport):
+                runner_args = self._start(transport, {"flow_config": "initial_node: greeting"})
+                self.assertEqual(runner_args.flow_config, "initial_node: greeting")
+
+    def test_the_session_flow_beats_the_cli_default_all_the_way_to_the_bot(self):
+        for transport in ("daily", "livekit", "moq"):
+            with self.subTest(transport=transport):
+                runner_args = self._start(
+                    transport, {"flow_config": "from: the session"}, flow_config="from: --flow"
+                )
+                self.assertEqual(runner_args.flow_config, "from: the session")
+
+    def test_the_cli_default_reaches_a_session_that_named_no_flow(self):
+        for transport in ("daily", "livekit", "moq"):
+            with self.subTest(transport=transport):
+                runner_args = self._start(transport, {}, flow_config="from: --flow")
+                self.assertEqual(runner_args.flow_config, "from: --flow")
+
+    def test_a_deferred_transport_warns_that_it_cannot_carry_the_flow(self):
+        # Their bot starts on a later /ws or /ws-client connection, which
+        # carries nothing from this request.
+        for transport in ("websocket", "twilio"):
+            with self.subTest(transport=transport), self._warnings() as warned:
+                self._start(transport, {"flow_config": "initial_node: greeting"})
+                self.assertIn("flow_config", warned.getvalue())
+
+    def test_a_deferred_transport_says_nothing_when_no_flow_was_sent(self):
+        with self._warnings() as warned:
+            self._start("websocket", {})
+        self.assertNotIn("flow_config", warned.getvalue())
+
 
 class TestEvalRunnerBodyFlowConfig(unittest.TestCase):
     """Under the eval transport the runner body stands in for the /start request.
@@ -1085,3 +1193,7 @@ class TestEvalRunnerBodyFlowConfig(unittest.TestCase):
         runner_args = self._run_eval("[1, 2, 3]", "from: --flow")
         self.assertEqual(runner_args.flow_config, "from: --flow")
         self.assertEqual(runner_args.body, [1, 2, 3])
+
+
+if __name__ == "__main__":
+    unittest.main()

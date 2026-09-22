@@ -113,6 +113,7 @@ import sys
 import time
 import unicodedata
 import uuid
+from collections.abc import Mapping
 from contextlib import asynccontextmanager
 from http import HTTPMethod
 from pathlib import Path
@@ -548,13 +549,44 @@ def _apply_cli_args(runner_args: RunnerArguments, args: argparse.Namespace) -> N
         runner_args.flow_config = getattr(args, "flow_config", None)
 
 
+def _session_flow_config(value: Any) -> str | None:
+    """The ``flow_config`` of a ``/start`` request, as the text the bot takes.
+
+    The field is documented as YAML or JSON text, but a JSON client's natural
+    move is to send the flow as an object, so one is serialised rather than
+    refused; the bot reads JSON either way. Anything else is refused here,
+    where the caller still learns about it, rather than in the bot, where it
+    surfaces as an ``AttributeError`` from deep inside a YAML loader.
+
+    Args:
+        value: Whatever the request carried as ``flow_config``.
+
+    Returns:
+        The flow as text, or ``None`` when the session named none.
+
+    Raises:
+        HTTPException: 400, when the value is neither text nor an object.
+    """
+    if value is None or isinstance(value, str):
+        return value
+    if isinstance(value, Mapping):
+        return json.dumps(value)
+    raise HTTPException(
+        status_code=400,
+        detail=(
+            f"flow_config must be the flow as YAML or JSON text, or as an object; "
+            f"got {type(value).__name__}."
+        ),
+    )
+
+
 def _read_flow_config(path: str | None) -> str | None:
     """Read the ``--flow`` file, or ``None`` without one.
 
     The text goes to the bot as it was written; the schema is the bot's to
     check, with ``FlowConfig.from_yaml``.
     """
-    return Path(path).read_text() if path else None
+    return Path(path).read_text(encoding="utf-8") if path else None
 
 
 async def _run_telephony_bot(websocket: WebSocket, args: argparse.Namespace):
@@ -740,9 +772,21 @@ def _setup_unified_start_route(
             }
 
         ``flow_config`` sits beside ``body`` rather than inside it because it is
-        the runner's to act on and ``body`` is the bot's. Telephony sessions
-        cannot use it: their bot starts when the provider connects to ``/ws``,
-        which carries nothing from this request.
+        the runner's to act on and ``body`` is the bot's. It may be the flow as
+        text, or the flow as an object, which is serialised to JSON text before
+        it is passed on; anything else is a 400.
+
+        Telephony and plain ``websocket`` sessions cannot use it. Their bot
+        starts when the provider or the client connects to ``/ws`` or
+        ``/ws-client``, which carries nothing from this request, so a flow sent
+        with one of them is warned about and dropped.
+
+        Whoever sends ``flow_config`` writes the bot's system prompt, every
+        task prompt, and which of its tools are offered at each step. Treat it
+        as being as privileged as the bot's own code, and accept it only from a
+        caller you would let write them. A caller you trust less can be given a
+        choice among flows someone else has published -- named by id, resolved
+        to text by the platform -- rather than a flow of their own.
 
         A platform that stores flows may let a session name one by id instead,
         and resolve it to the text before the bot is started. This runner has
@@ -763,7 +807,7 @@ def _setup_unified_start_route(
 
         # The flow this session runs, if it named one. `--flow` is the default
         # for a session that did not, applied by `_apply_cli_args`.
-        session_flow = request_data.get("flow_config")
+        session_flow = _session_flow_config(request_data.get("flow_config"))
         if request_data.get("flow_id"):
             logger.warning(
                 "Ignoring flow_id: this runner has no store to resolve one against. "
@@ -796,11 +840,24 @@ def _setup_unified_start_route(
                 ),
             )
 
+        # Two transports answer this request with a URL and start their bot on
+        # the connection that follows, which carries nothing from here. A flow
+        # sent with one of them is dropped, and silence would be indistinguishable
+        # from a session that named no flow at all, so say so.
+        if session_flow is not None and (
+            transport in TELEPHONY_TRANSPORTS or transport == "websocket"
+        ):
+            logger.warning(
+                f"Ignoring flow_config: a '{transport}' session's bot starts on a later "
+                "connection, which carries nothing from this request. The bot will run the "
+                "flow given to --flow, or the one it ships with."
+            )
+
         if transport == "webrtc":
             # WebRTC: register the session; the bot starts when the WebRTC offer arrives.
             session_id = str(uuid.uuid4())
             active_sessions[session_id] = request_data.get("body", {})
-            if session_flow:
+            if session_flow is not None:
                 session_flows[session_id] = session_flow
 
             result = StartBotResult(
