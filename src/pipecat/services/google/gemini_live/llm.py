@@ -2066,11 +2066,12 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
         response = FunctionResponse(name=tool_name, id=tool_call_id, response=response_payload)
         # The guides document scheduling inside the response, the API reference
         # as a field of its own; set both so whichever the server reads is
-        # there. will_continue only exists as a field.
-        if scheduling:
+        # there. will_continue only exists as a field: True keeps the call open
+        # for more responses, and False closes it, which the last response has
+        # to say or the call stays open for good.
+        if non_blocking:
             response.scheduling = FunctionResponseScheduling(scheduling)
-        if not is_final:
-            response.will_continue = True
+            response.will_continue = not is_final
 
         try:
             await self._session.send_tool_response(function_responses=response)
