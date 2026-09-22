@@ -34,6 +34,7 @@ from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
     Frame,
+    FunctionCallResultFrame,
     InputAudioRawFrame,
     InputTextRawFrame,
     InterruptionFrame,
@@ -75,6 +76,12 @@ _ASYNC_TOOL_STARTED_RESULT = (
 # message arrives. Bracketed framing helps the model treat this as a
 # tool-result update rather than fresh user input.
 _ASYNC_TOOL_FINAL_RESULT_TEMPLATE = "[Async tool result for tool_call_id={tool_call_id}] {result}"
+
+# Template for the user-side text we inject when an intermediate result
+# arrives: the same framing as the final one, saying the task is still running.
+_ASYNC_TOOL_PROGRESS_TEMPLATE = (
+    "[Async tool progress for tool_call_id={tool_call_id}, still running] {result}"
+)
 
 
 @dataclass
@@ -446,6 +453,63 @@ class UltravoxRealtimeLLMService(LLMService):
         """Return the ``one_shot_selected_tools`` configured at construction, if any."""
         return self._selected_tools
 
+    @property
+    def accepts_intermediate_function_call_results(self) -> bool:
+        """Intermediate results reach the model as user-side text.
+
+        A client tool takes one result, which Ultravox is given as soon as an
+        async call starts so the conversation isn't frozen; what the call
+        produces after that goes in as text (see :meth:`push_frame`).
+        """
+        return True
+
+    async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
+        """Push a frame, sending function call results to Ultravox on the way.
+
+        Results are broadcast by the base service; the downstream copy is
+        observed here and sent as it is produced, so a tool that reports
+        progress reaches the model while it is still working.
+
+        Args:
+            frame: The frame to push.
+            direction: The direction of frame pushing.
+        """
+        if direction == FrameDirection.DOWNSTREAM and isinstance(frame, FunctionCallResultFrame):
+            await self._handle_function_call_result(frame)
+        await super().push_frame(frame, direction)
+
+    async def _handle_function_call_result(self, frame: FunctionCallResultFrame):
+        """Send one result to Ultravox as it is produced.
+
+        An intermediate result goes in as user-side text, urgent enough to
+        speak about when the result asks the model to run, and as context to
+        draw on otherwise. A final result settles the call — through the tool
+        channel, or as text when the call was already settled with the
+        placeholder that unfreezes an async one.
+        """
+        result = json.dumps(frame.result, ensure_ascii=False) if frame.result else "COMPLETED"
+        is_final = frame.properties.is_final if frame.properties else True
+
+        if not is_final:
+            run_llm = frame.properties.run_llm if frame.properties else None
+            if run_llm is None:
+                run_llm = frame.run_llm if frame.run_llm is not None else True
+            await self._send_user_text(
+                _ASYNC_TOOL_PROGRESS_TEMPLATE.format(
+                    tool_call_id=frame.tool_call_id, result=result
+                ),
+                urgency="soon" if run_llm else "later",
+            )
+            return
+
+        if frame.tool_call_id in self._completed_tool_calls:
+            return
+        if frame.tool_call_id in self._started_placeholder_sent:
+            await self._send_async_tool_result(frame.tool_call_id, result)
+        else:
+            await self._send_tool_result(frame.tool_call_id, result)
+            self._completed_tool_calls.add(frame.tool_call_id)
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process incoming frames for the Ultravox Realtime service.
 
@@ -493,16 +557,7 @@ class UltravoxRealtimeLLMService(LLMService):
                     # call. Nothing more to do here.
                     continue
                 if async_payload.kind == "intermediate":
-                    logger.error(
-                        f"{self}: Ultravox does not support streamed async "
-                        f"tool results; dropping intermediate result for "
-                        f"tool_call_id={async_payload.tool_call_id}. Use a "
-                        f"non-realtime LLM service if your tool needs to "
-                        f"stream intermediate results."
-                    )
-                    await self.push_error(
-                        error_msg="Ultravox does not support streamed async tool results.",
-                    )
+                    # Sent as text when it was produced.
                     continue
                 if async_payload.kind == "final":
                     if async_payload.tool_call_id in self._completed_tool_calls:
@@ -589,15 +644,22 @@ class UltravoxRealtimeLLMService(LLMService):
             audio = await self._resampler.resample(audio, frame.sample_rate, self._sample_rate)
         await self._send(audio)
 
-    async def _send_user_text(self, text: str):
+    async def _send_user_text(self, text: str, *, urgency: str | None = None):
         """Send user text via Ultravox Realtime.
 
         Args:
             text: The text to send as user input.
+            urgency: When the agent should act on it — ``"soon"`` at the next
+                opportunity, ``"later"`` on a reply it makes anyway, so the
+                text is context rather than something to answer. Ultravox's own
+                default applies when omitted.
         """
         if not self._socket:
             return
-        await self._send({"type": "user_text_message", "text": text})
+        message: dict[str, Any] = {"type": "user_text_message", "text": text}
+        if urgency:
+            message["urgency"] = urgency
+        await self._send(message)
 
     async def _update_output_medium(self, output_medium: str | None):
         # Known quirk: None is the default but setting it back to None
