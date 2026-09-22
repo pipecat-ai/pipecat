@@ -1572,6 +1572,12 @@ class LLMAssistantAggregator(LLMContextAggregator):
         # arriving in the same speaking window are bundled into a single deferred push.
         self._push_context_on_bot_stopped_speaking: bool = False
 
+        # A function call result asked to run inference and the push hasn't happened yet:
+        # it was held for results still queued, or for a user who is speaking. Whichever
+        # result is handled once the way is clear makes the push, whatever its own
+        # `run_llm` says.
+        self._context_push_owed: bool = False
+
         self._assistant_turn_start_timestamp = ""
 
         self._thought_append_to_context = False
@@ -1627,6 +1633,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         await super().reset()
         await self._reset_thought_aggregation()  # Just to be safe
         self._push_context_on_bot_stopped_speaking = False
+        self._context_push_owed = False
 
     async def _reset_thought_aggregation(self):
         """Reset the thought aggregation state."""
@@ -1800,6 +1807,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         """
         await super().push_context_frame(direction)
         self._push_context_on_bot_stopped_speaking = False
+        self._context_push_owed = False
 
     async def _handle_llm_run(self, frame: LLMRunFrame):
         await self.push_context_frame(FrameDirection.UPSTREAM)
@@ -1943,7 +1951,10 @@ class LLMAssistantAggregator(LLMContextAggregator):
                 else:
                     run_llm = True
 
-        if run_llm and not self._user_speaking:
+        if run_llm:
+            self._context_push_owed = True
+
+        if self._context_push_owed and not self._user_speaking:
             await self._maybe_push_context_after_function_result()
 
         # Call the `on_context_updated` callback once the function call result
@@ -1969,8 +1980,9 @@ class LLMAssistantAggregator(LLMContextAggregator):
         if self.has_queued_frame(FunctionCallResultFrame):
             # Another FunctionCallResultFrame is already queued. Defer the context push
             # to bundle all results into a single LLM call instead of triggering one
-            # inference pass per result. The context will be pushed once the last
-            # function call in the queue is processed.
+            # inference pass per result. The push is owed until it happens, so the last
+            # result in the queue makes it whether or not that result asks to run —
+            # a burst can end with an intermediate result that doesn't.
             logger.debug(
                 f"{self}: More FunctionCallResultFrames queued — deferring context frame push."
             )
