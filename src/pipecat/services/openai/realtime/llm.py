@@ -30,6 +30,8 @@ from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
     Frame,
+    FunctionCallCancelFrame,
+    FunctionCallResultFrame,
     InputAudioRawFrame,
     InputImageRawFrame,
     InterimTranscriptionFrame,
@@ -370,6 +372,17 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
         self._messages_added_manually = {}
         self._pending_function_calls = {}  # Track function calls by call_id
         self._completed_tool_calls = set()
+        # Calls the API is waiting on, by call_id: only these can be answered
+        # with a function_call_output. Cleared on disconnect, since a reconnect
+        # replays the conversation as text and the API no longer knows the ids.
+        self._open_function_calls: set[str] = set()
+        # Something was delivered that no response has taken in yet. A response
+        # starting clears it; an inference request while it stands creates one.
+        self._results_awaiting_response = False
+        # A response was asked for while one was already running, and is owed
+        # once that one is done.
+        self._response_create_owed = False
+        self._response_active = False
         # Whether we've already emitted the "stripping `reasoning`" warning
         # for this service instance. The Realtime API doesn't allow swapping
         # the model mid-session, so once is enough.
@@ -539,6 +552,15 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
             and session_properties.audio.input.turn_detection is False
         )
 
+    @property
+    def accepts_intermediate_function_call_results(self) -> bool:
+        """Intermediate results reach the model as conversation items.
+
+        The API takes one output per function call, so an intermediate result
+        goes in beside the call instead of through it (see :meth:`push_frame`).
+        """
+        return True
+
     def service_metadata_frame(self) -> LLMServiceMetadataFrame:
         """Realtime service; recommends external turn strategies when server-side VAD is active."""
         # When turn_detection is disabled the server doesn't emit VAD events,
@@ -560,6 +582,9 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
             await self.send_client_event(events.ResponseCancelEvent())
         await self._truncate_current_audio_response()
         await self.stop_all_metrics()
+        # Whatever the interrupted response was going to say is moot, and so is
+        # a response owed behind it: the user's turn makes one of its own.
+        self._response_create_owed = False
         if self._current_assistant_response:
             await self.push_frame(LLMFullResponseEndFrame())
             # Only push TTSStoppedFrame if audio modality is enabled
@@ -646,7 +671,7 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
         if isinstance(frame, TranscriptionFrame):
             pass
         elif isinstance(frame, LLMContextFrame):
-            await self._handle_context(frame.context)
+            await self._handle_context(frame.context, direction)
         elif isinstance(frame, InputAudioRawFrame):
             if not self._audio_input_paused:
                 await self._send_user_audio(frame)
@@ -674,7 +699,27 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
 
         await self.push_frame(frame, direction)
 
-    async def _handle_context(self, context: LLMContext):
+    async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
+        """Push a frame, delivering function call outcomes to the API on the way.
+
+        Function call results and cancellations are broadcast by the base
+        service; the downstream copy is observed here and sent to the API as it
+        is produced, intermediate results included. The frames travel on to the
+        assistant aggregator, which records them in the context and decides when
+        inference should run.
+
+        Args:
+            frame: The frame to push.
+            direction: The direction of frame pushing.
+        """
+        if direction == FrameDirection.DOWNSTREAM:
+            if isinstance(frame, FunctionCallResultFrame):
+                await self._handle_function_call_result(frame)
+            elif isinstance(frame, FunctionCallCancelFrame):
+                await self._handle_function_call_cancel(frame)
+        await super().push_frame(frame, direction)
+
+    async def _handle_context(self, context: LLMContext, direction: FrameDirection):
         if not self._context:
             # We got our initial context
             self._context = context
@@ -687,8 +732,17 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
             # We got an updated context.
             # This may contain a new user message or tool call result.
             self._context = context
-            # Send results for newly-completed function calls, if any.
+            # Send results for newly-completed function calls, if any (results
+            # this service pushed are already sent; this catches any written
+            # into the context some other way).
             await self._process_completed_function_calls(send_new_results=True)
+            # A context frame from downstream is the aggregator recording a
+            # response that already happened. One from upstream asks for
+            # inference — with the tool results, sibling calls, bot speech and
+            # user speech it accounts for — so it is what runs the model over
+            # whatever was delivered since the last response.
+            if direction == FrameDirection.UPSTREAM and self._results_awaiting_response:
+                await self._create_response()
 
     async def _handle_messages_append(self, frame):
         logger.error("!!! NEED TO IMPLEMENT MESSAGES APPEND")
@@ -734,6 +788,11 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
                 await self.cancel_task(self._receive_task, timeout=1.0)
                 self._receive_task = None
             self._completed_tool_calls = set()
+            # A new session knows none of the old call ids, and no response is
+            # running in it.
+            self._open_function_calls = set()
+            self._response_active = False
+            self._response_create_owed = False
             self._disconnecting = False
         except Exception as e:
             await self.push_error(error_msg=f"Error disconnecting: {e}", exception=e)
@@ -837,6 +896,8 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
                 await self._handle_evt_session_created(evt)
             elif evt.type == "session.updated":
                 await self._handle_evt_session_updated(evt)
+            elif evt.type == "response.created":
+                await self._handle_evt_response_created(evt)
             elif evt.type == "response.output_audio.delta":
                 await self._handle_evt_audio_delta(evt)
             elif evt.type == "conversation.item.added":
@@ -993,6 +1054,11 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
             for future in futures:
                 future.set_result(evt.item)
 
+    async def _handle_evt_response_created(self, evt):
+        """Note the response, which takes in everything delivered before it."""
+        self._response_active = True
+        self._results_awaiting_response = False
+
     @traced_openai_realtime(operation="llm_response")
     async def _handle_evt_response_done(self, evt):
         # todo: figure out whether there's anything we need to do for "cancelled" events
@@ -1032,6 +1098,13 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
             await self.push_frame(TTSStoppedFrame())
         await self.push_frame(LLMFullResponseEndFrame())
         self._current_assistant_response = None
+        self._response_active = False
+        # A response asked for while this one was running is owed now, unless
+        # this one took in what it was for.
+        if self._response_create_owed:
+            self._response_create_owed = False
+            if self._results_awaiting_response:
+                await self._create_response()
         # error handling
         if evt.response.status == "failed":
             await self.push_error(error_msg=evt.response.status_details["error"]["message"])
@@ -1090,6 +1163,10 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
                 # Remove from pending calls FIRST to prevent duplicate processing
                 del self._pending_function_calls[evt.call_id]
 
+                # The API is waiting on this call now, so its id can be answered
+                # with a function_call_output.
+                self._open_function_calls.add(evt.call_id)
+
                 # Create the function call and process it
                 function_calls = [
                     FunctionCallFromLLM(
@@ -1115,6 +1192,7 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
         # Note: this event is not received when turn detection is disabled,
         # which is good: in that case, local turn detection is responsible for
         # this work.
+        self._response_create_owed = False
         await self._truncate_current_audio_response()
         await self.broadcast_frame(ProposedUserStartedSpeakingFrame)
 
@@ -1176,6 +1254,13 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
             self._run_llm_when_api_session_ready = True
             return
 
+        if self._response_active:
+            # The API refuses a second response while one is running. Hold this
+            # one for response.done rather than losing it to that error.
+            logger.debug("Response already active — holding the next one until it is done")
+            self._response_create_owed = True
+            return
+
         assert self._context is not None
 
         adapter = self.get_llm_adapter()
@@ -1212,10 +1297,15 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
         )
 
     async def _process_completed_function_calls(self, send_new_results: bool):
+        """Send any tool result the context holds that hasn't reached the API yet.
+
+        Results this service produced are already sent, as they are produced
+        (see :meth:`push_frame`), so what this finds is a result written into
+        the context some other way, plus, with ``send_new_results=False``, the
+        results a context brings with it at the start of a session.
+        """
         assert self._context is not None
 
-        # Check for set of completed function calls in the context
-        sent_new_result = False
         for message in self._context.get_messages():
             # LLMSpecificMessages are opaque provider-specific payloads, not
             # standard tool-result messages — skip them.
@@ -1234,22 +1324,14 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
                     # awaits a result; nothing to send for the started marker.
                     continue
                 if async_payload.kind == "intermediate":
-                    logger.error(
-                        f"{self}: OpenAI Realtime does not support streamed async "
-                        f"tool results; dropping intermediate result for "
-                        f"tool_call_id={async_payload.tool_call_id}. Use a "
-                        f"non-realtime LLM service if your tool needs to "
-                        f"stream intermediate results."
-                    )
-                    await self.push_error(
-                        error_msg="OpenAI Realtime does not support streamed async tool results.",
-                    )
+                    # Sent as a message when it was produced; the call stays
+                    # open for the final result.
                     continue
                 if async_payload.kind == "final":
                     # Deliver via the formal tool-result channel — same path
                     # as a synchronous tool result, just delayed.
                     if send_new_results:
-                        sent_new_result = True
+                        self._results_awaiting_response = True
                         await self._send_tool_result(
                             async_payload.tool_call_id, async_payload.result
                         )
@@ -1266,16 +1348,11 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
                 if tool_call_id and tool_call_id not in self._completed_tool_calls:
                     # Found a newly-completed function call - send the result to the service
                     if send_new_results:
-                        sent_new_result = True
+                        self._results_awaiting_response = True
                         await self._send_tool_result(
                             tool_call_id, cast(str | None, message.get("content"))
                         )
                     self._completed_tool_calls.add(tool_call_id)
-
-        # If we reported any new tool call results to the service, trigger
-        # another response
-        if sent_new_result:
-            await self._create_response()
 
     def _handle_speech_control_params(self, frame: SpeechControlParamsFrame):
         """Auto-size the pre-roll from the upstream VAD's start_secs.
@@ -1375,9 +1452,52 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
 
     async def _send_tool_result(self, tool_call_id: str, result: str | None):
         logger.debug(f"Sending tool result to OpenAI Realtime for tool_call_id={tool_call_id}")
+        self._open_function_calls.discard(tool_call_id)
         item = events.ConversationItem(
             type="function_call_output",
             call_id=tool_call_id,
             output=result,
         )
         await self.send_client_event(events.ConversationItemCreateEvent(item=item))
+
+    async def _send_progress_message(self, text: str):
+        """Put text into the conversation for the model to take in, without answering it."""
+        item = events.ConversationItem(
+            type="message",
+            role="system",
+            content=[events.ItemContent(type="input_text", text=text)],
+        )
+        await self.send_client_event(events.ConversationItemCreateEvent(item=item))
+
+    async def _handle_function_call_result(self, frame: FunctionCallResultFrame):
+        """Send one function call result to the API as it is produced.
+
+        An intermediate result can't go through the tool-result channel — the
+        API takes one output per call — so it goes in as a message carrying the
+        same envelope a text LLM would read from the context. A final result
+        answers the call, unless a reconnect has left the API without the id to
+        answer, in which case it goes in as a message too.
+        """
+        result = json.dumps(frame.result, ensure_ascii=False) if frame.result else "COMPLETED"
+        is_final = frame.properties.is_final if frame.properties else True
+
+        if not is_final:
+            message = async_tool_messages.build_intermediate_result_message(
+                frame.tool_call_id, result
+            )
+            await self._send_progress_message(cast(str, message.get("content", "")))
+        elif frame.tool_call_id in self._open_function_calls:
+            await self._send_tool_result(frame.tool_call_id, result)
+        else:
+            message = async_tool_messages.build_final_result_message(frame.tool_call_id, result)
+            await self._send_progress_message(cast(str, message.get("content", "")))
+
+        self._completed_tool_calls.add(frame.tool_call_id)
+        self._results_awaiting_response = True
+
+    async def _handle_function_call_cancel(self, frame: FunctionCallCancelFrame):
+        """Settle a cancelled call, so the API isn't left waiting on it."""
+        if frame.tool_call_id not in self._open_function_calls:
+            return
+        await self._send_tool_result(frame.tool_call_id, "CANCELLED")
+        self._completed_tool_calls.add(frame.tool_call_id)
