@@ -235,6 +235,47 @@ class TestGeminiLiveIntermediateResults(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self._responses(), [])
 
 
+class TestNovaSonicIntermediateResults(unittest.IsolatedAsyncioTestCase):
+    """Nova Sonic takes them as text beside the call."""
+
+    def setUp(self):
+        pytest.importorskip("aws_sdk_bedrock_runtime")
+        from pipecat.services.aws.nova_sonic.llm import AWSNovaSonicLLMService
+
+        self.service = AWSNovaSonicLLMService(secret_access_key="k", access_key_id="i", region="r")
+        self.service.send_text = AsyncMock()
+        self.service._send_tool_result = AsyncMock()
+        self.service._stream = object()
+        self.service._prompt_name = "prompt"
+
+    def _texts(self) -> list[tuple[str, bool]]:
+        # send_text(text, role, prompt_name, stream, interactive)
+        return [(c.args[0], c.args[4]) for c in self.service.send_text.call_args_list]
+
+    async def test_an_intermediate_result_goes_in_as_interactive_text(self):
+        await self.service.push_frame(_result(is_final=False))
+
+        ((text, interactive),) = self._texts()
+        payload = async_tool_messages.parse_message({"role": "developer", "content": text})
+        assert payload is not None
+        self.assertEqual(payload.kind, "intermediate")
+        self.assertTrue(interactive)
+        self.service._send_tool_result.assert_not_awaited()
+
+    async def test_a_silent_result_goes_in_without_asking_for_a_reply(self):
+        await self.service.push_frame(_result(is_final=False, run_llm=False))
+
+        ((_, interactive),) = self._texts()
+        self.assertFalse(interactive)
+
+    async def test_a_final_result_settles_the_call(self):
+        await self.service.push_frame(_result(is_final=True))
+
+        self.assertEqual(self._texts(), [])
+        self.service._send_tool_result.assert_awaited_once()
+        self.assertIn("call_1", self.service._completed_tool_calls)
+
+
 class _Usage:
     input_tokens = 0
     output_tokens = 0

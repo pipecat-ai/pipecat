@@ -20,7 +20,7 @@ import wave
 from dataclasses import dataclass, field
 from enum import Enum
 from importlib.resources import files
-from typing import Any
+from typing import Any, cast
 
 from loguru import logger
 from pydantic import BaseModel, Field
@@ -37,6 +37,7 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     FunctionCallFromLLM,
+    FunctionCallResultFrame,
     InputAudioRawFrame,
     InterruptionFrame,
     LLMContextFrame,
@@ -597,6 +598,55 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
         """Return the tools configured via ``tools=`` at construction, if any."""
         return self._tools
 
+    @property
+    def accepts_intermediate_function_call_results(self) -> bool:
+        """Intermediate results reach the model as text input.
+
+        Nova Sonic takes one ``toolResult`` per call, so an intermediate result
+        goes in as text beside the call — which is what the docs suggest for
+        keeping a conversation going while an async tool runs.
+        """
+        return True
+
+    async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
+        """Push a frame, sending function call results to the API on the way.
+
+        Results are broadcast by the base service; the downstream copy is
+        observed here and sent as it is produced, so a tool that reports
+        progress reaches the model while it is still working.
+
+        Args:
+            frame: The frame to push.
+            direction: The direction of frame pushing.
+        """
+        if direction == FrameDirection.DOWNSTREAM and isinstance(frame, FunctionCallResultFrame):
+            await self._handle_function_call_result(frame)
+        await super().push_frame(frame, direction)
+
+    async def _handle_function_call_result(self, frame: FunctionCallResultFrame):
+        """Send one result to the API as it is produced.
+
+        A final result goes through the tool-result channel, which Nova Sonic
+        always folds into what it says next. An intermediate one goes in as
+        text: interactive when the model should say something about it,
+        plain text for it to take in otherwise.
+        """
+        result = json.dumps(frame.result, ensure_ascii=False) if frame.result else "COMPLETED"
+        is_final = frame.properties.is_final if frame.properties else True
+        if is_final:
+            await self._send_tool_result(frame.tool_call_id, result)
+            self._completed_tool_calls.add(frame.tool_call_id)
+            return
+        run_llm = frame.properties.run_llm if frame.properties else None
+        if run_llm is None:
+            run_llm = frame.run_llm if frame.run_llm is not None else True
+        message = async_tool_messages.build_intermediate_result_message(frame.tool_call_id, result)
+        await self._send_text_event(
+            text=cast(str, message.get("content", "")),
+            role=Role.USER,
+            interactive=bool(run_llm),
+        )
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process incoming frames and handle service-specific logic.
 
@@ -708,16 +758,8 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
                     # awaits a result; nothing to send for the started marker.
                     continue
                 if async_payload.kind == "intermediate":
-                    logger.error(
-                        f"{self}: Nova Sonic does not support streamed async "
-                        f"tool results; dropping intermediate result for "
-                        f"tool_call_id={async_payload.tool_call_id}. Use a "
-                        f"non-realtime LLM service if your tool needs to "
-                        f"stream intermediate results."
-                    )
-                    await self.push_error(
-                        error_msg="Nova Sonic does not support streamed async tool results.",
-                    )
+                    # Sent as text when it was produced; the call stays open
+                    # for the result that settles it.
                     continue
                 if async_payload.kind == "final":
                     # Deliver via the formal toolResult channel — same path
