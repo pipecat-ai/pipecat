@@ -1,0 +1,149 @@
+#
+# Copyright (c) 2024-2026, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
+"""Classifier backed by Jev, TypeSafe's hosted classification model.
+
+:class:`JevClassifier` turns each question into a request and each reply
+into a result, through a :class:`~pipecat.classifiers.jev_client.JevClient`.
+"""
+
+from collections.abc import Mapping
+from typing import Any
+
+from loguru import logger
+
+from pipecat.classifiers.base_classifier import (
+    BaseClassifier,
+    ChoiceQuestion,
+    ChoiceResult,
+    ClassifierError,
+    ClassifierQuestion,
+    ClassifierResult,
+    ScoreResult,
+    YesNoQuestion,
+    YesNoResult,
+)
+from pipecat.classifiers.jev_client import JevClient
+from pipecat.workers.base_worker import BaseWorker
+
+
+class JevClassifier(BaseClassifier):
+    """Answers questions by asking Jev.
+
+    Jev's probabilities are calibrated. Build one with an API key to get a
+    client of its own, or pass a :class:`JevClient` to share one between
+    several classifiers. A client the classifier created is closed in
+    :meth:`cleanup`; a shared one is left to whoever made it.
+
+    Example::
+
+        client = JevClient(api_key=os.getenv("TYPESAFE_API_KEY"))
+        turn_classifier = JevClassifier(client=client)
+        voicemail_classifier = JevClassifier(client=client)
+    """
+
+    def __init__(self, *, api_key: str | None = None, client: JevClient | None = None):
+        """Initialize the classifier.
+
+        Args:
+            api_key: Jev API key, when the classifier should have a client
+                of its own.
+            client: A client to share. One of ``api_key`` and ``client`` is
+                required.
+        """
+        super().__init__()
+        if client is None and not api_key:
+            raise ValueError("JevClassifier needs an API key or a JevClient")
+        self._owns_client = client is None
+        self._client = client or JevClient(api_key=api_key or "")
+
+    @property
+    def client(self) -> JevClient:
+        """The client this classifier asks through."""
+        return self._client
+
+    async def setup(self, worker: BaseWorker):
+        """Open the connection to Jev ahead of the first question.
+
+        A connection that cannot be opened now is only a warning: the first
+        question opens it itself.
+
+        Args:
+            worker: The worker the owner runs in.
+        """
+        await super().setup(worker)
+        try:
+            await self._client.connect()
+        except ClassifierError as e:
+            logger.warning(f"{self}: {e}")
+
+    async def cleanup(self):
+        """Close the client if this classifier created it."""
+        await super().cleanup()
+        if self._owns_client:
+            await self._client.close()
+
+    async def ask(
+        self, state: str | dict[str, Any] | list[Any], questions: Mapping[str, ClassifierQuestion]
+    ) -> dict[str, ClassifierResult]:
+        """Answer several questions about one state, in one request.
+
+        Args:
+            state: What the questions are about.
+            questions: The questions, by name.
+
+        Returns:
+            One result per question, by the same names.
+        """
+        answers = await self._client.ask(
+            state, {name: self._to_jev(q) for name, q in questions.items()}
+        )
+        return {
+            name: self._from_jev(question, answers[name]) for name, question in questions.items()
+        }
+
+    def _to_jev(self, question: ClassifierQuestion) -> dict[str, Any]:
+        """A question in Jev's own format."""
+        if isinstance(question, YesNoQuestion):
+            jev: dict[str, Any] = {"type": "noul", "instructions": question.instructions}
+            if question.yes is not None or question.no is not None:
+                jev["criteria"] = {"true": question.yes or "", "false": question.no or ""}
+            return jev
+        if isinstance(question, ChoiceQuestion):
+            return {
+                "type": "choice",
+                "instructions": question.instructions,
+                "criteria": question.options,
+            }
+        return {"type": "score", "instructions": question.instructions, "criteria": question.rubric}
+
+    def _from_jev(self, question: ClassifierQuestion, answer: dict[str, Any]) -> ClassifierResult:
+        """A result built from Jev's answer to the question."""
+        if isinstance(question, YesNoQuestion):
+            return YesNoResult(probability=self._number(answer, "noul"))
+        if isinstance(question, ChoiceQuestion):
+            probabilities = answer.get("probabilities") or {}
+            return ChoiceResult(
+                label=str(answer.get("choice", "")),
+                probabilities={o: float(probabilities.get(o, 0.0)) for o in question.options},
+                confidence=self._number(answer, "confidence"),
+            )
+        # Jev keys level probabilities by position; the result keys them by level.
+        probabilities = answer.get("probabilities") or {}
+        return ScoreResult(
+            score=self._number(answer, "score"),
+            probabilities={
+                ScoreResult.level_key(level): float(probabilities.get(str(index), 0.0))
+                for index, level in enumerate(question.rubric)
+            },
+            confidence=self._number(answer, "confidence"),
+        )
+
+    def _number(self, answer: dict[str, Any], key: str) -> float:
+        try:
+            return float(answer[key])
+        except (KeyError, TypeError, ValueError) as e:
+            raise ClassifierError(f"Jev reply has no usable '{key}'") from e
