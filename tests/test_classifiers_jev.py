@@ -125,6 +125,43 @@ class TestJevClient:
         await client.close()
 
     @pytest.mark.asyncio
+    async def test_a_reply_that_is_not_json_is_an_error(self):
+        client = _client(lambda request: httpx.Response(200, text="<html>busy</html>"))
+
+        with pytest.raises(ClassifierError, match="not valid JSON"):
+            await client.ask("a", {"answer": {"type": "noul", "instructions": "?"}})
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_a_reply_that_is_not_an_object_is_an_error(self):
+        client = _client(lambda request: httpx.Response(200, json=["answers"]))
+
+        with pytest.raises(ClassifierError, match="not a JSON object"):
+            await client.ask("a", {"answer": {"type": "noul", "instructions": "?"}})
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_a_reply_without_answers_is_an_error(self):
+        client = _client(lambda request: httpx.Response(200, json={"model": "jev-latest"}))
+
+        with pytest.raises(ClassifierError, match="no answers"):
+            await client.ask("a", {"answer": {"type": "noul", "instructions": "?"}})
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_usage_that_is_not_an_object_is_ignored(self):
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200, json={"answers": {"answer": {"type": "noul", "noul": 0.5}}, "usage": "none"}
+            )
+
+        client = _client(handler)
+        await client.ask("a", {"answer": {"type": "noul", "instructions": "?"}})
+
+        assert client.usage.input_tokens == 0
+        await client.close()
+
+    @pytest.mark.asyncio
     async def test_unreachable_is_an_error(self):
         def handler(request: httpx.Request) -> httpx.Response:
             raise httpx.ConnectError("down")

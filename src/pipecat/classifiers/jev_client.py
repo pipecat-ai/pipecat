@@ -177,11 +177,17 @@ class JevClient:
                 continue
             if response.status_code != 200:
                 raise ClassifierError(f"Jev rejected the request: HTTP {response.status_code}")
-            data = response.json()
-            usage = data.get("usage") or {}
-            self._usage.input_tokens += usage.get("input_tokens", 0)
-            self._usage.output_tokens += usage.get("output_tokens", 0)
-            answers = data.get("answers") if isinstance(data, dict) else None
+            try:
+                data = response.json()
+            except ValueError as e:
+                raise ClassifierError(f"Jev reply is not valid JSON: {e}") from e
+            if not isinstance(data, dict):
+                raise ClassifierError("Jev reply is not a JSON object")
+            usage = data.get("usage")
+            if isinstance(usage, dict):
+                self._usage.input_tokens += usage.get("input_tokens", 0)
+                self._usage.output_tokens += usage.get("output_tokens", 0)
+            answers = data.get("answers")
             if not isinstance(answers, dict):
                 raise ClassifierError("Jev reply has no answers")
             missing = [name for name in questions if not isinstance(answers.get(name), dict)]
