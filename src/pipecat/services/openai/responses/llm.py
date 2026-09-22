@@ -417,6 +417,7 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
         context: LLMContext,
         max_tokens: int | None = None,
         system_instruction: str | None = None,
+        response_schema: dict[str, Any] | None = None,
     ) -> str | None:
         """Run a one-shot, out-of-band inference with the given LLM context.
 
@@ -426,6 +427,9 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
             context: The LLM context containing conversation history.
             max_tokens: Optional maximum number of tokens to generate.
             system_instruction: Optional system instruction for this inference.
+            response_schema: Optional JSON schema the reply must follow. The
+                service asks the provider to enforce it, so the reply is JSON
+                text matching the schema.
 
         Returns:
             The LLM's response as a string, or None if no response is generated.
@@ -445,6 +449,16 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
 
         if max_tokens is not None:
             params["max_output_tokens"] = max_tokens
+
+        if response_schema is not None:
+            params["text"] = {
+                "format": {
+                    "type": "json_schema",
+                    "name": "response",
+                    "schema": response_schema,
+                    "strict": True,
+                }
+            }
 
         response = await self._client.responses.create(**params)
 

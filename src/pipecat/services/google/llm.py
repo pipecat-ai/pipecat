@@ -340,6 +340,7 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
         context: LLMContext,
         max_tokens: int | None = None,
         system_instruction: str | None = None,
+        response_schema: dict[str, Any] | None = None,
     ) -> str | None:
         """Run a one-shot, out-of-band (i.e. out-of-pipeline) inference with the given LLM context.
 
@@ -349,6 +350,9 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
                 overrides the service's default max_tokens setting.
             system_instruction: Optional system instruction to use for this inference.
                 If provided, overrides any system instruction in the context.
+            response_schema: Optional JSON schema the reply must follow. The
+                service asks the provider to enforce it, so the reply is JSON
+                text matching the schema.
 
         Returns:
             The LLM's response as a string, or None if no response is generated.
@@ -377,6 +381,10 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
         # Override max_output_tokens if provided
         if max_tokens is not None:
             generation_params["max_output_tokens"] = max_tokens
+
+        if response_schema is not None:
+            generation_params["response_mime_type"] = "application/json"
+            generation_params["response_json_schema"] = response_schema
 
         generation_config = GenerateContentConfig(**generation_params)
 

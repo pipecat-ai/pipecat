@@ -1045,3 +1045,168 @@ async def test_openai_responses_http_run_inference_system_instruction_param_with
             {"role": "developer", "content": "Summarize the conversation"}
         ]
         assert "instructions" not in call_kwargs
+
+
+# A reply schema for the response_schema tests.
+RESPONSE_SCHEMA = {
+    "type": "object",
+    "properties": {"answer": {"type": "string", "enum": ["yes", "no"]}},
+    "required": ["answer"],
+    "additionalProperties": False,
+}
+
+
+@pytest.mark.asyncio
+async def test_openai_run_inference_response_schema():
+    """A response schema goes to chat completions as a strict json_schema response format."""
+    with patch.object(OpenAILLMService, "create_client"):
+        service = OpenAILLMService(settings=OpenAILLMService.Settings(model="gpt-4o-mini"))
+        service._client = AsyncMock()
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = '{"answer": "yes"}'
+        service._client.chat.completions.create.return_value = mock_response
+
+        result = await service.run_inference(
+            LLMContext(messages=[{"role": "user", "content": "Is water wet?"}]),
+            response_schema=RESPONSE_SCHEMA,
+        )
+
+        assert result == '{"answer": "yes"}'
+        call_kwargs = service._client.chat.completions.create.call_args.kwargs
+        assert call_kwargs["response_format"] == {
+            "type": "json_schema",
+            "json_schema": {"name": "response", "schema": RESPONSE_SCHEMA, "strict": True},
+        }
+
+
+@pytest.mark.asyncio
+async def test_openai_run_inference_without_response_schema_sends_no_format():
+    with patch.object(OpenAILLMService, "create_client"):
+        service = OpenAILLMService(settings=OpenAILLMService.Settings(model="gpt-4o-mini"))
+        service._client = AsyncMock()
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = "yes"
+        service._client.chat.completions.create.return_value = mock_response
+
+        await service.run_inference(LLMContext(messages=[{"role": "user", "content": "?"}]))
+
+        assert "response_format" not in service._client.chat.completions.create.call_args.kwargs
+
+
+@pytest.mark.asyncio
+async def test_openai_responses_run_inference_response_schema():
+    """A response schema goes to the Responses API as a strict json_schema text format."""
+    with patch.object(OpenAIResponsesLLMService, "_create_client"):
+        service = OpenAIResponsesLLMService(
+            settings=OpenAIResponsesLLMService.Settings(model="gpt-4.1")
+        )
+        service._client = AsyncMock()
+        mock_response = MagicMock()
+        mock_response.output_text = '{"answer": "no"}'
+        service._client.responses.create = AsyncMock(return_value=mock_response)
+
+        result = await service.run_inference(
+            LLMContext(messages=[{"role": "user", "content": "Is fire cold?"}]),
+            response_schema=RESPONSE_SCHEMA,
+        )
+
+        assert result == '{"answer": "no"}'
+        call_kwargs = service._client.responses.create.call_args.kwargs
+        assert call_kwargs["text"] == {
+            "format": {
+                "type": "json_schema",
+                "name": "response",
+                "schema": RESPONSE_SCHEMA,
+                "strict": True,
+            }
+        }
+
+
+@pytest.mark.asyncio
+async def test_anthropic_run_inference_response_schema():
+    """A response schema goes to Anthropic as a json_schema output format."""
+    service = AnthropicLLMService(
+        api_key="test-key", settings=AnthropicLLMService.Settings(model="claude-haiku-4-5")
+    )
+    service._client = AsyncMock()
+    mock_adapter = MagicMock()
+    mock_adapter.get_llm_invocation_params.return_value = AnthropicLLMInvocationParams(
+        messages=[{"role": "user", "content": "Is water wet?"}], system="Answer.", tools=[]
+    )
+    service.get_llm_adapter = MagicMock(return_value=mock_adapter)
+    mock_response = MagicMock()
+    mock_response.content = [MagicMock()]
+    mock_response.content[0].text = '{"answer": "yes"}'
+    service._client.beta.messages.create.return_value = mock_response
+
+    result = await service.run_inference(
+        MagicMock(spec=LLMContext), response_schema=RESPONSE_SCHEMA
+    )
+
+    assert result == '{"answer": "yes"}'
+    call_kwargs = service._client.beta.messages.create.call_args.kwargs
+    assert call_kwargs["output_config"] == {
+        "format": {"type": "json_schema", "schema": RESPONSE_SCHEMA}
+    }
+
+
+@pytest.mark.asyncio
+async def test_google_run_inference_response_schema():
+    """A response schema goes to Gemini as a JSON mime type and a response JSON schema."""
+    service = GoogleLLMService(
+        api_key="test-key", settings=GoogleLLMService.Settings(model="gemini-2.5-flash")
+    )
+    service._client = AsyncMock()
+    mock_adapter = MagicMock()
+    mock_adapter.get_llm_invocation_params.return_value = GeminiLLMInvocationParams(
+        messages=[{"role": "user", "content": "Is water wet?"}],
+        system_instruction="Answer.",
+        tools=NotGiven(),
+    )
+    service.get_llm_adapter = MagicMock(return_value=mock_adapter)
+    mock_response = MagicMock()
+    mock_response.candidates = [MagicMock()]
+    mock_response.candidates[0].content.parts = [MagicMock()]
+    mock_response.candidates[0].content.parts[0].text = '{"answer": "yes"}'
+    service._client.aio = AsyncMock()
+    service._client.aio.models = AsyncMock()
+    service._client.aio.models.generate_content = AsyncMock(return_value=mock_response)
+
+    result = await service.run_inference(
+        MagicMock(spec=LLMContext), response_schema=RESPONSE_SCHEMA
+    )
+
+    assert result == '{"answer": "yes"}'
+    config = service._client.aio.models.generate_content.call_args.kwargs["config"]
+    assert config.response_mime_type == "application/json"
+    assert config.response_json_schema == RESPONSE_SCHEMA
+
+
+@pytest.mark.asyncio
+async def test_aws_bedrock_run_inference_ignores_response_schema():
+    """Bedrock has no reply schema, so the request goes out without one."""
+    service = AWSBedrockLLMService(
+        settings=AWSBedrockLLMService.Settings(model="anthropic.claude-3-sonnet-20240229-v1:0")
+    )
+    mock_adapter = MagicMock()
+    mock_adapter.get_llm_invocation_params.return_value = AWSBedrockLLMInvocationParams(
+        messages=[{"role": "user", "content": [{"text": "Is water wet?"}]}],
+        system=[{"text": "Answer."}],
+        tools=[],
+        tool_choice=None,
+    )
+    service.get_llm_adapter = MagicMock(return_value=mock_adapter)
+    mock_client = AsyncMock()
+    mock_client.converse.return_value = {"output": {"message": {"content": [{"text": "yes"}]}}}
+    mock_context_manager = AsyncMock()
+    mock_context_manager.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_context_manager.__aexit__ = AsyncMock(return_value=None)
+    with patch.object(service._aws_session, "create_client", return_value=mock_context_manager):
+        result = await service.run_inference(
+            MagicMock(spec=LLMContext), response_schema=RESPONSE_SCHEMA
+        )
+
+    assert result == "yes"
+    assert "toolConfig" not in mock_client.converse.call_args.kwargs

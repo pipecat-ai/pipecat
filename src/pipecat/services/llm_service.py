@@ -446,6 +446,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         context: LLMContext,
         max_tokens: int | None = None,
         system_instruction: str | None = None,
+        response_schema: dict[str, Any] | None = None,
     ) -> str | None:
         """Run a one-shot, out-of-band (i.e. out-of-pipeline) inference with the given LLM context.
 
@@ -457,6 +458,11 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 overrides the service's default max_tokens/max_completion_tokens setting.
             system_instruction: Optional system instruction to use for this inference.
                 If provided, overrides any system instruction in the context.
+            response_schema: Optional JSON schema the reply must follow. Services
+                that can have the provider enforce it return JSON text matching
+                the schema. The schema must satisfy the strictest provider in
+                use: every object lists all its properties as required and sets
+                ``additionalProperties`` to false.
 
         Returns:
             The LLM's response as a string, or None if no response is generated.

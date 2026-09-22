@@ -278,6 +278,7 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
         context: LLMContext,
         max_tokens: int | None = None,
         system_instruction: str | None = None,
+        response_schema: dict[str, Any] | None = None,
     ) -> str | None:
         """Run a one-shot, out-of-band (i.e. out-of-pipeline) inference with the given LLM context.
 
@@ -287,10 +288,14 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
                 overrides the service's default max_tokens setting.
             system_instruction: Optional system instruction to use for this inference.
                 If provided, overrides any system instruction in the context.
+            response_schema: Accepted for interface compatibility. Bedrock's
+                Converse API has no reply schema, so it is not enforced.
 
         Returns:
             The LLM's response as a string, or None if no response is generated.
         """
+        if response_schema is not None:
+            logger.warning(f"{self}: response_schema is not supported by Bedrock and is ignored")
         messages = []
         system = []
         effective_instruction = system_instruction or assert_given(

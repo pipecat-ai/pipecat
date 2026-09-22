@@ -389,6 +389,7 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
         context: LLMContext,
         max_tokens: int | None = None,
         system_instruction: str | None = None,
+        response_schema: dict[str, Any] | None = None,
     ) -> str | None:
         """Run a one-shot, out-of-band (i.e. out-of-pipeline) inference with the given LLM context.
 
@@ -398,6 +399,9 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
                 overrides the service's default max_tokens/max_completion_tokens setting.
             system_instruction: Optional system instruction to use for this inference.
                 If provided, overrides any system instruction in the context.
+            response_schema: Optional JSON schema the reply must follow. The
+                service asks the provider to enforce it, so the reply is JSON
+                text matching the schema.
 
         Returns:
             The LLM's response as a string, or None if no response is generated.
@@ -426,6 +430,12 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
                 params["max_completion_tokens"] = max_tokens
             else:
                 params["max_tokens"] = max_tokens
+
+        if response_schema is not None:
+            params["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {"name": "response", "schema": response_schema, "strict": True},
+            }
 
         # LLM completion
         response = await self._client.chat.completions.create(**params)
