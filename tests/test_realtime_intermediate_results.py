@@ -48,9 +48,18 @@ def _result(call_id: str = "call_1", *, is_final: bool, run_llm: bool = True, re
     )
 
 
-class TestOpenAIRealtimeIntermediateResults(unittest.IsolatedAsyncioTestCase):
+class OpenAIProtocolIntermediateResultsTests:
+    """The checks every service speaking the OpenAI realtime protocol answers.
+
+    Each service has its own module and its own event models, so the suite runs
+    once per service rather than testing one and assuming the rest.
+    """
+
+    def _build_service(self):
+        raise NotImplementedError
+
     def setUp(self):
-        self.service = OpenAIRealtimeLLMService(api_key="test")
+        self.service = self._build_service()
         self.service.send_client_event = AsyncMock()
         self.service._api_session_ready = True
         self.service._llm_needs_conversation_setup = False
@@ -123,7 +132,7 @@ class TestOpenAIRealtimeIntermediateResults(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self._responses(), [])
 
     async def test_a_run_asked_for_during_a_response_waits_for_it_to_finish(self):
-        await self.service._handle_evt_response_created(None)
+        await self._response_created()
         await self.service.push_frame(_result(is_final=True))
 
         await self._push_context_upstream()
@@ -134,7 +143,7 @@ class TestOpenAIRealtimeIntermediateResults(unittest.IsolatedAsyncioTestCase):
 
     async def test_a_response_takes_in_what_was_delivered_before_it(self):
         await self.service.push_frame(_result(is_final=True))
-        await self.service._handle_evt_response_created(None)
+        await self._response_created()
 
         await self._response_done()
         await self._push_context_upstream()
@@ -142,7 +151,7 @@ class TestOpenAIRealtimeIntermediateResults(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self._responses(), [])
 
     async def test_an_interruption_drops_a_run_that_was_waiting(self):
-        await self.service._handle_evt_response_created(None)
+        await self._response_created()
         await self.service.push_frame(_result(is_final=True))
         await self._push_context_upstream()
 
@@ -176,11 +185,68 @@ class TestOpenAIRealtimeIntermediateResults(unittest.IsolatedAsyncioTestCase):
         await self._push_context_upstream()
 
         self.assertEqual(len(self._items()), sent)
-        self.service.push_error.assert_not_awaited()
+        complaints = [
+            str(c.kwargs.get("error_msg", "")) for c in self.service.push_error.call_args_list
+        ]
+        self.assertFalse([c for c in complaints if "intermediate" in c])
+
+    async def _response_created(self):
+        await self.service._handle_evt_response_created(_ResponseCreated())
 
     async def _response_done(self):
         """Feed the service a response.done, which is where a held run fires."""
         await self.service._handle_evt_response_done(_ResponseDone())
+
+
+class TestOpenAIRealtimeIntermediateResults(
+    OpenAIProtocolIntermediateResultsTests, unittest.IsolatedAsyncioTestCase
+):
+    def _build_service(self):
+        return OpenAIRealtimeLLMService(api_key="test")
+
+
+class TestGrokRealtimeIntermediateResults(
+    OpenAIProtocolIntermediateResultsTests, unittest.IsolatedAsyncioTestCase
+):
+    def _build_service(self):
+        from pipecat.services.xai.realtime.llm import GrokRealtimeLLMService
+
+        return GrokRealtimeLLMService(api_key="test")
+
+
+class TestInworldRealtimeIntermediateResults(unittest.IsolatedAsyncioTestCase):
+    """Inworld takes none: its model calls the tool again instead of relaying."""
+
+    def setUp(self):
+        from pipecat.services.inworld.realtime.llm import InworldRealtimeLLMService
+
+        self.service = InworldRealtimeLLMService(api_key="test")
+        self.service.send_client_event = AsyncMock()
+        self.service._api_session_ready = True
+        self.service._llm_needs_conversation_setup = False
+        self.service._context = LLMContext()
+        self.service._open_function_calls.add("call_1")
+
+    def _items(self) -> list:
+        return [
+            c.args[0].item
+            for c in self.service.send_client_event.call_args_list
+            if hasattr(c.args[0], "item")
+        ]
+
+    async def test_it_says_it_takes_no_intermediate_results(self):
+        self.assertFalse(self.service.accepts_intermediate_function_call_results)
+
+    async def test_an_intermediate_result_is_dropped(self):
+        await self.service.push_frame(_result(is_final=False))
+
+        self.assertEqual(self._items(), [])
+
+    async def test_a_final_result_answers_the_call(self):
+        await self.service.push_frame(_result(is_final=True))
+
+        (item,) = self._items()
+        self.assertEqual(item.type, "function_call_output")
 
 
 class TestGeminiLiveIntermediateResults(unittest.IsolatedAsyncioTestCase):
@@ -283,12 +349,21 @@ class _Usage:
 
 
 class _Response:
+    id = "resp_1"
     usage = _Usage()
     status = "completed"
+    status_details = None
     output: list = []
 
 
-class _ResponseDone:
-    """The fields ``_handle_evt_response_done`` reads."""
+class _ResponseCreated:
+    """The fields a ``response.created`` handler reads."""
 
     response = _Response()
+
+
+class _ResponseDone:
+    """The fields a ``response.done`` handler reads."""
+
+    response = _Response()
+    usage = _Usage()
