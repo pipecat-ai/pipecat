@@ -71,7 +71,13 @@ uv run python examples/flows/yaml/food_ordering/bot.py --flow my_flow.yaml
 uv run python examples/flows/yaml/food_ordering/bot.py -t eval --flow my_other_flow.yaml
 ```
 
-The flow reaches the bot as text and `FlowConfig.from_yaml` validates it, so a flow that doesn't match the schema fails the same way whether it came from a file or from a platform that started the session. A flow that names a tool the handlers don't define fails when `Flow` joins the two, with every unresolved name reported at once.
+The bot loads whichever of the two it was given with `FlowConfig.from_session`, which validates the text and logs which flow it ran — a session's, or the file beside the bot. That line is worth reading: a flow can go missing on the way in, and a bot running the flow it ships with looks exactly like a session that named none.
+
+That is not hypothetical. The development runner honours `flow_config`, but a platform that starts your bot carries only the fields it knows, and a start request's unknown fields are usually ignored rather than refused. Before relying on a session's flow against a hosted runner, check that the platform passes it through. Even here, telephony and plain `websocket` sessions cannot use it: their bot starts on a later `/ws` or `/ws-client` connection, which carries nothing from the `/start` request, so the runner warns and drops it.
+
+A flow that doesn't match the schema fails the same way whichever of the two it came from. A flow that names a tool the handlers don't define fails when `Flow` joins the two, with every unresolved name reported at once.
+
+Whoever sends `flow_config` writes the bot's system prompt, every task prompt, and which of its tools are offered at each step. It is as privileged as the bot's own code, so accept it only from a caller you would let write that code. Where the caller is less trusted than that — an end user, say, or anyone holding a key that ships in a client app — let them choose among flows someone else has published, named by id and resolved to text by the platform, rather than send a flow of their own.
 
 ## Flows in Python
 
