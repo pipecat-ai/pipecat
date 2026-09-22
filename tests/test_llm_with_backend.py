@@ -397,6 +397,15 @@ async def test_render_output_is_the_seam_for_another_wording():
 # ---------------------------------------------------------------------------
 
 
+def test_a_frontend_that_declines_the_role_is_refused():
+    class _Declining(_TextFrontend):
+        def llm_with_backend_role_objection(self, role):
+            return f"cannot be the {role}: it has a backend of its own"
+
+    with pytest.raises(ValueError, match="cannot be the frontend"):
+        LLMWithBackend(frontend=_Declining(), backend="backend")
+
+
 def test_the_service_adds_the_connector_guidance_to_the_frontend_prompt():
     frontend = _TextFrontend()
     LLMWithBackend(frontend=frontend, backend="backend")
