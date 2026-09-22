@@ -181,6 +181,8 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
     # Overriding the default adapter to use the Anthropic one.
     adapter_class = AnthropicLLMAdapter
 
+    supports_response_schema: bool = True
+
     # Backward compatibility: ThinkingConfig used to be defined inline here.
     ThinkingConfig = AnthropicThinkingConfig
 
@@ -370,6 +372,21 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
         if generation is not None and generation >= _SONNET_THINKS_BY_DEFAULT_FROM:
             params["thinking"] = {"type": "disabled"}
 
+    @staticmethod
+    def model_supports_response_schema(model: str) -> bool:
+        """Whether a model can enforce a response schema.
+
+        Structured outputs arrived with the 4.5 models. A model id without a
+        version, such as a preview, is assumed to support them.
+
+        Args:
+            model: The model name.
+        """
+        match = re.search(r"claude(?:-[a-z]+)?-(\d+)(?:-(\d{1,2})(?!\d))?", model)
+        if not match:
+            return True
+        return (int(match.group(1)), int(match.group(2) or 0)) >= (4, 5)
+
     async def run_inference(
         self,
         context: LLMContext,
@@ -422,6 +439,7 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
         thinking = assert_given(self._settings.thinking)
         if thinking:
             params["thinking"] = thinking.model_dump(exclude_unset=True)
+        response_schema = self._check_response_schema(response_schema)
         if response_schema is not None:
             params["output_config"] = {"format": {"type": "json_schema", "schema": response_schema}}
 

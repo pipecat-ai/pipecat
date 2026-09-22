@@ -294,8 +294,7 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
         Returns:
             The LLM's response as a string, or None if no response is generated.
         """
-        if response_schema is not None:
-            logger.warning(f"{self}: response_schema is not supported by Bedrock and is ignored")
+        self._check_response_schema(response_schema)
         messages = []
         system = []
         effective_instruction = system_instruction or assert_given(

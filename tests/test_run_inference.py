@@ -17,6 +17,7 @@ from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.services.anthropic.llm import AnthropicLLMService
 from pipecat.services.aws.llm import AWSBedrockLLMService
+from pipecat.services.deepseek.llm import DeepSeekLLMService
 from pipecat.services.google.llm import GoogleLLMService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.openai.responses.llm import (
@@ -1210,3 +1211,152 @@ async def test_aws_bedrock_run_inference_ignores_response_schema():
 
     assert result == "yes"
     assert "toolConfig" not in mock_client.converse.call_args.kwargs
+
+
+@pytest.mark.parametrize(
+    "model, supported",
+    [
+        ("gpt-4o-mini", True),
+        ("gpt-4o-2024-08-06", True),
+        ("gpt-4.1", True),
+        ("gpt-5-mini", True),
+        ("o3", True),
+        ("gpt-4o-2024-05-13", False),
+        ("gpt-4-turbo", False),
+        ("gpt-4", False),
+        ("gpt-3.5-turbo", False),
+        ("o1-mini", False),
+    ],
+)
+def test_openai_supports_response_schema(model, supported):
+    assert OpenAILLMService.supports_response_schema is True
+    assert OpenAILLMService.model_supports_response_schema(model) is supported
+    assert OpenAIResponsesLLMService.supports_response_schema is True
+    assert OpenAIResponsesLLMService.model_supports_response_schema(model) is supported
+
+
+@pytest.mark.parametrize(
+    "model, supported",
+    [
+        ("claude-haiku-4-5", True),
+        ("claude-sonnet-4-5-20250929", True),
+        ("claude-opus-4-6", True),
+        ("claude-fable-5-1", True),
+        ("claude-mythos-preview", True),
+        ("claude-opus-4-1-20250805", False),
+        ("claude-sonnet-4-20250514", False),
+        ("claude-3-7-sonnet-20250219", False),
+        ("claude-3-5-haiku-20241022", False),
+    ],
+)
+def test_anthropic_supports_response_schema(model, supported):
+    assert AnthropicLLMService.supports_response_schema is True
+    assert AnthropicLLMService.model_supports_response_schema(model) is supported
+
+
+@pytest.mark.parametrize(
+    "model, supported",
+    [
+        ("gemini-2.5-flash", True),
+        ("gemini-3.6-flash", True),
+        ("gemini-3.1-pro-preview", True),
+        ("gemini-flash-latest", True),
+        ("gemini-2.0-flash-001", False),
+        ("gemini-1.5-pro", False),
+    ],
+)
+def test_google_supports_response_schema(model, supported):
+    assert GoogleLLMService.supports_response_schema is True
+    assert GoogleLLMService.model_supports_response_schema(model) is supported
+
+
+def test_services_without_response_schema():
+    """Bedrock's Converse API and DeepSeek's chat API have no reply schema."""
+    assert AWSBedrockLLMService.supports_response_schema is False
+    assert DeepSeekLLMService.supports_response_schema is False
+
+
+@pytest.mark.asyncio
+async def test_openai_run_inference_response_schema_ignored_on_legacy_model():
+    """A model without schema support gets no response format, and a warning says so."""
+    from loguru import logger
+
+    warnings_seen = []
+    handler = logger.add(lambda message: warnings_seen.append(message), level="WARNING")
+    try:
+        with patch.object(OpenAILLMService, "create_client"):
+            service = OpenAILLMService(settings=OpenAILLMService.Settings(model="gpt-4-turbo"))
+            service._client = AsyncMock()
+            mock_response = MagicMock()
+            mock_response.choices = [MagicMock()]
+            mock_response.choices[0].message.content = "yes"
+            service._client.chat.completions.create.return_value = mock_response
+
+            result = await service.run_inference(
+                LLMContext(messages=[{"role": "user", "content": "?"}]),
+                response_schema=RESPONSE_SCHEMA,
+            )
+    finally:
+        logger.remove(handler)
+
+    assert result == "yes"
+    assert "response_format" not in service._client.chat.completions.create.call_args.kwargs
+    assert any(
+        "response_schema is not supported by model gpt-4-turbo" in str(m) for m in warnings_seen
+    )
+
+
+@pytest.mark.asyncio
+async def test_anthropic_run_inference_response_schema_ignored_on_legacy_model():
+    service = AnthropicLLMService(
+        api_key="test-key", settings=AnthropicLLMService.Settings(model="claude-3-5-haiku-20241022")
+    )
+    service._client = AsyncMock()
+    mock_adapter = MagicMock()
+    mock_adapter.get_llm_invocation_params.return_value = AnthropicLLMInvocationParams(
+        messages=[{"role": "user", "content": "Is water wet?"}], system="Answer.", tools=[]
+    )
+    service.get_llm_adapter = MagicMock(return_value=mock_adapter)
+    mock_response = MagicMock()
+    mock_response.content = [MagicMock()]
+    mock_response.content[0].text = "yes"
+    service._client.beta.messages.create.return_value = mock_response
+
+    result = await service.run_inference(
+        MagicMock(spec=LLMContext), response_schema=RESPONSE_SCHEMA
+    )
+
+    assert result == "yes"
+    call_kwargs = service._client.beta.messages.create.call_args.kwargs
+    assert "output_config" not in call_kwargs
+
+
+@pytest.mark.asyncio
+async def test_google_run_inference_response_schema_ignored_on_legacy_model():
+    service = GoogleLLMService(
+        api_key="test-key", settings=GoogleLLMService.Settings(model="gemini-2.0-flash")
+    )
+    service._client = AsyncMock()
+    mock_adapter = MagicMock()
+    mock_adapter.get_llm_invocation_params.return_value = GeminiLLMInvocationParams(
+        messages=[{"role": "user", "content": "Is water wet?"}],
+        system_instruction="Answer.",
+        tools=NotGiven(),
+    )
+    service.get_llm_adapter = MagicMock(return_value=mock_adapter)
+    mock_response = MagicMock()
+    mock_response.candidates = [MagicMock()]
+    mock_response.candidates[0].content.parts = [MagicMock()]
+    mock_response.candidates[0].content.parts[0].text = "yes"
+    service._client.aio = AsyncMock()
+    service._client.aio.models = AsyncMock()
+    service._client.aio.models.generate_content = AsyncMock(return_value=mock_response)
+
+    result = await service.run_inference(
+        MagicMock(spec=LLMContext), response_schema=RESPONSE_SCHEMA
+    )
+
+    assert result == "yes"
+    config = service._client.aio.models.generate_content.call_args.kwargs["config"]
+    assert config.response_mime_type is None
+    assert config.response_json_schema is None

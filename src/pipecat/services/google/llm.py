@@ -13,6 +13,7 @@ including LLM services, context management, and message aggregation.
 import asyncio
 import io
 import os
+import re
 import uuid
 from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import aclosing
@@ -167,6 +168,8 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
 
     # Overriding the default adapter to use the Gemini one.
     adapter_class = GeminiLLMAdapter
+
+    supports_response_schema: bool = True
 
     # Backward compatibility: ThinkingConfig used to be defined inline here.
     ThinkingConfig = GoogleThinkingConfig
@@ -335,6 +338,21 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
         """Create the Gemini client instance. Subclasses can override this."""
         self._client = genai.Client(api_key=self._api_key, http_options=self._http_options)
 
+    @staticmethod
+    def model_supports_response_schema(model: str) -> bool:
+        """Whether a model can enforce a response schema.
+
+        Gemini takes a JSON schema from the 2.5 models on. A model id without
+        a version is assumed to support it.
+
+        Args:
+            model: The model name.
+        """
+        match = re.search(r"gemini(?:-[a-z]+)*-(\d+)(?:\.(\d+))?", model)
+        if not match:
+            return True
+        return (int(match.group(1)), int(match.group(2) or 0)) >= (2, 5)
+
     async def run_inference(
         self,
         context: LLMContext,
@@ -382,6 +400,7 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
         if max_tokens is not None:
             generation_params["max_output_tokens"] = max_tokens
 
+        response_schema = self._check_response_schema(response_schema)
         if response_schema is not None:
             generation_params["response_mime_type"] = "application/json"
             generation_params["response_json_schema"] = response_schema
