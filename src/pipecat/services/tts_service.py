@@ -1133,7 +1133,7 @@ class TTSService(AIService):
             if len(buffer) % 2 == 1:
                 buffer.extend(b"\x00")
             audio = await maybe_resample(bytes(buffer))
-            yield TTSAudioRawFrame(audio, self.sample_rate, 1)
+            yield TTSAudioRawFrame(audio, self.sample_rate, 1, context_id=context_id)
 
     async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
         self._processing_text = False

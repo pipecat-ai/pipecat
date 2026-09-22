@@ -536,7 +536,11 @@ class GeminiTTSSettings(TTSSettings):
 
     Parameters:
         prompt: Optional style instructions for how to synthesize the content.
-        multi_speaker: Whether to enable multi-speaker support.
+            Supported on the GCP backend, and on the Gemini API backend by
+            Gemini 3.8 TTS models (sent as a ``speech_metadata.style``
+            annotation); older models on the Gemini API backend ignore it
+            with a warning.
+        multi_speaker: Whether to enable multi-speaker support (GCP backend only).
         speaker_configs: List of speaker configurations for multi-speaker mode.
     """
 
@@ -1212,9 +1216,17 @@ class GeminiTTSService(GoogleBaseTTSService):
     Model names differ by backend. Cloud Text-to-Speech takes
     ``gemini-3.1-flash-tts-preview``, ``gemini-2.5-flash-tts``,
     ``gemini-2.5-flash-lite-preview-tts`` and ``gemini-2.5-pro-tts``; the Gemini API
-    takes ``gemini-3.1-flash-tts-preview``, ``gemini-2.5-flash-preview-tts`` and
+    takes ``gemini-3.8-flash-tts``, ``gemini-3.8-flash-lite-tts``,
+    ``gemini-3.1-flash-tts-preview``, ``gemini-2.5-flash-preview-tts`` and
     ``gemini-2.5-pro-preview-tts``. Defaults to ``gemini-3.1-flash-tts-preview``,
     which both backends accept.
+
+    Gemini 3.8 TTS models (Gemini API backend, google-genai >= 2.25.0) treat the
+    input text strictly as a verbatim transcript: the ``prompt`` setting is sent
+    as a structured ``speech_metadata.style`` annotation, and only momentary
+    vocal events belong inline in the text as angle-bracket tags (``<laugh>``,
+    ``<sigh>``, ``<short pause>``). Custom voices from Voice design are
+    supported via their ``voice_...`` IDs.
 
     Note:
         Requires Google Cloud credentials via service account JSON, credentials file,
@@ -1385,7 +1397,9 @@ class GeminiTTSService(GoogleBaseTTSService):
             self._warn_init_param_moved_to_settings("voice_id", "voice")
             default_settings.voice = voice_id
 
-        if default_settings.voice not in self.AVAILABLE_VOICES:
+        voice = assert_given(default_settings.voice)
+        # Custom voice IDs begin with `voice_`
+        if voice not in self.AVAILABLE_VOICES and not voice.startswith("voice_"):
             logger.warning(
                 f"Voice '{default_settings.voice}' not in known voices list. Using anyway."
             )
@@ -1423,6 +1437,7 @@ class GeminiTTSService(GoogleBaseTTSService):
         self._warn_unsupported_genai_settings(
             multi_speaker=assert_given(default_settings.multi_speaker),
             prompt=assert_given(default_settings.prompt),
+            model=assert_given(default_settings.model),
         )
 
     def _create_client(
@@ -1462,13 +1477,27 @@ class GeminiTTSService(GoogleBaseTTSService):
                 # Do nothing - we're shutting down anyway.
                 pass
 
+    @staticmethod
+    def _is_gemini_38_tts(model: str | None) -> bool:
+        """Whether the model follows the Gemini 3.8 TTS request contract.
+
+        Gemini 3.8 TTS models treat input text as a verbatim transcript, take
+        style instructions via ``speech_metadata``, and return WAV by default.
+        Covers the official ``gemini-3.8-*-tts`` names and the ``sonic-*``
+        preview codenames.
+        """
+        if not model:
+            return False
+        return "-3.8-" in model or model.startswith("sonic-")
+
     def _warn_unsupported_genai_settings(
-        self, *, multi_speaker: bool | None, prompt: str | None
+        self, *, multi_speaker: bool | None, prompt: str | None, model: str | None
     ) -> None:
         """Warn about settings the GenAI backend silently ignores.
 
-        The Gemini API (GenAI) backend supports neither multi-speaker output nor
-        prompt/style instructions. This is a no-op on the GCP backend.
+        The Gemini API (GenAI) backend does not support multi-speaker output.
+        Prompt/style instructions are supported only by Gemini 3.8 TTS models
+        (sent as ``speech_metadata.style``). This is a no-op on the GCP backend.
         """
         if not self._use_genai:
             return
@@ -1477,10 +1506,10 @@ class GeminiTTSService(GoogleBaseTTSService):
                 f"{self}: Multi-speaker is not supported by the Gemini API (GenAI) TTS "
                 "backend; using a single speaker."
             )
-        if prompt:
+        if prompt and not self._is_gemini_38_tts(model):
             logger.warning(
-                f"{self}: Prompt/style instructions are not supported by the Gemini API "
-                "(GenAI) TTS backend."
+                f"{self}: Prompt/style instructions require a Gemini 3.8 TTS model on "
+                "the Gemini API (GenAI) backend."
             )
 
     def language_to_service_language(self, language: Language) -> str | None:
@@ -1516,13 +1545,19 @@ class GeminiTTSService(GoogleBaseTTSService):
         Returns:
             Dict mapping changed field names to their previous values.
         """
-        if is_given(delta.voice) and delta.voice not in self.AVAILABLE_VOICES:
+        if (
+            is_given(delta.voice)
+            and delta.voice not in self.AVAILABLE_VOICES
+            and not delta.voice.startswith("voice_")
+        ):
             logger.warning(f"Voice '{delta.voice}' not in known voices list. Using anyway.")
 
         if isinstance(delta, self.Settings):
+            model = delta.model if is_given(delta.model) else self._settings.model
             self._warn_unsupported_genai_settings(
                 multi_speaker=delta.multi_speaker if is_given(delta.multi_speaker) else None,
                 prompt=delta.prompt if is_given(delta.prompt) else None,
+                model=model if is_given(model) else None,
             )
 
         return await super()._update_settings(delta)
@@ -1531,10 +1566,15 @@ class GeminiTTSService(GoogleBaseTTSService):
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         """Generate streaming speech from text using Gemini TTS models.
 
+        Gemini 3.8 TTS models treat the text as a verbatim transcript. Momentary
+        vocal events may appear inline as angle-bracket tags (e.g. ``<laugh>``,
+        ``<sigh>``, ``<short pause>``); sustained delivery style belongs in the
+        ``prompt`` setting, not in the text. Older models accept square-bracket
+        markup tags like ``[sigh]`` or ``[whispering]`` in the text instead.
+
         Args:
             text: The text to synthesize into speech.
-            context_id: The context ID for tracking audio frames. Can include markup tags
-                  like [sigh], [laughing], [whispering] for expressive control.
+            context_id: The context ID for tracking audio frames.
 
         Yields:
             Frame: Audio frames containing the synthesized speech as it's generated.
@@ -1601,9 +1641,18 @@ class GeminiTTSService(GoogleBaseTTSService):
         logger.debug(f"{self}: Generating GenAI TTS [{text}]")
 
         try:
-            config = genai.types.GenerateContentConfig(
-                response_modalities=["AUDIO"],
-                speech_config=genai.types.SpeechConfig(
+            model = assert_given(self._settings.model)
+            is_gemini_38 = self._is_gemini_38_tts(model)
+
+            if is_gemini_38 and not hasattr(genai.types, "SpeechMetadata"):
+                yield ErrorFrame(
+                    error=f"Gemini 3.8 TTS models require google-genai >= 2.25.0 (model: {model})"
+                )
+                return
+
+            config_kwargs: dict[str, Any] = {
+                "response_modalities": ["AUDIO"],
+                "speech_config": genai.types.SpeechConfig(
                     language_code=assert_given(self._settings.language),
                     voice_config=genai.types.VoiceConfig(
                         prebuilt_voice_config=genai.types.PrebuiltVoiceConfig(
@@ -1611,51 +1660,55 @@ class GeminiTTSService(GoogleBaseTTSService):
                         )
                     ),
                 ),
-            )
+            }
+
+            contents: Any = text
+            if is_gemini_38:
+                # Gemini 3.8 TTS treats the input strictly as a verbatim
+                # transcript: sustained style goes in speech_metadata. The
+                # response defaults to WAV (google-genai 2.25.0 offers no way to
+                # request raw PCM via GenerateContentConfig), so the audio
+                # streaming below strips a RIFF header when one arrives.
+                part_kwargs: dict[str, Any] = {"text": text}
+                prompt = self._settings.prompt
+                if is_given(prompt) and prompt:
+                    part_kwargs["speech_metadata"] = genai.types.SpeechMetadata(style=prompt)
+                contents = [
+                    genai.types.Content(role="user", parts=[genai.types.Part(**part_kwargs)])
+                ]
+
+            config = genai.types.GenerateContentConfig(**config_kwargs)
 
             await self.start_tts_usage_metrics(text)
 
             client = cast("genai.Client", self._client)
 
-            model = assert_given(self._settings.model)
-            assert model is not None
-
             response = await client.aio.models.generate_content_stream(
                 model=model,
-                contents=text,
+                contents=contents,
                 config=config,
             )
 
-            audio_buffer = b""
-            first_chunk_for_ttfb = False
-            CHUNK_SIZE = self.chunk_size
-
-            async for chunk in response:
-                if (
-                    chunk.candidates
-                    and chunk.candidates[0].content
-                    and chunk.candidates[0].content.parts
-                ):
+            async def audio_chunks() -> AsyncGenerator[bytes, None]:
+                first_chunk_for_ttfb = False
+                async for chunk in response:
+                    if not (
+                        chunk.candidates
+                        and chunk.candidates[0].content
+                        and chunk.candidates[0].content.parts
+                    ):
+                        continue
                     for part in chunk.candidates[0].content.parts:
-                        if part.inline_data:
-                            audio_bytes = part.inline_data.data
-                            if not audio_bytes:
-                                continue
-
+                        if part.inline_data and part.inline_data.data:
                             if not first_chunk_for_ttfb:
                                 await self.stop_ttfb_metrics()
                                 first_chunk_for_ttfb = True
+                            yield part.inline_data.data
 
-                            audio_buffer += audio_bytes
-                            while len(audio_buffer) >= CHUNK_SIZE:
-                                piece = audio_buffer[:CHUNK_SIZE]
-                                audio_buffer = audio_buffer[CHUNK_SIZE:]
-                                yield TTSAudioRawFrame(
-                                    piece, self.sample_rate, 1, context_id=context_id
-                                )
-
-            if audio_buffer:
-                yield TTSAudioRawFrame(audio_buffer, self.sample_rate, 1, context_id=context_id)
+            async for frame in self._stream_audio_frames_from_iterator(
+                audio_chunks(), strip_wav_header=is_gemini_38, context_id=context_id
+            ):
+                yield frame
 
         except Exception as e:
             yield ErrorFrame(error=f"Gemini GenAI TTS generation error: {str(e)}")
