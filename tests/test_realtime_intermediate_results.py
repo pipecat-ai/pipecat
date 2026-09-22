@@ -342,6 +342,56 @@ class TestNovaSonicIntermediateResults(unittest.IsolatedAsyncioTestCase):
         self.assertIn("call_1", self.service._completed_tool_calls)
 
 
+class TestUltravoxIntermediateResults(unittest.IsolatedAsyncioTestCase):
+    """Ultravox takes them as user-side text, urgent or not."""
+
+    def setUp(self):
+        from pipecat.services.ultravox.llm import (
+            OneShotInputParams,
+            UltravoxRealtimeLLMService,
+        )
+
+        self.service = UltravoxRealtimeLLMService(
+            params=OneShotInputParams(api_key="test", system_prompt="test")
+        )
+        self.service._socket = object()
+        self.service._send = AsyncMock()
+
+    def _sent(self) -> list[dict]:
+        return [c.args[0] for c in self.service._send.call_args_list]
+
+    async def test_an_intermediate_result_goes_in_as_text_to_speak_about(self):
+        await self.service.push_frame(_result(is_final=False))
+
+        (message,) = self._sent()
+        self.assertEqual(message["type"], "user_text_message")
+        self.assertIn("still running", message["text"])
+        self.assertEqual(message["urgency"], "soon")
+
+    async def test_a_silent_result_goes_in_as_context(self):
+        await self.service.push_frame(_result(is_final=False, run_llm=False))
+
+        (message,) = self._sent()
+        self.assertEqual(message["urgency"], "later")
+
+    async def test_a_final_result_settles_the_call(self):
+        await self.service.push_frame(_result(is_final=True))
+
+        (message,) = self._sent()
+        self.assertEqual(message["type"], "client_tool_result")
+        self.assertEqual(message["invocationId"], "call_1")
+
+    async def test_a_final_result_for_an_async_call_goes_in_as_text(self):
+        # The placeholder already settled the call, so the result can't.
+        self.service._started_placeholder_sent.add("call_1")
+
+        await self.service.push_frame(_result(is_final=True))
+
+        (message,) = self._sent()
+        self.assertEqual(message["type"], "user_text_message")
+        self.assertIn("Async tool result", message["text"])
+
+
 class _Usage:
     input_tokens = 0
     output_tokens = 0
