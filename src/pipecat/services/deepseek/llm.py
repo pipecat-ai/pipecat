@@ -62,6 +62,7 @@ class DeepSeekLLMService(OpenAILLMService):
     # DeepSeek doesn't support the "developer" message role.
     # This value is used by BaseOpenAILLMService when calling the adapter.
     supports_developer_role = False
+    supports_response_schema = False
 
     # Supplies the `reasoning_content` DeepSeek requires on assistant messages
     # in thinking mode.

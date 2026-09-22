@@ -8,6 +8,7 @@
 
 import asyncio
 import json
+import re
 from collections.abc import Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -72,6 +73,13 @@ class OpenAILLMSettings(LLMSettings):
     )
 
 
+# OpenAI models that predate strict JSON schema replies: gpt-3.5, gpt-4 and
+# gpt-4-turbo, the first gpt-4o snapshot, chatgpt-4o and the o1 previews.
+OPENAI_MODEL_WITHOUT_RESPONSE_SCHEMA = re.compile(
+    r"^(gpt-3\.5|gpt-4($|-)|gpt-4o-2024-05-13|chatgpt-4o|o1-mini|o1-preview)"
+)
+
+
 class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
     """Base class for all services that use the AsyncOpenAI client.
 
@@ -92,6 +100,10 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
     this to ``False``, which causes the adapter to convert "developer"
     messages to "user" messages before sending them to the API.
     """
+
+    supports_response_schema: bool = True
+    """Whether the API can enforce a response schema. OpenAI-compatible
+    services whose API cannot should set this to ``False``."""
 
     @deprecated(
         "`BaseOpenAILLMService.InputParams` is deprecated since 0.0.105 and will be removed in "
@@ -384,11 +396,23 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
 
         return params
 
+    @staticmethod
+    def model_supports_response_schema(model: str) -> bool:
+        """Whether a model can enforce a response schema.
+
+        OpenAI models before gpt-4o-mini and gpt-4o-2024-08-06 cannot.
+
+        Args:
+            model: The model name.
+        """
+        return not OPENAI_MODEL_WITHOUT_RESPONSE_SCHEMA.match(model)
+
     async def run_inference(
         self,
         context: LLMContext,
         max_tokens: int | None = None,
         system_instruction: str | None = None,
+        response_schema: dict[str, Any] | None = None,
     ) -> str | None:
         """Run a one-shot, out-of-band (i.e. out-of-pipeline) inference with the given LLM context.
 
@@ -398,6 +422,9 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
                 overrides the service's default max_tokens/max_completion_tokens setting.
             system_instruction: Optional system instruction to use for this inference.
                 If provided, overrides any system instruction in the context.
+            response_schema: Optional JSON schema the reply must follow. The
+                service asks the provider to enforce it, so the reply is JSON
+                text matching the schema.
 
         Returns:
             The LLM's response as a string, or None if no response is generated.
@@ -426,6 +453,13 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
                 params["max_completion_tokens"] = max_tokens
             else:
                 params["max_tokens"] = max_tokens
+
+        response_schema = self._check_response_schema(response_schema)
+        if response_schema is not None:
+            params["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {"name": "response", "schema": response_schema, "strict": True},
+            }
 
         # LLM completion
         response = await self._client.chat.completions.create(**params)

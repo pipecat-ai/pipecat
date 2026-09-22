@@ -302,6 +302,13 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         "The function `{function_name}` failed and returned no result."
     )
 
+    supports_response_schema: bool = False
+    """Whether the provider can enforce a response schema in ``run_inference()``.
+
+    Services whose provider can set this to ``True``. When only some of its
+    models can, they also override :meth:`model_supports_response_schema`.
+    """
+
     def __init__(
         self,
         run_in_parallel: bool = True,
@@ -446,6 +453,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         context: LLMContext,
         max_tokens: int | None = None,
         system_instruction: str | None = None,
+        response_schema: dict[str, Any] | None = None,
     ) -> str | None:
         """Run a one-shot, out-of-band (i.e. out-of-pipeline) inference with the given LLM context.
 
@@ -457,11 +465,45 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 overrides the service's default max_tokens/max_completion_tokens setting.
             system_instruction: Optional system instruction to use for this inference.
                 If provided, overrides any system instruction in the context.
+            response_schema: Optional JSON schema the reply must follow. Services
+                that can have the provider enforce it return JSON text matching
+                the schema. When the service or its current model cannot
+                enforce one (see :attr:`supports_response_schema`), the schema
+                is ignored with a warning. The schema must satisfy the
+                strictest provider in use: every object lists all its
+                properties as required and sets ``additionalProperties`` to
+                false.
 
         Returns:
             The LLM's response as a string, or None if no response is generated.
         """
         raise NotImplementedError(f"run_inference() not supported by {self.__class__.__name__}")
+
+    def _check_response_schema(
+        self, response_schema: dict[str, Any] | None
+    ) -> dict[str, Any] | None:
+        """The schema to send, or None with a warning if it cannot be enforced."""
+        if response_schema is None:
+            return None
+        if not self.supports_response_schema:
+            logger.warning(f"{self}: response_schema is not supported and is ignored")
+            return None
+        if not self.model_supports_response_schema(self._settings.model or ""):
+            logger.warning(
+                f"{self}: response_schema is not supported by model {self._settings.model} "
+                "and is ignored"
+            )
+            return None
+        return response_schema
+
+    @staticmethod
+    def model_supports_response_schema(model: str) -> bool:
+        """Whether a model can enforce a response schema, on a provider that can.
+
+        Args:
+            model: The model name.
+        """
+        return True
 
     @property
     def reports_ttfat(self) -> bool:
