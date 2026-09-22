@@ -361,6 +361,104 @@ async def test_sip_refer_sends_refer_and_call_transfer_is_rejected():
     assert connection.transfer.await_count == 1  # the rejection never touched the call
 
 
+def _fake_consult():
+    consult = Mock()
+    consult.connect = AsyncMock()
+    consult.dial = AsyncMock()
+    consult.wait_established = AsyncMock()
+    consult.disconnect = AsyncMock()
+    return consult
+
+
+@pytest.mark.asyncio
+async def test_sip_attended_transfer_dials_consult_then_splices():
+    transport, connection = make_transport()
+    set_active_call(connection, handle=7)
+    transport._dial_in_session_id = "7"
+    connection.attended_transfer = AsyncMock()
+    consult = _fake_consult()
+    connection.consult_connection = Mock(return_value=consult)
+
+    # Bad inputs are refused before any consult leg is placed.
+    assert (
+        await transport.sip_attended_transfer({})
+        == "Can't transfer SIP call if 'toEndPoint' is not set"
+    )
+    assert (
+        await transport.sip_attended_transfer(
+            {"sessionId": "999", "toEndPoint": "sip:9196@example.com"}
+        )
+        == "no such session"
+    )
+    connection.consult_connection.assert_not_called()
+
+    # Happy path: dial the target, confirm it answered, splice, tear the
+    # consult leg down.
+    assert await transport.sip_attended_transfer({"toEndPoint": "sip:9196@example.com"}) is None
+    consult.connect.assert_awaited_once()
+    consult.dial.assert_awaited_once_with("sip:9196@example.com")
+    consult.wait_established.assert_awaited_once()
+    connection.attended_transfer.assert_awaited_once_with(consult)
+    consult.disconnect.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_sip_attended_transfer_failure_cleans_up_and_resumes():
+    transport, connection = make_transport()
+    set_active_call(connection, handle=7)
+    transport._dial_in_session_id = "7"
+    connection.attended_transfer = AsyncMock(side_effect=RuntimeError("replaces_unsupported"))
+    connection.resume = AsyncMock()
+    consult = _fake_consult()
+    connection.consult_connection = Mock(return_value=consult)
+
+    error = await transport.sip_attended_transfer({"toEndPoint": "sip:9196@example.com"})
+
+    assert "replaces_unsupported" in error
+    assert transport._transfer_pending is False  # not left armed for the next close
+    consult.disconnect.assert_awaited_once()  # consult leg torn down even on failure
+    # A failed splice leaves the active call on hold; it must be resumed.
+    connection.resume.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_sip_attended_transfer_setup_failure_leaves_active_call_alone():
+    # A consult leg that never establishes must not touch the active call:
+    # the splice never held it, so there is nothing to resume.
+    transport, connection = make_transport()
+    set_active_call(connection, handle=7)
+    transport._dial_in_session_id = "7"
+    connection.attended_transfer = AsyncMock()
+    connection.resume = AsyncMock()
+    consult = _fake_consult()
+    consult.wait_established = AsyncMock(side_effect=RuntimeError("no answer"))
+    connection.consult_connection = Mock(return_value=consult)
+
+    error = await transport.sip_attended_transfer({"toEndPoint": "sip:9196@example.com"})
+
+    assert "no answer" in error
+    connection.attended_transfer.assert_not_awaited()
+    connection.resume.assert_not_awaited()
+    consult.disconnect.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_transfer_close_reports_transferred_reason():
+    # While a transfer is splicing, the active call's close is reported as
+    # "transferred" so a bot tells it apart from a hangup; the flag is cleared.
+    transport, connection = make_transport()
+    recorded = record_events(transport, ["on_dialin_stopped"])
+    transport._transfer_pending = True
+
+    closed = dict(IN_PAYLOAD, reason="", established=True)
+    await connection._call_event_handler("call_closed", closed)
+    await settle()
+
+    stopped = recorded[0][1][0]
+    assert stopped["reason"] == "transferred"
+    assert transport._transfer_pending is False
+
+
 def tx_info(**kwargs):
     """An AudioInfo stand-in with a healthy, empty transmit buffer."""
     fields = dict(tx_sample_rate=8000, tx_channels=1, tx_buffered=0, tx_ready=True)
