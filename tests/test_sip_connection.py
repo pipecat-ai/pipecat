@@ -279,6 +279,32 @@ def test_consult_connection_shares_account_and_is_registrationless():
     assert consult._account.extra_params == ("medianat=stun",)
     # A consult leg never registers; it reuses the primary's registered UA.
     assert consult._account.reg_interval == 0
+    # ...and stays out of inbound routing so a call never lands on it while idle.
+    assert consult._route_inbound is False
+
+
+@pytest.mark.asyncio
+async def test_consult_leg_is_not_routed_inbound(env):
+    # A consult leg opts out of inbound routing, so an incoming call is never
+    # handed to it while it sits idle between connect and dial — even when the
+    # primary is busy, the call is rejected rather than landing on the consult.
+    primary = make_connection()
+    await primary.connect()
+    primary.take_incoming(make_fake_call(handle=0xA1))  # primary is now busy
+    assert primary.has_active_call
+
+    consult = primary.consult_connection()
+    await consult.connect()
+    assert not consult.has_active_call
+
+    route = env.ua.incoming_callbacks[0]
+    incoming = make_fake_call(handle=0xB2)
+    route(incoming)
+    for _ in range(10):
+        await asyncio.sleep(0)
+
+    assert not consult.has_active_call  # the consult leg never claimed it
+    incoming.reject.assert_awaited_once()  # every routed connection was busy
 
 
 @pytest.mark.asyncio
@@ -351,8 +377,29 @@ async def test_call_events_relay_established_and_closed(env):
     listener(StackEvent(event=Event.CALL_CLOSED, call=call.handle, text="hangup"))
     await asyncio.wait_for(closed.wait(), EVENT_TIMEOUT)
     assert closed_payloads[0]["reason"] == "hangup"
+    assert closed_payloads[0]["transferred"] is False  # a hangup is not a transfer
     assert closed_payloads[0]["established"] is True
     assert not connection.has_active_call
+
+
+@pytest.mark.asyncio
+async def test_call_closed_flags_transfer_from_reason(env):
+    # The connection derives a `transferred` flag from the stack's exact
+    # transfer-success close reason, so a completed transfer (blind or Replaces)
+    # is told apart from a hangup on the close.
+    connection = make_connection()
+    await connection.connect()
+    call = make_fake_call()
+    env.ua.dial.return_value = call
+    closed_payloads, closed = capture(connection, "call_closed")
+
+    await connection.dial("sip:9196@example.com")
+    listener = call.listeners[0]
+
+    listener(StackEvent(event=Event.CALL_CLOSED, call=call.handle, text="Call transfered"))
+    await asyncio.wait_for(closed.wait(), EVENT_TIMEOUT)
+    assert closed_payloads[0]["reason"] == "Call transfered"
+    assert closed_payloads[0]["transferred"] is True
 
 
 @pytest.mark.asyncio

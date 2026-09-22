@@ -225,7 +225,7 @@ def resolve_media_nat_params(explicit: str | None) -> tuple[str, ...] | None:
         return None
 
     stun_uri = stun if stun.startswith(("stun:", "stuns:")) else f"stun:{stun}"
-    logger.warning(
+    logger.info(
         f"SIP media-NAT: enabling medianat=stun via {stun_uri} by default so media "
         "works behind NAT. If calls have one-way or no audio, this STUN server may be "
         "unreachable (baresip logs 'medianat ... failed'); on a public-IP host STUN is "
