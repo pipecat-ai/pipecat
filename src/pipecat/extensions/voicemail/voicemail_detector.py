@@ -32,6 +32,7 @@ from pipecat.classifiers.llm.classifier import DEFAULT_INSTRUCTIONS, LLMClassifi
 from pipecat.frames.frames import (
     EndFrame,
     Frame,
+    MetricsFrame,
     StopFrame,
     SystemFrame,
     TranscriptionFrame,
@@ -43,6 +44,7 @@ from pipecat.frames.frames import (
     UserStoppedSpeakingFrame,
     WorkerFrame,
 )
+from pipecat.metrics.metrics import MetricsData
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 from pipecat.services.llm_service import LLMService
 from pipecat.utils.sync.base_notifier import BaseNotifier
@@ -282,6 +284,8 @@ class VoicemailDetector(FrameProcessor):
         self._register_event_handler("on_conversation_detected")
         self._register_event_handler("on_voicemail_detected")
 
+        self._classifier.add_event_handler("on_metrics", self._on_classifier_metrics)
+
     def detector(self) -> "VoicemailDetector":
         """The processor to place after the STT service.
 
@@ -435,6 +439,10 @@ class VoicemailDetector(FrameProcessor):
             logger.info(f"{self}: CONVERSATION detected")
             await self._conversation_notifier.notify()
             await self._call_event_handler("on_conversation_detected")
+
+    async def _on_classifier_metrics(self, classifier: BaseClassifier, data: list[MetricsData]):
+        """Push the classifier's metrics into the pipeline."""
+        await self.push_frame(MetricsFrame(data=data))
 
     async def _delayed_voicemail_handler(self):
         """Fire ``on_voicemail_detected`` once the greeting has been quiet for the delay."""

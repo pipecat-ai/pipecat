@@ -16,12 +16,14 @@ from pipecat.frames.frames import (
     EndWorkerFrame,
     Frame,
     LLMTextFrame,
+    MetricsFrame,
     TranscriptionFrame,
     TTSStartedFrame,
     TTSTextFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
+from pipecat.metrics.metrics import ProcessingMetricsData
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.llm_service import LLMService
@@ -51,13 +53,13 @@ class _FakeClassifier(BaseClassifier):
     async def cleanup(self):
         self.cleaned_up = True
 
-    async def ask(self, state, questions):
+    async def _ask(self, state, questions):
         self.asked.append(state)
         answer = self.answers.pop(0)
         if isinstance(answer, Exception):
             raise answer
         label, confidence = answer
-        return {
+        results = {
             name: ChoiceResult(
                 choice=label,
                 probabilities={o: float(o == label) for o in q.options},
@@ -65,6 +67,7 @@ class _FakeClassifier(BaseClassifier):
             )
             for name, q in questions.items()
         }
+        return results, None
 
 
 class _Passthrough(FrameProcessor):
@@ -107,6 +110,21 @@ class TestVoicemailDetectorVerdicts(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(fired, [detector])
         self.assertEqual(classifier.asked, ["Hi, you've reached Sam."])
+
+    async def test_each_classification_pushes_its_metrics(self):
+        detector, _ = _detector(("conversation", 0.9))
+
+        down, _ = await run_test(
+            detector,
+            frames_to_send=[_said("Hello?"), SleepFrame(VERDICT_SETTLE)],
+            start_timeout=5.0,
+        )
+
+        metrics = [f for f in down if isinstance(f, MetricsFrame)]
+        self.assertEqual(len(metrics), 1)
+        (processing,) = metrics[0].data
+        self.assertIsInstance(processing, ProcessingMetricsData)
+        self.assertEqual(processing.processor, detector._classifier.name)
 
     async def test_conversation_verdict_fires_handler(self):
         detector, _ = _detector(("conversation", 0.9))
