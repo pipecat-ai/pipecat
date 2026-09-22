@@ -354,25 +354,14 @@ class MOQParams(TransportParams):
             serve mode publishes its own as
             :attr:`MOQTransport.cert_fingerprints` for exactly this. Again,
             an alternative to disabling ``verify_ssl``, not a companion.
-        connection_timeout: How long, in seconds, the peer may be missing
-            before the transport gives up on it. It bounds the wait for
-            the peer to join, which its broadcast being announced ends.
-            In client mode it also bounds an outage: it counts from when
-            the session drops, or the peer's tracks end without its
-            ``session-ending`` marker, until the peer's data flows again,
-            and the transport redials the relay for that long, backing
-            off from 0.5 s to 2 s. A redial that succeeds does not
-            restart it. A relay that vanishes without closing the session
-            is noticed by a traffic-stall watchdog well before the QUIC
-            idle timeout (~30 s) would report it, and the count starts
-            there. It must outlast a load balancer failing a dead relay
-            out (~30 s), since until then redials can be pinned to the
-            dead target. While the peer is missing it is not reported
-            gone. Once the time is up the transport fires
-            ``on_client_disconnected`` for a peer it had seen, and pushes
-            a permanent connectivity error if it has no session with the
-            relay. A token the relay refuses, whether at the dial or by
-            closing the session, is never retried.
+        connection_timeout: How long, in seconds, the peer may be
+            missing before the transport gives up on it. It bounds the
+            wait for the peer to join and, in client mode, an outage,
+            during which the transport redials the relay with backoff.
+            When it expires, the transport fires
+            ``on_client_disconnected`` for a peer it had seen, and
+            pushes a permanent connectivity error if it has no session
+            with the relay.
         serve: When ``True``, the bot binds its own UDP socket and accepts
             incoming MOQ sessions instead of dialing a relay.
         bind: Local UDP socket bind address. In serve mode it's the
@@ -613,31 +602,34 @@ class MOQTransportClient:
         # mirroring DailyTransportClient's join/leave counter.
         self._holders = 0
 
-        # Record metadata on the bot's transcript stream; see the module
-        # docstring. The count spans reconnects because the stream does.
+        # Identifies this transport instance on its transcript records.
         self._epoch = secrets.token_hex(8)
+        # Next record's ``seq``; spans reconnects because the stream does.
         self._next_seq = 0
-        # Every record published so far, replayed into the stream a redial
-        # creates so a subscriber that joins late still gets the whole log.
-        # It grows for the life of the call, as the stream it feeds does:
-        # a subscriber reads the stream from its first record, and nothing
-        # tells the transport what a given subscriber already has.
+        # Every record published, for replay into a redialed stream.
         self._transcript_log: list[dict] = []
-        # Set while a redial replays the log into a new stream; records
-        # published meanwhile reach the stream from the replay, in order.
+
+        # Set while a redial replays the log into a new stream. A record
+        # published mid-replay is only logged; the replay writes it in turn.
         self._transcript_replaying = False
-        # Dedupe watermark for the peer's transcript stream, kept across
-        # redials because the peer's log is replayed to every new
-        # subscription.
+
+        # Epoch of the peer's transcript records last seen; a new one
+        # resets the watermark.
         self._peer_epoch: str | None = None
+        # Dedupe watermark: highest peer ``seq`` accepted, kept across
+        # redials.
         self._peer_last_seq = -1
+
         # Whether the peer's broadcast has been seen and not yet reported
-        # gone. Set when it is announced, cleared by ``_report_peer_gone``.
+        # gone. Cleared by ``_report_peer_gone``.
         self._peer_connected = False
+        # Whether a dial has succeeded; a later dial is a redial.
         self._connected_once = False
-        # Whether a session (or the serve bind) is up and reported through
-        # ``on_connected``, and whether one ever was.
+
+        # Whether a session (or the serve bind) is up and reported
+        # through ``on_connected``.
         self._session_up = False
+        # Whether a session was _ever_ up.
         self._session_reported = False
         # When the peer went missing (monotonic): it has not joined yet, or
         # an outage is in progress. ``None`` while the peer is with us.
@@ -645,11 +637,10 @@ class MOQTransportClient:
         self._peer_missing_since: float | None = None
         # Redials made while the peer has been missing; sets the backoff.
         self._redial_attempt = 0
-        # Why the current session closed, when the close carried an error.
         self._session_close_error: Exception | None = None
-        # Whether the current subscription to the peer has delivered anything,
-        # and the event a waiter uses to learn that it has.
+        # Whether current subscription to peer has delivered anything.
         self._peer_data_seen = False
+        # Set when peer data arrives; wakes a waiter awaiting it.
         self._peer_data_event: asyncio.Event | None = None
         # Set by the peer's session-ending marker: its tracks are ending
         # because it is leaving, not because a relay between us failed.
