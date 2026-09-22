@@ -50,7 +50,7 @@ from pipecat.frames.frames import (
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_context import LLMContext, LLMStandardMessage
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
-from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
+from pipecat.services.llm_service import FunctionCallFromLLM, LLMService, LLMWithBackendRole
 from pipecat.services.openai._constants import OPENAI_SAMPLE_RATE
 from pipecat.services.openai.responses.llm import (
     OpenAIResponsesLLMSettings,
@@ -356,6 +356,27 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
             True if metrics generation is supported.
         """
         return True
+
+    @property
+    def accepts_intermediate_function_call_results(self) -> bool:
+        """The Live API takes one output per function call, so intermediate results are dropped."""
+        return False
+
+    def llm_with_backend_role_objection(self, role: LLMWithBackendRole) -> str | None:
+        """Decline both roles: this service is a frontend with a backend of its own.
+
+        Args:
+            role: The role the service is being asked to take.
+
+        Returns:
+            The reason, naming what to use instead.
+        """
+        return (
+            f"{self.__class__.__name__} cannot be an LLMWithBackend {role}: it is already a "
+            "frontend with a backend of its own. Give it a delegation instead — "
+            "OpenAILiveLLMService.ClientDelegation for a backend worker, or "
+            "OpenAILiveLLMService.ResponsesDelegation for OpenAI's own."
+        )
 
     def service_metadata_frame(self) -> LLMServiceMetadataFrame:
         """Recommend external turn strategies, resolved from the API's projected turns.

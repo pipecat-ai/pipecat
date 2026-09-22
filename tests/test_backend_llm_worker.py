@@ -196,6 +196,15 @@ async def _run_backend(
     return (finals[-1].text if finals else ""), updates, backend
 
 
+def test_an_llm_that_declines_the_role_is_refused():
+    class _Objector(_ScriptedLLM):
+        def llm_with_backend_role_objection(self, role):
+            return f"no {role} here"
+
+    with pytest.raises(ValueError, match="no backend here"):
+        BackendLLMWorker(llm=_Objector([]))
+
+
 @pytest.mark.asyncio
 async def test_backend_runs_a_tool_loop_and_streams_intermediate_responses():
     llm = _ScriptedLLM(
