@@ -171,10 +171,16 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         )
         await worker.queue_frames([LLMRunFrame()])
 
+    @transport.event_handler("on_client_disconnected")
+    async def on_client_disconnected(transport):
+        logger.info("Client disconnected")
+        await runner.cancel()
+
     @transport.event_handler("on_disconnected")
     async def on_disconnected(transport):
+        # In client mode the transport redials the relay, so this is not
+        # the end of the call; on_client_disconnected is.
         logger.info("Disconnected from MOQ relay")
-        await runner.cancel()
 
     @transport.event_handler("on_error")
     async def on_error(transport, message, exception):

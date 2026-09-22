@@ -773,6 +773,8 @@ async def create_transport(
         # Convert TransportParams to MOQParams if needed, applying runner args
         if not isinstance(params, MOQParams):
             params = MOQParams(**params.model_dump())
+        if runner_args.relay_url is not None:
+            params.relay_url = runner_args.relay_url
         params.verify_ssl = runner_args.verify_ssl
         params.namespace = runner_args.namespace
         params.participant_id = runner_args.participant_id
@@ -783,12 +785,15 @@ async def create_transport(
         params.serve_tls_cert = runner_args.serve_tls_cert
         params.serve_tls_key = runner_args.serve_tls_key
 
-        transport = MOQTransport(
-            params=params,
-            host=runner_args.host,
-            port=runner_args.port,
-            path=runner_args.path,
-        )
+        # Host and port only matter when the URL is composed from them (and,
+        # in serve mode, for the default bind); when the runner arguments
+        # carry a URL instead, the transport's defaults stay in place.
+        transport_kwargs: dict = {"path": runner_args.path}
+        if runner_args.host is not None:
+            transport_kwargs["host"] = runner_args.host
+        if runner_args.port is not None:
+            transport_kwargs["port"] = runner_args.port
+        transport = MOQTransport(params=params, **transport_kwargs)
 
         # Auto-wire the runner back-channel: when the transport finishes
         # MOQ bring-up, copy out the cert fingerprints (serve mode) and
