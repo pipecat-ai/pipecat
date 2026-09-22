@@ -4,9 +4,11 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import argparse
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
+from pipecat.runner.run import _run_sip
 from pipecat.runner.sip import (
     SIPClientConfig,
     cleanup,
@@ -171,3 +173,61 @@ class TestResolveMediaNatParams(unittest.TestCase):
             result = resolve_media_nat_params(None)
 
         self.assertEqual(result, ("medianat=stun", "stunserver=stun:stun.example.com:3478"))
+
+
+PROVISIONED_CONFIG = SIPClientConfig(
+    user="pipecat-abcd1234",
+    password="s3cretpass12",
+    domain="mydomain.sip-us.daily.co",
+    transport="tls",
+    sip_uri="sip:pipecat-abcd1234@mydomain.sip-us.daily.co",
+    provisioned=True,
+)
+
+
+class TestRunSip(unittest.IsolatedAsyncioTestCase):
+    """_run_sip: env parsing and the cleanup-in-finally contract."""
+
+    def _session_cm(self):
+        # aiohttp.ClientSession() used as an async context manager.
+        cm = MagicMock()
+        cm.__aenter__ = AsyncMock(return_value=AsyncMock())
+        cm.__aexit__ = AsyncMock(return_value=False)
+        return cm
+
+    def _patches(self, env, bot):
+        return (
+            patch.dict("os.environ", env, clear=True),
+            patch("pipecat.runner.run.aiohttp.ClientSession", return_value=self._session_cm()),
+            patch("pipecat.runner.sip.configure", AsyncMock(return_value=PROVISIONED_CONFIG)),
+            patch("pipecat.runner.sip.cleanup", AsyncMock()),
+            patch("pipecat.runner.run._get_bot_module", return_value=bot),
+        )
+
+    async def test_non_integer_reg_interval_exits(self):
+        bot = MagicMock()
+        bot.bot = AsyncMock()
+        env_patch, session_patch, configure_patch, cleanup_patch, bot_patch = self._patches(
+            {"SIP_REG_INTERVAL": "not-an-int"}, bot
+        )
+        with env_patch, session_patch, configure_patch, cleanup_patch as cleanup_mock, bot_patch:
+            with self.assertRaises(SystemExit):
+                await _run_sip(argparse.Namespace(runner_body=None))
+
+        bot.bot.assert_not_awaited()
+        cleanup_mock.assert_not_awaited()  # failed before provisioning's try/finally
+
+    async def test_cleanup_runs_when_bot_raises(self):
+        bot = MagicMock()
+        bot.bot = AsyncMock(side_effect=RuntimeError("bot boom"))
+        env_patch, session_patch, configure_patch, cleanup_patch, bot_patch = self._patches(
+            {"SIP_REG_INTERVAL": "900", "SIP_RTP_TIMEOUT": "45"}, bot
+        )
+        with env_patch, session_patch, configure_patch, cleanup_patch as cleanup_mock, bot_patch:
+            with self.assertRaises(RuntimeError):
+                await _run_sip(argparse.Namespace(runner_body=None))
+
+        cleanup_mock.assert_awaited_once()  # cleanup runs in finally even on bot error
+        runner_args = bot.bot.await_args.args[0]
+        self.assertEqual(runner_args.reg_interval, 900)
+        self.assertEqual(runner_args.rtp_timeout, 45)

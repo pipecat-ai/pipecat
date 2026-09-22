@@ -292,9 +292,10 @@ class SIPRunnerArguments(RunnerArguments):
             differently from ``user`` (credential-list trunks).
         extra_params: Extra baresip account parameters, each a
             ``"key=value"`` string, appended verbatim to the SIP
-            address-of-record — e.g. ``("medianat=ice",
-            "stunserver=stun:HOST:PORT")`` to enable ICE behind NAT. None
-            adds nothing.
+            address-of-record — e.g. ``("medianat=stun",
+            "stunserver=stun:HOST:PORT")`` for media-NAT traversal behind
+            NAT against a non-ICE peer (a PSTN trunk); use ``medianat=ice``
+            only when the peer also speaks ICE. None adds nothing.
         reg_interval: Seconds between registration refreshes; 0 disables
             registration entirely (trunk mode).
         rtp_timeout: Seconds without received RTP after which a call is

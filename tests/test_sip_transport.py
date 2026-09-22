@@ -171,6 +171,9 @@ async def test_dialout_event_sequence_and_compound_emission():
     await connection._call_event_handler("call_progress", OUT_PAYLOAD)
     await settle()
     assert [name for name, _ in recorded] == ["on_dialout_connected"]
+    connected_data = recorded[0][1][0]
+    assert connected_data["origin"] == "sip:1001@example.com"
+    assert connected_data["destination"] == "sip:9196@example.com"
 
     await connection._call_event_handler("call_established", OUT_PAYLOAD)
     await settle()
@@ -199,6 +202,7 @@ async def test_dialout_event_sequence_and_compound_emission():
     assert stopped == {
         "sessionId": "7",
         "sipCallId": "out-abc",
+        "origin": "sip:1001@example.com",
         "destination": "sip:9196@example.com",
         "reason": "hangup",
     }
@@ -415,7 +419,6 @@ async def test_sip_attended_transfer_failure_cleans_up_and_resumes():
     error = await transport.sip_attended_transfer({"toEndPoint": "sip:9196@example.com"})
 
     assert "replaces_unsupported" in error
-    assert transport._transfer_pending is False  # not left armed for the next close
     consult.disconnect.assert_awaited_once()  # consult leg torn down even on failure
     # A failed splice leaves the active call on hold; it must be resumed.
     connection.resume.assert_awaited_once()
@@ -444,19 +447,35 @@ async def test_sip_attended_transfer_setup_failure_leaves_active_call_alone():
 
 @pytest.mark.asyncio
 async def test_transfer_close_reports_transferred_reason():
-    # While a transfer is splicing, the active call's close is reported as
-    # "transferred" so a bot tells it apart from a hangup; the flag is cleared.
+    # A completed transfer closes the active call; the connection flags it from the
+    # stack's close reason, so the transport reports reason "transferred" for a bot
+    # to tell it apart from a hangup. The internal flag is not leaked downstream.
     transport, connection = make_transport()
     recorded = record_events(transport, ["on_dialin_stopped"])
-    transport._transfer_pending = True
 
-    closed = dict(IN_PAYLOAD, reason="", established=True)
+    closed = dict(IN_PAYLOAD, reason="Call transfered", transferred=True, established=True)
     await connection._call_event_handler("call_closed", closed)
     await settle()
 
     stopped = recorded[0][1][0]
     assert stopped["reason"] == "transferred"
-    assert transport._transfer_pending is False
+    assert "transferred" not in stopped  # internal flag, not exposed to the bot
+
+
+@pytest.mark.asyncio
+async def test_hangup_during_transfer_not_reported_as_transferred():
+    # A caller hangup racing an in-flight REFER closes with a normal reason (the
+    # connection flags only the stack's transfer-success reason), so it is reported
+    # as the hangup — the pre-set-flag race that mislabeled it is gone.
+    transport, connection = make_transport()
+    recorded = record_events(transport, ["on_dialin_stopped"])
+
+    closed = dict(IN_PAYLOAD, reason="hangup", established=True)
+    await connection._call_event_handler("call_closed", closed)
+    await settle()
+
+    stopped = recorded[0][1][0]
+    assert stopped["reason"] == "hangup"
 
 
 def tx_info(**kwargs):
