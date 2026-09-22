@@ -52,7 +52,9 @@ class LLMClassifier(BaseClassifier):
 
     The probabilities are whatever the LLM wrote, so they are not calibrated.
     Any service that implements ``run_inference()`` can back a classifier;
-    realtime services cannot.
+    realtime services cannot. The reply's shape is enforced by the provider
+    where the service supports a reply schema, and otherwise asked for in
+    the prompt and parsed from the reply.
 
     Example::
 
@@ -104,7 +106,10 @@ class LLMClassifier(BaseClassifier):
         context = LLMContext([{"role": "user", "content": self._render(state, questions)}])
         try:
             reply = await self._llm.run_inference(
-                context, max_tokens=self._max_tokens, system_instruction=self._instructions
+                context,
+                max_tokens=self._max_tokens,
+                system_instruction=self._instructions,
+                response_schema=self._schema(questions),
             )
         except NotImplementedError as e:
             raise ClassifierError(f"{self._llm} cannot run a one-shot inference") from e
@@ -159,6 +164,35 @@ class LLMClassifier(BaseClassifier):
         parts.append(f"Reply with one JSON object of this shape: {{{names}}}")
         return "\n\n".join(parts)
 
+    def _schema(self, questions: Mapping[str, ClassifierQuestion]) -> dict[str, Any]:
+        """The JSON schema of the reply: one answer per question, in its shape."""
+        answers: dict[str, Any] = {}
+        for name, question in questions.items():
+            if isinstance(question, YesNoQuestion):
+                answers[name] = self._object({"probability": {"type": "number"}})
+            elif isinstance(question, ChoiceQuestion):
+                options = list(question.options)
+                answers[name] = self._object(
+                    {
+                        "label": {"type": "string", "enum": options},
+                        "probabilities": self._object({o: {"type": "number"} for o in options}),
+                    }
+                )
+            else:
+                answers[name] = self._object(
+                    {"score": {"type": "number"}, "confidence": {"type": "number"}}
+                )
+        return self._object(answers)
+
+    def _object(self, properties: dict[str, Any]) -> dict[str, Any]:
+        """A schema for an object with exactly these properties, all required."""
+        return {
+            "type": "object",
+            "properties": properties,
+            "required": list(properties),
+            "additionalProperties": False,
+        }
+
     def _parse(self, reply: str) -> dict[str, Any]:
         """The JSON object in the LLM's reply, fences and prose around it ignored."""
         text = reply.strip()
@@ -188,9 +222,7 @@ class LLMClassifier(BaseClassifier):
             given = given if isinstance(given, dict) else {}
             probabilities = {o: self._clamp(given.get(o, 0.0)) for o in question.options}
             return ChoiceResult(
-                label=label,
-                probabilities=probabilities,
-                confidence=probabilities[label] if probabilities[label] > 0 else 1.0,
+                label=label, probabilities=probabilities, confidence=probabilities[label]
             )
         score = self._number(answer, "score")
         confidence = self._unit(answer, "confidence")

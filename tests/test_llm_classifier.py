@@ -31,16 +31,19 @@ class _ScriptedLLM(LLMService):
         super().__init__()
         self._replies = list(replies)
         self.requests: list[tuple[str, str | None]] = []
+        self.schemas: list[dict | None] = []
 
     async def run_inference(
         self,
         context: LLMContext,
         max_tokens: int | None = None,
         system_instruction: str | None = None,
+        response_schema: dict | None = None,
     ) -> str | None:
         content = context.messages[-1]["content"]
         assert isinstance(content, str)
         self.requests.append((content, system_instruction))
+        self.schemas.append(response_schema)
         return self._replies.pop(0)
 
 
@@ -147,6 +150,50 @@ async def test_a_fenced_reply_is_parsed():
     classifier, _ = _classifier('Sure:\n```json\n{"q": {"probability": 0.4}}\n```\n')
     results = await classifier.yes_no("hi", {"q": YesNoQuestion(instructions="?")})
     assert results["q"].probability == 0.4
+
+
+@pytest.mark.asyncio
+async def test_the_reply_schema_has_one_answer_per_question():
+    classifier, llm = _classifier(
+        '{"q": {"probability": 0.5}, "w": {"label": "a", "probabilities": {"a": 1, "b": 0}}}'
+    )
+    await classifier.ask(
+        "hi",
+        {
+            "q": YesNoQuestion(instructions="?"),
+            "w": ChoiceQuestion(instructions="?", options={"a": "", "b": None}),
+        },
+    )
+
+    schema = llm.schemas[0]
+    assert schema is not None
+    assert schema["required"] == ["q", "w"]
+    assert schema["additionalProperties"] is False
+    assert schema["properties"]["q"]["required"] == ["probability"]
+    choice = schema["properties"]["w"]["properties"]
+    assert choice["label"]["enum"] == ["a", "b"]
+    assert choice["probabilities"]["required"] == ["a", "b"]
+
+
+@pytest.mark.asyncio
+async def test_the_score_schema_asks_for_a_score_and_a_confidence():
+    classifier, llm = _classifier('{"mood": {"score": 1, "confidence": 0.5}}')
+    await classifier.score("hi", {"mood": ScoreQuestion(instructions="?", rubric=["a", "b"])})
+
+    schema = llm.schemas[0]
+    assert schema is not None
+    assert schema["properties"]["mood"]["required"] == ["score", "confidence"]
+
+
+@pytest.mark.asyncio
+async def test_a_choice_without_probabilities_has_no_confidence():
+    classifier, _ = _classifier('{"q": {"label": "b"}}')
+    results = await classifier.choice(
+        "hi", {"q": ChoiceQuestion(instructions="?", options={"a": "", "b": ""})}
+    )
+    assert results["q"].label == "b"
+    assert results["q"].confidence == 0.0
+    assert results["q"].probabilities == {"a": 0.0, "b": 0.0}
 
 
 @pytest.mark.asyncio
