@@ -1,0 +1,2 @@
+- Fixed a tool result asking for inference being dropped when another result was queued behind it and that one asked for none: the assistant aggregator now runs inference once the burst is in, whatever the last result asks for.
+- Fixed Inworld Realtime sending a user's message twice when a function call result arrived between the server's VAD turn and the aggregator writing that message.
