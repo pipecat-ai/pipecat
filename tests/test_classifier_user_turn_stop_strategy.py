@@ -8,7 +8,8 @@ import asyncio
 import unittest
 
 from pipecat.classifiers.base_classifier import BaseClassifier, ChoiceResult, ClassifierError
-from pipecat.frames.frames import Frame, TranscriptionFrame
+from pipecat.frames.frames import Frame, MetricsFrame, TranscriptionFrame
+from pipecat.metrics.metrics import ProcessingMetricsData
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.turns.types import ProcessFrameResult
 from pipecat.turns.user_stop import (
@@ -60,7 +61,7 @@ class _FakeClassifier(BaseClassifier):
     async def cleanup(self):
         self.cleaned_up = True
 
-    async def ask(self, state, questions):
+    async def _ask(self, state, questions):
         self.asked.append(state)
         if self.delay:
             await asyncio.sleep(self.delay)
@@ -74,7 +75,7 @@ class _FakeClassifier(BaseClassifier):
                 probabilities={o: float(o == answer) for o in question.options},
                 confidence=0.9,
             )
-        return results
+        return results, None
 
 
 def _said(text: str) -> TranscriptionFrame:
@@ -117,6 +118,24 @@ class TestClassifierUserTurnCompletionStopStrategy(unittest.IsolatedAsyncioTestC
         self.assertEqual(len(self.inference), 1)
         self.assertEqual(len(self.stopped), 1)
         self.assertEqual(self.detector.frames[0].text, "I'd like to")
+
+    async def test_each_classification_pushes_its_metrics(self):
+        strategy = await self._strategy("complete")
+        pushed = []
+
+        @strategy.event_handler("on_push_frame")
+        async def _pushed(s, frame, direction):
+            pushed.append(frame)
+
+        await strategy.process_frame(_said("book a table."))
+        await self.detector.trigger_user_turn_stopped()
+        await asyncio.sleep(SETTLE)
+
+        metrics = [f for f in pushed if isinstance(f, MetricsFrame)]
+        self.assertEqual(len(metrics), 1)
+        (processing,) = metrics[0].data
+        self.assertIsInstance(processing, ProcessingMetricsData)
+        self.assertEqual(processing.processor, self.classifier.name)
 
     async def test_short_holds_the_turn_until_the_user_continues(self):
         strategy = await self._strategy("short", "complete", short_timeout=5.0)

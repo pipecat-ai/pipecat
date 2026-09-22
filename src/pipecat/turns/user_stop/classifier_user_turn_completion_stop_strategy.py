@@ -11,9 +11,10 @@ import asyncio
 from loguru import logger
 
 from pipecat.classifiers.base_classifier import BaseClassifier, ChoiceQuestion, ClassifierError
-from pipecat.frames.frames import Frame, TranscriptionFrame
+from pipecat.frames.frames import Frame, MetricsFrame, TranscriptionFrame
+from pipecat.metrics.metrics import MetricsData
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.frame_processor import FrameProcessorSetup
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.turns.types import ProcessFrameResult
 from pipecat.turns.user_stop.base_user_turn_stop_strategy import (
     BaseUserTurnStopStrategy,
@@ -129,6 +130,7 @@ class ClassifierUserTurnCompletionStopStrategy(BaseUserTurnStopStrategy):
         self._timeout_task: asyncio.Task | None = None
 
         self._inner.add_event_handler("on_user_turn_stopped", self._on_inner_stopped)
+        self._classifier.add_event_handler("on_metrics", self._on_classifier_metrics)
 
     @property
     def inner(self) -> BaseUserTurnStopStrategy:
@@ -156,6 +158,15 @@ class ClassifierUserTurnCompletionStopStrategy(BaseUserTurnStopStrategy):
             super().add_event_handler(event_name, handler)
         else:
             self._inner.add_event_handler(event_name, handler)
+
+    async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
+        """Push a frame through the inner strategy, where the frame listeners are.
+
+        Args:
+            frame: The frame to be pushed.
+            direction: What direction the frame should be pushed to.
+        """
+        await self._inner.push_frame(frame, direction)
 
     async def setup(self, setup: FrameProcessorSetup):
         """Set up the inner strategy and the classifier."""
@@ -192,6 +203,9 @@ class ClassifierUserTurnCompletionStopStrategy(BaseUserTurnStopStrategy):
         self._params = params
         await self._cancel_pending()
         self._classify_task = self.task_manager.create_task(self._classify(), f"{self}::_classify")
+
+    async def _on_classifier_metrics(self, classifier: BaseClassifier, data: list[MetricsData]):
+        await self.push_frame(MetricsFrame(data=data))
 
     async def _classify(self):
         state: dict[str, str] = {"user": self._text}
