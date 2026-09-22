@@ -23,6 +23,8 @@ import json
 import unittest
 from unittest.mock import AsyncMock
 
+import pytest
+
 from pipecat.frames.frames import (
     FunctionCallCancelFrame,
     FunctionCallResultFrame,
@@ -179,6 +181,58 @@ class TestOpenAIRealtimeIntermediateResults(unittest.IsolatedAsyncioTestCase):
     async def _response_done(self):
         """Feed the service a response.done, which is where a held run fires."""
         await self.service._handle_evt_response_done(_ResponseDone())
+
+
+class TestGeminiLiveIntermediateResults(unittest.IsolatedAsyncioTestCase):
+    """Gemini takes them on the tool-response channel itself, as a generator."""
+
+    def setUp(self):
+        pytest.importorskip("google.genai")
+        from pipecat.services.google.gemini_live.llm import GeminiLiveLLMService
+
+        self.service = GeminiLiveLLMService(api_key="test")
+        self.service._session = AsyncMock()
+        self.service._tool_call_id_to_name["call_1"] = "delegate"
+        # The tool the results belong to is an async one, which is what the
+        # NON_BLOCKING declaration and the scheduling hints follow.
+        self.service._function_is_async = lambda name: True
+
+    def _responses(self) -> list:
+        return [
+            c.kwargs["function_responses"]
+            for c in self.service._session.send_tool_response.call_args_list
+        ]
+
+    async def test_an_intermediate_result_keeps_the_call_open(self):
+        await self.service.push_frame(_result(is_final=False))
+
+        (response,) = self._responses()
+        self.assertTrue(response.will_continue)
+        self.assertEqual(response.scheduling, "WHEN_IDLE")
+
+    async def test_a_silent_result_asks_the_model_not_to_answer(self):
+        await self.service.push_frame(_result(is_final=False, run_llm=False))
+
+        (response,) = self._responses()
+        self.assertEqual(response.scheduling, "SILENT")
+        # The guides put scheduling inside the response, the reference beside it.
+        self.assertEqual(response.response["scheduling"], "SILENT")
+
+    async def test_a_final_result_settles_the_call(self):
+        await self.service.push_frame(_result(is_final=True))
+
+        (response,) = self._responses()
+        self.assertIsNone(response.will_continue)
+        self.assertEqual(response.scheduling, "WHEN_IDLE")
+        self.assertIn("call_1", self.service._completed_tool_calls)
+
+    async def test_a_model_without_non_blocking_tools_takes_no_intermediate_results(self):
+        self.service._settings.model = "models/gemini-3.1-flash-live-preview"
+        self.assertFalse(self.service.accepts_intermediate_function_call_results)
+
+        await self.service.push_frame(_result(is_final=False))
+
+        self.assertEqual(self._responses(), [])
 
 
 class _Usage:
