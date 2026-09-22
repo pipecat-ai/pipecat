@@ -623,8 +623,13 @@ class LLMWithBackend(Pipeline):
                 A worker given here is added to the pipeline worker at setup.
             connector: How delegation works. A default
                 :class:`BackendConnector` when omitted.
+
+        Raises:
+            ValueError: If the frontend service declines the role.
         """
         logger.warning("LLMWithBackend is alpha: its API is likely to change between releases.")
+        if objection := frontend.llm_with_backend_role_objection("frontend"):
+            raise ValueError(objection)
         self._frontend = frontend
         self._backend = backend
         self._connector = connector or BackendConnector()
