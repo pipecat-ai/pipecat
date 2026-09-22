@@ -74,12 +74,16 @@ class ConnectorContext:
     Parameters:
         backend_name: Name of the backend worker, local or registered elsewhere.
         frontend_is_realtime: Whether the frontend is a speech-to-speech
-            service. Its function calls accept one result, and its context can
-            lag the audio, which changes what a delegation can send and receive.
+            service. Its context can lag the audio, which changes how a
+            delegation words its request.
+        frontend_accepts_intermediate_results: Whether the frontend delivers a
+            tool's intermediate results to its model, which is what lets the
+            backend's progress reach the user as it comes.
     """
 
     backend_name: str
     frontend_is_realtime: bool
+    frontend_accepts_intermediate_results: bool = True
 
 
 # ---------------------------------------------------------------------------
@@ -339,15 +343,26 @@ class BackendConnector:
 
     A request strategy defines the tool and composes the request; a reply
     strategy delivers what the backend produces. Either may be given, or left
-    to the connector to pick by frontend kind once it is bound:
+    to the connector to pick once it is bound. The request strategy goes by
+    frontend kind, since a speech-to-speech frontend's context lags the audio;
+    the reply strategy goes by whether the frontend delivers a tool's
+    intermediate results to its model:
 
-    +-------------------+--------------------------------------+----------------------------------------------+
-    |                   | request                              | reply                                        |
-    +===================+======================================+==============================================+
-    | text frontend     | ``TranscriptBackendRequestStrategy`` | ``SpeakOnPrefersSpokenBackendReplyStrategy`` |
-    +-------------------+--------------------------------------+----------------------------------------------+
-    | realtime frontend | ``ExplicitBackendRequestStrategy``   | ``OneShotBackendReplyStrategy``              |
-    +-------------------+--------------------------------------+----------------------------------------------+
+    +---------------------------------+--------------------------------------+
+    | frontend                        | request                              |
+    +=================================+======================================+
+    | text                            | ``TranscriptBackendRequestStrategy`` |
+    +---------------------------------+--------------------------------------+
+    | speech-to-speech                | ``ExplicitBackendRequestStrategy``   |
+    +---------------------------------+--------------------------------------+
+
+    +---------------------------------+----------------------------------------------+
+    | frontend                        | reply                                        |
+    +=================================+==============================================+
+    | takes intermediate results      | ``SpeakOnPrefersSpokenBackendReplyStrategy`` |
+    +---------------------------------+----------------------------------------------+
+    | doesn't                         | ``OneShotBackendReplyStrategy``              |
+    +---------------------------------+----------------------------------------------+
 
     A delegation that fails raises out of the tool handler, which the frontend
     service settles as an error result. The function calls the backend makes on the way are
@@ -417,7 +432,7 @@ class BackendConnector:
 
         Raises:
             ValueError: If the reply strategy needs intermediate results and the
-                frontend is a speech-to-speech service, which cannot take them.
+                frontend doesn't deliver them to its model.
         """
         self._context = context
         if self._request_strategy is None:
@@ -428,14 +443,17 @@ class BackendConnector:
             )
         if self._reply_strategy is None:
             self._reply_strategy = (
-                OneShotBackendReplyStrategy()
-                if context.frontend_is_realtime
-                else SpeakOnPrefersSpokenBackendReplyStrategy()
+                SpeakOnPrefersSpokenBackendReplyStrategy()
+                if context.frontend_accepts_intermediate_results
+                else OneShotBackendReplyStrategy()
             )
-        if context.frontend_is_realtime and self._reply_strategy.needs_intermediate_results:
+        if (
+            not context.frontend_accepts_intermediate_results
+            and self._reply_strategy.needs_intermediate_results
+        ):
             raise ValueError(
-                f"{type(self._reply_strategy).__name__} reports intermediate results, which a "
-                "speech-to-speech frontend cannot take: its function calls accept one result"
+                f"{type(self._reply_strategy).__name__} reports intermediate results, which this "
+                "frontend does not deliver to its model"
             )
         self._tool = self.build_tool()
 
@@ -564,8 +582,13 @@ class LLMWithBackend(Pipeline):
                 A worker given here is added to the pipeline worker at setup.
             connector: How delegation works. A default
                 :class:`BackendConnector` when omitted.
+
+        Raises:
+            ValueError: If the frontend service declines the role.
         """
         logger.warning("LLMWithBackend is alpha: its API is likely to change between releases.")
+        if objection := frontend.llm_with_backend_role_objection("frontend"):
+            raise ValueError(objection)
         self._frontend = frontend
         self._backend = backend
         self._connector = connector or BackendConnector()
@@ -573,6 +596,7 @@ class LLMWithBackend(Pipeline):
             ConnectorContext(
                 backend_name=backend if isinstance(backend, str) else backend.name,
                 frontend_is_realtime=frontend.service_metadata_frame().is_realtime_service,
+                frontend_accepts_intermediate_results=frontend.accepts_intermediate_function_call_results,
             )
         )
         if instruction := self._connector.frontend_instruction:

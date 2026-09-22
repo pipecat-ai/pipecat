@@ -146,8 +146,18 @@ def _stream(
     return requests
 
 
-def _bound(connector: BackendConnector, realtime: bool = False) -> BackendConnector:
-    connector.bind(ConnectorContext(backend_name="backend", frontend_is_realtime=realtime))
+def _bound(
+    connector: BackendConnector,
+    realtime: bool = False,
+    accepts_intermediate_results: bool = True,
+) -> BackendConnector:
+    connector.bind(
+        ConnectorContext(
+            backend_name="backend",
+            frontend_is_realtime=realtime,
+            frontend_accepts_intermediate_results=accepts_intermediate_results,
+        )
+    )
     return connector
 
 
@@ -165,18 +175,28 @@ def test_a_text_frontend_hands_over_the_transcript_and_follows_the_flag():
     assert connector.tool.handler is not None
 
 
-def test_a_realtime_frontend_words_the_request_and_takes_every_output_at_once():
+def test_a_realtime_frontend_words_the_request_itself():
     connector = _bound(BackendConnector(), realtime=True)
     assert isinstance(connector.request_strategy, ExplicitBackendRequestStrategy)
-    assert isinstance(connector.reply_strategy, OneShotBackendReplyStrategy)
     assert connector.tool.required == ["request"]
 
 
-def test_a_realtime_frontend_refuses_a_reply_strategy_that_streams():
-    with pytest.raises(ValueError, match="one result"):
+def test_a_realtime_frontend_that_takes_intermediate_results_follows_the_flag():
+    connector = _bound(BackendConnector(), realtime=True)
+    assert isinstance(connector.reply_strategy, SpeakOnPrefersSpokenBackendReplyStrategy)
+
+
+def test_a_frontend_that_takes_no_intermediate_results_takes_every_output_at_once():
+    connector = _bound(BackendConnector(), realtime=True, accepts_intermediate_results=False)
+    assert isinstance(connector.reply_strategy, OneShotBackendReplyStrategy)
+
+
+def test_a_frontend_that_takes_no_intermediate_results_refuses_a_reply_strategy_that_streams():
+    with pytest.raises(ValueError, match="does not deliver"):
         _bound(
             BackendConnector(reply_strategy=SpeakOnPrefersSpokenBackendReplyStrategy()),
             realtime=True,
+            accepts_intermediate_results=False,
         )
 
 
@@ -272,7 +292,9 @@ async def test_one_shot_delivers_every_output_together(monkeypatch):
     _stream(monkeypatch, _PROGRESS, _THOUGHT, _SPOKEN_PROGRESS, _FINAL)
     params = _params()
 
-    await _bound(BackendConnector(), realtime=True).delegate(params)
+    await _bound(
+        BackendConnector(reply_strategy=OneShotBackendReplyStrategy()), realtime=True
+    ).delegate(params)
 
     assert params.result_callback.await_args_list == [  # type: ignore[attr-defined]
         call({"outputs": ["Let me check.", "Almost there.", "It's 62 and raining."]})
@@ -283,7 +305,9 @@ async def test_one_shot_delivers_every_output_together(monkeypatch):
 async def test_one_shot_delivers_what_it_held_when_the_final_output_is_empty(monkeypatch):
     _stream(monkeypatch, _PROGRESS, _SPOKEN_PROGRESS, _EMPTY_FINAL)
     params = _params()
-    connector = _bound(BackendConnector(), realtime=True)
+    connector = _bound(
+        BackendConnector(reply_strategy=OneShotBackendReplyStrategy()), realtime=True
+    )
 
     await connector.delegate(params)
 
@@ -301,7 +325,9 @@ async def test_one_shot_drops_what_it_held_when_the_delegation_fails(monkeypatch
 
     monkeypatch.setattr(llm_with_backend, "_delegate_to_backend", fake)
     params = _params()
-    connector = _bound(BackendConnector(), realtime=True)
+    connector = _bound(
+        BackendConnector(reply_strategy=OneShotBackendReplyStrategy()), realtime=True
+    )
 
     with pytest.raises(JobError):
         await connector.delegate(params)
@@ -315,7 +341,9 @@ async def test_one_shot_delivers_a_lone_output_as_text(monkeypatch):
     _stream(monkeypatch, _FINAL)
     params = _params()
 
-    await _bound(BackendConnector(), realtime=True).delegate(params)
+    await _bound(
+        BackendConnector(reply_strategy=OneShotBackendReplyStrategy()), realtime=True
+    ).delegate(params)
 
     assert params.result_callback.await_args_list == [  # type: ignore[attr-defined]
         call({"text": "It's 62 and raining."})
@@ -411,7 +439,9 @@ async def test_an_empty_final_output_still_settles_the_call(monkeypatch):
     _stream(monkeypatch, _EMPTY_FINAL)
     params = _params()
 
-    await _bound(BackendConnector(), realtime=True).delegate(params)
+    await _bound(
+        BackendConnector(reply_strategy=OneShotBackendReplyStrategy()), realtime=True
+    ).delegate(params)
 
     assert params.result_callback.await_args_list == [call({"text": ""})]  # type: ignore[attr-defined]
 
@@ -419,6 +449,15 @@ async def test_an_empty_final_output_still_settles_the_call(monkeypatch):
 # ---------------------------------------------------------------------------
 # The service
 # ---------------------------------------------------------------------------
+
+
+def test_a_frontend_that_declines_the_role_is_refused():
+    class _Objector(_TextFrontend):
+        def llm_with_backend_role_objection(self, role):
+            return f"no {role} here"
+
+    with pytest.raises(ValueError, match="no frontend here"):
+        LLMWithBackend(frontend=_Objector(), backend="backend")
 
 
 def test_the_service_adds_the_connector_guidance_to_the_frontend_prompt():

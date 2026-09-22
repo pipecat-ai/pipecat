@@ -451,7 +451,12 @@ class BackendLLMWorker(LLMContextWorker):
                 default VAD and turn-analysis strategies (and the model the
                 latter loads) have nothing to do here.
             assistant_params: Optional parameters for the assistant aggregator.
+
+        Raises:
+            ValueError: If the LLM service declines the role.
         """
+        if objection := llm.llm_with_backend_role_objection("backend"):
+            raise ValueError(objection)
         if user_params is None:
             user_params = LLMUserAggregatorParams(user_turn_strategies=ExternalUserTurnStrategies())
         super().__init__(

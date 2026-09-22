@@ -18,6 +18,7 @@ from typing import (
     TYPE_CHECKING,
     Any,
     Generic,
+    Literal,
     Protocol,
     cast,
 )
@@ -88,6 +89,12 @@ if TYPE_CHECKING:
 
 # Type alias for a callable that handles LLM function calls.
 FunctionCallHandler = Callable[["FunctionCallParams"], Awaitable[None]]
+
+
+# The two roles a service can fill in an
+# `~pipecat.pipeline.llm_with_backend.LLMWithBackend`: the conversational
+# frontend, or the LLM inside the backend worker.
+LLMWithBackendRole = Literal["frontend", "backend"]
 
 
 # Type alias for a callback function that handles the result of an LLM function call.
@@ -478,6 +485,36 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         if self._reports_ttfat is None:
             self._reports_ttfat = not self.service_metadata_frame().is_realtime_service
         return self._reports_ttfat
+
+    @property
+    def accepts_intermediate_function_call_results(self) -> bool:
+        """Whether this service delivers a tool's intermediate results to the model.
+
+        An intermediate result is one reported with
+        ``FunctionCallResultProperties(is_final=False)`` while the call keeps
+        running. A text service passes them on as context messages. A
+        speech-to-speech service has to map them onto whatever second channel
+        its provider offers, and not all of them have one.
+
+        Returns:
+            True if intermediate results reach the model.
+        """
+        return True
+
+    def llm_with_backend_role_objection(self, role: LLMWithBackendRole) -> str | None:
+        """Why this service can't take the given role in an ``LLMWithBackend``, if it can't.
+
+        The composite raises with what this returns, so the objection says what
+        to do instead. Services that work in both roles, which is nearly all of
+        them, say nothing.
+
+        Args:
+            role: The role the service is being asked to take.
+
+        Returns:
+            The reason, or None when the service can take the role.
+        """
+        return None
 
     def service_metadata_frame(self) -> LLMServiceMetadataFrame:
         """The metadata frame this LLM service broadcasts at start.
