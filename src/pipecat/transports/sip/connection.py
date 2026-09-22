@@ -461,6 +461,19 @@ class SIPConnection(BaseObject):
         if extra_params is not None:
             account_args["extra_params"] = tuple(extra_params)
         self._account = Account(**account_args)
+        # The account-defining arguments, kept so consult_connection() can build a
+        # sibling on the same account (reg_interval is overridden there).
+        self._account_kwargs: dict = dict(
+            user=user,
+            domain=domain,
+            password=password,
+            auth_user=auth_user,
+            transport=transport,
+            registrar=registrar,
+            audio_codecs=audio_codecs,
+            dtmf_mode=dtmf_mode,
+            extra_params=extra_params,
+        )
         self._settings = _RuntimeSettings(
             net_interface=net_interface,
             rtp_timeout=rtp_timeout,
@@ -685,6 +698,25 @@ class SIPConnection(BaseObject):
         self._answered = True
         self._maybe_emit_connected()
 
+    async def wait_established(self, timeout: float = 30.0):
+        """Wait until the active call is SIP-established (the far end answered).
+
+        This is the signaling answer (``CALL_ESTABLISHED``), not media-up: a
+        consult leg is splice-ready the moment the far end answers, before any
+        audio flows. Used to confirm a transfer target picked up before
+        :meth:`attended_transfer`.
+
+        Args:
+            timeout: Seconds to wait for establishment.
+
+        Raises:
+            CallTimeout: The call did not establish within ``timeout``.
+            BaresipError: The far end refused or the call otherwise failed
+                (``CallBusy``, ``CallDeclined``, ``CallFailed``).
+        """
+        call = self._require_call()
+        await call.wait_established(timeout)
+
     async def reject(self):
         """Decline the active inbound call with 486 Busy Here."""
         call = self._require_call()
@@ -732,6 +764,26 @@ class SIPConnection(BaseObject):
         if consult_call is None:
             raise RuntimeError("consult SIPConnection has no active call")
         await call.attended_transfer(consult_call)
+
+    def consult_connection(self) -> "SIPConnection":
+        """A second connection on this account for a transfer/consult leg.
+
+        Registration-less (``reg_interval=0``): the shared runtime caches one
+        UserAgent per address-of-record, so the sibling reuses this
+        connection's already-registered UA to place the outbound leg — no
+        second binding to clobber the first. Both calls live in the one
+        runtime, which is all a Replaces splice needs (the stack resolves
+        call handles globally, not per UA).
+
+        The caller owns the returned connection's lifecycle: connect and dial
+        it, and disconnect it when done. See
+        :meth:`~pipecat.transports.sip.transport.SIPTransport.sip_attended_transfer`.
+        """
+        sibling = SIPConnection(reg_interval=0, **self._account_kwargs)
+        # The sibling must present the SAME runtime-wide settings, or acquiring
+        # the already-running runtime raises on a mismatch; share them verbatim.
+        sibling._settings = self._settings
+        return sibling
 
     def read_audio(self, max_bytes: int) -> bytes:
         """Read received PCM from the active call.
