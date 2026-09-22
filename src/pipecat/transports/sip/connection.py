@@ -27,7 +27,9 @@ The sharing model, from the outside in:
   idle connection bound to the account — the claim is synchronous, so
   two INVITEs can never land on one connection — and refused with 486
   when every connection is busy (the stack's own
-  ``max_concurrent_calls`` cap refuses even earlier).
+  ``max_concurrent_calls`` cap refuses even earlier). That cap defaults to
+  2 and is runtime-wide, so holding more than two calls at once means
+  passing a raised ``max_concurrent_calls`` on **every** connection.
 
 So "one registration, N concurrent conversations" is spelled: one
 process, one runtime, one user agent for the account, and N connections
@@ -109,6 +111,13 @@ _STDLIB_LOG_LEVELS = {
     "warning": logging.WARNING,
     "error": logging.ERROR,
 }
+
+# The exact close reason baresip reports on the leg it transferred away when a
+# REFER (blind or with Replaces) it sent completes — mirrors baresip-python's
+# ``Call._TRANSFER_SUCCESS`` (its own spelling). Distinguishes a transfer from a
+# hangup on the close, so the flag that requests a transfer need not be trusted
+# across the close race.
+_TRANSFER_CLOSE_REASON = "Call transfered"
 
 
 @dataclass(frozen=True)
@@ -238,7 +247,10 @@ class _SharedRuntime:
         The first binding for an address-of-record allocates the user
         agent and installs the inbound dispatcher; later bindings share
         it. An inbound call goes to the first bound connection without an
-        active call, and is rejected when every connection is busy.
+        active call, and is rejected when every connection is busy. A
+        connection with ``route_inbound=False`` (a consult/transfer leg)
+        gets the shared user agent to place its outbound call but is left
+        out of the inbound routing list.
         """
         aor = f"sip:{account.user}@{account.domain}"
         async with self._lock:
@@ -258,7 +270,7 @@ class _SharedRuntime:
                     task.add_done_callback(pending.discard)
 
                 ua.on_incoming(route_incoming)
-            if connection not in connections:
+            if connection._route_inbound and connection not in connections:
                 connections.append(connection)
             return self._uas[aor]
 
@@ -371,6 +383,7 @@ class SIPConnection(BaseObject):
         video_bitrate: int = 1_000_000,
         native_log_level: str = "warning",
         sip_trace: bool = False,
+        route_inbound: bool = True,
         **kwargs,
     ):
         """Initialize the connection.
@@ -443,6 +456,12 @@ class SIPConnection(BaseObject):
                 the tool for signaling and SDP/media-path debugging. The
                 trace contains call metadata and digest authentication
                 material, so keep it off in production. Runtime-wide.
+            route_inbound: Whether the shared inbound dispatcher routes
+                incoming calls to this connection (per-connection, not
+                runtime-wide). A consult/transfer leg sets ``False`` so an
+                inbound INVITE is never handed to it while it sits idle
+                between :meth:`connect` and :meth:`dial`; see
+                :meth:`consult_connection`.
             **kwargs: Additional arguments passed to the parent.
         """
         super().__init__(**kwargs)
@@ -486,6 +505,9 @@ class SIPConnection(BaseObject):
             native_log_level=native_log_level,
             sip_trace=sip_trace,
         )
+        # Per-connection: a consult/transfer leg opts out of inbound routing so a
+        # call never lands on it while it is briefly idle between connect and dial.
+        self._route_inbound = route_inbound
         self._runtime: Runtime | None = None
         self._ua: UserAgent | None = None
         self._connected = False
@@ -773,13 +795,15 @@ class SIPConnection(BaseObject):
         connection's already-registered UA to place the outbound leg — no
         second binding to clobber the first. Both calls live in the one
         runtime, which is all a Replaces splice needs (the stack resolves
-        call handles globally, not per UA).
+        call handles globally, not per UA). It also opts out of inbound
+        routing (``route_inbound=False``) so an incoming call is never handed
+        to the consult leg while it is idle between connect and dial.
 
         The caller owns the returned connection's lifecycle: connect and dial
         it, and disconnect it when done. See
         :meth:`~pipecat.transports.sip.transport.SIPTransport.sip_attended_transfer`.
         """
-        sibling = SIPConnection(reg_interval=0, **self._account_kwargs)
+        sibling = SIPConnection(reg_interval=0, route_inbound=False, **self._account_kwargs)
         # The sibling must present the SAME runtime-wide settings, or acquiring
         # the already-running runtime raises on a mismatch; share them verbatim.
         sibling._settings = self._settings
@@ -1038,8 +1062,11 @@ class SIPConnection(BaseObject):
                 self._emit("renegotiated", self._call_payload(sdp=event.text or ""))
         elif event.event is Event.CALL_CLOSED:
             self._final_stats = call.final_stats
+            reason = event.text or ""
             payload = self._call_payload(
-                reason=event.text or "", established=self._call_established
+                reason=reason,
+                established=self._call_established,
+                transferred=reason == _TRANSFER_CLOSE_REASON,
             )
             self._detach_call()
             self._emit("call_closed", payload)
