@@ -17,7 +17,8 @@ Usage::
     TYPESAFE_API_KEY=... python evals/classifiers/measure_turn_completion.py
     python evals/classifiers/measure_turn_completion.py --no-context
     python evals/classifiers/measure_turn_completion.py --repeat 3
-    OPENAI_API_KEY=... python evals/classifiers/measure_turn_completion.py --llm gpt-4o-mini
+    OPENAI_API_KEY=... python evals/classifiers/measure_turn_completion.py --llm openai/gpt-4o-mini
+    ANTHROPIC_API_KEY=... python evals/classifiers/measure_turn_completion.py --llm anthropic/claude-haiku-4-5
 """
 
 import argparse
@@ -38,6 +39,15 @@ from pipecat.turns.user_stop.classifier_user_turn_completion_stop_strategy impor
 )
 
 HERE = Path(__file__).parent
+
+#: LLM services an ``--llm SERVICE/MODEL`` run can use, with the key each reads.
+LLM_SERVICES = {
+    "openai": ("pipecat.services.openai.llm", "OpenAILLMService", "OPENAI_API_KEY"),
+    "anthropic": ("pipecat.services.anthropic.llm", "AnthropicLLMService", "ANTHROPIC_API_KEY"),
+    "google": ("pipecat.services.google.llm", "GoogleLLMService", "GOOGLE_API_KEY"),
+    "groq": ("pipecat.services.groq.llm", "GroqLLMService", "GROQ_API_KEY"),
+    "cerebras": ("pipecat.services.cerebras.llm", "CerebrasLLMService", "CEREBRAS_API_KEY"),
+}
 SCENARIOS = HERE.parent / "release" / "scenarios" / "scripted"
 
 
@@ -136,7 +146,11 @@ async def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--no-context", action="store_true", help="drop the bot's previous line")
     parser.add_argument("--repeat", type=int, default=1, help="run the set this many times")
-    parser.add_argument("--llm", metavar="MODEL", help="use an OpenAI model instead of Jev")
+    parser.add_argument(
+        "--llm",
+        metavar="SERVICE/MODEL",
+        help=f"use an LLM instead of Jev; services: {', '.join(LLM_SERVICES)}",
+    )
     args = parser.parse_args()
 
     turns = load_turns(with_context=not args.no_context)
@@ -158,14 +172,20 @@ async def main() -> None:
         await classifier.cleanup()
 
 
-async def measure_with_llm(model: str, turns: list[dict], repeat: int) -> None:
-    """Run the measurement with an LLM classifier."""
-    from pipecat.services.openai.llm import OpenAILLMService
+async def measure_with_llm(spec: str, turns: list[dict], repeat: int) -> None:
+    """Run the measurement with an LLM classifier, given as ``SERVICE/MODEL``."""
+    import importlib
 
-    api_key = os.getenv("OPENAI_API_KEY")
+    service_name, _, model = spec.partition("/")
+    if service_name not in LLM_SERVICES or not model:
+        sys.exit(f"--llm takes SERVICE/MODEL with one of: {', '.join(LLM_SERVICES)}")
+    module_name, class_name, key_name = LLM_SERVICES[service_name]
+    api_key = os.getenv(key_name)
     if not api_key:
-        sys.exit("OPENAI_API_KEY is not set")
-    classifier = LLMClassifier(llm=OpenAILLMService(api_key=api_key, model=model))
+        sys.exit(f"{key_name} is not set")
+    service_class = getattr(importlib.import_module(module_name), class_name)
+    llm = service_class(api_key=api_key, settings=service_class.Settings(model=model))
+    classifier = LLMClassifier(llm=llm)
     try:
         await measure(classifier, turns, repeat)
     finally:
