@@ -41,11 +41,11 @@ _KEEPALIVE_EXPIRY = 240.0
 
 
 class JevUsage(BaseModel):
-    """Tokens a :class:`JevClient` has used so far.
+    """Tokens Jev used: for one request, or over every request in :attr:`JevClient.usage`.
 
     Parameters:
-        input_tokens: Tokens sent, over every request.
-        output_tokens: Tokens received, over every request.
+        input_tokens: Tokens sent.
+        output_tokens: Tokens received.
     """
 
     input_tokens: int = 0
@@ -106,6 +106,11 @@ class JevClient:
             self._http.headers["Authorization"] = f"Bearer {api_key}"
 
     @property
+    def model(self) -> str:
+        """The Jev model the questions go to."""
+        return self._model
+
+    @property
     def usage(self) -> JevUsage:
         """Tokens used so far, over every request."""
         return self._usage
@@ -139,7 +144,7 @@ class JevClient:
 
     async def ask(
         self, state: str | dict[str, Any] | list[Any], questions: Mapping[str, dict[str, Any]]
-    ) -> dict[str, dict[str, Any]]:
+    ) -> tuple[dict[str, dict[str, Any]], JevUsage]:
         """Send questions about one state and return Jev's answers.
 
         Args:
@@ -149,7 +154,8 @@ class JevClient:
                 ``instructions``, and ``criteria``.
 
         Returns:
-            The answers by the same names, in Jev's own format.
+            The answers by the same names, in Jev's own format, and the
+            tokens the request used.
 
         Raises:
             ClassifierError: If Jev rejected the request, kept refusing it
@@ -184,13 +190,15 @@ class JevClient:
             if not isinstance(data, dict):
                 raise ClassifierError("Jev reply is not a JSON object")
             usage = data.get("usage")
-            if isinstance(usage, dict):
-                self._usage.input_tokens += usage.get("input_tokens", 0)
-                self._usage.output_tokens += usage.get("output_tokens", 0)
+            request_usage = (
+                JevUsage.model_validate(usage) if isinstance(usage, dict) else JevUsage()
+            )
+            self._usage.input_tokens += request_usage.input_tokens
+            self._usage.output_tokens += request_usage.output_tokens
             answers = data.get("answers")
             if not isinstance(answers, dict):
                 raise ClassifierError("Jev reply has no answers")
             missing = [name for name in questions if not isinstance(answers.get(name), dict)]
             if missing:
                 raise ClassifierError(f"Jev reply has no answer for {', '.join(missing)}")
-            return {name: answers[name] for name in questions}
+            return {name: answers[name] for name in questions}, request_usage

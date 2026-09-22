@@ -27,6 +27,7 @@ from pipecat.classifiers.base_classifier import (
     YesNoResult,
 )
 from pipecat.classifiers.jev_client import JevClient
+from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.workers.base_worker import BaseWorker
 
 
@@ -86,24 +87,26 @@ class JevClassifier(BaseClassifier):
         if self._owns_client:
             await self._client.close()
 
-    async def ask(
+    @property
+    def model_name(self) -> str:
+        """The Jev model the questions go to."""
+        return self._client.model
+
+    async def _ask(
         self, state: str | dict[str, Any] | list[Any], questions: Mapping[str, ClassifierQuestion]
-    ) -> dict[str, ClassifierResult]:
-        """Answer several questions about one state, in one request.
-
-        Args:
-            state: What the questions are about.
-            questions: The questions, by name.
-
-        Returns:
-            One result per question, by the same names.
-        """
-        answers = await self._client.ask(
+    ) -> tuple[dict[str, ClassifierResult], LLMTokenUsage]:
+        """Answer the questions in one request."""
+        answers, usage = await self._client.ask(
             state, {name: self._to_jev(q) for name, q in questions.items()}
         )
-        return {
+        results = {
             name: self._from_jev(question, answers[name]) for name, question in questions.items()
         }
+        return results, LLMTokenUsage(
+            prompt_tokens=usage.input_tokens,
+            completion_tokens=usage.output_tokens,
+            total_tokens=usage.input_tokens + usage.output_tokens,
+        )
 
     def _to_jev(self, question: ClassifierQuestion) -> dict[str, Any]:
         """A question in Jev's own format."""

@@ -91,18 +91,16 @@ class LLMClassifier(BaseClassifier):
         """The LLM that answers the questions."""
         return self._llm
 
-    async def ask(
+    @property
+    def model_name(self) -> str | None:
+        """The LLM service's model."""
+        model = self._llm._settings.model
+        return model if isinstance(model, str) else None
+
+    async def _ask(
         self, state: str | dict[str, Any] | list[Any], questions: Mapping[str, ClassifierQuestion]
-    ) -> dict[str, ClassifierResult]:
-        """Answer several questions about one state, in one LLM call.
-
-        Args:
-            state: What the questions are about.
-            questions: The questions, by name.
-
-        Returns:
-            One result per question, by the same names.
-        """
+    ) -> tuple[dict[str, ClassifierResult], None]:
+        """Answer the questions in one LLM call. The call reports no token usage."""
         context = LLMContext([{"role": "user", "content": self._render(state, questions)}])
         try:
             reply = await self._llm.run_inference(
@@ -123,7 +121,7 @@ class LLMClassifier(BaseClassifier):
             if not isinstance(answer, dict):
                 raise ClassifierError(f"the LLM gave no answer for {name!r}")
             results[name] = self._result(question, answer)
-        return results
+        return results, None
 
     def _render(
         self, state: str | dict[str, Any] | list[Any], questions: Mapping[str, ClassifierQuestion]

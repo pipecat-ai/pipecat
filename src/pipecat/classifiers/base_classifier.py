@@ -17,12 +17,19 @@ results.
 """
 
 import json
+import time
 from abc import abstractmethod
 from collections.abc import Mapping
 from typing import Any, TypeAlias, TypeVar
 
 from pydantic import BaseModel, Field
 
+from pipecat.metrics.metrics import (
+    LLMTokenUsage,
+    LLMUsageMetricsData,
+    MetricsData,
+    ProcessingMetricsData,
+)
 from pipecat.utils.base_object import BaseObject
 from pipecat.workers.base_worker import BaseWorker
 
@@ -142,12 +149,25 @@ class BaseClassifier(BaseObject):
 
     Every question is about a ``state``: plain text, or structured data such
     as a transcript with speaker labels or a trimmed screen snapshot.
-    Subclasses implement :meth:`ask`, which answers any number of questions
-    about one state, by name; the three typed methods are built on it and
-    take questions of one kind.
+    :meth:`ask` answers any number of questions about one state, by name;
+    the three typed methods are built on it and take questions of one kind.
+    Subclasses implement :meth:`_ask`.
 
     The owner calls :meth:`setup` once before the first question and
     :meth:`cleanup` once when it is done.
+
+    Event handlers available:
+
+    - on_metrics: Called after every call with its metrics, the time it
+      took and, when the classifier knows it, the tokens it used. A
+      classifier cannot push frames, so the owner is the one to put them in
+      a :class:`~pipecat.frames.frames.MetricsFrame`.
+
+    Example::
+
+        @classifier.event_handler("on_metrics")
+        async def on_metrics(classifier, data: list[MetricsData]):
+            await processor.push_frame(MetricsFrame(data=data))
     """
 
     def __init__(self, **kwargs):
@@ -157,6 +177,13 @@ class BaseClassifier(BaseObject):
             **kwargs: Additional arguments passed to the parent class.
         """
         super().__init__(**kwargs)
+
+        self._register_event_handler("on_metrics")
+
+    @property
+    def model_name(self) -> str | None:
+        """The model that answers, named in the metrics."""
+        return None
 
     async def setup(self, worker: BaseWorker):
         """Prepare the classifier to answer questions.
@@ -168,7 +195,6 @@ class BaseClassifier(BaseObject):
         """
         await super().setup(worker.task_manager)
 
-    @abstractmethod
     async def ask(
         self, state: str | dict[str, Any] | list[Any], questions: Mapping[str, ClassifierQuestion]
     ) -> dict[str, ClassifierResult]:
@@ -185,7 +211,12 @@ class BaseClassifier(BaseObject):
         Raises:
             ClassifierError: If the answers could not be produced.
         """
-        pass
+        started = time.perf_counter()
+        results, usage = await self._ask(state, questions)
+        await self._call_event_handler(
+            "on_metrics", self._metrics(time.perf_counter() - started, usage)
+        )
+        return results
 
     async def yes_no(
         self, state: str | dict[str, Any] | list[Any], questions: Mapping[str, YesNoQuestion]
@@ -239,6 +270,23 @@ class BaseClassifier(BaseObject):
             ClassifierError: If the answers could not be produced.
         """
         return self._typed(await self.ask(state, questions), ScoreResult)
+
+    @abstractmethod
+    async def _ask(
+        self, state: str | dict[str, Any] | list[Any], questions: Mapping[str, ClassifierQuestion]
+    ) -> tuple[dict[str, ClassifierResult], LLMTokenUsage | None]:
+        """Answer the questions, and say what tokens the call used if that is known."""
+        pass
+
+    def _metrics(self, seconds: float, usage: LLMTokenUsage | None) -> list[MetricsData]:
+        data: list[MetricsData] = [
+            ProcessingMetricsData(processor=self.name, model=self.model_name, value=seconds)
+        ]
+        if usage is not None:
+            data.append(
+                LLMUsageMetricsData(processor=self.name, model=self.model_name, value=usage)
+            )
+        return data
 
     def _typed(self, results: dict[str, ClassifierResult], result_type: type[R]) -> dict[str, R]:
         typed: dict[str, R] = {}

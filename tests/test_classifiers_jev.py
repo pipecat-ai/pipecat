@@ -20,6 +20,7 @@ from pipecat.classifiers.base_classifier import (
 )
 from pipecat.classifiers.jev import JevClassifier
 from pipecat.classifiers.jev_client import JevClient
+from pipecat.metrics.metrics import LLMUsageMetricsData, ProcessingMetricsData
 from pipecat.utils.asyncio.task_manager import TaskManager
 from pipecat.workers.base_worker import BaseWorker
 
@@ -54,12 +55,13 @@ class TestJevClient:
             return _reply({"type": "noul", "noul": 0.9})
 
         client = _client(handler)
-        answers = await client.ask(
+        answers, usage = await client.ask(
             "hello", {"answer": {"type": "noul", "instructions": "a greeting?"}}
         )
         answer = answers["answer"]
 
         assert answer == {"type": "noul", "noul": 0.9}
+        assert (usage.input_tokens, usage.output_tokens) == (12, 3)
         assert seen["url"] == "https://api.typesafe.ai/v1/systemone"
         assert seen["auth"] == "Bearer key"
         assert seen["body"] == {
@@ -96,7 +98,7 @@ class TestJevClient:
             return _reply({"type": "noul", "noul": 0.7})
 
         client = _client(handler)
-        answer = (await client.ask("a", {"answer": {"type": "noul", "instructions": "?"}}))[
+        answer = (await client.ask("a", {"answer": {"type": "noul", "instructions": "?"}}))[0][
             "answer"
         ]
 
@@ -565,4 +567,33 @@ class TestJevClassifierSeveralQuestions:
         await first.setup(owner)
 
         assert connects == ["/v1/models"]
+        await client.close()
+
+
+class TestMetrics:
+    @pytest.mark.asyncio
+    async def test_every_call_reports_its_time_and_tokens(self):
+        client = _client(lambda request: _reply({"type": "noul", "noul": 0.9}))
+        classifier = JevClassifier(client=client)
+        await classifier.setup(_owner())
+        reported = asyncio.Event()
+        seen: list = []
+
+        @classifier.event_handler("on_metrics")
+        async def on_metrics(classifier, data):
+            seen.extend(data)
+            reported.set()
+
+        await classifier.yes_no("hello", {"answer": YesNoQuestion(instructions="a greeting?")})
+        await asyncio.wait_for(reported.wait(), 1)
+
+        processing, usage = seen
+        assert isinstance(processing, ProcessingMetricsData)
+        assert processing.processor == classifier.name
+        assert processing.model == classifier.model_name
+        assert processing.value >= 0
+        assert isinstance(usage, LLMUsageMetricsData)
+        assert (usage.value.prompt_tokens, usage.value.completion_tokens) == (12, 3)
+        assert usage.value.total_tokens == 15
+        await classifier.cleanup()
         await client.close()

@@ -11,6 +11,8 @@ the next scripted reply, so the tests exercise the question rendering, the
 JSON parsing and the results.
 """
 
+import asyncio
+
 import pytest
 
 from pipecat.classifiers.base_classifier import (
@@ -20,6 +22,7 @@ from pipecat.classifiers.base_classifier import (
     YesNoQuestion,
 )
 from pipecat.classifiers.llm import LLMClassifier
+from pipecat.metrics.metrics import ProcessingMetricsData
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.services.llm_service import LLMService
 
@@ -235,3 +238,24 @@ async def test_a_service_without_run_inference_is_an_error():
     classifier = LLMClassifier(llm=_NoInferenceLLM())
     with pytest.raises(ClassifierError, match="one-shot"):
         await classifier.yes_no("hi", {"q": YesNoQuestion(instructions="?")})
+
+
+@pytest.mark.asyncio
+async def test_every_call_reports_its_time_without_tokens():
+    classifier, _ = _classifier('{"answer": {"probability": 0.9}}')
+    reported = asyncio.Event()
+    seen: list = []
+
+    @classifier.event_handler("on_metrics")
+    async def on_metrics(classifier, data):
+        seen.extend(data)
+        reported.set()
+
+    await classifier.yes_no("hello", {"answer": YesNoQuestion(instructions="a greeting?")})
+    await asyncio.wait_for(reported.wait(), 1)
+
+    (processing,) = seen
+    assert isinstance(processing, ProcessingMetricsData)
+    assert processing.processor == classifier.name
+    assert processing.model is None
+    assert processing.value >= 0
