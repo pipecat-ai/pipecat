@@ -121,7 +121,7 @@ class JevClassifier(BaseClassifier):
                 "instructions": question.instructions,
                 "criteria": question.options,
             }
-        return {"type": "score", "instructions": question.instructions, "criteria": question.rubric}
+        return {"type": "score", "instructions": question.instructions, "criteria": question.levels}
 
     def _from_jev(self, question: ClassifierQuestion, answer: dict[str, Any]) -> ClassifierResult:
         """A result built from Jev's answer to the question."""
@@ -140,7 +140,7 @@ class JevClassifier(BaseClassifier):
             score=self._number(answer, "score"),
             probabilities={
                 ScoreResult.level_key(level): float(probabilities.get(str(index), 0.0))
-                for index, level in enumerate(question.rubric)
+                for index, level in enumerate(question.levels)
             },
             confidence=self._number(answer, "confidence"),
         )

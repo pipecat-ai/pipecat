@@ -292,11 +292,11 @@ class TestJevClassifier:
             )
 
         classifier = JevClassifier(client=_client(handler))
-        rubric = ["calm", "frustrated", "angry"]
+        levels = ["calm", "frustrated", "angry"]
         result = (
             await classifier.score(
                 "This is the third time!",
-                {"answer": ScoreQuestion(instructions="how upset is the user?", rubric=rubric)},
+                {"answer": ScoreQuestion(instructions="how upset is the user?", levels=levels)},
             )
         )["answer"]
 
@@ -306,7 +306,7 @@ class TestJevClassifier:
         assert seen["question"] == {
             "type": "score",
             "instructions": "how upset is the user?",
-            "criteria": rubric,
+            "criteria": levels,
         }
         await classifier.client.close()
 
@@ -374,7 +374,7 @@ class TestJevLive:
                     {
                         "answer": ScoreQuestion(
                             instructions="how upset is the user?",
-                            rubric=["calm", "impatient", "frustrated", "asking for a person"],
+                            levels=["calm", "impatient", "frustrated", "asking for a person"],
                         )
                     },
                 )
@@ -462,11 +462,11 @@ class TestJevClassifierStructuredQuestions:
             )
 
         classifier = JevClassifier(client=_client(handler))
-        rubric = [{"level": "calm"}, {"level": "angry", "signs": ["shouting"]}]
+        levels = [{"level": "calm"}, {"level": "angry", "signs": ["shouting"]}]
         result = (
             await classifier.score(
                 "This is the third time!",
-                {"answer": ScoreQuestion(instructions="how upset?", rubric=rubric)},
+                {"answer": ScoreQuestion(instructions="how upset?", levels=levels)},
             )
         )["answer"]
 
@@ -506,7 +506,7 @@ class TestJevClassifierSeveralQuestions:
             "Hello there!",
             {
                 "greeting": YesNoQuestion(instructions="is this a greeting?"),
-                "mood": ScoreQuestion(instructions="how upset?", rubric=["calm", "upset"]),
+                "mood": ScoreQuestion(instructions="how upset?", levels=["calm", "upset"]),
             },
         )
 

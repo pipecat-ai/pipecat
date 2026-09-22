@@ -71,16 +71,16 @@ class ChoiceQuestion(BaseModel):
 
 
 class ScoreQuestion(BaseModel):
-    """Where the state falls on an ordered rubric.
+    """Where the state falls on an ordered scale.
 
     Parameters:
         instructions: What is being rated.
-        rubric: The levels in order, lowest first, each described in a few
+        levels: The levels of the scale in order, lowest first, each described in a few
             words or as structured data. At least two.
     """
 
     instructions: str | dict[str, Any] | list[Any]
-    rubric: list[str | dict[str, Any] | list[Any]] = Field(min_length=2)
+    levels: list[str | dict[str, Any] | list[Any]] = Field(min_length=2)
 
 
 ClassifierQuestion: TypeAlias = YesNoQuestion | ChoiceQuestion | ScoreQuestion
@@ -123,7 +123,7 @@ class ScoreResult(BaseModel):
     """Answer to a :class:`ScoreQuestion`.
 
     Parameters:
-        score: Where the state falls on the rubric, as a position from 0 (the
+        score: Where the state falls on the scale, as a position from 0 (the
             first level) to one less than the number of levels. It may fall
             between two levels.
         probabilities: How likely each level is, keyed by level description
@@ -137,10 +137,10 @@ class ScoreResult(BaseModel):
 
     @staticmethod
     def level_key(level: Any) -> str:
-        """The key a rubric level gets in ``probabilities``.
+        """The key a level gets in ``probabilities``.
 
         Args:
-            level: A level of the rubric, text or structured data.
+            level: A level of the scale, text or structured data.
 
         Returns:
             The level itself when it is text, otherwise its JSON text.
@@ -265,14 +265,14 @@ class BaseClassifier(BaseObject):
     async def score(
         self, state: str | dict[str, Any] | list[Any], questions: Mapping[str, ScoreQuestion]
     ) -> dict[str, ScoreResult]:
-        """Ask where the state falls on each rubric.
+        """Ask where the state falls on each scale.
 
         Args:
             state: What the questions are about.
             questions: The questions, by name.
 
         Returns:
-            The position on each rubric and how likely each level is, by the
+            The position on each scale and how likely each level is, by the
             same names.
 
         Raises:

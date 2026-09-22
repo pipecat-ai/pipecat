@@ -150,9 +150,9 @@ class LLMClassifier(BaseClassifier):
                 )
             else:
                 lines.append("Scale, lowest first:")
-                for index, level in enumerate(question.rubric):
+                for index, level in enumerate(question.levels):
                     lines.append(f"{index}: {self._text(level)}")
-                last = len(question.rubric) - 1
+                last = len(question.levels) - 1
                 lines.append(
                     f'Answer shape: {{"score": <position on the scale, from 0 to {last}, '
                     'decimals allowed>, "confidence": <how sure you are>}'
@@ -224,12 +224,12 @@ class LLMClassifier(BaseClassifier):
             )
         score = self._number(answer, "score")
         confidence = self._unit(answer, "confidence")
-        nearest = min(range(len(question.rubric)), key=lambda i: abs(i - score))
+        nearest = min(range(len(question.levels)), key=lambda i: abs(i - score))
         return ScoreResult(
             score=score,
             probabilities={
                 ScoreResult.level_key(level): confidence if i == nearest else 0.0
-                for i, level in enumerate(question.rubric)
+                for i, level in enumerate(question.levels)
             },
             confidence=confidence,
         )
