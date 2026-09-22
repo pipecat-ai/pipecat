@@ -13,6 +13,7 @@ voice transcription, streaming responses, and tool usage.
 
 import asyncio
 import io
+import json
 import re
 import time
 import uuid
@@ -36,6 +37,7 @@ from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
     Frame,
+    FunctionCallResultFrame,
     InputAudioRawFrame,
     InputImageRawFrame,
     InputTextRawFrame,
@@ -90,6 +92,7 @@ try:
         ContextWindowCompressionConfig,
         EndSensitivity,
         FunctionResponse,
+        FunctionResponseScheduling,
         GenerationConfig,
         GroundingMetadata,
         HistoryConfig,
@@ -434,6 +437,16 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
 
     # Overriding the default adapter to use the Gemini Live one.
     adapter_class = GeminiLiveLLMAdapter
+
+    @property
+    def accepts_intermediate_function_call_results(self) -> bool:
+        """Whether the model takes a call's intermediate results.
+
+        They ride the tool-response channel as a generator (``will_continue``),
+        which only a NON_BLOCKING call allows, so this follows the same model
+        gating as the rest of the async-tool support.
+        """
+        return self._supports_non_blocking_tools
 
     def service_metadata_frame(self) -> LLMServiceMetadataFrame:
         """Realtime service; emits no server-side turn frames, so recommends no external strategies."""
@@ -1003,6 +1016,45 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
     # StartFrame, StopFrame, CancelFrame implemented in base class
     #
 
+    async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
+        """Push a frame, sending function call results to the API on the way.
+
+        Results are broadcast by the base service; the downstream copy is
+        observed here and sent as it is produced, so a tool that reports
+        progress reaches the model while it is still working.
+
+        Args:
+            frame: The frame to push.
+            direction: The direction of frame pushing.
+        """
+        if direction == FrameDirection.DOWNSTREAM and isinstance(frame, FunctionCallResultFrame):
+            await self._handle_function_call_result(frame)
+        await super().push_frame(frame, direction)
+
+    async def _handle_function_call_result(self, frame: FunctionCallResultFrame):
+        """Send one result to the API, and say whether the model should answer it."""
+        is_final = frame.properties.is_final if frame.properties else True
+        if not is_final and not self.accepts_intermediate_function_call_results:
+            logger.warning(
+                f"{self}: {self._settings.model} takes one result per function call; "
+                f"dropping the intermediate result for {frame.function_name}"
+            )
+            return
+        run_llm = frame.properties.run_llm if frame.properties else None
+        if run_llm is None:
+            run_llm = frame.run_llm if frame.run_llm is not None else True
+        tool_name = self._tool_call_id_to_name.get(frame.tool_call_id, "tool_call_result")
+        result = json.dumps(frame.result, ensure_ascii=False) if frame.result else "COMPLETED"
+        await self._tool_result(
+            frame.tool_call_id,
+            tool_name,
+            GeminiLiveLLMAdapter.to_function_response_dict(result),
+            is_final=is_final,
+            spoken=bool(run_llm),
+        )
+        if is_final:
+            self._completed_tool_calls.add(frame.tool_call_id)
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process incoming frames for the Gemini Live service.
 
@@ -1187,16 +1239,8 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
                     # awaits a result; nothing to send for the started marker.
                     continue
                 if async_payload.kind == "intermediate":
-                    logger.error(
-                        f"{self}: Gemini Live does not support streamed async "
-                        f"tool results; dropping intermediate result for "
-                        f"tool_call_id={async_payload.tool_call_id}. Use a "
-                        f"non-realtime LLM service if your tool needs to "
-                        f"stream intermediate results."
-                    )
-                    await self.push_error(
-                        error_msg="Gemini Live does not support streamed async tool results.",
-                    )
+                    # Sent as it was produced, keeping the call open for the
+                    # result that settles it.
                     continue
                 if async_payload.kind == "final":
                     # Deliver via the formal tool-response channel — same
@@ -1975,9 +2019,27 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
 
     @traced_gemini_live(operation="llm_tool_result")
     async def _tool_result(
-        self, tool_call_id: str, tool_name: str, tool_result_message: dict[str, Any]
+        self,
+        tool_call_id: str,
+        tool_name: str,
+        tool_result_message: dict[str, Any],
+        *,
+        is_final: bool = True,
+        spoken: bool = True,
     ):
-        """Send tool result back to the API."""
+        """Send tool result back to the API.
+
+        Args:
+            tool_call_id: The call the result belongs to.
+            tool_name: The function that was called.
+            tool_result_message: The result, as a response dict.
+            is_final: Whether this result completes the call. An intermediate
+                one keeps it open (``will_continue``), which only a NON_BLOCKING
+                call allows.
+            spoken: Whether the model should address the result. It is told to
+                stay silent otherwise, so the result is context it can draw on
+                if the conversation turns that way.
+        """
         if self._disconnecting or not self._session:
             return
 
@@ -1988,19 +2050,27 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
         # Pair the NON_BLOCKING declaration on async tools with a
         # scheduling hint on the response. WHEN_IDLE lets Gemini finish
         # whatever it's currently saying before addressing the result, so
-        # we don't cut off mid-sentence when delayed results land. Only
-        # meaningful for NON_BLOCKING tools — synchronous tools never
-        # leave the model mid-turn — so we mirror the gating used at
-        # tool-declaration time.
+        # we don't cut off mid-sentence when delayed results land; SILENT
+        # takes the result in without answering it. Only meaningful for
+        # NON_BLOCKING tools — synchronous tools never leave the model
+        # mid-turn — so we mirror the gating used at tool-declaration time.
         # https://ai.google.dev/gemini-api/docs/live-api/tools#async-function-calling
-        if self._supports_non_blocking_tools and self._function_is_async(tool_name):
-            response_payload = {**tool_result_message, "scheduling": "WHEN_IDLE"}
-        else:
-            response_payload = tool_result_message
+        non_blocking = self._supports_non_blocking_tools and self._function_is_async(tool_name)
+        scheduling = ("WHEN_IDLE" if spoken else "SILENT") if non_blocking else None
+        response_payload = (
+            {**tool_result_message, "scheduling": scheduling} if scheduling else tool_result_message
+        )
 
         # For now we're shoving the name into the tool_call_id field, so this
         # will work until we revisit that.
         response = FunctionResponse(name=tool_name, id=tool_call_id, response=response_payload)
+        # The guides document scheduling inside the response, the API reference
+        # as a field of its own; set both so whichever the server reads is
+        # there. will_continue only exists as a field.
+        if scheduling:
+            response.scheduling = FunctionResponseScheduling(scheduling)
+        if not is_final:
+            response.will_continue = True
 
         try:
             await self._session.send_tool_response(function_responses=response)
