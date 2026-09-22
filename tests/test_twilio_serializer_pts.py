@@ -19,8 +19,9 @@ import base64
 import json
 import unittest
 
-from pipecat.frames.frames import InputAudioRawFrame, StartFrame
+from pipecat.frames.frames import InputAudioRawFrame
 from pipecat.serializers.twilio import TwilioFrameSerializer
+from tests.frame_processor_helpers import frame_processor_setup
 
 _METADATA_KEY = "audio_capture_time_ns"
 
@@ -43,7 +44,7 @@ class TestTwilioMediaCaptureTime(unittest.IsolatedAsyncioTestCase):
         self.serializer = TwilioFrameSerializer(
             "MZstream", params=TwilioFrameSerializer.InputParams(auto_hang_up=False)
         )
-        await self.serializer.setup(StartFrame(audio_in_sample_rate=16000))
+        await self.serializer.setup(frame_processor_setup(audio_in_sample_rate=16000))
 
     async def test_timestamp_recorded_as_capture_time_ns(self):
         frame = await self.serializer.deserialize(media_message(timestamp="5000"))
