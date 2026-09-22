@@ -1735,6 +1735,41 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
         assert payload.result.startswith("CANCELLED")
         assert not aggregator.has_function_calls_in_progress
 
+    async def test_run_survives_a_later_result_that_does_not_ask_to_run(self):
+        """A burst runs inference once, even when its last result doesn't ask for it."""
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        frames_to_send = [
+            FunctionCallInProgressFrame(
+                function_name="lookup",
+                tool_call_id="1",
+                arguments={},
+                cancel_on_interruption=False,
+            ),
+            SleepFrame(),
+            # Queued together, so the first result's push is held for the second.
+            FunctionCallResultFrame(
+                function_name="lookup",
+                tool_call_id="1",
+                arguments={},
+                result={"progress": "on it"},
+                properties=FunctionCallResultProperties(is_final=False, run_llm=True),
+            ),
+            FunctionCallResultFrame(
+                function_name="lookup",
+                tool_call_id="1",
+                arguments={},
+                result={"progress": "still on it"},
+                properties=FunctionCallResultProperties(is_final=False, run_llm=False),
+            ),
+        ]
+        await run_test(
+            aggregator,
+            frames_to_send=frames_to_send,
+            expected_down_frames=[],
+            expected_up_frames=[LLMContextFrame],
+        )
+
     async def test_function_call_cancel_run_llm(self):
         """A cancellation asking for inference pushes the context upstream."""
         context = LLMContext()
