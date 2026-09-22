@@ -130,7 +130,7 @@ class JevClassifier(BaseClassifier):
         if isinstance(question, ChoiceQuestion):
             probabilities = answer.get("probabilities") or {}
             return ChoiceResult(
-                label=str(answer.get("choice", "")),
+                choice=str(answer.get("choice", "")),
                 probabilities={o: float(probabilities.get(o, 0.0)) for o in question.options},
                 confidence=self._number(answer, "confidence"),
             )

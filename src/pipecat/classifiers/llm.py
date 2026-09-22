@@ -39,7 +39,7 @@ DEFAULT_INSTRUCTIONS = (
     'example, a yes or no question named "voicemail" is answered '
     '{"voicemail": {"probability": 0.97}}. A choice question named "department" '
     "with the options billing, support and sales is answered "
-    '{"department": {"label": "billing", "probabilities": {"billing": 0.92, '
+    '{"department": {"choice": "billing", "probabilities": {"billing": 0.92, '
     '"support": 0.06, "sales": 0.02}}}. A score question named "mood" on a '
     'scale of three levels is answered {"mood": {"score": 1.8, "confidence": 0.8}}. '
     "Several questions about one input get one object with an answer for each "
@@ -138,14 +138,14 @@ class LLMClassifier(BaseClassifier):
                 lines.append('Answer shape: {"probability": <probability that the answer is yes>}')
             elif isinstance(question, ChoiceQuestion):
                 lines.append("Options:")
-                for label, description in question.options.items():
+                for option, description in question.options.items():
                     lines.append(
-                        f"- {label}: {self._text(description)}"
+                        f"- {option}: {self._text(description)}"
                         if description is not None
-                        else f"- {label}"
+                        else f"- {option}"
                     )
                 lines.append(
-                    'Answer shape: {"label": <the option that fits best>, '
+                    'Answer shape: {"choice": <the option that fits best>, '
                     '"probabilities": {<a probability per option, summing to 1>}}'
                 )
             else:
@@ -172,7 +172,7 @@ class LLMClassifier(BaseClassifier):
                 options = list(question.options)
                 answers[name] = self._object(
                     {
-                        "label": {"type": "string", "enum": options},
+                        "choice": {"type": "string", "enum": options},
                         "probabilities": self._object({o: {"type": "number"} for o in options}),
                     }
                 )
@@ -213,14 +213,14 @@ class LLMClassifier(BaseClassifier):
         if isinstance(question, YesNoQuestion):
             return YesNoResult(probability=self._unit(answer, "probability"))
         if isinstance(question, ChoiceQuestion):
-            label = str(answer.get("label", ""))
-            if label not in question.options:
-                raise ClassifierError(f"the LLM chose {label!r}, which is not an option")
+            choice = str(answer.get("choice", ""))
+            if choice not in question.options:
+                raise ClassifierError(f"the LLM chose {choice!r}, which is not an option")
             given = answer.get("probabilities")
             given = given if isinstance(given, dict) else {}
             probabilities = {o: self._clamp(given.get(o, 0.0)) for o in question.options}
             return ChoiceResult(
-                label=label, probabilities=probabilities, confidence=probabilities[label]
+                choice=choice, probabilities=probabilities, confidence=probabilities[choice]
             )
         score = self._number(answer, "score")
         confidence = self._unit(answer, "confidence")

@@ -61,8 +61,8 @@ class ChoiceQuestion(BaseModel):
 
     Parameters:
         instructions: What is being decided.
-        options: The options to choose from, each label mapped to a
-            description of when it applies, or ``None`` when the label says
+        options: The options to choose from, each mapped to a description
+            of when it applies, or ``None`` when the option itself says
             enough.
     """
 
@@ -100,12 +100,12 @@ class ChoiceResult(BaseModel):
     """Answer to a :class:`ChoiceQuestion`.
 
     Parameters:
-        label: The option that fits best.
-        probabilities: How likely each option is, keyed by option label.
-        confidence: How sure the classifier is of ``label``, from 0 to 1.
+        choice: The option that fits best.
+        probabilities: How likely each option is, keyed by option.
+        confidence: How sure the classifier is of ``choice``, from 0 to 1.
     """
 
-    label: str
+    choice: str
     probabilities: dict[str, float]
     confidence: float
 

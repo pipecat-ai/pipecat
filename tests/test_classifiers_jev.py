@@ -264,7 +264,7 @@ class TestJevClassifier:
             )
         )["answer"]
 
-        assert result.label == "short"
+        assert result.choice == "short"
         assert result.probabilities == {"complete": 0.1, "short": 0.88, "long": 0.0}
         assert result.confidence == 0.8
         assert seen["question"] == {
@@ -364,7 +364,7 @@ class TestJevLive:
                     },
                 )
             )["answer"]
-            assert choice.label in ("complete", "short", "long")
+            assert choice.choice in ("complete", "short", "long")
             assert abs(sum(choice.probabilities.values()) - 1.0) < 0.05
 
             score = (
@@ -440,7 +440,7 @@ class TestJevClassifierStructuredQuestions:
             )
         )["answer"]
 
-        assert result.label == "b"
+        assert result.choice == "b"
         assert seen["question"] == {
             "type": "choice",
             "instructions": {"question": "which?", "note": "casual"},

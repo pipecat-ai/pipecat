@@ -71,7 +71,7 @@ async def test_yes_no_answers_from_the_json_reply():
 @pytest.mark.asyncio
 async def test_choice_answers_with_a_probability_per_option():
     classifier, _ = _classifier(
-        '{"turn": {"label": "short", "probabilities": {"short": 0.8, "complete": 0.2}}}'
+        '{"turn": {"choice": "short", "probabilities": {"short": 0.8, "complete": 0.2}}}'
     )
     question = ChoiceQuestion(
         instructions="is the turn over?",
@@ -79,7 +79,7 @@ async def test_choice_answers_with_a_probability_per_option():
     )
     results = await classifier.choice("I'd like to", {"turn": question})
 
-    assert results["turn"].label == "short"
+    assert results["turn"].choice == "short"
     assert results["turn"].probabilities == {"complete": 0.2, "short": 0.8, "long": 0.0}
     assert results["turn"].confidence == 0.8
 
@@ -115,7 +115,7 @@ async def test_several_questions_go_in_one_call():
 
 @pytest.mark.asyncio
 async def test_the_question_is_rendered_with_its_options_and_the_reply_shape():
-    classifier, llm = _classifier('{"which": {"label": "a"}}')
+    classifier, llm = _classifier('{"which": {"choice": "a"}}')
     await classifier.choice(
         {"assistant": "Where to?", "user": "japan"},
         {"which": ChoiceQuestion(instructions="which?", options={"a": "first", "b": None})},
@@ -158,7 +158,7 @@ async def test_a_fenced_reply_is_parsed():
 @pytest.mark.asyncio
 async def test_the_reply_schema_has_one_answer_per_question():
     classifier, llm = _classifier(
-        '{"q": {"probability": 0.5}, "w": {"label": "a", "probabilities": {"a": 1, "b": 0}}}'
+        '{"q": {"probability": 0.5}, "w": {"choice": "a", "probabilities": {"a": 1, "b": 0}}}'
     )
     await classifier.ask(
         "hi",
@@ -174,7 +174,7 @@ async def test_the_reply_schema_has_one_answer_per_question():
     assert schema["additionalProperties"] is False
     assert schema["properties"]["q"]["required"] == ["probability"]
     choice = schema["properties"]["w"]["properties"]
-    assert choice["label"]["enum"] == ["a", "b"]
+    assert choice["choice"]["enum"] == ["a", "b"]
     assert choice["probabilities"]["required"] == ["a", "b"]
 
 
@@ -190,22 +190,22 @@ async def test_the_score_schema_asks_for_a_score_and_a_confidence():
 
 @pytest.mark.asyncio
 async def test_a_choice_without_probabilities_has_no_confidence():
-    classifier, _ = _classifier('{"q": {"label": "b"}}')
+    classifier, _ = _classifier('{"q": {"choice": "b"}}')
     results = await classifier.choice(
         "hi", {"q": ChoiceQuestion(instructions="?", options={"a": "", "b": ""})}
     )
-    assert results["q"].label == "b"
+    assert results["q"].choice == "b"
     assert results["q"].confidence == 0.0
     assert results["q"].probabilities == {"a": 0.0, "b": 0.0}
 
 
 @pytest.mark.asyncio
 async def test_a_lone_answer_without_its_name_is_accepted():
-    classifier, _ = _classifier('{"label": "b", "probabilities": {"a": 0.2, "b": 0.8}}')
+    classifier, _ = _classifier('{"choice": "b", "probabilities": {"a": 0.2, "b": 0.8}}')
     results = await classifier.choice(
         "hi", {"q": ChoiceQuestion(instructions="?", options={"a": "", "b": ""})}
     )
-    assert results["q"].label == "b"
+    assert results["q"].choice == "b"
 
 
 @pytest.mark.asyncio
@@ -225,8 +225,8 @@ async def test_a_missing_answer_is_an_error():
 
 
 @pytest.mark.asyncio
-async def test_a_label_outside_the_options_is_an_error():
-    classifier, _ = _classifier('{"q": {"label": "c"}}')
+async def test_a_choice_outside_the_options_is_an_error():
+    classifier, _ = _classifier('{"q": {"choice": "c"}}')
     with pytest.raises(ClassifierError, match="not an option"):
         await classifier.choice(
             "hi", {"q": ChoiceQuestion(instructions="?", options={"a": "", "b": ""})}
