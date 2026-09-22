@@ -11,7 +11,6 @@ supporting both Faster Whisper and MLX Whisper backends for efficient inference.
 """
 
 import asyncio
-import platform
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -35,18 +34,6 @@ except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error('In order to use Whisper, you need to `uv add "pipecat-ai[whisper]"`.')
     raise ImportError(f"Missing module: {e}") from e
-
-# MLX Whisper only runs on Apple Silicon. On other platforms the package is
-# unavailable (or installed but unloadable, e.g. a missing ``libmlx.so``), so
-# importing it would break this module everywhere else. Only attempt it on macOS;
-# WhisperSTTServiceMLX imports it lazily when actually used.
-if platform.system() == "Darwin" and platform.machine() == "arm64":
-    try:
-        import mlx_whisper  # noqa: F401
-    except ModuleNotFoundError as e:
-        logger.error(f"Exception: {e}")
-        logger.error('In order to use Whisper, you need to `uv add "pipecat-ai[mlx-whisper]"`.')
-        raise ImportError(f"Missing module: {e}") from e
 
 
 class Model(StrEnum):
@@ -575,9 +562,15 @@ class WhisperSTTServiceMLX(WhisperSTTService):
                   or an ErrorFrame if transcription fails.
         """
         try:
-            # This will trigger an exception in case we want to use
-            # WhisperMLXSTTService in a platform different than macOS.
-            import mlx_whisper
+            # mlx-whisper is its own extra and only runs on Apple Silicon, so it is
+            # imported here rather than at module scope: pipecat-ai[whisper] must stay
+            # importable without it.
+            try:
+                import mlx_whisper
+            except ModuleNotFoundError as e:
+                logger.error(f"Exception: {e}")
+                logger.error('In order to use Whisper MLX, you need to `uv add "pipecat-ai[mlx-whisper]"`.')
+                raise ImportError(f"Missing module: {e}") from e
 
             await self.start_processing_metrics()
 
