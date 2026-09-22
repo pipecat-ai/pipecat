@@ -17,6 +17,7 @@ from pipecat.classifiers.base_classifier import (
     ClassifierError,
     ScoreQuestion,
     YesNoQuestion,
+    YesNoResult,
 )
 from pipecat.classifiers.jev import JevClassifier
 from pipecat.classifiers.jev_client import JevClient
@@ -568,6 +569,13 @@ class TestJevClassifierSeveralQuestions:
 
         assert connects == ["/v1/models"]
         await client.close()
+
+
+class TestResults:
+    def test_yes_when_yes_is_likelier(self):
+        assert YesNoResult(probability=0.5).is_yes
+        assert YesNoResult(probability=0.9).is_yes
+        assert not YesNoResult(probability=0.49).is_yes
 
 
 class TestMetrics:

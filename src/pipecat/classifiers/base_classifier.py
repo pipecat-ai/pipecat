@@ -95,6 +95,15 @@ class YesNoResult(BaseModel):
 
     probability: float
 
+    @property
+    def is_yes(self) -> bool:
+        """Whether yes is the likelier answer.
+
+        Callers that need more certainty than that compare ``probability``
+        with a threshold of their own.
+        """
+        return self.probability >= 0.5
+
 
 class ChoiceResult(BaseModel):
     """Answer to a :class:`ChoiceQuestion`.
