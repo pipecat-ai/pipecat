@@ -380,9 +380,12 @@ class SIPOutputTransport(BaseOutputTransport):
         already-written audio; without the flush that much stale bot
         speech would still play after an interruption.
         """
+        await super().process_frame(frame, direction)
+        # Flush after the base has cancelled (and awaited) the audio sender, so a
+        # sender waking from its high-water sleep cannot write one more chunk into
+        # the buffer after it is emptied.
         if isinstance(frame, InterruptionFrame):
             self._connection.flush_tx()
-        await super().process_frame(frame, direction)
 
     async def stop(self, frame: EndFrame):
         """Flush the base transport and release the shared connection."""
@@ -482,7 +485,11 @@ class SIPTransport(BaseTransport):
     account and stack settings) and hands it to the transport; the
     transport owns the call's relationship to the pipeline. One call per
     transport instance — run several instances to hold several
-    conversations on one account.
+    conversations on one account, **each with its own connection** (the
+    transport binds event handlers to the connection it is given, so a
+    connection is not reusable across transport instances). More than two
+    concurrent calls needs the connections' ``max_concurrent_calls`` raised
+    from its default of 2 (it is runtime-wide — set it on every connection).
 
     See the module docstring for the DailyTransport compatibility
     matrix.
@@ -524,9 +531,6 @@ class SIPTransport(BaseTransport):
         self._dialout_progressed = False
         self._other_participant_has_joined = False
         self._left = False
-        # True while an attended transfer is splicing, so the active call's
-        # close is reported with reason "transferred" rather than a hangup.
-        self._transfer_pending = False
 
         # The call's video geometry must match what the base sender
         # produces; align the (not yet connected) connection with the
@@ -783,11 +787,9 @@ class SIPTransport(BaseTransport):
             # The splice never started, so the active call is untouched.
             await self._teardown_consult(consult)
             return str(e)
-        self._transfer_pending = True
         try:
             await self._connection.attended_transfer(consult)
         except Exception as e:
-            self._transfer_pending = False
             await self._teardown_consult(consult)
             # attended_transfer holds the active call before the REFER; a failed
             # splice leaves it on hold, so resume it to keep talking to the caller.
@@ -922,6 +924,7 @@ class SIPTransport(BaseTransport):
         return {
             "sessionId": data.get("sessionId"),
             "sipCallId": data.get("sipCallId"),
+            "origin": data.get("origin"),
             "destination": data.get("destination"),
         }
 
@@ -951,13 +954,18 @@ class SIPTransport(BaseTransport):
         stats = connection.final_stats
         if stats is not None:
             await self._call_event_handler("on_call_quality_stats", stats)
-        # A successful attended transfer closes the active call by protocol;
-        # report that as "transferred" so a bot distinguishes it from a hangup.
-        transferred = self._transfer_pending
-        self._transfer_pending = False
+        # A completed transfer (blind REFER or attended Replaces) closes the
+        # active call by protocol; the connection flags it from the stack's close
+        # reason, so report "transferred" to distinguish it from a hangup — and a
+        # caller hangup racing the REFER is correctly not flagged.
+        transferred = bool(data.get("transferred"))
         if data.get("direction") == "in":
             self._dial_in_session_id = ""
-            stopped = {k: v for k, v in data.items() if k not in ("established", "direction")}
+            stopped = {
+                k: v
+                for k, v in data.items()
+                if k not in ("established", "direction", "transferred")
+            }
             if transferred:
                 stopped["reason"] = "transferred"
             await self._call_event_handler("on_dialin_stopped", stopped)
