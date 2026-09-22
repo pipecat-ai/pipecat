@@ -28,7 +28,7 @@ _JSON_NATIVE = (str, int, float, bool, type(None))
 class JSONMessageSerializer(MessageSerializer):
     """Serialize bus messages as JSON with pluggable type adapters.
 
-    Handles JSON-native types, enums, bytes, dataclasses, and any type
+    Handles JSON-native types, enums, tuples, bytes, dataclasses, and any type
     with a registered ``TypeAdapter`` (e.g. ``LLMContext``, ``ToolsSchema``).
     Adapters for common Pipecat types are registered by default.
     Additional type adapters can be registered via ``register_adapter()``.
@@ -98,6 +98,17 @@ class JSONMessageSerializer(MessageSerializer):
             return {k: self._serialize_value(v) for k, v in value.items()}
         if isinstance(value, list):
             return [self._serialize_value(v) for v in value]
+        if isinstance(value, tuple):
+            adapter = self._find_adapter(type(value))
+            if adapter is not None:
+                return {
+                    "__type__": f"{type(value).__module__}.{type(value).__name__}",
+                    "__data__": adapter.serialize(value, self._serialize_value),
+                }
+            return {
+                "__type__": "tuple",
+                "__data__": [self._serialize_value(v) for v in value],
+            }
         if isinstance(value, bytes):
             return {"__type__": "bytes", "__data__": base64.b64encode(value).decode("ascii")}
         if isinstance(value, BaseModel):
@@ -149,6 +160,8 @@ class JSONMessageSerializer(MessageSerializer):
         """Deserialize a tagged value using its fully qualified type name."""
         if type_name == "bytes":
             return base64.b64decode(data)
+        if type_name == "tuple":
+            return tuple(self._deserialize_value(v) for v in data)
         cls = _resolve_type(type_name)
         if cls is None:
             logger.warning(f"JSONMessageSerializer: could not resolve type {type_name}")
