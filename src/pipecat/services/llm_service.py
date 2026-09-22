@@ -981,12 +981,12 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 asynchronous: the LLM continues the conversation immediately
                 without waiting for the result, and the result is injected later
                 via a developer message. Defaults to ``None`` (fall back to the
-                ``@tool_options`` decorator value, then to True). Note: realtime
-                LLM services deliver only the final result to the provider;
-                intermediate streamed results (reported via
-                ``FunctionCallResultProperties(is_final=False)``) are
-                dropped and an error is raised. Use a non-realtime LLM
-                service if your tool needs to stream intermediate results.
+                ``@tool_options`` decorator value, then to True). A speech-to-speech
+                service takes intermediate results (reported via
+                ``FunctionCallResultProperties(is_final=False)``) on whatever
+                second channel its provider offers; one that can't says so with
+                ``accepts_intermediate_function_call_results`` and drops them
+                with a warning.
             timeout_secs: Optional per-tool timeout in seconds, overriding the
                 global ``function_call_timeout_secs``. A call that runs past it is
                 cancelled: the handler is thrown an ``asyncio.CancelledError``, the
@@ -1095,12 +1095,12 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 asynchronous: the LLM continues the conversation immediately
                 without waiting for the result, and the result is injected later
                 via a developer message. Defaults to ``None`` (fall back to the
-                ``@tool_options`` decorator value, then to True).
-                Note: realtime LLM services deliver only the final result to the
-                provider; intermediate streamed results (reported via
-                ``FunctionCallResultProperties(is_final=False)``) are
-                dropped and an error is raised. Use a non-realtime LLM
-                service if your tool needs to stream intermediate results.
+                ``@tool_options`` decorator value, then to True). A speech-to-speech
+                service takes intermediate results (reported via
+                ``FunctionCallResultProperties(is_final=False)``) on whatever
+                second channel its provider offers; one that can't says so with
+                ``accepts_intermediate_function_call_results`` and drops them
+                with a warning.
             timeout_secs: Optional per-tool timeout in seconds, overriding the
                 global ``function_call_timeout_secs``. A call that runs past it is
                 cancelled: the handler is thrown an ``asyncio.CancelledError``, the
