@@ -288,7 +288,8 @@ class TestGeminiLiveIntermediateResults(unittest.IsolatedAsyncioTestCase):
         await self.service.push_frame(_result(is_final=True))
 
         (response,) = self._responses()
-        self.assertIsNone(response.will_continue)
+        # The call stays open for good unless the last response closes it.
+        self.assertFalse(response.will_continue)
         self.assertEqual(response.scheduling, "WHEN_IDLE")
         self.assertIn("call_1", self.service._completed_tool_calls)
 
