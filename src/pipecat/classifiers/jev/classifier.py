@@ -7,7 +7,7 @@
 """Classifier backed by Jev, TypeSafe's hosted classification model.
 
 :class:`JevClassifier` turns each question into a request and each reply
-into a result, through a :class:`~pipecat.classifiers.jev_client.JevClient`.
+into a result, through a :class:`~pipecat.classifiers.jev.client.JevClient`.
 """
 
 from collections.abc import Mapping
@@ -26,7 +26,7 @@ from pipecat.classifiers.base_classifier import (
     YesNoQuestion,
     YesNoResult,
 )
-from pipecat.classifiers.jev_client import JevClient
+from pipecat.classifiers.jev.client import JevClient
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.workers.base_worker import BaseWorker
 

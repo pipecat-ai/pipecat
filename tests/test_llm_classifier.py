@@ -21,7 +21,7 @@ from pipecat.classifiers.base_classifier import (
     ScoreQuestion,
     YesNoQuestion,
 )
-from pipecat.classifiers.llm import LLMClassifier
+from pipecat.classifiers.llm.classifier import LLMClassifier
 from pipecat.metrics.metrics import ProcessingMetricsData
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.services.llm_service import LLMService

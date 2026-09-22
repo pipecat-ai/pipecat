@@ -8,7 +8,7 @@
 
 One :class:`JevClient` holds one HTTP/2 connection pool, adds the auth
 header, retries when Jev is busy, and counts the tokens every request used.
-Several :class:`~pipecat.classifiers.jev.JevClassifier` instances can share
+Several :class:`~pipecat.classifiers.jev.classifier.JevClassifier` instances can share
 one.
 """
 
