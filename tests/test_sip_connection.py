@@ -267,6 +267,51 @@ async def test_dial_returns_session_id_and_busy_raises(env):
         await connection.dial("sip:9197@example.com")
 
 
+def test_consult_connection_shares_account_and_is_registrationless():
+    connection = make_connection(transport="tls", extra_params=("medianat=stun",))
+
+    consult = connection.consult_connection()
+
+    assert isinstance(consult, SIPConnection)
+    assert consult._account.user == "1001"
+    assert consult._account.domain == "example.com"
+    assert consult._account.transport == "tls"
+    assert consult._account.extra_params == ("medianat=stun",)
+    # A consult leg never registers; it reuses the primary's registered UA.
+    assert consult._account.reg_interval == 0
+
+
+@pytest.mark.asyncio
+async def test_consult_connection_connects_against_configured_runtime(env):
+    # A sibling must present the primary's runtime-wide settings, or acquiring
+    # the already-running runtime raises on a mismatch. Exercise it with a
+    # non-default setting and a live connect.
+    connection = make_connection(rtp_timeout=30)
+    await connection.connect()
+
+    consult = connection.consult_connection()
+    await consult.connect()  # must not raise on a settings mismatch
+
+    assert env.runtime_constructions == 1  # sibling reuses the running runtime
+    assert consult.is_connected
+    env.ua.register.assert_awaited_once()  # only the primary registered
+
+
+@pytest.mark.asyncio
+async def test_wait_established_delegates_to_call(env):
+    connection = make_connection()
+    await connection.connect()
+    call = make_fake_call(handle=0x7)
+    env.ua.dial.return_value = call
+    await connection.dial("sip:9196@example.com")
+
+    await connection.wait_established(timeout=5.0)
+
+    # dial() also arms an establishment watcher that awaits wait_established();
+    # assert our explicit-timeout call landed among the awaits.
+    call.wait_established.assert_any_await(5.0)
+
+
 @pytest.mark.asyncio
 async def test_dial_failure_emits_call_failed(env):
     connection = make_connection()

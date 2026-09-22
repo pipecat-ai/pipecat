@@ -32,14 +32,18 @@ errors and warnings carry ``errorMsg``. Daily's ``provider`` and
 ``on_client_disconnected``, ``on_participant_updated`` (hold/resume),
 ``on_connected``, ``on_left``, ``on_before_leave``, ``on_error``,
 ``on_call_state_updated``. Methods: ``start_dialout``, ``stop_dialout``,
-``send_dtmf``, ``sip_call_transfer``, ``sip_refer`` — all return
-``str | None`` errors and never raise.
+``send_dtmf``, ``sip_call_transfer``, ``sip_refer``, and the SIP-only
+``sip_attended_transfer`` — all return ``str | None`` errors and never raise.
 
 **Equivalent with deltas:** ``sip_refer`` sends a true SIP REFER;
 ``sip_call_transfer`` is **rejected with an error for now** — Daily's
 version re-anchors the call in its cloud, and substituting a REFER
 would silently change the semantics (mediated transfer, with the bot
-bridging both legs, is the planned faithful implementation).
+bridging both legs, is the planned faithful implementation). Both
+``sip_refer`` (blind) and the SIP-only ``sip_attended_transfer``
+(consult-then-splice, REFER with Replaces) are REFER-based, so they
+need a peer that processes REFER — a SIP PBX or registrar
+(FreeSWITCH, Asterisk, Kamailio), not a carrier PSTN trunk.
 ``on_connected`` fires with no payload (as on LiveKit), while Daily
 passes its join data — a cross-transport handler should accept an
 optional second argument (``on_connected(transport, data=None)``).
@@ -520,6 +524,9 @@ class SIPTransport(BaseTransport):
         self._dialout_progressed = False
         self._other_participant_has_joined = False
         self._left = False
+        # True while an attended transfer is splicing, so the active call's
+        # close is reported with reason "transferred" rather than a hangup.
+        self._transfer_pending = False
 
         # The call's video geometry must match what the base sender
         # produces; align the (not yet connected) connection with the
@@ -696,9 +703,9 @@ class SIPTransport(BaseTransport):
         such infrastructure, and quietly substituting a REFER (which
         requires far-end support and different semantics) would mislead;
         until mediated transfer lands — the bot bridging both legs
-        itself — this returns an error. Use :meth:`sip_refer` for a SIP
-        REFER, or ``SIPConnection.attended_transfer`` for a
-        Replaces-based splice.
+        itself — this returns an error. Use :meth:`sip_refer` for a blind
+        SIP REFER, or :meth:`sip_attended_transfer` for a consult-then-splice
+        REFER with Replaces.
 
         Args:
             settings: Ignored until mediated transfer lands.
@@ -713,7 +720,12 @@ class SIPTransport(BaseTransport):
         )
 
     async def sip_refer(self, settings) -> str | None:
-        """Send a SIP REFER for the call.
+        """Send a SIP REFER for the call (blind transfer).
+
+        The caller is asked to call ``toEndPoint`` itself; on success this
+        call closes. Needs a peer that processes REFER — a SIP PBX or
+        registrar, not a carrier PSTN trunk. For a transfer that confirms the
+        target answered first, see :meth:`sip_attended_transfer`.
 
         Args:
             settings: ``toEndPoint`` (the destination URI); optional
@@ -723,6 +735,83 @@ class SIPTransport(BaseTransport):
             An error description, or None on success.
         """
         return await self._refer(settings)
+
+    async def sip_attended_transfer(self, settings) -> str | None:
+        """Attended transfer: dial a target, confirm it answers, then splice.
+
+        Places a consultation call to ``toEndPoint``, waits for it to be
+        answered, then sends a REFER with a Replaces header on the active
+        call so the two peers connect directly. On success both of the
+        transport's legs close — the parties now talk without the bot — and
+        the active call's close is reported with reason ``"transferred"``.
+
+        Unlike :meth:`sip_refer`, the target is confirmed up before the caller
+        is moved. Both transfers are REFER-based and need a peer that
+        processes REFER/Replaces — a SIP PBX or registrar (FreeSWITCH,
+        Asterisk, Kamailio), **not** a carrier PSTN trunk. A SIP-only addition
+        (DailyTransport has no attended-transfer verb); for the cloud-mediated
+        transfer that needs nothing from the far end, see
+        :meth:`sip_call_transfer`.
+
+        Args:
+            settings: ``toEndPoint`` (the target URI); optional ``sessionId``
+                (the leg to transfer; defaults to the active call).
+
+        Returns:
+            An error description, or None on success.
+        """
+        settings = settings or {}
+        session_id = (
+            settings.get("sessionId") or self._dial_out_session_id or self._dial_in_session_id
+        )
+        if not session_id:
+            return "Can't transfer SIP call if 'sessionId' is not set"
+        if session_id != self._connection.session_id:
+            return "no such session"
+        to_end_point = settings.get("toEndPoint")
+        if not to_end_point:
+            return "Can't transfer SIP call if 'toEndPoint' is not set"
+        # The consult leg is a sibling connection on the same account (a shared,
+        # already-registered UA); it is dialed, spliced, and torn down entirely
+        # within this call, so the bot never addresses it directly.
+        consult = self._connection.consult_connection()
+        try:
+            await consult.connect()
+            await consult.dial(to_end_point)
+            await consult.wait_established()
+        except Exception as e:
+            # The splice never started, so the active call is untouched.
+            await self._teardown_consult(consult)
+            return str(e)
+        self._transfer_pending = True
+        try:
+            await self._connection.attended_transfer(consult)
+        except Exception as e:
+            self._transfer_pending = False
+            await self._teardown_consult(consult)
+            # attended_transfer holds the active call before the REFER; a failed
+            # splice leaves it on hold, so resume it to keep talking to the caller.
+            if self._connection.has_active_call:
+                try:
+                    await self._connection.resume()
+                except Exception as resume_error:
+                    logger.debug(f"{self} resume after failed transfer: {resume_error}")
+            return str(e)
+        # Success: the active call has already closed with reason "transferred"
+        # (attended_transfer completes only once it does). The consult leg's own
+        # close follows from the peer's Replaces; a BYE from us now only tears
+        # down that already-replaced dialog, so releasing it here is safe.
+        await self._teardown_consult(consult)
+        return None
+
+    async def _teardown_consult(self, consult):
+        # Hang up whatever consult leg survives and release its runtime owner;
+        # never let teardown raise out of a transfer method (which must return
+        # an error string, not throw). A no-op if connect never succeeded.
+        try:
+            await consult.disconnect()
+        except Exception as e:
+            logger.debug(f"{self} consult leg teardown: {e}")
 
     async def request_keyframe(self):
         """Ask the far end for a video keyframe (SIP-only addition).
@@ -862,9 +951,15 @@ class SIPTransport(BaseTransport):
         stats = connection.final_stats
         if stats is not None:
             await self._call_event_handler("on_call_quality_stats", stats)
+        # A successful attended transfer closes the active call by protocol;
+        # report that as "transferred" so a bot distinguishes it from a hangup.
+        transferred = self._transfer_pending
+        self._transfer_pending = False
         if data.get("direction") == "in":
             self._dial_in_session_id = ""
             stopped = {k: v for k, v in data.items() if k not in ("established", "direction")}
+            if transferred:
+                stopped["reason"] = "transferred"
             await self._call_event_handler("on_dialin_stopped", stopped)
         else:
             self._dial_out_session_id = ""
@@ -872,7 +967,7 @@ class SIPTransport(BaseTransport):
             # that closes before connect (never established) must still signal its
             # end, or a bot that tears down on this event would hang on the close.
             stopped = self._dialout_data(data)
-            stopped["reason"] = data.get("reason", "")
+            stopped["reason"] = "transferred" if transferred else data.get("reason", "")
             await self._call_event_handler("on_dialout_stopped", stopped)
         if data.get("established"):
             participant = self._participant(data)
