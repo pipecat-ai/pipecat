@@ -6,80 +6,13 @@
 
 """MOQ (Media over QUIC) transport implementation for Pipecat.
 
-Uses the upstream ``moq`` Python library
-(`moq-rs <https://pypi.org/project/moq-rs/>`_) for the QUIC connection,
-MOQ session, announcement discovery, subscription routing, group/frame
-framing, codec-specific catalog management, and Opus encode/decode +
-resampling for raw audio tracks. This module just wires it into the
-pipecat Frame pipeline.
-
-Each participant publishes under a per-participant broadcast path
-``<namespace>/<participant_id>`` (e.g. ``pipecat/response``); the bot
-subscribes to the peer at ``<namespace>/<peer_id>`` (e.g.
-``pipecat/request``). The ids default to the direction each side carries
--- the bot's own broadcast is the ``response``, the peer's the
-``request``. That layer assumes
-both peers agree on a namespace up front; when the paths are instead
-assigned externally, ``response_path``/``request_path`` set them
-directly and the namespace is unused. Audio rides on a
-single Opus track; RTVI JSON rides on a fixed-name ``transcript.json.z``
-track carried by moq's JSON stream helper (``publish_json_stream`` /
-``subscribe_json_stream``). The stream is an ordered, lossless append-log
-of records — every message is delivered in order, unlike the JSON
-*snapshot* helper (``publish_json_snapshot`` / ``subscribe_json_snapshot``)
-which collapses to the latest value and would drop RTVI events a slow
-consumer fell behind on. Compression is enabled (hence the ``.z``
-suffix). The transcript is a side-channel, like moq-boy's
-``status``/``command`` tracks: it deliberately bypasses the catalog
-(which only describes media renditions), so the browser reads it by the
-well-known name rather than by catalog discovery.
-
-Both directions carry the same shape: the bot publishes bot-side RTVI
-events on its own ``transcript`` track and subscribes to the client's
-``transcript`` track for client-side traffic (``client-ready`` for
-protocol negotiation, typed text input, function-call results, etc).
-This makes MoQ a full bidirectional RTVI transport, on par with the
-Daily and WebSocket transports.
-
-Two modes:
-
-- **Server mode** (``serve=True``): the bot binds its own UDP socket via
-  ``moq.Server`` and accepts the browser's direct connection. Removes
-  the need for a separate ``moq-relay`` process for local dev. The
-  self-signed cert fingerprints are exposed via
-  :attr:`MOQTransport.cert_fingerprints` so a browser can pin them.
-- **Client mode** (``serve=False``): the bot dials a relay at
-  ``relay_url`` (or the constructor's ``host``/``port``/``path``) and
-  the browser dials the same relay independently. Neither peer needs a
-  reachable address, so this is the mode that works when the bot sits
-  behind NAT. Both peers must agree on the namespace, since that's what
-  they rendezvous on — the dev runner mints a random one per session
-  and hands it to the browser (see :mod:`pipecat.runner.moq`).
-
-Client mode redials the relay when the session drops (see
-:attr:`MOQParams.reconnect_timeout`). The publish side is kept across
-dials by content but rebuilt by identity: a redial announces the same
-path from a fresh origin, replaying the transcript log into it, because a
-relay that still holds a dead route for the old publisher never serves a
-re-announce under that publisher's identity. The peer's tracks are
-subscribed again once its broadcast is announced to the new session.
-A token the relay refuses is not retried; the relay accepts the connection
-first and then closes the session as unauthorized, so the refusal is read
-off the session close rather than the dial.
-
-Each side appends a ``session-ending`` marker to its transcript stream
-before it leaves. A peer whose tracks end after the marker has hung up. A
-peer whose tracks end without it may be behind a failed relay, which on
-the wire looks the same as a hangup, so the transport redials and gives
-the peer ``connection_timeout`` to reappear before reporting it gone.
-
-Every transcript record carries ``seq`` and ``epoch``. The JSON stream is
-a single group that a subscriber always reads from its first record, so a
-reconnect on either side replays the whole log. The subscriber drops
-records it has already seen (``seq`` at or below the last one for the
-same ``epoch``) and strips both fields before the message reaches the
-pipeline. A record without ``seq`` comes from a peer that predates the
-fields and passes through unchanged.
+This module provides MoQ transport using the ``moq`` Python library
+(`moq-rs <https://pypi.org/project/moq-rs/>`_) for the QUIC session,
+discovery, subscription routing, and Opus encode/decode; this module
+wires it into the pipecat frame pipeline. Each participant publishes an
+audio track and an RTVI JSON transcript track under its own broadcast
+path (``<namespace>/<participant_id>``) and subscribes to the peer's,
+making MoQ a full bidirectional RTVI transport.
 """
 
 import asyncio
@@ -258,22 +191,34 @@ DEFAULT_AUDIO_OUT_TRACK = "bot-audio"
 # suffix marks that the stream is compressed on the wire.
 DEFAULT_TRANSCRIPT_TRACK = "transcript.json.z"
 
-# Transport-level fields on every transcript record. ``seq`` counts records
-# for the life of the publishing transport instance, across reconnects;
-# ``epoch`` identifies that instance, so a fresh peer starts its own count
-# instead of colliding with the previous one's watermark on the subscriber.
+# Transport-level fields on every transcript record. The transcript is a
+# single group that a subscriber always reads from its first record, so a
+# reconnect on either side replays the whole log; these fields are how the
+# subscriber drops what it has already seen (see ``_accept_peer_record``).
+# ``seq`` counts records for the life of the publishing transport instance,
+# across reconnects; ``epoch`` identifies that instance, so a fresh peer
+# starts its own count instead of colliding with the previous one's
+# watermark on the subscriber.
 TRANSCRIPT_SEQ_FIELD = "seq"
 TRANSCRIPT_EPOCH_FIELD = "epoch"
 
 # Client-mode redial schedule: the delay before each attempt doubles from
 # the first value up to the cap, and the outage as a whole is bounded by
-# ``MOQParams.reconnect_timeout``.
+# ``MOQParams.reconnect_timeout``. The cap is what the caller feels once
+# the relay is back — a dial is one QUIC handshake, so it stays low.
 _RECONNECT_BACKOFF_INITIAL_S = 0.5
-_RECONNECT_BACKOFF_MAX_S = 8.0
+_RECONNECT_BACKOFF_MAX_S = 2.0
 # A dropped connection ends the peer's subscriptions a beat before the
 # session itself reports closed. After the subscriptions end, wait this long
 # for the session before concluding the peer left a session that stayed up.
 _SESSION_CLOSE_GRACE_S = 0.5
+# A healthy session receives keepalive/ACK traffic every ~2.5-5s even when
+# nothing is being published, so an inbound byte counter frozen this long
+# means the network path is dead (see ``_session_stalled``). 3x the worst
+# observed gap — a false trigger rebuilds a healthy session — yet half of
+# QUIC's ~30s idle timeout.
+_SESSION_STALL_POLL_S = 1.0
+_SESSION_STALL_S = 15.0
 # After subscribing to the peer's tracks, how long to wait for the first
 # record or audio frame before treating the subscription as dead. A relay
 # keeps announcing a path whose route died and serves nothing on it, so an
@@ -341,11 +286,10 @@ class MOQParams(TransportParams):
     """Configuration parameters for MOQ transport.
 
     Parameters:
-        relay_url: Full relay URL (e.g. ``https://relay.example.com:4080/moq``).
+        relay_url: Full relay URL, query string included,
+            (e.g. ``https://relay.example.com:4080/moq?jwt=…``),
             If unset, the transport composes one from the constructor's
-            ``host``/``port``/``path``. Dialed as given on every attempt,
-            query string included, so a relay token such as ``?jwt=…``
-            rides along. Ignored in serve mode.
+            ``host``/``port``/``path``. Ignored in serve mode.
         namespace: Top-level namespace shared by all participants.
         participant_id: This bot's id; the bot publishes under
             ``<namespace>/<participant_id>``. Defaults to ``response``,
@@ -389,10 +333,17 @@ class MOQParams(TransportParams):
             every redialed one.
         reconnect_timeout: Client mode only. How long, in seconds, the
             transport keeps redialing the relay after the session drops
-            before it gives up, counted from the start of the outage.
-            Attempts back off from 0.5 s to 8 s. While it redials the peer
-            is not reported gone; once the window expires the transport
-            fires ``on_client_disconnected`` for a peer it had seen and
+            before it gives up, counted from when the drop is detected.
+            A relay that vanishes without closing the session (killed
+            process, dead network path) is noticed by a traffic-stall
+            watchdog well before the QUIC idle timeout (~30 s) would
+            report it.
+            Attempts back off from 0.5 s to 2 s. The window must outlast
+            a load balancer failing a dead relay out (~30 s), since until
+            then redials can be pinned to the dead target.
+            While it redials the peer is not reported gone; once the
+            window expires the transport fires ``on_client_disconnected``
+            for a peer it had seen and
             pushes a permanent connectivity error. ``0`` disables
             redialing, so a dropped session ends the transport as a
             normal close. A token the relay refuses, whether at the dial
@@ -851,7 +802,7 @@ class MOQTransportClient:
         """Append an RTVI message to the transcript JSON stream.
 
         The record is the message plus the ``seq`` and ``epoch`` fields a
-        subscriber uses to drop replays (see the module docstring); the
+        subscriber uses to drop replays (see ``TRANSCRIPT_SEQ_FIELD``); the
         message itself is not modified. The stream helper serializes and
         frames the record, appending it to the ordered log so no message
         is dropped.
@@ -1030,9 +981,13 @@ class MOQTransportClient:
                 _RECONNECT_BACKOFF_MAX_S,
                 remaining,
             )
+            # The redial window opens at detection, not at the loss
+            # itself: a relay that vanished without closing is noticed by
+            # the traffic-stall watchdog (see _session_stalled), so this
+            # line can trail the outage by up to _SESSION_STALL_S.
             logger.warning(
                 f"MOQ: session lost ({error or 'closed'}); redialing in {delay:.1f}s "
-                f"(attempt {attempt}, {remaining:.0f}s left)"
+                f"(attempt {attempt}; will keep redialing for up to {remaining:.0f}s)"
             )
             await self._callbacks.on_reconnecting(attempt)
             await asyncio.sleep(delay)
@@ -1082,8 +1037,19 @@ class MOQTransportClient:
             consume = self._task_manager.create_task(
                 self._consume_peer(subscribe_origin), f"{self}::moq_consume"
             )
+            stalled = self._task_manager.create_task(
+                self._session_stalled(session), f"{self}::moq_session_stalled"
+            )
             try:
-                done, _ = await asyncio.wait({closed, consume}, return_when=asyncio.FIRST_COMPLETED)
+                done, _ = await asyncio.wait(
+                    {closed, consume, stalled}, return_when=asyncio.FIRST_COMPLETED
+                )
+                if stalled in done and closed not in done and consume not in done:
+                    logger.warning(
+                        f"MOQ: no inbound traffic for {_SESSION_STALL_S:.0f}s; "
+                        f"treating the session as dead"
+                    )
+                    return False
                 if closed not in done:
                     await asyncio.wait({closed}, timeout=_SESSION_CLOSE_GRACE_S)
                 if closed.done():
@@ -1095,7 +1061,7 @@ class MOQTransportClient:
                 logger.warning("MOQ: dropping the session for a fresh one")
                 return False
             finally:
-                for task in (closed, consume):
+                for task in (closed, consume, stalled):
                     if not task.done():
                         await self._task_manager.cancel_task(task)
 
@@ -1108,6 +1074,40 @@ class MOQTransportClient:
         except Exception as e:
             self._session_close_error = e
             logger.debug(f"MOQ: session closed: {e}")
+
+    async def _session_stalled(self, session: "moq.Session"):
+        """Return when the session's inbound byte counter stops moving.
+
+        A healthy session receives keepalive/ACK traffic every few
+        seconds even when nothing is being published, so a counter frozen
+        for ``_SESSION_STALL_S`` means the network path is dead. QUIC
+        itself only notices such a loss at its idle timeout (~30 s in
+        moq-native, not tunable through moq-ffi); returning early is what
+        starts the redial at the stall threshold instead. Never returns when the
+        backend reports no counters (the WebSocket fallback), leaving
+        ``session.closed()`` as the only signal.
+        """
+        stats = getattr(session, "stats", None)
+        last: int | None = None
+        last_changed = time.monotonic()
+        while True:
+            received: int | None = None
+            if stats is not None:
+                try:
+                    received = stats().bytes_received
+                except Exception as e:
+                    logger.debug(f"MOQ: session.stats() raised: {e}")
+                    stats = None
+            if received is None:
+                stats = None
+                await asyncio.sleep(3600)
+                continue
+            if received != last:
+                last = received
+                last_changed = time.monotonic()
+            elif time.monotonic() - last_changed >= _SESSION_STALL_S:
+                return
+            await asyncio.sleep(_SESSION_STALL_POLL_S)
 
     async def _on_peer_available(self):
         """Record that the peer's broadcast is announced on the current session.
@@ -1502,7 +1502,7 @@ class MOQTransportClient:
     def _accept_peer_record(self, record: dict) -> dict | None:
         """Return the RTVI message in a peer transcript record, or ``None`` for a replay.
 
-        Records carry ``seq`` and ``epoch`` (see the module docstring). A
+        Records carry ``seq`` and ``epoch`` (see ``TRANSCRIPT_SEQ_FIELD``). A
         record at or below the last ``seq`` seen for the current ``epoch``
         has already been delivered. A different ``epoch`` is a new peer
         instance whose count starts over. A record without ``seq`` comes
