@@ -12,12 +12,17 @@ llm = LLMWithBackend(
 )
 ```
 
-How a delegation crosses is the `BackendConnector`'s business, built from two strategies the service picks by frontend kind unless told otherwise:
+How a delegation crosses is the `BackendConnector`'s business, built from two strategies the service picks unless told otherwise. The request strategy goes by what the frontend is, the reply strategy by what it can do with a tool's intermediate results:
 
-|                   | request (frontend → backend)                                                       | reply (backend → frontend)                                                                                  |
-| ----------------- | ---------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| text frontend     | `TranscriptBackendRequestStrategy`: the conversation since the previous delegation | `SpeakOnPrefersSpokenBackendReplyStrategy`: progress relayed as it comes, spoken as the backend's flag says |
-| realtime frontend | `ExplicitBackendRequestStrategy`: a request the model words itself                 | `OneShotBackendReplyStrategy`: every output at once, when done                                              |
+| frontend                                     | request (frontend → backend)                                                       |
+| -------------------------------------------- | ---------------------------------------------------------------------------------- |
+| text                                         | `TranscriptBackendRequestStrategy`: the conversation since the previous delegation |
+| speech-to-speech (its context lags the audio) | `ExplicitBackendRequestStrategy`: a request the model words itself                 |
+
+| frontend                        | reply (backend → frontend)                                                                                  |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| takes intermediate results      | `SpeakOnPrefersSpokenBackendReplyStrategy`: progress relayed as it comes, spoken as the backend's flag says  |
+| doesn't                         | `OneShotBackendReplyStrategy`: every output at once, when done                                                |
 
 ## Examples
 
@@ -25,6 +30,8 @@ How a delegation crosses is the `BackendConnector`'s business, built from two st
 | ---------------------------------------------- | ------------------------------------------------------------------------------------------------- |
 | [`cascade-frontend.py`](cascade-frontend.py)   | A cascade pipeline (STT + GPT + TTS) as the frontend, all defaults.                               |
 | [`realtime-frontend.py`](realtime-frontend.py) | OpenAI Realtime as the frontend, all defaults. Same backend, same prompts as the cascade example. |
+
+A speech-to-speech frontend hears the backend's progress if the service delivers a tool's intermediate results to its model, which OpenAI Realtime, Gemini Live, Grok, Nova Sonic and Ultravox do. One that doesn't gets every output at once instead.
 
 Run any of them the usual way, then connect a client:
 

@@ -827,11 +827,13 @@ class FunctionCallResultProperties:
         is_final: Whether this is the final result for the function call. When
             ``False`` the result is treated as an intermediate update. Defaults to ``True``.
             Only meaningful for async function calls (``cancel_on_interruption=False``).
-            Note: realtime LLM services do not support streamed intermediate
-            results; they deliver only the final result to the provider. An
-            intermediate result reported to a realtime service is dropped
-            and an error is raised. Use a non-realtime LLM service if your
-            tool needs to stream intermediate results.
+            A speech-to-speech service takes one output per call, so it puts an
+            intermediate result to its model some other way — a conversation
+            item, a text event, a response that keeps the call open — and
+            ``run_llm`` says whether the model should answer it or just take it
+            in. A service that can't do that at all says so with
+            ``accepts_intermediate_function_call_results`` and drops
+            intermediate results with a warning.
     """
 
     run_llm: bool | None = None

@@ -17,11 +17,11 @@ How a delegation crosses is the :class:`BackendConnector`'s business, built
 from two strategies: a :class:`BackendRequestStrategy` defines the tool the
 frontend calls and turns a call into the request the backend receives, and a
 :class:`BackendReplyStrategy` turns each thing the backend produces into what
-the frontend hears about it. The connector picks defaults by frontend kind:
-a text frontend hands over the conversation and relays the backend's
-progress as it comes; a speech-to-speech frontend words the request itself
-and takes every output at once, since its function calls accept one
-result.
+the frontend hears about it. The connector picks defaults from what the
+frontend is and what it can do: a speech-to-speech frontend words the request
+itself, since its context lags the audio, and a frontend that takes a tool's
+intermediate results hears the backend's progress as it comes rather than
+everything at once when it is done.
 """
 
 from contextlib import aclosing
@@ -240,8 +240,8 @@ class BackendReplyStrategy:
     """
 
     #: Whether the strategy reports outputs before the final one as
-    #: intermediate tool results. A speech-to-speech frontend cannot take
-    #: those: its function calls accept one result.
+    #: intermediate tool results, which not every frontend delivers to its
+    #: model (``accepts_intermediate_function_call_results``).
     needs_intermediate_results: bool = False
     #: Guidance appended to the frontend's system instruction, if any.
     frontend_instruction: str | None = None
@@ -275,10 +275,11 @@ class OneShotBackendReplyStrategy(BackendReplyStrategy):
     The ``delegate`` call's one result carries every output, in order, under
     ``outputs``; one alone, or none, under ``text``. Reasoning summaries are
     left out.
-    The default for a speech-to-speech frontend, whose function calls accept
-    one result. It may not stay the default: if and when those services can
-    take intermediate results, progress could reach such a frontend as it
-    comes, as :class:`SpeakOnPrefersSpokenBackendReplyStrategy` delivers it.
+    The default for a frontend that doesn't take a tool's intermediate
+    results, which is the only way progress can reach a model before the work
+    is done. It also suits a frontend that should stay quiet until then,
+    though :class:`SpeakOnPrefersSpokenBackendReplyStrategy` gives that too,
+    with a backend that flags nothing before its final output.
     """
 
     def __init__(self):
@@ -314,7 +315,8 @@ class SpeakOnPrefersSpokenBackendReplyStrategy(BackendReplyStrategy):
     output's ``prefers_spoken`` flag asks. A reasoning summary is recorded under
     ``reasoning`` rather than ``text``, so the frontend can tell the backend
     thinking from something to relay, and can say how the work is going if
-    asked. The default for a text frontend.
+    asked. The default for any frontend that takes intermediate results,
+    speech-to-speech included.
     """
 
     needs_intermediate_results = True
