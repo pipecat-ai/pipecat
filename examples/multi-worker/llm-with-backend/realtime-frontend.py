@@ -13,11 +13,10 @@ the two together: it installs the ``delegate`` tool on the frontend and runs
 the backend as a worker of its own.
 
 With a speech-to-speech frontend the defaults have the model word the
-request itself (its context can lag the audio, so the backend cannot read the
-conversation) and deliver everything the backend produced at once, since a realtime
-function call takes one result. ``cascade-frontend.py`` puts a cascade
-pipeline in the frontend's place, against the same backend and the same
-prompts.
+request itself, since its context can lag the audio and the backend cannot
+read the conversation. The backend's progress is relayed as it comes, as it
+is for a text frontend. ``cascade-frontend.py`` puts a cascade pipeline in
+the frontend's place, against the same backend and the same prompts.
 
 Architecture::
 
@@ -124,6 +123,27 @@ async def get_restaurant_recommendation(params: FunctionCallParams, location: st
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info("Starting bot")
 
+    # Thinking summaries stream back to the frontend as "thought" outputs.
+    backend = BackendLLMWorker(
+        name="backend",
+        llm=AnthropicLLMService(
+            api_key=os.environ["ANTHROPIC_API_KEY"],
+            settings=AnthropicLLMService.Settings(
+                system_instruction=BACKEND_INSTRUCTIONS,
+                thinking=AnthropicLLMService.ThinkingConfig(type="adaptive", display="summarized"),
+            ),
+        ),
+        context=LLMContext(tools=[get_current_weather, get_restaurant_recommendation]),
+    )
+
+    # A backend that takes a while can say so the moment work is handed to
+    # it: the frontend says the line while the backend works, instead of
+    # waiting in silence. Even a quick lookup here is a few model round trips,
+    # so the line is worth it; drop it for a backend that answers at once.
+    @backend.event_handler("on_delegation_started")
+    async def on_delegation_started(backend, request):
+        await backend.say("Let me look into that, this takes a moment.")
+
     llm = LLMWithBackend(
         frontend=OpenAIRealtimeLLMService(
             api_key=os.environ["OPENAI_API_KEY"],
@@ -139,19 +159,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
                 ),
             ),
         ),
-        backend=BackendLLMWorker(
-            name="backend",
-            llm=AnthropicLLMService(
-                api_key=os.environ["ANTHROPIC_API_KEY"],
-                settings=AnthropicLLMService.Settings(
-                    system_instruction=BACKEND_INSTRUCTIONS,
-                    thinking=AnthropicLLMService.ThinkingConfig(
-                        type="adaptive", display="summarized"
-                    ),
-                ),
-            ),
-            context=LLMContext(tools=[get_current_weather, get_restaurant_recommendation]),
-        ),
+        backend=backend,
     )
 
     # The frontend's only tool, ``delegate``, is installed by the service;
