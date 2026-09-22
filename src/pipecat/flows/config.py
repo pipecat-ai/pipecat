@@ -63,6 +63,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
+from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from pipecat.flows.types import ContextStrategy
@@ -378,6 +379,35 @@ class FlowConfig(BaseModel):
         if path.suffix == ".json":
             return cls.from_json(text)
         return cls.from_yaml(text, base_dir=path.parent)
+
+    @classmethod
+    def from_session(cls, text: str | None, default_path: str | Path) -> "FlowConfig":
+        """Load the flow a session named, or the one the bot ships with.
+
+        :attr:`~pipecat.runner.types.RunnerArguments.flow_config` holds the
+        flow a session named in its start request. It is ``None`` when the
+        session named none -- and also when something between that request and
+        the bot dropped the field, which is the likelier of the two once a
+        platform sits in between. The bot cannot tell those apart, so this logs
+        which of the two flows it ran.
+
+        A session's flow is parsed without a base directory, so ``!include`` is
+        unavailable to it: text that arrived with a request does not get to
+        read files off the bot's disk. A flow loaded from ``default_path`` may
+        use ``!include`` as always.
+
+        Args:
+            text: The session's flow, as YAML or JSON text, or ``None``.
+            default_path: The flow to fall back to, as :meth:`from_file` takes it.
+
+        Returns:
+            The validated config.
+        """
+        if text is None:
+            logger.info(f"Flow: {default_path} (the session named none)")
+            return cls.from_file(default_path)
+        logger.info(f"Flow: the one this session named ({len(text)} characters)")
+        return cls.from_yaml(text)
 
 
 def _require_mapping(data: Any) -> dict[str, Any]:

@@ -117,11 +117,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     # The flow is data: the one the session named, or the one beside this bot.
     # Then join it to the tool it names.
-    config = (
-        FlowConfig.from_yaml(runner_args.flow_config)
-        if runner_args.flow_config
-        else FlowConfig.from_file(FLOW_CONFIG_PATH)
-    )
+    config = FlowConfig.from_session(runner_args.flow_config, FLOW_CONFIG_PATH)
     flow = Flow(config, handlers=handlers)
 
     flow_manager = FlowManager(

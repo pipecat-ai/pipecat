@@ -135,11 +135,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # handlers module. The config is validated as it loads; constructing the
     # Flow checks that every tool it names exists and has a valid
     # direct-function signature.
-    config = (
-        FlowConfig.from_yaml(runner_args.flow_config)
-        if runner_args.flow_config
-        else FlowConfig.from_file(FLOW_CONFIG_PATH)
-    )
+    config = FlowConfig.from_session(runner_args.flow_config, FLOW_CONFIG_PATH)
     flow = Flow(
         config,
         handlers=handlers,

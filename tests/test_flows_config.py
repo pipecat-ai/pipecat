@@ -170,6 +170,42 @@ class TestFlowConfigLoading(unittest.TestCase):
         with self.assertRaises(yaml.constructor.ConstructorError):
             FlowConfig.from_yaml("initial_node: a\nnodes: !include nodes.yaml\n")
 
+    def test_from_session_runs_the_flow_the_session_named(self):
+        d = Path(tempfile.mkdtemp())
+        (d / "flow.yaml").write_text(json.dumps(_minimal()), encoding="utf-8")
+        config = FlowConfig.from_session(
+            "initial_node: b\nnodes:\n  b:\n    task_messages: []\n", d / "flow.yaml"
+        )
+        self.assertEqual(config.initial_node, "b")
+
+    def test_from_session_falls_back_to_the_bots_own_flow(self):
+        d = Path(tempfile.mkdtemp())
+        (d / "flow.yaml").write_text(json.dumps(_minimal()), encoding="utf-8")
+        self.assertEqual(FlowConfig.from_session(None, d / "flow.yaml").initial_node, "a")
+
+    def test_from_session_takes_an_empty_flow_at_its_word(self):
+        # Not a fallback: falling back would run the shipped flow without a
+        # word, where the session plainly named something and it was empty.
+        d = Path(tempfile.mkdtemp())
+        (d / "flow.yaml").write_text(json.dumps(_minimal()), encoding="utf-8")
+        with self.assertRaises(ValueError):
+            FlowConfig.from_session("", d / "flow.yaml")
+
+    def test_from_session_denies_a_session_flow_the_include_tag(self):
+        # A flow that arrived with a request does not get to read the disk.
+        d = Path(tempfile.mkdtemp())
+        (d / "flow.yaml").write_text(json.dumps(_minimal()), encoding="utf-8")
+        with self.assertRaises(yaml.constructor.ConstructorError):
+            FlowConfig.from_session(
+                "initial_node: a\nnodes: !include nodes.yaml\n", d / "flow.yaml"
+            )
+
+    def test_from_session_reads_a_session_flow_sent_as_json(self):
+        d = Path(tempfile.mkdtemp())
+        (d / "flow.yaml").write_text(json.dumps(_minimal()), encoding="utf-8")
+        config = FlowConfig.from_session(json.dumps(_minimal()), d / "flow.yaml")
+        self.assertEqual(config.initial_node, "a")
+
     def test_top_level_must_be_mapping(self):
         with self.assertRaises(ValueError) as cm:
             FlowConfig.from_yaml("- just\n- a list\n")
