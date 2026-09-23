@@ -14,6 +14,7 @@ import base64
 import json
 import time
 import urllib.parse
+import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from dataclasses import fields as dataclass_fields
@@ -673,7 +674,7 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
                 auth_header = f"Basic {self.api_key}"
 
             # Inworld requires key and protocol query parameters
-            session_key = f"pipecat-realtime-{int(time.time() * 1000)}"
+            session_key = f"pipecat-realtime-{uuid.uuid4().hex}"
             params = urllib.parse.urlencode({"key": session_key, "protocol": "realtime"})
             separator = "&" if "?" in self.base_url else "?"
             uri = f"{self.base_url}{separator}{params}"
