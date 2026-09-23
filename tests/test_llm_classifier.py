@@ -283,3 +283,21 @@ async def test_every_call_reports_its_time_without_tokens():
     assert processing.processor == classifier.name
     assert processing.model is None
     assert processing.value >= 0
+
+
+@pytest.mark.asyncio
+async def test_a_named_classifier_reports_metrics_under_its_name():
+    classifier, _ = _classifier('{"answer": {"probability": 0.9}}', name="voicemail")
+    reported = asyncio.Event()
+    seen: list = []
+
+    @classifier.event_handler("on_metrics")
+    async def on_metrics(classifier, data):
+        seen.extend(data)
+        reported.set()
+
+    await classifier.yes_no("hello", {"answer": YesNoQuestion(instructions="a greeting?")})
+    await asyncio.wait_for(reported.wait(), 1)
+
+    assert classifier.name == "voicemail"
+    assert seen[0].processor == "voicemail"

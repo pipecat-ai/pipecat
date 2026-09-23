@@ -30,7 +30,6 @@ from pipecat.metrics.metrics import (
     ProcessingMetricsData,
 )
 from pipecat.utils.base_object import BaseObject
-from pipecat.workers.base_worker import BaseWorker
 
 
 class ClassifierError(Exception):
@@ -177,8 +176,8 @@ class BaseClassifier(BaseObject):
     the three typed methods are built on it and take questions of one kind.
     Subclasses implement :meth:`_ask`.
 
-    The owner calls :meth:`setup` once before the first question and
-    :meth:`cleanup` once when it is done.
+    An owner that runs inside a worker calls :meth:`setup` with its task
+    manager before the first question, and :meth:`cleanup` when it is done.
 
     Event handlers available:
 
@@ -189,9 +188,11 @@ class BaseClassifier(BaseObject):
 
     Example::
 
-        @classifier.event_handler("on_metrics")
+        await self._classifier.setup(self.task_manager)
+
+        @self._classifier.event_handler("on_metrics")
         async def on_metrics(classifier, data: list[MetricsData]):
-            await processor.push_frame(MetricsFrame(data=data))
+            await self.push_frame(MetricsFrame(data=data))
     """
 
     def __init__(self, **kwargs):
@@ -205,19 +206,9 @@ class BaseClassifier(BaseObject):
         self._register_event_handler("on_metrics")
 
     @property
-    def model_name(self) -> str | None:
+    def model(self) -> str | None:
         """The model that answers, named in the metrics."""
         return None
-
-    async def setup(self, worker: BaseWorker):
-        """Prepare the classifier to answer questions.
-
-        Args:
-            worker: The worker the owner runs in. Its task manager runs the
-                classifier's tasks and event handlers, and implementations
-                that need the worker itself keep it.
-        """
-        await super().setup(worker.task_manager)
 
     async def ask(
         self, state: str | dict[str, Any] | list[Any], questions: Mapping[str, ClassifierQuestion]
@@ -304,12 +295,10 @@ class BaseClassifier(BaseObject):
 
     def _metrics(self, seconds: float, usage: LLMTokenUsage | None) -> list[MetricsData]:
         data: list[MetricsData] = [
-            ProcessingMetricsData(processor=self.name, model=self.model_name, value=seconds)
+            ProcessingMetricsData(processor=self.name, model=self.model, value=seconds)
         ]
         if usage is not None:
-            data.append(
-                LLMUsageMetricsData(processor=self.name, model=self.model_name, value=usage)
-            )
+            data.append(LLMUsageMetricsData(processor=self.name, model=self.model, value=usage))
         return data
 
     def _typed(self, results: dict[str, ClassifierResult], result_type: type[R]) -> dict[str, R]:

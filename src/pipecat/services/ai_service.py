@@ -58,6 +58,16 @@ class AIService(FrameProcessor):
         self._tracing_enabled: bool = False
         self._tracing_context = None
 
+    @property
+    def settings(self) -> ServiceSettings:
+        """The service's current settings, for reading.
+
+        Change them with a
+        :class:`~pipecat.frames.frames.ServiceUpdateSettingsFrame`, so the
+        service applies the change and its metrics keep the model in sync.
+        """
+        return self._settings
+
     def _sync_model_name_to_metrics(self):
         """Sync the current AI model name (in `self._settings.model`) for usage in metrics.
 

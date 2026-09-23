@@ -74,6 +74,7 @@ class LLMClassifier(BaseClassifier):
         llm: LLMService[Any],
         instructions: str | None = None,
         max_tokens: int | None = None,
+        **kwargs,
     ):
         """Initialize the classifier.
 
@@ -82,8 +83,9 @@ class LLMClassifier(BaseClassifier):
             instructions: System instructions for the LLM. The default asks
                 for one JSON object with an answer per question.
             max_tokens: Cap on the reply's length, for services that take one.
+            **kwargs: Additional arguments passed to the parent class.
         """
-        super().__init__()
+        super().__init__(**kwargs)
         self._llm = llm
         self._instructions = instructions or DEFAULT_INSTRUCTIONS
         self._max_tokens = max_tokens
@@ -94,9 +96,9 @@ class LLMClassifier(BaseClassifier):
         return self._llm
 
     @property
-    def model_name(self) -> str | None:
+    def model(self) -> str | None:
         """The LLM service's model."""
-        model = self._llm._settings.model
+        model = self._llm.settings.model
         return model if isinstance(model, str) else None
 
     async def _ask(

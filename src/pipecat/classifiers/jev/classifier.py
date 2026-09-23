@@ -29,7 +29,7 @@ from pipecat.classifiers.base_classifier import (
 )
 from pipecat.classifiers.jev.client import JevClient
 from pipecat.metrics.metrics import LLMTokenUsage
-from pipecat.workers.base_worker import BaseWorker
+from pipecat.utils.asyncio.task_manager import BaseTaskManager
 
 
 class JevClassifier(BaseClassifier):
@@ -47,7 +47,7 @@ class JevClassifier(BaseClassifier):
         voicemail_classifier = JevClassifier(client=client)
     """
 
-    def __init__(self, *, api_key: str | None = None, client: JevClient | None = None):
+    def __init__(self, *, api_key: str | None = None, client: JevClient | None = None, **kwargs):
         """Initialize the classifier.
 
         Args:
@@ -55,8 +55,9 @@ class JevClassifier(BaseClassifier):
                 of its own.
             client: A client to share. One of ``api_key`` and ``client`` is
                 required.
+            **kwargs: Additional arguments passed to the parent class.
         """
-        super().__init__()
+        super().__init__(**kwargs)
         if client is None and not api_key:
             raise ValueError("JevClassifier needs an API key or a JevClient")
         self._owns_client = client is None
@@ -67,16 +68,16 @@ class JevClassifier(BaseClassifier):
         """The client this classifier asks through."""
         return self._client
 
-    async def setup(self, worker: BaseWorker):
+    async def setup(self, task_manager: BaseTaskManager):
         """Open the connection to Jev ahead of the first question.
 
         A connection that cannot be opened now is only a warning: the first
         question opens it itself.
 
         Args:
-            worker: The worker the owner runs in.
+            task_manager: The task manager of the owner.
         """
-        await super().setup(worker)
+        await super().setup(task_manager)
         try:
             await self._client.connect()
         except ClassifierError as e:
@@ -89,7 +90,7 @@ class JevClassifier(BaseClassifier):
             await self._client.close()
 
     @property
-    def model_name(self) -> str:
+    def model(self) -> str:
         """The Jev model the questions go to."""
         return self._client.model
 

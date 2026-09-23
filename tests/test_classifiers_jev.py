@@ -23,7 +23,6 @@ from pipecat.classifiers.jev.classifier import JevClassifier
 from pipecat.classifiers.jev.client import JevClient
 from pipecat.metrics.metrics import LLMUsageMetricsData, ProcessingMetricsData
 from pipecat.utils.asyncio.task_manager import TaskManager
-from pipecat.workers.base_worker import BaseWorker
 
 USAGE = {"input_tokens": 12, "output_tokens": 3}
 
@@ -31,11 +30,6 @@ USAGE = {"input_tokens": 12, "output_tokens": 3}
 def _client(handler: Callable[[httpx.Request], httpx.Response], **kwargs) -> JevClient:
     http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     return JevClient(api_key="key", http_client=http, **kwargs)
-
-
-def _owner() -> BaseWorker:
-    """A worker for a classifier to be set up in."""
-    return BaseWorker("owner", task_manager=TaskManager())
 
 
 def _reply(answer: dict) -> httpx.Response:
@@ -407,7 +401,7 @@ class TestJevClientConnection:
             return httpx.Response(200, json={"models": []})
 
         classifier = JevClassifier(client=_client(handler))
-        await classifier.setup(_owner())
+        await classifier.setup(TaskManager())
 
         assert seen == [("GET", "/v1/models")]
         await classifier.client.close()
@@ -418,7 +412,7 @@ class TestJevClientConnection:
             raise httpx.ConnectError("down")
 
         classifier = JevClassifier(client=_client(handler))
-        await classifier.setup(_owner())
+        await classifier.setup(TaskManager())
         await classifier.client.close()
 
 
@@ -570,9 +564,9 @@ class TestJevClassifierSeveralQuestions:
 
         client = _client(handler)
         first, second = JevClassifier(client=client), JevClassifier(client=client)
-        owner = _owner()
-        await asyncio.gather(first.setup(owner), second.setup(owner))
-        await first.setup(owner)
+        task_manager = TaskManager()
+        await asyncio.gather(first.setup(task_manager), second.setup(task_manager))
+        await first.setup(task_manager)
 
         assert connects == ["/v1/models"]
         await client.close()
@@ -590,7 +584,7 @@ class TestMetrics:
     async def test_every_call_reports_its_time_and_tokens(self):
         client = _client(lambda request: _reply({"type": "noul", "noul": 0.9}))
         classifier = JevClassifier(client=client)
-        await classifier.setup(_owner())
+        await classifier.setup(TaskManager())
         reported = asyncio.Event()
         seen: list = []
 
@@ -605,10 +599,29 @@ class TestMetrics:
         processing, usage = seen
         assert isinstance(processing, ProcessingMetricsData)
         assert processing.processor == classifier.name
-        assert processing.model == classifier.model_name
+        assert processing.model == classifier.model
         assert processing.value >= 0
         assert isinstance(usage, LLMUsageMetricsData)
         assert (usage.value.prompt_tokens, usage.value.completion_tokens) == (12, 3)
         assert usage.value.total_tokens == 15
         await classifier.cleanup()
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_a_named_classifier_reports_metrics_under_its_name(self):
+        client = _client(lambda request: _reply({"type": "noul", "noul": 0.9}))
+        classifier = JevClassifier(client=client, name="voicemail")
+        reported = asyncio.Event()
+        seen: list = []
+
+        @classifier.event_handler("on_metrics")
+        async def on_metrics(classifier, data):
+            seen.extend(data)
+            reported.set()
+
+        await classifier.yes_no("hello", {"answer": YesNoQuestion(instructions="a greeting?")})
+        await asyncio.wait_for(reported.wait(), 1)
+
+        assert classifier.name == "voicemail"
+        assert all(item.processor == "voicemail" for item in seen)
         await client.close()

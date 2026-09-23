@@ -22,7 +22,7 @@ SYSTEM_CONTEXT = LLMContext(messages=[{"role": "system", "content": "from contex
 
 
 def _service(system_instruction=None):
-    return SimpleNamespace(_settings=SimpleNamespace(system_instruction=system_instruction))
+    return SimpleNamespace(settings=SimpleNamespace(system_instruction=system_instruction))
 
 
 def test_settings_system_instruction_takes_priority():
