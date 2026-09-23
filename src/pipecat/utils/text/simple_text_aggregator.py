@@ -94,7 +94,9 @@ class SimpleTextAggregator(BaseTextAggregator):
             if result:
                 yield result
 
-    async def _check_sentence_with_lookahead(self, char: str) -> Aggregation | None:
+    async def _check_sentence_with_lookahead(
+        self, char: str, *, protected_end: int = 0
+    ) -> Aggregation | None:
         """Check a possible sentence ending using text that arrives after it.
 
         ``char`` is already appended to ``self._text``. Punctuation starts a
@@ -118,6 +120,10 @@ class SimpleTextAggregator(BaseTextAggregator):
 
         Args:
             char: The character just appended to the aggregation buffer.
+            protected_end: Buffer offset before which no sentence boundary is
+                accepted. Subclasses pass the end of the last closed tag or
+                pattern, so punctuation inside it (``<spell>St. Louis</spell>``)
+                never splits the text.
 
         Returns:
             Aggregation if a sentence boundary is confirmed, otherwise None.
@@ -132,6 +138,14 @@ class SimpleTextAggregator(BaseTextAggregator):
             # Including "?" could make the terminal-punctuation fallback accept
             # the whole buffer. This temporary slice does not discard the "?".
             candidate = self._text[:-1] if is_punctuation else self._text
+            if protected_end:
+                # Blank out punctuation up to protected_end with equal-width
+                # spaces, so boundary offsets still refer to self._text.
+                protected = "".join(
+                    " " if c in SENTENCE_ENDING_PUNCTUATION else c
+                    for c in candidate[:protected_end]
+                )
+                candidate = protected + candidate[protected_end:]
             eos_marker = match_endofsentence(candidate, language=self.language)
             if eos_marker:
                 result = Aggregation(
