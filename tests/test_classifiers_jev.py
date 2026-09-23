@@ -40,7 +40,7 @@ def _owner() -> BaseWorker:
 
 def _reply(answer: dict) -> httpx.Response:
     return httpx.Response(
-        200, json={"model": "jev-latest", "answers": {"answer": answer}, "usage": USAGE}
+        200, json={"model": "jev-1.13.0", "answers": {"answer": answer}, "usage": USAGE}
     )
 
 
@@ -66,7 +66,7 @@ class TestJevClient:
         assert seen["url"] == "https://api.typesafe.ai/v1/systemone"
         assert seen["auth"] == "Bearer key"
         assert seen["body"] == {
-            "model": "jev-latest",
+            "model": "jev-1.13.0",
             "state": "hello",
             "questions": {"answer": {"type": "noul", "instructions": "a greeting?"}},
         }
@@ -145,7 +145,7 @@ class TestJevClient:
 
     @pytest.mark.asyncio
     async def test_a_reply_without_answers_is_an_error(self):
-        client = _client(lambda request: httpx.Response(200, json={"model": "jev-latest"}))
+        client = _client(lambda request: httpx.Response(200, json={"model": "jev-1.13.0"}))
 
         with pytest.raises(ClassifierError, match="no answers"):
             await client.ask("a", {"answer": {"type": "noul", "instructions": "?"}})
@@ -487,7 +487,7 @@ class TestJevClassifierSeveralQuestions:
             return httpx.Response(
                 200,
                 json={
-                    "model": "jev-latest",
+                    "model": "jev-1.13.0",
                     "answers": {
                         "greeting": {"type": "noul", "noul": 0.9},
                         "mood": {

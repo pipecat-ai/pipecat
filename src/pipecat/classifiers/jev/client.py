@@ -70,7 +70,7 @@ class JevClient:
         *,
         api_key: str,
         base_url: str = "https://api.typesafe.ai",
-        model: str = "jev-latest",
+        model: str = "jev-1.13.0",
         timeout: float = 10.0,
         max_retries: int = 3,
         http_client: httpx.AsyncClient | None = None,
@@ -80,7 +80,9 @@ class JevClient:
         Args:
             api_key: Jev API key.
             base_url: Where the API is served.
-            model: The Jev model to ask.
+            model: The Jev model to ask. A pinned version, so the confidence
+                thresholds tuned against it hold until the caller chooses to
+                move; ``jev-latest`` follows TypeSafe's newest release.
             timeout: Seconds to wait for a reply before giving up.
             max_retries: How many times to retry a request Jev refused
                 because it was busy.
