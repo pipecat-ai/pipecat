@@ -193,6 +193,25 @@ class TestPatternPairAggregator(unittest.IsolatedAsyncioTestCase):
         # Buffer should be empty
         self.assertEqual(self.aggregator.text.text, "")
 
+    async def test_keep_pattern_content_not_split(self):
+        """Punctuation inside a closed KEEP pattern is not a sentence boundary."""
+        self.aggregator.add_pattern(
+            type="spell_pattern",
+            start_pattern="<spell>",
+            end_pattern="</spell>",
+            action=MatchAction.KEEP,
+        )
+
+        text = "Your code is <spell>X. Y. Z</spell>. Say <spell>St. Louis</spell> slowly. Done"
+        results = [result async for result in self.aggregator.aggregate(text)]
+
+        self.assertEqual(
+            [r.text for r in results],
+            ["Your code is <spell>X. Y. Z</spell>.", "Say <spell>St. Louis</spell> slowly."],
+        )
+        result = await self.aggregator.flush()
+        self.assertEqual(result.text, "Done")
+
     async def test_flush_unclosed_pattern_returns_preceding_text(self):
         """Unclosed REMOVE pattern: flush returns text before it, drops the rest.
 
