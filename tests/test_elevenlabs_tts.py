@@ -293,6 +293,30 @@ class _FakeWebSocket:
         self.sent.append(json.loads(data))
 
 
+class _DisconnectWebSocket(_FakeWebSocket):
+    """Simulate close_socket waiting while the default context is open."""
+
+    def __init__(self):
+        super().__init__()
+        self.default_context_open = False
+        self.closed = False
+
+    async def send(self, data: str):
+        await super().send(data)
+        message = self.sent[-1]
+        if message == {"text": ""}:
+            self.default_context_open = True
+        elif message == {"close_context": True}:
+            self.default_context_open = False
+
+    async def wait_closed(self):
+        if self.default_context_open:
+            raise TimeoutError("default context is still open")
+
+    async def close(self):
+        self.closed = True
+
+
 def _make_service() -> ElevenLabsTTSService:
     return ElevenLabsTTSService(
         api_key="test-key",
@@ -354,6 +378,84 @@ async def test_keepalive_without_active_context_sends_empty():
     await service._send_keepalive()
 
     assert ws.sent == [{"text": ""}]
+
+
+@pytest.mark.asyncio
+async def test_disconnect_closes_default_context_before_socket():
+    service = _make_service()
+    ws = _DisconnectWebSocket()
+    service._websocket = ws
+
+    await service._send_keepalive()
+    await service._disconnect_websocket()
+
+    assert ws.sent == [{"text": ""}, {"close_context": True}, {"close_socket": True}]
+    assert ws.closed
+    assert service._websocket is None
+    assert service._default_context_websocket is None
+
+
+@pytest.mark.asyncio
+async def test_disconnect_without_default_context_sends_only_close_socket():
+    service = _make_service()
+    ws = _DisconnectWebSocket()
+    service._websocket = ws
+
+    await service._disconnect_websocket()
+
+    assert ws.sent == [{"close_socket": True}]
+    assert ws.closed
+
+
+@pytest.mark.asyncio
+async def test_named_context_keepalive_does_not_close_default_context():
+    service = _make_service()
+    ws = _DisconnectWebSocket()
+    service._websocket = ws
+    service._turn_context_id = "ctx-1"
+    service._context_init_sent.add("ctx-1")
+
+    await service._send_keepalive()
+    await service._disconnect_websocket()
+
+    assert ws.sent == [{"text": "", "context_id": "ctx-1"}, {"close_socket": True}]
+    assert ws.closed
+
+
+@pytest.mark.asyncio
+async def test_disconnect_does_not_close_default_context_on_replacement_socket():
+    service = _make_service()
+    old_ws = _DisconnectWebSocket()
+    service._websocket = old_ws
+    await service._send_keepalive()
+
+    new_ws = _DisconnectWebSocket()
+    service._websocket = new_ws
+    await service._disconnect_websocket()
+
+    assert new_ws.sent == [{"close_socket": True}]
+    assert new_ws.closed
+
+
+@pytest.mark.asyncio
+async def test_disconnect_closes_default_context_after_named_keepalive():
+    service = _make_service()
+    ws = _DisconnectWebSocket()
+    service._websocket = ws
+    await service._send_keepalive()
+
+    service._turn_context_id = "ctx-1"
+    service._context_init_sent.add("ctx-1")
+    await service._send_keepalive()
+    await service._disconnect_websocket()
+
+    assert ws.sent == [
+        {"text": ""},
+        {"text": "", "context_id": "ctx-1"},
+        {"close_context": True},
+        {"close_socket": True},
+    ]
+    assert ws.closed
 
 
 class _FakeHttpResponse:

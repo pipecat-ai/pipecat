@@ -586,6 +586,9 @@ class ElevenLabsTTSBase(WebsocketTTSService):
     def _clear_connection_state(self):
         """Drop per-connection context bookkeeping after the socket closes."""
 
+    async def _before_websocket_close(self):
+        """Perform protocol-specific cleanup before requesting a socket close."""
+
     async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
         """Apply a settings delta, reconnecting as needed.
 
@@ -702,6 +705,7 @@ class ElevenLabsTTSBase(WebsocketTTSService):
                 # otherwise ends a notable fraction of sessions in a 1006 close).
                 # The timeout is only a fallback ceiling; the clean close
                 # normally arrives well within it.
+                await self._before_websocket_close()
                 await websocket.send(json.dumps({"close_socket": True}))
                 try:
                     await asyncio.wait_for(websocket.wait_closed(), timeout=2.0)
