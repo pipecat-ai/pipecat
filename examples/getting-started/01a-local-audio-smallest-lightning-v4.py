@@ -54,9 +54,7 @@ async def main():
 
     async def say_something():
         await asyncio.sleep(1)
-        await worker.queue_frames(
-            [TTSSpeakFrame("Hello there, this is Lightning v4."), EndFrame()]
-        )
+        await worker.queue_frames([TTSSpeakFrame("Hello there, this is Lightning v4."), EndFrame()])
 
     await asyncio.gather(runner.run(), say_something())
 
