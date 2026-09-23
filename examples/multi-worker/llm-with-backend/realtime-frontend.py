@@ -140,7 +140,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             ),
         ),
         backend=BackendLLMWorker(
-            name="backend",
             llm=AnthropicLLMService(
                 api_key=os.environ["ANTHROPIC_API_KEY"],
                 settings=AnthropicLLMService.Settings(
