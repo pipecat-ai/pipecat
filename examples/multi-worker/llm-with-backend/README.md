@@ -26,24 +26,24 @@ How a delegation crosses is the `BackendConnector`'s business, built from two st
 
 ## Examples
 
-| Example                                                      | What it shows                                                                                     |
-| ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------- |
-| [`openai-frontend.py`](openai-frontend.py)                   | A cascade pipeline (STT + GPT + TTS) as the frontend, all defaults.                               |
-| [`openai-realtime-frontend.py`](openai-realtime-frontend.py) | OpenAI Realtime as the frontend, all defaults. Same backend, same prompts as the cascade example. |
-| [`gemini-live-frontend.py`](gemini-live-frontend.py)         | Gemini Live (`gemini-3.8-live`) as the frontend, all defaults. Same backend, same prompts.        |
+| Example                                                        | What it shows                                                                                     |
+| -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| [`openai-responses-frontend.py`](openai-responses-frontend.py) | A cascade pipeline (STT + OpenAI Responses + TTS) as the frontend, all defaults.                  |
+| [`openai-realtime-frontend.py`](openai-realtime-frontend.py)   | OpenAI Realtime as the frontend, all defaults. Same backend, same prompts as the cascade example. |
+| [`gemini-live-frontend.py`](gemini-live-frontend.py)           | Gemini Live (`gemini-3.8-live`) as the frontend, all defaults. Same backend, same prompts.        |
 
 A speech-to-speech frontend hears the backend's progress if the service delivers a tool's intermediate results to its model, which OpenAI Realtime, Gemini Live, Grok, Nova Sonic and Ultravox do. One that doesn't gets every output at once instead.
 
 Run any of them the usual way, then connect a client:
 
 ```bash
-python openai-frontend.py
+python openai-responses-frontend.py
 ```
 
 Or drive one with a behavioral eval:
 
 ```bash
-python openai-frontend.py -t eval --port 7860
+python openai-responses-frontend.py -t eval --port 7860
 pipecat eval run ../../../scripts/release-evals/scenarios/scripted/weather_function_call_audio.yaml --bot-url ws://localhost:7860 -v
 ```
 
