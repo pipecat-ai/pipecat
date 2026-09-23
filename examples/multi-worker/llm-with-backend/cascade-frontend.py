@@ -6,8 +6,8 @@
 
 """A voice agent with an LLM and a backend: a cascade frontend delegating to a backend LLM.
 
-The frontend keeps the conversation moving with a small, fast model and no
-tools of its own. Anything that needs tools or careful reasoning it hands to
+The frontend keeps the conversation moving with a fast model on OpenAI's
+Responses API and no tools of its own. Anything that needs tools or careful reasoning it hands to
 a backend running Claude, and relays what comes back. ``LLMWithBackend`` wires
 the two together: it installs the ``delegate`` tool on the frontend and runs
 the backend as a worker of its own.
@@ -58,7 +58,7 @@ from pipecat.services.anthropic.llm import AnthropicLLMService
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.llm_service import FunctionCallParams
-from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.openai.responses.llm import OpenAIResponsesLLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.workers.llm import BackendLLMWorker
@@ -153,9 +153,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         await backend.say("Let me look into that, this takes a moment.")
 
     llm = LLMWithBackend(
-        frontend=OpenAILLMService(
+        frontend=OpenAIResponsesLLMService(
             api_key=os.environ["OPENAI_API_KEY"],
-            settings=OpenAILLMService.Settings(system_instruction=FRONTEND_INSTRUCTIONS),
+            settings=OpenAIResponsesLLMService.Settings(system_instruction=FRONTEND_INSTRUCTIONS),
         ),
         backend=backend,
     )

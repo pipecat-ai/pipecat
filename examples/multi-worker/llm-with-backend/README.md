@@ -4,7 +4,7 @@ A conversational **frontend** holds the conversation with a fast model and no to
 
 ```python
 llm = LLMWithBackend(
-    frontend=OpenAILLMService(...),
+    frontend=OpenAIResponsesLLMService(...),
     backend=BackendLLMWorker(
         llm=AnthropicLLMService(...),
         context=LLMContext(tools=[get_current_weather, get_restaurant_recommendation]),
@@ -65,7 +65,7 @@ Frontend process:
 bus = RedisBus(redis=Redis.from_url(REDIS_URL), channel="pipecat:llm-with-backend")
 
 llm = LLMWithBackend(
-    frontend=OpenAILLMService(...),
+    frontend=OpenAIResponsesLLMService(...),
     backend="backend",  # registered in the other process
 )
 
