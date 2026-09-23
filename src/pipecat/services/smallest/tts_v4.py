@@ -210,8 +210,10 @@ class SmallestLightningV4TTSService(WebsocketTTSService):
         if settings is not None:
             default_settings.apply_update(settings)
 
-        if default_settings.speed is not None and not (
-            _SPEED_MIN <= default_settings.speed <= _SPEED_MAX
+        if (
+            is_given(default_settings.speed)
+            and default_settings.speed is not None
+            and not (_SPEED_MIN <= default_settings.speed <= _SPEED_MAX)
         ):
             raise ValueError(
                 f"speed must be within {_SPEED_MIN}-{_SPEED_MAX}, got {default_settings.speed}"
