@@ -18,7 +18,7 @@ read the conversation. The backend's progress is relayed as it comes, as it
 is for a text frontend: a Gemini Live model takes it on the tool-response
 channel itself, which ``gemini-3.8-live`` and the 2.5 native-audio models
 allow. ``openai-realtime-frontend.py`` puts OpenAI Realtime in the frontend's
-place and ``cascade-frontend.py`` a cascade pipeline, against the same backend
+place and ``openai-frontend.py`` a cascade pipeline, against the same backend
 and the same prompts.
 
 Architecture::

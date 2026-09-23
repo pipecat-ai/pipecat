@@ -6,11 +6,12 @@
 
 """A voice agent with an LLM and a backend: a cascade frontend delegating to a backend LLM.
 
-The frontend keeps the conversation moving with a fast model on OpenAI's
-Responses API and no tools of its own. Anything that needs tools or careful
-reasoning it hands to a backend running Claude, and relays what comes back.
-``LLMWithBackend`` wires the two together: it installs the ``delegate`` tool
-on the frontend and runs the backend as a worker of its own.
+The frontend, a model on OpenAI's Responses API in a cascade pipeline (STT,
+LLM, TTS), keeps the conversation moving with no tools of its own. Anything
+that needs tools or careful reasoning it hands to a backend running Claude,
+and relays what comes back. ``LLMWithBackend`` wires the two together: it
+installs the ``delegate`` tool on the frontend and runs the backend as a
+worker of its own.
 
 With a text frontend the defaults hand the backend the conversation itself
 (the frontend words nothing) and relay the backend's progress as it comes.
