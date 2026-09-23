@@ -6,7 +6,9 @@
 
 """Tests for RTVI observer frame-id retention."""
 
+import gc
 import unittest
+import weakref
 from unittest.mock import AsyncMock
 
 from pipecat.frames.frames import (
@@ -115,6 +117,25 @@ class TestRTVIObserverFrameRetention(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(observer._frames_seen, {frame.id})
         self.assertEqual(observer._queued_aggregated_text_frames, [frame])
         observer.send_rtvi_message.assert_not_awaited()
+
+    async def test_disabled_frame_tracking_does_not_retain_frames(self):
+        observer = RTVIObserver(params=RTVIObserverParams())
+        observer.send_rtvi_message = AsyncMock()
+        source = FrameProcessor()
+        frames = [VADUserStartedSpeakingFrame() for _ in range(128)]
+
+        for frame in frames:
+            await self._push(observer, frame, source)
+
+        frame_refs = [weakref.ref(frame) for frame in frames]
+        self.assertEqual(len(observer._frames_seen_while_disabled), len(frames))
+
+        del frame
+        frames.clear()
+        gc.collect()
+
+        self.assertTrue(all(frame_ref() is None for frame_ref in frame_refs))
+        self.assertEqual(observer._frames_seen_while_disabled, {})
 
     async def test_disabled_marker_frames_still_deduplicate_after_runtime_enable(self):
         observer = RTVIObserver(params=RTVIObserverParams())
