@@ -171,7 +171,8 @@ class JevClient:
             try:
                 response = await self._http.post("/v1/systemone", json=body)
             except httpx.HTTPError as e:
-                raise ClassifierError(f"Jev request failed: {e}") from e
+                # Some httpx errors, such as a timeout, carry no message.
+                raise ClassifierError(f"Jev request failed: {e!r}") from e
             if response.status_code in (_TOO_MANY_REQUESTS, _OVERLOADED):
                 if attempt > self._max_retries:
                     raise ClassifierError(
