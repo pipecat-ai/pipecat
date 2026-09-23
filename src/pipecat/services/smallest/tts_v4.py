@@ -20,7 +20,10 @@ service rather than a model option on :class:`~pipecat.services.smallest.tts.Sma
 """
 
 import asyncio
+import base64
+import io
 import json
+import wave
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from typing import Any
@@ -35,15 +38,18 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
+    InputAudioRawFrame,
     TTSAudioRawFrame,
     TTSStoppedFrame,
+    UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame,
 )
-from pipecat.processors.frame_processor import FrameProcessorSetup
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import WebsocketTTSService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.tracing.service_decorators import traced_tts
-from pipecat.utils.types import NOT_GIVEN, NotGiven
+from pipecat.utils.types import NOT_GIVEN, NotGiven, is_given
 
 # Sample rates the live session will negotiate; anything else is rejected at
 # connect time with close code 1008.
@@ -51,6 +57,12 @@ _ALLOWED_SAMPLE_RATES = (8000, 16000, 24000, 44100, 48000)
 _DEFAULT_SAMPLE_RATE = 48000
 
 _DEFAULT_VOICE = "brannock"
+
+# The `speed` connect param's accepted range; outside it, the connection is
+# refused at the handshake. Validated at construction so a bad value fails
+# immediately instead of on the next connect.
+_SPEED_MIN = 0.5
+_SPEED_MAX = 2.0
 
 _READY_TIMEOUT_SECONDS = 10.0
 
@@ -144,8 +156,11 @@ class SmallestLightningV4TTSService(WebsocketTTSService):
     different one from the Lightning v4 ``get_voices`` catalogue.
 
     The session also conditions each turn on the *caller's* side of the
-    conversation, but only if told: call :meth:`add_user_turn` with the
-    caller's transcript (e.g. from an LLM user aggregator's
+    conversation, but only if told, and only with audio: this service
+    captures the caller's raw microphone audio between
+    ``UserStartedSpeakingFrame`` and ``UserStoppedSpeakingFrame`` on its own,
+    and pairs it with the caller's transcript when the application calls
+    :meth:`add_user_turn` (e.g. from an LLM user aggregator's
     ``on_user_turn_stopped`` handler) after each user turn.
 
     Example::
@@ -195,6 +210,13 @@ class SmallestLightningV4TTSService(WebsocketTTSService):
         if settings is not None:
             default_settings.apply_update(settings)
 
+        if default_settings.speed is not None and not (
+            _SPEED_MIN <= default_settings.speed <= _SPEED_MAX
+        ):
+            raise ValueError(
+                f"speed must be within {_SPEED_MIN}-{_SPEED_MAX}, got {default_settings.speed}"
+            )
+
         super().__init__(
             push_stop_frames=False,
             push_start_frame=True,
@@ -212,6 +234,16 @@ class SmallestLightningV4TTSService(WebsocketTTSService):
         # Binary audio frames carry no turn id, so they're attributed to the
         # turn most recently confirmed by `turn_start`.
         self._turn_context_id: str | None = None
+
+        # Caller audio for the turn currently being captured (between
+        # UserStartedSpeakingFrame and UserStoppedSpeakingFrame), and the most
+        # recently finished turn's captured audio, held until its transcript
+        # arrives via add_user_turn().
+        self._capturing_caller_audio = False
+        self._caller_audio = bytearray()
+        self._caller_audio_sample_rate = 0
+        self._pending_caller_audio: bytes | None = None
+        self._pending_caller_audio_sample_rate = 0
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -277,20 +309,46 @@ class SmallestLightningV4TTSService(WebsocketTTSService):
         await super().cancel(frame)
         await self._disconnect()
 
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Capture the caller's raw audio for the turn add_user_turn() will send.
+
+        Args:
+            frame: The frame to process.
+            direction: The direction of frame flow.
+        """
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, UserStartedSpeakingFrame):
+            self._capturing_caller_audio = True
+            self._caller_audio = bytearray()
+        elif isinstance(frame, InputAudioRawFrame) and self._capturing_caller_audio:
+            self._caller_audio_sample_rate = frame.sample_rate
+            self._caller_audio.extend(frame.audio)
+        elif isinstance(frame, UserStoppedSpeakingFrame):
+            self._capturing_caller_audio = False
+            if self._caller_audio:
+                self._pending_caller_audio = bytes(self._caller_audio)
+                self._pending_caller_audio_sample_rate = self._caller_audio_sample_rate
+            self._caller_audio = bytearray()
+
     async def add_user_turn(self, text: str):
         """Feed the caller's turn into Lightning v4's server-held context.
 
         The session conditions each `speak` on what came before it, including
-        what the caller said — but only if told, via `user_audio`. Nothing in
-        the base pipeline calls this automatically (a `TranscriptionFrame` is
-        consumed by the user aggregator and never reaches the TTS service), so
-        the application must call it itself, typically from an
-        `on_user_turn_stopped` handler on the LLM's user aggregator.
+        what the caller said — but only via a `user_audio` frame that carries
+        BOTH the transcript and the caller's own captured audio. A text-only
+        entry is not a weaker version of this: the server discards context
+        entries with no audio outright, so sending text alone looks like it
+        works while conditioning nothing. If no audio was captured for this
+        turn (e.g. it arrived before the first `UserStoppedSpeakingFrame`),
+        this drops the turn and logs a warning rather than sending one.
 
-        Sends only the transcript, not caller audio: Lightning v4's `audio`
-        field is for the caller's actual voice, which this service never has
-        (its input is text from the LLM, and its own microphone input, if
-        any, belongs to the STT service, not this one).
+        Nothing in the base pipeline calls this automatically — a
+        `TranscriptionFrame` is consumed by the user aggregator and never
+        reaches the TTS service — so the application must call it itself,
+        typically from an `on_user_turn_stopped` handler on the LLM's user
+        aggregator, right after this service's own `process_frame` has seen
+        that turn's `UserStoppedSpeakingFrame`.
 
         Args:
             text: The caller's turn, e.g. the content of a
@@ -298,10 +356,38 @@ class SmallestLightningV4TTSService(WebsocketTTSService):
         """
         if not text or not self._websocket:
             return
+
+        audio = self._pending_caller_audio
+        sample_rate = self._pending_caller_audio_sample_rate
+        self._pending_caller_audio = None
+
+        if not audio:
+            logger.warning(
+                f"{self}: dropping caller turn with no captured audio ({text[:40]!r}); "
+                "Lightning v4 discards text-only context entries"
+            )
+            return
+
+        msg = {
+            "event": "user_audio",
+            "text": text,
+            "audio": self._wav_base64(audio, sample_rate),
+        }
         try:
-            await self._websocket.send(json.dumps({"event": "user_audio", "text": text}))
+            await self._websocket.send(json.dumps(msg))
         except Exception as e:
             logger.warning(f"{self} error sending user turn context: {e}")
+
+    @staticmethod
+    def _wav_base64(pcm: bytes, sample_rate: int) -> str:
+        """Wrap 16-bit mono PCM in a WAV container, base64 encoded."""
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(sample_rate)
+            wf.writeframes(pcm)
+        return base64.b64encode(buf.getvalue()).decode("ascii")
 
     async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
         """Apply a settings delta, reconnecting if a connect-time field changed.
@@ -310,6 +396,14 @@ class SmallestLightningV4TTSService(WebsocketTTSService):
         ``content_filter_action`` are only negotiated when the connection is
         opened, so changing any of them requires a fresh connection.
         """
+        new_speed = getattr(delta, "speed", NOT_GIVEN)
+        if (
+            is_given(new_speed)
+            and new_speed is not None
+            and not (_SPEED_MIN <= new_speed <= _SPEED_MAX)
+        ):
+            raise ValueError(f"speed must be within {_SPEED_MIN}-{_SPEED_MAX}, got {new_speed}")
+
         changed = await super()._update_settings(delta)
 
         if changed.keys() & {

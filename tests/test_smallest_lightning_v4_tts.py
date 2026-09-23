@@ -6,11 +6,20 @@
 
 """Tests for SmallestLightningV4TTSService's turn-based live-session handling."""
 
+import base64
 import json
+import wave
+from io import BytesIO
 
 import pytest
 
-from pipecat.frames.frames import TTSAudioRawFrame
+from pipecat.frames.frames import (
+    InputAudioRawFrame,
+    TTSAudioRawFrame,
+    UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame,
+)
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.smallest.tts_v4 import (
     SmallestLightningV4TTSService,
     language_to_smallest_lightning_v4_language,
@@ -196,27 +205,58 @@ async def test_interrupt_sends_a_single_frame_without_reconnecting():
     assert service._turn_context_id is None
 
 
+class _FakeWebsocket:
+    def __init__(self):
+        self.sent = []
+
+    async def send(self, data):
+        self.sent.append(json.loads(data))
+
+
+def _pcm_of(seconds: float, sample_rate: int = 16000) -> bytes:
+    return b"\x00\x01" * int(seconds * sample_rate)
+
+
 @pytest.mark.asyncio
-async def test_add_user_turn_sends_the_callers_transcript():
+async def test_add_user_turn_sends_the_callers_transcript_and_audio():
     service = _make_service()
-
-    sent = []
-
-    class FakeWebsocket:
-        async def send(self, data):
-            sent.append(json.loads(data))
-
-    service._websocket = FakeWebsocket()
+    service._websocket = (ws := _FakeWebsocket())
+    service._pending_caller_audio = _pcm_of(0.1)
+    service._pending_caller_audio_sample_rate = 16000
 
     await service.add_user_turn("What's my balance?")
 
-    assert sent == [{"event": "user_audio", "text": "What's my balance?"}]
+    assert len(ws.sent) == 1
+    msg = ws.sent[0]
+    assert msg["event"] == "user_audio"
+    assert msg["text"] == "What's my balance?"
+    # The audio round-trips as a WAV container, base64 encoded.
+    with wave.open(BytesIO(base64.b64decode(msg["audio"])), "rb") as wf:
+        assert wf.getframerate() == 16000
+        assert wf.getnchannels() == 1
+        assert wf.readframes(wf.getnframes()) == _pcm_of(0.1)
+    # Consumed, so a second call without new audio drops instead of re-sending it.
+    assert service._pending_caller_audio is None
+
+
+@pytest.mark.asyncio
+async def test_add_user_turn_drops_turn_with_no_captured_audio():
+    """Lightning v4 discards text-only context entries, so sending one would
+    look like it worked while conditioning nothing — drop it instead."""
+    service = _make_service()
+    service._websocket = (ws := _FakeWebsocket())
+    service._pending_caller_audio = None
+
+    await service.add_user_turn("What's my balance?")
+
+    assert ws.sent == []
 
 
 @pytest.mark.asyncio
 async def test_add_user_turn_is_a_noop_without_a_connection():
     service = _make_service()
     service._websocket = None
+    service._pending_caller_audio = _pcm_of(0.1)
 
     # Should not raise even though there's nowhere to send.
     await service.add_user_turn("What's my balance?")
@@ -225,15 +265,55 @@ async def test_add_user_turn_is_a_noop_without_a_connection():
 @pytest.mark.asyncio
 async def test_add_user_turn_ignores_empty_text():
     service = _make_service()
-
-    sent = []
-
-    class FakeWebsocket:
-        async def send(self, data):
-            sent.append(json.loads(data))
-
-    service._websocket = FakeWebsocket()
+    service._websocket = (ws := _FakeWebsocket())
+    service._pending_caller_audio = _pcm_of(0.1)
 
     await service.add_user_turn("")
 
-    assert sent == []
+    assert ws.sent == []
+
+
+@pytest.mark.asyncio
+async def test_captures_caller_audio_between_start_and_stop_speaking():
+    service = _make_service()
+
+    await service.process_frame(UserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+    await service.process_frame(
+        InputAudioRawFrame(audio=_pcm_of(0.1), sample_rate=16000, num_channels=1),
+        FrameDirection.DOWNSTREAM,
+    )
+    await service.process_frame(UserStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+
+    assert service._pending_caller_audio == _pcm_of(0.1)
+    assert service._pending_caller_audio_sample_rate == 16000
+
+
+@pytest.mark.asyncio
+async def test_ignores_input_audio_outside_a_speaking_burst():
+    service = _make_service()
+
+    # No UserStartedSpeakingFrame yet, so this audio belongs to nobody's turn.
+    await service.process_frame(
+        InputAudioRawFrame(audio=_pcm_of(0.1), sample_rate=16000, num_channels=1),
+        FrameDirection.DOWNSTREAM,
+    )
+    await service.process_frame(UserStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+
+    assert service._pending_caller_audio is None
+
+
+def test_construction_rejects_out_of_range_speed():
+    with pytest.raises(ValueError):
+        SmallestLightningV4TTSService(
+            api_key="test-key",
+            settings=SmallestLightningV4TTSService.Settings(voice="rhodes", speed=3.0),
+        )
+
+
+def test_construction_accepts_boundary_speeds():
+    for speed in (0.5, 2.0):
+        service = SmallestLightningV4TTSService(
+            api_key="test-key",
+            settings=SmallestLightningV4TTSService.Settings(voice="rhodes", speed=speed),
+        )
+        assert service._settings.speed == speed
