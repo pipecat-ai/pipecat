@@ -61,7 +61,7 @@ from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.responses.llm import OpenAIResponsesLLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
-from pipecat.workers.llm import BackendLLMWorker
+from pipecat.workers.llm import BackendLLMWorker, BackendOutput
 from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
@@ -146,12 +146,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # A backend that takes a while can have the frontend respond to the user
     # the moment work is handed to it, instead of leaving them in silence.
     # The frontend decides what to say: it may mention the wait in its own
-    # words, or, if the user also asked for a joke while they wait, tell the
+    # words, or, say, if the user also asked for a joke while they wait, tell the
     # joke. Even a quick lookup here is a few model round trips, so this is
     # worth it; drop it for a backend that answers at once.
     @backend.event_handler("on_delegation_started")
     async def on_delegation_started(backend, request):
-        await backend.say("Let me look into that, this takes a moment.")
+        await backend.send_output(BackendOutput(text="Let me look into that, this takes a moment."))
 
     llm = LLMWithBackend(
         frontend=OpenAIResponsesLLMService(
