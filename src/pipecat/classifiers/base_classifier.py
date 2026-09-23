@@ -35,11 +35,9 @@ from pipecat.utils.base_object import BaseObject
 class ClassifierError(Exception):
     """A classifier could not answer a question."""
 
-    pass
-
 
 class YesNoQuestion(BaseModel):
-    """Whether the state satisfies a criteria.
+    """Whether the state meets a condition.
 
     Parameters:
         instructions: What is being checked for, as a yes or no question.
@@ -236,7 +234,7 @@ class BaseClassifier(BaseObject):
     async def yes_no(
         self, state: str | dict[str, Any] | list[Any], questions: Mapping[str, YesNoQuestion]
     ) -> dict[str, YesNoResult]:
-        """Ask whether the state satisfies each criteria.
+        """Ask whether the state meets each condition.
 
         Args:
             state: What the questions are about.

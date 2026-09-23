@@ -79,9 +79,8 @@ class JevClient:
         Args:
             api_key: Jev API key.
             base_url: Where the API is served.
-            model: The Jev model to ask. A pinned version, so the confidence
-                thresholds tuned against it hold until the caller chooses to
-                move; ``jev-latest`` follows TypeSafe's newest release.
+            model: The Jev model to ask. Pinned so thresholds tuned against
+                it keep holding; ``jev-latest`` follows TypeSafe's newest release.
             timeout: Seconds to wait for a reply before giving up.
             max_retries: How many times to retry a request Jev refused
                 because it was busy.
