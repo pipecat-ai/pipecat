@@ -317,7 +317,7 @@ def is_silence(pcm_bytes: bytes) -> bool:
     audio_data = np.frombuffer(pcm_bytes, dtype=np.int16)
 
     # Check the maximum absolute amplitude in the frame
-    max_value = np.abs(audio_data).max()
+    max_value = np.abs(audio_data.astype(np.int32)).max()
 
     # If max value is lower than SPEAKING_THRESHOLD, consider it as silence
     return max_value <= SPEAKING_THRESHOLD
