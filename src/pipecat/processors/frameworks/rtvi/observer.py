@@ -9,6 +9,7 @@
 import inspect
 import time
 import warnings
+import weakref
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -233,6 +234,7 @@ class RTVIObserver(BaseObserver):
 
         self._ignored_sources: set[FrameProcessor] = set(self._params.ignored_sources)
         self._frames_seen = set()
+        self._frames_seen_while_disabled: dict[int, weakref.ReferenceType[Frame]] = {}
 
         self._bot_transcription = ""
         self._last_user_audio_level = 0
@@ -359,6 +361,21 @@ class RTVIObserver(BaseObserver):
         """
         self._ignored_sources.discard(source)
 
+    def _remember_frame_seen_while_disabled(self, frame: Frame):
+        """Remember a disabled configurable frame without retaining the frame or its ID."""
+        frame_key = id(frame)
+
+        def remove_frame(frame_ref: weakref.ReferenceType[Frame]):
+            if self._frames_seen_while_disabled.get(frame_key) is frame_ref:
+                self._frames_seen_while_disabled.pop(frame_key, None)
+
+        self._frames_seen_while_disabled[frame_key] = weakref.ref(frame, remove_frame)
+
+    def _was_seen_while_disabled(self, frame: Frame) -> bool:
+        """Return whether this live frame was previously seen while disabled."""
+        frame_ref = self._frames_seen_while_disabled.get(id(frame))
+        return frame_ref is not None and frame_ref() is frame
+
     def _get_function_call_report_level(self, function_name: str) -> RTVIFunctionCallReportLevel:
         """Get the report level for a specific function call.
 
@@ -440,65 +457,80 @@ class RTVIObserver(BaseObserver):
             return
 
         # If we have already seen this frame, let's skip it.
-        if frame.id in self._frames_seen:
+        if frame.id in self._frames_seen or self._was_seen_while_disabled(frame):
             return
 
-        # This tells whether the frame is already processed. If false, we will try
-        # again the next time we see the frame.
-        mark_as_seen = True
-
+        # This tells whether the frame was handled. If false, we will try again
+        # the next time we see the frame.
+        mark_as_seen = False
         if (
             isinstance(frame, (UserStartedSpeakingFrame, UserStoppedSpeakingFrame))
             and self._params.user_speaking_enabled
         ):
             await self._handle_interruptions(frame)
-        elif (
-            isinstance(frame, (VADUserStartedSpeakingFrame, VADUserStoppedSpeakingFrame))
-            and self._params.vad_user_speaking_enabled
-        ):
-            await self._handle_vad_speaking(frame)
+            mark_as_seen = True
+        elif isinstance(frame, (VADUserStartedSpeakingFrame, VADUserStoppedSpeakingFrame)):
+            if self._params.vad_user_speaking_enabled:
+                await self._handle_vad_speaking(frame)
+                mark_as_seen = True
+            else:
+                self._remember_frame_seen_while_disabled(frame)
         elif (
             isinstance(frame, (UserMuteStartedFrame, UserMuteStoppedFrame))
             and self._params.user_mute_enabled
         ):
             await self._handle_user_mute(frame)
+            mark_as_seen = True
         elif (
             isinstance(frame, (BotStartedSpeakingFrame, BotStoppedSpeakingFrame))
             and self._params.bot_speaking_enabled
         ):
             await self._handle_bot_speaking(frame)
+            mark_as_seen = True
         elif isinstance(frame, InterruptionFrame) and self._params.bot_speaking_enabled:
             # The bot's in-flight output was cut off (VAD barge-in or a programmatic
             # run_immediately interrupt). Let clients drop what it was mid-saying.
             await self.send_rtvi_message(RTVI.BotInterruptedMessage())
+            mark_as_seen = True
         elif (
             isinstance(frame, (TranscriptionFrame, InterimTranscriptionFrame))
             and self._params.user_transcription_enabled
         ):
             await self._handle_user_transcriptions(frame)
+            mark_as_seen = True
         elif isinstance(frame, LLMContextFrame) and self._params.user_llm_enabled:
             await self._handle_context(frame)
+            mark_as_seen = True
         elif isinstance(frame, LLMFullResponseStartFrame) and self._params.bot_llm_enabled:
             await self.send_rtvi_message(RTVI.BotLLMStartedMessage())
+            mark_as_seen = True
         elif isinstance(frame, LLMFullResponseEndFrame) and self._params.bot_llm_enabled:
             await self.send_rtvi_message(RTVI.BotLLMStoppedMessage())
+            mark_as_seen = True
         elif isinstance(frame, LLMTextFrame) and self._params.bot_llm_enabled:
             await self._handle_llm_text_frame(frame)
-        elif isinstance(frame, LLMMarkerResponseFrame) and self._params.bot_llm_marker_enabled:
-            await self.send_rtvi_message(
-                RTVI.BotLLMMarkerMessage(
-                    data=RTVI.BotLLMMarkerMessageData(
-                        text=frame.marker or "",
-                        kind=frame.kind,
-                        raw=frame.raw,
-                        markers=list(frame.markers),
+            mark_as_seen = True
+        elif isinstance(frame, LLMMarkerResponseFrame):
+            if self._params.bot_llm_marker_enabled:
+                await self.send_rtvi_message(
+                    RTVI.BotLLMMarkerMessage(
+                        data=RTVI.BotLLMMarkerMessageData(
+                            text=frame.marker or "",
+                            kind=frame.kind,
+                            raw=frame.raw,
+                            markers=list(frame.markers),
+                        )
                     )
                 )
-            )
+                mark_as_seen = True
+            else:
+                self._remember_frame_seen_while_disabled(frame)
         elif isinstance(frame, TTSStartedFrame) and self._params.bot_tts_enabled:
             await self.send_rtvi_message(RTVI.BotTTSStartedMessage())
+            mark_as_seen = True
         elif isinstance(frame, TTSStoppedFrame) and self._params.bot_tts_enabled:
             await self.send_rtvi_message(RTVI.BotTTSStoppedMessage())
+            mark_as_seen = True
         elif isinstance(frame, AggregatedTextProgressFrame):
             if not isinstance(src, BaseOutputTransport):
                 # This check is to make sure we handle the frame when it has gone
@@ -506,6 +538,7 @@ class RTVIObserver(BaseObserver):
                 mark_as_seen = False
             else:
                 await self._handle_aggregated_progress(frame)
+                mark_as_seen = True
         elif isinstance(frame, AggregatedTextFrame) and (
             self._params.bot_output_enabled or self._params.bot_tts_enabled
         ):
@@ -515,13 +548,17 @@ class RTVIObserver(BaseObserver):
                 mark_as_seen = False
             else:
                 await self._handle_aggregated_llm_text(frame)
+                mark_as_seen = True
         elif isinstance(frame, MetricsFrame) and self._params.metrics_enabled:
             await self._handle_metrics(frame)
+            mark_as_seen = True
         elif isinstance(frame, FunctionCallsStartedFrame):
+            reportable_call = False
             for function_call in frame.function_calls:
                 report_level = self._get_function_call_report_level(function_call.function_name)
                 if report_level == RTVIFunctionCallReportLevel.DISABLED:
                     continue
+                reportable_call = True
                 msg_data = RTVI.LLMFunctionCallStartMessageData()
                 if report_level in (
                     RTVIFunctionCallReportLevel.NAME,
@@ -530,6 +567,10 @@ class RTVIObserver(BaseObserver):
                     msg_data.function_name = function_call.function_name
                 message = RTVI.LLMFunctionCallStartMessage(data=msg_data)
                 await self.send_rtvi_message(message)
+            if reportable_call:
+                mark_as_seen = True
+            else:
+                self._remember_frame_seen_while_disabled(frame)
         elif isinstance(frame, FunctionCallInProgressFrame):
             report_level = self._get_function_call_report_level(frame.function_name)
             if report_level != RTVIFunctionCallReportLevel.DISABLED:
@@ -545,6 +586,9 @@ class RTVIObserver(BaseObserver):
                     msg_data.arguments = frame.arguments
                 message = RTVI.LLMFunctionCallInProgressMessage(data=msg_data)
                 await self.send_rtvi_message(message)
+                mark_as_seen = True
+            else:
+                self._remember_frame_seen_while_disabled(frame)
         elif isinstance(frame, FunctionCallCancelFrame):
             report_level = self._get_function_call_report_level(frame.function_name)
             if report_level != RTVIFunctionCallReportLevel.DISABLED:
@@ -559,6 +603,9 @@ class RTVIObserver(BaseObserver):
                     msg_data.function_name = frame.function_name
                 message = RTVI.LLMFunctionCallStoppedMessage(data=msg_data)
                 await self.send_rtvi_message(message)
+                mark_as_seen = True
+            else:
+                self._remember_frame_seen_while_disabled(frame)
         elif isinstance(frame, FunctionCallResultFrame):
             report_level = self._get_function_call_report_level(frame.function_name)
             if report_level != RTVIFunctionCallReportLevel.DISABLED:
@@ -575,25 +622,33 @@ class RTVIObserver(BaseObserver):
                     msg_data.result = frame.result if frame.result else None
                 message = RTVI.LLMFunctionCallStoppedMessage(data=msg_data)
                 await self.send_rtvi_message(message)
+                mark_as_seen = True
+            else:
+                self._remember_frame_seen_while_disabled(frame)
         elif isinstance(frame, RTVIServerMessageFrame):
             message = RTVI.ServerMessage(data=frame.data)
             await self.send_rtvi_message(message)
+            mark_as_seen = True
         elif isinstance(frame, RTVIUICommandFrame):
             message = RTVI.UICommandMessage(
                 data=RTVI.UICommandData(command=frame.command, payload=frame.payload)
             )
             await self.send_rtvi_message(message)
+            mark_as_seen = True
         elif isinstance(frame, RTVIUIJobGroupFrame):
             if frame.data is not None:
                 message = RTVI.UIJobGroupMessage(data=frame.data)
                 await self.send_rtvi_message(message)
+                mark_as_seen = True
         elif isinstance(frame, RTVIConfigureObserverFrame):
             self._apply_config(frame)
+            mark_as_seen = True
         elif isinstance(frame, RTVIServerResponseFrame):
             if frame.error is not None:
                 await self._send_error_response(frame)
             else:
                 await self._send_server_response(frame)
+            mark_as_seen = True
         elif isinstance(frame, InputAudioRawFrame) and self._params.user_audio_level_enabled:
             # Every frame feeds the rolling window, but the window is only
             # measured when a level is due to be reported.
@@ -605,6 +660,7 @@ class RTVIObserver(BaseObserver):
                 message = RTVI.UserAudioLevelMessage(data=RTVI.AudioLevelMessageData(value=level))
                 await self.send_rtvi_message(message)
                 self._last_user_audio_level = curr_time
+            mark_as_seen = True
         elif isinstance(frame, TTSAudioRawFrame) and self._params.bot_audio_level_enabled:
             self._bot_volume_tracker.update(frame.audio, frame.sample_rate)
             curr_time = time.time()
@@ -614,6 +670,7 @@ class RTVIObserver(BaseObserver):
                 message = RTVI.BotAudioLevelMessage(data=RTVI.AudioLevelMessageData(value=level))
                 await self.send_rtvi_message(message)
                 self._last_bot_audio_level = curr_time
+            mark_as_seen = True
 
         if mark_as_seen:
             self._frames_seen.add(frame.id)
