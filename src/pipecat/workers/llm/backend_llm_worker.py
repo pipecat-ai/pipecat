@@ -370,10 +370,10 @@ class BackendLLMWorker(LLMContextWorker):
     LLM until it has nothing more to do.
 
     Everything the backend's model produces reaches the frontend as
-    :class:`BackendOutput` updates, continually. :meth:`say` (and its general
-    form :meth:`send_output`) lets the app send one output of its own on the
-    same channel, e.g. from an ``on_delegation_started`` handler or a tool,
-    for a backend that knows its work is slow to tell the user so.
+    :class:`BackendOutput` updates, continually. :meth:`send_output` lets the
+    app send one output of its own on the same channel, e.g. from an
+    ``on_delegation_started`` handler or a tool, so a backend that knows its
+    work is slow can have the frontend respond to the user meanwhile.
 
     Event handlers available:
 
@@ -415,7 +415,9 @@ class BackendLLMWorker(LLMContextWorker):
 
         @backend.event_handler("on_delegation_started")
         async def on_delegation_started(backend, request):
-            await backend.say("Let me look into that, this takes a moment.")
+            await backend.send_output(
+                BackendOutput(text="Let me look into that, this takes a moment.")
+            )
     """
 
     def __init__(
@@ -532,24 +534,6 @@ class BackendLLMWorker(LLMContextWorker):
             run.final_output.to_payload()
             if run.final_output
             else {"text": "", "prefers_spoken": False},
-        )
-
-    async def say(self, text: str, *, apply_transform_output: bool = False) -> None:
-        """Send one spoken line to the frontend, on the delegation in progress.
-
-        The line is a :class:`BackendOutput` flagged ``prefers_spoken``, so a
-        frontend following the flag says it right away while the backend keeps
-        working. For anything else, :meth:`send_output`.
-
-        Args:
-            text: What the frontend should say.
-            apply_transform_output: Whether to run the line through
-                ``transform_output`` as the model's outputs are; see
-                :meth:`send_output`.
-        """
-        await self.send_output(
-            BackendOutput(text=text, prefers_spoken=True),
-            apply_transform_output=apply_transform_output,
         )
 
     async def send_output(

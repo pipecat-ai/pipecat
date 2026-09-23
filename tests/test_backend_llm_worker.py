@@ -540,7 +540,7 @@ async def test_the_response_carries_the_transformed_final_output():
 
 
 @pytest.mark.asyncio
-async def test_a_backend_can_say_something_as_soon_as_a_delegation_arrives():
+async def test_a_backend_can_send_an_output_as_soon_as_a_delegation_arrives():
     """An app's own spoken line rides the same channel as the model's outputs."""
     llm = _ScriptedLLM([[("text", "Done.")]])
     backend = BackendLLMWorker(llm=llm, name="backend", context=LLMContext())
@@ -549,7 +549,7 @@ async def test_a_backend_can_say_something_as_soon_as_a_delegation_arrives():
     @backend.event_handler("on_delegation_started")
     async def on_delegation_started(worker, request: str):
         requests.append(request)
-        await worker.say("Let me look into that.")
+        await worker.send_output(BackendOutput(text="Let me look into that."))
 
     requester = BaseWorker("requester")
     runner = WorkerRunner(handle_sigint=False)
@@ -607,7 +607,7 @@ async def test_an_apps_own_output_is_sent_as_given_past_the_transform():
 
     @backend.event_handler("on_delegation_started")
     async def on_delegation_started(worker, request: str):
-        await worker.say("Let me look into that.")
+        await worker.send_output(BackendOutput(text="Let me look into that."))
 
     requester = BaseWorker("requester")
     runner = WorkerRunner(handle_sigint=False)
@@ -647,8 +647,8 @@ async def test_an_apps_own_output_can_ask_for_the_transform():
 
     @backend.event_handler("on_delegation_started")
     async def on_delegation_started(worker, request: str):
-        await worker.say("as given")
-        await worker.say("shaped", apply_transform_output=True)
+        await worker.send_output(BackendOutput(text="as given"))
+        await worker.send_output(BackendOutput(text="shaped"), apply_transform_output=True)
 
     requester = BaseWorker("requester")
     runner = WorkerRunner(handle_sigint=False)
@@ -676,7 +676,7 @@ async def test_an_output_sent_outside_a_delegation_is_dropped():
     backend = BackendLLMWorker(llm=_ScriptedLLM([]), name="backend", context=LLMContext())
     backend.send_job_update = AsyncMock()  # type: ignore[method-assign]
 
-    await backend.say("Nobody is listening.")
+    await backend.send_output(BackendOutput(text="Nobody is listening."))
 
     backend.send_job_update.assert_not_awaited()
 
