@@ -239,12 +239,14 @@ class LLMClassifier(BaseClassifier):
         return value if isinstance(value, str) else json.dumps(value, indent=2)
 
     def _number(self, answer: dict[str, Any], key: str) -> float:
+        """The number the LLM wrote under ``key``, or a ClassifierError if it did not."""
         try:
             return float(answer[key])
         except (KeyError, TypeError, ValueError) as e:
             raise ClassifierError(f"the LLM's answer has no usable '{key}'") from e
 
     def _unit(self, answer: dict[str, Any], key: str) -> float:
+        """The number under ``key`` kept between 0 and 1, for probabilities and confidences."""
         return self._clamp(self._number(answer, key))
 
     def _clamp(self, value: Any) -> float:

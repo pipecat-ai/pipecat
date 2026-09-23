@@ -139,6 +139,12 @@ class ScoreResult(BaseModel):
     def level_key(level: Any) -> str:
         """The key a level gets in ``probabilities``.
 
+        A level can be structured data, which cannot key a dict, so the
+        probabilities are keyed by the level's JSON text. This is how to look
+        one up::
+
+            result.probabilities[ScoreResult.level_key(question.levels[0])]
+
         Args:
             level: A level of the scale, text or structured data.
 
