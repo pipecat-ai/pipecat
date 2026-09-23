@@ -14,6 +14,7 @@ from typing import Any, TypedDict, TypeGuard, TypeVar, cast
 from anthropic import NOT_GIVEN as ANTHROPIC_NOT_GIVEN
 from anthropic import NotGiven as AnthropicNotGiven
 from anthropic.types.message_param import MessageParam
+from anthropic.types.text_block_param import TextBlockParam
 from anthropic.types.tool_union_param import ToolUnionParam
 from loguru import logger
 
@@ -54,7 +55,7 @@ def anthropic_is_given(value: _T | AnthropicNotGiven) -> TypeGuard[_T]:
 class AnthropicLLMInvocationParams(TypedDict):
     """Context-based parameters for invoking Anthropic's LLM API."""
 
-    system: str | AnthropicNotGiven
+    system: str | list[TextBlockParam] | AnthropicNotGiven
     messages: list[MessageParam]
     tools: list[ToolUnionParam]
 
@@ -104,7 +105,11 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
             discard_context_system=True,
         )
         return {
-            "system": system if system is not None else ANTHROPIC_NOT_GIVEN,
+            "system": self._system_with_cache_control(system)
+            if enable_prompt_caching
+            else system
+            if system is not None
+            else ANTHROPIC_NOT_GIVEN,
             "messages": (
                 self._with_cache_control_markers(converted.messages)
                 if enable_prompt_caching
@@ -466,6 +471,33 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
         except Exception as e:
             logger.error(f"Error adding cache control marker: {e}")
             return messages_with_markers
+
+    @staticmethod
+    def _system_with_cache_control(
+        system: str | None,
+    ) -> str | list[TextBlockParam] | AnthropicNotGiven:
+        """Add a cache breakpoint to a system prompt when one is present.
+
+        Anthropic accepts system prompts as either a string or a list of content
+        blocks. Converting a string to one text block lets the shared system
+        prompt be cached independently of the conversation messages.
+
+        Args:
+            system: The system prompt to mark for caching, if present.
+
+        Returns:
+            The system prompt as one cacheable text block, or Anthropic's
+            ``NOT_GIVEN`` sentinel when there is no system prompt.
+        """
+        if system is None:
+            return ANTHROPIC_NOT_GIVEN
+        return [
+            {
+                "type": "text",
+                "text": system,
+                "cache_control": {"type": "ephemeral"},
+            }
+        ]
 
     @staticmethod
     def _to_anthropic_function_format(function: FunctionSchema) -> dict[str, Any]:

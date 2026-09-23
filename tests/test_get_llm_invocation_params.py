@@ -1451,6 +1451,49 @@ class TestAnthropicGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(len(params["messages"]), 1)
         self.assertEqual(params["messages"][0]["role"], "user")
 
+    def test_prompt_caching_marks_system_instruction(self):
+        """Prompt caching adds a reusable breakpoint to the system prompt."""
+        context = LLMContext(messages=[{"role": "user", "content": "Hello"}])
+
+        params = self.adapter.get_llm_invocation_params(
+            context,
+            enable_prompt_caching=True,
+            system_instruction="Be helpful.",
+        )
+
+        self.assertEqual(
+            params["system"],
+            [
+                {
+                    "type": "text",
+                    "text": "Be helpful.",
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ],
+        )
+
+    def test_prompt_caching_keeps_system_instruction_as_string_when_disabled(self):
+        """Without prompt caching, the system prompt keeps its string form."""
+        context = LLMContext(messages=[{"role": "user", "content": "Hello"}])
+
+        params = self.adapter.get_llm_invocation_params(
+            context,
+            enable_prompt_caching=False,
+            system_instruction="Be helpful.",
+        )
+
+        self.assertEqual(params["system"], "Be helpful.")
+
+    def test_prompt_caching_leaves_system_omitted_when_not_configured(self):
+        """Caching does not add a system block when no system prompt exists."""
+        from anthropic import NOT_GIVEN
+
+        context = LLMContext(messages=[{"role": "user", "content": "Hello"}])
+
+        params = self.adapter.get_llm_invocation_params(context, enable_prompt_caching=True)
+
+        self.assertIs(params["system"], NOT_GIVEN)
+
     def test_initial_developer_message_becomes_user(self):
         """Initial developer message without system_instruction becomes user, not system."""
         from anthropic import NOT_GIVEN
