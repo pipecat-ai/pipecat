@@ -92,7 +92,12 @@ async def test_score_answers_with_the_nearest_level():
 
     assert results["mood"].score == 1.8
     assert results["mood"].confidence == 0.7
-    assert results["mood"].probabilities == {"calm": 0.0, "impatient": 0.0, "frustrated": 0.7}
+    assert [(l.level, l.probability) for l in results["mood"].levels] == [
+        ("calm", 0.0),
+        ("impatient", 0.0),
+        ("frustrated", 0.7),
+    ]
+    assert results["mood"].probability("frustrated") == 0.7
 
 
 @pytest.mark.asyncio

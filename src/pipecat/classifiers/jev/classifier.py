@@ -22,6 +22,7 @@ from pipecat.classifiers.base_classifier import (
     ClassifierError,
     ClassifierQuestion,
     ClassifierResult,
+    ScoreLevel,
     ScoreResult,
     YesNoQuestion,
     YesNoResult,
@@ -134,14 +135,14 @@ class JevClassifier(BaseClassifier):
                 probabilities={o: float(probabilities.get(o, 0.0)) for o in question.options},
                 confidence=self._number(answer, "confidence"),
             )
-        # Jev keys level probabilities by position; the result keys them by level.
+        # Jev keys level probabilities by position.
         probabilities = answer.get("probabilities") or {}
         return ScoreResult(
             score=self._number(answer, "score"),
-            probabilities={
-                ScoreResult.level_key(level): float(probabilities.get(str(index), 0.0))
+            levels=[
+                ScoreLevel(level=level, probability=float(probabilities.get(str(index), 0.0)))
                 for index, level in enumerate(question.levels)
-            },
+            ],
             confidence=self._number(answer, "confidence"),
         )
 

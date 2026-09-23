@@ -301,7 +301,12 @@ class TestJevClassifier:
         )["answer"]
 
         assert result.score == 1.05
-        assert result.probabilities == {"calm": 0.0, "frustrated": 0.95, "angry": 0.05}
+        assert [(l.level, l.probability) for l in result.levels] == [
+            ("calm", 0.0),
+            ("frustrated", 0.95),
+            ("angry", 0.05),
+        ]
+        assert result.probability("frustrated") == 0.95
         assert result.confidence == 0.92
         assert seen["question"] == {
             "type": "score",
@@ -470,10 +475,11 @@ class TestJevClassifierStructuredQuestions:
             )
         )["answer"]
 
-        assert result.probabilities == {
-            '{"level": "calm"}': 0.1,
-            '{"level": "angry", "signs": ["shouting"]}': 0.9,
-        }
+        assert [l.level for l in result.levels] == levels
+        assert result.probability({"level": "calm"}) == 0.1
+        assert result.probability({"signs": ["shouting"], "level": "angry"}) == 0.9
+        with pytest.raises(KeyError):
+            result.probability({"level": "elated"})
         await classifier.client.close()
 
 
@@ -513,7 +519,8 @@ class TestJevClassifierSeveralQuestions:
         assert set(seen["body"]["questions"]) == {"greeting", "mood"}
         assert results["greeting"].probability == 0.9
         assert results["mood"].score == 0.2
-        assert results["mood"].probabilities == {"calm": 0.8, "upset": 0.2}
+        assert results["mood"].probability("calm") == 0.8
+        assert results["mood"].probability("upset") == 0.2
         await classifier.client.close()
 
     @pytest.mark.asyncio

@@ -23,6 +23,7 @@ from pipecat.classifiers.base_classifier import (
     ClassifierError,
     ClassifierQuestion,
     ClassifierResult,
+    ScoreLevel,
     ScoreResult,
     YesNoQuestion,
     YesNoResult,
@@ -227,10 +228,10 @@ class LLMClassifier(BaseClassifier):
         nearest = min(range(len(question.levels)), key=lambda i: abs(i - score))
         return ScoreResult(
             score=score,
-            probabilities={
-                ScoreResult.level_key(level): confidence if i == nearest else 0.0
+            levels=[
+                ScoreLevel(level=level, probability=confidence if i == nearest else 0.0)
                 for i, level in enumerate(question.levels)
-            },
+            ],
             confidence=confidence,
         )
 

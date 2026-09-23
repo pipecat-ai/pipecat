@@ -16,7 +16,6 @@ at once: :meth:`BaseClassifier.ask` takes any mix of kinds, and
 results.
 """
 
-import json
 import time
 from abc import abstractmethod
 from collections.abc import Mapping
@@ -119,39 +118,49 @@ class ChoiceResult(BaseModel):
     confidence: float
 
 
+class ScoreLevel(BaseModel):
+    """One level of a :class:`ScoreQuestion`'s scale and how likely it is.
+
+    Parameters:
+        level: The level as the question gave it.
+        probability: How likely the state is at this level, from 0 to 1.
+    """
+
+    level: str | dict[str, Any] | list[Any]
+    probability: float
+
+
 class ScoreResult(BaseModel):
     """Answer to a :class:`ScoreQuestion`.
 
     Parameters:
         score: Where the state falls on the scale, as a position from 0 (the
-            first level) to one less than the number of levels. It may fall
-            between two levels.
-        probabilities: How likely each level is, keyed by level description
-            (structured levels are keyed by their JSON text).
+            first level) to one less than the number of levels. It is the
+            probability-weighted position, so it may fall between two levels.
+        levels: How likely each level is, in the question's order.
         confidence: How sure the classifier is of ``score``, from 0 to 1.
     """
 
     score: float
-    probabilities: dict[str, float]
+    levels: list[ScoreLevel]
     confidence: float
 
-    @staticmethod
-    def level_key(level: Any) -> str:
-        """The key a level gets in ``probabilities``.
-
-        A level can be structured data, which cannot key a dict, so the
-        probabilities are keyed by the level's JSON text. This is how to look
-        one up::
-
-            result.probabilities[ScoreResult.level_key(question.levels[0])]
+    def probability(self, level: str | dict[str, Any] | list[Any]) -> float:
+        """How likely one level is.
 
         Args:
-            level: A level of the scale, text or structured data.
+            level: The level as the question gave it.
 
         Returns:
-            The level itself when it is text, otherwise its JSON text.
+            The level's probability.
+
+        Raises:
+            KeyError: If the scale has no such level.
         """
-        return level if isinstance(level, str) else json.dumps(level, sort_keys=True)
+        for item in self.levels:
+            if item.level == level:
+                return item.probability
+        raise KeyError(f"not a level of this scale: {level!r}")
 
 
 ClassifierResult: TypeAlias = YesNoResult | ChoiceResult | ScoreResult
