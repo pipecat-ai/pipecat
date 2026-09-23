@@ -434,7 +434,9 @@ class BackendLLMWorker(LLMContextWorker):
             llm: The backend LLM service.
             context: The backend's context, typically carrying its tools.
                 A fresh empty context when omitted.
-            name: Worker name; auto-generated when omitted.
+            name: Unique name for this worker on the bus. Auto-generated when
+                omitted; give one when the backend runs in another process,
+                where the frontend addresses it by name.
             transform_output: Called with each :class:`BackendOutput` the
                 model produces before it is sent, as
                 ``transform_output(output, is_final=...)``, to adjust its
@@ -455,7 +457,7 @@ class BackendLLMWorker(LLMContextWorker):
         if user_params is None:
             user_params = LLMUserAggregatorParams(user_turn_strategies=ExternalUserTurnStrategies())
         super().__init__(
-            name,  # type: ignore[arg-type]  # None selects an auto-generated name
+            name,
             llm=llm,
             active=True,
             context=context,
