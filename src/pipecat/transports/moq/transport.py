@@ -1435,15 +1435,18 @@ class MOQTransportClient:
         """Read the catalog, subscribe to the first audio track, pump PCM."""
         if not self._params.audio_in_enabled:
             return
-        catalog_sub = self._track(await peer_broadcast.subscribe_catalog())
 
         # @moq/publish.Broadcast publishes an initial catalog before the
         # mic permission resolves, so the first frame typically has no
         # audio. Wait for an update that does — the catalog subscription
         # is an async iterator that emits each refresh — capped so we
-        # don't hang forever if the peer never adds audio at all.
+        # don't hang forever if the peer never adds audio at all. The
+        # subscribe itself is inside the guard: a relay still announcing a
+        # path whose route died refuses the subscription as the peer's
+        # tracks ending, not as a transport failure.
         catalog = None
         try:
+            catalog_sub = self._track(await peer_broadcast.subscribe_catalog())
             async with asyncio.timeout(self._params.connection_timeout):
                 async for next_catalog in catalog_sub:
                     if next_catalog.audio:
@@ -1501,19 +1504,19 @@ class MOQTransportClient:
             ),
         )
 
-        consumer = self._track(
-            await peer_broadcast.subscribe_audio(
-                track_name,
-                audio,
-                moq.AudioDecoderOutput(
-                    format=moq.AudioFormat.S16,
-                    sample_rate=target_rate,
-                    channels=source_channels,
-                    latency_max_ms=self._params.audio_in_max_latency_ms,
-                ),
-            )
-        )
         try:
+            consumer = self._track(
+                await peer_broadcast.subscribe_audio(
+                    track_name,
+                    audio,
+                    moq.AudioDecoderOutput(
+                        format=moq.AudioFormat.S16,
+                        sample_rate=target_rate,
+                        channels=source_channels,
+                        latency_max_ms=self._params.audio_in_max_latency_ms,
+                    ),
+                )
+            )
             async for frame in consumer:
                 if frame.data:
                     await self._on_peer_data()
@@ -1545,11 +1548,11 @@ class MOQTransportClient:
         """
         track_name = self._params.transcript_track
         logger.debug(f"MOQ: subscribing to peer transcript {track_name!r}")
-        consumer = self._track(
-            await peer_broadcast.subscribe_json_stream(track_name, compression=True)
-        )
         dropped = 0
         try:
+            consumer = self._track(
+                await peer_broadcast.subscribe_json_stream(track_name, compression=True)
+            )
             async for record in consumer:
                 if not isinstance(record, dict):
                     logger.warning(
