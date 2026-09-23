@@ -580,6 +580,14 @@ class ElevenLabsTTSBase(WebsocketTTSService):
     async def _close_context(self, context_id: str):
         """Close a server-side context to free its slot."""
 
+    async def _close_open_contexts(self):
+        """Close every server-side context still open, ahead of ``close_socket``.
+
+        ElevenLabs acts on ``close_socket`` only while no context is open on the
+        connection. With one open it leaves the socket up, and the disconnect
+        waits out its full ceiling on the ``EndFrame`` path.
+        """
+
     async def _on_websocket_connected(self):
         """Run any protocol-specific setup once the connection is open."""
 
@@ -697,11 +705,13 @@ class ElevenLabsTTSBase(WebsocketTTSService):
             if websocket:
                 logger.debug(f"Disconnecting from {self.CONNECTION_NAME}")
                 # The multi-stream protocol tears down in two steps: we ask
-                # ElevenLabs to close, then it closes. Wait for its close before
-                # forcing ours, so we don't race the closing handshake (which
-                # otherwise ends a notable fraction of sessions in a 1006 close).
-                # The timeout is only a fallback ceiling; the clean close
-                # normally arrives well within it.
+                # ElevenLabs to close, then it closes. ElevenLabs acts on
+                # close_socket only once no context is open, so ours go first.
+                # Wait for its close before forcing ours, so we don't race the
+                # closing handshake (which otherwise ends a notable fraction of
+                # sessions in a 1006 close). The timeout is only a fallback
+                # ceiling; the clean close normally arrives well within it.
+                await self._close_open_contexts()
                 await websocket.send(json.dumps({"close_socket": True}))
                 try:
                     await asyncio.wait_for(websocket.wait_closed(), timeout=2.0)
