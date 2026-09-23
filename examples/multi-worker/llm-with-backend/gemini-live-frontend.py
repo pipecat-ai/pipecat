@@ -4,31 +4,33 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""A voice agent with an LLM and a backend: a cascade frontend delegating to a backend LLM.
+"""A voice agent with an LLM and a backend: a speech-to-speech frontend delegating to a backend LLM.
 
-The frontend keeps the conversation moving with a fast model on OpenAI's
-Responses API and no tools of its own. Anything that needs tools or careful
-reasoning it hands to a backend running Claude, and relays what comes back.
-``LLMWithBackend`` wires the two together: it installs the ``delegate`` tool
-on the frontend and runs the backend as a worker of its own.
+The frontend is Gemini Live, holding the spoken conversation with no
+tools of its own. Anything that needs tools or careful reasoning it hands to
+a backend running Claude, and relays what comes back. ``LLMWithBackend`` wires
+the two together: it installs the ``delegate`` tool on the frontend and runs
+the backend as a worker of its own.
 
-With a text frontend the defaults hand the backend the conversation itself
-(the frontend words nothing) and relay the backend's progress as it comes.
-``openai-realtime-frontend.py`` and ``gemini-live-frontend.py`` put a
-speech-to-speech model in the frontend's place, against the same backend.
+With a speech-to-speech frontend the defaults have the model word the
+request itself, since its context can lag the audio and the backend cannot
+read the conversation. The backend's progress is relayed as it comes, as it
+is for a text frontend: a Gemini Live model takes it on the tool-response
+channel itself, which ``gemini-3.8-live`` and the 2.5 native-audio models
+allow. ``openai-realtime-frontend.py`` puts OpenAI Realtime in the frontend's
+place and ``cascade-frontend.py`` a cascade pipeline, against the same backend
+and the same prompts.
 
 Architecture::
 
-    Main worker (transport + STT + LLMWithBackend + TTS)
-      ├── frontend: fast LLM, ``delegate`` tool
+    Main worker (transport + LLMWithBackend)
+      ├── frontend: realtime model, ``delegate`` tool
       └── backend: BackendLLMWorker (Claude + tools), delegated to over a job
 
 Requirements:
 
-- OPENAI_API_KEY
+- GOOGLE_API_KEY
 - ANTHROPIC_API_KEY
-- DEEPGRAM_API_KEY
-- CARTESIA_API_KEY
 """
 
 import os
@@ -37,17 +39,13 @@ from datetime import datetime
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.llm_with_backend import LLMWithBackend
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response_universal import (
-    LLMContextAggregatorPair,
-    LLMUserAggregatorParams,
-)
+from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
 from pipecat.processors.frameworks.rtvi import (
     RTVIFunctionCallReportLevel,
     RTVIObserverParams,
@@ -55,10 +53,8 @@ from pipecat.processors.frameworks.rtvi import (
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.anthropic.llm import AnthropicLLMService
-from pipecat.services.cartesia.tts import CartesiaTTSService
-from pipecat.services.deepgram.stt import DeepgramSTTService
+from pipecat.services.google.gemini_live.llm import GeminiLiveLLMService
 from pipecat.services.llm_service import FunctionCallParams
-from pipecat.services.openai.responses.llm import OpenAIResponsesLLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.workers.llm import BackendLLMWorker
@@ -123,14 +119,6 @@ async def get_restaurant_recommendation(params: FunctionCallParams, location: st
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info("Starting bot")
 
-    stt = DeepgramSTTService(api_key=os.environ["DEEPGRAM_API_KEY"])
-    tts = CartesiaTTSService(
-        api_key=os.environ["CARTESIA_API_KEY"],
-        settings=CartesiaTTSService.Settings(
-            voice="9626c31c-bec5-4cca-baa8-f8ba9e84c8bc",  # Jacqueline
-        ),
-    )
-
     # Thinking summaries stream back to the frontend as "thought" outputs.
     backend = BackendLLMWorker(
         name="backend",
@@ -153,30 +141,30 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         await backend.say("Let me look into that, this takes a moment.")
 
     llm = LLMWithBackend(
-        frontend=OpenAIResponsesLLMService(
-            api_key=os.environ["OPENAI_API_KEY"],
-            settings=OpenAIResponsesLLMService.Settings(system_instruction=FRONTEND_INSTRUCTIONS),
+        frontend=GeminiLiveLLMService(
+            api_key=os.environ["GOOGLE_API_KEY"],
+            settings=GeminiLiveLLMService.Settings(
+                model="models/gemini-3.8-live",
+                system_instruction=FRONTEND_INSTRUCTIONS,
+            ),
         ),
         backend=backend,
     )
 
     # The frontend's only tool, ``delegate``, is installed by the service;
     # the real tools live in the backend.
-    context = LLMContext()
-    aggregators = LLMContextAggregatorPair(
-        context,
-        user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
+    context = LLMContext(
+        [{"role": "developer", "content": "Greet the user and ask how you can help."}],
     )
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(context)
 
     pipeline = Pipeline(
         [
             transport.input(),
-            stt,
-            aggregators.user(),
+            user_aggregator,
             llm,
-            tts,
             transport.output(),
-            aggregators.assistant(),
+            assistant_aggregator,
         ]
     )
 
@@ -205,9 +193,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info("Client connected")
-        context.add_message(
-            {"role": "developer", "content": "Greet the user and ask how you can help."}
-        )
         await worker.queue_frame(LLMRunFrame())
 
     @transport.event_handler("on_client_disconnected")

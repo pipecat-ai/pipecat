@@ -15,8 +15,9 @@ the backend as a worker of its own.
 With a speech-to-speech frontend the defaults have the model word the
 request itself, since its context can lag the audio and the backend cannot
 read the conversation. The backend's progress is relayed as it comes, as it
-is for a text frontend. ``cascade-frontend.py`` puts a cascade pipeline in
-the frontend's place, against the same backend and the same prompts.
+is for a text frontend. ``gemini-live-frontend.py`` puts Gemini Live in the
+frontend's place and ``cascade-frontend.py`` a cascade pipeline, against the
+same backend and the same prompts.
 
 Architecture::
 
