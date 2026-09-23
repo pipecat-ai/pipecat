@@ -50,6 +50,8 @@ from pipecat.utils.types import NOT_GIVEN, NotGiven
 _ALLOWED_SAMPLE_RATES = (8000, 16000, 24000, 44100, 48000)
 _DEFAULT_SAMPLE_RATE = 48000
 
+_DEFAULT_VOICE = "brannock"
+
 _READY_TIMEOUT_SECONDS = 10.0
 
 
@@ -138,9 +140,13 @@ class SmallestLightningV4TTSService(WebsocketTTSService):
     Word timestamps are not supported on this endpoint. Only ``en`` and
     ``auto`` are valid languages; other languages resolve to ``auto``.
 
-    Voice IDs should be fetched from the ``get_speech``/``get_voices``
-    endpoint rather than hardcoded, as the voice catalogue is still changing
-    during the beta.
+    Defaults to the ``brannock`` voice; pass ``settings.voice`` to use a
+    different one from the Lightning v4 ``get_voices`` catalogue.
+
+    The session also conditions each turn on the *caller's* side of the
+    conversation, but only if told: call :meth:`add_user_turn` with the
+    caller's transcript (e.g. from an LLM user aggregator's
+    ``on_user_turn_stopped`` handler) after each user turn.
 
     Example::
 
@@ -173,13 +179,13 @@ class SmallestLightningV4TTSService(WebsocketTTSService):
             sample_rate: Audio sample rate in Hz. Must be one of 8000, 16000,
                 24000, 44100 or 48000; any other value falls back to 48000
                 with a warning. If None, uses the pipeline default.
-            settings: Runtime-updatable settings for the TTS service. ``voice``
-                is required.
+            settings: Runtime-updatable settings for the TTS service. Defaults
+                to the ``brannock`` voice; pass ``voice`` to use another one.
             **kwargs: Additional arguments passed to parent WebsocketTTSService.
         """
         default_settings = self.Settings(
             model="lightning_v4",
-            voice=None,
+            voice=_DEFAULT_VOICE,
             language=Language.EN,
             speed=None,
             content_filter=None,
@@ -188,12 +194,6 @@ class SmallestLightningV4TTSService(WebsocketTTSService):
 
         if settings is not None:
             default_settings.apply_update(settings)
-
-        if not default_settings.voice:
-            raise ValueError(
-                "SmallestLightningV4TTSService requires a voice id (fetch the current "
-                "catalogue from the Lightning v4 get_voices endpoint)"
-            )
 
         super().__init__(
             push_stop_frames=False,
@@ -276,6 +276,32 @@ class SmallestLightningV4TTSService(WebsocketTTSService):
         """
         await super().cancel(frame)
         await self._disconnect()
+
+    async def add_user_turn(self, text: str):
+        """Feed the caller's turn into Lightning v4's server-held context.
+
+        The session conditions each `speak` on what came before it, including
+        what the caller said — but only if told, via `user_audio`. Nothing in
+        the base pipeline calls this automatically (a `TranscriptionFrame` is
+        consumed by the user aggregator and never reaches the TTS service), so
+        the application must call it itself, typically from an
+        `on_user_turn_stopped` handler on the LLM's user aggregator.
+
+        Sends only the transcript, not caller audio: Lightning v4's `audio`
+        field is for the caller's actual voice, which this service never has
+        (its input is text from the LLM, and its own microphone input, if
+        any, belongs to the STT service, not this one).
+
+        Args:
+            text: The caller's turn, e.g. the content of a
+                :class:`~pipecat.processors.aggregators.llm_response_universal.UserTurnStoppedMessage`.
+        """
+        if not text or not self._websocket:
+            return
+        try:
+            await self._websocket.send(json.dumps({"event": "user_audio", "text": text}))
+        except Exception as e:
+            logger.warning(f"{self} error sending user turn context: {e}")
 
     async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
         """Apply a settings delta, reconnecting if a connect-time field changed.

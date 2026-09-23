@@ -27,11 +27,10 @@ def _make_service(**kwargs) -> SmallestLightningV4TTSService:
     return SmallestLightningV4TTSService(api_key="test-key", settings=settings, **kwargs)
 
 
-def test_requires_a_voice():
-    """A voice id is required; there's no safe hardcoded default given the
-    still-changing beta voice catalogue."""
-    with pytest.raises(ValueError):
-        SmallestLightningV4TTSService(api_key="test-key")
+def test_defaults_to_brannock_voice():
+    """A voice is not required; it defaults to `brannock` if unset."""
+    service = SmallestLightningV4TTSService(api_key="test-key")
+    assert service._settings.voice == "brannock"
 
 
 def test_does_not_reuse_context_id_within_a_turn():
@@ -195,3 +194,46 @@ async def test_interrupt_sends_a_single_frame_without_reconnecting():
 
     assert sent == [{"event": "interrupt"}]
     assert service._turn_context_id is None
+
+
+@pytest.mark.asyncio
+async def test_add_user_turn_sends_the_callers_transcript():
+    service = _make_service()
+
+    sent = []
+
+    class FakeWebsocket:
+        async def send(self, data):
+            sent.append(json.loads(data))
+
+    service._websocket = FakeWebsocket()
+
+    await service.add_user_turn("What's my balance?")
+
+    assert sent == [{"event": "user_audio", "text": "What's my balance?"}]
+
+
+@pytest.mark.asyncio
+async def test_add_user_turn_is_a_noop_without_a_connection():
+    service = _make_service()
+    service._websocket = None
+
+    # Should not raise even though there's nowhere to send.
+    await service.add_user_turn("What's my balance?")
+
+
+@pytest.mark.asyncio
+async def test_add_user_turn_ignores_empty_text():
+    service = _make_service()
+
+    sent = []
+
+    class FakeWebsocket:
+        async def send(self, data):
+            sent.append(json.loads(data))
+
+    service._websocket = FakeWebsocket()
+
+    await service.add_user_turn("")
+
+    assert sent == []
