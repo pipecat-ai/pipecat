@@ -85,25 +85,43 @@ async def test_choice_answers_with_a_probability_per_option():
 
 
 @pytest.mark.asyncio
-async def test_score_answers_with_the_nearest_level():
-    classifier, _ = _classifier('{"mood": {"score": 1.8, "confidence": 0.7}}')
+async def test_score_answers_from_a_probability_per_level():
+    classifier, _ = _classifier('{"mood": {"probabilities": {"0": 0.0, "1": 0.3, "2": 0.7}}}')
     question = ScoreQuestion(instructions="how upset?", levels=["calm", "impatient", "frustrated"])
     results = await classifier.score("This is the third time!", {"mood": question})
 
-    assert results["mood"].score == 1.8
+    assert results["mood"].score == pytest.approx(1.7)
     assert results["mood"].confidence == 0.7
     assert [(l.level, l.probability) for l in results["mood"].levels] == [
         ("calm", 0.0),
-        ("impatient", 0.0),
+        ("impatient", 0.3),
         ("frustrated", 0.7),
     ]
     assert results["mood"].probability("frustrated") == 0.7
 
 
 @pytest.mark.asyncio
+async def test_score_probabilities_are_scaled_to_sum_to_one():
+    classifier, _ = _classifier('{"mood": {"probabilities": {"0": 0.5, "1": 1.0}}}')
+    question = ScoreQuestion(instructions="how upset?", levels=["calm", "upset"])
+    results = await classifier.score("hmm", {"mood": question})
+
+    assert [l.probability for l in results["mood"].levels] == pytest.approx([1 / 3, 2 / 3])
+    assert results["mood"].score == pytest.approx(2 / 3)
+
+
+@pytest.mark.asyncio
+async def test_a_score_without_any_probability_is_an_error():
+    classifier, _ = _classifier('{"mood": {"probabilities": {}}}')
+    question = ScoreQuestion(instructions="how upset?", levels=["calm", "upset"])
+    with pytest.raises(ClassifierError):
+        await classifier.score("hmm", {"mood": question})
+
+
+@pytest.mark.asyncio
 async def test_several_questions_go_in_one_call():
     classifier, llm = _classifier(
-        '{"greeting": {"probability": 0.9}, "mood": {"score": 0.0, "confidence": 0.8}}'
+        '{"greeting": {"probability": 0.9}, "mood": {"probabilities": {"0": 1.0, "1": 0.0}}}'
     )
     results = await classifier.ask(
         "Hello there!",
@@ -184,13 +202,14 @@ async def test_the_reply_schema_has_one_answer_per_question():
 
 
 @pytest.mark.asyncio
-async def test_the_score_schema_asks_for_a_score_and_a_confidence():
-    classifier, llm = _classifier('{"mood": {"score": 1, "confidence": 0.5}}')
+async def test_the_score_schema_asks_for_a_probability_per_level():
+    classifier, llm = _classifier('{"mood": {"probabilities": {"0": 0.5, "1": 0.5}}}')
     await classifier.score("hi", {"mood": ScoreQuestion(instructions="?", levels=["a", "b"])})
 
     schema = llm.schemas[0]
     assert schema is not None
-    assert schema["properties"]["mood"]["required"] == ["score", "confidence"]
+    assert schema["properties"]["mood"]["required"] == ["probabilities"]
+    assert schema["properties"]["mood"]["properties"]["probabilities"]["required"] == ["0", "1"]
 
 
 @pytest.mark.asyncio

@@ -42,7 +42,8 @@ DEFAULT_INSTRUCTIONS = (
     "with the options billing, support and sales is answered "
     '{"department": {"choice": "billing", "probabilities": {"billing": 0.92, '
     '"support": 0.06, "sales": 0.02}}}. A score question named "mood" on a '
-    'scale of three levels is answered {"mood": {"score": 1.8, "confidence": 0.8}}. '
+    "scale of three levels is answered with a probability per level, by position, "
+    '{"mood": {"probabilities": {"0": 0.1, "1": 0.7, "2": 0.2}}}. '
     "Several questions about one input get one object with an answer for each "
     "of them."
 )
@@ -153,10 +154,10 @@ class LLMClassifier(BaseClassifier):
                 lines.append("Scale, lowest first:")
                 for index, level in enumerate(question.levels):
                     lines.append(f"{index}: {self._text(level)}")
-                last = len(question.levels) - 1
+                positions = ", ".join(f'"{i}": <probability>' for i in range(len(question.levels)))
                 lines.append(
-                    f'Answer shape: {{"score": <position on the scale, from 0 to {last}, '
-                    'decimals allowed>, "confidence": <how sure you are>}'
+                    f'Answer shape: {{"probabilities": {{{positions}}}}}, one per level by '
+                    "position, summing to 1"
                 )
             parts.append("\n".join(lines))
         names = ", ".join(f'"{name}": <answer to "{name}">' for name in questions)
@@ -178,8 +179,9 @@ class LLMClassifier(BaseClassifier):
                     }
                 )
             else:
+                positions = [str(i) for i in range(len(question.levels))]
                 answers[name] = self._object(
-                    {"score": {"type": "number"}, "confidence": {"type": "number"}}
+                    {"probabilities": self._object({i: {"type": "number"} for i in positions})}
                 )
         return self._object(answers)
 
@@ -223,16 +225,23 @@ class LLMClassifier(BaseClassifier):
             return ChoiceResult(
                 choice=choice, probabilities=probabilities, confidence=probabilities[choice]
             )
-        score = self._number(answer, "score")
-        confidence = self._unit(answer, "confidence")
-        nearest = min(range(len(question.levels)), key=lambda i: abs(i - score))
+        # The LLM gives a probability per level, by position. The score is the
+        # probability-weighted position and the confidence the largest share,
+        # as with Jev; a distribution that does not sum to 1 is scaled to.
+        given = answer.get("probabilities")
+        given = given if isinstance(given, dict) else {}
+        probabilities = [self._clamp(given.get(str(i), 0.0)) for i in range(len(question.levels))]
+        total = sum(probabilities)
+        if total <= 0:
+            raise ClassifierError("the LLM gave no probability for any level")
+        probabilities = [p / total for p in probabilities]
         return ScoreResult(
-            score=score,
+            score=sum(i * p for i, p in enumerate(probabilities)),
             levels=[
-                ScoreLevel(level=level, probability=confidence if i == nearest else 0.0)
-                for i, level in enumerate(question.levels)
+                ScoreLevel(level=level, probability=p)
+                for level, p in zip(question.levels, probabilities)
             ],
-            confidence=confidence,
+            confidence=max(probabilities),
         )
 
     def _text(self, value: Any) -> str:
