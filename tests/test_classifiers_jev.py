@@ -28,8 +28,10 @@ USAGE = {"input_tokens": 12, "output_tokens": 3}
 
 
 def _client(handler: Callable[[httpx.Request], httpx.Response], **kwargs) -> JevClient:
-    http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-    return JevClient(api_key="key", http_client=http, **kwargs)
+    """A client whose requests ``handler`` answers instead of Jev."""
+    client = JevClient(api_key="key", **kwargs)
+    client._http._transport = httpx.MockTransport(handler)
+    return client
 
 
 def _reply(answer: dict) -> httpx.Response:
@@ -267,6 +269,37 @@ class TestJevClassifier:
             "instructions": "is the user's turn over?",
             "criteria": options,
         }
+        await classifier.client.close()
+
+    @pytest.mark.asyncio
+    async def test_a_choice_outside_the_options_is_an_error(self):
+        classifier = JevClassifier(
+            client=_client(
+                lambda request: _reply({"type": "choice", "choice": "maybe", "confidence": 0.8})
+            )
+        )
+        question = ChoiceQuestion(instructions="?", options={"yes": None, "no": None})
+        with pytest.raises(ClassifierError, match="not an option"):
+            await classifier.choice("hmm", {"answer": question})
+        await classifier.client.close()
+
+    @pytest.mark.asyncio
+    async def test_an_unusable_probability_is_an_error(self):
+        classifier = JevClassifier(
+            client=_client(
+                lambda request: _reply(
+                    {
+                        "type": "choice",
+                        "choice": "yes",
+                        "probabilities": {"yes": "high", "no": 0.1},
+                        "confidence": 0.8,
+                    }
+                )
+            )
+        )
+        question = ChoiceQuestion(instructions="?", options={"yes": None, "no": None})
+        with pytest.raises(ClassifierError, match="unusable probability"):
+            await classifier.choice("hmm", {"answer": question})
         await classifier.client.close()
 
     @pytest.mark.asyncio

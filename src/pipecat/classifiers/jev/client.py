@@ -26,8 +26,8 @@ try:
     import httpx
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error("In order to use Jev, you need to `pip install pipecat-ai[jev]`.")
-    raise Exception(f"Missing module: {e}")
+    logger.error('In order to use Jev, you need to `uv add "pipecat-ai[jev]"`.')
+    raise ImportError(f"Missing module: {e}") from e
 
 #: Jev answers a request with this status when the caller is rate limited.
 _TOO_MANY_REQUESTS = 429
@@ -73,7 +73,6 @@ class JevClient:
         model: str = "jev-1.13.0",
         timeout: float = 10.0,
         max_retries: int = 3,
-        http_client: httpx.AsyncClient | None = None,
     ):
         """Initialize the client.
 
@@ -86,8 +85,6 @@ class JevClient:
             timeout: Seconds to wait for a reply before giving up.
             max_retries: How many times to retry a request Jev refused
                 because it was busy.
-            http_client: An HTTP client to send requests with instead of
-                the one built here. Mostly for tests.
         """
         if not api_key:
             raise ValueError("JevClient needs an API key")
@@ -96,16 +93,13 @@ class JevClient:
         self._usage = JevUsage()
         self._connected = False
         self._connect_lock = asyncio.Lock()
-        self._http = http_client or httpx.AsyncClient(
+        self._http = httpx.AsyncClient(
             base_url=base_url,
             headers={"Authorization": f"Bearer {api_key}"},
             timeout=timeout,
             http2=True,
             limits=httpx.Limits(keepalive_expiry=_KEEPALIVE_EXPIRY),
         )
-        if http_client is not None:
-            self._http.base_url = httpx.URL(base_url)
-            self._http.headers["Authorization"] = f"Bearer {api_key}"
 
     @property
     def model(self) -> str:
@@ -142,6 +136,7 @@ class JevClient:
 
     async def close(self):
         """Close the connection pool."""
+        self._connected = False
         await self._http.aclose()
 
     async def ask(

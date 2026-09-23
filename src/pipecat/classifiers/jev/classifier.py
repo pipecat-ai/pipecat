@@ -58,10 +58,12 @@ class JevClassifier(BaseClassifier):
             **kwargs: Additional arguments passed to the parent class.
         """
         super().__init__(**kwargs)
-        if client is None and not api_key:
-            raise ValueError("JevClassifier needs an API key or a JevClient")
         self._owns_client = client is None
-        self._client = client or JevClient(api_key=api_key or "")
+        if client is None:
+            if not api_key:
+                raise ValueError("JevClassifier needs an API key or a JevClient")
+            client = JevClient(api_key=api_key)
+        self._client = client
 
     @property
     def client(self) -> JevClient:
@@ -130,25 +132,38 @@ class JevClassifier(BaseClassifier):
         if isinstance(question, YesNoQuestion):
             return YesNoResult(probability=self._number(answer, "noul"))
         if isinstance(question, ChoiceQuestion):
-            probabilities = answer.get("probabilities") or {}
+            choice = str(answer.get("choice", ""))
+            if choice not in question.options:
+                raise ClassifierError(f"Jev chose {choice!r}, which is not an option")
+            probabilities = self._probabilities(answer, list(question.options))
             return ChoiceResult(
-                choice=str(answer.get("choice", "")),
-                probabilities={o: float(probabilities.get(o, 0.0)) for o in question.options},
+                choice=choice,
+                probabilities=probabilities,
                 confidence=self._number(answer, "confidence"),
             )
         # Jev keys level probabilities by position.
-        probabilities = answer.get("probabilities") or {}
+        positions = [str(index) for index in range(len(question.levels))]
+        probabilities = self._probabilities(answer, positions)
         return ScoreResult(
             score=self._number(answer, "score"),
             levels=[
-                ScoreLevel(level=level, probability=float(probabilities.get(str(index), 0.0)))
-                for index, level in enumerate(question.levels)
+                ScoreLevel(level=level, probability=probabilities[position])
+                for level, position in zip(question.levels, positions)
             ],
             confidence=self._number(answer, "confidence"),
         )
 
     def _number(self, answer: dict[str, Any], key: str) -> float:
+        """The number Jev wrote under ``key``, or a ClassifierError if it did not."""
         try:
             return float(answer[key])
         except (KeyError, TypeError, ValueError) as e:
             raise ClassifierError(f"Jev reply has no usable '{key}'") from e
+
+    def _probabilities(self, answer: dict[str, Any], keys: list[str]) -> dict[str, float]:
+        """The probability Jev wrote for each key, 0 for the ones it left out."""
+        given = answer.get("probabilities") or {}
+        try:
+            return {key: float(given.get(key, 0.0)) for key in keys}
+        except (TypeError, ValueError) as e:
+            raise ClassifierError(f"Jev reply has an unusable probability: {e}") from e
