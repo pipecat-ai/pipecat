@@ -143,10 +143,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         context=LLMContext(tools=[get_current_weather, get_restaurant_recommendation]),
     )
 
-    # A backend that takes a while can say so the moment work is handed to
-    # it: the frontend says the line while the backend works, instead of
-    # waiting in silence. Even a quick lookup here is a few model round trips,
-    # so the line is worth it; drop it for a backend that answers at once.
+    # A backend that takes a while can have the frontend respond to the user
+    # the moment work is handed to it, instead of leaving them in silence.
+    # The frontend decides what to say: it may mention the wait in its own
+    # words, or, if the user also asked for a joke while they wait, tell the
+    # joke. Even a quick lookup here is a few model round trips, so this is
+    # worth it; drop it for a backend that answers at once.
     @backend.event_handler("on_delegation_started")
     async def on_delegation_started(backend, request):
         await backend.say("Let me look into that, this takes a moment.")
