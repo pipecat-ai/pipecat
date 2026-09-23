@@ -227,6 +227,11 @@ class ClassificationProcessor(FrameProcessor):
 
     For voicemail detection, the event handler timer starts immediately and is cancelled
     and restarted based on user speech patterns to ensure proper timing.
+
+    An optional classification timeout bounds how long the pipeline waits for a
+    decision. It is armed once, when the first classification is requested, and
+    is not restarted by later user turns. If it expires without a decision, the
+    call is treated as CONVERSATION.
     """
 
     def __init__(
@@ -236,6 +241,7 @@ class ClassificationProcessor(FrameProcessor):
         conversation_notifier: BaseNotifier,
         voicemail_notifier: BaseNotifier,
         voicemail_response_delay: float,
+        classification_timeout: float | None = None,
     ):
         """Initialize the voicemail processor.
 
@@ -249,12 +255,17 @@ class ClassificationProcessor(FrameProcessor):
             voicemail_response_delay: Delay in seconds after user stops speaking
                 before triggering the voicemail event handler. This ensures the voicemail
                 greeting or user message is complete before responding.
+            classification_timeout: Maximum time in seconds to wait for a
+                classification decision, measured from the end of the first user
+                turn. When it expires without a decision the call is treated as
+                CONVERSATION. None waits indefinitely.
         """
         super().__init__()
         self._gate_notifier = gate_notifier
         self._conversation_notifier = conversation_notifier
         self._voicemail_notifier = voicemail_notifier
         self._voicemail_response_delay = voicemail_response_delay
+        self._classification_timeout = classification_timeout
 
         # Register the conversation and voicemail detected events
         self._register_event_handler("on_conversation_detected")
@@ -271,6 +282,9 @@ class ClassificationProcessor(FrameProcessor):
         self._voicemail_event = asyncio.Event()
         self._voicemail_event.set()
 
+        # Classification deadline state
+        self._timeout_task: asyncio.Task | None = None
+
     async def setup(self, setup: FrameProcessorSetup):
         """Set up the processor with required components.
 
@@ -286,6 +300,9 @@ class ClassificationProcessor(FrameProcessor):
         if self._voicemail_task:
             await self.cancel_task(self._voicemail_task)
             self._voicemail_task = None
+        if self._timeout_task:
+            await self.cancel_task(self._timeout_task)
+            self._timeout_task = None
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames and handle LLM classification responses.
@@ -328,6 +345,9 @@ class ClassificationProcessor(FrameProcessor):
             # User stopped speaking - clear the voicemail event
             if self._voicemail_detected:
                 self._voicemail_event.clear()
+            # The end of a user turn is what requests a classification, so the
+            # first one is where the classification deadline starts.
+            self._maybe_start_classification_timeout()
             await self.push_frame(frame, direction)
 
         else:
@@ -353,11 +373,8 @@ class ClassificationProcessor(FrameProcessor):
 
         if "CONVERSATION" in response:
             # Human answered - continue normal conversation flow
-            self._decision_made = True
             logger.info(f"{self}: CONVERSATION detected")
-            await self._gate_notifier.notify()  # Close the classifier gate
-            await self._conversation_notifier.notify()  # Release buffered TTS frames
-            await self._call_event_handler("on_conversation_detected")
+            await self._handle_conversation_detected()
 
         elif "VOICEMAIL" in response:
             # Voicemail detected - trigger voicemail handling
@@ -374,8 +391,52 @@ class ClassificationProcessor(FrameProcessor):
             self._voicemail_event.clear()
 
         else:
-            # This can happen if the LLM is interrupted before completing the response
+            # This can happen if the LLM is interrupted before completing the
+            # response, or if the model ignores the response instruction. No
+            # decision is made, so the gates stay as they are until a later
+            # reply carries a label or the classification timeout expires.
             logger.debug(f"{self}: No classification found: '{full_response}'")
+
+    async def _handle_conversation_detected(self):
+        """Apply the CONVERSATION decision: stop classifying and release gated TTS.
+
+        The decision flag is set before any await so a concurrent decision
+        path (a classifier reply racing the classification timeout) sees it
+        and returns without acting twice.
+        """
+        self._decision_made = True
+        await self._gate_notifier.notify()  # Close the classifier gate
+        await self._conversation_notifier.notify()  # Release buffered TTS frames
+        await self._call_event_handler("on_conversation_detected")
+
+    def _maybe_start_classification_timeout(self):
+        """Arm the classification deadline on the first classification request.
+
+        The deadline is armed once and never restarted: a caller who keeps
+        interrupting the classifier must not be able to push it out
+        indefinitely.
+        """
+        if self._classification_timeout is None or self._timeout_task or self._decision_made:
+            return
+        self._timeout_task = self.create_task(
+            self._classification_timeout_handler(self._classification_timeout)
+        )
+
+    async def _classification_timeout_handler(self, timeout: float):
+        """Default to CONVERSATION if no decision is made before the deadline.
+
+        A human left in silence is a worse outcome than a bot speaking into a
+        voicemail recording, so the fallback releases the gated audio rather
+        than holding it.
+
+        Args:
+            timeout: Seconds to wait before applying the default verdict.
+        """
+        await asyncio.sleep(timeout)
+        if self._decision_made:
+            return
+        logger.warning(f"{self}: No classification within {timeout}s, defaulting to CONVERSATION")
+        await self._handle_conversation_detected()
 
     async def _delayed_voicemail_handler(self):
         """Execute the voicemail event handler after the configured delay.
@@ -592,6 +653,7 @@ VOICEMAIL SYSTEM (respond "VOICEMAIL"):
         llm: LLMService,
         voicemail_response_delay: float = 2.0,
         custom_system_prompt: str | None = None,
+        classification_timeout: float | None = None,
     ):
         """Initialize the voicemail detector with classification and buffering components.
 
@@ -606,12 +668,23 @@ VOICEMAIL SYSTEM (respond "VOICEMAIL"):
                 uses the default prompt optimized for outbound calling scenarios.
                 Custom prompts should instruct the LLM to respond with exactly
                 "CONVERSATION" or "VOICEMAIL" for proper detection functionality.
+            classification_timeout: Maximum time in seconds to wait for a
+                classification decision, measured from the end of the first user
+                turn (when the first classification is requested) and not
+                restarted by later turns. If it expires without a decision, the
+                call is treated as CONVERSATION: the classifier stops, gated TTS
+                frames are released and ``on_conversation_detected`` fires.
+                Without it, a classifier reply carrying neither label leaves
+                the TTS gate closed with no deadline. Choose a value longer than
+                the longest greeting the classifier should get to hear. Default
+                is None, which waits indefinitely.
         """
         self._classifier_llm = llm
         self._prompt = (
             custom_system_prompt if custom_system_prompt is not None else self.DEFAULT_SYSTEM_PROMPT
         )
         self._voicemail_response_delay = voicemail_response_delay
+        self._classification_timeout = classification_timeout
 
         # Validate custom prompts to ensure they work with the detection logic
         if custom_system_prompt is not None:
@@ -645,6 +718,7 @@ VOICEMAIL SYSTEM (respond "VOICEMAIL"):
             conversation_notifier=self._conversation_notifier,
             voicemail_notifier=self._voicemail_notifier,
             voicemail_response_delay=voicemail_response_delay,
+            classification_timeout=classification_timeout,
         )
         self._voicemail_gate = TTSGate(self._conversation_notifier, self._voicemail_notifier)
 

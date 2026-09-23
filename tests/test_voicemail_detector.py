@@ -20,6 +20,11 @@ from pipecat.frames.frames import (
     LLMFullResponseStartFrame,
     LLMTextFrame,
     StopWorkerFrame,
+    TTSAudioRawFrame,
+    TTSStartedFrame,
+    TTSStoppedFrame,
+    UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
@@ -236,3 +241,136 @@ class TestVoicemailDetectorEndWorkerFrame(unittest.IsolatedAsyncioTestCase):
             any(isinstance(f, EndWorkerFrame) for f in up),
             f"EndWorkerFrame did not escape upstream after CONVERSATION: {_names(up)}",
         )
+
+
+#
+# Classification timeout tests
+#
+# The detector's classification branch runs a _Passthrough in place of the
+# LLM, so the test injects the classifier's reply frames directly. A
+# _SpeakOnce sits between the detector and its TTS gate, where the main LLM
+# and TTS would be, and emits one TTS response for the gate to hold. Whether
+# that audio reaches the sink is the observable outcome of every case.
+#
+
+CLASSIFICATION_TIMEOUT = 0.3
+# Long enough past the timeout for the fallback verdict to release the gate.
+TIMEOUT_SETTLE = CLASSIFICATION_TIMEOUT + 0.5
+
+
+class _SpeakOnce(FrameProcessor):
+    """Emits a single TTS response the first time the user stops speaking."""
+
+    def __init__(self):
+        super().__init__()
+        self._spoken = False
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
+        await super().process_frame(frame, direction)
+        await self.push_frame(frame, direction)
+        if isinstance(frame, UserStoppedSpeakingFrame) and not self._spoken:
+            self._spoken = True
+            await self.push_frame(TTSStartedFrame())
+            await self.push_frame(
+                TTSAudioRawFrame(audio=b"\x01\x00" * 800, sample_rate=8000, num_channels=1)
+            )
+            await self.push_frame(TTSStoppedFrame())
+
+
+def _user_turn() -> list[Frame]:
+    return [UserStartedSpeakingFrame(), UserStoppedSpeakingFrame()]
+
+
+def _reply_frames(text: str) -> list[Frame]:
+    """Frames a streaming LLM emits for a reply, without any settle time."""
+    return [LLMFullResponseStartFrame(), LLMTextFrame(text=text), LLMFullResponseEndFrame()]
+
+
+class TestClassificationTimeout(unittest.IsolatedAsyncioTestCase):
+    def _detector_and_events(self, timeout: float | None) -> tuple[VoicemailDetector, list[str]]:
+        detector = VoicemailDetector(
+            llm=_Passthrough(),  # type: ignore[arg-type]
+            voicemail_response_delay=VOICEMAIL_DELAY,
+            classification_timeout=timeout,
+        )
+        events: list[str] = []
+
+        @detector.event_handler("on_conversation_detected")
+        async def _on_conversation(_processor: FrameProcessor):
+            events.append("on_conversation_detected")
+
+        @detector.event_handler("on_voicemail_detected")
+        async def _on_voicemail(_processor: FrameProcessor):
+            events.append("on_voicemail_detected")
+
+        return detector, events
+
+    async def _run(self, detector: VoicemailDetector, frames: list[Frame]):
+        down, _up = await run_test(
+            Pipeline([detector, _SpeakOnce(), detector.gate()]),
+            frames_to_send=frames,
+            start_timeout=5.0,
+        )
+        return [f for f in down if isinstance(f, TTSAudioRawFrame)]
+
+    async def test_no_label_reply_defaults_to_conversation_after_timeout(self):
+        detector, events = self._detector_and_events(CLASSIFICATION_TIMEOUT)
+        audio = await self._run(
+            detector,
+            _user_turn() + _reply_frames("I'm not sure.") + [SleepFrame(TIMEOUT_SETTLE)],
+        )
+        self.assertEqual(len(audio), 1, "Timeout did not release the gated TTS audio")
+        self.assertEqual(events, ["on_conversation_detected"])
+
+    async def test_no_label_reply_holds_gate_without_timeout(self):
+        detector, events = self._detector_and_events(None)
+        audio = await self._run(
+            detector,
+            _user_turn() + _reply_frames("I'm not sure.") + [SleepFrame(TIMEOUT_SETTLE)],
+        )
+        self.assertEqual(audio, [], "Gate released audio with no verdict and no timeout")
+        self.assertEqual(events, [])
+
+    async def test_timeout_does_not_override_earlier_verdict(self):
+        detector, events = self._detector_and_events(CLASSIFICATION_TIMEOUT)
+        audio = await self._run(
+            detector,
+            _user_turn() + _reply_frames("VOICEMAIL") + [SleepFrame(TIMEOUT_SETTLE)],
+        )
+        self.assertEqual(audio, [], "VOICEMAIL verdict did not clear the gated TTS audio")
+        self.assertEqual(events, ["on_voicemail_detected"])
+
+    async def test_timeout_is_not_restarted_by_later_turns(self):
+        # Two no-label turns, each shorter than the timeout but together
+        # longer than it. A deadline restarted by the second turn would still
+        # be pending when the pipeline ends.
+        detector, events = self._detector_and_events(CLASSIFICATION_TIMEOUT)
+        half = CLASSIFICATION_TIMEOUT * 0.7
+        audio = await self._run(
+            detector,
+            _user_turn()
+            + _reply_frames("I'm not sure.")
+            + [SleepFrame(half)]
+            + _user_turn()
+            + _reply_frames("Still not sure.")
+            + [SleepFrame(half)],
+        )
+        self.assertEqual(len(audio), 1, "Deadline was pushed out by the second user turn")
+        self.assertEqual(events, ["on_conversation_detected"])
+
+    async def test_timeout_is_armed_by_the_first_user_turn(self):
+        # With no user turn there is nothing to classify, so the deadline is
+        # never armed and the gate keeps holding.
+        detector, events = self._detector_and_events(CLASSIFICATION_TIMEOUT)
+        down, _up = await run_test(
+            Pipeline([detector, detector.gate()]),
+            frames_to_send=[
+                TTSStartedFrame(),
+                TTSAudioRawFrame(audio=b"\x01\x00" * 800, sample_rate=8000, num_channels=1),
+                TTSStoppedFrame(),
+                SleepFrame(TIMEOUT_SETTLE),
+            ],
+            start_timeout=5.0,
+        )
+        self.assertFalse(any(isinstance(f, TTSAudioRawFrame) for f in down))
+        self.assertEqual(events, [])
