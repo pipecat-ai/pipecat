@@ -2194,7 +2194,12 @@ class LLMAssistantAggregator(LLMContextAggregator):
         # open assistant turn, open one. This handles the case of TTSSpeakFrame-driven
         # utterances that have no surrounding LLM response frames to signal assistant
         # turn boundaries, while rightly deferring to any earlier LLM-driven turn start.
-        if frame.append_to_context and not self._assistant_turn_start_timestamp:
+        # An interrupted turn still waiting for its deferred close counts as
+        # closed here too, so the utterance gets a turn of its own.
+        if frame.append_to_context and (
+            not self._assistant_turn_start_timestamp
+            or self._interrupted_turn_serial == self._assistant_turn_serial
+        ):
             await self._trigger_assistant_turn_started()
 
     async def _handle_push_aggregation(self):

@@ -1458,6 +1458,52 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(stop_messages[1].interrupted)
         self.assertEqual(stop_messages[1].content, "We close at nine.")
 
+    async def test_tts_speak_after_interruption_gets_its_own_turn(self):
+        """A TTSSpeakFrame utterance that reaches the aggregator before the
+        interrupted turn's deferred close still opens a turn of its own."""
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+
+        stop_messages = []
+
+        @aggregator.event_handler("on_assistant_turn_stopped")
+        async def on_assistant_turn_stopped(aggregator, message: AssistantTurnStoppedMessage):
+            stop_messages.append(message)
+
+        frames_to_send = [
+            LLMFullResponseStartFrame(),
+            TTSTextFrame("Hello", aggregated_by=AggregationType.WORD),
+            SleepFrame(),
+            # No SleepFrame after the interruption: the utterance's frames are
+            # queued before the aggregator's own closing frame.
+            InterruptionFrame(),
+            TTSStartedFrame(append_to_context=True),
+            TTSTextFrame("Sorry", aggregated_by=AggregationType.WORD),
+            LLMAssistantPushAggregationFrame(),
+            SleepFrame(),
+        ]
+        expected_down_frames = [
+            InterruptionFrame,
+            LLMContextFrame,
+            LLMContextAssistantTimestampFrame,
+            LLMContextAssistantTurnFrame,
+            TTSStartedFrame,
+            LLMContextFrame,
+            LLMContextAssistantTimestampFrame,
+            LLMContextAssistantTurnFrame,
+        ]
+        await run_test(
+            aggregator,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+        )
+        self.assertEqual([m["content"] for m in context.messages], ["Hello", "Sorry"])
+        self.assertEqual(len(stop_messages), 2)
+        self.assertTrue(stop_messages[0].interrupted)
+        self.assertEqual(stop_messages[0].content, "Hello")
+        self.assertFalse(stop_messages[1].interrupted)
+        self.assertEqual(stop_messages[1].content, "Sorry")
+
     async def test_interruption_with_no_open_turn_writes_nothing(self):
         """An interruption between turns leaves the context alone."""
         context = LLMContext()
