@@ -59,7 +59,7 @@ from pipecat.utils.string import resolve_sentence_tokenizer_language
 from pipecat.utils.text.base_text_filter import BaseTextFilter
 from pipecat.utils.text.pattern_pair_aggregator import PatternMatch
 from pipecat.utils.text.simple_text_aggregator import SimpleTextAggregator
-from pipecat.utils.text.word_timestamp_utils import merge_punct_tokens
+from pipecat.utils.text.word_timestamp_utils import merge_punct_tokens, split_trailing_number
 from pipecat.utils.time import seconds_to_nanoseconds
 from pipecat.utils.types import is_given
 
@@ -380,6 +380,9 @@ class TTSService(AIService):
         # keeps its id, so observers that dedup by frame.id (e.g. RTVIObserver)
         # don't emit a second bot-llm-stopped.
         self._pending_llm_response_end_frames: dict[str, LLMFullResponseEndFrame] = {}
+        # Raw word-timestamp tokens of a number that the next ``pre_merge_tokens``
+        # message for the same context may continue, keyed by context ID.
+        self._held_number_tokens: dict[str, list[tuple[str, float]]] = {}
         self._reuse_context_id_within_turn: bool = reuse_context_id_within_turn
 
         # _turn_context_id:
@@ -1060,6 +1063,7 @@ class TTSService(AIService):
         self._text_aggregation_metrics_started = False
         self._aggregated_frame_sequencer.clear()  # discard all pending slots on interruption
         self._pending_llm_response_end_frames.clear()
+        self._held_number_tokens.clear()
         await self.reset_word_timestamps()
 
         await self._stop_audio_context_task()
@@ -1446,15 +1450,44 @@ class TTSService(AIService):
                 extra spaces between consecutive frames (e.g. ElevenLabs for CJK languages
                 where word tokens already self-contain their spacing). None leaves the
                 frame's own default unchanged.
-            pre_merge_tokens: When True, punctuation and space-only tokens are merged into
-                the preceding word via ``merge_punct_tokens`` before queuing (e.g. Inworld
-                TTS, which emits spaces and punctuation as separate tokens). After merging
-                the resulting tokens are clean word strings, so ``includes_inter_frame_spaces``
-                should be left False (its default).
+            pre_merge_tokens: When True, punctuation and space-only tokens and the
+                fragments of a number are merged into their word via ``merge_punct_tokens``
+                before queuing (e.g. Inworld TTS, which emits spaces and punctuation as
+                separate tokens and can split a number's digits across tokens and
+                messages). A trailing number is held until the next call for the same
+                context, or until the context ends, so its digits are merged whole. After
+                merging the resulting tokens are clean word strings, so
+                ``includes_inter_frame_spaces`` should be left False (its default).
         """
         if pre_merge_tokens:
+            if context_id:
+                held = self._held_number_tokens.pop(context_id, [])
+                word_times, trailing = split_trailing_number(held + word_times)
+                if trailing:
+                    self._held_number_tokens[context_id] = trailing
             word_times = merge_punct_tokens(word_times)
+        await self._queue_word_timestamps(word_times, context_id, includes_inter_frame_spaces)
 
+    async def flush_word_timestamps(self, context_id: str | None):
+        """Queue a number held back by ``add_word_timestamps(pre_merge_tokens=True)``.
+
+        Services call this when no further timestamps can continue the context's last
+        word, e.g. at the end of a generation. The context's ``TTSStoppedFrame`` and
+        end-of-context marker also flush it.
+
+        Args:
+            context_id: The TTS context whose held number should be queued.
+        """
+        held = self._held_number_tokens.pop(context_id, None) if context_id else None
+        if held:
+            await self._queue_word_timestamps(merge_punct_tokens(held), context_id, None)
+
+    async def _queue_word_timestamps(
+        self,
+        word_times: list[tuple[str, float]],
+        context_id: str | None,
+        includes_inter_frame_spaces: bool | None,
+    ):
         ifs = bool(includes_inter_frame_spaces)
         if context_id and self.audio_context_available(context_id):
             for word, timestamp in word_times:
@@ -1543,6 +1576,9 @@ class TTSService(AIService):
         if not context_id:
             logger.debug(f"{self} unable to append audio to context: no context ID provided")
             return
+        if frame is None or isinstance(frame, TTSStoppedFrame):
+            # The context is ending: a held number can no longer be continued.
+            await self.flush_word_timestamps(context_id)
         if self.audio_context_available(context_id):
             logger.trace(f"{self} appending audio {frame} to audio context {context_id}")
             await self._audio_contexts[context_id].put(frame)
@@ -1669,6 +1705,7 @@ class TTSService(AIService):
 
                 # We just finished processing the context, so we can safely remove it.
                 del self._audio_contexts[context_id]
+                self._held_number_tokens.pop(context_id, None)
                 await self.on_audio_context_completed(context_id=context_id)
                 self.reset_active_audio_context()
             else:
