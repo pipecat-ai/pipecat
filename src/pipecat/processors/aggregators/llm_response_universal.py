@@ -150,9 +150,11 @@ class LLMUserAggregatorParams:
             idle detection.
         vad_analyzer: Voice Activity Detection analyzer instance.
         empty_user_turn: How to respond to a user turn that ends with no
-            transcript. ``None`` (the default) leaves such turns unanswered.
-            Telling whether the turn interrupted the bot requires the
-            aggregators to be created with ``LLMContextAggregatorPair``.
+            transcript. By default, the bot answers such a turn when it
+            interrupted the bot, and leaves it unanswered otherwise. ``None``
+            leaves every such turn unanswered. Telling whether the turn
+            interrupted the bot requires the aggregators to be created with
+            ``LLMContextAggregatorPair``.
         filter_incomplete_user_turns: When enabled, the LLM outputs a
             turn-completion marker at the start of each response: ● (complete),
             ◐ (incomplete short), or ○ (incomplete long). Incomplete
@@ -181,7 +183,7 @@ class LLMUserAggregatorParams:
     user_turn_stop_timeout: float = 5.0
     user_idle_timeout: float = 0
     vad_analyzer: VADAnalyzer | None = None
-    empty_user_turn: EmptyUserTurnConfig | None = None
+    empty_user_turn: EmptyUserTurnConfig | None = field(default_factory=EmptyUserTurnConfig)
     filter_incomplete_user_turns: bool = False
     user_turn_completion_config: UserTurnCompletionConfig | None = None
 
