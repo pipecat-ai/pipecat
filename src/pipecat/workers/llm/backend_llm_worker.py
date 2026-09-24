@@ -58,6 +58,7 @@ from pipecat.frames.frames import (
     InterruptionFrame,
     LLMContextFrame,
     LLMMessagesAppendFrame,
+    LLMRunFrame,
 )
 from pipecat.pipeline.job_context import (
     JobError,
@@ -118,14 +119,16 @@ ERROR_UPDATE_TYPE = "error"
 #: from and its output goes, whatever the app's prompt says the backend does.
 BACKEND_OUTPUT_INSTRUCTIONS = (
     "You are the backend of a voice assistant. What you receive comes from the assistant: "
-    "the conversation it is having with the user, or a request it wrote for you. What you "
-    "write goes to the assistant, which decides what the user hears and says it in its own "
-    "words. Write plain text it can speak from: no Markdown, no raw JSON. Keep progress "
-    "notes to a sentence; give results in full. A new message may arrive while you are "
-    "working. It may add work, change it, or cancel some or all of it: follow the latest "
+    "the conversation it is having with the user, or a request it wrote for you. Everything "
+    "you write goes to the assistant, which tells the user in its own words, so write only "
+    "when you have something for the user: a result, a question you cannot proceed without, "
+    "or news worth an update. Do not narrate your steps; the assistant sees the tools you "
+    "call. Write plain text it can speak from: no Markdown, no raw JSON. When you were asked "
+    "for several things, report each one as soon as it is done, in the same message as your "
+    "next tool calls if you are continuing other work. A new message may arrive while you "
+    "are working. It may add work, change it, or cancel some or all of it: follow the latest "
     "instructions, cancel tools whose results are no longer wanted, and do not repeat work "
-    "already done. If your work is cancelled, do not announce it; the assistant already "
-    "has. Ask the assistant a question only when you cannot proceed without an answer."
+    "already done. If your work is cancelled, do not announce it; the assistant already has."
 )
 
 #: Appended to the backend's conversation when the frontend cancels its work.
@@ -468,10 +471,10 @@ class BackendLLMWorker(LLMContextWorker):
     with ``JobStatus.ERROR``. Cancelling the job interrupts the backend's
     pipeline, so the next delegation starts clean.
 
-    Whether an output asks to be spoken is decided per output: a turn that
-    ended by calling tools is narration and does not, a turn that did not
-    call tools does, a reasoning summary does not. ``transform_output`` can
-    change that, or the text, or drop the output.
+    Everything the model writes asks to be spoken: the instruction appended
+    to its prompt tells it to write only when it has something for the user.
+    A reasoning summary does not. ``transform_output`` can change that, or
+    the text, or drop the output.
 
     Example::
 
@@ -540,22 +543,30 @@ class BackendLLMWorker(LLMContextWorker):
         self._requests_pending = 0
         self._runs_requested = 0
         self._runs_completed = 0
-        # Whether the turn in progress has called tools, which decides whether
-        # its text is narration or something to say. Set when the calls start
-        # and cleared when the turn ends: the calls-started frame is a system
-        # frame, so it reaches the aggregator ahead of the queued frames that
-        # open the turn it belongs to.
-        self._turn_made_calls = False
+        # The index in the context of a request appended while the model was
+        # busy, which asked for no run of its own: the run that follows the
+        # current step takes it up, and the model sees the request beside
+        # whatever that step produced. Running it separately would run the
+        # model twice on the same context, the second time with nothing new
+        # to react to. Cleared once a run has it in view.
+        self._request_awaiting_run: int | None = None
 
         @self.llm.event_handler("on_before_process_frame")
         async def on_before_llm_frame(llm, frame: Frame):
             if isinstance(frame, LLMContextFrame):
                 self._runs_requested += 1
+                if (
+                    self._request_awaiting_run is not None
+                    and len(frame.context.messages) > self._request_awaiting_run
+                ):
+                    self._request_awaiting_run = None
 
         @self.user_aggregator.event_handler("on_before_process_frame")
         async def on_before_user_aggregator_frame(aggregator, frame: Frame):
             if isinstance(frame, LLMMessagesAppendFrame) and self._requests_pending:
                 self._requests_pending -= 1
+                if not frame.run_llm:
+                    self._request_awaiting_run = len(self.context.messages)
 
         # The backend's function calls are relayed as they pass the assistant
         # aggregator, which every phase of a call reaches.
@@ -563,9 +574,6 @@ class BackendLLMWorker(LLMContextWorker):
         async def on_before_assistant_aggregator_frame(aggregator, frame: Frame):
             if isinstance(frame, InterruptionFrame):
                 self._runs_requested = self._runs_completed = 0
-                self._turn_made_calls = False
-            elif isinstance(frame, FunctionCallsStartedFrame):
-                self._turn_made_calls = True
             await self._on_function_call_frame(frame)
 
         @self.assistant_aggregator.event_handler("on_assistant_turn_stopped")
@@ -585,9 +593,15 @@ class BackendLLMWorker(LLMContextWorker):
         """Whether the backend has work in hand: a request or run outstanding, or a call in flight."""
         return (
             self._requests_pending > 0
-            or self._runs_requested > self._runs_completed
+            or self._model_busy
             or self.assistant_aggregator.has_function_calls_in_progress
-            or self.llm.has_queued_frame(LLMContextFrame)
+        )
+
+    @property
+    def _model_busy(self) -> bool:
+        """Whether a run is in progress or queued for the model."""
+        return self._runs_requested > self._runs_completed or self.llm.has_queued_frame(
+            LLMContextFrame
         )
 
     @property
@@ -659,6 +673,7 @@ class BackendLLMWorker(LLMContextWorker):
         )
         note.interruptible = False
         await self.queue_frame(note)
+        await self._run_awaiting_request()
         await self.send_job_response(message.job_id, {"cancelled": was_working})
 
     async def _refuse(self, job_id: str, reason: str) -> None:
@@ -666,17 +681,29 @@ class BackendLLMWorker(LLMContextWorker):
         await self.send_job_response(job_id, {"error": reason}, status=JobStatus.ERROR)
 
     async def _queue_request(self, request: str) -> None:
-        """Append a request to the backend's conversation and run the model on it.
+        """Append a request to the backend's conversation, and run the model on it if it is idle.
 
-        The frame is uninterruptible, so a request queued just ahead of a
-        cancellation survives the interruption the cancellation broadcasts.
+        While a run is in progress or queued, the request asks for no run of
+        its own: the run that follows the current step takes it up (see
+        ``_request_awaiting_run``). The frame is uninterruptible, so a request
+        queued just ahead of a cancellation survives the interruption the
+        cancellation broadcasts.
         """
         self._requests_pending += 1
         frame = LLMMessagesAppendFrame(
-            messages=[{"role": "user", "content": request}], run_llm=True
+            messages=[{"role": "user", "content": request}], run_llm=not self._model_busy
         )
         frame.interruptible = False
         await self.queue_frame(frame)
+
+    async def _run_awaiting_request(self) -> None:
+        """Run the model on a request that was waiting for the current step, if nothing else will."""
+        if (
+            self._request_awaiting_run is not None
+            and not self._model_busy
+            and not self.assistant_aggregator.has_function_calls_in_progress
+        ):
+            await self.queue_frame(LLMRunFrame())
 
     async def _stop_work(self, reason: str) -> None:
         """Interrupt the pipeline and cancel every function call in flight.
@@ -761,7 +788,6 @@ class BackendLLMWorker(LLMContextWorker):
             return
         self._runs_completed += 1
         text = (message.content or "").strip()
-        made_calls, self._turn_made_calls = self._turn_made_calls, False
         if self._run is not None:
             await self._on_run_turn_stopped(self._run, text)
             return
@@ -769,10 +795,11 @@ class BackendLLMWorker(LLMContextWorker):
             return
         try:
             if text:
-                await self._emit(BackendOutput(text=text, prefers_spoken=not made_calls))
+                await self._emit(BackendOutput(text=text, prefers_spoken=True))
         except Exception as e:
             logger.error(f"Worker '{self.name}': transform_output failed: {e}")
             await self._send_update({"type": ERROR_UPDATE_TYPE, "error": str(e)})
+        await self._run_awaiting_request()
         if not self.working:
             await self._send_update({"type": IDLE_UPDATE_TYPE})
 

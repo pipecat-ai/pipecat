@@ -60,6 +60,12 @@ BACKEND_MESSAGE_PREFIX = "Backend: "
 #: How a backend reasoning summary is marked in the frontend's conversation.
 BACKEND_THOUGHT_PREFIX = "Backend (thinking): "
 
+#: How a function call the backend is making is marked in the frontend's conversation.
+BACKEND_WORKING_PREFIX = "Backend (working): "
+
+#: Every mark a rendered backend message can open with.
+BACKEND_PREFIXES = (BACKEND_MESSAGE_PREFIX, BACKEND_THOUGHT_PREFIX, BACKEND_WORKING_PREFIX)
+
 #: When the frontend delegates and when it does not, ahead of each request
 #: strategy's own guidance. The frontend's own system instruction says what
 #: the backend is for.
@@ -75,22 +81,28 @@ _DELEGATION_POLICY = (
 
 #: What the frontend does with the backend's messages and the stop tool.
 _MESSAGES_INSTRUCTION = (
-    "After delegating, acknowledge briefly and do whatever else the user asked that you can "
-    "do yourself. The result says whether the backend was idle or already working; if it was "
-    "working, your request joins that work.\n\n"
+    "After delegating, acknowledge briefly, without offering updates or asking whether to "
+    "go ahead, and do whatever else the user asked that you can do yourself. The result says "
+    "whether the backend was idle or already working; if it was working, your request joins "
+    "that work.\n\n"
     "BACKEND MESSAGES: The backend works on its own after you delegate and may be doing "
     "several things at once. What it has to say arrives as messages in the conversation "
-    f'marked "{BACKEND_MESSAGE_PREFIX.strip()}". A message may report progress, a result, a '
-    "question for the user, or that it stopped. When you are prompted after one arrives, "
-    "relay what matters in your own words, once. A message you were not prompted for is "
-    "context: use it if the user asks how the work is going, and leave it otherwise. The "
+    f'marked "{BACKEND_MESSAGE_PREFIX.strip()}": a result, a question for the user, or news '
+    "worth an update. When you are prompted after one arrives, relay what matters in your "
+    f'own words, once. Messages marked "{BACKEND_WORKING_PREFIX.strip()}" and '
+    f'"{BACKEND_THOUGHT_PREFIX.strip()}" are what the backend is doing and thinking. Never '
+    "relay them on their own, but when the user asks how the work is going, answer from the "
+    "latest of them, concretely: name the step, such as which file it is reading or that it "
+    "is running the tests, rather than saying only that it is still working. The "
     "conversation may have moved on since the backend started: if the user has changed or "
     "cancelled what they asked for, weigh the message against that and say only what still "
     "helps. Never state a result you have not received from the backend, and never say work "
     "is done that the backend has not said is done.\n\n"
-    f"If the user wants the backend to stop what it is doing, call {CANCEL_TOOL_NAME} at "
-    "once. If they also want something else, or want only part of the work stopped, "
-    "delegate that in the same reply."
+    f"Whenever the user says to stop or cancel what the backend is doing, call "
+    f"{CANCEL_TOOL_NAME} at once, in that same reply, even if they ask for something else in "
+    "the same breath; then delegate the new request as well. Delegating the stop is not "
+    "enough, because the stop must be immediate. Only when the user wants part of the work "
+    "kept, or wants it changed rather than stopped, delegate that instead."
 )
 
 
@@ -258,8 +270,7 @@ def _is_backend_message(message: LLMContextMessage) -> bool:
         return False
     content = message.get("content")
     return message.get("role") == "developer" and (
-        isinstance(content, str)
-        and content.startswith((BACKEND_MESSAGE_PREFIX, BACKEND_THOUGHT_PREFIX))
+        isinstance(content, str) and content.startswith(BACKEND_PREFIXES)
     )
 
 
@@ -387,10 +398,11 @@ class BackendConnector:
             FunctionSchema(
                 name=CANCEL_TOOL_NAME,
                 description=(
-                    "Stop all the work the backend is doing now. Call this when the user no "
-                    "longer wants it: they say to stop, cancel, or never mind. If the user "
-                    "wants only part of it stopped, or wants it changed, delegate that "
-                    "instead and the backend will sort it out. Returns at once."
+                    "Stop all the work the backend is doing now. Call this whenever the user "
+                    "says to stop, cancel, or never mind, even if they ask for something else "
+                    "in the same breath: call this, and delegate the new request too. Only "
+                    "when the user wants part of the work kept, or wants it changed rather "
+                    "than stopped, delegate that instead. Returns at once."
                 ),
                 properties={},
                 required=[],
@@ -492,6 +504,11 @@ class BackendConnector:
                 )
         elif isinstance(event, BackendToolCall):
             await frontend.push_frame(event.to_frame())
+            message = self.render_tool_call(event)
+            if message is not None:
+                await frontend.queue_frame(
+                    LLMMessagesAppendFrame(messages=[message], run_llm=False)
+                )
         elif isinstance(event, BackendError):
             logger.warning(f"Backend error: {event.error}")
             await frontend.queue_frame(
@@ -526,6 +543,27 @@ class BackendConnector:
             return None
         prefix = BACKEND_THOUGHT_PREFIX if output.is_thought else BACKEND_MESSAGE_PREFIX
         return {"role": "developer", "content": f"{prefix}{output.text}"}
+
+    def render_tool_call(self, call: BackendToolCall) -> LLMContextMessage | None:
+        """Render a phase of a backend function call as a message the frontend's conversation takes in, silently.
+
+        The default records each call as it starts, with its arguments, so the
+        frontend can say what the backend is doing if asked; the other phases
+        are not recorded. Override to record more, less, or nothing.
+
+        Args:
+            call: The phase of the call.
+
+        Returns:
+            The message, or ``None`` to record nothing for this phase.
+        """
+        if call.phase != "in_progress":
+            return None
+        arguments = ", ".join(f"{k}={v!r}" for k, v in (call.arguments or {}).items())
+        return {
+            "role": "developer",
+            "content": f"{BACKEND_WORKING_PREFIX}{call.function_name}({arguments})",
+        }
 
 
 # ---------------------------------------------------------------------------
