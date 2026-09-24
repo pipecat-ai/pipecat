@@ -54,6 +54,14 @@ class _NoInferenceLLM(LLMService):
     pass
 
 
+class _SilentLLM(LLMService):
+    """Never answers run_inference()."""
+
+    async def run_inference(self, context, **kwargs) -> str | None:
+        await asyncio.Event().wait()
+        return None
+
+
 def _classifier(*replies: str | None, **kwargs) -> tuple[LLMClassifier, _ScriptedLLM]:
     llm = _ScriptedLLM(*replies)
     return LLMClassifier(llm=llm, **kwargs), llm
@@ -255,6 +263,13 @@ async def test_a_choice_outside_the_options_is_an_error():
         await classifier.choice(
             "hi", {"q": ChoiceQuestion(instructions="?", options={"a": "", "b": ""})}
         )
+
+
+@pytest.mark.asyncio
+async def test_a_reply_that_does_not_come_in_time_is_an_error():
+    classifier = LLMClassifier(llm=_SilentLLM(), timeout=0.05)
+    with pytest.raises(ClassifierError, match="did not answer within"):
+        await classifier.yes_no("hello", {"answer": YesNoQuestion(instructions="a greeting?")})
 
 
 @pytest.mark.asyncio

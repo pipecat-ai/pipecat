@@ -402,7 +402,9 @@ class VoicemailDetector(FrameProcessor):
         is how every verdict comes to act.
         """
         await asyncio.sleep(self._decision_timeout)
-        # The answer for everything heard so far, once a call in flight is done.
+        # The answer for everything heard so far, once a call in flight is
+        # done. This cannot hang: a classifier answers or raises within a
+        # timeout of its own.
         await self._segments.join()
         if self._decision:
             return
