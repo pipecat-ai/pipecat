@@ -92,6 +92,7 @@ from pipecat.processors.aggregators.llm_context_summarizer import (
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 from pipecat.services.stt_latency import DEFAULT_TTFS_P99
+from pipecat.turns.empty_user_turn import EmptyUserTurnConfig
 from pipecat.turns.types import UserTurnSpeculation
 from pipecat.turns.user_idle_controller import UserIdleController
 from pipecat.turns.user_mute import BaseUserMuteStrategy
@@ -148,6 +149,10 @@ class LLMUserAggregatorParams:
             has been idle (not speaking) for this duration. Set to 0 to disable
             idle detection.
         vad_analyzer: Voice Activity Detection analyzer instance.
+        empty_user_turn: How to respond to a user turn that ends with no
+            transcript. ``None`` (the default) leaves such turns unanswered.
+            Telling whether the turn interrupted the bot requires the
+            aggregators to be created with ``LLMContextAggregatorPair``.
         filter_incomplete_user_turns: When enabled, the LLM outputs a
             turn-completion marker at the start of each response: ● (complete),
             ◐ (incomplete short), or ○ (incomplete long). Incomplete
@@ -176,6 +181,7 @@ class LLMUserAggregatorParams:
     user_turn_stop_timeout: float = 5.0
     user_idle_timeout: float = 0
     vad_analyzer: VADAnalyzer | None = None
+    empty_user_turn: EmptyUserTurnConfig | None = None
     filter_incomplete_user_turns: bool = False
     user_turn_completion_config: UserTurnCompletionConfig | None = None
 
@@ -721,6 +727,17 @@ class LLMUserAggregator(LLMContextAggregator):
         # inferences fire before finalization.
         self._full_user_turn_aggregation: str | None = None
 
+        # What the bot is doing, as far as the current user turn is concerned.
+        # The paired assistant aggregator reports its turns; without a pair,
+        # every user turn is treated as having found the bot idle.
+        self._paired_assistant_aggregator: LLMAssistantAggregator | None = None
+        self._assistant_turn_active = False
+        # An inference was requested and its response hasn't started yet.
+        self._assistant_response_pending = False
+        # Whether the current user turn interrupted a response in progress.
+        self._user_turn_interrupted_bot = False
+        self._consecutive_empty_user_turn_recoveries = 0
+
         self._user_turn_controller = UserTurnController(
             user_turn_strategies=user_turn_strategies,
             user_turn_stop_timeout=self._params.user_turn_stop_timeout,
@@ -884,6 +901,16 @@ class LLMUserAggregator(LLMContextAggregator):
     async def push_aggregation(self) -> str:
         """Push the current aggregation."""
         return await self._push_aggregation()
+
+    async def push_context_frame(self, direction: FrameDirection = FrameDirection.DOWNSTREAM):
+        """Push a context frame in the specified direction.
+
+        Args:
+            direction: The direction to push the frame (upstream or downstream).
+        """
+        await super().push_context_frame(direction)
+        if direction == FrameDirection.DOWNSTREAM:
+            self._assistant_response_pending = True
 
     async def _push_aggregation(self, *, run_llm: bool = True) -> str:
         """Write the aggregated user turn to the context.
@@ -1320,6 +1347,12 @@ class LLMUserAggregator(LLMContextAggregator):
         self._user_turn_start_timestamp = time_now_iso8601()
         self._full_user_turn_aggregation = None
 
+        # The interruption below cancels whatever response is in progress, so
+        # this is the last point where it can be seen.
+        self._user_turn_interrupted_bot = params.enable_interruptions and self._bot_responding()
+        if params.enable_interruptions:
+            self._assistant_response_pending = False
+
         if params.enable_user_speaking_frames:
             await self.broadcast_frame(UserStartedSpeakingFrame)
 
@@ -1475,6 +1508,71 @@ class LLMUserAggregator(LLMContextAggregator):
             )
             await self._call_event_handler("on_user_turn_stopped", strategy, message)
             self._user_turn_start_timestamp = ""
+
+        interrupted_bot = self._user_turn_interrupted_bot
+        self._user_turn_interrupted_bot = False
+
+        if content:
+            self._consecutive_empty_user_turn_recoveries = 0
+        elif not on_session_end:
+            # Nothing was written to the context, so the LLM won't answer this
+            # turn unless we recover from it. If we don't, nothing will restart
+            # the idle timer the turn cancelled.
+            if not await self._maybe_recover_empty_user_turn(interrupted_bot):
+                await self._user_idle_controller.wait_for_user()
+
+    def _bot_responding(self) -> bool:
+        """Whether the bot is thinking, speaking or running a function call."""
+        assistant = self._paired_assistant_aggregator
+        if not assistant:
+            return False
+        return (
+            self._assistant_response_pending
+            or self._assistant_turn_active
+            or assistant.has_function_calls_in_progress
+        )
+
+    async def _maybe_recover_empty_user_turn(self, interrupted_bot: bool) -> bool:
+        """Run the LLM for a user turn that ended with no transcript.
+
+        Args:
+            interrupted_bot: Whether the turn interrupted a response in progress.
+
+        Returns:
+            Whether the LLM was asked to respond.
+        """
+        config = self._params.empty_user_turn
+        if not config:
+            return False
+
+        prompt = config.interrupted_prompt if interrupted_bot else config.idle_prompt
+        if not prompt:
+            return False
+
+        if self._consecutive_empty_user_turn_recoveries >= config.max_consecutive_recoveries:
+            logger.debug(f"{self}: Empty user turn left unanswered (too many in a row)")
+            return False
+
+        # A pending function call result runs the LLM itself, and a muted user
+        # shouldn't be prompted to speak.
+        assistant = self._paired_assistant_aggregator
+        if self._user_is_muted or (assistant and assistant.has_function_calls_in_progress):
+            return False
+
+        logger.debug(
+            f"{self}: Empty user turn ({'interrupted' if interrupted_bot else 'idle'}), running LLM"
+        )
+        self._consecutive_empty_user_turn_recoveries += 1
+        self._context.add_message(cast(LLMContextMessage, {"role": "developer", "content": prompt}))
+        await self.push_context_frame()
+        return True
+
+    def _handle_paired_assistant_turn_started(self):
+        self._assistant_turn_active = True
+        self._assistant_response_pending = False
+
+    def _handle_paired_assistant_turn_stopped(self):
+        self._assistant_turn_active = False
 
 
 class LLMAssistantAggregator(LLMContextAggregator):
@@ -2328,11 +2426,17 @@ class LLMAssistantAggregator(LLMContextAggregator):
     async def _trigger_assistant_turn_started(self):
         self._assistant_turn_start_timestamp = time_now_iso8601()
 
+        if self._paired_user_aggregator:
+            self._paired_user_aggregator._handle_paired_assistant_turn_started()
+
         await self._call_event_handler("on_assistant_turn_started")
 
     async def _trigger_assistant_turn_stopped(self, *, interrupted: bool = False):
         if not self._assistant_turn_start_timestamp:
             return
+
+        if self._paired_user_aggregator:
+            self._paired_user_aggregator._handle_paired_assistant_turn_stopped()
 
         aggregation = await self.push_aggregation()
         if aggregation:
@@ -2472,6 +2576,8 @@ class LLMContextAggregatorPair:
             _realtime_service_mode=realtime_service_mode,
             _paired_user_aggregator=self._user,
         )
+        # Lets the user half tell whether a user turn interrupted the bot.
+        self._user._paired_assistant_aggregator = self._assistant
 
     def user(self) -> LLMUserAggregator:
         """Get the user context aggregator.

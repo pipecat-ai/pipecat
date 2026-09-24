@@ -68,6 +68,7 @@ class UserIdleController(BaseObject):
         self._user_idle_timeout = user_idle_timeout
 
         self._waiting_for_user: bool = False
+        self._bot_speaking: bool = False
         self._user_turn_in_progress: bool = False
         self._function_calls_in_progress: int = 0
         self._idle_timer_task: asyncio.Task | None = None
@@ -113,6 +114,7 @@ class UserIdleController(BaseObject):
             return
 
         if isinstance(frame, BotStoppedSpeakingFrame):
+            self._bot_speaking = False
             # Only start the timer if the user isn't mid-turn and no function
             # calls are pending.
             #
@@ -134,6 +136,7 @@ class UserIdleController(BaseObject):
                 self._waiting_for_user = True
                 await self._start_idle_timer()
         elif isinstance(frame, BotStartedSpeakingFrame):
+            self._bot_speaking = True
             self._waiting_for_user = False
             await self._cancel_idle_timer()
         elif isinstance(frame, UserStartedSpeakingFrame):
@@ -148,6 +151,22 @@ class UserIdleController(BaseObject):
             await self._cancel_idle_timer()
         elif isinstance(frame, (FunctionCallResultFrame, FunctionCallCancelFrame)):
             self._function_calls_in_progress = max(0, self._function_calls_in_progress - 1)
+
+    async def wait_for_user(self):
+        """Start waiting for the user after a turn the bot will not answer.
+
+        The timer normally starts when the bot stops speaking. A user turn that
+        ends with nothing for the bot to answer (e.g. no transcript) cancels
+        the timer without the bot speaking again afterwards, so the caller
+        re-arms it here. Does nothing while the bot is speaking, a user turn
+        is in progress, or function calls are pending.
+        """
+        if self._bot_speaking or self._user_turn_in_progress:
+            return
+        if self._function_calls_in_progress > 0:
+            return
+        self._waiting_for_user = True
+        await self._start_idle_timer()
 
     async def _start_idle_timer(self):
         """Start (or restart) the idle timer."""
