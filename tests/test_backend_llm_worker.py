@@ -34,7 +34,11 @@ from pipecat.pipeline.job_context import JobError
 from pipecat.pipeline.job_decorator import job
 from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.llm_service import FunctionCallFromLLM, FunctionCallParams, LLMService
+from pipecat.services.llm_service import (
+    FunctionCallFromLLM,
+    FunctionCallParams,
+    LLMService,
+)
 from pipecat.services.settings import LLMSettings
 from pipecat.workers.base_worker import BaseWorker
 from pipecat.workers.llm import BackendLLMWorker
@@ -344,11 +348,55 @@ async def test_a_message_sent_while_the_model_runs_is_taken_up_by_the_next_run()
 
 
 @pytest.mark.asyncio
-async def test_a_message_sent_while_only_a_tool_is_in_flight_runs_at_once():
-    """The model is idle, so the request does not wait on the tool."""
+async def test_a_message_sent_while_a_synchronous_tool_is_in_flight_waits_for_its_result():
+    """The context lacks the call's result until it returns, so the request rides the run it brings."""
     lookup_started = asyncio.Event()
     lookup_may_finish = asyncio.Event()
 
+    async def slow_lookup(params: FunctionCallParams):
+        """Look something up, slowly."""
+        lookup_started.set()
+        await lookup_may_finish.wait()
+        await params.result_callback({"found": True})
+
+    llm = _ScriptedLLM(
+        [
+            [("call", "slow_lookup", "call_1", {})],
+            [("text", "The lookup is done, and on to the second thing.")],
+        ]
+    )
+    backend, requester, runner = _attached_backend(llm, tools=[slow_lookup])
+    events: list = []
+
+    async def body():
+        async with _BackendSession(requester, "backend") as session:
+            await session.send("First")
+            await asyncio.wait_for(lookup_started.wait(), 5)
+            assert (await session.send("Second")) == "working"
+            await asyncio.sleep(0.2)
+            assert len(llm.contexts_seen) == 1
+            lookup_may_finish.set()
+            events.extend(await _until_idle(session))
+
+    await _drive(runner, requester, backend, body)
+
+    assert [e.text for e in events if isinstance(e, BackendOutput)] == [
+        "The lookup is done, and on to the second thing.",
+    ]
+    # One run for both: the result and the request were in view together.
+    assert len(llm.contexts_seen) == 2
+    contents = [m.get("content") for m in llm.contexts_seen[1]]
+    assert "Second" in contents
+    assert any(isinstance(c, str) and "found" in c for c in contents)
+
+
+@pytest.mark.asyncio
+async def test_a_message_sent_while_only_an_asynchronous_tool_is_in_flight_runs_at_once():
+    """The model is idle and the call has its placeholder, so the request does not wait."""
+    lookup_started = asyncio.Event()
+    lookup_may_finish = asyncio.Event()
+
+    @tool_options(cancel_on_interruption=False)
     async def slow_lookup(params: FunctionCallParams):
         """Look something up, slowly."""
         lookup_started.set()

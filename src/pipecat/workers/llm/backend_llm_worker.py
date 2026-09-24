@@ -553,6 +553,18 @@ class BackendLLMWorker(LLMContextWorker):
                 self._turn_made_calls = True
             await self._on_function_call_frame(frame)
 
+        @self.assistant_aggregator.event_handler("on_after_process_frame")
+        async def on_after_assistant_aggregator_frame(aggregator, frame: Frame):
+            # A result that asks for no run may have settled the last call a
+            # waiting request was held for; one that asks for a run brings
+            # the run itself.
+            if (
+                isinstance(frame, FunctionCallResultFrame)
+                and frame.properties is not None
+                and frame.properties.run_llm is False
+            ):
+                await self._run_awaiting_request()
+
         @self.assistant_aggregator.event_handler("on_assistant_turn_stopped")
         async def on_assistant_turn_stopped(aggregator, message: AssistantTurnStoppedMessage):
             await self._on_assistant_turn_stopped(message)
@@ -657,25 +669,33 @@ class BackendLLMWorker(LLMContextWorker):
     async def _queue_request(self, request: str) -> None:
         """Append a request to the backend's conversation, and run the model on it if it is idle.
 
-        While a run is in progress or queued, the request asks for no run of
-        its own: the run that follows the current step takes it up (see
-        ``_request_awaiting_run``). The frame is uninterruptible, so a request
-        queued just ahead of a cancellation survives the interruption the
-        cancellation broadcasts.
+        While a run is in progress or queued, or a synchronous call is in
+        flight, the request asks for no run of its own: the run that follows
+        the current step takes it up (see ``_request_awaiting_run``). A run
+        while a synchronous call is in flight would see the call without its
+        result, which the adapter cannot send as it is. The frame is
+        uninterruptible, so a request queued just ahead of a cancellation
+        survives the interruption the cancellation broadcasts.
         """
         self._requests_pending += 1
         frame = LLMMessagesAppendFrame(
-            messages=[{"role": "user", "content": request}], run_llm=not self._model_busy
+            messages=[{"role": "user", "content": request}],
+            run_llm=not self._model_busy and not self._calls_block_a_run,
         )
         frame.interruptible = False
         await self.queue_frame(frame)
+
+    @property
+    def _calls_block_a_run(self) -> bool:
+        """Whether a synchronous call is in flight, whose result will bring the next run."""
+        return self.assistant_aggregator.has_blocking_function_calls_in_progress
 
     async def _run_awaiting_request(self) -> None:
         """Run the model on a request that was waiting for the current step, if nothing else will."""
         if (
             self._request_awaiting_run is not None
             and not self._model_busy
-            and not self.assistant_aggregator.has_function_calls_in_progress
+            and not self._calls_block_a_run
         ):
             await self.queue_frame(LLMRunFrame())
 
