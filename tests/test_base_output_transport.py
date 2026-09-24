@@ -7,9 +7,10 @@
 """Tests for interruption handling in :class:`BaseOutputTransport`."""
 
 import asyncio
+import time
 import unittest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import numpy as np
 
@@ -20,6 +21,7 @@ from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
+    HeartbeatFrame,
     InterruptionFrame,
     MixerControlFrame,
     OutputAudioRawFrame,
@@ -506,5 +508,77 @@ class TestBaseOutputTransportResampling(unittest.IsolatedAsyncioTestCase):
             samples = np.frombuffer(after, dtype=np.int16)
             self.assertGreater(len(samples), 0)
             self.assertLessEqual(int(samples.max()), 0)
+        finally:
+            await transport.cancel(CancelFrame())
+
+
+class TestBaseOutputTransportBotStoppedFallback(unittest.IsolatedAsyncioTestCase):
+    """The no-mixer fallback closes the bot-speaking state after audio stops.
+
+    It covers TTS audio that arrives without a later ``TTSStoppedFrame``. Heartbeats
+    and other non-audio frames travel through the same queue, at a shorter period
+    than the fallback, and must not hold it open.
+    """
+
+    FALLBACK_SECS = 0.3
+
+    async def asyncSetUp(self):
+        # The audio task reads the fallback window when it starts, which may be
+        # after setup, so the patch has to outlive the transport's creation.
+        patcher = patch(
+            "pipecat.transports.base_output.BOT_VAD_STOP_FALLBACK_SECS", self.FALLBACK_SECS
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    async def _make_speaking_transport(self) -> tuple[BaseOutputTransport, list]:
+        transport = await _make_transport(mixer=None)
+        pushed: list[tuple[float, type]] = []
+
+        async def record(frame, direction=FrameDirection.DOWNSTREAM):
+            pushed.append((time.time(), type(frame)))
+
+        transport.push_frame = AsyncMock(side_effect=record)
+        sender = transport._media_senders[None]
+        audio = TTSAudioRawFrame(
+            audio=b"\x01\x02" * (sender.audio_chunk_size // 2),
+            sample_rate=sender.sample_rate,
+            num_channels=1,
+        )
+        await transport.process_frame(audio, FrameDirection.DOWNSTREAM)
+        return transport, pushed
+
+    async def test_fallback_fires_while_heartbeats_keep_arriving(self):
+        transport, pushed = await self._make_speaking_transport()
+        try:
+            audio_time = time.time()
+            # Heartbeats at a shorter period than the fallback, and no TTSStoppedFrame.
+            for _ in range(int(self.FALLBACK_SECS * 3 / 0.1)):
+                await asyncio.sleep(0.1)
+                await transport.process_frame(
+                    HeartbeatFrame(timestamp=0), FrameDirection.DOWNSTREAM
+                )
+
+            pushed_types = [frame_type for _, frame_type in pushed]
+            self.assertIn(BotStartedSpeakingFrame, pushed_types)
+            self.assertIn(BotStoppedSpeakingFrame, pushed_types)
+            stopped_at = next(at for at, t in pushed if t is BotStoppedSpeakingFrame)
+            # Measured from the audio, not from the heartbeats that followed it.
+            self.assertLess(stopped_at - audio_time, self.FALLBACK_SECS * 2)
+        finally:
+            await transport.cancel(CancelFrame())
+
+    async def test_fallback_is_not_needed_when_tts_stopped_arrives(self):
+        transport, pushed = await self._make_speaking_transport()
+        try:
+            await transport.process_frame(TTSStoppedFrame(), FrameDirection.DOWNSTREAM)
+            await asyncio.sleep(0.1)
+
+            pushed_types = [frame_type for _, frame_type in pushed]
+            self.assertEqual(pushed_types.count(BotStoppedSpeakingFrame), 2)  # both directions
+            # The fallback later finds nothing to do.
+            await asyncio.sleep(self.FALLBACK_SECS * 2)
+            pushed_types = [frame_type for _, frame_type in pushed]
+            self.assertEqual(pushed_types.count(BotStoppedSpeakingFrame), 2)
         finally:
             await transport.cancel(CancelFrame())

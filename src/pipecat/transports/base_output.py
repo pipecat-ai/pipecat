@@ -893,16 +893,30 @@ class BaseOutputTransport(FrameProcessor):
             """
 
             async def without_mixer(vad_stop_secs: float) -> AsyncGenerator[Frame, None]:
+                # The fallback fires once `vad_stop_secs` have passed without an
+                # audio frame. Non-audio frames share this queue (heartbeats
+                # among them, at a shorter period than the fallback), so only
+                # audio moves the reference time; the queue is emptied before
+                # the fallback is considered so frame order is kept.
+                last_audio_time = time.time()
                 while True:
+                    remaining = vad_stop_secs - (time.time() - last_audio_time)
                     try:
-                        frame = await asyncio.wait_for(
-                            self._audio_queue.get(), timeout=vad_stop_secs
-                        )
-                        yield frame
-                        self._audio_queue.task_done()
-                    except TimeoutError:
+                        if remaining > 0:
+                            frame = await asyncio.wait_for(
+                                self._audio_queue.get(), timeout=remaining
+                            )
+                        else:
+                            frame = self._audio_queue.get_nowait()
+                    except (TimeoutError, asyncio.QueueEmpty):
                         # Fallback: notify the bot stopped speaking upstream if necessary based on timeout.
                         await self._bot_stopped_speaking()
+                        last_audio_time = time.time()
+                        continue
+                    if isinstance(frame, OutputAudioRawFrame):
+                        last_audio_time = time.time()
+                    yield frame
+                    self._audio_queue.task_done()
 
             async def with_mixer(vad_stop_secs: float) -> AsyncGenerator[Frame, None]:
                 # Caller below only invokes this when `self._mixer` is set.
