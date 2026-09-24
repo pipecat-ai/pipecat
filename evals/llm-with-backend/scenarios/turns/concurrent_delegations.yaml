@@ -1,0 +1,35 @@
+# A second request while the first is still being worked on. The research is
+# quick and lands first; the code fix takes longer and lands after.
+- expect:
+    - event: response
+      eval: "the bot opens the conversation in some way (a greeting, an introduction, an offer to help, or a question to get the user started)"
+
+- user: "Fix the flaky retry test in the HTTP client."
+  expect:
+    - event: function_call
+      calls:
+        - name: delegate
+    - event: response
+      within_ms: 15000
+      eval: "acknowledges that it is starting on the fix"
+
+- user: "Oh, and also, look up what our retry policy RFC says about backoff."
+  send_after:
+    delay_ms: 5000
+  expect:
+    - event: function_call
+      calls:
+        - name: delegate
+    - event: response
+      within_ms: 15000
+      eval: "acknowledges the research request, without claiming to have the answer yet"
+
+- expect:
+    - event: response
+      within_ms: 60000
+      eval: "reports what the retry policy RFC says: exponential backoff, doubling per attempt, with a cap and jitter"
+
+- expect:
+    - event: response
+      within_ms: 150000
+      eval: "reports that the retry test was fixed and the tests now pass"
