@@ -43,6 +43,7 @@ from pipecat.frames.frames import (
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
+    LLMMessagesAppendFrame,
     LLMServiceMetadataFrame,
     LLMTextFrame,
     TranscriptionFrame,
@@ -55,7 +56,11 @@ from pipecat.frames.frames import (
 )
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators import async_tool_messages
-from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
+from pipecat.processors.aggregators.llm_context import (
+    LLMContext,
+    LLMSpecificMessage,
+    standard_message_text,
+)
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.aws.nova_sonic.session_continuation import (
     SessionContinuationHelper,
@@ -662,8 +667,24 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
             await self._handle_input_audio_frame(frame)
         elif isinstance(frame, InterruptionFrame):
             await self._handle_interruption_frame()
+        elif isinstance(frame, LLMMessagesAppendFrame):
+            await self._handle_messages_append(frame)
 
         await self.push_frame(frame, direction)
+
+    async def _handle_messages_append(self, frame: LLMMessagesAppendFrame):
+        """Put appended messages into the session as text, for the model to take in.
+
+        Interactive text when the append asks to run, which the model answers
+        as it would the user speaking; plain text otherwise, which it takes in
+        without answering.
+        """
+        for message in frame.messages:
+            text = standard_message_text(message)
+            if text:
+                await self._send_text_event(
+                    text=text, role=Role.USER, interactive=bool(frame.run_llm)
+                )
 
     async def _handle_context(self, context: LLMContext):
         if self._disconnecting:

@@ -80,6 +80,30 @@ class LLMSpecificMessage:
 LLMContextMessage: TypeAlias = LLMStandardMessage | LLMSpecificMessage
 
 
+def standard_message_text(message: LLMContextMessage) -> str:
+    """Return the text of a standard context message, joining the text parts of list content.
+
+    Args:
+        message: A context message.
+
+    Returns:
+        The text, or ``""`` for a message in a service's own format or one
+        that carries no text.
+    """
+    if isinstance(message, LLMSpecificMessage):
+        return ""
+    content = message.get("content")  # type: ignore[attr-defined]
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return " ".join(
+            part.get("text", "")
+            for part in content
+            if isinstance(part, dict) and part.get("type") == "text" and part.get("text")
+        )
+    return ""
+
+
 class LLMContext:
     """Manages conversation context for LLM interactions.
 

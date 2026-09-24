@@ -63,7 +63,11 @@ from pipecat.frames.frames import (
 )
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators import async_tool_messages
-from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
+from pipecat.processors.aggregators.llm_context import (
+    LLMContext,
+    LLMSpecificMessage,
+    standard_message_text,
+)
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.google.frames import LLMSearchOrigin, LLMSearchResponseFrame, LLMSearchResult
 from pipecat.services.google.utils import update_google_client_http_options
@@ -833,6 +837,9 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
         # A turn_complete held open because the server reported it was still
         # working (see `_handle_server_message`), plus its watchdog.
         self._turn_complete_pending_idle: LiveServerMessage | None = None
+        # Content appended to the session that no turn has answered yet; the
+        # aggregator's next upstream context frame completes the turn.
+        self._content_awaiting_response = False
         self._deferred_turn_complete_timeout_task: asyncio.Task | None = None
         self._warned_interaction_status_unsupported = False
 
@@ -971,8 +978,10 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
     #
 
     async def _handle_interruption(self):
-        # The interruption ends the turn, so a held turn_complete is moot.
+        # The interruption ends the turn, so a held turn_complete is moot, and
+        # so is a reply owed for appended content: the user's turn makes one.
         self._discard_deferred_turn()
+        self._content_awaiting_response = False
         if self._bot_is_responding:
             await self._set_bot_is_responding(False)
             if self._settings.modalities == GeminiModalities.AUDIO:
@@ -1075,7 +1084,7 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
         if isinstance(frame, TranscriptionFrame):
             await self.push_frame(frame, direction)
         elif isinstance(frame, LLMContextFrame):
-            await self._handle_context(frame.context)
+            await self._handle_context(frame.context, direction)
         elif isinstance(frame, InputTextRawFrame):
             await self._send_user_text(frame.text)
             await self.push_frame(frame, direction)
@@ -1104,13 +1113,8 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
             self._handle_speech_control_params(frame)
             await self.push_frame(frame, direction)
         elif isinstance(frame, LLMMessagesAppendFrame):
-            # NOTE: handling LLMMessagesAppendFrame here in the LLMService is
-            # unusual - typically this would be handled in the user context
-            # aggregator. Leaving this handling here so that legacy user code
-            # that uses this frame *without* a user context aggregator to kick
-            # off a conversation still works (we used to have an example that
-            # did that).
-            await self._create_single_response(frame.messages)
+            await self._handle_messages_append(frame)
+            await self.push_frame(frame, direction)
         elif isinstance(frame, LLMSetToolsFrame):
             # TODO: implement runtime tool updates for Gemini Live.
             pass
@@ -1122,7 +1126,56 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
         """Return the tools configured via ``tools=`` at construction, if any."""
         return self._tools_from_init
 
-    async def _handle_context(self, context: LLMContext):
+    async def _handle_messages_append(self, frame: LLMMessagesAppendFrame):
+        """Put appended messages into the session, for the model to take in.
+
+        They go in as client content that does not complete a turn, so the
+        model reads them without answering. Whether it answers is the
+        aggregator's call: an append that asks to run comes back to this
+        service as the context frame the assistant aggregator pushes upstream,
+        which completes the turn (see :meth:`_handle_context`). Without a
+        context aggregator, the append starts a conversation on its own, which
+        is how a pipeline with no aggregators kicks one off.
+        """
+        if self._context is None:
+            await self._create_single_response(frame.messages)
+            return
+        if self._disconnecting or not self._session:
+            return
+        turns = cast(
+            "list[Content | ContentDict]",
+            [
+                {"role": "user", "parts": [{"text": text}]}
+                for text in (standard_message_text(m) for m in frame.messages)
+                if text
+            ],
+        )
+        if not turns:
+            return
+        try:
+            await self._session.send_client_content(turns=turns, turn_complete=False)
+        except Exception as e:
+            await self._handle_send_error(e)
+            return
+        self._content_awaiting_response = True
+
+    async def _complete_turn(self):
+        """Ask the model to answer the content it has been given."""
+        if self._disconnecting or not self._session:
+            return
+        self._content_awaiting_response = False
+        try:
+            await self._session.send_client_content(turn_complete=True)
+            # Gemini 3.x wants turn_complete=True, but also won't run inference
+            # without a realtime input.
+            if self._is_gemini_3:
+                await self._session.send_realtime_input(text=" ")
+        except Exception as e:
+            await self._handle_send_error(e)
+
+    async def _handle_context(
+        self, context: LLMContext, direction: FrameDirection = FrameDirection.DOWNSTREAM
+    ):
         if not self._context:
             # We got our initial context
             self._context = context
@@ -1178,6 +1231,12 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
         else:
             # We got an updated context.
             self._context = context
+            # A context frame from upstream is the aggregator asking for
+            # inference — with the bot speech and user speech it accounts for —
+            # so it is what has the model answer content appended since it
+            # last spoke.
+            if direction == FrameDirection.UPSTREAM and self._content_awaiting_response:
+                await self._complete_turn()
 
             # Here we assume that the updated context will contain either:
             # - new messages (that the Gemini Live service, with its own

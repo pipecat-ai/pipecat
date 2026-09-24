@@ -29,6 +29,7 @@ from pipecat.frames.frames import (
     FunctionCallCancelFrame,
     FunctionCallResultFrame,
     FunctionCallResultProperties,
+    LLMMessagesAppendFrame,
 )
 from pipecat.processors.aggregators import async_tool_messages
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -36,6 +37,10 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.openai.realtime.llm import OpenAIRealtimeLLMService
 
 WEATHER = {"temperature": 75}
+
+
+def _append(text: str = "Backend: On it.", *, run_llm: bool = True, role: str = "developer"):
+    return LLMMessagesAppendFrame(messages=[{"role": role, "content": text}], run_llm=run_llm)
 
 
 def _result(call_id: str = "call_1", *, is_final: bool, run_llm: bool = True, result=None):
@@ -169,6 +174,31 @@ class OpenAIProtocolIntermediateResultsTests:
         self.assertEqual(item.type, "function_call_output")
         self.assertEqual(item.output, "CANCELLED")
 
+    async def test_an_appended_message_goes_in_as_an_item_and_runs_when_the_aggregator_asks(self):
+        await self.service._handle_messages_append(_append())
+
+        (item,) = self._items()
+        self.assertEqual(item.type, "message")
+        self.assertEqual(item.role, self._append_role)
+        self.assertEqual(item.content[0].text, "Backend: On it.")
+        self.assertEqual(self._responses(), [])
+
+        await self._push_context_upstream()
+        self.assertEqual(len(self._responses()), 1)
+
+    async def test_an_appended_message_nobody_asks_about_runs_nothing(self):
+        await self.service._handle_messages_append(_append(run_llm=False))
+
+        self.assertEqual(len(self._items()), 1)
+        self.assertEqual(self._responses(), [])
+
+    async def test_nothing_is_appended_before_the_conversation_is_set_up(self):
+        self.service._llm_needs_conversation_setup = True
+
+        await self.service._handle_messages_append(_append())
+
+        self.assertEqual(self._items(), [])
+
     async def test_the_context_scan_neither_errors_nor_resends(self):
         self.service.push_error = AsyncMock()
         await self.service.push_frame(_result(is_final=False))
@@ -201,6 +231,8 @@ class OpenAIProtocolIntermediateResultsTests:
 class TestOpenAIRealtimeIntermediateResults(
     OpenAIProtocolIntermediateResultsTests, unittest.IsolatedAsyncioTestCase
 ):
+    _append_role = "system"
+
     def _build_service(self):
         return OpenAIRealtimeLLMService(api_key="test")
 
@@ -208,6 +240,8 @@ class TestOpenAIRealtimeIntermediateResults(
 class TestGrokRealtimeIntermediateResults(
     OpenAIProtocolIntermediateResultsTests, unittest.IsolatedAsyncioTestCase
 ):
+    _append_role = "user"
+
     def _build_service(self):
         from pipecat.services.xai.realtime.llm import GrokRealtimeLLMService
 
@@ -233,6 +267,13 @@ class TestInworldRealtimeIntermediateResults(unittest.IsolatedAsyncioTestCase):
             for c in self.service.send_client_event.call_args_list
             if hasattr(c.args[0], "item")
         ]
+
+    async def test_it_declines_the_frontend_role(self):
+        self.assertIn(
+            "cannot be an LLMWithBackend frontend",
+            self.service.llm_with_backend_role_objection("frontend") or "",
+        )
+        self.assertIsNone(self.service.llm_with_backend_role_objection("backend"))
 
     async def test_it_says_it_takes_no_intermediate_results(self):
         self.assertFalse(self.service.accepts_intermediate_function_call_results)
@@ -293,6 +334,43 @@ class TestGeminiLiveIntermediateResults(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.scheduling, "WHEN_IDLE")
         self.assertIn("call_1", self.service._completed_tool_calls)
 
+    async def test_an_appended_message_goes_in_without_completing_the_turn(self):
+        self.service._context = LLMContext()
+
+        await self.service._handle_messages_append(_append())
+
+        self.service._session.send_client_content.assert_awaited_once_with(
+            turns=[{"role": "user", "parts": [{"text": "Backend: On it."}]}], turn_complete=False
+        )
+
+    async def test_the_aggregator_asking_to_run_completes_the_turn(self):
+        self.service._context = LLMContext()
+        await self.service._handle_messages_append(_append())
+
+        await self.service._handle_context(self.service._context, FrameDirection.UPSTREAM)
+
+        calls = self.service._session.send_client_content.call_args_list
+        self.assertEqual(calls[-1].kwargs, {"turn_complete": True})
+        # Answered once: a later push with nothing new completes no turn.
+        await self.service._handle_context(self.service._context, FrameDirection.UPSTREAM)
+        self.assertEqual(len(self.service._session.send_client_content.call_args_list), 2)
+
+    async def test_an_interruption_drops_a_reply_owed_for_appended_content(self):
+        self.service._context = LLMContext()
+        await self.service._handle_messages_append(_append())
+
+        await self.service._handle_interruption()
+        await self.service._handle_context(self.service._context, FrameDirection.UPSTREAM)
+
+        self.assertEqual(len(self.service._session.send_client_content.call_args_list), 1)
+
+    async def test_without_a_context_an_append_starts_a_conversation(self):
+        await self.service._handle_messages_append(_append())
+
+        self.assertTrue(
+            self.service._session.send_client_content.await_args.kwargs["turn_complete"]
+        )
+
     async def test_a_model_without_non_blocking_tools_takes_no_intermediate_results(self):
         self.service._settings.model = "models/gemini-3.1-flash-live-preview"
         self.assertFalse(self.service.accepts_intermediate_function_call_results)
@@ -342,6 +420,16 @@ class TestNovaSonicIntermediateResults(unittest.IsolatedAsyncioTestCase):
         self.service._send_tool_result.assert_awaited_once()
         self.assertIn("call_1", self.service._completed_tool_calls)
 
+    async def test_an_appended_message_goes_in_as_text_interactive_as_asked(self):
+        await self.service._handle_messages_append(_append())
+        await self.service._handle_messages_append(
+            _append("Backend (working): read_file()", run_llm=False)
+        )
+
+        self.assertEqual(
+            self._texts(), [("Backend: On it.", True), ("Backend (working): read_file()", False)]
+        )
+
 
 class TestUltravoxIntermediateResults(unittest.IsolatedAsyncioTestCase):
     """Ultravox takes them as user-side text, urgent or not."""
@@ -360,6 +448,12 @@ class TestUltravoxIntermediateResults(unittest.IsolatedAsyncioTestCase):
 
     def _sent(self) -> list[dict]:
         return [c.args[0] for c in self.service._send.call_args_list]
+
+    async def test_it_declines_the_frontend_role(self):
+        self.assertIn(
+            "cannot be an LLMWithBackend frontend",
+            self.service.llm_with_backend_role_objection("frontend") or "",
+        )
 
     async def test_an_intermediate_result_goes_in_as_text_to_speak_about(self):
         await self.service.push_frame(_result(is_final=False))
