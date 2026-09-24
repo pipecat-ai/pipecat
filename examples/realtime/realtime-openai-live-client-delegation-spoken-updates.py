@@ -104,7 +104,7 @@ changes their plans, and when the job is done. Never claim an action
 completed without a tool result confirming it."""
 
 
-async def transform_output(output: BackendOutput, *, is_final: bool) -> BackendOutput:
+async def transform_output(output: BackendOutput) -> BackendOutput:
     """Let the backend's own marker decide what reaches the user."""
     # `prefers_spoken` is one flag on one output, and an output is a whole message
     # the backend wrote, so the marker opens the message it applies to.
