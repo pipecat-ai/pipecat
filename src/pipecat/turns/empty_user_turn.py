@@ -22,19 +22,22 @@ class EmptyUserTurnConfig:
     """How the user aggregator responds to a user turn with no transcript.
 
     A user turn can start on voice activity alone and then end with no
-    transcript, because the speech could not be recognized or was not speech
-    at all. Nothing is written to the context and the LLM does not run, so if
-    that turn interrupted the bot, the conversation stalls until the user
-    speaks again. With this config, the aggregator appends a developer message
-    for such a turn and runs the LLM once.
+    transcript: a cough, background noise, or speech the STT could not
+    recognize. Nothing is written to the context and the LLM does not run.
+    With this config, the aggregator can append a developer message for such
+    a turn and run the LLM once.
 
-    Empty turns fall into two cases, each with its own prompt:
+    Either case may be noise. They differ in what happens if the turn goes
+    unanswered, so each has its own prompt:
 
     - Interrupted: the turn started while the bot was thinking, speaking or
-      running a function call, and interrupted it. A turn before the bot has
-      first finished speaking counts as one too.
-    - Idle: the bot had finished and was waiting for the user, so the turn was
-      most likely background noise.
+      running a function call, and cut it off. Unanswered, the bot stays
+      silent mid-response, so by default the LLM runs and the bot asks the
+      user to repeat or picks up where it left off. A turn before the bot has
+      first finished speaking counts as interrupted too.
+    - Idle: the bot had finished and was waiting for the user. The
+      conversation isn't stuck, and answering what may be noise would be
+      intrusive, so by default the turn gets no answer.
 
     Parameters:
         interrupted_prompt: Developer message for an empty turn that interrupted

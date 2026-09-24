@@ -12,12 +12,13 @@ that turn interrupted the bot, the bot has stopped talking and the LLM has
 nothing new to answer, so the conversation stalls.
 
 By default, the user aggregator runs the LLM once for such a turn, with a
-developer message saying that the user spoke but wasn't
-understood. The bot then asks the user to repeat, or repeats what they may
-have missed. An empty turn while the bot was idle is most likely noise, and is
-left unanswered by default; `user_idle_timeout` still applies after it, so the
-bot checks in if the user then stays quiet. `EmptyUserTurnConfig` customizes
-this behavior, and `empty_user_turn=None` turns it off.
+developer message saying that the user spoke but wasn't understood. The bot
+then asks the user to repeat, or repeats what they may have missed. An empty
+turn while the bot was idle is left unanswered by default: the bot is already
+waiting for the user, and answering what may be noise would be intrusive.
+`user_idle_timeout` still applies after it, so the bot checks in if the user
+then stays quiet. `EmptyUserTurnConfig` customizes this behavior, and
+`empty_user_turn=None` turns it off.
 
 To try it without a noisy room, say "pineapple": this bot drops any transcript
 containing that word, as if the STT had failed to recognize it. Ask for a long
