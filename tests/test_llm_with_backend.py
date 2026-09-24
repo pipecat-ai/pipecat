@@ -188,6 +188,7 @@ def test_the_frontend_guidance_covers_delegation_and_the_backends_messages():
     guidance = _bound().frontend_instruction or ""
     assert "delegate tool" in guidance
     assert 'marked "Backend:"' in guidance
+    assert '"Backend (working):"' in guidance
     assert "cancel_delegated_work" in guidance
 
 
@@ -347,6 +348,18 @@ async def test_the_backends_calls_are_reported_and_nothing_else_happens_to_them(
     assert isinstance(pushed, ExternalFunctionCallInProgressFrame)
     assert (pushed.function_name, pushed.tool_call_id) == ("get_weather", "toolu_1")
     assert pushed.parent_tool_call_id is None
+    # The call is also recorded in the conversation, silently, so the frontend
+    # can say what the backend is doing.
+    (appended,) = [c.args[0] for c in frontend.queue_frame.await_args_list]
+    assert appended.run_llm is False
+    assert appended.messages == [
+        {"role": "developer", "content": "Backend (working): get_weather(location='Seattle')"}
+    ]
+
+    frontend = SimpleNamespace(queue_frame=AsyncMock(), push_frame=AsyncMock())
+    await connector.deliver(
+        frontend, BackendToolCall("result", "get_weather", "toolu_1", result={})
+    )  # type: ignore[arg-type]
     frontend.queue_frame.assert_not_awaited()
 
 
@@ -452,7 +465,8 @@ async def test_a_local_backend_is_heard_through_the_frontends_conversation():
     assert result.properties == FunctionCallResultProperties(run_llm=True)
     appended = [f for f in down if isinstance(f, LLMMessagesAppendFrame)]
     assert [(f.messages[0]["content"], f.run_llm) for f in appended] == [
-        ("Backend: Let me check.", False),
+        ("Backend: Let me check.", True),
+        ("Backend (working): get_weather(location='Seattle')", False),
         ("Backend: It's 62 and raining.", True),
     ]
     # The backend's own call reached the frontend's pipeline as a report only.
