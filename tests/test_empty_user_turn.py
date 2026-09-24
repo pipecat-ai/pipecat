@@ -15,6 +15,7 @@ from pipecat.frames.frames import (
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
+    LLMRunFrame,
     TranscriptionFrame,
     TTSTextFrame,
     VADUserStartedSpeakingFrame,
@@ -97,8 +98,10 @@ def _bot_idle() -> list[Frame]:
 
 
 def _bot_speaking() -> list[Frame]:
-    """A bot response that is still being spoken."""
+    """A requested bot response that is still being spoken."""
     return [
+        LLMRunFrame(),
+        SleepFrame(),
         LLMFullResponseStartFrame(),
         BotStartedSpeakingFrame(),
         TTSTextFrame("Where would", aggregated_by=AggregationType.WORD),
@@ -126,7 +129,7 @@ class TestEmptyUserTurn(unittest.IsolatedAsyncioTestCase):
             [*_bot_speaking(), *_empty_turn()], empty_user_turn=self._config()
         )
         self.assertEqual(_developer_messages(context), [INTERRUPTED_PROMPT])
-        self.assertEqual(inferences, 1)
+        self.assertEqual(inferences, 2)
         # The recovery comes after what the user heard of the interrupted response.
         messages = context.get_messages()
         self.assertEqual(messages[-2], {"role": "assistant", "content": "Where would"})
@@ -172,21 +175,21 @@ class TestEmptyUserTurn(unittest.IsolatedAsyncioTestCase):
     async def test_enabled_by_default(self):
         context, inferences = await self._run([*_bot_speaking(), *_empty_turn()])
         self.assertEqual(_developer_messages(context), [DEFAULT_EMPTY_USER_TURN_INTERRUPTED_PROMPT])
-        self.assertEqual(inferences, 1)
+        self.assertEqual(inferences, 2)
 
     async def test_disabled(self):
         context, inferences = await self._run(
             [*_bot_speaking(), *_empty_turn()], empty_user_turn=None
         )
         self.assertEqual(_developer_messages(context), [])
-        self.assertEqual(inferences, 0)
+        self.assertEqual(inferences, 1)
 
     async def test_transcribed_turn_not_recovered(self):
         context, inferences = await self._run(
             [*_bot_speaking(), *_transcribed_turn("Hello!")], empty_user_turn=self._config()
         )
         self.assertEqual(_developer_messages(context), [])
-        self.assertEqual(inferences, 1)
+        self.assertEqual(inferences, 2)
 
     async def test_consecutive_recoveries_are_bounded(self):
         # The second empty turn interrupts the recovery's own pending response,
@@ -208,6 +211,7 @@ class TestEmptyUserTurn(unittest.IsolatedAsyncioTestCase):
         # The function call's result will run the LLM on its own.
         context, inferences = await self._run(
             [
+                LLMRunFrame(),
                 *_bot_idle(),
                 FunctionCallsStartedFrame(
                     function_calls=[
@@ -225,7 +229,7 @@ class TestEmptyUserTurn(unittest.IsolatedAsyncioTestCase):
             empty_user_turn=self._config(),
         )
         self.assertEqual(_developer_messages(context), [])
-        self.assertEqual(inferences, 0)
+        self.assertEqual(inferences, 1)
 
     async def test_without_pair(self):
         context = LLMContext()
