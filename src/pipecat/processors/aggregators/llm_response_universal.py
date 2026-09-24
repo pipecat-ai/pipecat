@@ -152,7 +152,8 @@ class LLMUserAggregatorParams:
         empty_user_turn: How to respond to a user turn that ends with no
             transcript. By default, the bot answers such a turn when it
             interrupted the bot, and leaves it unanswered otherwise. ``None``
-            leaves every such turn unanswered.
+            leaves every such turn unanswered. Ignored with a realtime LLM
+            service, which hears the user's audio directly.
         filter_incomplete_user_turns: When enabled, the LLM outputs a
             turn-completion marker at the start of each response: ● (complete),
             ◐ (incomplete short), or ○ (incomplete long). Incomplete
