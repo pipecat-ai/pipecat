@@ -479,6 +479,75 @@ class TestUserIdleController(unittest.IsolatedAsyncioTestCase):
 
         await controller.cleanup()
 
+    async def test_wait_for_user_arms_timer(self):
+        """Test that wait_for_user arms the timer after a user turn."""
+        controller = UserIdleController(user_idle_timeout=USER_IDLE_TIMEOUT)
+        await controller.setup(frame_processor_setup(self.task_manager))
+
+        idle_triggered = False
+
+        @controller.event_handler("on_user_turn_idle")
+        async def on_user_turn_idle(controller):
+            nonlocal idle_triggered
+            idle_triggered = True
+
+        # The user speaks while the bot is idle: the timer is cancelled and
+        # nothing else would restart it.
+        await controller.process_frame(BotStoppedSpeakingFrame())
+        await controller.process_frame(UserStartedSpeakingFrame())
+        await controller.process_frame(UserStoppedSpeakingFrame())
+        await controller.wait_for_user()
+
+        await asyncio.sleep(USER_IDLE_TIMEOUT + 0.1)
+
+        self.assertTrue(idle_triggered)
+
+        await controller.cleanup()
+
+    async def test_wait_for_user_while_bot_speaking_does_not_arm(self):
+        """Test that wait_for_user does nothing while the bot is speaking."""
+        controller = UserIdleController(user_idle_timeout=USER_IDLE_TIMEOUT)
+        await controller.setup(frame_processor_setup(self.task_manager))
+
+        idle_triggered = False
+
+        @controller.event_handler("on_user_turn_idle")
+        async def on_user_turn_idle(controller):
+            nonlocal idle_triggered
+            idle_triggered = True
+
+        await controller.process_frame(BotStartedSpeakingFrame())
+        await controller.wait_for_user()
+
+        await asyncio.sleep(USER_IDLE_TIMEOUT + 0.1)
+
+        self.assertFalse(idle_triggered)
+
+        await controller.cleanup()
+
+    async def test_wait_for_user_during_function_call_does_not_arm(self):
+        """Test that wait_for_user does nothing while a function call is pending."""
+        controller = UserIdleController(user_idle_timeout=USER_IDLE_TIMEOUT)
+        await controller.setup(frame_processor_setup(self.task_manager))
+
+        idle_triggered = False
+
+        @controller.event_handler("on_user_turn_idle")
+        async def on_user_turn_idle(controller):
+            nonlocal idle_triggered
+            idle_triggered = True
+
+        await controller.process_frame(
+            FunctionCallsStartedFrame(function_calls=[unittest.mock.Mock()])
+        )
+        await controller.wait_for_user()
+
+        await asyncio.sleep(USER_IDLE_TIMEOUT + 0.1)
+
+        self.assertFalse(idle_triggered)
+
+        await controller.cleanup()
+
 
 if __name__ == "__main__":
     unittest.main()
