@@ -29,7 +29,10 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.tests.utils import SleepFrame, run_test
-from pipecat.turns.empty_user_turn import EmptyUserTurnConfig
+from pipecat.turns.empty_user_turn import (
+    DEFAULT_EMPTY_USER_TURN_INTERRUPTED_PROMPT,
+    EmptyUserTurnConfig,
+)
 from pipecat.turns.user_start import (
     TranscriptionUserTurnStartStrategy,
     VADUserTurnStartStrategy,
@@ -152,8 +155,15 @@ class TestEmptyUserTurn(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(_developer_messages(context), [IDLE_PROMPT])
 
-    async def test_disabled_by_default(self):
+    async def test_enabled_by_default(self):
         context, inferences = await self._run([*_bot_speaking(), *_empty_turn()])
+        self.assertEqual(_developer_messages(context), [DEFAULT_EMPTY_USER_TURN_INTERRUPTED_PROMPT])
+        self.assertEqual(inferences, 1)
+
+    async def test_disabled(self):
+        context, inferences = await self._run(
+            [*_bot_speaking(), *_empty_turn()], empty_user_turn=None
+        )
         self.assertEqual(_developer_messages(context), [])
         self.assertEqual(inferences, 0)
 
@@ -235,18 +245,14 @@ class TestEmptyUserTurnIdle(unittest.IsolatedAsyncioTestCase):
                     BotStoppedSpeakingFrame(),
                     VADUserStoppedSpeakingFrame(),
                     SleepFrame(sleep=USER_TURN_STOP_TIMEOUT + 0.2),
-                ]
+                ],
+                empty_user_turn=None,
             )
         )
 
     async def test_idle_timer_not_rearmed_after_recovery(self):
         # The recovery response is on its way, so the user isn't idle yet.
-        self.assertFalse(
-            await self._idle_fired(
-                [*_bot_speaking(), *_empty_turn()],
-                empty_user_turn=EmptyUserTurnConfig(interrupted_prompt=INTERRUPTED_PROMPT),
-            )
-        )
+        self.assertFalse(await self._idle_fired([*_bot_speaking(), *_empty_turn()]))
 
 
 if __name__ == "__main__":
