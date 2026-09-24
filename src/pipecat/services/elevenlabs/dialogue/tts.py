@@ -34,6 +34,7 @@ from pipecat.services.elevenlabs.tts_base import (
 )
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TextAggregationMode
+from pipecat.utils.text.phonemes import normalize_ipa
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
 # Text-to-Dialogue rejects a keepalive that doesn't name a registered context,
@@ -221,6 +222,21 @@ class ElevenLabsDialogueTTSService(ElevenLabsTTSBase):
         self._seed = seed
 
         self._contexts: dict[str, _DialogueContext] = {}
+
+    @classmethod
+    def format_pronunciation(cls, word: str, ipa: str) -> str | None:
+        """Render a pronunciation as IPA between slashes, as Eleven v3 reads it.
+
+        Args:
+            word: The word being pronounced (unused: the IPA replaces it).
+            ipa: The pronunciation, in IPA.
+
+        Returns:
+            The IPA wrapped in slashes, e.g. ``/mɛtˈfɔɹmɪn/``, or None for an
+            empty pronunciation.
+        """
+        ipa = normalize_ipa(ipa)
+        return f"/{ipa}/" if ipa else None
 
     def _set_voice_settings(self):
         return build_elevenlabs_ttd_voice_settings(self._settings)

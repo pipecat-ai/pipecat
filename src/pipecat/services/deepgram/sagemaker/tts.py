@@ -39,6 +39,7 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
 )
 from pipecat.services.aws.sagemaker.bidi_client import SageMakerBidiClient
+from pipecat.services.deepgram.tts import format_deepgram_pronunciation
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -136,6 +137,21 @@ class DeepgramSageMakerTTSService(TTSService):
 
         self._client: SageMakerBidiClient | None = None
         self._response_task: asyncio.Task | None = None
+
+    @classmethod
+    def format_pronunciation(cls, word: str, ipa: str) -> str | None:
+        """Render a pronunciation as a Deepgram inline pronunciation object.
+
+        See :func:`~pipecat.services.deepgram.tts.format_deepgram_pronunciation`.
+
+        Args:
+            word: The word being pronounced.
+            ipa: The pronunciation, in IPA.
+
+        Returns:
+            The inline object, or None when the pronunciation cannot be used.
+        """
+        return format_deepgram_pronunciation(word, ipa)
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
