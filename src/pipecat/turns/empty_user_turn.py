@@ -9,11 +9,10 @@
 from dataclasses import dataclass
 
 DEFAULT_EMPTY_USER_TURN_INTERRUPTED_PROMPT = (
-    "The user started speaking while you were responding, which cut your response "
-    "off, but their speech was not recognized: what they said and meant is unknown. "
-    "They may have heard only part of your last response, or none of it. Briefly ask "
-    "them to repeat themselves, or briefly repeat the point or question they may have "
-    "missed. Do not guess what they said."
+    "The user may have said something while you were responding, but it was not "
+    "recognized. Your response was cut off there, and the conversation only includes "
+    "the part they heard, which may be none of it. Briefly ask them to repeat it, and "
+    "repeat any question they may have missed."
 )
 
 
