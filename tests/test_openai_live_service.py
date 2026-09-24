@@ -50,7 +50,7 @@ from pipecat.services.openai.responses.llm import OpenAIResponsesLLMService
 from pipecat.utils.asyncio.task_manager import TaskManager
 from pipecat.utils.base_object import BaseObject
 from pipecat.workers.llm import BackendOutput
-from pipecat.workers.llm.backend_llm_worker import BackendToolCall, _BackendFinalOutput
+from pipecat.workers.llm.backend_llm_worker import BackendError, BackendIdle, BackendToolCall
 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
@@ -1073,38 +1073,93 @@ async def test_reset_conversation_starts_a_new_session_from_the_current_context(
 # ---------------------------------------------------------------------------
 
 
-class _FakeBackend:
-    name = "backend"
+class _FakeSession:
+    """Stands in for the session with the backend: records what is sent, yields what a test feeds."""
+
+    def __init__(self, worker, backend_name, *, timeout_secs=None):
+        self.worker = worker
+        self.backend_name = backend_name
+        self.timeout_secs = timeout_secs
+        self.requests: list[str] = []
+        self.cancels: list[str] = []
+        self.send_error: Exception | None = None
+        self._events: asyncio.Queue = asyncio.Queue()
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        return False
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        event = await self._events.get()
+        if event is None:
+            raise StopAsyncIteration
+        return event
+
+    async def send(self, request: str) -> str:
+        if self.send_error is not None:
+            raise self.send_error
+        self.requests.append(request)
+        return "idle"
+
+    async def cancel(self, reason: str) -> bool:
+        self.cancels.append(reason)
+        return True
+
+    async def feed(self, *events):
+        """Hand events to the service's consumer and let it process them."""
+        for event in events:
+            self._events.put_nowait(event)
+        for _ in range(10):
+            await asyncio.sleep(0)
 
 
-async def _client_delegation_service(monkeypatch, _delegate_to_backend):
+async def _client_delegation_service(
+    monkeypatch, *, timeout_secs: float = 5
+) -> tuple[OpenAILiveLLMService, _EventRecorder, _FakeSession]:
+    sessions: list[_FakeSession] = []
+
+    def make_session(worker, backend_name, *, timeout_secs=None):
+        session = _FakeSession(worker, backend_name, timeout_secs=timeout_secs)
+        sessions.append(session)
+        return session
+
+    monkeypatch.setattr(live_llm, "_BackendSession", make_session)
     service = await _make_service_with_tasks(
-        delegation=OpenAILiveLLMService.ClientDelegation(backend=_FakeBackend(), timeout_secs=5)
+        delegation=OpenAILiveLLMService.ClientDelegation(
+            backend="backend", timeout_secs=timeout_secs
+        )
     )
     recorder = _EventRecorder()
     service.send_client_event = recorder
-    monkeypatch.setattr(live_llm, "_delegate_to_backend", _delegate_to_backend)
     monkeypatch.setattr(type(service), "pipeline_worker", property(lambda self: "worker"))
-    return service, recorder
+    # What setup() does once the pipeline worker exists: attach to the backend.
+    service._backend_session_task = service.create_task(
+        service._run_backend_session(), "backend_session"
+    )
+    for _ in range(5):
+        await asyncio.sleep(0)
+    (session,) = sessions
+    return service, recorder, session
 
 
 def _client_delegation(delegation_id: str) -> events.DelegationMetadata:
     return events.DelegationMetadata(id=delegation_id, target="client")
 
 
+_REPORT_LINE = (
+    "Act on the user's most recent request in the conversation above, and report its result "
+    "as soon as you have it, before going on with other work."
+)
+
+
 @pytest.mark.asyncio
 async def test_client_delegation_sends_the_fragments_since_the_last_one(monkeypatch):
-    calls = []
-
-    async def fake_delegate_to_backend(worker, backend_name, *, request, timeout_secs):
-        calls.append((worker, backend_name, request, timeout_secs))
-        yield BackendOutput(text="Checking the weather.", prefers_spoken=True)
-        yield BackendOutput(text="Still looking.", is_thought=True, prefers_spoken=False)
-        yield _BackendFinalOutput(
-            BackendOutput(text="It's 62 and raining in Seattle.", prefers_spoken=True)
-        )
-
-    service, recorder = await _client_delegation_service(monkeypatch, fake_delegate_to_backend)
+    service, recorder, session = await _client_delegation_service(monkeypatch)
 
     await _drive(
         service,
@@ -1113,23 +1168,27 @@ async def test_client_delegation_sends_the_fragments_since_the_last_one(monkeypa
             _transcript_delta("assistant", "Let me check.", start_ms=200),
         ],
     )
-    await service._run_client_delegation(_client_delegation("item_d1"))
+    await service._handle_client_delegation(_client_delegation("item_d1"))
 
     # No task text: the delegation names none, so the backend is handed the
     # conversation rendered as a transcript and works the request out from it.
-    assert calls == [
-        (
-            "worker",
-            "backend",
-            "Voice conversation so far:\n"
-            "USER: what's the weather in seattle\n"
-            "ASSISTANT: Let me check.\n"
-            "\n"
-            "Act on the user's most recent request in the conversation above.",
-            5,
-        )
+    assert session.backend_name == "backend"
+    assert session.timeout_secs == 5
+    assert session.requests == [
+        "Voice conversation so far:\n"
+        "USER: what's the weather in seattle\n"
+        "ASSISTANT: Let me check.\n"
+        "\n" + _REPORT_LINE
     ]
     assert service._transcript_fragments == []
+
+    await session.feed(
+        BackendOutput(text="Checking the weather.", prefers_spoken=True),
+        BackendOutput(text="Still looking.", is_thought=True, prefers_spoken=False),
+        BackendOutput(text="It's 62 and raining in Seattle.", prefers_spoken=True),
+        BackendIdle(),
+    )
+
     thinking = [
         (e["delegation_id"], e["content"]) for e in recorder.of_type("session.thinking.append")
     ]
@@ -1141,19 +1200,13 @@ async def test_client_delegation_sends_the_fragments_since_the_last_one(monkeypa
         ("item_d1", "Checking the weather."),
         ("item_d1", "It's 62 and raining in Seattle."),
     ]
+    assert service._current_delegation is None
 
 
 @pytest.mark.asyncio
 async def test_the_backend_reads_whole_utterances_not_fragments(monkeypatch):
     """Frame-boundary fragments are joined back up, spacing and all."""
-    calls = []
-
-    async def fake_delegate_to_backend(worker, backend_name, *, request, timeout_secs):
-        calls.append(request)
-        for output in ():
-            yield output
-
-    service, _ = await _client_delegation_service(monkeypatch, fake_delegate_to_backend)
+    service, _, session = await _client_delegation_service(monkeypatch)
 
     await _drive(
         service,
@@ -1167,74 +1220,130 @@ async def test_the_backend_reads_whole_utterances_not_fragments(monkeypatch):
             _transcript_delta("user", ", DC", start_ms=1200),
         ],
     )
-    await service._run_client_delegation(_client_delegation("item_d1"))
+    await service._handle_client_delegation(_client_delegation("item_d1"))
 
-    assert calls == [
+    assert session.requests == [
         "Voice conversation so far:\n"
         "ASSISTANT: Hey there!\n"
         "USER: Get me the weather in Washington, DC\n"
-        "\n"
-        "Act on the user's most recent request in the conversation above."
+        "\n" + _REPORT_LINE
     ]
+
+
+@pytest.mark.asyncio
+async def test_delegations_take_the_backend_one_at_a_time(monkeypatch):
+    """A second delegation waits until the backend has nothing left to do."""
+    service, recorder, session = await _client_delegation_service(monkeypatch)
+
+    await _drive(service, [_transcript_delta("user", "what's the weather in seattle")])
+    await service._handle_client_delegation(_client_delegation("item_d1"))
+    await _drive(service, [_transcript_delta("user", "and in boston", start_ms=2000)])
+    await service._handle_client_delegation(_client_delegation("item_d2"))
+
+    # Only the first has been sent; the second holds the transcript it was raised on.
+    assert len(session.requests) == 1
+    assert len(service._queued_delegations) == 1
+
+    await session.feed(BackendOutput(text="62 and raining."), BackendIdle())
+
+    assert len(session.requests) == 2
+    assert session.requests[1].startswith(
+        "Voice conversation since the previous delegation:\nUSER: and in boston\n"
+    )
+    assert service._current_delegation is not None
+    assert service._current_delegation.id == "item_d2"
+    # Outputs from here on belong to the second delegation.
+    await session.feed(BackendOutput(text="Boston is 55."), BackendIdle())
+    commentary = [
+        (e["delegation_id"], e["content"]) for e in recorder.of_type("session.commentary.append")
+    ]
+    assert commentary == [("item_d1", "62 and raining."), ("item_d2", "Boston is 55.")]
+    assert service._current_delegation is None
 
 
 @pytest.mark.asyncio
 async def test_a_reset_starts_the_next_delegation_transcript_afresh(monkeypatch):
     """A new session has no previous delegation for a transcript to run from."""
-    requests: list[str] = []
-
-    async def fake_delegate_to_backend(worker, backend_name, *, request, timeout_secs):
-        requests.append(request)
-        for output in ():
-            yield output
-
-    service, _ = await _client_delegation_service(monkeypatch, fake_delegate_to_backend)
+    service, _, session = await _client_delegation_service(monkeypatch)
     service._connect = AsyncMock()
 
     await _drive(service, [_transcript_delta("user", "what's the weather in seattle")])
-    await service._run_client_delegation(_client_delegation("item_d1"))
+    await service._handle_client_delegation(_client_delegation("item_d1"))
+    await session.feed(BackendIdle())
 
     await _drive(service, [_transcript_delta("user", "and in boston", start_ms=2000)])
-    await service._run_client_delegation(_client_delegation("item_d2"))
+    await service._handle_client_delegation(_client_delegation("item_d2"))
 
+    # The reset drops the delegation in progress: the backend is told to stop.
     await service.reset_conversation()
+    assert session.cancels == ["session ended"]
+    assert service._current_delegation is None
 
     await _drive(service, [_transcript_delta("user", "let's start over", start_ms=4000)])
-    await service._run_client_delegation(_client_delegation("item_d3"))
+    await service._handle_client_delegation(_client_delegation("item_d3"))
 
-    assert requests[0].startswith("Voice conversation so far:")
-    assert requests[1].startswith("Voice conversation since the previous delegation:")
-    assert requests[2].startswith("Voice conversation so far:")
+    assert session.requests[0].startswith("Voice conversation so far:")
+    assert session.requests[1].startswith("Voice conversation since the previous delegation:")
+    assert session.requests[2].startswith("Voice conversation so far:")
 
 
 @pytest.mark.asyncio
 async def test_client_delegation_failure_is_reported_to_the_model(monkeypatch):
-    async def failing_delegate_to_backend(*args, **kwargs):
-        raise JobError("timed out")
-        yield
-
-    service, recorder = await _client_delegation_service(monkeypatch, failing_delegate_to_backend)
+    service, recorder, session = await _client_delegation_service(monkeypatch)
     service.push_error = AsyncMock()
+    session.send_error = JobError("timed out")
 
-    await service._run_client_delegation(_client_delegation("item_d1"))
+    await service._handle_client_delegation(_client_delegation("item_d1"))
 
     # The model is told the work failed; the detail goes to the error instead.
     (append,) = recorder.of_type("session.commentary.append")
     assert "timed out" not in append["content"]
     service.push_error.assert_awaited_once()
     assert "timed out" in service.push_error.await_args.kwargs["error_msg"]
+    assert service._current_delegation is None
+
+
+@pytest.mark.asyncio
+async def test_a_backend_error_ends_the_delegation_and_starts_the_next(monkeypatch):
+    service, recorder, session = await _client_delegation_service(monkeypatch)
+    service.push_error = AsyncMock()
+
+    await service._handle_client_delegation(_client_delegation("item_d1"))
+    await service._handle_client_delegation(_client_delegation("item_d2"))
+    await session.feed(BackendError(error="the provider is down"))
+
+    (append,) = recorder.of_type("session.commentary.append")
+    assert append["delegation_id"] == "item_d1"
+    assert "could not be completed" in append["content"]
+    service.push_error.assert_awaited_once()
+    assert len(session.requests) == 2
+    assert service._current_delegation is not None
+    assert service._current_delegation.id == "item_d2"
+
+
+@pytest.mark.asyncio
+async def test_a_delegation_the_backend_takes_too_long_on_is_abandoned(monkeypatch):
+    service, recorder, session = await _client_delegation_service(monkeypatch, timeout_secs=0.05)
+
+    await service._handle_client_delegation(_client_delegation("item_d1"))
+    await asyncio.sleep(0.2)
+
+    assert session.cancels == ["delegation timed out"]
+    (append,) = recorder.of_type("session.commentary.append")
+    assert append["delegation_id"] == "item_d1"
+    assert "could not be completed" in append["content"]
+    assert service._current_delegation is None
 
 
 @pytest.mark.asyncio
 async def test_the_backends_calls_are_reported_without_a_parent(monkeypatch):
-    async def fake_delegate_to_backend(*args, **kwargs):
-        yield BackendToolCall("in_progress", "get_weather", "toolu_1", arguments={"location": "DC"})
-        yield _BackendFinalOutput(BackendOutput(text="75 and nice."))
-
-    service, _ = await _client_delegation_service(monkeypatch, fake_delegate_to_backend)
+    service, _, session = await _client_delegation_service(monkeypatch)
     service.push_frame = AsyncMock()
 
-    await service._run_client_delegation(_client_delegation("item_d1"))
+    await service._handle_client_delegation(_client_delegation("item_d1"))
+    await session.feed(
+        BackendToolCall("in_progress", "get_weather", "toolu_1", arguments={"location": "DC"})
+    )
 
     (pushed,) = [c.args[0] for c in service.push_frame.await_args_list]
     assert isinstance(pushed, ExternalFunctionCallFrame)
@@ -1247,26 +1356,23 @@ async def test_the_backends_calls_are_reported_without_a_parent(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_a_delegation_that_produced_nothing_still_answers_the_model(monkeypatch):
-    async def silent_delegate_to_backend(*args, **kwargs):
-        for output in ():
-            yield output
+    service, recorder, session = await _client_delegation_service(monkeypatch)
 
-    service, recorder = await _client_delegation_service(monkeypatch, silent_delegate_to_backend)
-
-    await service._run_client_delegation(_client_delegation("item_d1"))
+    await service._handle_client_delegation(_client_delegation("item_d1"))
+    await session.feed(BackendIdle())
 
     (append,) = recorder.of_type("session.commentary.append")
+    assert append["delegation_id"] == "item_d1"
     assert "without an answer" in append["content"]
 
 
 @pytest.mark.asyncio
 async def test_long_delegation_results_are_chunked_at_sentence_boundaries(monkeypatch):
-    async def _delegate_to_backend(*args, **kwargs):
-        text = " ".join(f"Sentence number {i} is here." for i in range(120))
-        yield BackendOutput(text=text, prefers_spoken=True)
+    service, recorder, session = await _client_delegation_service(monkeypatch)
 
-    service, recorder = await _client_delegation_service(monkeypatch, _delegate_to_backend)
-    await service._run_client_delegation(_client_delegation("item_d1"))
+    await service._handle_client_delegation(_client_delegation("item_d1"))
+    text = " ".join(f"Sentence number {i} is here." for i in range(120))
+    await session.feed(BackendOutput(text=text, prefers_spoken=True))
 
     appends = recorder.of_type("session.commentary.append")
     assert len(appends) > 1
