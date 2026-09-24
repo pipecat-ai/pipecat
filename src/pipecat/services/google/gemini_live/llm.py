@@ -1164,6 +1164,7 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
         if self._disconnecting or not self._session:
             return
         self._content_awaiting_response = False
+        logger.debug(f"{self}: completing the turn for appended content")
         try:
             await self._session.send_client_content(turn_complete=True)
             # Gemini 3.x wants turn_complete=True, but also won't run inference

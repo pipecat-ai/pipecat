@@ -216,7 +216,7 @@ async def test_the_transcript_request_sends_only_what_the_backend_has_not_seen()
         "ASSISTANT: It's raining.\n"
         "USER: and boston?\n"
         "\n"
-        "Act on the user's most recent request in the conversation above."
+        "Act on the user's most recent request in the conversation above, and report its result as soon as you have it, before going on with other work."
     )
 
 
@@ -248,7 +248,10 @@ async def test_the_explicit_request_sends_the_model_words():
 
     await connector.delegate(_params(arguments={"request": "Weather in Seattle, Fahrenheit."}))
 
-    assert session.requests == ["Weather in Seattle, Fahrenheit."]
+    assert session.requests == [
+        "Weather in Seattle, Fahrenheit.\n\n"
+        "Report the result of this request as soon as you have it, before going on with other work."
+    ]
 
 
 # ---------------------------------------------------------------------------

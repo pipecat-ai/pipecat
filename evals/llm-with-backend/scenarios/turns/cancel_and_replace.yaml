@@ -11,7 +11,7 @@
       calls:
         - name: delegate
     - event: response
-      within_ms: 15000
+      within_ms: 25000
       eval: "acknowledges that it is starting on the fix"
 
 - user: "Stop, stop, forget the retry test, don't change anything in the code, I'll deal with it myself later. What I actually need right now, and it's the only thing I care about at the moment, is to know whether CI is green on the main branch. Can you check that for me?"

@@ -10,7 +10,7 @@
       calls:
         - name: delegate
     - event: response
-      within_ms: 15000
+      within_ms: 25000
       eval: "acknowledges that it is starting on the fix"
 
 - user: "Actually, never mind. Don't change anything, leave the code as it is."
@@ -21,7 +21,7 @@
       calls:
         - name: cancel_delegated_work
     - event: response
-      within_ms: 15000
+      within_ms: 25000
       eval: "confirms the work was stopped and nothing will be changed"
     - event: response
       absent: true

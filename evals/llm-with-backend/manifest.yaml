@@ -32,3 +32,23 @@ suite:
       - audio/cancel_delegation
       - audio/cancel_and_replace
       - audio/progress_inquiry
+  - bot: openai-realtime-frontend.py
+    scenarios:
+      - audio/frontend_only
+      - audio/delegate_ack
+      - audio/delegate_with_aside
+      - audio/concurrent_delegations
+      - audio/superseding_delegation
+      - audio/cancel_delegation
+      - audio/cancel_and_replace
+      - audio/progress_inquiry
+  - bot: gemini-live-frontend.py
+    scenarios:
+      - audio/frontend_only
+      - audio/delegate_ack
+      - audio/delegate_with_aside
+      - audio/concurrent_delegations
+      - audio/superseding_delegation
+      - audio/cancel_delegation
+      - audio/cancel_and_replace
+      - audio/progress_inquiry

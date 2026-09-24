@@ -11,9 +11,10 @@ each taking as long as the real thing plausibly would:
 
 - **Code changes**, a loop: ``search_codebase`` finds the files, ``read_file``
   reads them, ``apply_patch`` changes one, ``run_tests`` checks the result. The
-  first test run after a change to the HTTP client fails on one test, so the
-  backend has to read the test, patch again and run again before it can report
-  the change done. Twenty to thirty seconds end to end.
+  first test run after a change to the client trips a neighbouring test that
+  wants each retry delay reported to a metrics module, so the backend has to
+  read that test, patch again and run again before it can report the change
+  done. A minute or so end to end, most of it the model's own steps.
 - **Research**: ``search_docs`` then ``read_doc``, a few seconds each.
 - **Quick lookups**: ``check_ci_status`` and ``list_open_prs``, a second each.
 
@@ -53,26 +54,68 @@ the tests said."""
 
 _FILES = {
     "src/http_client.py": (
+        "import time\n\n\n"
+        "class TransientError(Exception):\n"
+        "    pass\n\n\n"
+        "class RetriesExhausted(Exception):\n"
+        "    pass\n\n\n"
         "class HttpClient:\n"
         "    RETRIES = 3\n"
         "    BACKOFF_SECS = 1\n\n"
+        "    def __init__(self, transport):\n"
+        "        self._transport = transport\n\n"
         "    def get(self, url):\n"
         "        for attempt in range(self.RETRIES):\n"
         "            try:\n"
-        "                return self._request(url)\n"
+        "                return self._transport(url)\n"
         "            except TransientError:\n"
         "                time.sleep(self.BACKOFF_SECS)\n"
         "        raise RetriesExhausted(url)\n"
     ),
     "tests/test_http_client.py": (
-        "def test_retry_backoff(monkeypatch, client):\n"
-        "    sleeps = record_sleeps(monkeypatch)\n"
-        "    client.get('https://example.test/flaky')\n"
+        "import time\n\n"
+        "from src.http_client import HttpClient, TransientError\n\n\n"
+        "def flaky(fail_times):\n"
+        "    calls = []\n\n"
+        "    def transport(url):\n"
+        "        calls.append(url)\n"
+        "        if len(calls) <= fail_times:\n"
+        "            raise TransientError()\n"
+        "        return 'ok'\n\n"
+        "    return transport\n\n\n"
+        "def test_retry_backoff(monkeypatch):\n"
+        "    sleeps = []\n"
+        "    monkeypatch.setattr(time, 'sleep', sleeps.append)\n"
+        "    HttpClient(flaky(2)).get('https://example.test/flaky')\n"
         "    # The backoff between retries must grow, or a busy upstream\n"
         "    # gets hammered at a fixed rate.\n"
-        "    assert sleeps == sorted(sleeps) and sleeps[0] < sleeps[-1]\n"
+        "    assert sleeps == sorted(sleeps) and sleeps[0] < sleeps[-1]\n\n\n"
+        "def test_first_retry_waits_one_base_interval(monkeypatch):\n"
+        "    sleeps = []\n"
+        "    monkeypatch.setattr(time, 'sleep', sleeps.append)\n"
+        "    HttpClient(flaky(1)).get('https://example.test/flaky')\n"
+        "    assert sleeps[0] == HttpClient.BACKOFF_SECS\n"
     ),
-    "src/retry_policy.py": "def next_delay(attempt, base=1):\n    return base\n",
+    "src/metrics.py": (
+        "_backoffs = []\n\n\n"
+        "def record_backoff(attempt, delay):\n"
+        "    # Report one retry delay, so the retry dashboard can chart them.\n"
+        "    _backoffs.append((attempt, delay))\n"
+    ),
+    "tests/test_retry_metrics.py": (
+        "import time\n\n"
+        "from src import metrics\n"
+        "from src.http_client import HttpClient\n"
+        "from tests.test_http_client import flaky\n\n\n"
+        "def test_every_retry_delay_is_recorded(monkeypatch):\n"
+        "    monkeypatch.setattr(time, 'sleep', lambda secs: None)\n"
+        "    recorded = []\n"
+        "    monkeypatch.setattr(metrics, 'record_backoff', lambda attempt, delay: recorded.append(delay))\n"
+        "    HttpClient(flaky(2)).get('https://example.test/flaky')\n"
+        "    # The dashboard charts what the client actually waited, so the client\n"
+        "    # reports each delay before sleeping it.\n"
+        "    assert len(recorded) == 2\n"
+    ),
 }
 
 _DOCS = {
@@ -89,8 +132,7 @@ _DOCS = {
         "title": "HTTP client guide",
         "summary": (
             "HttpClient wraps requests with retries, timeouts and tracing. Retry behaviour is "
-            "governed by RFC 12; the client's BACKOFF_SECS constant predates it and is due to "
-            "be replaced with a call into retry_policy.next_delay."
+            "governed by RFC 12; the client's fixed BACKOFF_SECS sleep predates it."
         ),
     },
     "oncall-runbook": {
@@ -102,8 +144,8 @@ _DOCS = {
     },
 }
 
-# Patches applied to each file, in order. The test run reads this to decide
-# whether the retry test passes.
+# Changes applied to each file, in order. The test run reads this to decide
+# what passes.
 _patches: dict[str, list[str]] = {}
 
 
@@ -141,19 +183,20 @@ async def read_file(params: FunctionCallParams, path: str):
     await params.result_callback({"path": path, "content": _FILES[path]})
 
 
-async def apply_patch(params: FunctionCallParams, path: str, description: str):
-    """Change a file in the codebase.
+async def apply_patch(params: FunctionCallParams, path: str, content: str):
+    """Replace a file's content in the codebase.
 
     Args:
         path: The file to change.
-        description: What the change does, in a sentence.
+        content: The file's new content, in full.
     """
     await _work(2)
     if path not in _FILES:
         await params.result_callback({"error": f"no such file: {path}"})
         return
-    _patches.setdefault(path, []).append(description)
-    await params.result_callback({"path": path, "applied": description})
+    _FILES[path] = content
+    _patches.setdefault(path, []).append(content)
+    await params.result_callback({"path": path, "applied": True, "lines": content.count("\n")})
 
 
 @tool_options(cancel_on_interruption=False)
@@ -164,29 +207,34 @@ async def run_tests(params: FunctionCallParams, path: str | None = None):
         path: A test file to run alone; the whole suite when omitted.
     """
     await _work(5)
-    # The first change to the client leaves the backoff test failing: a
-    # retry policy that the client does not actually call. The second
-    # change, whatever it is, is taken to wire it in.
-    client_patches = len(_patches.get("src/http_client.py", []))
-    if client_patches == 1:
-        await params.result_callback(
+    # The first change to the client fixes the backoff and trips a
+    # neighbouring test the backend has not seen, which wants each delay
+    # reported to the metrics module; the second change is taken to do that.
+    # A change to the tests alone leaves the client as it was.
+    changes = len(_patches.get("src/http_client.py", []))
+    if changes == 0:
+        failures = [
             {
-                "passed": 41,
-                "failed": 1,
-                "failures": [
-                    {
-                        "test": "tests/test_http_client.py::test_retry_backoff",
-                        "message": (
-                            "assert [1, 1, 1] == sorted([1, 1, 1]) and 1 < 1: the retry "
-                            "delays do not grow; HttpClient.get still sleeps BACKOFF_SECS "
-                            "on every attempt"
-                        ),
-                    }
-                ],
+                "test": "tests/test_http_client.py::test_retry_backoff",
+                "message": "assert [1, 1] == sorted([1, 1]) and 1 < 1: the retry delays do not grow",
             }
-        )
-        return
-    await params.result_callback({"passed": 42, "failed": 0, "failures": []})
+        ]
+    elif changes == 1:
+        failures = [
+            {
+                "test": "tests/test_retry_metrics.py::test_every_retry_delay_is_recorded",
+                "message": (
+                    "assert 0 == 2: no retry delay was recorded; the client must call "
+                    "metrics.record_backoff(attempt, delay) before each sleep (see "
+                    "tests/test_retry_metrics.py)"
+                ),
+            }
+        ]
+    else:
+        failures = []
+    await params.result_callback(
+        {"passed": 42 - len(failures), "failed": len(failures), "failures": failures}
+    )
 
 
 @tool_options(cancel_on_interruption=False)
@@ -264,6 +312,10 @@ def build_backend() -> BackendLLMWorker:
                 # Thinking summaries reach the frontend as silent "Backend (thinking):"
                 # messages, so it can say how the work is going if asked.
                 thinking=AnthropicLLMService.ThinkingConfig(type="adaptive", display="summarized"),
+                # Thinking counts against max_tokens; a long think on the default
+                # budget leaves no room for the tool call that follows it, and the
+                # loop stalls on a response with neither text nor a call.
+                max_tokens=16384,
             ),
         ),
         context=LLMContext(

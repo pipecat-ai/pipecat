@@ -38,6 +38,7 @@ from pipecat.services.llm_service import FunctionCallParams, LLMService
 from pipecat.workers.base_worker import BaseWorker
 from pipecat.workers.llm.backend_llm_worker import (
     _DEFAULT_TRANSCRIPT_INSTRUCTION,
+    _REPORT_INSTRUCTION,
     BackendError,
     BackendEvent,
     BackendIdle,
@@ -84,7 +85,9 @@ _MESSAGES_INSTRUCTION = (
     "After delegating, acknowledge briefly, without offering updates or asking whether to "
     "go ahead, and do whatever else the user asked that you can do yourself. The result says "
     "whether the backend was idle or already working; if it was working, your request joins "
-    "that work.\n\n"
+    "that work. The backend sees nothing of the conversation but what you delegate, so every "
+    "new request that needs it takes a delegate call of its own, even while it is still "
+    "working on an earlier one.\n\n"
     "BACKEND MESSAGES: The backend works on its own after you delegate and may be doing "
     "several things at once. What it has to say arrives as messages in the conversation "
     f'marked "{BACKEND_MESSAGE_PREFIX.strip()}": a result, a question for the user, or news '
@@ -236,16 +239,20 @@ class ExplicitBackendRequestStrategy(BackendRequestStrategy):
         "request": {
             "type": "string",
             "description": (
-                "The request, self-contained: the user's goal, the details they gave "
-                "(places, dates, names) and their latest correction."
+                "What the user is asking for now, self-contained: their goal, the details "
+                "they gave (places, dates, names) and their latest correction. Work already "
+                "handed over stays with the backend; a new request joins it, so do not "
+                "restate earlier requests."
             ),
         }
     }
     tool_required = ["request"]
     frontend_instruction = _DELEGATION_POLICY + (
         "Word the request so it stands on its own: the user's goal, the exact details "
-        "they gave and their latest correction, with everything they asked for in the one "
-        "request, so you delegate once per reply however many things that is."
+        "they gave and their latest correction, with everything new they asked for in the "
+        "one request, so you delegate once per reply however many things that is. Work "
+        "already handed over stays with the backend: a new request joins it, so do not "
+        "restate earlier requests, and a correction names what changes."
     )
 
     def tool_description(self) -> str:
@@ -255,13 +262,15 @@ class ExplicitBackendRequestStrategy(BackendRequestStrategy):
             "backend tool or careful reasoning. Call this as soon as any part of what the "
             "user asks needs that, with the request worded to stand on its own, and do the "
             "rest yourself. One call per reply, however many things the user asked for: two "
-            "questions, or one question about two places, go in one request. Keep talking "
+            "questions, or one question about two places, go in one request. Work already "
+            "handed over stays with the backend, so send only what is new. Keep talking "
             "with the user while it works."
         )
 
     async def compose_request(self, params: FunctionCallParams) -> str | None:
-        """Send the model's request as it stands."""
-        return str(params.arguments.get("request") or "").strip() or None
+        """Send the model's request as it stands, with the reporting expectation after it."""
+        request = str(params.arguments.get("request") or "").strip()
+        return f"{request}\n\n{_REPORT_INSTRUCTION}" if request else None
 
 
 def _is_backend_message(message: LLMContextMessage) -> bool:
@@ -497,6 +506,10 @@ class BackendConnector:
             event: What the backend produced.
         """
         if isinstance(event, BackendOutput):
+            logger.debug(
+                f"Backend output ({'spoken' if event.prefers_spoken else 'silent'}"
+                f"{', thought' if event.is_thought else ''}): {event.text!r}"
+            )
             message = self.render_output(event)
             if message is not None:
                 await frontend.queue_frame(
