@@ -295,7 +295,7 @@ class BaseClassifier(BaseObject):
         data: list[MetricsData] = [
             ProcessingMetricsData(processor=self.name, model=self.model, value=seconds)
         ]
-        if usage is not None:
+        if usage:
             data.append(LLMUsageMetricsData(processor=self.name, model=self.model, value=usage))
         return data
 
