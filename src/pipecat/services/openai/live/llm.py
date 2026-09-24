@@ -1018,7 +1018,8 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
                 self._backend_session = session
                 async for event in session:
                     await self._on_backend_event(event)
-            logger.warning(f"{self}: backend '{backend_name}' went away")
+                if not session.detached:
+                    logger.warning(f"{self}: backend '{backend_name}' went away")
         except asyncio.CancelledError:
             raise
         except Exception as e:
