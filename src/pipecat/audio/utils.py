@@ -130,6 +130,7 @@ def pcm_to_wav(
     Returns:
         A complete in-memory WAV file as bytes.
     """
+    pcm = memoryview(pcm).cast("B")
     block_align = 2 * num_channels
     remainder = len(pcm) % block_align
     if remainder:
