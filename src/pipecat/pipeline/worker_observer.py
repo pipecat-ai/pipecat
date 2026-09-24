@@ -107,6 +107,7 @@ class WorkerObserver(BaseObserver):
             observer: The observer to remove.
         """
         # If the observer has a proxy, remove it.
+        proxy = None
         if self._proxies and observer in self._proxies:
             proxy = self._proxies[observer]
             # Remove the proxy so it doesn't get called anymore.
@@ -118,6 +119,9 @@ class WorkerObserver(BaseObserver):
         # Remove the observer from the list.
         if observer in self._observers:
             self._observers.remove(observer)
+
+        if proxy is not None:
+            await observer.cleanup()
 
     async def setup(self, task_manager: BaseTaskManager):
         """Set up a proxy for every managed observer.
