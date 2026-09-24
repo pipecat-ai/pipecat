@@ -55,7 +55,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.aggregators import async_tool_messages
 from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
+from pipecat.services.llm_service import FunctionCallFromLLM, LLMService, LLMWithBackendRole
 from pipecat.services.settings import LLMSettings
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
@@ -452,6 +452,15 @@ class UltravoxRealtimeLLMService(LLMService):
     def _service_tools(self) -> "ToolsSchema | None":
         """Return the ``one_shot_selected_tools`` configured at construction, if any."""
         return self._selected_tools
+
+    def llm_with_backend_role_objection(self, role: LLMWithBackendRole) -> str | None:
+        """Decline the frontend role: built-in tools never reach an Ultravox session."""
+        if role == "frontend":
+            return (
+                "UltravoxRealtimeLLMService cannot be an LLMWithBackend frontend: built-in "
+                "tools do not reach its session, so its model never sees the delegate tool"
+            )
+        return None
 
     @property
     def accepts_intermediate_function_call_results(self) -> bool:
