@@ -31,4 +31,4 @@
 - expect:
     - event: response
       within_ms: 200000
-      eval: "reports both of these, in either order: what the on-call runbook says about upstream timeouts (check the upstream's status page, then the retry dashboard for a spike in exhausted retries), and that the retry test was fixed and the tests now pass (until both have been reported, answer continue, not no)"
+      eval: "answer continue, not no, while only one of these two has been reported so far; answer yes once both have been, in either order: what the on-call runbook says about upstream timeouts (check the upstream's status page, then the retry dashboard for a spike in exhausted retries), and that the retry test was fixed and the tests now pass"
