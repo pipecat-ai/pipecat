@@ -62,6 +62,23 @@ class TestObserverSetup(unittest.IsolatedAsyncioTestCase):
         self.assertIs(self.survivor.task_manager, self.task_manager)
         self.assertEqual(self.survivor.calls, [True])
 
+    async def test_duplicate_runtime_registration_keeps_one_proxy(self):
+        existing_tasks = set(self.task_manager.current_tasks())
+        self.worker.add_observer(self.survivor)
+        self.assertEqual(set(self.task_manager.current_tasks()), existing_tasks)
+        await self.worker.on_pipeline_started()
+        await asyncio.wait_for(self.survivor.received.wait(), timeout=2)
+        self.assertEqual(self.survivor.setup_calls, 1)
+
+    async def test_remove_then_readd_starts_one_new_proxy(self):
+        await self.worker.remove_observer(self.survivor)
+        self.assertFalse(self.task_manager.current_tasks())
+        self.worker.add_observer(self.survivor)
+        await self.worker.on_pipeline_started()
+        await asyncio.wait_for(self.survivor.received.wait(), timeout=2)
+        self.assertEqual(self.survivor.setup_calls, 2)
+        self.assertEqual(len(self.task_manager.current_tasks()), 1)
+
     async def test_slow_setup_queues_events_without_blocking_other_observers(self):
         observer = SetupObserver(gated=True)
         self.worker.add_observer(observer)
@@ -108,3 +125,37 @@ class TestObserverSetup(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(observer.ready)
         self.assertEqual(observer.calls, [])
         self.assertFalse(self.task_manager.current_tasks())
+
+
+class TestInitialObserverDeduplication(unittest.IsolatedAsyncioTestCase):
+    async def test_same_instance_in_initial_list_creates_one_proxy(self):
+        manager = TaskManager()
+        observer = SetupObserver()
+        worker = WorkerObserver(observers=[observer, observer])
+        try:
+            await worker.setup(manager)
+            self.assertEqual(observer.setup_calls, 1)
+            self.assertEqual(len(manager.current_tasks()), 1)
+            await worker.remove_observer(observer)
+            self.assertFalse(manager.current_tasks())
+        finally:
+            await worker.cleanup()
+            for task in list(manager.current_tasks()):
+                await manager.cancel_task(task)
+
+    async def test_repeated_add_before_setup_creates_one_proxy(self):
+        manager = TaskManager()
+        observer = SetupObserver()
+        worker = WorkerObserver()
+        worker.add_observer(observer)
+        worker.add_observer(observer)
+        try:
+            await worker.setup(manager)
+            self.assertEqual(observer.setup_calls, 1)
+            self.assertEqual(len(manager.current_tasks()), 1)
+            await worker.remove_observer(observer)
+            self.assertFalse(manager.current_tasks())
+        finally:
+            await worker.cleanup()
+            for task in list(manager.current_tasks()):
+                await manager.cancel_task(task)

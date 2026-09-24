@@ -77,7 +77,7 @@ class WorkerObserver(BaseObserver):
             **kwargs: Additional arguments passed to the base observer.
         """
         super().__init__(**kwargs)
-        self._observers = observers or []
+        self._observers = list(dict.fromkeys(observers or []))
         self._proxies: dict[BaseObserver, Proxy] | None = (
             None  # Becomes a dict after start() is called
         )
@@ -85,9 +85,14 @@ class WorkerObserver(BaseObserver):
     def add_observer(self, observer: BaseObserver):
         """Add a new observer to the managed list.
 
+        Adding an already registered observer has no effect.
+
         Args:
             observer: The observer to add.
         """
+        if observer in self._observers:
+            return
+
         # Add the observer to the list.
         self._observers.append(observer)
 
