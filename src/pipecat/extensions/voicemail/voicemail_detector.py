@@ -271,15 +271,12 @@ class VoicemailDetector(FrameProcessor):
         self._last_result: ChoiceResult | None = None
         self._decision: _Verdict | None = None
 
-        # The silence timer: after the caller stops, it acts on the best answer.
+        # Two silence timers, each restarted by speech. The decision timer acts
+        # on the latest answer once the caller has stopped; after a voicemail
+        # verdict, the message timer fires the handler once the greeting has.
         self._user_speaking = False
-        self._fallback_task: asyncio.Task | None = None
-
-        # The voicemail handler fires once the greeting has been quiet for
-        # the response delay; speech resets the wait.
-        self._voicemail_task: asyncio.Task | None = None
-        self._voicemail_event = asyncio.Event()
-        self._voicemail_event.set()
+        self._decision_task: asyncio.Task | None = None
+        self._message_task: asyncio.Task | None = None
 
         self._register_event_handler("on_conversation_detected")
         self._register_event_handler("on_voicemail_detected")
@@ -311,7 +308,6 @@ class VoicemailDetector(FrameProcessor):
         await super().setup(setup)
         await self._classifier.setup(self.task_manager)
         self._classify_task = self.create_task(self._classify_segments())
-        self._voicemail_task = self.create_task(self._delayed_voicemail_handler())
 
     async def cleanup(self):
         """Clean up the processor and its classifier."""
@@ -319,10 +315,8 @@ class VoicemailDetector(FrameProcessor):
         if self._classify_task:
             await self.cancel_task(self._classify_task)
             self._classify_task = None
-        await self._cancel_fallback()
-        if self._voicemail_task:
-            await self.cancel_task(self._voicemail_task)
-            self._voicemail_task = None
+        await self._cancel_decision_timer()
+        await self._cancel_message_timer()
         await self._classifier.cleanup()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -338,19 +332,18 @@ class VoicemailDetector(FrameProcessor):
             self._segments.put_nowait(frame.text.strip())
             # A transcription often lands after the caller has stopped; the
             # silence timer restarts from it.
-            if not self._user_speaking and self._decision is None:
-                await self._restart_fallback()
+            if not self._user_speaking and not self._decision:
+                await self._restart_decision_timer()
         elif isinstance(frame, UserStartedSpeakingFrame):
             self._user_speaking = True
-            await self._cancel_fallback()
-            if self._decision == "voicemail":
-                self._voicemail_event.set()
+            await self._cancel_decision_timer()
+            await self._cancel_message_timer()
         elif isinstance(frame, UserStoppedSpeakingFrame):
             self._user_speaking = False
-            if self._decision is None:
-                await self._restart_fallback()
+            if not self._decision:
+                await self._restart_decision_timer()
             elif self._decision == "voicemail":
-                self._voicemail_event.clear()
+                await self._restart_message_timer()
 
         # After a voicemail verdict nothing more should reach the conversation,
         # only the frames that end or control the pipeline.
@@ -371,7 +364,7 @@ class VoicemailDetector(FrameProcessor):
                 segments.append(self._segments.get_nowait())
             self._transcript.extend(segments)
             # Nothing to ask once the verdict is in.
-            if self._decision is None:
+            if not self._decision:
                 await self._classify(" ".join(self._transcript))
             # Lets the silence timer know the transcript is fully classified.
             for _ in segments:
@@ -391,16 +384,16 @@ class VoicemailDetector(FrameProcessor):
         # them apart, so the silence timer decides.
         self._last_result = result
 
-    async def _restart_fallback(self):
-        """Start the silence timer over."""
-        await self._cancel_fallback()
-        self._fallback_task = self.create_task(self._decide_after_silence())
+    async def _restart_decision_timer(self):
+        """Start the decision timer over."""
+        await self._cancel_decision_timer()
+        self._decision_task = self.create_task(self._decide_after_silence())
 
-    async def _cancel_fallback(self):
-        """Stop the silence timer, if it is running."""
-        if self._fallback_task is not None:
-            await self.cancel_task(self._fallback_task)
-            self._fallback_task = None
+    async def _cancel_decision_timer(self):
+        """Stop the decision timer, if it is running."""
+        if self._decision_task:
+            await self.cancel_task(self._decision_task)
+            self._decision_task = None
 
     async def _decide_after_silence(self):
         """Act on the latest answer once the caller has been quiet long enough.
@@ -411,9 +404,9 @@ class VoicemailDetector(FrameProcessor):
         await asyncio.sleep(self._decision_timeout)
         # The answer for everything heard so far, once a call in flight is done.
         await self._segments.join()
-        if self._decision is not None:
+        if self._decision:
             return
-        if self._last_result is not None:
+        if self._last_result:
             logger.info(
                 f"{self}: {self._last_result.choice} ({self._last_result.confidence:.2f}) "
                 f"after {self._decision_timeout}s of silence"
@@ -434,24 +427,28 @@ class VoicemailDetector(FrameProcessor):
             logger.info(f"{self}: VOICEMAIL detected")
             await self._voicemail_notifier.notify()
             await self.broadcast_interruption()
-            self._voicemail_event.clear()
+            await self._restart_message_timer()
         else:
             logger.info(f"{self}: CONVERSATION detected")
             await self._conversation_notifier.notify()
             await self._call_event_handler("on_conversation_detected")
 
+    async def _restart_message_timer(self):
+        """Start the message timer over."""
+        await self._cancel_message_timer()
+        self._message_task = self.create_task(self._leave_message_after_quiet())
+
+    async def _cancel_message_timer(self):
+        """Stop the message timer, if it is running."""
+        if self._message_task:
+            await self.cancel_task(self._message_task)
+            self._message_task = None
+
+    async def _leave_message_after_quiet(self):
+        """Fire ``on_voicemail_detected`` once the greeting has been quiet for the delay."""
+        await asyncio.sleep(self._voicemail_response_delay)
+        await self._call_event_handler("on_voicemail_detected")
+
     async def _on_classifier_metrics(self, classifier: BaseClassifier, data: list[MetricsData]):
         """Push the classifier's metrics into the pipeline."""
         await self.push_frame(MetricsFrame(data=data))
-
-    async def _delayed_voicemail_handler(self):
-        """Fire ``on_voicemail_detected`` once the greeting has been quiet for the delay."""
-        while True:
-            try:
-                await asyncio.wait_for(
-                    self._voicemail_event.wait(), timeout=self._voicemail_response_delay
-                )
-                await asyncio.sleep(0.1)
-            except TimeoutError:
-                await self._call_event_handler("on_voicemail_detected")
-                break

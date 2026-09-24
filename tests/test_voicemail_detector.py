@@ -152,9 +152,11 @@ class TestVoicemailDetectorVerdicts(unittest.IsolatedAsyncioTestCase):
         await run_test(
             detector,
             frames_to_send=[
+                UserStartedSpeakingFrame(),
                 _said("Hi,"),
                 SleepFrame(0.2),
                 _said("you've reached Sam. Leave a message."),
+                UserStoppedSpeakingFrame(),
                 SleepFrame(VERDICT_SETTLE),
             ],
             start_timeout=5.0,
@@ -173,9 +175,11 @@ class TestVoicemailDetectorVerdicts(unittest.IsolatedAsyncioTestCase):
         await run_test(
             detector,
             frames_to_send=[
+                UserStartedSpeakingFrame(),
                 _said("Hello?"),
                 SleepFrame(0.2),
                 _said("Anyone there?"),
+                UserStoppedSpeakingFrame(),
                 SleepFrame(VERDICT_SETTLE),
             ],
             start_timeout=5.0,
