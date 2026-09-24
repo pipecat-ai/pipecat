@@ -671,10 +671,12 @@ class TestDrainCancelledResponse:
         assert len(cancel_calls) == 1
 
     @pytest.mark.asyncio
-    async def test_drain_timeout_clears_state(self):
-        """If draining times out, should clear cancellation state."""
+    async def test_drain_timeout_clears_state_and_reconnects(self):
+        """A drain that times out leaves the abandoned response's events on the
+        socket, so the connection is replaced rather than reused."""
         service = _make_service()
         service._needs_drain = True
+        service._try_reconnect = AsyncMock(return_value=True)
 
         mock_ws = AsyncMock()
         # recv() never returns a terminal event — times out
@@ -685,6 +687,58 @@ class TestDrainCancelledResponse:
 
         assert not service._needs_drain
         assert not service._cancel_pending_response
+        service._try_reconnect.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_drain_gives_up_after_its_budget(self):
+        """The budget bounds the whole drain, not each event."""
+        service = _make_service()
+        service._needs_drain = True
+        service._try_reconnect = AsyncMock(return_value=True)
+        service._websocket = _ws_script(
+            {"type": "response.output_text.delta", "delta": "stale"},
+            0.2,  # longer than the budget below
+            {"type": "response.completed", "response": {"id": "resp_old"}},
+        )
+
+        with patch("pipecat.services.openai.responses.llm.CANCELLED_RESPONSE_DRAIN_SECS", 0.05):
+            await service._drain_cancelled_response()
+
+        assert not service._needs_drain
+        service._try_reconnect.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_drain_within_budget_keeps_the_connection(self):
+        service = _make_service()
+        service._needs_drain = True
+        service._try_reconnect = AsyncMock(return_value=True)
+        ws = _ws_events(
+            {"type": "response.output_text.delta", "delta": "stale"},
+            {"type": "response.completed", "response": {"id": "resp_old"}},
+        )
+        service._websocket = ws
+
+        await service._drain_cancelled_response()
+
+        assert not service._needs_drain
+        assert service._websocket is ws
+        service._try_reconnect.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_drain_clears_previous_response_state(self):
+        """The cancelled response replaces the one the next request would chain
+        from, so the next request must send the full context."""
+        service = _make_service()
+        service._needs_drain = True
+        service._store_previous_response_state("resp_1", [{"role": "user", "content": "hi"}], [])
+        service._websocket = _ws_events(
+            {"type": "response.completed", "response": {"id": "resp_old"}},
+        )
+
+        await service._drain_cancelled_response()
+
+        assert service._previous_response_id is None
+        assert service._previous_input_hash is None
 
 
 # ---------------------------------------------------------------------------

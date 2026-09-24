@@ -68,6 +68,12 @@ from pipecat.utils.http import TIMEOUT_EXCEPTIONS, connection_limits
 from pipecat.utils.tracing.service_decorators import traced_llm
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
+# How long to wait for a cancelled response's remaining events before replacing
+# the connection instead. The server keeps generating a cancelled response, so
+# the wait would otherwise last as long as the rest of that reply takes, while
+# a new connection costs about a second.
+CANCELLED_RESPONSE_DRAIN_SECS = 1.0
+
 # ---------------------------------------------------------------------------
 # Private retry exception classes
 # ---------------------------------------------------------------------------
@@ -871,28 +877,37 @@ class OpenAIResponsesLLMService(
         """Drain events from a cancelled response before starting a new one.
 
         After a cancellation, the WebSocket may still have in-flight events
-        from the cancelled response.  We must drain them before sending a
-        new ``response.create`` — we can't simply filter them inline because
-        the API doesn't provide a reliable way to correlate events to a
-        specific response (e.g. delta events carry neither a
-        ``response_id`` nor any intermediary identifier that could be
-        traced back to one).
+        from the cancelled response. They must not be read as the next
+        response's, and they cannot be filtered inline: delta events carry
+        neither a ``response_id`` nor any intermediary identifier that could
+        be traced back to one.
 
-        This method reads and discards events until a terminal event
-        (``response.completed``, ``response.failed``, or
-        ``response.incomplete``) arrives, ensuring the connection is clean.
-        If draining times out or the connection drops, clears cancellation
-        state and returns — ``_ensure_connected`` will handle reconnection
-        before the next inference.
+        The server keeps generating a cancelled response, so this reads and
+        discards events until a terminal event (``response.completed``,
+        ``response.failed`` or ``response.incomplete``) arrives or
+        ``CANCELLED_RESPONSE_DRAIN_SECS`` run out. Past that budget the
+        connection is replaced, so the next inference starts on one that
+        carries no events from the abandoned response. A dropped connection
+        is left to ``_ensure_connected``.
+
+        The cancelled response is now the connection's latest, so the
+        response the next request would otherwise chain from can no longer
+        be continued; the ``previous_response_id`` state is cleared and the
+        next request sends the full context.
         """
         if not self._websocket:
             self._clear_cancellation_state()
             return
 
+        self._clear_previous_response_state()
+
         logger.debug(f"{self}: Draining cancelled response events")
+        deadline = time.monotonic() + CANCELLED_RESPONSE_DRAIN_SECS
         try:
             while True:
-                raw = await asyncio.wait_for(self._websocket.recv(), timeout=5.0)
+                raw = await asyncio.wait_for(
+                    self._websocket.recv(), timeout=max(deadline - time.monotonic(), 0)
+                )
                 event = json.loads(raw)
                 event_type = event.get("type")
 
@@ -922,7 +937,14 @@ class OpenAIResponsesLLMService(
                     )
                     self._clear_cancellation_state()
                     return
-        except (TimeoutError, WebsocketReconnectedError, ConnectionClosed) as e:
+        except TimeoutError:
+            logger.warning(
+                f"{self}: Cancelled response still streaming after "
+                f"{CANCELLED_RESPONSE_DRAIN_SECS}s — reconnecting"
+            )
+            self._clear_cancellation_state()
+            await self._try_reconnect(report_error=self._report_error)
+        except (WebsocketReconnectedError, ConnectionClosed) as e:
             logger.warning(f"{self}: Error draining cancelled response: {e}")
             self._clear_cancellation_state()
 
