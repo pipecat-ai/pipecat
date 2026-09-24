@@ -693,10 +693,10 @@ async def test_an_attached_frontend_hears_the_backend_work_a_request_through():
     await _drive(runner, requester, backend, body)
 
     assert statuses == ["idle"]
-    # A turn that called tools is narration; the one that did not is spoken.
+    # Everything the model writes asks to be spoken.
     outputs = [e for e in events if isinstance(e, BackendOutput)]
     assert outputs == [
-        BackendOutput(text="Let me check.", prefers_spoken=False),
+        BackendOutput(text="Let me check.", prefers_spoken=True),
         BackendOutput(text="It's 62 and raining in Seattle.", prefers_spoken=True),
     ]
     calls = [e for e in events if isinstance(e, BackendToolCall)]
@@ -711,8 +711,8 @@ async def test_an_attached_frontend_hears_the_backend_work_a_request_through():
 
 
 @pytest.mark.asyncio
-async def test_a_message_sent_while_the_backend_works_joins_the_work():
-    """The second request is taken up after the current step, with both in view."""
+async def test_a_message_sent_while_the_model_runs_is_taken_up_by_the_next_run():
+    """No run of its own: the run that follows the current step sees the request beside the result."""
     lookup_started = asyncio.Event()
     lookup_may_finish = asyncio.Event()
 
@@ -722,11 +722,14 @@ async def test_a_message_sent_while_the_backend_works_joins_the_work():
         await lookup_may_finish.wait()
         await params.result_callback({"found": True})
 
+    # The response stays open for a while after issuing its call, so the second
+    # message arrives while the model is still busy with the first.
     llm = _ScriptedLLM(
         [
             [("call", "slow_lookup", "call_1", {})],
             [("text", "Done with both.")],
-        ]
+        ],
+        settle_secs=1.0,
     )
     backend, requester, runner = _attached_backend(llm, tools=[slow_lookup])
     statuses: list[str] = []
@@ -743,10 +746,56 @@ async def test_a_message_sent_while_the_backend_works_joins_the_work():
     await _drive(runner, requester, backend, body)
 
     assert statuses == ["idle", "working"]
-    # The run after the lookup saw both requests.
-    users = [m["content"] for m in llm.contexts_seen[-1] if m.get("role") == "user"]
+    assert len(llm.contexts_seen) == 2
+    users = [m["content"] for m in llm.contexts_seen[1] if m.get("role") == "user"]
     assert users == ["First", "Second"]
     assert [e.text for e in events if isinstance(e, BackendOutput)] == ["Done with both."]
+
+
+@pytest.mark.asyncio
+async def test_a_message_sent_while_only_a_tool_is_in_flight_runs_at_once():
+    """The model is idle, so the request does not wait on the tool."""
+    lookup_started = asyncio.Event()
+    lookup_may_finish = asyncio.Event()
+
+    async def slow_lookup(params: FunctionCallParams):
+        """Look something up, slowly."""
+        lookup_started.set()
+        await lookup_may_finish.wait()
+        await params.result_callback({"found": True})
+
+    llm = _ScriptedLLM(
+        [
+            [("call", "slow_lookup", "call_1", {})],
+            [("text", "On the second thing now.")],
+            [("text", "And the lookup is done.")],
+        ]
+    )
+    backend, requester, runner = _attached_backend(llm, tools=[slow_lookup])
+    events: list = []
+
+    async def body():
+        async with _BackendSession(requester, "backend") as session:
+            await session.send("First")
+            await asyncio.wait_for(lookup_started.wait(), 5)
+            assert (await session.send("Second")) == "working"
+            async for event in session:
+                events.append(event)
+                if isinstance(event, BackendOutput):
+                    break
+            lookup_may_finish.set()
+            events.extend(await _until_idle(session))
+
+    await _drive(runner, requester, backend, body)
+
+    # The second request ran before the lookup returned, on a context that
+    # still had the call in progress.
+    assert [e.text for e in events if isinstance(e, BackendOutput)] == [
+        "On the second thing now.",
+        "And the lookup is done.",
+    ]
+    assert len(llm.contexts_seen) == 3
+    assert "Second" in [m.get("content") for m in llm.contexts_seen[1]]
 
 
 @pytest.mark.asyncio
