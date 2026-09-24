@@ -548,6 +548,21 @@ class TestUserIdleController(unittest.IsolatedAsyncioTestCase):
 
         await controller.cleanup()
 
+    async def test_waiting_for_user(self):
+        """Test that waiting_for_user follows the bot finishing and the user speaking."""
+        controller = UserIdleController(user_idle_timeout=USER_IDLE_TIMEOUT)
+        await controller.setup(frame_processor_setup(self.task_manager))
+
+        self.assertFalse(controller.waiting_for_user)
+        await controller.process_frame(BotStoppedSpeakingFrame())
+        self.assertTrue(controller.waiting_for_user)
+        await controller.process_frame(UserStartedSpeakingFrame())
+        self.assertFalse(controller.waiting_for_user)
+        await controller.process_frame(UserStoppedSpeakingFrame())
+        self.assertFalse(controller.waiting_for_user)
+
+        await controller.cleanup()
+
 
 if __name__ == "__main__":
     unittest.main()

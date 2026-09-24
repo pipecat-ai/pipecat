@@ -10,11 +10,11 @@ from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     Frame,
-    FunctionCallInProgressFrame,
+    FunctionCallFromLLM,
+    FunctionCallsStartedFrame,
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
-    LLMRunFrame,
     TranscriptionFrame,
     TTSTextFrame,
     VADUserStartedSpeakingFrame,
@@ -91,6 +91,11 @@ def _transcribed_turn(text: str) -> list[Frame]:
     ]
 
 
+def _bot_idle() -> list[Frame]:
+    """The bot has finished speaking and is waiting for the user."""
+    return [BotStoppedSpeakingFrame(), SleepFrame()]
+
+
 def _bot_speaking() -> list[Frame]:
     """A bot response that is still being spoken."""
     return [
@@ -127,30 +132,39 @@ class TestEmptyUserTurn(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(messages[-2], {"role": "assistant", "content": "Where would"})
 
     async def test_interrupted_before_response_started(self):
-        # The LLM was asked for a response that hadn't started when the user
-        # spoke: nothing was heard, and the interruption cancelled it.
+        # The previous turn's response hadn't started when the user spoke:
+        # nothing was heard, and the interruption cancelled it.
         context, inferences = await self._run(
-            [LLMRunFrame(), SleepFrame(), *_empty_turn()], empty_user_turn=self._config()
+            [*_bot_idle(), *_transcribed_turn("Tell me a story."), *_empty_turn()],
+            empty_user_turn=self._config(),
         )
         self.assertEqual(_developer_messages(context), [INTERRUPTED_PROMPT])
         self.assertEqual(inferences, 2)
 
+    async def test_before_bot_spoke(self):
+        # Until the bot first finishes speaking it isn't waiting for the user,
+        # e.g. its greeting may still be on the way.
+        context, _ = await self._run(_empty_turn(), empty_user_turn=self._config())
+        self.assertEqual(_developer_messages(context), [INTERRUPTED_PROMPT])
+
     async def test_idle_ignored_by_default(self):
-        context, inferences = await self._run(_empty_turn(), empty_user_turn=self._config())
+        context, inferences = await self._run(
+            [*_bot_idle(), *_empty_turn()], empty_user_turn=self._config()
+        )
         self.assertEqual(_developer_messages(context), [])
         self.assertEqual(inferences, 0)
 
     async def test_idle_prompt(self):
         context, inferences = await self._run(
-            _empty_turn(), empty_user_turn=self._config(idle_prompt=IDLE_PROMPT)
+            [*_bot_idle(), *_empty_turn()],
+            empty_user_turn=self._config(idle_prompt=IDLE_PROMPT),
         )
         self.assertEqual(_developer_messages(context), [IDLE_PROMPT])
         self.assertEqual(inferences, 1)
 
     async def test_idle_after_response_finished(self):
-        # A finished response leaves the bot idle again.
         context, _ = await self._run(
-            [*_bot_speaking(), LLMFullResponseEndFrame(), SleepFrame(), *_empty_turn()],
+            [*_bot_speaking(), LLMFullResponseEndFrame(), *_bot_idle(), *_empty_turn()],
             empty_user_turn=self._config(idle_prompt=IDLE_PROMPT),
         )
         self.assertEqual(_developer_messages(context), [IDLE_PROMPT])
@@ -194,28 +208,30 @@ class TestEmptyUserTurn(unittest.IsolatedAsyncioTestCase):
         # The function call's result will run the LLM on its own.
         context, inferences = await self._run(
             [
-                FunctionCallInProgressFrame(
-                    function_name="get_weather",
-                    tool_call_id="1",
-                    arguments={},
-                    cancel_on_interruption=False,
+                *_bot_idle(),
+                FunctionCallsStartedFrame(
+                    function_calls=[
+                        FunctionCallFromLLM(
+                            function_name="get_weather",
+                            tool_call_id="1",
+                            arguments={},
+                            context=None,
+                        )
+                    ]
                 ),
                 SleepFrame(),
                 *_empty_turn(),
             ],
-            empty_user_turn=self._config(idle_prompt=IDLE_PROMPT),
+            empty_user_turn=self._config(),
         )
         self.assertEqual(_developer_messages(context), [])
         self.assertEqual(inferences, 0)
 
-    async def test_without_pair_treated_as_idle(self):
+    async def test_without_pair(self):
         context = LLMContext()
-        user = LLMUserAggregator(
-            context,
-            params=_user_params(empty_user_turn=self._config(idle_prompt=IDLE_PROMPT)),
-        )
-        await run_test(Pipeline([user]), frames_to_send=[LLMRunFrame(), *_empty_turn()])
-        self.assertEqual(_developer_messages(context), [IDLE_PROMPT])
+        user = LLMUserAggregator(context, params=_user_params(empty_user_turn=self._config()))
+        await run_test(Pipeline([user]), frames_to_send=[*_bot_speaking(), *_empty_turn()])
+        self.assertEqual(_developer_messages(context), [INTERRUPTED_PROMPT])
 
 
 class TestEmptyUserTurnIdle(unittest.IsolatedAsyncioTestCase):
