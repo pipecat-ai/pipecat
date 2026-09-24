@@ -4,13 +4,13 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Unit tests for LLMWithBackend, BackendConnector and the strategies.
+"""Unit tests for LLMWithBackend, BackendConnector and the request strategies.
 
-The connector and strategies are exercised directly with a faked delegation
-stream. The service is exercised through ``run_test`` with a scripted
-backend under a real WorkerRunner, so the delegate tool's whole path runs:
-advertised in the context, registered on the frontend, called, delegated
-over a job, and answered as tool results.
+The connector is exercised directly with a faked session. The service is
+exercised through ``run_test`` with a scripted backend under a real
+WorkerRunner, so the whole path runs: the tools installed on the frontend,
+``delegate`` called, the message sent over the session, and the backend's
+outputs appended to the frontend's conversation.
 """
 
 from types import SimpleNamespace
@@ -29,19 +29,15 @@ from pipecat.frames.frames import (
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
+    LLMMessagesAppendFrame,
     LLMServiceMetadataFrame,
     LLMSetToolsFrame,
 )
-from pipecat.pipeline import llm_with_backend
-from pipecat.pipeline.job_context import JobError
 from pipecat.pipeline.llm_with_backend import (
     BackendConnector,
-    BackendReplyStrategy,
     ConnectorContext,
     ExplicitBackendRequestStrategy,
     LLMWithBackend,
-    OneShotBackendReplyStrategy,
-    SpeakOnPrefersSpokenBackendReplyStrategy,
     TranscriptBackendRequestStrategy,
 )
 from pipecat.processors.aggregators.llm_context import NOT_GIVEN, LLMContext
@@ -50,7 +46,7 @@ from pipecat.services.llm_service import FunctionCallFromLLM, FunctionCallParams
 from pipecat.services.settings import LLMSettings
 from pipecat.tests.utils import SleepFrame, run_test
 from pipecat.workers.llm import BackendLLMWorker, BackendOutput
-from pipecat.workers.llm.backend_llm_worker import BackendToolCall, _BackendFinalOutput
+from pipecat.workers.llm.backend_llm_worker import BackendError, BackendIdle, BackendToolCall
 from tests.test_backend_llm_worker import _ScriptedLLM, get_weather
 
 
@@ -131,63 +127,68 @@ def _params(context: LLMContext | None = None, arguments: dict | None = None) ->
     )
 
 
-def _stream(
-    monkeypatch, *outputs: BackendOutput | BackendToolCall | _BackendFinalOutput
-) -> list[dict]:
-    """Fake the delegation stream; returns the requests it was given."""
-    requests: list[dict] = []
+class _FakeSession:
+    """Stands in for the session with the backend."""
 
-    async def fake(worker, backend_name, *, request, timeout_secs):
-        requests.append({"backend": backend_name, "request": request, "timeout": timeout_secs})
-        for output in outputs:
-            yield output
+    def __init__(self, status: str = "idle", cancelled: bool = True):
+        self.requests: list[str] = []
+        self.reasons: list[str] = []
+        self._status = status
+        self._cancelled = cancelled
 
-    monkeypatch.setattr(llm_with_backend, "_delegate_to_backend", fake)
-    return requests
+    async def send(self, request: str) -> str:
+        self.requests.append(request)
+        return self._status
+
+    async def cancel(self, reason: str) -> bool:
+        self.reasons.append(reason)
+        return self._cancelled
 
 
-def _bound(connector: BackendConnector, realtime: bool = False) -> BackendConnector:
+def _bound(
+    connector: BackendConnector | None = None,
+    *,
+    realtime: bool = False,
+    session: _FakeSession | None = None,
+) -> BackendConnector:
+    connector = connector or BackendConnector()
     connector.bind(ConnectorContext(backend_name="backend", frontend_is_realtime=realtime))
+    if session is not None:
+        connector._session = session  # type: ignore[assignment]
+        connector._session_open.set()
     return connector
 
 
 # ---------------------------------------------------------------------------
-# Connector defaults and the tool it builds
+# Connector defaults and the tools it builds
 # ---------------------------------------------------------------------------
 
 
-def test_a_text_frontend_hands_over_the_transcript_and_follows_the_flag():
-    connector = _bound(BackendConnector())
+def test_a_text_frontend_hands_over_the_transcript():
+    connector = _bound()
     assert isinstance(connector.request_strategy, TranscriptBackendRequestStrategy)
-    assert isinstance(connector.reply_strategy, SpeakOnPrefersSpokenBackendReplyStrategy)
-    assert connector.tool.name == "delegate"
+    assert [t.name for t in connector.tools] == ["delegate", "cancel_delegated_work"]
     assert connector.tool.properties == {}
-    assert connector.tool.handler is not None
+    assert all(t.handler is not None for t in connector.tools)
 
 
-def test_a_realtime_frontend_words_the_request_and_takes_every_output_at_once():
-    connector = _bound(BackendConnector(), realtime=True)
+def test_a_realtime_frontend_words_the_request():
+    connector = _bound(realtime=True)
     assert isinstance(connector.request_strategy, ExplicitBackendRequestStrategy)
-    assert isinstance(connector.reply_strategy, OneShotBackendReplyStrategy)
     assert connector.tool.required == ["request"]
 
 
-def test_a_realtime_frontend_refuses_a_reply_strategy_that_streams():
-    with pytest.raises(ValueError, match="one result"):
-        _bound(
-            BackendConnector(reply_strategy=SpeakOnPrefersSpokenBackendReplyStrategy()),
-            realtime=True,
-        )
-
-
-def test_the_tool_description_frames_a_handoff():
-    connector = _bound(BackendConnector())
+def test_the_tool_descriptions_frame_a_handoff_and_a_stop():
+    connector = _bound()
     assert "One handoff per reply" in connector.tool.description
+    assert "Stop all the work" in connector.tools[1].description
 
 
-def test_the_frontend_guidance_comes_from_the_strategies():
-    connector = _bound(BackendConnector())
-    assert "delegate tool" in (connector.frontend_instruction or "")
+def test_the_frontend_guidance_covers_delegation_and_the_backends_messages():
+    guidance = _bound().frontend_instruction or ""
+    assert "delegate tool" in guidance
+    assert 'marked "Backend:"' in guidance
+    assert "cancel_delegated_work" in guidance
 
 
 # ---------------------------------------------------------------------------
@@ -196,224 +197,186 @@ def test_the_frontend_guidance_comes_from_the_strategies():
 
 
 @pytest.mark.asyncio
-async def test_the_transcript_request_sends_only_what_the_backend_has_not_seen(monkeypatch):
-    requests = _stream(monkeypatch, _BackendFinalOutput(BackendOutput(text="ok")))
-    connector = _bound(BackendConnector(timeout_secs=7))
+async def test_the_transcript_request_sends_only_what_the_backend_has_not_seen():
+    session = _FakeSession()
+    connector = _bound(session=session)
     context = LLMContext([{"role": "user", "content": "weather in seattle?"}])
 
     await connector.delegate(_params(context))
     context.add_message({"role": "assistant", "content": "It's raining."})
+    context.add_message({"role": "developer", "content": "Backend: Looking it up."})
     context.add_message({"role": "user", "content": "and boston?"})
     await connector.delegate(_params(context))
 
-    assert requests[0]["backend"] == "backend"
-    assert requests[0]["timeout"] == 7
-    assert requests[0]["request"].startswith(
-        "Voice conversation so far:\nUSER: weather in seattle?\n"
-    )
-    assert requests[1]["request"].startswith(
+    assert session.requests[0].startswith("Voice conversation so far:\nUSER: weather in seattle?\n")
+    # The backend's own messages are not sent back to it.
+    assert session.requests[1] == (
         "Voice conversation since the previous delegation:\n"
-        "ASSISTANT: It's raining.\nUSER: and boston?\n"
+        "ASSISTANT: It's raining.\n"
+        "USER: and boston?\n"
+        "\n"
+        "Act on the user's most recent request in the conversation above."
     )
 
 
 @pytest.mark.asyncio
-async def test_the_explicit_request_sends_the_model_words(monkeypatch):
-    requests = _stream(monkeypatch, _BackendFinalOutput(BackendOutput(text="ok")))
-    connector = _bound(BackendConnector(request_strategy=ExplicitBackendRequestStrategy()))
+async def test_a_delegate_call_with_nothing_new_sends_nothing():
+    """A second call for the same turn finds the transcript slice empty and settles quietly."""
+    session = _FakeSession()
+    connector = _bound(session=session)
+    context = LLMContext([{"role": "user", "content": "weather in seattle?"}])
+
+    await connector.delegate(_params(context))
+    params = _params(context)
+    await connector.delegate(params)
+
+    assert session.requests == [session.requests[0]]
+    assert params.result_callback.await_args_list == [  # type: ignore[attr-defined]
+        call(
+            {"status": "already_delegated"}, properties=FunctionCallResultProperties(run_llm=False)
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_the_explicit_request_sends_the_model_words():
+    session = _FakeSession()
+    connector = _bound(
+        BackendConnector(request_strategy=ExplicitBackendRequestStrategy()), session=session
+    )
 
     await connector.delegate(_params(arguments={"request": "Weather in Seattle, Fahrenheit."}))
 
-    assert requests[0]["request"] == "Weather in Seattle, Fahrenheit."
+    assert session.requests == ["Weather in Seattle, Fahrenheit."]
 
 
 # ---------------------------------------------------------------------------
-# Reply strategies
+# The delegate and cancel tools
 # ---------------------------------------------------------------------------
 
-_PROGRESS = BackendOutput(text="Let me check.", prefers_spoken=False)
-_SPOKEN_PROGRESS = BackendOutput(text="Almost there.", prefers_spoken=True)
-_FINAL = _BackendFinalOutput(BackendOutput(text="It's 62 and raining."))
-_THOUGHT = BackendOutput(text="Weather first.", is_thought=True, prefers_spoken=False)
-_EMPTY_FINAL = _BackendFinalOutput(BackendOutput(text=""))
+
+@pytest.mark.asyncio
+async def test_delegate_settles_at_once_with_what_the_backend_was_doing():
+    for status in ("idle", "working"):
+        params = _params(LLMContext([{"role": "user", "content": "do it"}]))
+
+        await _bound(session=_FakeSession(status=status)).delegate(params)
+
+        assert params.result_callback.await_args_list == [  # type: ignore[attr-defined]
+            call(
+                {"status": "delegated", "backend": status},
+                properties=FunctionCallResultProperties(run_llm=True),
+            )
+        ]
 
 
 @pytest.mark.asyncio
-async def test_speak_on_prefers_spoken_relays_progress_and_runs_the_frontend_as_flagged(
-    monkeypatch,
-):
-    _stream(monkeypatch, _PROGRESS, _THOUGHT, _SPOKEN_PROGRESS, _FINAL)
-    params = _params()
+async def test_delegate_can_leave_the_frontend_quiet():
+    params = _params(LLMContext([{"role": "user", "content": "do it"}]))
 
-    await _bound(BackendConnector()).delegate(params)
+    await _bound(BackendConnector(respond_on_delegate=False), session=_FakeSession()).delegate(
+        params
+    )
 
-    assert params.result_callback.await_args_list == [  # type: ignore[attr-defined]
-        call(
-            {"text": "Let me check."},
-            properties=FunctionCallResultProperties(is_final=False, run_llm=False),
-        ),
-        call(
-            {"reasoning": "Weather first."},
-            properties=FunctionCallResultProperties(is_final=False, run_llm=False),
-        ),
-        call(
-            {"text": "Almost there."},
-            properties=FunctionCallResultProperties(is_final=False, run_llm=True),
-        ),
-        call(
-            {"text": "It's 62 and raining."},
-            properties=FunctionCallResultProperties(is_final=True, run_llm=True),
-        ),
-    ]
+    (settled,) = params.result_callback.await_args_list  # type: ignore[attr-defined]
+    assert settled.kwargs["properties"] == FunctionCallResultProperties(run_llm=False)
 
 
 @pytest.mark.asyncio
-async def test_one_shot_delivers_every_output_together(monkeypatch):
-    _stream(monkeypatch, _PROGRESS, _THOUGHT, _SPOKEN_PROGRESS, _FINAL)
-    params = _params()
+async def test_delegate_fails_when_the_backend_never_attaches():
+    connector = _bound(BackendConnector(timeout_secs=0.05))
+    params = _params(LLMContext([{"role": "user", "content": "do it"}]))
 
-    await _bound(BackendConnector(), realtime=True).delegate(params)
-
-    assert params.result_callback.await_args_list == [  # type: ignore[attr-defined]
-        call({"outputs": ["Let me check.", "Almost there.", "It's 62 and raining."]})
-    ]
-
-
-@pytest.mark.asyncio
-async def test_one_shot_delivers_what_it_held_when_the_final_output_is_empty(monkeypatch):
-    _stream(monkeypatch, _PROGRESS, _SPOKEN_PROGRESS, _EMPTY_FINAL)
-    params = _params()
-    connector = _bound(BackendConnector(), realtime=True)
-
-    await connector.delegate(params)
-
-    assert params.result_callback.await_args_list == [  # type: ignore[attr-defined]
-        call({"outputs": ["Let me check.", "Almost there."]})
-    ]
-    assert connector.reply_strategy._progress == {}  # type: ignore[attr-defined]
-
-
-@pytest.mark.asyncio
-async def test_one_shot_drops_what_it_held_when_the_delegation_fails(monkeypatch):
-    async def fake(worker, backend_name, *, request, timeout_secs):
-        yield _PROGRESS
-        raise JobError("backend errored")
-
-    monkeypatch.setattr(llm_with_backend, "_delegate_to_backend", fake)
-    params = _params()
-    connector = _bound(BackendConnector(), realtime=True)
-
-    with pytest.raises(JobError):
+    with pytest.raises(RuntimeError, match="not attached"):
         await connector.delegate(params)
 
     params.result_callback.assert_not_awaited()  # type: ignore[attr-defined]
-    assert connector.reply_strategy._progress == {}  # type: ignore[attr-defined]
 
 
 @pytest.mark.asyncio
-async def test_one_shot_delivers_a_lone_output_as_text(monkeypatch):
-    _stream(monkeypatch, _FINAL)
-    params = _params()
-
-    await _bound(BackendConnector(), realtime=True).delegate(params)
-
-    assert params.result_callback.await_args_list == [  # type: ignore[attr-defined]
-        call({"text": "It's 62 and raining."})
-    ]
-
-
-@pytest.mark.asyncio
-async def test_a_delivery_that_fails_closes_the_stream(monkeypatch):
-    """Closing the stream is what cancels the backend's job, so it must happen at once."""
-    closed = False
-
-    async def fake(worker, backend_name, *, request, timeout_secs):
-        nonlocal closed
-        try:
-            yield _PROGRESS
-            yield _FINAL
-        finally:
-            closed = True
-
-    monkeypatch.setattr(llm_with_backend, "_delegate_to_backend", fake)
-
-    class _Broken(BackendReplyStrategy):
-        async def deliver(self, params, output, *, is_final):
-            raise RuntimeError("frontend went away")
-
-    with pytest.raises(RuntimeError):
-        await _bound(BackendConnector(reply_strategy=_Broken())).delegate(_params())
-
-    assert closed
-
-
-@pytest.mark.asyncio
-async def test_the_backends_calls_are_reported_as_children_of_the_delegate_call(monkeypatch):
-    _stream(
-        monkeypatch,
-        BackendToolCall("in_progress", "get_weather", "toolu_1", arguments={"location": "Seattle"}),
-        _FINAL,
-    )
-    params = _params()
-
-    await _bound(BackendConnector()).delegate(params)
-
-    (pushed,) = [c.args[0] for c in params.llm.push_frame.await_args_list]
-    assert isinstance(pushed, ExternalFunctionCallInProgressFrame)
-    assert (pushed.function_name, pushed.tool_call_id) == ("get_weather", "toolu_1")
-    assert pushed.parent_tool_call_id == "call_1"
-    # The call is reported, not delivered to the frontend as a result.
-    assert params.result_callback.await_args_list == [  # type: ignore[attr-defined]
-        call(
-            {"text": "It's 62 and raining."},
-            properties=FunctionCallResultProperties(is_final=True, run_llm=True),
-        )
-    ]
-
-
-@pytest.mark.asyncio
-async def test_empty_progress_is_skipped_unless_the_backend_asks_for_it_spoken(monkeypatch):
-    blank = BackendOutput(text="", prefers_spoken=False)
-    for realtime in (False, True):
-        _stream(monkeypatch, blank, _PROGRESS, blank, _FINAL)
+async def test_cancel_reports_whether_there_was_work_to_stop():
+    for cancelled, status in ((True, "cancelled"), (False, "nothing_running")):
+        session = _FakeSession(cancelled=cancelled)
         params = _params()
 
-        await _bound(BackendConnector(), realtime=realtime).delegate(params)
+        await _bound(session=session).cancel(params)
 
-        results = [c.args[0] for c in params.result_callback.await_args_list]  # type: ignore[attr-defined]
-        assert {"text": ""} not in results
-        assert results[-1] in (
-            {"text": "It's 62 and raining."},
-            {"outputs": ["Let me check.", "It's 62 and raining."]},
-        )
+        assert session.reasons == ["cancelled by the user"]
+        assert params.result_callback.await_args_list == [  # type: ignore[attr-defined]
+            call({"status": status}, properties=FunctionCallResultProperties(run_llm=True))
+        ]
 
-    _stream(monkeypatch, BackendOutput(text="", prefers_spoken=True), _FINAL)
-    params = _params()
 
-    await _bound(BackendConnector()).delegate(params)
-
-    assert params.result_callback.await_args_list[0] == call(  # type: ignore[attr-defined]
-        {"text": ""}, properties=FunctionCallResultProperties(is_final=False, run_llm=True)
-    )
+# ---------------------------------------------------------------------------
+# Delivery
+# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_an_empty_final_output_still_settles_the_call(monkeypatch):
-    _stream(monkeypatch, _PROGRESS, _EMPTY_FINAL)
-    params = _params()
+async def test_outputs_are_appended_to_the_frontend_and_run_it_as_flagged():
+    connector = _bound()
+    frontend = SimpleNamespace(queue_frame=AsyncMock(), push_frame=AsyncMock())
 
-    await _bound(BackendConnector()).delegate(params)
+    await connector.deliver(frontend, BackendOutput(text="Let me check.", prefers_spoken=False))  # type: ignore[arg-type]
+    await connector.deliver(
+        frontend, BackendOutput(text="Weather first.", is_thought=True, prefers_spoken=False)
+    )  # type: ignore[arg-type]
+    await connector.deliver(frontend, BackendOutput(text="It's 62 and raining."))  # type: ignore[arg-type]
+    await connector.deliver(frontend, BackendOutput(text=""))  # type: ignore[arg-type]
 
-    assert params.result_callback.await_args_list[-1] == call(  # type: ignore[attr-defined]
-        {"text": ""}, properties=FunctionCallResultProperties(is_final=True, run_llm=True)
+    appended = [c.args[0] for c in frontend.queue_frame.await_args_list]
+    assert [(f.messages, f.run_llm) for f in appended] == [
+        ([{"role": "developer", "content": "Backend: Let me check."}], False),
+        ([{"role": "developer", "content": "Backend (thinking): Weather first."}], False),
+        ([{"role": "developer", "content": "Backend: It's 62 and raining."}], True),
+    ]
+    frontend.push_frame.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_the_backends_calls_are_reported_and_nothing_else_happens_to_them():
+    connector = _bound()
+    frontend = SimpleNamespace(queue_frame=AsyncMock(), push_frame=AsyncMock())
+
+    await connector.deliver(
+        frontend,  # type: ignore[arg-type]
+        BackendToolCall("in_progress", "get_weather", "toolu_1", arguments={"location": "Seattle"}),
     )
 
-    _stream(monkeypatch, _EMPTY_FINAL)
-    params = _params()
+    (pushed,) = [c.args[0] for c in frontend.push_frame.await_args_list]
+    assert isinstance(pushed, ExternalFunctionCallInProgressFrame)
+    assert (pushed.function_name, pushed.tool_call_id) == ("get_weather", "toolu_1")
+    assert pushed.parent_tool_call_id is None
+    frontend.queue_frame.assert_not_awaited()
 
-    await _bound(BackendConnector(), realtime=True).delegate(params)
 
-    assert params.result_callback.await_args_list == [call({"text": ""})]  # type: ignore[attr-defined]
+@pytest.mark.asyncio
+async def test_a_backend_error_is_spoken_and_idle_is_not():
+    connector = _bound()
+    frontend = SimpleNamespace(queue_frame=AsyncMock(), push_frame=AsyncMock())
+
+    await connector.deliver(frontend, BackendIdle())  # type: ignore[arg-type]
+    await connector.deliver(frontend, BackendError(error="provider down"))  # type: ignore[arg-type]
+
+    (appended,) = [c.args[0] for c in frontend.queue_frame.await_args_list]
+    assert appended.run_llm is True
+    assert appended.messages[0]["content"].startswith("Backend: The work could not be completed")
+
+
+@pytest.mark.asyncio
+async def test_render_output_is_the_seam_for_another_wording():
+    class _Terse(BackendConnector):
+        def render_output(self, output):
+            return None if output.is_thought else {"role": "user", "content": f"[be] {output.text}"}
+
+    connector = _bound(_Terse())
+    frontend = SimpleNamespace(queue_frame=AsyncMock(), push_frame=AsyncMock())
+
+    await connector.deliver(frontend, BackendOutput(text="thinking", is_thought=True))  # type: ignore[arg-type]
+    await connector.deliver(frontend, BackendOutput(text="done"))  # type: ignore[arg-type]
+
+    (appended,) = [c.args[0] for c in frontend.queue_frame.await_args_list]
+    assert appended.messages == [{"role": "user", "content": "[be] done"}]
 
 
 # ---------------------------------------------------------------------------
@@ -434,7 +397,7 @@ def _tool_names(converted) -> list[str]:
 
 
 @pytest.mark.asyncio
-async def test_delegate_is_a_built_in_tool_beside_the_frontends_own():
+async def test_the_tools_are_built_in_beside_the_frontends_own():
     frontend = _TextFrontend()
     service = LLMWithBackend(frontend=frontend, backend="backend")
     context = LLMContext(tools=[get_current_time])
@@ -442,7 +405,7 @@ async def test_delegate_is_a_built_in_tool_beside_the_frontends_own():
 
     await run_test(service, frames_to_send=[LLMContextFrame(context), set_tools])
 
-    # Never in the context's or a tool change's tool set, so no diff sees it.
+    # Never in the context's or a tool change's tool set, so no diff sees them.
     assert [t.name for t in context.tools.standard_tools] == ["get_current_time"]
     assert set_tools.tools == [get_weather]
     # Sent on every inference all the same, beside whatever tools there are.
@@ -450,15 +413,19 @@ async def test_delegate_is_a_built_in_tool_beside_the_frontends_own():
     assert _tool_names(adapter.from_standard_tools(context.tools)) == [
         "get_current_time",
         "delegate",
+        "cancel_delegated_work",
     ]
-    assert _tool_names(adapter.from_standard_tools(NOT_GIVEN)) == ["delegate"]
+    assert _tool_names(adapter.from_standard_tools(NOT_GIVEN)) == [
+        "delegate",
+        "cancel_delegated_work",
+    ]
     assert frontend.has_function("delegate")
-    assert not frontend._functions["delegate"].cancel_on_interruption
+    assert frontend.has_function("cancel_delegated_work")
 
 
 @pytest.mark.asyncio
-async def test_a_local_backend_is_heard_through_the_delegate_tool():
-    """The whole path, with the backend worker added by the service itself."""
+async def test_a_local_backend_is_heard_through_the_frontends_conversation():
+    """The whole path, with the backend worker added and attached by the service itself."""
     backend = BackendLLMWorker(
         name="backend",
         llm=_ScriptedLLM(
@@ -474,15 +441,20 @@ async def test_a_local_backend_is_heard_through_the_delegate_tool():
 
     down, _ = await run_test(
         service,
-        frames_to_send=[LLMContextFrame(LLMContext()), SleepFrame(sleep=2.0)],
+        frames_to_send=[
+            LLMContextFrame(LLMContext([{"role": "user", "content": "weather in seattle?"}])),
+            SleepFrame(sleep=2.0),
+        ],
     )
 
-    results = [f for f in down if isinstance(f, FunctionCallResultFrame)]
-    assert [r.result for r in results] == [
-        {"text": "Let me check."},
-        {"text": "It's 62 and raining."},
+    (result,) = [f for f in down if isinstance(f, FunctionCallResultFrame)]
+    assert result.result == {"status": "delegated", "backend": "idle"}
+    assert result.properties == FunctionCallResultProperties(run_llm=True)
+    appended = [f for f in down if isinstance(f, LLMMessagesAppendFrame)]
+    assert [(f.messages[0]["content"], f.run_llm) for f in appended] == [
+        ("Backend: Let me check.", False),
+        ("Backend: It's 62 and raining.", True),
     ]
-    assert results[0].properties == FunctionCallResultProperties(is_final=False, run_llm=False)
     # The backend's own call reached the frontend's pipeline as a report only.
     reported = [f for f in down if isinstance(f, ExternalFunctionCallFrame)]
     assert [(type(f), f.function_name) for f in reported] == [
@@ -490,4 +462,4 @@ async def test_a_local_backend_is_heard_through_the_delegate_tool():
         (ExternalFunctionCallInProgressFrame, "get_weather"),
         (ExternalFunctionCallResultFrame, "get_weather"),
     ]
-    assert {f.parent_tool_call_id for f in reported} == {"call_1"}
+    assert {f.parent_tool_call_id for f in reported} == {None}
