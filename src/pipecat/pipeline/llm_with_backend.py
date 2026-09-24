@@ -10,48 +10,55 @@ The frontend is any LLM service, text or speech-to-speech, and holds the
 conversation. The backend is a :class:`~pipecat.workers.llm.backend_llm_worker.BackendLLMWorker`
 running a heavier model with the tools, and does the work the frontend hands
 off. :class:`LLMWithBackend` wraps the frontend so the pair drops into a
-pipeline where an LLM goes, and installs the ``delegate`` tool that joins
-them.
+pipeline where an LLM goes, and installs the tools that join them.
 
-How a delegation crosses is the :class:`BackendConnector`'s business, built
-from two strategies: a :class:`BackendRequestStrategy` defines the tool the
-frontend calls and turns a call into the request the backend receives, and a
-:class:`BackendReplyStrategy` turns each thing the backend produces into what
-the frontend hears about it. The connector picks defaults by frontend kind:
-a text frontend hands over the conversation and relays the backend's
-progress as it comes; a speech-to-speech frontend words the request itself
-and takes every output at once, since its function calls accept one
-result.
+The two exchange messages, not calls. The frontend's ``delegate`` tool puts a
+message to the backend and returns at once; what the backend has to say comes
+back as a stream of outputs, each appended to the frontend's conversation as
+a message marked ``Backend:``, spoken or silent as the backend's flag says.
+Nothing is a bounded unit of work: a second request joins the first, a
+correction changes it, and ``cancel_delegated_work`` stops it. How a request
+is worded is the :class:`BackendRequestStrategy`'s business, and the
+:class:`BackendConnector` owns the tools, the session with the backend, and
+how each output is rendered into the conversation.
 """
 
-from contextlib import aclosing
+import asyncio
 from dataclasses import dataclass
 from typing import Any
 
 from loguru import logger
 
-from pipecat.adapters.schemas.direct_function import tool_options
 from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.frames.frames import (
-    FunctionCallResultProperties,
-)
+from pipecat.frames.frames import FunctionCallResultProperties, LLMMessagesAppendFrame
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.processors.frame_processor import (
-    FrameProcessorSetup,
-)
+from pipecat.processors.aggregators.llm_context import LLMContextMessage
+from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.llm_service import FunctionCallParams, LLMService
+from pipecat.workers.base_worker import BaseWorker
 from pipecat.workers.llm.backend_llm_worker import (
     _DEFAULT_TRANSCRIPT_INSTRUCTION,
+    BackendError,
+    BackendEvent,
+    BackendIdle,
     BackendLLMWorker,
     BackendOutput,
     BackendToolCall,
-    _BackendFinalOutput,
-    _delegate_to_backend,
+    _BackendSession,
     _render_transcript_request,
 )
 
 #: Name of the tool the frontend calls to delegate.
 DELEGATE_TOOL_NAME = "delegate"
+
+#: Name of the tool the frontend calls to stop the backend's work.
+CANCEL_TOOL_NAME = "cancel_delegated_work"
+
+#: How a backend output is marked in the frontend's conversation.
+BACKEND_MESSAGE_PREFIX = "Backend: "
+
+#: How a backend reasoning summary is marked in the frontend's conversation.
+BACKEND_THOUGHT_PREFIX = "Backend (thinking): "
 
 #: When the frontend delegates and when it does not, ahead of each request
 #: strategy's own guidance. The frontend's own system instruction says what
@@ -66,6 +73,26 @@ _DELEGATION_POLICY = (
     "around it. "
 )
 
+#: What the frontend does with the backend's messages and the stop tool.
+_MESSAGES_INSTRUCTION = (
+    "After delegating, acknowledge briefly and do whatever else the user asked that you can "
+    "do yourself. The result says whether the backend was idle or already working; if it was "
+    "working, your request joins that work.\n\n"
+    "BACKEND MESSAGES: The backend works on its own after you delegate and may be doing "
+    "several things at once. What it has to say arrives as messages in the conversation "
+    f'marked "{BACKEND_MESSAGE_PREFIX.strip()}". A message may report progress, a result, a '
+    "question for the user, or that it stopped. When you are prompted after one arrives, "
+    "relay what matters in your own words, once. A message you were not prompted for is "
+    "context: use it if the user asks how the work is going, and leave it otherwise. The "
+    "conversation may have moved on since the backend started: if the user has changed or "
+    "cancelled what they asked for, weigh the message against that and say only what still "
+    "helps. Never state a result you have not received from the backend, and never say work "
+    "is done that the backend has not said is done.\n\n"
+    f"If the user wants the backend to stop what it is doing, call {CANCEL_TOOL_NAME} at "
+    "once. If they also want something else, or want only part of the work stopped, "
+    "delegate that in the same reply."
+)
+
 
 @dataclass
 class ConnectorContext:
@@ -74,8 +101,8 @@ class ConnectorContext:
     Parameters:
         backend_name: Name of the backend worker, local or registered elsewhere.
         frontend_is_realtime: Whether the frontend is a speech-to-speech
-            service. Its function calls accept one result, and its context can
-            lag the audio, which changes what a delegation can send and receive.
+            service, whose context can lag the audio, which changes how a
+            delegation words its request.
     """
 
     backend_name: str
@@ -110,7 +137,7 @@ class BackendRequestStrategy:
         """
         raise NotImplementedError
 
-    async def compose_request(self, params: FunctionCallParams) -> str:
+    async def compose_request(self, params: FunctionCallParams) -> str | None:
         """Turn a ``delegate`` call into the text put to the backend.
 
         Args:
@@ -118,7 +145,8 @@ class BackendRequestStrategy:
                 frontend's context.
 
         Returns:
-            The request text.
+            The request text, or ``None`` when the call carries nothing new
+            for the backend, in which case nothing is sent.
         """
         raise NotImplementedError
 
@@ -130,20 +158,20 @@ class TranscriptBackendRequestStrategy(BackendRequestStrategy):
     transcript of what was said since the previous delegation (the whole
     conversation the first time), rendered by
     :func:`~pipecat.workers.llm.backend_llm_worker._render_transcript_request`.
-    The default for a text frontend, whose context is current when the tool
-    runs.
+    The backend's own messages in the conversation are left out: the backend
+    already has what it said. The default for a text frontend, whose context
+    is current when the tool runs.
 
     The cursor assumes the conversation accrues. A rewritten context or a
     failed delegation's turns are not re-sent; the user's next request
-    carries what matters.
+    carries what matters. A call that finds no new turn since the previous
+    delegation sends nothing.
     """
 
     frontend_instruction = _DELEGATION_POLICY + (
         "A delegation hands over the whole conversation, not one item: the backend reads "
         "it and does everything in it that is its job, so delegate once per reply however "
-        "many things the user asked for, and do not word the request. While it works, "
-        "keep the conversation going. When its result comes back, relay it in your own "
-        "words."
+        "many things the user asked for, and do not word the request."
     )
 
     def __init__(self, *, instruction: str = _DEFAULT_TRANSCRIPT_INSTRUCTION):
@@ -167,15 +195,19 @@ class TranscriptBackendRequestStrategy(BackendRequestStrategy):
             "talking with the user while it works."
         )
 
-    async def compose_request(self, params: FunctionCallParams) -> str:
+    async def compose_request(self, params: FunctionCallParams) -> str | None:
         """Render the turns since the previous delegation as the request."""
         messages = params.context.get_messages()
         if self._delegated_through > len(messages):
             # The context was reset since the previous delegation.
             self._delegated_through = 0
-        conversation = messages[self._delegated_through :]
+        conversation = [
+            m for m in messages[self._delegated_through :] if not _is_backend_message(m)
+        ]
         first = self._delegated_through == 0
         self._delegated_through = len(messages)
+        if not any(m.get("role") in ("user", "assistant") for m in conversation):  # type: ignore[union-attr]
+            return None
         return _render_transcript_request(conversation, instruction=self._instruction, first=first)
 
 
@@ -201,9 +233,7 @@ class ExplicitBackendRequestStrategy(BackendRequestStrategy):
     frontend_instruction = _DELEGATION_POLICY + (
         "Word the request so it stands on its own: the user's goal, the exact details "
         "they gave and their latest correction, with everything they asked for in the one "
-        "request, so you delegate once per reply however many things that is. While it "
-        "works, keep the conversation going. When its result comes back, relay it in your "
-        "own words."
+        "request, so you delegate once per reply however many things that is."
     )
 
     def tool_description(self) -> str:
@@ -217,116 +247,20 @@ class ExplicitBackendRequestStrategy(BackendRequestStrategy):
             "with the user while it works."
         )
 
-    async def compose_request(self, params: FunctionCallParams) -> str:
+    async def compose_request(self, params: FunctionCallParams) -> str | None:
         """Send the model's request as it stands."""
-        return str(params.arguments.get("request") or "")
+        return str(params.arguments.get("request") or "").strip() or None
 
 
-# ---------------------------------------------------------------------------
-# Reply strategies: backend → frontend
-# ---------------------------------------------------------------------------
-
-
-class BackendReplyStrategy:
-    """Turns each :class:`BackendOutput` into what the frontend hears about it.
-
-    The final output settles the ``delegate`` call and always comes. What the
-    frontend hears of the outputs before it, and when, is what strategies
-    differ on. An output with no text is the strategy's to read.
-    """
-
-    #: Whether the strategy reports outputs before the final one as
-    #: intermediate tool results. A speech-to-speech frontend cannot take
-    #: those: its function calls accept one result.
-    needs_intermediate_results: bool = False
-    #: Guidance appended to the frontend's system instruction, if any.
-    frontend_instruction: str | None = None
-
-    async def deliver(
-        self, params: FunctionCallParams, output: BackendOutput, *, is_final: bool
-    ) -> None:
-        """Deliver one output to the frontend.
-
-        Args:
-            params: The ``delegate`` call the output belongs to.
-            output: The output.
-            is_final: Whether it is the backend's final output, which settles the call.
-        """
-        raise NotImplementedError
-
-    async def fail(self, params: FunctionCallParams) -> None:
-        """Handle the delegation failing.
-
-        The frontend service settles the call with the error. The base does
-        nothing.
-
-        Args:
-            params: The ``delegate`` call.
-        """
-
-
-class OneShotBackendReplyStrategy(BackendReplyStrategy):
-    """Delivers everything the backend produced at once, when it is done.
-
-    The ``delegate`` call's one result carries every output, in order, under
-    ``outputs``; one alone, or none, under ``text``. Reasoning summaries are
-    left out.
-    The default for a speech-to-speech frontend, whose function calls accept
-    one result. It may not stay the default: if and when those services can
-    take intermediate results, progress could reach such a frontend as it
-    comes, as :class:`SpeakOnPrefersSpokenBackendReplyStrategy` delivers it.
-    """
-
-    def __init__(self):
-        """Initialize the strategy."""
-        self._progress: dict[str, list[str]] = {}
-
-    async def deliver(
-        self, params: FunctionCallParams, output: BackendOutput, *, is_final: bool
-    ) -> None:
-        """Hold outputs back; deliver them all with the last."""
-        if output.is_thought or (not output.text and not is_final):
-            return
-        if not is_final:
-            self._progress.setdefault(params.tool_call_id, []).append(output.text)
-            return
-        progress = self._progress.pop(params.tool_call_id, [])
-        outputs = [*progress, output.text] if output.text else progress
-        if len(outputs) > 1:
-            await params.result_callback({"outputs": outputs})
-        else:
-            await params.result_callback({"text": outputs[0] if outputs else ""})
-
-    async def fail(self, params: FunctionCallParams) -> None:
-        """Drop the held outputs."""
-        self._progress.pop(params.tool_call_id, None)
-
-
-class SpeakOnPrefersSpokenBackendReplyStrategy(BackendReplyStrategy):
-    """Relays the backend's progress as it comes, spoken as the backend's flag says.
-
-    Each output is recorded as a tool result, the final one settling the
-    call, and the frontend is run on it, and so speaks it, exactly when the
-    output's ``prefers_spoken`` flag asks. A reasoning summary is recorded under
-    ``reasoning`` rather than ``text``, so the frontend can tell the backend
-    thinking from something to relay, and can say how the work is going if
-    asked. The default for a text frontend.
-    """
-
-    needs_intermediate_results = True
-
-    async def deliver(
-        self, params: FunctionCallParams, output: BackendOutput, *, is_final: bool
-    ) -> None:
-        """Record the output as a tool result, and run the frontend as flagged."""
-        if not is_final and not output.text and not output.prefers_spoken:
-            return
-        await params.result_callback(
-            {"reasoning" if output.is_thought else "text": output.text},
-            properties=FunctionCallResultProperties(
-                is_final=is_final, run_llm=output.prefers_spoken
-            ),
-        )
+def _is_backend_message(message: LLMContextMessage) -> bool:
+    """Whether a context message is one the connector rendered from a backend output."""
+    if not isinstance(message, dict):
+        return False
+    content = message.get("content")
+    return message.get("role") == "developer" and (
+        isinstance(content, str)
+        and content.startswith((BACKEND_MESSAGE_PREFIX, BACKEND_THOUGHT_PREFIX))
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -335,52 +269,53 @@ class SpeakOnPrefersSpokenBackendReplyStrategy(BackendReplyStrategy):
 
 
 class BackendConnector:
-    """Joins the two layers: the ``delegate`` tool, and what crosses it each way.
+    """Joins the two layers: the tools the frontend calls, the session with the backend, and what each output becomes.
 
-    A request strategy defines the tool and composes the request; a reply
-    strategy delivers what the backend produces. Either may be given, or left
-    to the connector to pick by frontend kind once it is bound:
+    A request strategy defines the ``delegate`` tool and composes the request.
+    It may be given, or left to the connector to pick by frontend kind once
+    bound: :class:`TranscriptBackendRequestStrategy` for a text frontend,
+    :class:`ExplicitBackendRequestStrategy` for a speech-to-speech one, whose
+    context lags the audio.
 
-    +-------------------+--------------------------------------+----------------------------------------------+
-    |                   | request                              | reply                                        |
-    +===================+======================================+==============================================+
-    | text frontend     | ``TranscriptBackendRequestStrategy`` | ``SpeakOnPrefersSpokenBackendReplyStrategy`` |
-    +-------------------+--------------------------------------+----------------------------------------------+
-    | realtime frontend | ``ExplicitBackendRequestStrategy``   | ``OneShotBackendReplyStrategy``              |
-    +-------------------+--------------------------------------+----------------------------------------------+
-
-    A delegation that fails raises out of the tool handler, which the frontend
-    service settles as an error result. The function calls the backend makes on the way are
-    reported in the frontend's pipeline as children of the ``delegate`` call,
-    for clients to show; nothing else in the pipeline sees them.
+    The connector holds the session with the backend for the frontend's life,
+    and turns each output the backend sends into a message appended to the
+    frontend's conversation with :meth:`render_output`, run or not as the
+    output's ``prefers_spoken`` flag says. The function calls the backend makes
+    on the way are reported in the frontend's pipeline for clients to show;
+    nothing else in the pipeline sees them.
 
     Example::
 
-        connector = BackendConnector(reply_strategy=OneShotBackendReplyStrategy())
+        connector = BackendConnector(respond_on_delegate=False)
     """
 
     def __init__(
         self,
         *,
         request_strategy: BackendRequestStrategy | None = None,
-        reply_strategy: BackendReplyStrategy | None = None,
-        timeout_secs: float | None = 120,
+        respond_on_delegate: bool = True,
+        timeout_secs: float | None = 30,
     ):
         """Initialize the connector.
 
         Args:
             request_strategy: How a ``delegate`` call becomes the backend's
                 request. Picked by frontend kind when omitted.
-            reply_strategy: How the backend's outputs reach the frontend.
-                Picked by frontend kind when omitted.
-            timeout_secs: How long a delegation may take, including the wait
-                for the backend to become ready.
+            respond_on_delegate: Whether the frontend runs again as soon as a
+                delegation is sent, which is where its acknowledgement comes
+                from: a text model's tool-call turn carries no prose. Off for
+                a frontend that announces a handoff itself.
+            timeout_secs: How long the backend may take to acknowledge a
+                message or a cancellation, including the wait for it to become
+                ready.
         """
         self._request_strategy = request_strategy
-        self._reply_strategy = reply_strategy
+        self._respond_on_delegate = respond_on_delegate
         self._timeout_secs = timeout_secs
         self._context: ConnectorContext | None = None
-        self._tool: FunctionSchema | None = None
+        self._tools: list[FunctionSchema] = []
+        self._session: _BackendSession | None = None
+        self._session_open = asyncio.Event()
 
     @property
     def request_strategy(self) -> BackendRequestStrategy:
@@ -389,35 +324,32 @@ class BackendConnector:
         return self._request_strategy
 
     @property
-    def reply_strategy(self) -> BackendReplyStrategy:
-        """The reply strategy in use. Available once bound."""
-        assert self._reply_strategy is not None, "connector not bound"
-        return self._reply_strategy
+    def tools(self) -> list[FunctionSchema]:
+        """The tools to install on the frontend. Available once bound."""
+        assert self._tools, "connector not bound"
+        return self._tools
 
     @property
     def tool(self) -> FunctionSchema:
-        """The ``delegate`` tool to install on the frontend. Available once bound."""
-        assert self._tool is not None, "connector not bound"
-        return self._tool
+        """The ``delegate`` tool. Available once bound."""
+        return self.tools[0]
 
     @property
     def frontend_instruction(self) -> str | None:
-        """Guidance for the frontend model, from both strategies. Available once bound."""
-        parts = [
-            self.request_strategy.frontend_instruction,
-            self.reply_strategy.frontend_instruction,
-        ]
+        """Guidance for the frontend model. Available once bound."""
+        parts = [self.request_strategy.frontend_instruction, _MESSAGES_INSTRUCTION]
         return "\n\n".join(p for p in parts if p) or None
 
+    @property
+    def session(self) -> _BackendSession | None:
+        """The session with the backend, while one is open."""
+        return self._session
+
     def bind(self, context: ConnectorContext) -> None:
-        """Settle the strategies for the layers being joined and build the tool.
+        """Settle the strategy for the layers being joined and build the tools.
 
         Args:
             context: The layers.
-
-        Raises:
-            ValueError: If the reply strategy needs intermediate results and the
-                frontend is a speech-to-speech service, which cannot take them.
         """
         self._context = context
         if self._request_strategy is None:
@@ -426,86 +358,174 @@ class BackendConnector:
                 if context.frontend_is_realtime
                 else TranscriptBackendRequestStrategy()
             )
-        if self._reply_strategy is None:
-            self._reply_strategy = (
-                OneShotBackendReplyStrategy()
-                if context.frontend_is_realtime
-                else SpeakOnPrefersSpokenBackendReplyStrategy()
-            )
-        if context.frontend_is_realtime and self._reply_strategy.needs_intermediate_results:
-            raise ValueError(
-                f"{type(self._reply_strategy).__name__} reports intermediate results, which a "
-                "speech-to-speech frontend cannot take: its function calls accept one result"
-            )
-        self._tool = self.build_tool()
+        self._tools = self.build_tools()
 
-    def build_tool(self) -> FunctionSchema:
-        """Build the ``delegate`` tool from the request strategy.
+    def build_tools(self) -> list[FunctionSchema]:
+        """Build the tools to install on the frontend: ``delegate`` first, then ``cancel_delegated_work``.
 
-        Override to install a tool of another shape entirely; the service reads
+        Override to install tools of another shape entirely; the service reads
         nothing else from the connector but :attr:`frontend_instruction`.
 
         Returns:
-            The tool, carrying its handler.
+            The tools, each carrying its handler.
         """
 
-        @tool_options(cancel_on_interruption=False)
         async def delegate(params: FunctionCallParams):
             await self.delegate(params)
 
-        return FunctionSchema(
-            name=DELEGATE_TOOL_NAME,
-            description=self.request_strategy.tool_description(),
-            properties=self.request_strategy.tool_parameters,
-            required=self.request_strategy.tool_required,
-            handler=delegate,
-        )
+        async def cancel(params: FunctionCallParams):
+            await self.cancel(params)
+
+        return [
+            FunctionSchema(
+                name=DELEGATE_TOOL_NAME,
+                description=self.request_strategy.tool_description(),
+                properties=self.request_strategy.tool_parameters,
+                required=self.request_strategy.tool_required,
+                handler=delegate,
+            ),
+            FunctionSchema(
+                name=CANCEL_TOOL_NAME,
+                description=(
+                    "Stop all the work the backend is doing now. Call this when the user no "
+                    "longer wants it: they say to stop, cancel, or never mind. If the user "
+                    "wants only part of it stopped, or wants it changed, delegate that "
+                    "instead and the backend will sort it out. Returns at once."
+                ),
+                properties={},
+                required=[],
+                handler=cancel,
+            ),
+        ]
+
+    async def run_session(self, worker: BaseWorker, frontend: LLMService[Any]) -> None:
+        """Hold the session with the backend, delivering what it produces, until cancelled.
+
+        Args:
+            worker: The pipeline worker the frontend runs in.
+            frontend: The frontend service, which takes the deliveries.
+        """
+        assert self._context is not None, "connector not bound"
+        try:
+            async with _BackendSession(
+                worker, self._context.backend_name, timeout_secs=self._timeout_secs
+            ) as session:
+                self._session = session
+                self._session_open.set()
+                async for event in session:
+                    await self.deliver(frontend, event)
+            logger.warning(f"Backend '{self._context.backend_name}' went away")
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.error(f"The session with backend '{self._context.backend_name}' failed: {e}")
+        finally:
+            self._session = None
+            self._session_open.clear()
+
+    async def _open_session(self) -> _BackendSession:
+        """The session, once it is open; waits for it up to the timeout."""
+        if self._session is None:
+            try:
+                await asyncio.wait_for(self._session_open.wait(), self._timeout_secs)
+            except TimeoutError:
+                raise RuntimeError("the backend is not attached") from None
+        assert self._session is not None
+        return self._session
 
     async def delegate(self, params: FunctionCallParams) -> None:
-        """Run one delegation: compose the request, deliver each output.
+        """Put the request a ``delegate`` call carries to the backend, and settle the call at once.
 
         Args:
             params: The ``delegate`` call.
         """
         assert self._context is not None, "connector not bound"
         request = await self.request_strategy.compose_request(params)
+        if request is None:
+            # Nothing new since the previous delegation: the backend has it all.
+            logger.debug(f"Delegate call {params.tool_call_id} carries nothing new; not sent")
+            await params.result_callback(
+                {"status": "already_delegated"},
+                properties=FunctionCallResultProperties(run_llm=False),
+            )
+            return
         logger.debug(f"Delegating to '{self._context.backend_name}': {request!r}")
-        try:
-            # Closing the stream on the way out, however the loop ends, is
-            # what cancels the backend's job at once.
-            async with aclosing(
-                _delegate_to_backend(
-                    params.pipeline_worker,
-                    self._context.backend_name,
-                    request=request,
-                    timeout_secs=self._timeout_secs,
-                )
-            ) as events:
-                async for event in events:
-                    if isinstance(event, BackendToolCall):
-                        await self.report_tool_call(params, event)
-                        continue
-                    if isinstance(event, _BackendFinalOutput):
-                        await self.reply_strategy.deliver(params, event.output, is_final=True)
-                    else:
-                        await self.reply_strategy.deliver(params, event, is_final=False)
-        except BaseException:
-            await self.reply_strategy.fail(params)
-            raise
+        session = await self._open_session()
+        status = await session.send(request)
+        await params.result_callback(
+            {"status": "delegated", "backend": status},
+            properties=FunctionCallResultProperties(run_llm=self._respond_on_delegate),
+        )
 
-    async def report_tool_call(self, params: FunctionCallParams, call: BackendToolCall) -> None:
-        """Report a function call the backend made, as the ``delegate`` call's child.
-
-        The call ran in the backend's pipeline; here it is only reported, as
-        the :class:`~pipecat.frames.frames.ExternalFunctionCallFrame` for its
-        phase, which the RTVI observer turns into function-call events under
-        the ``delegate`` call.
+    async def cancel(self, params: FunctionCallParams) -> None:
+        """Stop the backend's work, and settle the call with whether there was any.
 
         Args:
-            params: The ``delegate`` call the backend is working for.
-            call: The phase of the backend's call.
+            params: The ``cancel_delegated_work`` call.
         """
-        await params.llm.push_frame(call.to_frame(parent_tool_call_id=params.tool_call_id))
+        session = await self._open_session()
+        cancelled = await session.cancel("cancelled by the user")
+        await params.result_callback(
+            {"status": "cancelled" if cancelled else "nothing_running"},
+            properties=FunctionCallResultProperties(run_llm=True),
+        )
+
+    async def deliver(self, frontend: LLMService[Any], event: BackendEvent) -> None:
+        """Deliver one thing the backend produced to the frontend.
+
+        An output becomes a message appended to the frontend's conversation,
+        which runs the frontend when the output asks to be spoken. A function
+        call phase is reported as the
+        :class:`~pipecat.frames.frames.ExternalFunctionCallFrame` for it, which
+        the RTVI observer turns into function-call events. An error becomes a
+        spoken message, so the user hears the work stopped.
+
+        Args:
+            frontend: The frontend service.
+            event: What the backend produced.
+        """
+        if isinstance(event, BackendOutput):
+            message = self.render_output(event)
+            if message is not None:
+                await frontend.queue_frame(
+                    LLMMessagesAppendFrame(messages=[message], run_llm=event.prefers_spoken)
+                )
+        elif isinstance(event, BackendToolCall):
+            await frontend.push_frame(event.to_frame())
+        elif isinstance(event, BackendError):
+            logger.warning(f"Backend error: {event.error}")
+            await frontend.queue_frame(
+                LLMMessagesAppendFrame(
+                    messages=[
+                        {
+                            "role": "developer",
+                            "content": f"{BACKEND_MESSAGE_PREFIX}The work could not be completed.",
+                        }
+                    ],
+                    run_llm=True,
+                )
+            )
+        elif isinstance(event, BackendIdle):
+            logger.debug("Backend is idle")
+
+    def render_output(self, output: BackendOutput) -> LLMContextMessage | None:
+        """Render a backend output as the message the frontend's conversation takes in.
+
+        Override for another wording, role, or to leave some outputs out by
+        returning ``None``. The default marks the message so the frontend can
+        tell it from the user's and its own, and so the transcript request
+        strategy can leave it out of what it sends the backend.
+
+        Args:
+            output: The output.
+
+        Returns:
+            The message, or ``None`` to deliver nothing for this output.
+        """
+        if not output.text:
+            return None
+        prefix = BACKEND_THOUGHT_PREFIX if output.is_thought else BACKEND_MESSAGE_PREFIX
+        return {"role": "developer", "content": f"{prefix}{output.text}"}
 
 
 # ---------------------------------------------------------------------------
@@ -522,14 +542,15 @@ class LLMWithBackend(Pipeline):
     Put it where the LLM goes in a pipeline. It is a :class:`Pipeline`, not an
     :class:`LLMService`: functions, settings updates, event handlers and a
     ``FlowManager`` go on :attr:`frontend`. It wraps the frontend service,
-    installs the connector's ``delegate`` tool on it as a built-in tool,
-    appends the connector's guidance to the frontend's system instruction,
-    and adds a local backend worker to the pipeline worker so the app never
-    wires it up. A built-in tool is sent on every inference beside whatever
-    tools the frontend has, and never enters the context's tool set, so a
-    tool change announced to the model never mentions it. The tools are the
-    backend's; the frontend has ``delegate`` and no more, though a tool it
-    must keep, in its context or configured on the service, stays.
+    installs the connector's tools on it as built-in tools, appends the
+    connector's guidance to the frontend's system instruction, adds a local
+    backend worker to the pipeline worker so the app never wires it up, and
+    holds the session with the backend for the pipeline's life. A built-in
+    tool is sent on every inference beside whatever tools the frontend has,
+    and never enters the context's tool set, so a tool change announced to
+    the model never mentions it. The tools are the backend's; the frontend
+    has ``delegate`` and ``cancel_delegated_work`` and no more, though a tool
+    it must keep, in its context or configured on the service, stays.
 
     The guidance says when to delegate in general terms. The frontend's own
     system instruction is the place to say what the backend is for, in plain
@@ -577,10 +598,10 @@ class LLMWithBackend(Pipeline):
         )
         if instruction := self._connector.frontend_instruction:
             frontend.append_system_instruction(instruction)
-        frontend.register_function(
-            DELEGATE_TOOL_NAME, self._connector.tool.handler, cancel_on_interruption=False
-        )
-        frontend.get_llm_adapter().builtin_tools[DELEGATE_TOOL_NAME] = self._connector.tool
+        for tool in self._connector.tools:
+            frontend.register_function(tool.name, tool.handler, cancel_on_interruption=False)
+            frontend.get_llm_adapter().builtin_tools[tool.name] = tool
+        self._session_task: asyncio.Task | None = None
         super().__init__([frontend])
 
     @property
@@ -598,13 +619,24 @@ class LLMWithBackend(Pipeline):
         """The connector joining the two layers."""
         return self._connector
 
-    async def setup(self, setup: FrameProcessorSetup):
-        """Set up the frontend, and register a local backend worker as a child of the pipeline worker."""
-        await super().setup(setup)
-        if isinstance(self._backend, BackendLLMWorker):
-            await self.pipeline_worker.add_workers(self._backend)
-
     @property
     def tool(self) -> FunctionSchema:
         """The ``delegate`` tool installed on the frontend."""
         return self._connector.tool
+
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the frontend, register a local backend worker as a child of the pipeline worker, and open the session."""
+        await super().setup(setup)
+        if isinstance(self._backend, BackendLLMWorker):
+            await self.pipeline_worker.add_workers(self._backend)
+        self._session_task = self.create_task(
+            self._connector.run_session(self.pipeline_worker, self._frontend),
+            f"{self}::backend_session",
+        )
+
+    async def cleanup(self):
+        """Close the session with the backend, then clean up the frontend."""
+        if self._session_task is not None:
+            await self.cancel_task(self._session_task)
+            self._session_task = None
+        await super().cleanup()
