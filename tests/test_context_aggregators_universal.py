@@ -1376,10 +1376,10 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
             LLMFullResponseEndFrame(),
         ]
         expected_down_frames = [
+            InterruptionFrame,
             LLMContextFrame,
             LLMContextAssistantTimestampFrame,
             LLMContextAssistantTurnFrame,
-            InterruptionFrame,
             LLMContextFrame,
             LLMContextAssistantTimestampFrame,
             LLMContextAssistantTurnFrame,
@@ -1395,6 +1395,102 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stop_messages[0].content, "Hello")
         self.assertFalse(stop_messages[1].interrupted)
         self.assertEqual(stop_messages[1].content, "Hello there!")
+
+    async def test_interruption_keeps_overtaken_text_in_the_interrupted_turn(self):
+        """Text the interruption overtook in the queue lands in the interrupted turn.
+
+        The output transport releases each word downstream as it is played, and
+        the InterruptionFrame is a system frame, so it is dequeued ahead of words
+        that arrived before it. The user heard those words: they are written to
+        the interrupted turn, reported in its turn-stopped message, and kept off
+        the front of the next turn.
+        """
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+
+        stop_messages = []
+
+        @aggregator.event_handler("on_assistant_turn_stopped")
+        async def on_assistant_turn_stopped(aggregator, message: AssistantTurnStoppedMessage):
+            stop_messages.append(message)
+
+        def word(text: str) -> TTSTextFrame:
+            return TTSTextFrame(text, aggregated_by=AggregationType.WORD)
+
+        frames_to_send = [
+            LLMFullResponseStartFrame(),
+            word("The"),
+            word("pool"),
+            word("opens"),
+            SleepFrame(),
+            # Sent back-to-back with the interruption, so both words sit in the
+            # aggregator's queue when the interruption is dequeued past them.
+            word("at"),
+            word("six"),
+            InterruptionFrame(),
+            SleepFrame(),
+            LLMFullResponseStartFrame(),
+            word("We"),
+            word("close"),
+            word("at"),
+            word("nine."),
+            LLMFullResponseEndFrame(),
+        ]
+        expected_down_frames = [
+            InterruptionFrame,
+            LLMContextFrame,
+            LLMContextAssistantTimestampFrame,
+            LLMContextAssistantTurnFrame,
+            LLMContextFrame,
+            LLMContextAssistantTimestampFrame,
+            LLMContextAssistantTurnFrame,
+        ]
+        await run_test(
+            aggregator,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+        )
+        self.assertEqual(context.messages[0]["content"], "The pool opens at six")
+        self.assertEqual(context.messages[1]["content"], "We close at nine.")
+        self.assertEqual(len(stop_messages), 2)
+        self.assertTrue(stop_messages[0].interrupted)
+        self.assertEqual(stop_messages[0].content, "The pool opens at six")
+        self.assertFalse(stop_messages[1].interrupted)
+        self.assertEqual(stop_messages[1].content, "We close at nine.")
+
+    async def test_interruption_with_no_open_turn_writes_nothing(self):
+        """An interruption between turns leaves the context alone."""
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+
+        stop_messages = []
+
+        @aggregator.event_handler("on_assistant_turn_stopped")
+        async def on_assistant_turn_stopped(aggregator, message: AssistantTurnStoppedMessage):
+            stop_messages.append(message)
+
+        frames_to_send = [
+            LLMFullResponseStartFrame(),
+            LLMTextFrame("Hello there!"),
+            LLMFullResponseEndFrame(),
+            SleepFrame(),
+            InterruptionFrame(),
+            SleepFrame(),
+        ]
+        expected_down_frames = [
+            LLMContextFrame,
+            LLMContextAssistantTimestampFrame,
+            LLMContextAssistantTurnFrame,
+            InterruptionFrame,
+        ]
+        await run_test(
+            aggregator,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+        )
+        self.assertEqual([m["content"] for m in context.messages], ["Hello there!"])
+        self.assertEqual(len(stop_messages), 1)
+        self.assertFalse(stop_messages[0].interrupted)
 
     async def test_function_call(self):
         context = LLMContext()
@@ -1982,10 +2078,10 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
         ]
         expected_down_frames = [
             TTSStartedFrame,
+            InterruptionFrame,
             LLMContextFrame,
             LLMContextAssistantTimestampFrame,
             LLMContextAssistantTurnFrame,
-            InterruptionFrame,
         ]
         await run_test(
             aggregator,
