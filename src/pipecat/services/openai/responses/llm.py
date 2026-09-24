@@ -68,6 +68,22 @@ from pipecat.utils.http import TIMEOUT_EXCEPTIONS, connection_limits
 from pipecat.utils.tracing.service_decorators import traced_llm
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
+# WebSocket events that carry output the service pushes downstream or acts on.
+# The first of them ends the window in which a response that has produced
+# nothing may be abandoned and re-issued: from then on a retry would duplicate
+# what is already on its way. A function call announced by
+# ``response.output_item.added`` ends it too.
+_OUTPUT_EVENT_TYPES = frozenset(
+    {
+        "response.output_text.delta",
+        "response.reasoning_summary_text.delta",
+        "response.function_call_arguments.delta",
+        "response.function_call_arguments.done",
+        "response.output_item.done",
+    }
+)
+
+
 # ---------------------------------------------------------------------------
 # Private retry exception classes
 # ---------------------------------------------------------------------------
@@ -1126,9 +1142,12 @@ class OpenAIResponsesLLMService(
                 logger.debug(f"{self}: Response started: {self._current_response_id}")
                 continue
 
-            # Anything past response.created means the response is under way, so
-            # the window for abandoning and re-issuing it has closed.
-            deadline = None
+            # Only output closes the window for abandoning and re-issuing the
+            # response. The server acknowledges a request with
+            # response.in_progress, and announces a message item, well before
+            # the first delta, and none of that is anything a retry would repeat.
+            if event_type in _OUTPUT_EVENT_TYPES:
+                deadline = None
 
             if event_type == "response.output_text.delta":
                 await self.stop_ttfb_metrics()
@@ -1145,6 +1164,7 @@ class OpenAIResponsesLLMService(
                 await self.stop_ttfb_metrics()
                 item = event.get("item", {})
                 if item.get("type") == "function_call":
+                    deadline = None
                     # A turn that only calls tools produces no answer text, so the
                     # call itself is what the caller gets and TTFAT ends here
                     # rather than going unmeasured.

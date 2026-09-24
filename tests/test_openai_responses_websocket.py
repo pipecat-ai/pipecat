@@ -1077,6 +1077,94 @@ class TestRetryOnTimeout:
             await service._receive_response_events(MagicMock(spec=LLMContext), [], 0.05)
 
     @pytest.mark.asyncio
+    async def test_response_in_progress_does_not_close_the_window(self):
+        """The server sends response.in_progress right after response.created;
+        it carries no output, so a silent response must still be retried."""
+        from pipecat.services.openai.responses.llm import _ResponseTimeoutError
+
+        service = _make_service()
+        service._websocket = _ws_script(
+            {"type": "response.created", "response": {"id": "resp_1"}},
+            {"type": "response.in_progress", "response": {"id": "resp_1"}},
+        )
+
+        with pytest.raises(_ResponseTimeoutError):
+            await asyncio.wait_for(
+                service._receive_response_events(MagicMock(spec=LLMContext), [], 0.05),
+                timeout=2,
+            )
+
+    @pytest.mark.asyncio
+    async def test_message_item_without_output_does_not_close_the_window(self):
+        """A message item announced before its first delta is not yet output."""
+        from pipecat.services.openai.responses.llm import _ResponseTimeoutError
+
+        service = _make_service()
+        service.stop_ttfb_metrics = AsyncMock()
+        service._websocket = _ws_script(
+            {"type": "response.created", "response": {"id": "resp_1"}},
+            {"type": "response.in_progress", "response": {"id": "resp_1"}},
+            {"type": "response.output_item.added", "item": {"type": "message", "id": "msg_1"}},
+            {"type": "response.content_part.added", "item_id": "msg_1"},
+        )
+
+        with pytest.raises(_ResponseTimeoutError):
+            await asyncio.wait_for(
+                service._receive_response_events(MagicMock(spec=LLMContext), [], 0.05),
+                timeout=2,
+            )
+
+    @pytest.mark.asyncio
+    async def test_function_call_item_closes_the_window(self):
+        """A function call is output: once announced, a stall must not re-issue it."""
+        service = _make_service()
+        service.stop_ttfb_metrics = AsyncMock()
+        service.stop_ttfat_metrics = AsyncMock()
+        service.start_llm_usage_metrics = AsyncMock()
+        service.run_function_calls = AsyncMock()
+        service._websocket = _ws_script(
+            {"type": "response.created", "response": {"id": "resp_1"}},
+            {"type": "response.in_progress", "response": {"id": "resp_1"}},
+            {
+                "type": "response.output_item.added",
+                "item": {"type": "function_call", "id": "fc_1", "name": "f", "call_id": "c1"},
+            },
+            0.15,  # longer than the timeout below
+            {"type": "response.function_call_arguments.done", "item_id": "fc_1", "arguments": "{}"},
+            {"type": "response.completed", "response": {"id": "resp_1", "model": "gpt-4.1"}},
+        )
+
+        await service._receive_response_events(MagicMock(spec=LLMContext), [], 0.05)
+
+        service.run_function_calls.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_reasoning_item_closes_the_window(self):
+        """A finished reasoning item is appended to the context, so it is output."""
+        service = _make_service()
+        service.start_llm_usage_metrics = AsyncMock()
+        service._append_reasoning_message = AsyncMock()
+        service._websocket = _ws_script(
+            {"type": "response.created", "response": {"id": "resp_1"}},
+            {"type": "response.in_progress", "response": {"id": "resp_1"}},
+            {
+                "type": "response.output_item.done",
+                "item": {
+                    "type": "reasoning",
+                    "id": "rs_1",
+                    "summary": [],
+                    "encrypted_content": "x",
+                },
+            },
+            0.15,  # longer than the timeout below
+            {"type": "response.completed", "response": {"id": "resp_1", "model": "gpt-4.1"}},
+        )
+
+        await service._receive_response_events(MagicMock(spec=LLMContext), [], 0.05)
+
+        service._append_reasoning_message.assert_awaited_once()
+
+    @pytest.mark.asyncio
     async def test_no_timeout_when_not_requested(self):
         service = _make_service()
         service._push_llm_text = AsyncMock()
