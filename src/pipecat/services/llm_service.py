@@ -2066,6 +2066,23 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         item = await self._broadcast_function_call_cancelled(runner_item, run_llm=True)
         await self._call_event_handler("on_function_calls_cancelled", [item])
 
+    async def cancel_function_calls(
+        self, *, reason: str = "cancelled"
+    ) -> list[FunctionCallFromLLM]:
+        """Cancel every function call in flight, whether or not it survives interruptions.
+
+        Each handler is thrown ``asyncio.CancelledError``, the call is settled
+        downstream as cancelled, and ``on_function_calls_cancelled`` fires. No
+        inference runs for the cancellations.
+
+        Args:
+            reason: What triggered the cancellation, for the logs.
+
+        Returns:
+            The calls that were cancelled.
+        """
+        return await self._cancel_function_call_tasks(lambda item: True, reason=reason)
+
     async def _cancel_function_calls_by_tool_call_id(self, tool_call_id: str):
         """Cancel in-progress function call tasks by their tool_call_id.
 
