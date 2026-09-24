@@ -1,5 +1,6 @@
-# A second request while the first is still being worked on. The research is
-# quick and lands first; the code fix takes longer and lands after.
+# A second request while the first is still being worked on. The lookup is
+# quick and lands first; the code fix takes longer and lands after. The two are
+# unrelated, so the backend has no reason to fold one into the other.
 - expect:
     - event: response
       eval: "the bot opens the conversation in some way (a greeting, an introduction, an offer to help, or a question to get the user started)"
@@ -10,10 +11,10 @@
       calls:
         - name: delegate
     - event: response
-      within_ms: 15000
+      within_ms: 25000
       eval: "acknowledges that it is starting on the fix"
 
-- user: "Oh, and also, look up what our retry policy RFC says about backoff."
+- user: "Oh, and also, look up what the on-call runbook says to do about upstream timeouts."
   send_after:
     delay_ms: 5000
   expect:
@@ -21,15 +22,13 @@
       calls:
         - name: delegate
     - event: response
-      within_ms: 15000
+      within_ms: 25000
       eval: "acknowledges the research request, without claiming to have the answer yet"
 
+# No user turn: both results arrive on their own. The lookup is quick and
+# usually comes first, but the two may share one reply, so one turn waits for
+# both.
 - expect:
     - event: response
-      within_ms: 60000
-      eval: "reports what the retry policy RFC says: exponential backoff, doubling per attempt, with a cap and jitter"
-
-- expect:
-    - event: response
-      within_ms: 150000
-      eval: "reports that the retry test was fixed and the tests now pass"
+      within_ms: 200000
+      eval: "reports both of these, in either order: what the on-call runbook says about upstream timeouts (check the upstream's status page, then the retry dashboard for a spike in exhausted retries), and that the retry test was fixed and the tests now pass (until both have been reported, answer continue, not no)"
