@@ -16,6 +16,13 @@ from pipecat.bus.ui.messages import (
     _UI_SNAPSHOT_BUS_EVENT_NAME,
     BusUIEventMessage,
 )
+from pipecat.classifiers.base_classifier import (
+    BaseClassifier,
+    ChoiceQuestion,
+    ChoiceResult,
+    YesNoResult,
+)
+from pipecat.classifiers.llm.classifier import LLMClassifier
 from pipecat.frames.frames import (
     LLMContextFrame,
     LLMMessagesAppendFrame,
@@ -841,3 +848,131 @@ class TestUIWorkerPromptGuide(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class _FakeClassifier(BaseClassifier):
+    """Answers from a scripted probability and records what it was asked."""
+
+    def __init__(self, probability: float):
+        super().__init__()
+        self.probability = probability
+        self.choice_label = ""
+        self.asked: list = []
+        self.setup_task_manager = None
+        self.cleaned_up = False
+
+    async def setup(self, task_manager):
+        self.setup_task_manager = task_manager
+
+    async def cleanup(self):
+        self.cleaned_up = True
+
+    async def _ask(self, state, questions):
+        results = {}
+        for name, question in questions.items():
+            self.asked.append((state, question))
+            if isinstance(question, ChoiceQuestion):
+                options = question.options
+                label = self.choice_label if self.choice_label in options else next(iter(options))
+                results[name] = ChoiceResult(
+                    choice=label,
+                    probabilities={o: float(o == label) for o in options},
+                    confidence=self.probability,
+                )
+            else:
+                results[name] = YesNoResult(probability=self.probability)
+        return results, None
+
+
+class TestUIWorkerClassifier(unittest.IsolatedAsyncioTestCase):
+    async def test_defaults_to_an_llm_classifier_over_the_llm(self):
+        worker = await _make_worker()
+        self.assertIsInstance(worker.classifier, LLMClassifier)
+        self.assertIs(worker.classifier.llm, worker.llm)
+
+    async def test_activation_sets_the_classifier_up_and_cleanup_cleans_it(self):
+        classifier = _FakeClassifier(0.9)
+        worker = await _make_worker(classifier=classifier)
+
+        await worker.on_activated(None)
+        self.assertIs(classifier.setup_task_manager, worker.task_manager)
+        self.assertIs(worker.classifier, classifier)
+
+        await worker.cleanup()
+        self.assertTrue(classifier.cleaned_up)
+
+    async def test_should_respond_asks_with_the_event_and_the_screen(self):
+        classifier = _FakeClassifier(0.9)
+        worker = await _make_worker(classifier=classifier)
+        worker._latest_snapshot = _SAMPLE_SNAPSHOT
+        event = BusUIEventMessage(
+            source="music", target="ui", event_name="nav_click", payload={"view": "home"}
+        )
+
+        self.assertTrue(await worker.should_respond(event))
+
+        state, question = classifier.asked[0]
+        self.assertEqual(state["event"], {"name": "nav_click", "payload": {"view": "home"}})
+        self.assertTrue(state["screen"].startswith("<ui_state>"))
+        self.assertIn("say something", question.instructions)
+        self.assertIn("routine click", question.no)
+
+    async def test_should_respond_is_false_when_no_is_likelier(self):
+        worker = await _make_worker(classifier=_FakeClassifier(0.3))
+        event = BusUIEventMessage(source="music", target="ui", event_name="scroll", payload={})
+        self.assertFalse(await worker.should_respond(event))
+
+    async def test_should_respond_without_a_snapshot_sends_only_the_event(self):
+        classifier = _FakeClassifier(0.9)
+        worker = await _make_worker(classifier=classifier)
+        event = BusUIEventMessage(source="music", target="ui", event_name="scroll", payload={})
+
+        await worker.should_respond(event)
+
+        state, _ = classifier.asked[0]
+        self.assertNotIn("screen", state)
+
+    async def test_which_element_asks_over_the_named_elements(self):
+        classifier = _FakeClassifier(0.9)
+        classifier.choice_label = "e6"
+        worker = await _make_worker(classifier=classifier)
+        worker._latest_snapshot = _SAMPLE_SNAPSHOT
+
+        ref = await worker.which_element("the Taylor Swift one")
+
+        self.assertEqual(ref, "e6")
+        state, question = classifier.asked[0]
+        self.assertEqual(state["utterance"], "the Taylor Swift one")
+        self.assertIn("<ui_state>", state["screen"])
+        self.assertEqual(question.options["e5"], 'button "Bad Bunny"')
+        self.assertEqual(question.options["e6"], 'button "Taylor Swift"')
+        self.assertNotIn("e1", question.options)
+        self.assertIn("referring to", question.instructions)
+
+    async def test_which_element_returns_none_below_the_threshold(self):
+        classifier = _FakeClassifier(0.2)
+        classifier.choice_label = "e5"
+        worker = await _make_worker(classifier=classifier)
+        worker._latest_snapshot = _SAMPLE_SNAPSHOT
+        self.assertIsNone(await worker.which_element("that one"))
+
+    async def test_which_element_without_a_snapshot_asks_nothing(self):
+        classifier = _FakeClassifier(0.9)
+        worker = await _make_worker(classifier=classifier)
+        self.assertIsNone(await worker.which_element("that one"))
+        self.assertEqual(classifier.asked, [])
+
+    async def test_say_asks_the_pipeline_to_speak(self):
+        worker = await _make_worker()
+        worker.send_bus_message = AsyncMock()
+
+        await worker.say("Two items in your cart.")
+
+        sent = worker.send_bus_message.await_args.args[0]
+        self.assertIsInstance(sent, BusTTSSpeakMessage)
+        self.assertEqual(sent.text, "Two items in your cart.")
+        self.assertIsNone(sent.target)
+        self.assertTrue(sent.append_to_context)
+
+        await worker.say("Done.", target="voice")
+        self.assertEqual(worker.send_bus_message.await_args.args[0].target, "voice")

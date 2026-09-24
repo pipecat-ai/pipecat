@@ -11,6 +11,7 @@ import json
 from dataclasses import asdict, is_dataclass
 from typing import Any
 
+from loguru import logger
 from pydantic import BaseModel
 
 from pipecat.bus.messages import (
@@ -24,6 +25,8 @@ from pipecat.bus.ui.messages import (
     BusUICommandMessage,
     BusUIEventMessage,
 )
+from pipecat.classifiers.base_classifier import BaseClassifier, ChoiceQuestion, YesNoQuestion
+from pipecat.classifiers.llm.classifier import LLMClassifier
 from pipecat.frames.frames import LLMContextFrame, LLMMessagesAppendFrame, LLMMessagesUpdateFrame
 from pipecat.pipeline.job_context import JobGroupContext, JobGroupParams, JobStatus
 from pipecat.pipeline.job_decorator import job
@@ -45,6 +48,11 @@ from pipecat.workers.llm.llm_context_worker import LLMContextWorker
 from pipecat.workers.ui.ui_event_decorator import _collect_ui_event_handlers
 from pipecat.workers.ui.ui_prompts import UI_STATE_PROMPT_GUIDE
 
+# The most named elements put to the classifier as the options of one
+# question. It matches Jev's limit on choice options, and an LLM does no
+# better past that many either.
+_MAX_ELEMENT_OPTIONS = 255
+
 
 class UIWorker(BaseUIWorker, LLMContextWorker):
     """LLM worker that reads and drives a client GUI over the RTVI UI channel.
@@ -62,6 +70,10 @@ class UIWorker(BaseUIWorker, LLMContextWorker):
     - React to UI events, dispatched to ``@ui_event(name)`` handlers.
     - Drive the UI with ``send_command`` and the ``scroll_to`` / ``highlight`` /
       ``select_text`` / ``click`` / ``set_input_value`` helpers.
+    - Decide small things with a classifier, not an LLM turn: whether a UI
+      event deserves a comment (``should_respond``) and which element on
+      screen the user means (``which_element``). ``say`` speaks a line through
+      the pipeline's TTS.
     - Answer as a delegate. The built-in single-flight ``respond`` job runs one
       screen-grounded LLM turn that a ``@tool`` ends by calling ``respond_to_job``
       (which decides how the answer reaches the user).
@@ -99,6 +111,7 @@ class UIWorker(BaseUIWorker, LLMContextWorker):
         *,
         llm: LLMService[Any],
         context: LLMContext | None = None,
+        classifier: BaseClassifier | None = None,
         assistant_params: LLMAssistantAggregatorParams | None = None,
         inject_events: bool = True,
         auto_inject_ui_state: bool = True,
@@ -114,6 +127,14 @@ class UIWorker(BaseUIWorker, LLMContextWorker):
                 of the mutable history and are cleared on each
                 ``keep_history=False`` reset; put durable instructions in the
                 LLM's ``system_instruction`` instead.
+            classifier: Answers the small questions about the screen
+                (``should_respond``, ``which_element``). Without one, the
+                ``llm`` answers them through an
+                :class:`~pipecat.classifiers.llm.classifier.LLMClassifier`,
+                which costs an LLM call per question; a
+                :class:`~pipecat.classifiers.jev.classifier.JevClassifier`
+                answers in about a tenth of a second with a calibrated
+                probability.
             assistant_params: Optional assistant-aggregator parameters, e.g. to
                 enable context summarization for ``keep_history=True`` workers.
             inject_events: When True (the default), append each UI event to the
@@ -152,6 +173,7 @@ class UIWorker(BaseUIWorker, LLMContextWorker):
         # ``prompt_guide`` to override the text, or ``None`` to disable.
         if prompt_guide:
             self.llm.append_system_instruction(prompt_guide)
+        self._classifier = classifier or LLMClassifier(llm=llm)
         self._inject_events = inject_events
         self._auto_inject_ui_state = auto_inject_ui_state
         self._keep_history = keep_history
@@ -189,6 +211,25 @@ class UIWorker(BaseUIWorker, LLMContextWorker):
             content = self.render_ui_state()
             if content:
                 frame.context.add_message({"role": "developer", "content": content})
+
+    @property
+    def classifier(self) -> BaseClassifier:
+        """The classifier this worker asks the small questions about the screen."""
+        return self._classifier
+
+    async def on_activated(self, args: dict | None) -> None:
+        """Set the classifier up with this worker's task manager, then activate as usual.
+
+        Args:
+            args: Optional activation arguments.
+        """
+        await self._classifier.setup(self.task_manager)
+        await super().on_activated(args)
+
+    async def cleanup(self) -> None:
+        """Clean up the classifier along with the worker."""
+        await self._classifier.cleanup()
+        await super().cleanup()
 
     async def send_command(self, name: str, payload: Any = None) -> None:
         """Send a named UI command to the client.
@@ -306,6 +347,87 @@ class UIWorker(BaseUIWorker, LLMContextWorker):
             "set_input_value",
             SetInputValue(ref=ref, value=value, replace=replace),
         )
+
+    async def should_respond(
+        self,
+        message: BusUIEventMessage,
+        criteria: str = "the assistant should say something about what the user just did",
+    ) -> bool:
+        """Ask the classifier whether a UI event calls for the assistant to speak.
+
+        Most clicks and edits need no comment, and a handler that reacts to
+        events has to tell the few that do apart without an LLM turn. The
+        question carries the event and the latest ``<ui_state>`` snapshot.
+
+        Args:
+            message: The UI event.
+            criteria: What is being checked for, as a yes or no question.
+
+        Returns:
+            Whether the assistant should respond to the event.
+
+        Raises:
+            ClassifierError: If the classifier could not answer.
+        """
+        state: dict[str, Any] = {
+            "event": {"name": message.event_name, "payload": message.payload},
+        }
+        screen = self.render_ui_state()
+        if screen:
+            state["screen"] = screen
+        question = YesNoQuestion(
+            instructions=criteria,
+            yes="the event changes what the user is doing or asks for the assistant's attention",
+            no="a routine click, scroll, hover or edit that needs no comment",
+        )
+        result = (await self._classifier.yes_no(state, {"respond": question}))["respond"]
+        logger.debug(f"{self.name}: respond to '{message.event_name}'? {result.probability:.2f}")
+        return result.is_yes
+
+    async def which_element(self, description: str, threshold: float = 0.5) -> str | None:
+        """Ask the classifier which element on screen the user means.
+
+        The candidates are the snapshot's named elements, described by their
+        role and name. The user's words and the screen are the state.
+
+        Args:
+            description: What the user said, such as "the blue button".
+            threshold: The probability below which no element is returned.
+
+        Returns:
+            The element's snapshot ref, or ``None`` when there is no
+            snapshot, no named element, or no confident answer.
+
+        Raises:
+            ClassifierError: If the classifier could not answer.
+        """
+        options = self._element_options()
+        if not options:
+            return None
+        state = {"utterance": description, "screen": self.render_ui_state()}
+        question = ChoiceQuestion(
+            instructions="the element on screen the user is referring to", options=options
+        )
+        result = (await self._classifier.choice(state, {"element": question}))["element"]
+        logger.debug(f"{self.name}: '{description}' -> {result.choice} ({result.confidence:.2f})")
+        if result.confidence < threshold:
+            return None
+        return result.choice
+
+    async def say(self, text: str, *, target: str | None = None) -> None:
+        """Have the pipeline say something through its TTS, with no LLM turn.
+
+        Publishes a ``BusTTSSpeakMessage``; the pipeline worker that receives
+        it queues a ``TTSSpeakFrame``, and the text goes into the conversation
+        context as something the assistant said.
+
+        Args:
+            text: What to say.
+            target: The pipeline worker to address. ``None``, the default,
+                reaches every pipeline worker, which is the one there is in a
+                single-bot app.
+        """
+        await self.send_bus_message(BusTTSSpeakMessage(source=self.name, target=target, text=text))
 
     async def on_bus_message(self, message: BusMessage) -> None:
         """Dispatch UI events alongside base lifecycle handling."""
@@ -626,6 +748,29 @@ class UIWorker(BaseUIWorker, LLMContextWorker):
             handler(message),
             f"{self.name}::ui_event_{message.event_name}",
         )
+
+    def _element_options(self) -> dict[str, str | dict[str, Any] | list[Any] | None]:
+        """The snapshot's named elements, ref to description, breadth first up to the cap."""
+        options: dict[str, str | dict[str, Any] | list[Any] | None] = {}
+        root = (self._latest_snapshot or {}).get("root")
+        if not isinstance(root, dict):
+            return options
+        pending = [root]
+        while pending:
+            if len(options) == _MAX_ELEMENT_OPTIONS:
+                logger.debug(
+                    f"{self.name}: the screen has more than {_MAX_ELEMENT_OPTIONS} named "
+                    "elements; deeper ones are not candidates"
+                )
+                break
+            node = pending.pop(0)
+            ref = node.get("ref")
+            name = node.get("name")
+            if isinstance(ref, str) and ref and isinstance(name, str) and name:
+                options[ref] = f'{node.get("role", "element")} "{name}"'
+            children = node.get("children") or []
+            pending.extend(c for c in children if isinstance(c, dict))
+        return options
 
 
 def _is_user_turn(context: LLMContext) -> bool:
