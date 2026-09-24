@@ -75,6 +75,20 @@ class UserIdleController(BaseObject):
 
         self._register_event_handler("on_user_turn_idle", sync=True)
 
+    @property
+    def waiting_for_user(self) -> bool:
+        """Whether the bot has finished responding and is waiting for the user.
+
+        False while the bot is thinking, speaking or running a function call,
+        and during a user turn.
+        """
+        return self._waiting_for_user
+
+    @property
+    def function_calls_in_progress(self) -> bool:
+        """Whether function calls have started and not finished."""
+        return self._function_calls_in_progress > 0
+
     async def setup(self, setup: FrameProcessorSetup):
         """Set up the controller.
 

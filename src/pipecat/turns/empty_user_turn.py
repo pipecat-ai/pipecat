@@ -30,10 +30,11 @@ class EmptyUserTurnConfig:
 
     Empty turns fall into two cases, each with its own prompt:
 
-    - Interrupted: the turn started while the bot was responding (thinking,
-      speaking or running a function call) and interrupted it.
-    - Idle: the bot had nothing in progress, so the turn was most likely
-      background noise.
+    - Interrupted: the turn started while the bot was thinking, speaking or
+      running a function call, and interrupted it. A turn before the bot has
+      first finished speaking counts as one too.
+    - Idle: the bot had finished and was waiting for the user, so the turn was
+      most likely background noise.
 
     Parameters:
         interrupted_prompt: Developer message for an empty turn that interrupted
