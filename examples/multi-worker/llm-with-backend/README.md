@@ -1,43 +1,36 @@
 # LLM with backend
 
-A conversational **frontend** holds the conversation with a fast model and no tools of its own. Anything that needs tools, current information or careful reasoning it hands to a **backend**: a `BackendLLMWorker` running a heavier model with the tools. `LLMWithBackend` wraps the frontend so the pair drops into a pipeline where an LLM goes, installs the `delegate` tool that joins them, and runs the backend as a worker of its own.
+A conversational **frontend** holds the conversation with a fast model and no tools of its own. Anything that needs tools, current information or careful reasoning it hands to a **backend**: a `BackendLLMWorker` running a heavier model with the tools. `LLMWithBackend` wraps the frontend so the pair drops into a pipeline where an LLM goes, installs the tools that join them, and runs the backend as a worker of its own.
 
 ```python
 llm = LLMWithBackend(
     frontend=OpenAIResponsesLLMService(...),
     backend=BackendLLMWorker(
         llm=AnthropicLLMService(...),
-        context=LLMContext(tools=[get_current_weather, get_restaurant_recommendation]),
+        context=LLMContext(tools=[search_codebase, read_file, apply_patch, run_tests]),
     ),
 )
 ```
 
-How a delegation crosses is the `BackendConnector`'s business, built from two strategies the service picks by frontend kind unless told otherwise:
-
-|                   | request (frontend → backend)                                                       | reply (backend → frontend)                                                                                  |
-| ----------------- | ---------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| text frontend     | `TranscriptBackendRequestStrategy`: the conversation since the previous delegation | `SpeakOnPrefersSpokenBackendReplyStrategy`: progress relayed as it comes, spoken as the backend's flag says |
-| realtime frontend | `ExplicitBackendRequestStrategy`: a request the model words itself                 | `OneShotBackendReplyStrategy`: every output at once, when done                                              |
+The two exchange messages, not calls. The frontend's `delegate` tool puts a message to the backend and returns at once, so the frontend can acknowledge while the backend works. Everything the backend writes comes back as a message in the frontend's conversation marked `Backend:`, which the frontend relays in its own words; the backend is told to write only when it has something for the user. What it is doing and thinking is recorded in the conversation too, marked `Backend (working):` and `Backend (thinking):`, silently, so the frontend can say how the work is going if asked. A second request joins the work in progress, a correction changes it, and the `cancel_delegated_work` tool stops it. The `BackendConnector` owns the session with the backend and how a request is worded: a text frontend hands over the conversation since the previous delegation (`TranscriptBackendRequestStrategy`), a speech-to-speech frontend words the request itself (`ExplicitBackendRequestStrategy`), since its context lags the audio.
 
 ## Examples
 
-| Example                                        | What it shows                                                                                     |
-| ---------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| [`cascade-frontend.py`](cascade-frontend.py)   | A cascade pipeline (STT + GPT + TTS) as the frontend, all defaults.                               |
-| [`realtime-frontend.py`](realtime-frontend.py) | OpenAI Realtime as the frontend, all defaults. Same backend, same prompts as the cascade example. |
+One engineering assistant, three frontends. [`backend.py`](backend.py) holds the backend, its tools and both prompts: a code change that loops through searching, reading, patching and running the tests until they pass, a two-step research task, and quick CI and pull-request lookups, each taking about as long as the real thing would.
 
-Run any of them the usual way, then connect a client:
+| Example                                                        | Frontend                                              |
+| -------------------------------------------------------------- | ----------------------------------------------------- |
+| [`openai-responses-frontend.py`](openai-responses-frontend.py) | A cascade pipeline: STT, OpenAI's Responses API, TTS. |
+| [`openai-realtime-frontend.py`](openai-realtime-frontend.py)   | OpenAI Realtime, speech to speech.                    |
+| [`gemini-live-frontend.py`](gemini-live-frontend.py)           | Gemini Live, speech to speech.                        |
 
-```bash
-python cascade-frontend.py
-```
-
-Or drive one with a behavioral eval:
+Run one the usual way, then connect a client and try "fix the flaky retry test in the HTTP client", then ask for something else while it works:
 
 ```bash
-python cascade-frontend.py -t eval --port 7860
-pipecat eval run ../../../scripts/release-evals/scenarios/scripted/weather_function_call_audio.yaml --bot-url ws://localhost:7860 -v
+python openai-responses-frontend.py
 ```
+
+The behavioral evals for these bots are in [`evals/llm-with-backend/`](../../../evals/llm-with-backend/).
 
 ## A backend in another process
 
@@ -51,7 +44,7 @@ bus = RedisBus(redis=Redis.from_url(REDIS_URL), channel="pipecat:llm-with-backen
 backend = BackendLLMWorker(
     name="backend",
     llm=AnthropicLLMService(...),
-    context=LLMContext(tools=[get_current_weather, get_restaurant_recommendation]),
+    context=LLMContext(tools=[...]),
 )
 
 runner = WorkerRunner(bus=bus, handle_sigint=True)
@@ -74,4 +67,4 @@ await runner.add_workers(worker)
 await runner.run()
 ```
 
-The first delegation waits for the registry to report the backend ready, so a backend that starts a little late is fine. A `PgmqBus` works the same way.
+The frontend attaches to the backend when its pipeline starts and waits for the registry to report the backend ready, so a backend that starts a little late is fine. A `PgmqBus` works the same way.
