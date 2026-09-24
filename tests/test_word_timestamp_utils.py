@@ -91,8 +91,8 @@ class TestMergePunctTokens(unittest.TestCase):
         self.assertEqual(merge_punct_tokens(raw), [("have", 0.0), ("250", 0.2)])
 
     def test_separators_inside_a_number_are_kept(self):
-        raw = [("1", 0.0), (",", 0.1), ("1", 0.2), ("9", 0.3), ("9", 0.4)]
-        self.assertEqual(merge_punct_tokens(raw), [("1,199", 0.0)])
+        raw = [("3", 0.0), (",", 0.1), ("5", 0.2), ("0", 0.3), ("0", 0.4)]
+        self.assertEqual(merge_punct_tokens(raw), [("3,500", 0.0)])
         raw = [("7", 0.0), (".", 0.1), ("5", 0.2), (" ", 0.3), ("hours", 0.4)]
         self.assertEqual(merge_punct_tokens(raw), [("7.5", 0.0), ("hours", 0.4)])
 
@@ -113,9 +113,9 @@ class TestSplitTrailingNumber(unittest.TestCase):
         self.assertEqual(split_trailing_number(raw), ([("across", 0.0), (" ", 0.1)], [("20", 0.2)]))
 
     def test_trailing_number_with_separator_is_held(self):
-        raw = [("is", 0.0), (" ", 0.1), ("1", 0.2), (",", 0.3)]
+        raw = [("is", 0.0), (" ", 0.1), ("3", 0.2), (",", 0.3)]
         self.assertEqual(
-            split_trailing_number(raw), ([("is", 0.0), (" ", 0.1)], [("1", 0.2), (",", 0.3)])
+            split_trailing_number(raw), ([("is", 0.0), (" ", 0.1)], [("3", 0.2), (",", 0.3)])
         )
 
     def test_complete_words_are_not_held(self):

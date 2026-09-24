@@ -62,7 +62,7 @@ def merge_punct_tokens(
     preceding word's text and their timestamp is discarded (the preceding word's
     timestamp is kept).  A token starting with a digit is appended the same way to a
     preceding word that ends in a digit, optionally followed by ``.`` or ``,``, so
-    ``"1"``, ``","``, ``"1"``, ``"9"``, ``"9"`` becomes ``"1,199"``.  Leading
+    ``"3"``, ``","``, ``"5"``, ``"0"``, ``"0"`` becomes ``"3,500"``.  Leading
     punct/space tokens with no preceding word are silently discarded.  Every output
     token is stripped of leading and trailing whitespace (spaces, tabs, newlines).
 
