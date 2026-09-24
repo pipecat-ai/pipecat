@@ -3,10 +3,10 @@
     - event: response
       eval: "the bot opens the conversation in some way (a greeting, an introduction, an offer to help, or a question to get the user started)"
 
-- user: "Quick one: what's the difference between a mutex and a semaphore, in a sentence?"
+- user: "What does a mutex do?"
   expect:
     - event: response
-      eval: "explains the difference between a mutex and a semaphore (a mutex is held by one owner at a time, a semaphore admits a count)"
+      eval: "explains what a mutex does (it lets one thread or process at a time hold a lock on a shared resource)"
     - event: function_call
       absent: true
       within_ms: 5000

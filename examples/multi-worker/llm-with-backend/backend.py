@@ -29,6 +29,7 @@ frontend service.
 
 import asyncio
 import os
+import re
 from datetime import datetime
 
 from pipecat.adapters.schemas.direct_function import tool_options
@@ -207,20 +208,22 @@ async def run_tests(params: FunctionCallParams, path: str | None = None):
         path: A test file to run alone; the whole suite when omitted.
     """
     await _work(5)
-    # The first change to the client fixes the backoff and trips a
-    # neighbouring test the backend has not seen, which wants each delay
-    # reported to the metrics module; the second change is taken to do that.
-    # A change to the tests alone leaves the client as it was.
-    changes = len(_patches.get("src/http_client.py", []))
-    if changes == 0:
-        failures = [
+    # Two tests read the client as last patched: the backoff test wants the
+    # sleep to depend on the attempt, and a neighbouring metrics test the
+    # backend has not seen wants each delay reported to the metrics module.
+    # A fix that does both at once passes both; one that does only the first
+    # trips the second, and the backend has to read that test and patch again.
+    client = (_patches.get("src/http_client.py") or [_FILES["src/http_client.py"]])[-1]
+    failures = []
+    if re.search(r"sleep\(\s*(\w+\.)?BACKOFF_SECS\s*\)", client):
+        failures.append(
             {
                 "test": "tests/test_http_client.py::test_retry_backoff",
                 "message": "assert [1, 1] == sorted([1, 1]) and 1 < 1: the retry delays do not grow",
             }
-        ]
-    elif changes == 1:
-        failures = [
+        )
+    if "record_backoff(" not in client:
+        failures.append(
             {
                 "test": "tests/test_retry_metrics.py::test_every_retry_delay_is_recorded",
                 "message": (
@@ -229,9 +232,7 @@ async def run_tests(params: FunctionCallParams, path: str | None = None):
                     "tests/test_retry_metrics.py)"
                 ),
             }
-        ]
-    else:
-        failures = []
+        )
     await params.result_callback(
         {"passed": 42 - len(failures), "failed": len(failures), "failures": failures}
     )
@@ -310,11 +311,14 @@ def build_backend() -> BackendLLMWorker:
             settings=AnthropicLLMService.Settings(
                 system_instruction=BACKEND_INSTRUCTIONS,
                 # Thinking summaries reach the frontend as silent "Backend (thinking):"
-                # messages, so it can say how the work is going if asked.
-                thinking=AnthropicLLMService.ThinkingConfig(type="adaptive", display="summarized"),
-                # Thinking counts against max_tokens; a long think on the default
-                # budget leaves no room for the tool call that follows it, and the
-                # loop stalls on a response with neither text nor a call.
+                # messages, so it can say how the work is going if asked. The budget
+                # keeps a step to seconds: left to decide for itself, the model can
+                # think for a minute over one file.
+                thinking=AnthropicLLMService.ThinkingConfig(
+                    type="enabled", budget_tokens=2048, display="summarized"
+                ),
+                # Thinking counts against max_tokens; the budget plus a patch with
+                # a file's whole content must fit.
                 max_tokens=16384,
             ),
         ),

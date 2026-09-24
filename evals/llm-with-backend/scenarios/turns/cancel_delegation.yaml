@@ -22,7 +22,7 @@
         - name: cancel_delegated_work
     - event: response
       within_ms: 25000
-      eval: "confirms the work was stopped and nothing will be changed"
+      eval: "says in words that the work has been stopped or cancelled and the code left as it is (a bare acknowledgement such as 'okay' or 'got it' on its own is not enough: answer continue)"
     - event: response
       absent: true
       within_ms: 30000
