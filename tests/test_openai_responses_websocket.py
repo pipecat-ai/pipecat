@@ -740,6 +740,46 @@ class TestDrainCancelledResponse:
         assert service._previous_response_id is None
         assert service._previous_input_hash is None
 
+    @pytest.mark.asyncio
+    async def test_failed_reconnect_after_drain_timeout_fails_the_inference(self):
+        """When the connection cannot be replaced, the next inference reports an
+        error rather than sending its request on the socket that still carries
+        the abandoned response's events."""
+        from pipecat.frames.frames import LLMContextFrame
+
+        service = _make_service()
+        service._needs_drain = True
+        service.push_frame = AsyncMock()
+        service.push_error = AsyncMock()
+        service.start_ttfb_metrics = AsyncMock()
+        service.stop_ttfb_metrics = AsyncMock()
+        service.stop_processing_metrics = AsyncMock()
+
+        old_ws = AsyncMock()
+        old_ws.recv = AsyncMock(side_effect=asyncio.TimeoutError)
+        old_ws.send = AsyncMock()
+        service._websocket = old_ws
+
+        async def fail_to_reconnect(**kwargs):
+            service._websocket = None
+            return False
+
+        service._try_reconnect = AsyncMock(side_effect=fail_to_reconnect)
+
+        context = MagicMock(spec=LLMContext)
+        context.tools = None
+        context.tool_choice = None
+        context.messages = [{"role": "user", "content": "hi"}]
+
+        await service.process_frame(LLMContextFrame(context=context), FrameDirection.DOWNSTREAM)
+
+        assert not service._needs_drain
+        # Once when the drain gives up, once more before the request goes out.
+        assert service._try_reconnect.await_count == 2
+        old_ws.send.assert_not_called()
+        service.push_error.assert_awaited_once()
+        assert "Error during inference" in service.push_error.call_args.kwargs["error_msg"]
+
 
 # ---------------------------------------------------------------------------
 # Connection lifecycle
