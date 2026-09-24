@@ -57,7 +57,7 @@ from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators import async_tool_messages
 from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
-from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
+from pipecat.services.llm_service import FunctionCallFromLLM, LLMService, LLMWithBackendRole
 from pipecat.services.settings import LLMSettings
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.time import time_now_iso8601
@@ -446,6 +446,16 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
             and session_properties.audio.input
             and session_properties.audio.input.turn_detection is None
         )
+
+    def llm_with_backend_role_objection(self, role: LLMWithBackendRole) -> str | None:
+        """Decline the frontend role: the model calls a tool again when told a result beside it."""
+        if role == "frontend":
+            return (
+                "InworldRealtimeLLMService cannot be an LLMWithBackend frontend: given a "
+                "message beside an open tool call, its model calls the tool again instead of "
+                "taking the message in"
+            )
+        return None
 
     @property
     def accepts_intermediate_function_call_results(self) -> bool:
