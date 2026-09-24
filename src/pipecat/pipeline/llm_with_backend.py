@@ -210,8 +210,9 @@ class TranscriptBackendRequestStrategy(BackendRequestStrategy):
             "per reply, however many things the user asked for: two questions, or one "
             "question about two places, is one handoff. The backend sees nothing but what "
             "is handed over, so a request the user makes after your last handoff needs a "
-            "handoff of its own, even while the backend is still working. It takes no "
-            "arguments. Keep talking with the user while it works."
+            "handoff of its own, even while the backend is still working, and so does a "
+            "correction to work already handed over. It takes no arguments. Keep talking "
+            "with the user while it works."
         )
 
     async def compose_request(self, params: FunctionCallParams) -> str | None:
