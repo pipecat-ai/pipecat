@@ -36,6 +36,7 @@ from pipecat.bus.messages import (
     BusJobUpdateMessage,
     BusJobUpdateUrgentMessage,
     BusMessage,
+    BusTTSSpeakMessage,
 )
 from pipecat.bus.ui.messages import (
     _UI_CANCEL_JOB_GROUP_BUS_EVENT_NAME,
@@ -475,6 +476,21 @@ class BaseUIWorker(BaseWorker):
             "set_input_value",
             SetInputValue(ref=ref, value=value, replace=replace),
         )
+
+    async def say(self, text: str, *, target: str | None = None) -> None:
+        """Have the pipeline say something through its TTS, with no LLM turn.
+
+        Publishes a ``BusTTSSpeakMessage``; the pipeline worker that receives
+        it queues a ``TTSSpeakFrame``, and the text goes into the conversation
+        context as something the assistant said.
+
+        Args:
+            text: What to say.
+            target: The pipeline worker to address. ``None``, the default,
+                reaches every pipeline worker, which is the one there is in a
+                single-bot app.
+        """
+        await self.send_bus_message(BusTTSSpeakMessage(source=self.name, target=target, text=text))
 
     def render_ui_state(self) -> str:
         """Render the latest accessibility snapshot as a ``<ui_state>`` block.

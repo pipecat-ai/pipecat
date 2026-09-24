@@ -965,6 +965,22 @@ class TestBaseUIWorkerScreen(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(await worker.which_element("that one"))
         self.assertEqual(classifier.asked, [])
 
+    async def test_say_asks_the_pipeline_to_speak(self):
+        worker = _ScreenWorker("screen")
+        worker._task_manager = TaskManager()
+        worker.send_bus_message = AsyncMock()
+
+        await worker.say("Two items in your cart.")
+
+        sent = worker.send_bus_message.await_args.args[0]
+        self.assertIsInstance(sent, BusTTSSpeakMessage)
+        self.assertEqual(sent.text, "Two items in your cart.")
+        self.assertIsNone(sent.target)
+        self.assertTrue(sent.append_to_context)
+
+        await worker.say("Done.", target="voice")
+        self.assertEqual(worker.send_bus_message.await_args.args[0].target, "voice")
+
     async def test_should_respond_works_on_the_base_worker(self):
         classifier = _FakeClassifier(0.9)
         worker = await self._worker(classifier)
