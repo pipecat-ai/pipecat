@@ -683,7 +683,7 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
         """
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
-            model="models/gemini-2.5-flash-native-audio-preview-12-2025",
+            model="models/gemini-3.8-live",
             system_instruction=system_instruction,
             voice="Charon",
             frequency_penalty=None,
