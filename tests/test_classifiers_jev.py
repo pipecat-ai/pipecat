@@ -19,7 +19,7 @@ from pipecat.classifiers.base_classifier import (
     YesNoQuestion,
     YesNoResult,
 )
-from pipecat.classifiers.jev.classifier import JevClassifier
+from pipecat.classifiers.jev.classifier import JEV_MAX_CHOICE_OPTIONS, JevClassifier
 from pipecat.classifiers.jev.client import JevClient
 from pipecat.metrics.metrics import LLMUsageMetricsData, ProcessingMetricsData
 from pipecat.utils.asyncio.task_manager import TaskManager
@@ -269,6 +269,23 @@ class TestJevClassifier:
             "instructions": "is the user's turn over?",
             "criteria": options,
         }
+        await classifier.client.close()
+
+    @pytest.mark.asyncio
+    async def test_too_many_options_is_an_error_before_any_request(self):
+        sent = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            sent.append(request)
+            return _reply({"type": "choice", "choice": "o0", "confidence": 1.0})
+
+        classifier = JevClassifier(client=_client(handler))
+        options = {f"o{i}": None for i in range(JEV_MAX_CHOICE_OPTIONS + 1)}
+        with pytest.raises(ClassifierError, match="at most 255 options"):
+            await classifier.choice(
+                "hmm", {"answer": ChoiceQuestion(instructions="?", options=options)}
+            )
+        assert sent == []
         await classifier.client.close()
 
     @pytest.mark.asyncio
