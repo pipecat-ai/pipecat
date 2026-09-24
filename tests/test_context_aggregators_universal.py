@@ -1770,6 +1770,82 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
             expected_up_frames=[LLMContextFrame],
         )
 
+    async def test_an_append_asking_to_run_waits_for_the_bot_to_stop_speaking(self):
+        """Run mid-sentence, the model would answer a context that lacks its answer in progress."""
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        message = {"role": "developer", "content": "Backend: It's 62 and raining."}
+        await run_test(
+            aggregator,
+            frames_to_send=[
+                BotStartedSpeakingFrame(),
+                LLMMessagesAppendFrame(messages=[message], run_llm=True),
+                SleepFrame(),
+            ],
+            expected_down_frames=[BotStartedSpeakingFrame],
+            expected_up_frames=[],
+        )
+        assert context.get_messages() == [message]
+
+        aggregator = LLMAssistantAggregator(LLMContext())
+        await run_test(
+            aggregator,
+            frames_to_send=[
+                BotStartedSpeakingFrame(),
+                LLMMessagesAppendFrame(messages=[message], run_llm=True),
+                SleepFrame(),
+                BotStoppedSpeakingFrame(),
+            ],
+            expected_down_frames=[BotStartedSpeakingFrame, BotStoppedSpeakingFrame],
+            expected_up_frames=[LLMContextFrame],
+        )
+
+    async def test_an_append_asking_to_run_while_the_user_speaks_is_left_to_the_turn(self):
+        """The user's turn ending runs inference on the context as it stands."""
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        await run_test(
+            aggregator,
+            frames_to_send=[
+                UserStartedSpeakingFrame(),
+                LLMMessagesAppendFrame(
+                    messages=[{"role": "developer", "content": "Backend: Done."}], run_llm=True
+                ),
+                SleepFrame(),
+                UserStoppedSpeakingFrame(),
+                LLMMessagesAppendFrame(
+                    messages=[{"role": "developer", "content": "Backend (thinking): ..."}],
+                    run_llm=False,
+                ),
+                SleepFrame(),
+            ],
+            expected_down_frames=[UserStartedSpeakingFrame, UserStoppedSpeakingFrame],
+            expected_up_frames=[],
+        )
+        assert len(context.get_messages()) == 2
+
+    async def test_appends_queued_together_run_inference_once(self):
+        """A burst of messages is one run, whatever the last one asks."""
+        aggregator = LLMAssistantAggregator(LLMContext())
+        await run_test(
+            aggregator,
+            frames_to_send=[
+                SleepFrame(),
+                LLMMessagesAppendFrame(
+                    messages=[{"role": "developer", "content": "Backend: One."}], run_llm=True
+                ),
+                LLMMessagesAppendFrame(
+                    messages=[{"role": "developer", "content": "Backend: Two."}], run_llm=True
+                ),
+                LLMMessagesAppendFrame(
+                    messages=[{"role": "developer", "content": "Backend (thinking): Three."}],
+                    run_llm=False,
+                ),
+            ],
+            expected_down_frames=[],
+            expected_up_frames=[LLMContextFrame],
+        )
+
     async def test_function_call_cancel_run_llm(self):
         """A cancellation asking for inference pushes the context upstream."""
         context = LLMContext()
