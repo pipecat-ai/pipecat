@@ -16,4 +16,4 @@
 - expect:
     - event: response
       within_ms: 150000
-      eval: "reports that the retry test was fixed and the tests now pass (if the bot only reports progress or says the work is still underway, answer continue, not no: the report has not come yet)"
+      eval: "reports that the retry test was fixed and the tests now pass (if the bot only reports progress, says the work is still underway, or finishes the joke from its previous reply, answer continue, not no: the report has not come yet)"
