@@ -101,9 +101,10 @@ class MarkdownTextFilter(BaseTextFilter):
             # Remove backticks from inline code, but not from code blocks
             filtered_text = re.sub(r"(?<!`)`([^`\n]+)`(?!`)", r"\1", filtered_text)
 
-            # Remove repeated sequences of 5 or more characters
+            # Remove repeated sequences of 5 or more symbols, leaving letters
+            # and digits alone so numbers like 1000000 survive
             if self._settings.filter_repeated_sequences:
-                filtered_text = re.sub(r"(\S)(\1{4,})", "", filtered_text)
+                filtered_text = re.sub(r"([^\w\s]|_)(\1{4,})", "", filtered_text)
 
             # Preserve numbered list items with a unique marker, §NUM§
             filtered_text = re.sub(r"^(\d+\.)\s", r"§NUM§\1 ", filtered_text)
