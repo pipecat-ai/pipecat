@@ -1498,9 +1498,9 @@ class LLMUserAggregator(LLMContextAggregator):
         if content:
             self._consecutive_empty_user_turn_recoveries = 0
         elif not on_session_end:
-            # Nothing was written to the context, so the LLM won't answer this
-            # turn unless we recover from it. If we don't, nothing will restart
-            # the idle timer the turn cancelled.
+            # An empty turn doesn't run the LLM, so the bot stays silent unless
+            # a recovery runs it. Without one, restart the idle timer, which
+            # this turn's start cancelled.
             if not await self._maybe_recover_empty_user_turn(interrupted_bot):
                 await self._user_idle_controller.wait_for_user()
 
