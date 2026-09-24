@@ -407,7 +407,7 @@ class VoicemailDetector(FrameProcessor):
         if self._decision:
             return
         if self._last_result:
-            logger.info(
+            logger.debug(
                 f"{self}: {self._last_result.choice} ({self._last_result.confidence:.2f}) "
                 f"after {self._decision_timeout}s of silence"
             )
@@ -424,12 +424,12 @@ class VoicemailDetector(FrameProcessor):
         """Record the verdict and act on it: release or drop the held speech."""
         self._decision = label
         if label == "voicemail":
-            logger.info(f"{self}: VOICEMAIL detected")
+            logger.debug(f"{self}: VOICEMAIL detected")
             await self._voicemail_notifier.notify()
             await self.broadcast_interruption()
             await self._restart_message_timer()
         else:
-            logger.info(f"{self}: CONVERSATION detected")
+            logger.debug(f"{self}: CONVERSATION detected")
             await self._conversation_notifier.notify()
             await self._call_event_handler("on_conversation_detected")
 
