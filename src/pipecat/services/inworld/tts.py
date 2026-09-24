@@ -471,6 +471,9 @@ class InworldHttpTTSService(TTSService):
                 except json.JSONDecodeError:
                     continue
 
+        # The response is complete: no later chunk can continue a held number.
+        await self.flush_word_timestamps(context_id)
+
         # After processing all chunks, add the total utterance duration
         # to the cumulative time to ensure next utterance starts after this one
         if utterance_duration > 0:
@@ -502,6 +505,7 @@ class InworldHttpTTSService(TTSService):
             if word_times:
                 self._current_run_had_timestamps = True
                 await self.add_word_timestamps(word_times, context_id, pre_merge_tokens=True)
+                await self.flush_word_timestamps(context_id)
             utterance_duration = chunk_end_time
 
         audio_data = base64.b64decode(response_data["audioContent"])
@@ -1085,6 +1089,8 @@ class InworldTTSService(WebsocketTTSService):
 
             # Handle flush completion, which indicates the end of a generation
             if "flushCompleted" in result:
+                # No later message of this generation can continue a held number.
+                await self.flush_word_timestamps(ctx_id)
                 logger.trace(
                     f"{self}: Generation completed - updating cumulative_time: "
                     f"{self._cumulative_time} -> {self._generation_end_time}"

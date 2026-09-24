@@ -443,6 +443,8 @@ class _MockWordTimestampWSTTSService(TTSService):
 
     ``word_times`` pins the exact tokens and their timestamps.  When omitted the
     service splits the input text on spaces, assigning 0.1 s gaps.
+    ``word_time_messages`` instead delivers the tokens in several
+    ``add_word_timestamps`` calls, the way a provider streams them.
     """
 
     def __init__(
@@ -450,6 +452,7 @@ class _MockWordTimestampWSTTSService(TTSService):
         includes_inter_frame_spaces: bool = False,
         pre_merge_tokens: bool = False,
         word_times: list[tuple[str, float]] | None = None,
+        word_time_messages: list[list[tuple[str, float]]] | None = None,
         **kwargs,
     ):
         super().__init__(
@@ -462,6 +465,7 @@ class _MockWordTimestampWSTTSService(TTSService):
         self._includes_inter_frame_spaces = includes_inter_frame_spaces
         self._pre_merge_tokens = pre_merge_tokens
         self._word_times = word_times
+        self._word_time_messages = word_time_messages
 
     def can_generate_metrics(self) -> bool:
         return False
@@ -470,12 +474,13 @@ class _MockWordTimestampWSTTSService(TTSService):
         async def _deliver():
             await asyncio.sleep(0.01)
             word_times = self._word_times or [(w, i * 0.1) for i, w in enumerate(text.split())]
-            await self.add_word_timestamps(
-                word_times,
-                context_id=context_id,
-                includes_inter_frame_spaces=self._includes_inter_frame_spaces,
-                pre_merge_tokens=self._pre_merge_tokens,
-            )
+            for message in self._word_time_messages or [word_times]:
+                await self.add_word_timestamps(
+                    message,
+                    context_id=context_id,
+                    includes_inter_frame_spaces=self._includes_inter_frame_spaces,
+                    pre_merge_tokens=self._pre_merge_tokens,
+                )
             await self.append_to_audio_context(
                 context_id,
                 TTSAudioRawFrame(
@@ -884,6 +889,54 @@ async def test_websocket_word_timestamps_punctuation_tokens():
     assert [f.text for f in text_frames] == ["hello", "world!", "How", "are", "you?"], (
         "Punct-only tokens must be merged into the preceding word"
     )
+
+
+@pytest.mark.asyncio
+async def test_websocket_word_timestamps_number_split_across_messages():
+    """WebSocket path: a number's digits split across tokens and messages form one word.
+
+    Inworld reports the digits of a number as separate tokens with no space between
+    them, and a message can end in the middle of a number. Without merging, each
+    fragment becomes its own TTSTextFrame and the assistant context reads
+    "2 5 0" and "20 26".
+    """
+    messages = [
+        [("We", 0.0)],
+        [(" ", 0.1), ("have", 0.2), (" ", 0.3), ("2", 0.4), ("5", 0.5), ("0", 0.6), (" ", 0.7)],
+        [("customers", 0.8), (" ", 0.9), ("across", 1.0), (" ", 1.1)],
+        [("20", 1.2)],
+        [("26", 1.3), (" ", 1.4), ("plans", 1.5), (". ", 1.6)],
+    ]
+    tts = _MockWordTimestampWSTTSService(pre_merge_tokens=True, word_time_messages=messages)
+    frames_received = await run_test(
+        tts,
+        frames_to_send=[
+            TTSSpeakFrame(text="We have 250 customers across 2026 plans.", append_to_context=False)
+        ],
+    )
+    text_frames = [f for f in frames_received[0] if isinstance(f, TTSTextFrame)]
+    assert [f.text for f in text_frames] == [
+        "We",
+        "have",
+        "250",
+        "customers",
+        "across",
+        "2026",
+        "plans.",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_websocket_word_timestamps_held_number_flushed_at_context_end():
+    """A number ending the last message is emitted when the context stops."""
+    messages = [[("total", 0.0), (" ", 0.1)], [("4", 0.2), ("2", 0.3)]]
+    tts = _MockWordTimestampWSTTSService(pre_merge_tokens=True, word_time_messages=messages)
+    frames_received = await run_test(
+        tts,
+        frames_to_send=[TTSSpeakFrame(text="total 42", append_to_context=False)],
+    )
+    text_frames = [f for f in frames_received[0] if isinstance(f, TTSTextFrame)]
+    assert [f.text for f in text_frames] == ["total", "42"]
 
 
 # ---------------------------------------------------------------------------
