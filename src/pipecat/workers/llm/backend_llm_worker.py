@@ -74,7 +74,7 @@ from pipecat.processors.aggregators.llm_context import (
     LLMContext,
     LLMContextMessage,
     LLMSpecificMessage,
-    LLMStandardMessage,
+    standard_message_text,
 )
 from pipecat.processors.aggregators.llm_response_universal import (
     AssistantThoughtMessage,
@@ -326,29 +326,6 @@ class BackendOutputTransform(Protocol):
         ...
 
 
-def _message_text(message: LLMStandardMessage) -> str:
-    """Return a context message's text, joining the text parts of list content.
-
-    Text is all the transcript carries today, so non-text parts are left out.
-
-    Args:
-        message: A standard context message.
-
-    Returns:
-        The text, or ``""`` for a message that carries none.
-    """
-    content = message.get("content")  # type: ignore[attr-defined]
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        return " ".join(
-            part.get("text", "")
-            for part in content
-            if isinstance(part, dict) and part.get("type") == "text" and part.get("text")
-        )
-    return ""
-
-
 #: What :func:`_render_transcript_request` tells the backend to do with a transcript.
 _DEFAULT_TRANSCRIPT_INSTRUCTION = "Act on the user's most recent request in the conversation above."
 
@@ -396,7 +373,7 @@ def _render_transcript_request(
                 logger.debug(f"Skipping delegated message in {message.llm} format")
                 continue
             role = message.get("role")
-            text = _message_text(message)
+            text = standard_message_text(message)
             if role in ("user", "assistant") and text:
                 lines.append(f"{str(role).upper()}: {text}")
             else:

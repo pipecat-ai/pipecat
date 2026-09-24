@@ -56,7 +56,11 @@ from pipecat.frames.frames import (
 )
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators import async_tool_messages
-from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
+from pipecat.processors.aggregators.llm_context import (
+    LLMContext,
+    LLMSpecificMessage,
+    standard_message_text,
+)
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.openai._constants import OPENAI_REALTIME_WHISPER_MODEL, OPENAI_SAMPLE_RATE
@@ -744,8 +748,27 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
             if direction == FrameDirection.UPSTREAM and self._results_awaiting_response:
                 await self._create_response()
 
-    async def _handle_messages_append(self, frame):
-        logger.error("!!! NEED TO IMPLEMENT MESSAGES APPEND")
+    async def _handle_messages_append(self, frame: LLMMessagesAppendFrame):
+        """Put appended messages into the conversation as items, for the model to take in.
+
+        Whether the model answers them is the aggregator's call: an append
+        that asks to run comes back to this service as the context frame the
+        assistant aggregator pushes upstream, which creates the response (see
+        :meth:`_handle_context`). Before the session's conversation is set up,
+        nothing is sent: the setup sends the context, which the aggregator
+        records the messages in.
+        """
+        if not self._api_session_ready or self._llm_needs_conversation_setup:
+            return
+        for message in frame.messages:
+            text = standard_message_text(message)
+            if not text:
+                continue
+            role = message.get("role") if isinstance(message, dict) else None
+            await self._send_progress_message(
+                text, role="assistant" if role == "assistant" else "system"
+            )
+        self._results_awaiting_response = True
 
     #
     # websocket communication
@@ -1460,11 +1483,11 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
         )
         await self.send_client_event(events.ConversationItemCreateEvent(item=item))
 
-    async def _send_progress_message(self, text: str):
+    async def _send_progress_message(self, text: str, role: str = "system"):
         """Put text into the conversation for the model to take in, without answering it."""
         item = events.ConversationItem(
             type="message",
-            role="system",
+            role=role,  # type: ignore[arg-type]
             content=[events.ItemContent(type="input_text", text=text)],
         )
         await self.send_client_event(events.ConversationItemCreateEvent(item=item))
