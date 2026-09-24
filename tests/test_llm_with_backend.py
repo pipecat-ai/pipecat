@@ -477,7 +477,7 @@ async def test_a_local_backend_is_heard_through_the_frontends_conversation():
     assert result.properties == FunctionCallResultProperties(run_llm=True)
     appended = [f for f in down if isinstance(f, LLMMessagesAppendFrame)]
     assert [(f.messages[0]["content"], f.run_llm) for f in appended] == [
-        ("Backend: Let me check.", True),
+        ("Backend: Let me check.", False),
         ("Backend (working): get_weather(location='Seattle')", False),
         ("Backend: It's 62 and raining.", True),
     ]

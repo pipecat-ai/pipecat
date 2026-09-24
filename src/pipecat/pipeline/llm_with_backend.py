@@ -72,7 +72,9 @@ BACKEND_PREFIXES = (BACKEND_MESSAGE_PREFIX, BACKEND_THOUGHT_PREFIX, BACKEND_WORK
 #: the backend is for.
 _DELEGATION_POLICY = (
     "Delegate to the backend when any part of what the user asks needs a backend tool or "
-    "careful reasoning, or a correction changes work already requested. Do not delegate "
+    "careful reasoning, or a correction changes work already requested; a request that "
+    "arrives while the backend is already working is delegated like any other, since the "
+    "backend hears nothing you do not hand over. Do not delegate "
     "when you can answer from the conversation or a result you already have, or when you "
     "need a brief clarification first. Delegate before giving any answer that depends on "
     "backend work, and do not guess the result while waiting. To delegate, call the "
@@ -206,8 +208,10 @@ class TranscriptBackendRequestStrategy(BackendRequestStrategy):
             "in it that needs a backend tool or careful reasoning. Call this as soon as any "
             "part of what the user asks needs that, and do the rest yourself. One handoff "
             "per reply, however many things the user asked for: two questions, or one "
-            "question about two places, is one handoff. It takes no arguments. Keep "
-            "talking with the user while it works."
+            "question about two places, is one handoff. The backend sees nothing but what "
+            "is handed over, so a request the user makes after your last handoff needs a "
+            "handoff of its own, even while the backend is still working. It takes no "
+            "arguments. Keep talking with the user while it works."
         )
 
     async def compose_request(self, params: FunctionCallParams) -> str | None:
@@ -435,7 +439,8 @@ class BackendConnector:
                 self._session_open.set()
                 async for event in session:
                     await self.deliver(frontend, event)
-            logger.warning(f"Backend '{self._context.backend_name}' went away")
+                if not session.detached:
+                    logger.warning(f"Backend '{self._context.backend_name}' went away")
         except asyncio.CancelledError:
             raise
         except Exception as e:

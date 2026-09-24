@@ -40,6 +40,7 @@ from pipecat.workers.base_worker import BaseWorker
 from pipecat.workers.llm import BackendLLMWorker
 from pipecat.workers.llm.backend_llm_worker import (
     CANCELLED_NOTE,
+    REPORT_TOOL_NAME,
     BackendError,
     BackendIdle,
     BackendOutput,
@@ -282,10 +283,11 @@ async def test_an_attached_frontend_hears_the_backend_work_a_request_through():
     await _drive(runner, requester, backend, body)
 
     assert statuses == ["idle"]
-    # Everything the model writes asks to be spoken.
+    # What the model writes beside tool calls is notes on the work; what it
+    # writes in a turn with none is for the user.
     outputs = [e for e in events if isinstance(e, BackendOutput)]
     assert outputs == [
-        BackendOutput(text="Let me check.", prefers_spoken=True),
+        BackendOutput(text="Let me check.", prefers_spoken=False),
         BackendOutput(text="It's 62 and raining in Seattle.", prefers_spoken=True),
     ]
     calls = [e for e in events if isinstance(e, BackendToolCall)]
@@ -599,7 +601,7 @@ async def test_transform_output_shapes_what_the_model_writes():
         if output.is_thought:
             return None
         if output.text.startswith(">>"):
-            return replace(output, text=output.text[2:].lstrip())
+            return replace(output, text=output.text[2:].lstrip(), prefers_spoken=True)
         return replace(output, text="", prefers_spoken=False)
 
     backend, requester, runner = _attached_backend(llm, transform_output=transform_output)
@@ -612,11 +614,48 @@ async def test_transform_output_shapes_what_the_model_writes():
 
     await _drive(runner, requester, backend, body)
 
-    # The thought was dropped, the marker stripped, and an emptied output still sent.
+    # The thought was dropped, the marker stripped and its note spoken, and an
+    # emptied output still sent.
     assert [(e.text, e.prefers_spoken) for e in events if isinstance(e, BackendOutput)] == [
         ("Checking.", True),
         ("", False),
     ]
+
+
+@pytest.mark.asyncio
+async def test_the_report_tool_speaks_for_the_model_while_it_goes_on_working():
+    llm = _ScriptedLLM(
+        [
+            [
+                ("text", "Reporting the flight, then booking."),
+                ("call", REPORT_TOOL_NAME, "call_r", {"text": "Your flight is delayed."}),
+                ("call", "book_taxi", "call_1", {"time": "12:30"}),
+            ],
+            [("text", "Taxi booked for 12:30.")],
+        ]
+    )
+    backend, requester, runner = _attached_backend(llm, tools=[book_taxi])
+    events: list = []
+
+    async def body():
+        async with _BackendSession(requester, "backend") as session:
+            await session.send("Check my flight and book a taxi")
+            events.extend(await _until_idle(session))
+
+    await _drive(runner, requester, backend, body)
+
+    # The report is spoken, the note beside the calls is not, and the report
+    # tool itself is not reported as one of the backend's calls.
+    assert [(e.text, e.prefers_spoken) for e in events if isinstance(e, BackendOutput)] == [
+        ("Your flight is delayed.", True),
+        ("Reporting the flight, then booking.", False),
+        ("Taxi booked for 12:30.", True),
+    ]
+    assert {e.function_name for e in events if isinstance(e, BackendToolCall)} == {"book_taxi"}
+    assert isinstance(events[-1], BackendIdle)
+    # The tool is the model's on every inference, never in the context's tool set.
+    assert REPORT_TOOL_NAME in llm.get_llm_adapter().builtin_tools
+    assert REPORT_TOOL_NAME not in {t.name for t in backend.context.tools.standard_tools}
 
 
 @pytest.mark.asyncio
