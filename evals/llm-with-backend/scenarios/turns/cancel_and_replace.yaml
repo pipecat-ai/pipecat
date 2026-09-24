@@ -1,0 +1,35 @@
+# A long utterance that opens with a stop and ends with a new request, sent
+# while the backend is still working on the first. The bot stops the work,
+# starts the new request, and no report on the stopped work arrives later.
+- expect:
+    - event: response
+      eval: "the bot opens the conversation in some way (a greeting, an introduction, an offer to help, or a question to get the user started)"
+
+- user: "Fix the flaky retry test in the HTTP client."
+  expect:
+    - event: function_call
+      calls:
+        - name: delegate
+    - event: response
+      within_ms: 15000
+      eval: "acknowledges that it is starting on the fix"
+
+- user: "Stop, stop, forget the retry test, don't change anything in the code, I'll deal with it myself later. What I actually need right now, and it's the only thing I care about at the moment, is to know whether CI is green on the main branch. Can you check that for me?"
+  send_after:
+    delay_ms: 4000
+  expect:
+    - event: function_call
+      calls:
+        - name: cancel_delegated_work
+        - name: delegate
+    - event: response
+      within_ms: 20000
+      eval: "acknowledges stopping the code change and moves on to the CI check (reporting the status or saying it is checking); does not claim the retry test was fixed"
+
+- expect:
+    - event: response
+      within_ms: 40000
+      eval: "reports that CI on the main branch is green"
+    - event: response
+      absent: true
+      within_ms: 30000

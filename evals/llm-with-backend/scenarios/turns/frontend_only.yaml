@@ -1,0 +1,12 @@
+# A question the frontend answers itself: nothing here needs the backend.
+- expect:
+    - event: response
+      eval: "the bot opens the conversation in some way (a greeting, an introduction, an offer to help, or a question to get the user started)"
+
+- user: "Quick one: what's the difference between a mutex and a semaphore, in a sentence?"
+  expect:
+    - event: response
+      eval: "explains the difference between a mutex and a semaphore (a mutex is held by one owner at a time, a semaphore admits a count)"
+    - event: function_call
+      absent: true
+      within_ms: 5000
