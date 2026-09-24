@@ -531,7 +531,7 @@ class TestBaseOutputTransportBotStoppedFallback(unittest.IsolatedAsyncioTestCase
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    async def _make_speaking_transport(self) -> tuple[BaseOutputTransport, list]:
+    async def _make_recording_transport(self) -> tuple[BaseOutputTransport, list]:
         transport = await _make_transport(mixer=None)
         pushed: list[tuple[float, type]] = []
 
@@ -539,38 +539,43 @@ class TestBaseOutputTransportBotStoppedFallback(unittest.IsolatedAsyncioTestCase
             pushed.append((time.time(), type(frame)))
 
         transport.push_frame = AsyncMock(side_effect=record)
+        return transport, pushed
+
+    @staticmethod
+    def _one_chunk(transport: BaseOutputTransport) -> TTSAudioRawFrame:
         sender = transport._media_senders[None]
-        audio = TTSAudioRawFrame(
+        return TTSAudioRawFrame(
             audio=b"\x01\x02" * (sender.audio_chunk_size // 2),
             sample_rate=sender.sample_rate,
             num_channels=1,
         )
-        await transport.process_frame(audio, FrameDirection.DOWNSTREAM)
-        return transport, pushed
 
     async def test_fallback_fires_while_heartbeats_keep_arriving(self):
-        transport, pushed = await self._make_speaking_transport()
+        transport, pushed = await self._make_recording_transport()
         try:
-            audio_time = time.time()
-            # Heartbeats at a shorter period than the fallback, and no TTSStoppedFrame.
-            for _ in range(int(self.FALLBACK_SECS * 3 / 0.1)):
-                await asyncio.sleep(0.1)
+            await transport.process_frame(self._one_chunk(transport), FrameDirection.DOWNSTREAM)
+            # Heartbeats at a third of the window, for four windows, and no
+            # TTSStoppedFrame.
+            for _ in range(12):
+                await asyncio.sleep(self.FALLBACK_SECS / 3)
                 await transport.process_frame(
                     HeartbeatFrame(timestamp=0), FrameDirection.DOWNSTREAM
                 )
+            heartbeats_ended = time.time()
 
             pushed_types = [frame_type for _, frame_type in pushed]
             self.assertIn(BotStartedSpeakingFrame, pushed_types)
-            self.assertIn(BotStoppedSpeakingFrame, pushed_types)
-            stopped_at = next(at for at, t in pushed if t is BotStoppedSpeakingFrame)
-            # Measured from the audio, not from the heartbeats that followed it.
-            self.assertLess(stopped_at - audio_time, self.FALLBACK_SECS * 2)
+            stops = [at for at, frame_type in pushed if frame_type is BotStoppedSpeakingFrame]
+            # Once, in both directions, while heartbeats were still flowing.
+            self.assertEqual(len(stops), 2)
+            self.assertLess(max(stops), heartbeats_ended)
         finally:
             await transport.cancel(CancelFrame())
 
     async def test_fallback_is_not_needed_when_tts_stopped_arrives(self):
-        transport, pushed = await self._make_speaking_transport()
+        transport, pushed = await self._make_recording_transport()
         try:
+            await transport.process_frame(self._one_chunk(transport), FrameDirection.DOWNSTREAM)
             await transport.process_frame(TTSStoppedFrame(), FrameDirection.DOWNSTREAM)
             await asyncio.sleep(0.1)
 
@@ -580,5 +585,35 @@ class TestBaseOutputTransportBotStoppedFallback(unittest.IsolatedAsyncioTestCase
             await asyncio.sleep(self.FALLBACK_SECS * 2)
             pushed_types = [frame_type for _, frame_type in pushed]
             self.assertEqual(pushed_types.count(BotStoppedSpeakingFrame), 2)
+        finally:
+            await transport.cancel(CancelFrame())
+
+    async def test_queued_audio_plays_before_the_fallback_is_considered(self):
+        """Audio queued by the time the window has elapsed, as after a write that
+        stalled for longer than the window, plays first: the bot does not stop
+        and start again between two chunks of one utterance."""
+        transport, pushed = await self._make_recording_transport()
+        try:
+            stall = self.FALLBACK_SECS * 2
+            writes = 0
+
+            async def write(frame):
+                nonlocal writes
+                writes += 1
+                if writes == 1:
+                    await asyncio.sleep(stall)
+                return True
+
+            transport.write_audio_frame = AsyncMock(side_effect=write)
+            await transport.process_frame(self._one_chunk(transport), FrameDirection.DOWNSTREAM)
+            await transport.process_frame(self._one_chunk(transport), FrameDirection.DOWNSTREAM)
+            await asyncio.sleep(stall + self.FALLBACK_SECS * 2)
+
+            pushed_types = [frame_type for _, frame_type in pushed]
+            audio_at = [i for i, t in enumerate(pushed_types) if t is TTSAudioRawFrame]
+            stops_at = [i for i, t in enumerate(pushed_types) if t is BotStoppedSpeakingFrame]
+            self.assertEqual(len(audio_at), 2)
+            self.assertEqual(len(stops_at), 2)  # once, in both directions
+            self.assertGreater(min(stops_at), audio_at[-1])
         finally:
             await transport.cancel(CancelFrame())
