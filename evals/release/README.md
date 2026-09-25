@@ -130,9 +130,10 @@ Each run writes to `test-runs/<name>/`, a timestamp unless you pass `-n`:
 
 Other flags: `-c` for concurrency, `-t` for the default timeout of an
 expectation without its own `within_ms`, and `--no-cache` to synthesize the
-user's audio again instead of reusing it. Each manifest entry runs its
-scenarios one at a time on one slot, so a slow provider never holds more than
-one. An entry that can take more sets its own `concurrency:`.
+user's audio again instead of reusing it. The suite keeps `concurrency` runs
+going, taking the next one from the manifest entries in turn. An entry whose
+provider rate-limits sets its own `concurrency:`, and never has more than that
+many runs going at once.
 
 Everything in the manifest header except `suite:` can be given on the command
 line instead, and the command line wins: `--bots-dir`, `--scenarios-dir`,

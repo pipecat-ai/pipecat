@@ -76,11 +76,11 @@ needed when several entries share a bot, as when sweeping a model with
 ``runner_body:``; two entries may not run the same scenario under the same
 label.
 
-``concurrency`` is how many runs execute at once. Each entry's runs go one
-after another on a single slot, so its scenarios finish as a block and a slow
-provider holds no more than one slot; an entry may set its own
-``concurrency:`` to hold more than one. The suite's figure (or
-``--concurrency``) bounds the whole.
+``concurrency`` is how many runs execute at once. The suite keeps that many
+going, taking the next run from the entries in turn, so every entry makes
+progress and no slot waits while any entry still has runs. An entry whose
+provider rate-limits sets its own ``concurrency:``, and never has more than
+that many runs in flight.
 
 Manifest-relative paths (``bot``/``bots_dir``, ``scenarios_dir``,
 ``runs_dir``) resolve relative to the manifest file, so a manifest is portable;
@@ -403,13 +403,14 @@ class EvalRun:
         runner_body: The bot's runner-args body given inline, written to a
             file for the bot when it is spawned; ``None`` when there is none or
             it comes from ``runner_body_path``.
-        concurrency: How many suite slots this bot's entry may hold at once,
-            when its manifest entry says; ``None`` is one.
+        concurrency: How many runs of this bot's entry may be in flight at
+            once, when its manifest entry says; ``None`` is as many as the
+            suite runs.
         attempt: 1-based attempt number when the suite repeats (see
             :attr:`EvalManifest.repeat`); always 1 for a single pass.
         status: ``pending``, ``running``, or ``done``.
         stopping: True while the bot is being stopped after the run is done.
-            The run still holds its concurrency slot, so the next one waits.
+            The run still counts as in flight, so the next one waits.
         result: The outcome, once the run is done.
         error: Spawn/connection error message, if the run failed before producing a result.
         started_at: Monotonic start time, for the live elapsed counter.
@@ -747,16 +748,66 @@ class EvalManifest:
         return _RunnerBody(data=spec["data"])
 
 
+class _RunQueue:
+    """The suite's runs, handed out to workers from the entries in turn.
+
+    Each queue is one entry's runs for one attempt, in the order the entries
+    were given. A worker takes the next run from the first queue, in that
+    order and round-robin, whose entry is under its cap; when every queue
+    with runs left is at its cap, it waits for a run to finish.
+    """
+
+    def __init__(self, queues: list[tuple[str, int | None, deque[EvalRun]]]):
+        """Initialize the queue.
+
+        Args:
+            queues: Each entry's runs per attempt, with the entry's label and
+                its cap on runs in flight, ``None`` for no cap.
+        """
+        self._queues = queues
+        self._caps = {label: cap for label, cap, _ in queues}
+        self._in_flight = {label: 0 for label, _, _ in queues}
+        self._next = 0
+        self._changed = asyncio.Condition()
+
+    async def take(self) -> EvalRun | None:
+        """The next run to make, or ``None`` when none is left."""
+        async with self._changed:
+            while any(queue for _, _, queue in self._queues):
+                run = self._pick()
+                if run is not None:
+                    return run
+                await self._changed.wait()
+            return None
+
+    async def done(self, run: EvalRun) -> None:
+        """Count the run as finished, so its entry may take another."""
+        async with self._changed:
+            self._in_flight[run.label] -= 1
+            self._changed.notify_all()
+
+    def _pick(self) -> EvalRun | None:
+        """The next run whose entry is under its cap, round-robin from the last one taken."""
+        count = len(self._queues)
+        for offset in range(count):
+            index = (self._next + offset) % count
+            label, cap, queue = self._queues[index]
+            if queue and (cap is None or self._in_flight[label] < cap):
+                self._next = index + 1
+                self._in_flight[label] += 1
+                return queue.popleft()
+        return None
+
+
 @dataclass(frozen=True)
 class _SuiteRunSetup:
-    """What one :meth:`EvalSuite.run` call sets up for every lane it runs.
+    """What one :meth:`EvalSuite.run` call sets up for every run it makes.
 
     Parameters:
         ports: The port assigned to each run, keyed by the run's ``id()``.
         logs_dir: Directory for per-run logs.
         record_dir: Directory for per-run conversation recordings, or ``None``.
         results_path: JSONL file to append one record per finished run to, or ``None``.
-        slots: The suite's concurrency, as the semaphore a lane holds a slot of.
         debug: Whether each run saves its combined ``<run>.debug.log``.
         params: How each run behaves.
     """
@@ -765,7 +816,6 @@ class _SuiteRunSetup:
     logs_dir: Path
     record_dir: Path | None
     results_path: Path | None
-    slots: asyncio.Semaphore
     debug: bool
     params: EvalSessionParams
 
@@ -910,14 +960,13 @@ class EvalSuite(BaseObject):
     ) -> None:
         """Run all of the suite's runs, in place, with the manifest's concurrency.
 
-        Each run gets its own port (``base_port + index``). Every entry has a
-        queue of its own per attempt, its scenarios in manifest order, and its
-        runs go one after another on the slot it holds, so a slow or
-        rate-limited provider holds no more than that one slot and its
-        scenarios finish as a block. Queues take free slots in manifest order,
-        every entry's first attempt before any entry's second; an entry whose
-        ``concurrency:`` allows it holds that many slots, across its attempts,
-        and runs its queues that wide.
+        Each run gets its own port (``base_port + index``). ``concurrency``
+        workers each take the next run and run it until none is left. Runs are
+        taken from the entries in turn, every entry's first attempt before any
+        entry's second, so every entry makes progress and no worker waits
+        while any entry still has runs. An entry with a ``concurrency:`` of
+        its own never has more than that many runs in flight, across its
+        attempts; a worker that finds it full takes another entry's run.
 
         Args:
             logs_dir: Directory for per-run logs.
@@ -962,33 +1011,24 @@ class EvalSuite(BaseObject):
             logs_dir=logs_dir,
             record_dir=record_dir,
             results_path=results_path,
-            slots=asyncio.Semaphore(self.manifest.concurrency),
             debug=debug,
             params=params,
         )
-        entry_sems: dict[str, asyncio.Semaphore] = {}
-        lanes = []
-        for label, slots, queue in self._entry_queues(self.runs):
-            entry_sem = entry_sems.setdefault(label, asyncio.Semaphore(slots))
-            for _ in range(min(slots, len(queue))):
-                lanes.append(self._run_lane(queue, entry_sem, setup))
+        queue = _RunQueue(self._entry_queues(self.runs))
+        workers = min(self.manifest.concurrency, len(self.runs))
         try:
-            await asyncio.gather(*lanes)
+            await asyncio.gather(*(self._run_worker(queue, setup) for _ in range(workers)))
         finally:
             if handler is not None:
                 self.remove_event_handler("on_update", handler)
 
-    async def _run_lane(
-        self, queue: deque[EvalRun], entry_sem: asyncio.Semaphore, setup: _SuiteRunSetup
-    ) -> None:
-        """Hold one of the entry's slots and one suite slot, and run a queue on them, one run after another.
-
-        The entry's slot comes first, so a lane of an entry that is already
-        as wide as it may be waits without sitting on a suite slot.
-        """
-        async with entry_sem, setup.slots:
-            while queue:
-                await self._run_one(queue.popleft(), setup)
+    async def _run_worker(self, queue: "_RunQueue", setup: _SuiteRunSetup) -> None:
+        """Take runs from the queue and run them, one after another, until none is left."""
+        while (run := await queue.take()) is not None:
+            try:
+                await self._run_one(run, setup)
+            finally:
+                await queue.done(run)
 
     async def _run_one(self, run: EvalRun, setup: _SuiteRunSetup) -> None:
         """Spawn one bot, run its scenario against it, and record the outcome on ``run``."""
@@ -1025,21 +1065,21 @@ class EvalSuite(BaseObject):
             )
 
     @staticmethod
-    def _entry_queues(runs: list[EvalRun]) -> list[tuple[str, int, deque[EvalRun]]]:
-        """One queue per entry label and attempt, attempt-major then in manifest order, with the label and the slots the entry may hold.
+    def _entry_queues(runs: list[EvalRun]) -> list[tuple[str, int | None, deque[EvalRun]]]:
+        """One queue per entry label and attempt, attempt-major then in manifest order, with the label and the entry's cap.
 
-        A queue keeps its runs in manifest order. An entry's slots are the
-        lowest ``concurrency:`` among its runs, one when none sets it, and
-        they are shared by all of its attempts.
+        A queue keeps its runs in manifest order. An entry's cap is the lowest
+        ``concurrency:`` among its runs, ``None`` when none sets it, and it
+        covers all of its attempts.
         """
         queues: dict[tuple[int, str], deque[EvalRun]] = {}
-        slots: dict[str, int] = {}
+        caps: dict[str, int] = {}
         for run in runs:
             queues.setdefault((run.attempt, run.label), deque()).append(run)
             if run.concurrency is not None:
-                slots[run.label] = min(slots.get(run.label, run.concurrency), run.concurrency)
+                caps[run.label] = min(caps.get(run.label, run.concurrency), run.concurrency)
         return [
-            (label, slots.get(label, 1), queue)
+            (label, caps.get(label), queue)
             for (_, label), queue in sorted(queues.items(), key=lambda item: item[0][0])
         ]
 
