@@ -414,14 +414,10 @@ class EvalJudge:
 
         Args:
             classifier: The classifier that decides the verdicts. An LLM
-                service is also accepted, and classifies and explains with
-                itself.
-
-                .. deprecated:: 1.12.0
-                    Use :class:`~pipecat.classifiers.llm.classifier.LLMClassifier`
-                    over the service, passing the service as the ``explainer``
-                    for the reasons. Will be removed in 2.0.0.
-
+                service is still accepted here, deprecated like ``service``:
+                it classifies through an
+                :class:`~pipecat.classifiers.llm.classifier.LLMClassifier` and
+                explains with itself.
             explainer: The LLM asked for the reason behind a verdict.
             explain_below: A ``yes`` less sure than this is explained too.
             allow_continue: Whether a reply may be judged ``continue``.

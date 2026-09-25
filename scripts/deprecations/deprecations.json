@@ -91,17 +91,6 @@
       "location": "pipecat/evals/harness.py"
     },
     {
-      "subject": "EvalJudge.classifier",
-      "module": "pipecat.evals.judge",
-      "kind": "parameter",
-      "deprecated_in": "1.12.0",
-      "removed_in": "2.0.0",
-      "relation": "use_existing",
-      "replacement": "pipecat.classifiers.llm.classifier.LLMClassifier",
-      "message": "Use :class:`~pipecat.classifiers.llm.classifier.LLMClassifier` over the service, passing the service as the ``explainer`` for the reasons. Will be removed in 2.0.0.",
-      "location": "pipecat/evals/judge.py"
-    },
-    {
       "subject": "EvalJudge.evaluate_run.transcript",
       "module": "pipecat.evals.judge",
       "kind": "parameter",
