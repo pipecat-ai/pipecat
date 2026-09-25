@@ -34,6 +34,7 @@ from pipecat.frames.frames import FunctionCallResultProperties, LLMMessagesAppen
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.aggregators.llm_context import LLMContextMessage
 from pipecat.processors.frame_processor import FrameProcessorSetup
+from pipecat.processors.frameworks.rtvi.frames import RTVIServerMessageFrame
 from pipecat.services.llm_service import FunctionCallParams, LLMService
 from pipecat.workers.base_worker import BaseWorker
 from pipecat.workers.llm.backend_llm_worker import (
@@ -355,6 +356,7 @@ class BackendConnector:
         request_strategy: BackendRequestStrategy | None = None,
         respond_on_delegate: bool = True,
         timeout_secs: float | None = 30,
+        client_trace: bool = False,
     ):
         """Initialize the connector.
 
@@ -368,10 +370,16 @@ class BackendConnector:
             timeout_secs: How long the backend may take to acknowledge a
                 message or a cancellation, including the wait for it to become
                 ready.
+            client_trace: Whether to send every exchange with the backend to
+                the client as an RTVI server message (``type``
+                ``"llm-with-backend"``): each request, output, tool-call phase,
+                cancellation, error and idle. For debugging; a client's event
+                log shows them.
         """
         self._request_strategy = request_strategy
         self._respond_on_delegate = respond_on_delegate
         self._timeout_secs = timeout_secs
+        self._client_trace = client_trace
         self._context: ConnectorContext | None = None
         self._tools: list[FunctionSchema] = []
         self._session: _BackendSession | None = None
@@ -514,6 +522,7 @@ class BackendConnector:
         logger.debug(f"Delegating to '{self._context.backend_name}': {request!r}")
         session = await self._open_session()
         status = await session.send(request)
+        await self._trace(params.llm, event="request", text=request, backend=status)
         await params.result_callback(
             {"status": "delegated", "backend": status},
             properties=FunctionCallResultProperties(run_llm=self._respond_on_delegate),
@@ -527,6 +536,7 @@ class BackendConnector:
         """
         session = await self._open_session()
         cancelled = await session.cancel("cancelled by the user")
+        await self._trace(params.llm, event="cancel", cancelled=cancelled)
         await params.result_callback(
             {"status": "cancelled" if cancelled else "nothing_running"},
             properties=FunctionCallResultProperties(run_llm=True),
@@ -550,6 +560,13 @@ class BackendConnector:
             event: What the backend produced.
         """
         if isinstance(event, BackendOutput):
+            await self._trace(
+                frontend,
+                event="output",
+                text=event.text,
+                spoken=event.prefers_spoken,
+                thought=event.is_thought,
+            )
             logger.debug(
                 f"Backend output ({'spoken' if event.prefers_spoken else 'silent'}"
                 f"{', thought' if event.is_thought else ''}): {event.text!r}"
@@ -561,6 +578,14 @@ class BackendConnector:
                     LLMMessagesAppendFrame(messages=[message], run_llm=event.prefers_spoken),
                 )
         elif isinstance(event, BackendToolCall):
+            await self._trace(
+                frontend,
+                event="tool_call",
+                phase=event.phase,
+                name=event.function_name,
+                arguments=event.arguments,
+                result=event.result,
+            )
             await frontend.push_frame(event.to_frame())
             message = self.render_tool_call(event)
             if message is not None:
@@ -568,6 +593,7 @@ class BackendConnector:
                     frontend, LLMMessagesAppendFrame(messages=[message], run_llm=False)
                 )
         elif isinstance(event, BackendError):
+            await self._trace(frontend, event="error", error=event.error)
             logger.warning(f"Backend error: {event.error}")
             await self._append(
                 frontend,
@@ -585,7 +611,15 @@ class BackendConnector:
                 ),
             )
         elif isinstance(event, BackendIdle):
+            await self._trace(frontend, event="idle")
             logger.debug("Backend is idle")
+
+    async def _trace(self, frontend: LLMService[Any], **data: Any) -> None:
+        """Send one exchange with the backend to the client, when tracing is on."""
+        if self._client_trace:
+            await frontend.push_frame(
+                RTVIServerMessageFrame(data={"type": "llm-with-backend", **data})
+            )
 
     async def _append(self, frontend: LLMService[Any], frame: LLMMessagesAppendFrame) -> None:
         """Queue a message into the frontend's conversation, past any interruption on the way."""

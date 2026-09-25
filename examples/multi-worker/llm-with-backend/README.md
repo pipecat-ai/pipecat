@@ -32,6 +32,8 @@ Run one the usual way, then connect a client and try "fix the flaky retry test i
 python openai-responses-frontend.py
 ```
 
+Each frontend has a commented-out `connector=BackendConnector(client_trace=True)`: with it, every exchange with the backend is sent to the client as an RTVI server message and shows in the prebuilt UI's Events panel.
+
 The behavioral evals for these bots are in [`evals/llm-with-backend/`](../../../evals/llm-with-backend/).
 
 ## A backend in another process

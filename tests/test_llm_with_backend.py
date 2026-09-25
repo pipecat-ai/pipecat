@@ -43,6 +43,7 @@ from pipecat.pipeline.llm_with_backend import (
 )
 from pipecat.processors.aggregators.llm_context import NOT_GIVEN, LLMContext, LLMSpecificMessage
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frameworks.rtvi.frames import RTVIServerMessageFrame
 from pipecat.services.llm_service import FunctionCallFromLLM, FunctionCallParams, LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.tests.utils import SleepFrame, run_test
@@ -474,6 +475,46 @@ async def test_the_tools_are_built_in_beside_the_frontends_own():
     ]
     assert frontend.has_function("delegate")
     assert frontend.has_function("cancel_delegated_work")
+
+
+@pytest.mark.asyncio
+async def test_client_tracing_sends_each_exchange_as_a_server_message():
+    backend = BackendLLMWorker(
+        name="backend",
+        llm=_ScriptedLLM(
+            [
+                [("call", "get_weather", "c1", {"location": "Seattle"})],
+                [("text", "It's 62 and raining.")],
+            ]
+        ),
+        context=LLMContext(tools=[get_weather]),
+    )
+    service = LLMWithBackend(
+        frontend=_DelegatingFrontend(),
+        backend=backend,
+        connector=BackendConnector(client_trace=True),
+    )
+
+    down, _ = await run_test(
+        service,
+        frames_to_send=[
+            LLMContextFrame(LLMContext([{"role": "user", "content": "weather in seattle?"}])),
+            SleepFrame(sleep=2.0),
+        ],
+    )
+
+    traced = [f.data for f in down if isinstance(f, RTVIServerMessageFrame)]
+    assert all(d["type"] == "llm-with-backend" for d in traced)
+    assert [d["event"] for d in traced] == [
+        "request",
+        "tool_call",
+        "tool_call",
+        "tool_call",
+        "output",
+        "idle",
+    ]
+    assert traced[0]["backend"] == "idle" and "weather in seattle?" in traced[0]["text"]
+    assert traced[-2]["text"] == "It's 62 and raining." and traced[-2]["spoken"] is True
 
 
 @pytest.mark.asyncio
