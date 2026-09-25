@@ -16,6 +16,7 @@ from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMRunFrame,
+    LLMServiceMetadataFrame,
     TranscriptionFrame,
     TTSTextFrame,
     VADUserStartedSpeakingFrame,
@@ -273,6 +274,30 @@ class TestEmptyUserTurnIdle(unittest.IsolatedAsyncioTestCase):
     async def test_idle_timer_not_rearmed_after_recovery(self):
         # The recovery response is on its way, so the user isn't idle yet.
         self.assertFalse(await self._idle_fired([*_bot_speaking(), *_empty_turn()]))
+
+
+class TestEmptyUserTurnRealtime(unittest.IsolatedAsyncioTestCase):
+    async def test_disabled_in_explicit_realtime_mode(self):
+        pair = LLMContextAggregatorPair(LLMContext(), realtime_service_mode=True)
+        self.assertIsNone(pair.user()._params.empty_user_turn)
+
+    async def test_disabled_when_realtime_service_announces_itself(self):
+        pair = LLMContextAggregatorPair(LLMContext(), user_params=_user_params())
+        await run_test(
+            Pipeline([pair.user(), pair.assistant()]),
+            frames_to_send=[
+                LLMServiceMetadataFrame(service_name="FakeRealtimeLLM", is_realtime_service=True)
+            ],
+        )
+        self.assertIsNone(pair.user()._params.empty_user_turn)
+
+    async def test_kept_for_a_non_realtime_service(self):
+        pair = LLMContextAggregatorPair(LLMContext(), user_params=_user_params())
+        await run_test(
+            Pipeline([pair.user(), pair.assistant()]),
+            frames_to_send=[LLMServiceMetadataFrame(service_name="FakeLLM")],
+        )
+        self.assertIsNotNone(pair.user()._params.empty_user_turn)
 
 
 if __name__ == "__main__":
