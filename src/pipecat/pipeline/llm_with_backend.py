@@ -61,11 +61,20 @@ BACKEND_MESSAGE_PREFIX = "Backend: "
 #: How a backend reasoning summary is marked in the frontend's conversation.
 BACKEND_THOUGHT_PREFIX = "Backend (thinking): "
 
+#: How a backend note, text it wrote beside its tool calls, is marked in the
+#: frontend's conversation.
+BACKEND_NOTE_PREFIX = "Backend (note): "
+
 #: How a function call the backend is making is marked in the frontend's conversation.
 BACKEND_WORKING_PREFIX = "Backend (working): "
 
 #: Every mark a rendered backend message can open with.
-BACKEND_PREFIXES = (BACKEND_MESSAGE_PREFIX, BACKEND_THOUGHT_PREFIX, BACKEND_WORKING_PREFIX)
+BACKEND_PREFIXES = (
+    BACKEND_MESSAGE_PREFIX,
+    BACKEND_THOUGHT_PREFIX,
+    BACKEND_NOTE_PREFIX,
+    BACKEND_WORKING_PREFIX,
+)
 
 #: Carried on each spoken backend message, so the frontend relays it on whatever
 #: turn it lands on, a user's turn included, where the standing instruction
@@ -114,12 +123,15 @@ _MESSAGES_INSTRUCTION = (
     "relay just the message; do not repeat or rephrase your earlier reply. Relay each "
     "message once. Only when the user has cancelled or changed what they asked for does a "
     "message go unsaid, and then say only what still helps. Messages marked "
-    f'"{BACKEND_WORKING_PREFIX.strip()}" and "{BACKEND_THOUGHT_PREFIX.strip()}" are what '
-    "the backend is doing and thinking. Never relay them on their own, but when the user "
-    "asks how the work is going, answer from the latest of them, concretely: name the step, "
-    "such as which file it is reading or that it is running the tests, rather than saying "
-    "only that it is still working. Never state a result you have not received from the "
-    "backend, and never say work is done that the backend has not said is done.\n\n"
+    f'"{BACKEND_WORKING_PREFIX.strip()}", "{BACKEND_NOTE_PREFIX.strip()}" and '
+    f'"{BACKEND_THOUGHT_PREFIX.strip()}" are what the backend is doing and thinking. They '
+    "carry no results: what a call found reaches you only in a message marked "
+    f'"{BACKEND_MESSAGE_PREFIX.strip()}", so never describe or guess what a call found. Never '
+    "relay them on their own, but when the user asks how the work is going, answer from the "
+    "latest of them, concretely: name the step, such as which file it is reading or that it "
+    "is running the tests, rather than saying only that it is still working. Never state a "
+    "result you have not received from the backend, and never say work is done that the "
+    "backend has not said is done.\n\n"
     f"Whenever the user says to stop or cancel what the backend is doing, call "
     f"{CANCEL_TOOL_NAME} at once, in that same reply, even if they ask for something else in "
     "the same breath; then delegate the new request as well. Delegating the stop is not "
@@ -238,12 +250,15 @@ class TranscriptBackendRequestStrategy(BackendRequestStrategy):
         if self._delegated_through > len(messages):
             # The context was reset since the previous delegation.
             self._delegated_through = 0
+        # A message in a service's own format carries no turn for the transcript.
         conversation = [
-            m for m in messages[self._delegated_through :] if not _is_backend_message(m)
+            m
+            for m in messages[self._delegated_through :]
+            if isinstance(m, dict) and not _is_backend_message(m)
         ]
         first = self._delegated_through == 0
         self._delegated_through = len(messages)
-        if not any(m.get("role") in ("user", "assistant") for m in conversation):  # type: ignore[union-attr]
+        if not any(m.get("role") in ("user", "assistant") for m in conversation):
             return None
         return _render_transcript_request(conversation, instruction=self._instruction, first=first)
 
@@ -580,8 +595,9 @@ class BackendConnector:
         Override for another wording, role, or to leave some outputs out by
         returning ``None``. The default marks the message so the frontend can
         tell it from the user's and its own, and so the transcript request
-        strategy can leave it out of what it sends the backend; a spoken
-        output carries :data:`RELAY_NOTE` as well.
+        strategy can leave it out of what it sends the backend: a spoken
+        output as ``Backend:`` with :data:`RELAY_NOTE` after it, a silent one
+        as ``Backend (note):``, a reasoning summary as ``Backend (thinking):``.
 
         Args:
             output: The output.
@@ -593,8 +609,12 @@ class BackendConnector:
             return None
         if output.is_thought:
             return {"role": "developer", "content": f"{BACKEND_THOUGHT_PREFIX}{output.text}"}
-        note = f"\n\n{RELAY_NOTE}" if output.prefers_spoken else ""
-        return {"role": "developer", "content": f"{BACKEND_MESSAGE_PREFIX}{output.text}{note}"}
+        if not output.prefers_spoken:
+            return {"role": "developer", "content": f"{BACKEND_NOTE_PREFIX}{output.text}"}
+        return {
+            "role": "developer",
+            "content": f"{BACKEND_MESSAGE_PREFIX}{output.text}\n\n{RELAY_NOTE}",
+        }
 
     def render_tool_call(self, call: BackendToolCall) -> LLMContextMessage | None:
         """Render a phase of a backend function call as a message the frontend's conversation takes in, silently.
