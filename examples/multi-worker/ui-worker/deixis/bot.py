@@ -143,15 +143,15 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         processor_unusable_policy=ProcessorUnusablePolicy.END,
     )
 
-    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
-
     api_key = os.getenv("TYPESAFE_API_KEY")
     classifier = JevClassifier(api_key=api_key) if api_key else None
-    ui = UIWorker(
+    ui_worker = UIWorker(
         UI_NAME, llm=OpenAILLMService(api_key=os.environ["OPENAI_API_KEY"]), classifier=classifier
     )
 
-    await runner.add_workers(ui, worker)
+    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
+
+    await runner.add_workers(ui_worker, worker)
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):

@@ -18,8 +18,9 @@ captured before moving on. A user who can't see the screen never has to.
   returns the inputs with their current values, `screen("fill", "the
   email field", "john@example.com")` writes a value, and `screen("click",
   "the submit button")` submits. It never sees the page.
-- **A UIWorker with a classifier and no LLM turn.** `FormWorker` answers
-  the `screen` job: for "the email field" it asks its classifier which
+- **A plain UIWorker with a classifier and no LLM turn.** The built-in
+  `screen` job answers every tool call, so the example has no worker
+  subclass. For "the email field" the worker asks its classifier which
   element on the screen the words mean, then sends the command.
   With `TYPESAFE_API_KEY` set the classifier is Jev; otherwise the
   worker's own LLM answers through an `LLMClassifier`.

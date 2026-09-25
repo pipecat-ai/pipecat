@@ -35,9 +35,9 @@ Architecture::
         └── screen_tools("ui"): screen(action, target, value)
               └── params.pipeline_worker.job("ui", name="screen", payload=...)
 
-    FormWorker (UIWorker "ui", no LLM turn):
-      └── @job screen -> "list": the inputs with their values
-                         "fill" / "click": classifier finds the field, sends the command
+    UIWorker ("ui", with a classifier, no LLM turn):
+      └── built-in "screen" job -> "list": the inputs with their values
+                                   "fill" / "click": classifier finds the field, sends the command
 
 Run::
 
@@ -142,16 +142,6 @@ john@example.com; "five five five one two three four" is 5551234; "five \
 years" is 5. Confirm naturally ("got it, your email's john@example.com")."""
 
 
-class FormWorker(UIWorker):
-    """UIWorker that works the form for the voice LLM, with a classifier and no LLM turn."""
-
-    def __init__(self):
-        llm = OpenAILLMService(api_key=os.environ["OPENAI_API_KEY"])
-        api_key = os.getenv("TYPESAFE_API_KEY")
-        classifier = JevClassifier(api_key=api_key) if api_key else None
-        super().__init__(UI_NAME, llm=llm, classifier=classifier)
-
-
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info("Starting form-fill bot")
 
@@ -193,9 +183,15 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         processor_unusable_policy=ProcessorUnusablePolicy.END,
     )
 
+    api_key = os.getenv("TYPESAFE_API_KEY")
+    classifier = JevClassifier(api_key=api_key) if api_key else None
+    ui_worker = UIWorker(
+        UI_NAME, llm=OpenAILLMService(api_key=os.environ["OPENAI_API_KEY"]), classifier=classifier
+    )
+
     runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
 
-    await runner.add_workers(FormWorker(), worker)
+    await runner.add_workers(ui_worker, worker)
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):

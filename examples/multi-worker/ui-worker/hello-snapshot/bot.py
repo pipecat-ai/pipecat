@@ -178,9 +178,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         processor_unusable_policy=ProcessorUnusablePolicy.END,
     )
 
+    ui_worker = UIWorker(UI_NAME, llm=ui_llm)
+
     runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
 
-    await runner.add_workers(UIWorker(UI_NAME, llm=ui_llm), worker)
+    await runner.add_workers(ui_worker, worker)
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
