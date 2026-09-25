@@ -22,8 +22,7 @@ from pipecat.evals.judge import (
     RUN_JUDGE_SYSTEM_INSTRUCTION,
     EvalJudge,
     JudgeVerdict,
-    _parse_run_verdicts,
-    _parse_verdict,
+    _Explainer,
 )
 
 REPLY_OPTIONS = ("yes", "no", "continue")
@@ -101,7 +100,7 @@ def _judge(answers, explainer=None, **kwargs) -> tuple[EvalJudge, _FakeClassifie
 
 class TestParseRunVerdicts(unittest.TestCase):
     def test_the_goal_and_a_verdict_per_turn_per_criterion(self):
-        out = _parse_run_verdicts(
+        out = _Explainer._parse_run_verdicts(
             '{"goal": {"verdict": "yes", "reason": "Berlin was named."}, '
             '"turns": {"politeness": ["yes", "no"], "brevity": ["yes", "yes"]}, '
             '"reasons": {"politeness": {"2": "curt"}}}',
@@ -115,7 +114,7 @@ class TestParseRunVerdicts(unittest.TestCase):
         self.assertEqual([v.verdict for v in out.turns["brevity"]], ["yes", "yes"])
 
     def test_a_short_array_or_a_missing_criterion_fails_the_turns_it_lacks(self):
-        out = _parse_run_verdicts(
+        out = _Explainer._parse_run_verdicts(
             '```json\n{"goal": {"verdict": "no"}, "turns": {"Politeness": ["yes"]}}\n```',
             ["politeness", "brevity"],
             2,
@@ -126,51 +125,51 @@ class TestParseRunVerdicts(unittest.TestCase):
         self.assertEqual([v.reason for v in out.turns["brevity"]], ["(judge gave no verdict)"] * 2)
 
     def test_no_json_fails_everything(self):
-        out = _parse_run_verdicts("no json here", ["politeness"], 1)
+        out = _Explainer._parse_run_verdicts("no json here", ["politeness"], 1)
         self.assertEqual(out.goal.verdict, "none")
         self.assertEqual(out.turns["politeness"][0].verdict, "none")
 
 
 class TestParseVerdict(unittest.TestCase):
     def test_clean_json_yes(self):
-        v = _parse_verdict('{"verdict": "yes", "reason": "It mentions weather."}')
+        v = _Explainer._parse_verdict('{"verdict": "yes", "reason": "It mentions weather."}')
         self.assertTrue(v.passed)
         self.assertEqual(v.reason, "It mentions weather.")
 
     def test_clean_json_no(self):
-        v = _parse_verdict('{"verdict": "no", "reason": "Does not mention it."}')
+        v = _Explainer._parse_verdict('{"verdict": "no", "reason": "Does not mention it."}')
         self.assertFalse(v.passed)
         self.assertEqual(v.verdict, "no")
         self.assertEqual(v.reason, "Does not mention it.")
 
     def test_clean_json_continue(self):
-        v = _parse_verdict('{"verdict": "continue", "reason": "Just a filler so far."}')
+        v = _Explainer._parse_verdict('{"verdict": "continue", "reason": "Just a filler so far."}')
         self.assertEqual(v.verdict, "continue")
         self.assertFalse(v.passed)
         self.assertEqual(v.reason, "Just a filler so far.")
 
     def test_unknown_verdict_fails_closed(self):
-        v = _parse_verdict('{"verdict": "maybe", "reason": "x"}')
+        v = _Explainer._parse_verdict('{"verdict": "maybe", "reason": "x"}')
         self.assertEqual(v.verdict, "no")
 
     def test_unstructured_continue_fallback(self):
-        v = _parse_verdict("continue, more text is needed")
+        v = _Explainer._parse_verdict("continue, more text is needed")
         self.assertEqual(v.verdict, "continue")
 
     def test_fenced_json(self):
-        v = _parse_verdict('```json\n{"verdict": "yes", "reason": "ok"}\n```')
+        v = _Explainer._parse_verdict('```json\n{"verdict": "yes", "reason": "ok"}\n```')
         self.assertTrue(v.passed)
         self.assertEqual(v.reason, "ok")
 
     def test_fenced_json_without_lang(self):
-        v = _parse_verdict('```\n{"verdict": "yes", "reason": "ok"}\n```')
+        v = _Explainer._parse_verdict('```\n{"verdict": "yes", "reason": "ok"}\n```')
         self.assertTrue(v.passed)
 
     def test_trailing_prose_after_json(self):
         # Models sometimes append chatty text after the JSON object, and "know"
         # contains "no", so a substring-matching fallback would misread the
         # trailing sentence as a rejection.
-        v = _parse_verdict(
+        v = _Explainer._parse_verdict(
             ' {"verdict": "yes", "reason": "The bot greets the user."}\n\n'
             "Let me know if you'd like to evaluate any further turns!"
         )
@@ -178,33 +177,35 @@ class TestParseVerdict(unittest.TestCase):
         self.assertEqual(v.reason, "The bot greets the user.")
 
     def test_leading_prose_before_json(self):
-        v = _parse_verdict('Sure, here is my verdict: {"verdict": "no", "reason": "wrong"}')
+        v = _Explainer._parse_verdict(
+            'Sure, here is my verdict: {"verdict": "no", "reason": "wrong"}'
+        )
         self.assertFalse(v.passed)
         self.assertEqual(v.reason, "wrong")
 
     def test_unstructured_yes_fallback(self):
-        v = _parse_verdict("yes, this satisfies the criterion")
+        v = _Explainer._parse_verdict("yes, this satisfies the criterion")
         self.assertTrue(v.passed)
 
     def test_unstructured_no_fallback(self):
-        v = _parse_verdict("no, it does not")
+        v = _Explainer._parse_verdict("no, it does not")
         self.assertFalse(v.passed)
 
     def test_ambiguous_response_fails_closed(self):
-        v = _parse_verdict("the answer is yes or possibly no")
+        v = _Explainer._parse_verdict("the answer is yes or possibly no")
         self.assertFalse(v.passed)
         self.assertIn("could not parse", v.reason)
 
     def test_garbage_response(self):
-        v = _parse_verdict("???")
+        v = _Explainer._parse_verdict("???")
         self.assertFalse(v.passed)
 
     def test_extra_whitespace(self):
-        v = _parse_verdict('  \n {"verdict": "yes", "reason": "x"}  \n ')
+        v = _Explainer._parse_verdict('  \n {"verdict": "yes", "reason": "x"}  \n ')
         self.assertTrue(v.passed)
 
     def test_missing_reason(self):
-        v = _parse_verdict('{"verdict": "yes"}')
+        v = _Explainer._parse_verdict('{"verdict": "yes"}')
         self.assertTrue(v.passed)
         self.assertEqual(v.reason, "(no reason given)")
 

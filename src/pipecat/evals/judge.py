@@ -345,6 +345,13 @@ class RunVerdicts:
     turns: dict[str, list[JudgeVerdict]]
 
 
+# The reason a verdict carries when the explainer's call failed.
+EXPLAINER_FAILED = "explainer call failed"
+# The reason a verdict carries when the judge gave none.
+_NO_VERDICT = "(judge gave no verdict)"
+# The reason a verdict carries when the judge gave the verdict without one.
+NO_REASON = "(no reason given)"
+
 _TRANSCRIPTION_NOTE = (
     "The bot's text may be an automatic speech-to-text transcription: judge its intended "
     "spoken meaning, never its spelling ('for' may mean 'four', 'to' may mean 'two')."
@@ -568,31 +575,31 @@ class EvalJudge:
             reason is explained, and a failed call is a ``no`` with the failure
             as its reason.
         """
-        entries = _numbered_turns(e for e in self._transcript if e["role"] != "tool")
+        entries = self._numbered_turns(e for e in self._transcript if e["role"] != "tool")
         latest = entries.pop()["content"] if entries and entries[-1]["role"] == "bot" else ""
-        state = {"conversation": _conversation(entries), "latest_bot_reply": latest}
+        state = {"conversation": self._conversation(entries), "latest_bot_reply": latest}
         key = _cache_key("reply", criterion, state)
         if key not in self._cache:
             question = ChoiceQuestion(
                 instructions=(
                     "Does `latest_bot_reply`, the bot's most recent reply, following "
                     f"`conversation`, satisfy this criterion? Criterion: "
-                    f"{_sentence(criterion)} {_TRANSCRIPTION_NOTE}"
+                    f"{self._sentence(criterion)} {_TRANSCRIPTION_NOTE}"
                 ),
                 options=self._reply_outcomes,
             )
             answers = await self._choices(state, {"verdict": question})
             if answers is None:
-                verdict = _failed("no")
+                verdict = self._failed("no")
             else:
-                verdict = _reply_verdict(answers["verdict"])
+                verdict = self._reply_verdict(answers["verdict"])
                 if (
                     verdict.verdict != "continue"
                     and self._explainer
                     and self._needs_reason(verdict)
                 ):
                     explanation = await self._explainer.explain(self._transcript, criterion)
-                    verdict = _explained(verdict, explanation)
+                    verdict = self._explained(verdict, explanation)
             self._cache[key] = verdict
         return self._cache[key]
 
@@ -608,9 +615,9 @@ class EvalJudge:
             A ``yes`` or a ``no``, cached by call, criterion and conversation,
             and explained when it needs a reason.
         """
-        entries = _numbered_turns(e for e in self._transcript if e["role"] != "tool")
+        entries = self._numbered_turns(e for e in self._transcript if e["role"] != "tool")
         state = {
-            "conversation": _conversation(entries),
+            "conversation": self._conversation(entries),
             "call": {"name": name, "arguments": args or {}},
         }
         key = _cache_key("call", criterion, state)
@@ -618,18 +625,18 @@ class EvalJudge:
             answer = await self._yes_no(
                 state,
                 "Does the bot's function `call`, judged by its name and arguments, satisfy "
-                f"this criterion? Criterion: {_sentence(criterion)} `conversation` is context "
+                f"this criterion? Criterion: {self._sentence(criterion)} `conversation` is context "
                 f"only. {_TRANSCRIPTION_NOTE}",
             )
             if answer is None:
-                verdict = _failed("no")
+                verdict = self._failed("no")
             else:
-                verdict = _yes_no_verdict(answer)
+                verdict = self._yes_no_verdict(answer)
                 if self._explainer and self._needs_reason(verdict):
                     explanation = await self._explainer.explain_call(
                         self._transcript, name, args, criterion
                     )
-                    verdict = _explained(verdict, explanation)
+                    verdict = self._explained(verdict, explanation)
             self._cache[key] = verdict
         return self._cache[key]
 
@@ -680,14 +687,14 @@ class EvalJudge:
                 stacklevel=2,
             )
         conversation = list(self._transcript if transcript is None else transcript)
-        entries = _numbered_turns(conversation)
+        entries = self._numbered_turns(conversation)
         names = list(criteria)
         key = _cache_key("run", criteria, success, entries)
         if key in self._run_cache:
             return self._run_cache[key]
 
         goal_instructions = (
-            f"Does the conversation as a whole achieve this goal? Goal: {_sentence(success)} "
+            f"Does the conversation as a whole achieve this goal? Goal: {self._sentence(success)} "
             "A `tool` entry is a function the bot called at that point; a completed "
             "call is stronger evidence of an action than the bot saying it did it. "
             f"{_TRANSCRIPTION_NOTE}"
@@ -696,7 +703,7 @@ class EvalJudge:
             name: ChoiceQuestion(
                 instructions=(
                     "`latest_bot_reply` is the bot's reply following `conversation`. How does "
-                    f"it stand against this criterion? Criterion: {_sentence(criteria[name])} "
+                    f"it stand against this criterion? Criterion: {self._sentence(criteria[name])} "
                     f"{_TRANSCRIPTION_NOTE}"
                 ),
                 options=_TURN_OUTCOMES,
@@ -704,14 +711,14 @@ class EvalJudge:
             for name in names
         }
         turn_states = [
-            {"conversation": _conversation(entries[:i]), "latest_bot_reply": entry["content"]}
+            {"conversation": self._conversation(entries[:i]), "latest_bot_reply": entry["content"]}
             for i, entry in enumerate(entries)
             if entry["role"] == "bot"
         ]
 
         # The goal, and every criterion on each turn: one call each, all at once.
         goal_answer, turn_answers = await asyncio.gather(
-            self._yes_no({"conversation": _conversation(entries)}, goal_instructions),
+            self._yes_no({"conversation": self._conversation(entries)}, goal_instructions),
             asyncio.gather(
                 *(
                     self._choices(state, turn_questions)
@@ -720,12 +727,13 @@ class EvalJudge:
             ),
         )
 
-        failed = _failed("none")
+        failed = self._failed("none")
         verdicts = RunVerdicts(
-            goal=_yes_no_verdict(goal_answer) if goal_answer else failed,
+            goal=self._yes_no_verdict(goal_answer) if goal_answer else failed,
             turns={
                 name: [
-                    _turn_verdict(answers[name]) if answers else failed for answers in turn_answers
+                    self._turn_verdict(answers[name]) if answers else failed
+                    for answers in turn_answers
                 ]
                 for name in names
             },
@@ -773,7 +781,7 @@ class EvalJudge:
         def explain(verdict: JudgeVerdict, reasoned: JudgeVerdict | None) -> JudgeVerdict:
             if reasoned is None or reasoned.verdict == "none" or not self._needs_reason(verdict):
                 return verdict
-            return _explained(verdict, reasoned)
+            return self._explained(verdict, reasoned)
 
         turns: dict[str, list[JudgeVerdict]] = {}
         for name, turn_verdicts in verdicts.turns.items():
@@ -819,6 +827,113 @@ class EvalJudge:
                 else:
                     logger.error(f"Judge question failed: {e}")
         return None
+
+    @staticmethod
+    def _numbered_turns(transcript: Iterable[dict]) -> list[dict]:
+        """The conversation with each bot reply joined into one numbered turn.
+
+        A bot turn is a run of reply segments with nothing else between them.
+
+        Args:
+            transcript: The judge's conversation entries.
+
+        Returns:
+            The entries, each a dict with a ``role`` of ``user``, ``bot`` or
+            ``tool`` and the ``content``, a bot entry also carrying its ``turn``
+            (from 1).
+        """
+        entries: list[dict] = []
+        turn = 0
+        for entry in transcript:
+            if entry["role"] == "assistant":
+                if entries and entries[-1]["role"] == "bot":
+                    entries[-1]["content"] += f" {entry['content']}"
+                    continue
+                turn += 1
+                entries.append({"role": "bot", "turn": turn, "content": entry["content"]})
+            else:
+                entries.append({"role": entry["role"], "content": entry["content"]})
+        return entries
+
+    @staticmethod
+    def _conversation(entries: list[dict]) -> list[dict]:
+        """The conversation as the state carries it: a speaker, the text, and a bot turn's number."""
+        return [
+            {
+                "speaker": e["role"],
+                **({"turn": e["turn"]} if "turn" in e else {}),
+                "text": e["content"],
+            }
+            for e in entries
+        ]
+
+    @staticmethod
+    def _sentence(text: str) -> str:
+        """``text`` ending in punctuation, so the instruction after it reads as a new sentence."""
+        text = text.strip()
+        return text if text.endswith((".", "!", "?")) else f"{text}."
+
+    @staticmethod
+    def _reply_verdict(answer: ChoiceResult) -> JudgeVerdict:
+        """A reply's verdict: the choice of ``yes``, ``no`` or ``continue``."""
+        return JudgeVerdict(
+            verdict=answer.choice,
+            reason=EvalJudge._probabilities(answer.probabilities),
+            raw_response=answer.model_dump_json(),
+            confidence=answer.confidence,
+        )
+
+    @staticmethod
+    def _yes_no_verdict(answer: YesNoResult) -> JudgeVerdict:
+        """A yes/no verdict from the probability of yes."""
+        probability = answer.probability
+        return JudgeVerdict(
+            verdict="yes" if answer.is_yes else "no",
+            reason=f"P(yes)={probability:.2f}",
+            raw_response=answer.model_dump_json(),
+            confidence=max(probability, 1 - probability),
+        )
+
+    @staticmethod
+    def _turn_verdict(answer: ChoiceResult) -> JudgeVerdict:
+        """A turn's verdict: a ``no`` only when the criterion applies to the turn and fails.
+
+        Its confidence is the probability of the verdict given: for a pass, the
+        probability of either outcome that passes.
+        """
+        fails = answer.probabilities.get("fails", 0.0)
+        passed = answer.choice != "fails"
+        return JudgeVerdict(
+            verdict="yes" if passed else "no",
+            reason=EvalJudge._probabilities(answer.probabilities),
+            raw_response=answer.model_dump_json(),
+            confidence=1 - fails if passed else fails,
+        )
+
+    @staticmethod
+    def _probabilities(probabilities: dict[str, float]) -> str:
+        """The probability of each outcome, as a verdict's reason."""
+        return ", ".join(f"P({k})={v:.2f}" for k, v in probabilities.items())
+
+    @staticmethod
+    def _failed(verdict: str) -> JudgeVerdict:
+        """The verdict a failed call gives."""
+        return JudgeVerdict(verdict=verdict, reason="judge call failed", raw_response="")
+
+    @staticmethod
+    def _explained(verdict: JudgeVerdict, explanation: JudgeVerdict) -> JudgeVerdict:
+        """The verdict with the explainer's reason, noting when the explainer disagreed."""
+        if explanation.verdict == verdict.verdict:
+            given = explanation.reason and explanation.reason != NO_REASON
+            reason = f"{explanation.reason} ({verdict.reason})" if given else verdict.reason
+        else:
+            reason = f"{verdict.reason}; the explainer judged {explanation.verdict}: {explanation.reason}"
+        return JudgeVerdict(
+            verdict=verdict.verdict,
+            reason=reason,
+            raw_response=verdict.raw_response,
+            confidence=verdict.confidence,
+        )
 
 
 class _Explainer:
@@ -957,7 +1072,7 @@ class _Explainer:
                     goal=failed, turns={name: [failed] * turn for name in criteria}
                 )
             else:
-                self._run_cache[key] = _parse_run_verdicts(response, list(criteria), turn)
+                self._run_cache[key] = self._parse_run_verdicts(response, list(criteria), turn)
         return self._run_cache[key]
 
     async def _evaluate(
@@ -973,7 +1088,7 @@ class _Explainer:
                     verdict="no", reason=EXPLAINER_FAILED, raw_response=""
                 )
             else:
-                self._cache[key] = _parse_verdict(response)
+                self._cache[key] = self._parse_verdict(response)
         return self._cache[key]
 
     async def _ask(
@@ -1016,193 +1131,128 @@ class _Explainer:
             return None
         return response
 
+    @staticmethod
+    def _parse_verdict(response: str) -> JudgeVerdict:
+        """Parse the explainer's response. Tolerant of extra whitespace and code fences."""
+        cleaned = response.strip()
+        # Strip markdown code fences if the model ignored instructions
+        if cleaned.startswith("```"):
+            cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", cleaned, flags=re.MULTILINE).strip()
 
-def _numbered_turns(transcript: Iterable[dict]) -> list[dict]:
-    """The conversation with each bot reply joined into one numbered turn.
+        # Parse the first JSON object and ignore anything around it. Some models
+        # ignore "respond ONLY with JSON" and wrap the verdict in prose (e.g. a trailing
+        # "Let me know if you'd like to evaluate further turns!"); raw_decode from the
+        # first '{' parses the object and stops, leaving the trailing text out.
+        start = cleaned.find("{")
+        if start != -1:
+            try:
+                obj, _ = json.JSONDecoder().raw_decode(cleaned[start:])
+                verdict = str(obj.get("verdict", "")).strip().lower()
+                if verdict not in ("yes", "no", "continue"):
+                    verdict = "no"
+                reason = str(obj.get("reason", "")).strip()
+                return JudgeVerdict(
+                    verdict=verdict,
+                    reason=reason or NO_REASON,
+                    raw_response=response,
+                )
+            except (json.JSONDecodeError, AttributeError):
+                pass
 
-    A bot turn is a run of reply segments with nothing else between them.
+        # Fallback: scan for a verdict keyword in the raw text.
+        lowered = cleaned.lower()
+        if "continue" in lowered:
+            return JudgeVerdict(
+                verdict="continue", reason="(unstructured continue)", raw_response=response
+            )
+        if "yes" in lowered and "no" not in lowered:
+            return JudgeVerdict(verdict="yes", reason="(unstructured yes)", raw_response=response)
+        if "no" in lowered and "yes" not in lowered:
+            return JudgeVerdict(verdict="no", reason="(unstructured no)", raw_response=response)
+        return JudgeVerdict(
+            verdict="no",
+            reason=f"could not parse explainer response: {response!r}",
+            raw_response=response,
+        )
 
-    Args:
-        transcript: The judge's conversation entries.
+    @staticmethod
+    def _parse_run_verdicts(response: str, names: list[str], turn_count: int) -> RunVerdicts:
+        """Parse the run answer into the goal's verdict and one per turn per criterion.
 
-    Returns:
-        The entries, each a dict with a ``role`` of ``user``, ``bot`` or
-        ``tool`` and the ``content``, a bot entry also carrying its ``turn``
-        (from 1).
-    """
-    entries: list[dict] = []
-    turn = 0
-    for entry in transcript:
-        if entry["role"] == "assistant":
-            if entries and entries[-1]["role"] == "bot":
-                entries[-1]["content"] += f" {entry['content']}"
+        Anything missing or malformed is a ``none`` with a reason, and the raw
+        answer is logged, so a bad answer never passes a turn silently.
+        """
+        obj = _Explainer._judge_json(response)
+        goal = obj.get("goal")
+        if not isinstance(goal, dict):
+            goal = {}
+        answer = str(goal.get("verdict", "")).strip().lower()
+        goal_verdict = answer if answer in ("yes", "no") else "none"
+        goal_reason = str(goal.get("reason", "")).strip()
+        if goal_verdict == "none":
+            goal_reason = _NO_VERDICT
+        elif goal_verdict == "no" and not goal_reason:
+            goal_reason = NO_REASON
+        return RunVerdicts(
+            goal=JudgeVerdict(verdict=goal_verdict, reason=goal_reason, raw_response=response),
+            turns={
+                name: _Explainer._turn_verdicts(obj, name, turn_count, response) for name in names
+            },
+        )
+
+    @staticmethod
+    def _turn_verdicts(obj: dict, name: str, turn_count: int, response: str) -> list[JudgeVerdict]:
+        """One verdict per bot turn for criterion ``name``; a turn left out is a ``none``.
+
+        Criterion names match case-insensitively; a ``reasons`` entry, keyed by
+        the turn number, gives a ``no`` its reason.
+        """
+        turns_by_name = {
+            str(k).lower(): v for k, v in (obj.get("turns") or {}).items() if isinstance(v, list)
+        }
+        reasons_by_name = {
+            str(k).lower(): v for k, v in (obj.get("reasons") or {}).items() if isinstance(v, dict)
+        }
+        answers = turns_by_name.get(name.lower(), [])
+        reasons = reasons_by_name.get(name.lower(), {})
+        if len(answers) != turn_count:
+            logger.warning(
+                f"Explainer gave {len(answers)} verdict(s) for {name!r} over {turn_count} bot "
+                f"turn(s); its answer was: {response!r}"
+            )
+        verdicts = []
+        for index in range(turn_count):
+            answer = answers[index] if index < len(answers) else None
+            if isinstance(answer, dict):
+                answer = answer.get("verdict")
+            if answer is None:
+                verdicts.append(
+                    JudgeVerdict(verdict="none", reason=_NO_VERDICT, raw_response=response)
+                )
                 continue
-            turn += 1
-            entries.append({"role": "bot", "turn": turn, "content": entry["content"]})
-        else:
-            entries.append({"role": entry["role"], "content": entry["content"]})
-    return entries
+            verdict = "yes" if str(answer).strip().lower() == "yes" else "no"
+            reason = str(reasons.get(str(index + 1), "")).strip()
+            if verdict == "no" and not reason:
+                reason = NO_REASON
+            verdicts.append(JudgeVerdict(verdict=verdict, reason=reason, raw_response=response))
+        return verdicts
 
-
-def _conversation(entries: list[dict]) -> list[dict]:
-    """The conversation as the state carries it: a speaker, the text, and a bot turn's number."""
-    return [
-        {"speaker": e["role"], **({"turn": e["turn"]} if "turn" in e else {}), "text": e["content"]}
-        for e in entries
-    ]
-
-
-def _reply_verdict(answer: ChoiceResult) -> JudgeVerdict:
-    """A reply's verdict: the choice of ``yes``, ``no`` or ``continue``."""
-    return JudgeVerdict(
-        verdict=answer.choice,
-        reason=_probabilities(answer.probabilities),
-        raw_response=answer.model_dump_json(),
-        confidence=answer.confidence,
-    )
-
-
-def _yes_no_verdict(answer: YesNoResult) -> JudgeVerdict:
-    """A yes/no verdict from the probability of yes."""
-    probability = answer.probability
-    return JudgeVerdict(
-        verdict="yes" if answer.is_yes else "no",
-        reason=f"P(yes)={probability:.2f}",
-        raw_response=answer.model_dump_json(),
-        confidence=max(probability, 1 - probability),
-    )
-
-
-def _turn_verdict(answer: ChoiceResult) -> JudgeVerdict:
-    """A turn's verdict: a ``no`` only when the criterion applies to the turn and fails.
-
-    Its confidence is the probability of the verdict given: for a pass, the
-    probability of either outcome that passes.
-    """
-    fails = answer.probabilities.get("fails", 0.0)
-    passed = answer.choice != "fails"
-    return JudgeVerdict(
-        verdict="yes" if passed else "no",
-        reason=_probabilities(answer.probabilities),
-        raw_response=answer.model_dump_json(),
-        confidence=1 - fails if passed else fails,
-    )
-
-
-def _sentence(text: str) -> str:
-    """``text`` ending in punctuation, so the instruction after it reads as a new sentence."""
-    text = text.strip()
-    return text if text.endswith((".", "!", "?")) else f"{text}."
-
-
-def _probabilities(probabilities: dict[str, float]) -> str:
-    """The probability of each outcome, as a verdict's reason."""
-    return ", ".join(f"P({k})={v:.2f}" for k, v in probabilities.items())
-
-
-def _failed(verdict: str) -> JudgeVerdict:
-    """The verdict a failed call gives."""
-    return JudgeVerdict(verdict=verdict, reason="judge call failed", raw_response="")
-
-
-def _explained(verdict: JudgeVerdict, explanation: JudgeVerdict) -> JudgeVerdict:
-    """The verdict with the explainer's reason, noting when the explainer disagreed."""
-    if explanation.verdict == verdict.verdict:
-        given = explanation.reason and explanation.reason != NO_REASON
-        reason = f"{explanation.reason} ({verdict.reason})" if given else verdict.reason
-    else:
-        reason = (
-            f"{verdict.reason}; the explainer judged {explanation.verdict}: {explanation.reason}"
-        )
-    return JudgeVerdict(
-        verdict=verdict.verdict,
-        reason=reason,
-        raw_response=verdict.raw_response,
-        confidence=verdict.confidence,
-    )
-
-
-# The reason a verdict carries when the explainer's call failed.
-EXPLAINER_FAILED = "explainer call failed"
-# The reason a verdict carries when the judge gave none.
-_NO_VERDICT = "(judge gave no verdict)"
-# The reason a verdict carries when the judge gave the verdict without one.
-NO_REASON = "(no reason given)"
-
-
-def _parse_run_verdicts(response: str, names: list[str], turn_count: int) -> RunVerdicts:
-    """Parse the run answer into the goal's verdict and one per turn per criterion.
-
-    Anything missing or malformed is a ``none`` with a reason, and the raw
-    answer is logged, so a bad answer never passes a turn silently.
-    """
-    obj = _judge_json(response)
-    goal = obj.get("goal")
-    if not isinstance(goal, dict):
-        goal = {}
-    answer = str(goal.get("verdict", "")).strip().lower()
-    goal_verdict = answer if answer in ("yes", "no") else "none"
-    goal_reason = str(goal.get("reason", "")).strip()
-    if goal_verdict == "none":
-        goal_reason = _NO_VERDICT
-    elif goal_verdict == "no" and not goal_reason:
-        goal_reason = NO_REASON
-    return RunVerdicts(
-        goal=JudgeVerdict(verdict=goal_verdict, reason=goal_reason, raw_response=response),
-        turns={name: _turn_verdicts(obj, name, turn_count, response) for name in names},
-    )
-
-
-def _judge_json(response: str) -> dict:
-    """The JSON object in the answer, or ``{}`` when there is none; a fenced or prefaced answer still parses."""
-    cleaned = response.strip()
-    if cleaned.startswith("```"):
-        cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", cleaned, flags=re.MULTILINE).strip()
-    start = cleaned.find("{")
-    if start != -1:
-        try:
-            parsed, _ = json.JSONDecoder().raw_decode(cleaned[start:])
-            if isinstance(parsed, dict):
-                return parsed
-        except (json.JSONDecodeError, AttributeError):
-            pass
-    logger.warning(f"Explainer answer was not the expected JSON: {response!r}")
-    return {}
-
-
-def _turn_verdicts(obj: dict, name: str, turn_count: int, response: str) -> list[JudgeVerdict]:
-    """One verdict per bot turn for criterion ``name``; a turn left out is a ``none``.
-
-    Criterion names match case-insensitively; a ``reasons`` entry, keyed by
-    the turn number, gives a ``no`` its reason.
-    """
-    turns_by_name = {
-        str(k).lower(): v for k, v in (obj.get("turns") or {}).items() if isinstance(v, list)
-    }
-    reasons_by_name = {
-        str(k).lower(): v for k, v in (obj.get("reasons") or {}).items() if isinstance(v, dict)
-    }
-    answers = turns_by_name.get(name.lower(), [])
-    reasons = reasons_by_name.get(name.lower(), {})
-    if len(answers) != turn_count:
-        logger.warning(
-            f"Explainer gave {len(answers)} verdict(s) for {name!r} over {turn_count} bot "
-            f"turn(s); its answer was: {response!r}"
-        )
-    verdicts = []
-    for index in range(turn_count):
-        answer = answers[index] if index < len(answers) else None
-        if isinstance(answer, dict):
-            answer = answer.get("verdict")
-        if answer is None:
-            verdicts.append(JudgeVerdict(verdict="none", reason=_NO_VERDICT, raw_response=response))
-            continue
-        verdict = "yes" if str(answer).strip().lower() == "yes" else "no"
-        reason = str(reasons.get(str(index + 1), "")).strip()
-        if verdict == "no" and not reason:
-            reason = NO_REASON
-        verdicts.append(JudgeVerdict(verdict=verdict, reason=reason, raw_response=response))
-    return verdicts
+    @staticmethod
+    def _judge_json(response: str) -> dict:
+        """The JSON object in the answer, or ``{}`` when there is none; a fenced or prefaced answer still parses."""
+        cleaned = response.strip()
+        if cleaned.startswith("```"):
+            cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", cleaned, flags=re.MULTILINE).strip()
+        start = cleaned.find("{")
+        if start != -1:
+            try:
+                parsed, _ = json.JSONDecoder().raw_decode(cleaned[start:])
+                if isinstance(parsed, dict):
+                    return parsed
+            except (json.JSONDecodeError, AttributeError):
+                pass
+        logger.warning(f"Explainer answer was not the expected JSON: {response!r}")
+        return {}
 
 
 def _cache_key(*parts) -> str:
@@ -1210,47 +1260,3 @@ def _cache_key(*parts) -> str:
     return hashlib.sha256(
         json.dumps(parts, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")
     ).hexdigest()
-
-
-def _parse_verdict(response: str) -> JudgeVerdict:
-    """Parse the explainer's response. Tolerant of extra whitespace and code fences."""
-    cleaned = response.strip()
-    # Strip markdown code fences if the model ignored instructions
-    if cleaned.startswith("```"):
-        cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", cleaned, flags=re.MULTILINE).strip()
-
-    # Parse the first JSON object and ignore anything around it. Some models
-    # ignore "respond ONLY with JSON" and wrap the verdict in prose (e.g. a trailing
-    # "Let me know if you'd like to evaluate further turns!"); raw_decode from the
-    # first '{' parses the object and stops, leaving the trailing text out.
-    start = cleaned.find("{")
-    if start != -1:
-        try:
-            obj, _ = json.JSONDecoder().raw_decode(cleaned[start:])
-            verdict = str(obj.get("verdict", "")).strip().lower()
-            if verdict not in ("yes", "no", "continue"):
-                verdict = "no"
-            reason = str(obj.get("reason", "")).strip()
-            return JudgeVerdict(
-                verdict=verdict,
-                reason=reason or NO_REASON,
-                raw_response=response,
-            )
-        except (json.JSONDecodeError, AttributeError):
-            pass
-
-    # Fallback: scan for a verdict keyword in the raw text.
-    lowered = cleaned.lower()
-    if "continue" in lowered:
-        return JudgeVerdict(
-            verdict="continue", reason="(unstructured continue)", raw_response=response
-        )
-    if "yes" in lowered and "no" not in lowered:
-        return JudgeVerdict(verdict="yes", reason="(unstructured yes)", raw_response=response)
-    if "no" in lowered and "yes" not in lowered:
-        return JudgeVerdict(verdict="no", reason="(unstructured no)", raw_response=response)
-    return JudgeVerdict(
-        verdict="no",
-        reason=f"could not parse explainer response: {response!r}",
-        raw_response=response,
-    )
