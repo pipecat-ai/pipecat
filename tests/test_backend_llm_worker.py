@@ -706,6 +706,35 @@ async def test_transform_output_shapes_what_the_model_writes():
 
 
 @pytest.mark.asyncio
+async def test_a_report_made_on_its_own_brings_the_next_run():
+    """With no other call in the turn, nothing else would run the model again."""
+    llm = _ScriptedLLM(
+        [
+            [("call", "check_flight_status", "call_1", {"flight_number": "AA100"})],
+            [("call", REPORT_TOOL_NAME, "call_r", {"text": "Your flight is delayed."})],
+            [("call", "book_taxi", "call_2", {"time": "12:30"})],
+            [("text", "Taxi booked for 12:30.")],
+        ]
+    )
+    backend, requester, runner = _attached_backend(llm, tools=[check_flight_status, book_taxi])
+    events: list = []
+
+    async def body():
+        async with _BackendSession(requester, "backend") as session:
+            await session.send("Check my flight and book a taxi")
+            events.extend(await _until_idle(session))
+
+    await _drive(runner, requester, backend, body)
+
+    assert len(llm.contexts_seen) == 4
+    assert [(e.text, e.prefers_spoken) for e in events if isinstance(e, BackendOutput)] == [
+        ("Your flight is delayed.", True),
+        ("Taxi booked for 12:30.", True),
+    ]
+    assert isinstance(events[-1], BackendIdle)
+
+
+@pytest.mark.asyncio
 async def test_the_report_tool_speaks_for_the_model_while_it_goes_on_working():
     llm = _ScriptedLLM(
         [
