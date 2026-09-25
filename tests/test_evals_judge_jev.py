@@ -15,7 +15,7 @@ from unittest.mock import patch
 import httpx
 
 from pipecat.classifiers.jev.classifier import JevClassifier
-from pipecat.classifiers.jev.client import JevClient
+from pipecat.classifiers.jev.client import DEFAULT_MODEL, JevClient
 from pipecat.evals.judge import EvalJudge
 
 
@@ -112,7 +112,7 @@ def typesafe_classifier(config: dict) -> JevClassifier:
     api_key = os.environ.get("TYPESAFE_API_KEY")
     if not api_key:
         raise ValueError("no key")
-    return JevClassifier(api_key=api_key, model=config.get("model"), timeout=2.5)
+    return JevClassifier(api_key=api_key, model=config.get("model") or DEFAULT_MODEL, timeout=2.5)
 
 
 def _config_judge(api: _FakeApi, config: dict) -> EvalJudge:

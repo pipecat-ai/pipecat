@@ -15,6 +15,7 @@ import os
 
 from pipecat.classifiers.base_classifier import BaseClassifier
 from pipecat.classifiers.jev.classifier import JevClassifier
+from pipecat.classifiers.jev.client import DEFAULT_BASE_URL, DEFAULT_MODEL
 
 # Seconds to wait for Jev to answer a question. Jev answers in a few hundred
 # milliseconds, so a question still waiting this long is one to ask again.
@@ -38,10 +39,9 @@ def typesafe_classifier(config: dict) -> BaseClassifier:
     api_key = os.environ.get("TYPESAFE_API_KEY")
     if not api_key:
         raise ValueError("Judging with Jev needs an API key: set TYPESAFE_API_KEY.")
-    endpoint = config.get("endpoint")
     return JevClassifier(
         api_key=api_key,
-        model=config.get("model"),
-        base_url=str(endpoint).rstrip("/") if endpoint else None,
+        model=config.get("model") or DEFAULT_MODEL,
+        base_url=str(config.get("endpoint") or DEFAULT_BASE_URL).rstrip("/"),
         timeout=JEV_TIMEOUT,
     )

@@ -39,6 +39,13 @@ _OVERLOADED = 529
 #: five minutes, so this stays under that.
 _KEEPALIVE_EXPIRY = 240.0
 
+#: Where the API is served.
+DEFAULT_BASE_URL = "https://api.typesafe.ai"
+#: The Jev model to ask. Pinned so thresholds tuned against it hold.
+DEFAULT_MODEL = "jev-1.13.0"
+#: Seconds to wait for a reply before giving up.
+DEFAULT_TIMEOUT = 10.0
+
 
 class JevUsage(BaseModel):
     """Tokens Jev used: for one request, or over every request in :attr:`JevClient.usage`.
@@ -69,9 +76,9 @@ class JevClient:
         self,
         *,
         api_key: str,
-        base_url: str = "https://api.typesafe.ai",
-        model: str = "jev-1.13.0",
-        timeout: float = 10.0,
+        base_url: str = DEFAULT_BASE_URL,
+        model: str = DEFAULT_MODEL,
+        timeout: float = DEFAULT_TIMEOUT,
         max_retries: int = 3,
     ):
         """Initialize the client.

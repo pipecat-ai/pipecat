@@ -27,7 +27,12 @@ from pipecat.classifiers.base_classifier import (
     YesNoQuestion,
     YesNoResult,
 )
-from pipecat.classifiers.jev.client import JevClient
+from pipecat.classifiers.jev.client import (
+    DEFAULT_BASE_URL,
+    DEFAULT_MODEL,
+    DEFAULT_TIMEOUT,
+    JevClient,
+)
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
 
@@ -55,9 +60,9 @@ class JevClassifier(BaseClassifier):
         *,
         api_key: str | None = None,
         client: JevClient | None = None,
-        model: str | None = None,
-        base_url: str | None = None,
-        timeout: float | None = None,
+        model: str = DEFAULT_MODEL,
+        base_url: str = DEFAULT_BASE_URL,
+        timeout: float = DEFAULT_TIMEOUT,
         **kwargs,
     ):
         """Initialize the classifier.
@@ -67,12 +72,9 @@ class JevClassifier(BaseClassifier):
                 of its own.
             client: A client to share. One of ``api_key`` and ``client`` is
                 required.
-            model: The Jev model a client of its own asks; the client's
-                default when ``None``.
-            base_url: Where a client of its own sends its questions; the
-                client's default when ``None``.
-            timeout: Seconds a client of its own waits for an answer; the
-                client's default when ``None``.
+            model: The Jev model a client of its own asks.
+            base_url: Where a client of its own sends its questions.
+            timeout: Seconds a client of its own waits for an answer.
             **kwargs: Additional arguments passed to the parent class.
         """
         super().__init__(**kwargs)
@@ -80,8 +82,7 @@ class JevClassifier(BaseClassifier):
         if not client:
             if not api_key:
                 raise ValueError("JevClassifier needs an API key or a JevClient")
-            given = {"model": model, "base_url": base_url, "timeout": timeout}
-            client = JevClient(api_key=api_key, **{k: v for k, v in given.items() if v is not None})
+            client = JevClient(api_key=api_key, model=model, base_url=base_url, timeout=timeout)
         self._client = client
 
     @property
