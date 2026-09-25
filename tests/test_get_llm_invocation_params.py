@@ -766,6 +766,98 @@ class TestGeminiGetLLMInvocationParams(unittest.TestCase):
         # Second message (developer) should be converted to user in Google format
         self.assertEqual(params["messages"][1].role, "user")
 
+    def test_system_instruction_not_appended_for_image_user_message(self):
+        """A user message with text and an image is a regular message.
+
+        The system instruction is delivered through the ``system_instruction``
+        parameter, so it must not also be appended as a trailing user message.
+        """
+        messages: list[LLMStandardMessage] = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "What's in this image?"},
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": "data:image/jpeg;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+                        },
+                    },
+                ],
+            },
+        ]
+        context = LLMContext(messages=messages)
+
+        params = self.adapter.get_llm_invocation_params(
+            context, system_instruction="You are a helpful assistant."
+        )
+
+        self.assertEqual(params["system_instruction"], "You are a helpful assistant.")
+        self.assertEqual(len(params["messages"]), 1)
+
+        user_msg = params["messages"][0]
+        self.assertEqual(user_msg.role, "user")
+        self.assertEqual(user_msg.parts[0].text, "What's in this image?")
+        self.assertIsNotNone(user_msg.parts[1].inline_data)
+        self.assertEqual(user_msg.parts[1].inline_data.mime_type, "image/jpeg")
+
+    def test_system_instruction_not_appended_for_image_only_user_message(self):
+        """A user message with only an image is a regular message."""
+        messages: list[LLMStandardMessage] = [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": "data:image/jpeg;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+                        },
+                    },
+                ],
+            },
+        ]
+        context = LLMContext(messages=messages)
+
+        params = self.adapter.get_llm_invocation_params(
+            context, system_instruction="You are a helpful assistant."
+        )
+
+        self.assertEqual(params["system_instruction"], "You are a helpful assistant.")
+        self.assertEqual(len(params["messages"]), 1)
+
+        user_msg = params["messages"][0]
+        self.assertEqual(user_msg.role, "user")
+        self.assertIsNotNone(user_msg.parts[0].inline_data)
+        self.assertEqual(user_msg.parts[0].inline_data.mime_type, "image/jpeg")
+
+    def test_system_instruction_appended_when_only_function_messages(self):
+        """A context holding only function calls and responses gets the system instruction appended."""
+        messages: list[LLMStandardMessage] = [
+            {
+                "role": "assistant",
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "function": {"name": "get_weather", "arguments": '{"city": "Paris"}'},
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": "call_1", "content": '{"temp": 20}'},
+        ]
+        context = LLMContext(messages=messages)
+
+        params = self.adapter.get_llm_invocation_params(
+            context, system_instruction="You are a helpful assistant."
+        )
+
+        self.assertEqual(params["system_instruction"], "You are a helpful assistant.")
+        # Model function call + user function response + appended system message.
+        self.assertEqual(len(params["messages"]), 3)
+
+        last_msg = params["messages"][-1]
+        self.assertEqual(last_msg.role, "user")
+        self.assertEqual(last_msg.parts[0].text, "You are a helpful assistant.")
+
     # --- _merge_parallel_tool_calls_for_thinking ---
     #
     # With thinking enabled, a batch of parallel tool calls arrives split across
