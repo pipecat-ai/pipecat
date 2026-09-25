@@ -86,6 +86,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             settings=GeminiLiveLLMService.Settings(system_instruction=FRONTEND_INSTRUCTIONS),
         ),
         backend=build_backend(),
+        # To watch every exchange with the backend in a client's event log,
+        # such as the prebuilt UI's Events panel, pass a connector with
+        # client tracing on: each request, output, tool-call phase and
+        # cancellation is then sent to the client as an RTVI server message.
+        # from pipecat.pipeline.llm_with_backend import BackendConnector
+        # connector=BackendConnector(client_trace=True),
     )
 
     # The frontend's tools are installed by the service; the real tools live
