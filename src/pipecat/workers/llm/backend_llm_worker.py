@@ -543,6 +543,9 @@ class BackendLLMWorker(LLMContextWorker):
                 self._requests_pending -= 1
                 if not frame.run_llm:
                     self._request_awaiting_run = len(self.context.messages)
+                    # What the request was held for may be gone by the time it
+                    # lands, as when a cancellation cleared the calls in flight.
+                    await self._run_awaiting_request()
 
         # The backend's function calls are relayed as they pass the assistant
         # aggregator, which every phase of a call reaches.
@@ -656,11 +659,13 @@ class BackendLLMWorker(LLMContextWorker):
         reason = str((message.payload or {}).get("reason") or "cancelled by the frontend")
         was_working = self.working
         await self._stop_work(reason)
+        await self._await_calls_settled()
         note = LLMMessagesAppendFrame(
             messages=[{"role": "user", "content": CANCELLED_NOTE}], run_llm=False
         )
         note.interruptible = False
         await self.queue_frame(note)
+        # A request held for a call just cancelled runs now, with the note in view.
         await self._run_awaiting_request()
         await self.send_job_response(message.job_id, {"cancelled": was_working})
 
@@ -700,6 +705,13 @@ class BackendLLMWorker(LLMContextWorker):
             and not self._calls_block_a_run
         ):
             await self.queue_frame(LLMRunFrame())
+
+    async def _await_calls_settled(self, timeout_secs: float = 2.0) -> None:
+        """Wait for the cancellations of the calls in flight to be recorded downstream."""
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout_secs
+        while self.assistant_aggregator.has_function_calls_in_progress and loop.time() < deadline:
+            await asyncio.sleep(0.01)
 
     async def _stop_work(self, reason: str) -> None:
         """Interrupt the pipeline and cancel every function call in flight.
