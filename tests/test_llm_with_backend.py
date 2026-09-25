@@ -481,6 +481,9 @@ async def test_a_local_backend_is_heard_through_the_frontends_conversation():
         ("Backend (working): get_weather(location='Seattle')", False),
         ("Backend: It's 62 and raining.", True),
     ]
+    # A message queued while the bot speaks waits behind the speech; an
+    # interruption must not drop it on the way to the aggregator.
+    assert all(not f.interruptible for f in appended)
     # The backend's own call reached the frontend's pipeline as a report only.
     reported = [f for f in down if isinstance(f, ExternalFunctionCallFrame)]
     assert [(type(f), f.function_name) for f in reported] == [
