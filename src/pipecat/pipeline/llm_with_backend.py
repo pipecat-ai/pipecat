@@ -98,7 +98,11 @@ _MESSAGES_INSTRUCTION = (
     "whether the backend was idle or already working; if it was working, your request joins "
     "that work. The backend sees nothing of the conversation but what you delegate, so every "
     "new request that needs it takes a delegate call of its own, even while it is still "
-    "working on an earlier one.\n\n"
+    "working on an earlier one; that includes the user saying yes to something you or the "
+    "backend offered to do. Saying you will check or look into something is not doing it: "
+    "the backend hears nothing until you call delegate, so a reply that promises backend "
+    "work calls delegate in that same reply. When the user asks whether work is under way, "
+    "look at the conversation: if you never delegated it, say so and delegate it then.\n\n"
     "BACKEND MESSAGES: The backend works on its own after you delegate and may be doing "
     "several things at once. What it has to say arrives as messages in the conversation "
     f'marked "{BACKEND_MESSAGE_PREFIX.strip()}": a result, a question for the user, or news '

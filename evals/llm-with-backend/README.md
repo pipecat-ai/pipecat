@@ -27,6 +27,7 @@ The backend is an engineering assistant's: a code change that loops through sear
 | `progress_inquiry`       | "How's it going?" mid-fix: answered from the backend's silent progress messages, without delegating again.                                   |
 | `aside_while_waiting`    | Small talk while the fix is in progress: the chat is answered, and the fix is still reported when it lands.                                  |
 | `result_during_interruption` | A lookup bundled with a request for a long story, so its result lands while the story is being spoken, which the user then cuts off: the result is reported all the same. Audio only. |
+| `accepted_offer`         | "Yes, go ahead and check CI, and tell me a joke while we wait": the check is delegated, not merely promised, and "is it done?" is answered from the backend's report.       |
 
 ## Reading a verdict
 
