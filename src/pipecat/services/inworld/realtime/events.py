@@ -85,15 +85,27 @@ class TurnDetection(BaseModel):
     Parameters:
         type: Detection type. "server_vad" for standard VAD, "semantic_vad"
             for semantic-based detection.
-        eagerness: How eagerly to detect end of turn. Options: "low", "medium", "high".
+        eagerness: How eagerly to detect end of turn, for "semantic_vad".
+            Options: "low", "medium", "high", "auto".
         create_response: Whether to automatically create a response on turn end.
         interrupt_response: Whether user speech interrupts the current response.
+        threshold: Speech detection cutoff (0.0-1.0), for "server_vad".
+        prefix_padding_ms: Pre-speech audio retained before an utterance, in
+            milliseconds, for "server_vad".
+        silence_duration_ms: Trailing silence required to finalize a turn, in
+            milliseconds, for "server_vad".
+        idle_timeout_ms: Milliseconds without detected speech after which the
+            server emits an idle timeout, for "server_vad". 0 disables it.
     """
 
     type: Literal["server_vad", "semantic_vad"] | None = "semantic_vad"
     eagerness: str | None = None
     create_response: bool | None = None
     interrupt_response: bool | None = None
+    threshold: float | None = None
+    prefix_padding_ms: int | None = None
+    silence_duration_ms: int | None = None
+    idle_timeout_ms: int | None = None
 
 
 class InputTranscription(BaseModel):
@@ -101,14 +113,31 @@ class InputTranscription(BaseModel):
 
     Parameters:
         model: The STT model to use for transcription.
+        language: BCP-47 language code (e.g. "en", "es"). The model
+            auto-detects the language when omitted.
+        prompt: Transcription guidance: vocabulary hints, domain context,
+            formatting preferences.
     """
 
     model: str | None = None
+    language: str | None = None
+    prompt: str | None = None
 
 
 #
 # Audio configuration
 #
+
+
+class NoiseReduction(BaseModel):
+    """Noise reduction applied to input audio.
+
+    Parameters:
+        type: Microphone profile to tune the filter for: "near_field" for
+            headsets and handsets, "far_field" for speakerphones and rooms.
+    """
+
+    type: Literal["near_field", "far_field"]
 
 
 class AudioInput(BaseModel):
@@ -118,11 +147,14 @@ class AudioInput(BaseModel):
         format: The format configuration for input audio.
         transcription: Configuration for input audio transcription.
         turn_detection: Configuration for turn detection.
+        noise_reduction: Noise reduction applied to input audio. Disabled
+            when omitted.
     """
 
     format: PCMAudioFormat | PCMUAudioFormat | PCMAAudioFormat | None = None
     transcription: InputTranscription | None = None
     turn_detection: TurnDetection | None = None
+    noise_reduction: NoiseReduction | None = None
 
 
 class AudioOutput(BaseModel):
@@ -132,11 +164,13 @@ class AudioOutput(BaseModel):
         format: The format configuration for output audio.
         model: The TTS model to use (e.g. "inworld-tts-2").
         voice: The voice ID to use (e.g. "Sarah", "Clive").
+        speed: Speaking rate, from 0.25 to 1.5.
     """
 
     format: PCMAudioFormat | PCMUAudioFormat | PCMAAudioFormat | None = None
     model: str | None = None
     voice: str | None = None
+    speed: float | None = None
 
 
 class AudioConfiguration(BaseModel):
