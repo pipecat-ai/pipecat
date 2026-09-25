@@ -9,10 +9,12 @@
 The user asks the assistant to research a topic. The voice LLM calls the
 ``research`` tool, which sends a job to the UI worker; the worker
 dispatches three peer workers (Wikipedia, news, scholarly papers) in
-parallel as a job group, and every group a ``UIWorker`` dispatches is
-reported to the client as it goes. Each peer emits progress while it
-works; the client draws an in-flight card with per-worker status, and the
-user can cancel the group mid-flight from the card.
+parallel as a job group and waits for their answers. Every group a
+``UIWorker`` dispatches is reported to the client as it goes: each peer
+emits progress while it works, the client draws an in-flight card with
+per-worker status, and the user can cancel the group from the card. When
+every peer has answered, the job returns their summaries to the tool and
+the voice LLM tells the user what came back.
 
 Architecture::
 
@@ -22,9 +24,8 @@ Architecture::
               └── params.pipeline_worker.job("ui", name="research", payload={query})
 
     ResearchWorker (UIWorker "ui"):
-      ├── @job research    -> request_job_group("wikipedia", "news", "scholar",
-      │                          params=JobGroupParams(payload=..., label=...))
-      └── on_job_completed -> say("The research on ... is done.")
+      └── @job research -> async with self.job_group("wikipedia", "news", "scholar", ...)
+                           -> responds with every peer's summary
 
     Three peer workers (BaseWorker each):
       WikipediaResearcher · NewsResearcher · ScholarResearcher
@@ -33,10 +34,9 @@ The workers are deliberately simulated with ``asyncio.sleep`` and canned
 summaries so the demo focuses on the protocol, not the AI. A real app
 would wire each worker to its own data source.
 
-``request_job_group`` dispatches the group fire-and-forget and returns
-at once, so the spoken "researching X" acknowledgement frees the voice
-LLM to take new turns while the workers continue. Results land on the
-page as they arrive.
+The voice LLM says "researching X now" in the same turn as the tool
+call, so the user hears it while the workers run and the cards fill in;
+the tool returns a few seconds later with the summaries.
 
 Run::
 
@@ -57,7 +57,7 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.bus.messages import BusJobRequestMessage
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
-from pipecat.pipeline.job_context import JobError, JobGroupParams, JobGroupResponse
+from pipecat.pipeline.job_context import JobError, JobGroupError, JobGroupParams, JobStatus
 from pipecat.pipeline.job_decorator import job
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
@@ -99,20 +99,21 @@ any topic; progress and results stream to a panel on the user's screen.
 
 ## Tool: research
 
-``research(query)`` starts three background workers (Wikipedia, news, \
-scholarly papers) on the topic. They run in the background; you do NOT \
-wait for results — they appear on the user's screen as they land. After \
-calling it, speak a one-sentence acknowledgement.
+``research(query)`` runs three workers (Wikipedia, news, scholarly \
+papers) on the topic and returns their summaries. It takes a few \
+seconds; the user sees the progress on their screen meanwhile. Say a \
+one-sentence acknowledgement in the same turn as the call, and when \
+the summaries come back, give the user the gist in one or two sentences.
 
 ## Decision rules
 
-- **User asks to research / look up / find out about something** → call \
-``research`` with the topic, then acknowledge briefly \
-("Researching the Mariana Trench now.").
+- **User asks to research / look up / find out about something** → say \
+"Researching the Mariana Trench now." and call ``research`` with the \
+topic; then sum up what came back.
 - **User asks a quick question you can answer immediately** → just \
 answer it. Don't start research for trivia.
-- **User asks about ongoing research** → tell them progress and results \
-are on their screen. Don't start a duplicate task.
+- **User asks about research you already did** → answer from the \
+summaries you were given. Don't start a duplicate task.
 
 Your replies are spoken aloud: plain language, one short sentence, no \
 markdown or symbols."""
@@ -188,68 +189,57 @@ class ScholarResearcher(_SimulatedResearcher):
         )
 
 
-@tool_options(cancel_on_interruption=False)
+@tool_options(cancel_on_interruption=False, timeout_secs=60)
 async def research(params: FunctionCallParams, query: str):
-    """Start background research on a topic across three worker sources.
+    """Research a topic across three sources and return their summaries.
 
-    Dispatches the workers fire-and-forget: the group's progress and
-    results stream to the client as ``ui-job-group`` envelopes, so this
-    tool returns immediately and the LLM speaks a short acknowledgement.
+    Takes a few seconds. The user sees each source's progress on their
+    screen while it runs.
 
     Args:
-        query (str): The topic to research, e.g. "Mariana Trench".
+        params: Framework-provided tool invocation context.
+        query: The topic to research, such as "Mariana Trench".
     """
     logger.info(f"research('{query}')")
     try:
         async with params.pipeline_worker.job(
-            UI_NAME, name="research", payload={"query": query}, timeout=10
+            UI_NAME, name="research", payload={"query": query}, timeout=60
         ) as t:
             pass
     except JobError as e:
         logger.warning(f"research job failed: {e}")
         await params.result_callback({"error": str(e)})
         return
-    await params.result_callback(
-        {
-            "status": "started",
-            "job_id": t.response["job_id"],
-            "note": "Workers run in the background; results stream to the user's screen.",
-        }
-    )
+    await params.result_callback(t.response)
 
 
 class ResearchWorker(UIWorker):
-    """UIWorker that fans research out to the peer workers as a client-visible group.
+    """UIWorker that fans research out to the peer workers and answers with their summaries.
 
-    The cards on the client show the progress; when every worker has
-    finished, the worker also says so, since the user may not be looking.
+    The group is client-visible, so the cards on the client show each
+    worker's progress while the voice tool waits. The job answers once
+    every worker has responded, or with an error if the group fails.
     """
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._queries: dict[str, str] = {}
 
     @job(name="research")
     async def _research(self, message: BusJobRequestMessage) -> None:
         query = str((message.payload or {}).get("query", ""))
-        job_id = await self.request_job_group(
-            "wikipedia",
-            "news",
-            "scholar",
-            params=JobGroupParams(payload={"query": query}, label=f"Research: {query}"),
-        )
-        self._queries[job_id] = query
-        await self.send_job_response(message.job_id, {"job_id": job_id})
-
-    async def on_job_completed(self, result: JobGroupResponse) -> None:
-        await super().on_job_completed(result)
-        query = self._queries.pop(result.job_id, None)
-        if query:
-            await self.say(f"The research on {query} is done. The results are on your screen.")
-
-    async def cancel_job_group(self, job_id: str, *, reason: str | None = None) -> None:
-        self._queries.pop(job_id, None)
-        await super().cancel_job_group(job_id, reason=reason)
+        try:
+            async with self.job_group(
+                "wikipedia",
+                "news",
+                "scholar",
+                params=JobGroupParams(
+                    payload={"query": query}, label=f"Research: {query}", timeout=45
+                ),
+            ) as group:
+                pass
+        except JobGroupError as e:
+            logger.warning(f"{self}: research on {query!r} failed: {e}")
+            await self.send_job_response(message.job_id, {"error": str(e)}, status=JobStatus.ERROR)
+            return
+        summaries = {name: r.get("summary") for name, r in group.responses.items()}
+        await self.send_job_response(message.job_id, {"results": summaries})
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
