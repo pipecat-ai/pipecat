@@ -17,10 +17,10 @@ plus one custom command and one client-emitted event.
   "explain this". The worker reads its `selection` from its own snapshot,
   and `screen("selection")` hands the text to the voice, so no tool needs
   a ref.
-- **Async fan-out**: `review_selection` runs two peer workers (clarity +
-  tone) in parallel as a job group. The voice says "Reviewing this
-  paragraph" in the same turn, the in-flight card streams each worker's
-  progress, and when both have answered the voice gives their feedback.
+- **Async fan-out**: `review_selection` says "Reviewing this paragraph"
+  through TTS, then runs two peer workers (clarity + tone) in parallel as
+  a job group. The in-flight card streams each worker's progress, and
+  when both have answered the voice gives their feedback.
 - **Custom UI command**: as each reviewer completes, `on_job_response`
   emits an `add_note` command with its feedback; the client renders a
   note attached to the reviewed paragraph.

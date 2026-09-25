@@ -34,9 +34,9 @@ The workers are deliberately simulated with ``asyncio.sleep`` and canned
 summaries so the demo focuses on the protocol, not the AI. A real app
 would wire each worker to its own data source.
 
-The voice LLM says "researching X now" in the same turn as the tool
-call, so the user hears it while the workers run and the cards fill in;
-the tool returns a few seconds later with the summaries.
+The ``research`` tool says "Researching X now" through TTS before it
+sends the job, so the user hears it while the workers run and the cards
+fill in; the tool returns a few seconds later with the summaries.
 
 Run::
 
@@ -56,7 +56,7 @@ from pipecat.adapters.schemas.direct_function import tool_options
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.bus.messages import BusJobRequestMessage
 from pipecat.evals.transport import EvalTransportParams
-from pipecat.frames.frames import LLMRunFrame
+from pipecat.frames.frames import LLMRunFrame, TTSSpeakFrame
 from pipecat.pipeline.job_context import (
     JobError,
     JobGroupError,
@@ -107,15 +107,14 @@ any topic; progress and results stream to a panel on the user's screen.
 
 ``research(query)`` runs three workers (Wikipedia, news, scholarly \
 papers) on the topic and returns their summaries. It takes a few \
-seconds; the user sees the progress on their screen meanwhile. Say a \
-one-sentence acknowledgement in the same turn as the call, and when \
-the summaries come back, give the user the gist in one or two sentences.
+seconds; the tool tells the user it is researching, and they see the \
+progress on their screen meanwhile. When the summaries come back, give \
+the user the gist in one or two sentences.
 
 ## Decision rules
 
-- **User asks to research / look up / find out about something** → say \
-"Researching the Mariana Trench now." and call ``research`` with the \
-topic; then sum up what came back.
+- **User asks to research / look up / find out about something** → \
+call ``research`` with the topic, then sum up what came back.
 - **User asks a quick question you can answer immediately** → just \
 answer it. Don't start research for trivia.
 - **User asks about research you already did** → answer from the \
@@ -207,6 +206,7 @@ async def research(params: FunctionCallParams, query: str):
         query: The topic to research, such as "Mariana Trench".
     """
     logger.info(f"research('{query}')")
+    await params.llm.push_frame(TTSSpeakFrame(f"Researching {query} now."))
     try:
         async with params.pipeline_worker.job(
             UI_NAME, params=JobParams(name="research", payload={"query": query}, timeout=60)

@@ -77,7 +77,7 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.bus.messages import BusJobRequestMessage, BusJobResponseMessage
 from pipecat.classifiers.jev.classifier import JevClassifier
 from pipecat.evals.transport import EvalTransportParams
-from pipecat.frames.frames import LLMRunFrame
+from pipecat.frames.frames import LLMRunFrame, TTSSpeakFrame
 from pipecat.pipeline.job_context import (
     JobError,
     JobGroupError,
@@ -130,9 +130,9 @@ and go by what it returns. Never say nothing is selected on your own.
 ## Tools
 
 - review_selection(): review the paragraph the user has selected with \
-two reviewers. Say "Reviewing this paragraph" in the same turn as the \
-call; it returns their feedback a few seconds later, which you then \
-give in one or two spoken sentences.
+two reviewers. The tool tells the user the review has started; it \
+returns their feedback a few seconds later, which you then give in one \
+or two spoken sentences.
 - add_note(text): add a note to the notes panel, attached to the \
 selected paragraph. Pass the note's text as it should read; resolve \
 "that" from the conversation, never pass the pronoun.
@@ -364,6 +364,7 @@ async def review_selection(params: FunctionCallParams):
     Args:
         params: Framework-provided tool invocation context.
     """
+    await params.llm.push_frame(TTSSpeakFrame("Reviewing this paragraph."))
     await _ui(params, "review", {}, timeout=45)
 
 

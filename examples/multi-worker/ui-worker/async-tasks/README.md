@@ -21,11 +21,10 @@ when every worker has answered.
   `client.cancelUIJobGroup(job_id, reason)`. The dispatching worker turns
   the client's cancel event into `cancel_job_group(job_id)` on the
   registered group; cancelled workers report status `cancelled`.
-- **Results back to the voice**: the tool waits for the group, so the
-  voice LLM says "Researching the Mariana Trench now" in the same turn
-  as the call, the cards fill in while the workers run, and a few seconds
-  later the LLM gets the three summaries and tells the user what came
-  back.
+- **Results back to the voice**: the `research` tool says "Researching
+  the Mariana Trench now" through TTS, then waits for the group. The
+  cards fill in while the workers run, and a few seconds later the LLM
+  gets the three summaries and tells the user what came back.
 
 ## What it adds vs. the prior demos
 
