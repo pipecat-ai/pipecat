@@ -965,7 +965,13 @@ class _Explainer:
             response = await self._ask(
                 success, [], RUN_JUDGE_SYSTEM_INSTRUCTION, ask, max_tokens=budget
             )
-            self._run_cache[key] = _parse_run_verdicts(response, list(criteria), turn)
+            if response is None:
+                failed = JudgeVerdict(verdict="none", reason=EXPLAINER_FAILED, raw_response="")
+                self._run_cache[key] = RunVerdicts(
+                    goal=failed, turns={name: [failed] * turn for name in criteria}
+                )
+            else:
+                self._run_cache[key] = _parse_run_verdicts(response, list(criteria), turn)
         return self._run_cache[key]
 
     async def _evaluate(
@@ -976,8 +982,10 @@ class _Explainer:
         key = _cache_key(ask, messages)
         if key not in self._cache:
             response = await self._ask(criterion, messages, instruction, ask)
-            if response.startswith("\0"):
-                self._cache[key] = JudgeVerdict(verdict="no", reason=response[1:], raw_response="")
+            if response is None:
+                self._cache[key] = JudgeVerdict(
+                    verdict="no", reason=EXPLAINER_FAILED, raw_response=""
+                )
             else:
                 self._cache[key] = _parse_verdict(response)
         return self._cache[key]
@@ -990,12 +998,8 @@ class _Explainer:
         ask: str,
         *,
         max_tokens: int | None = None,
-    ) -> str:
-        """The explainer's raw answer to ``ask``.
-
-        A failed or empty call comes back as a NUL-prefixed reason, which no
-        answer starts with, so callers can report it as a ``no``.
-        """
+    ) -> str | None:
+        """The explainer's raw answer to ``ask``, or ``None`` when the call failed or said nothing."""
         # Copy the conversation and append the transient ask, so neither the ask
         # nor the answer ever lands in the persistent context.
         context = LLMContext(messages=list(messages))
@@ -1020,11 +1024,10 @@ class _Explainer:
             )
         except Exception as e:
             logger.error(f"Explainer call failed: {e.__class__.__name__} ({e})")
-            return f"\0explainer call failed: {e.__class__.__name__}"
-
+            return None
         if not response:
-            return "\0explainer returned empty response"
-
+            logger.error("Explainer returned an empty response")
+            return None
         return response
 
 
@@ -1133,6 +1136,8 @@ def _explained(verdict: JudgeVerdict, explanation: JudgeVerdict) -> JudgeVerdict
     )
 
 
+# The reason a verdict carries when the explainer's call failed.
+EXPLAINER_FAILED = "explainer call failed"
 # The reason a verdict carries when the judge gave none.
 _NO_VERDICT = "(judge gave no verdict)"
 # The reason a verdict carries when the judge gave the verdict without one.
@@ -1145,9 +1150,6 @@ def _parse_run_verdicts(response: str, names: list[str], turn_count: int) -> Run
     Anything missing or malformed is a ``none`` with a reason, and the raw
     answer is logged, so a bad answer never passes a turn silently.
     """
-    if response.startswith("\0"):
-        failed = JudgeVerdict(verdict="none", reason=response[1:], raw_response="")
-        return RunVerdicts(goal=failed, turns={n: [failed] * turn_count for n in names})
     obj = _judge_json(response)
     goal = obj.get("goal")
     if not isinstance(goal, dict):
