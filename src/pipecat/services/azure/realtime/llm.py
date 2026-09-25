@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from loguru import logger
 from websockets.asyncio.client import connect as websocket_connect
 
+from pipecat.services.openai.realtime import events
 from pipecat.services.openai.realtime.llm import OpenAIRealtimeLLMService
 
 AzureTokenProvider = Callable[[], Awaitable[str]]
@@ -105,6 +106,9 @@ class AzureRealtimeLLMService(OpenAIRealtimeLLMService):
                 f"{self}: `base_url` selects Azure's preview realtime API, whose protocol "
                 "this service doesn't implement. Use an `/openai/v1/realtime` URL instead."
             )
+
+    def _build_response_create_event(self) -> events.ResponseCreateEvent:
+        return events.ResponseCreateEvent()
 
     async def _connect(self):
         try:
