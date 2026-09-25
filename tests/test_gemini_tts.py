@@ -416,7 +416,7 @@ async def test_genai_38_strips_wav_header(mock_genai_client_class):
 @pytest.mark.asyncio
 @patch("google.genai.Client")
 async def test_genai_38_requires_new_sdk(mock_genai_client_class):
-    """A 3.8 model on an SDK without SpeechMetadata produces a clear version error."""
+    """A 3.8 model on an SDK without SpeechMetadata leaves the service unusable at start."""
     mock_client = MagicMock()
     mock_genai_client_class.return_value = mock_client
 
@@ -439,4 +439,5 @@ async def test_genai_38_requires_new_sdk(mock_genai_client_class):
     up_frames = frames_received[1]
     errors = [f.error for f in up_frames if isinstance(f, ErrorFrame)]
     assert any("google-genai >= 2.25.0" in error for error in errors)
+    assert not tts.is_usable
     mock_client.aio.models.generate_content_stream.assert_not_called()
