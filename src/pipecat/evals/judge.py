@@ -586,10 +586,13 @@ class EvalJudge:
                 verdict = _failed("no")
             else:
                 verdict = _reply_verdict(answers["verdict"])
-                if verdict.verdict != "continue":
-                    verdict = await self._explain(
-                        verdict, lambda e: e.explain(self._transcript, criterion)
-                    )
+                if (
+                    verdict.verdict != "continue"
+                    and self._explainer
+                    and self._needs_reason(verdict)
+                ):
+                    explanation = await self._explainer.explain(self._transcript, criterion)
+                    verdict = _explained(verdict, explanation)
             self._cache[key] = verdict
         return self._cache[key]
 
@@ -621,10 +624,12 @@ class EvalJudge:
             if answer is None:
                 verdict = _failed("no")
             else:
-                verdict = await self._explain(
-                    _yes_no_verdict(answer),
-                    lambda e: e.explain_call(self._transcript, name, args, criterion),
-                )
+                verdict = _yes_no_verdict(answer)
+                if self._explainer and self._needs_reason(verdict):
+                    explanation = await self._explainer.explain_call(
+                        self._transcript, name, args, criterion
+                    )
+                    verdict = _explained(verdict, explanation)
             self._cache[key] = verdict
         return self._cache[key]
 
@@ -751,16 +756,6 @@ class EvalJudge:
         """Whether a verdict is worth explaining: a ``no``, or an unsure ``yes``."""
         unsure = verdict.confidence is not None and verdict.confidence < self._explain_below
         return verdict.verdict == "no" or unsure
-
-    async def _explain(
-        self,
-        verdict: JudgeVerdict,
-        ask: Callable[["_Explainer"], Awaitable[JudgeVerdict]],
-    ) -> JudgeVerdict:
-        """The verdict with the explainer's reason for it, when it needs one and there is an explainer."""
-        if self._explainer is None or not self._needs_reason(verdict):
-            return verdict
-        return _explained(verdict, await ask(self._explainer))
 
     async def _explain_run(
         self,
