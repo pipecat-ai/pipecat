@@ -14,7 +14,7 @@ import base64
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, ClassVar, Union
+from typing import Any, ClassVar, Literal, Union
 
 from loguru import logger
 from websockets.protocol import State
@@ -53,14 +53,22 @@ class ElevenLabsDialogueTTSSettings(ElevenLabsTTSSettingsBase):
             0.0 is the most expressive but can hallucinate, 0.5 stays closest to
             the reference recording, and 1.0 is the most consistent but least
             responsive to audio tags. Values in between are accepted.
+        apply_text_normalization: Text normalization mode ("auto", "on",
+            "off"), controlling whether the model spells out numbers, dates and
+            currencies. ElevenLabs defaults to "auto".
     """
 
     stability: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    apply_text_normalization: Literal["auto", "on", "off"] | None | NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
 
     #: Fields in the WS URL — changing any of these requires a reconnect. Voice
     #: is absent because Text-to-Dialogue registers voices per context rather
     #: than in the URL, so a voice change only needs a new context.
-    URL_FIELDS: ClassVar[frozenset[str]] = frozenset({"model", "language"})
+    URL_FIELDS: ClassVar[frozenset[str]] = frozenset(
+        {"model", "language", "apply_text_normalization"}
+    )
 
     #: Fields carried in the per-context registration message — changing these
     #: requires closing the current audio context so the next one picks them up.
@@ -181,6 +189,7 @@ class ElevenLabsDialogueTTSService(ElevenLabsTTSBase):
             voice=None,
             language=None,
             stability=None,
+            apply_text_normalization=None,
         )
         if settings is not None:
             default_settings.apply_update(settings)
@@ -274,6 +283,9 @@ class ElevenLabsDialogueTTSService(ElevenLabsTTSBase):
 
         if self._seed is not None:
             url += f"&seed={self._seed}"
+
+        if self._settings.apply_text_normalization is not None:
+            url += f"&apply_text_normalization={self._settings.apply_text_normalization}"
 
         language_code = elevenlabs_language_code(
             assert_given(model), assert_given(self._settings.language)
