@@ -8,11 +8,11 @@ with a classifier. No LLM turn runs on the UI side.
 
 ## What it shows
 
-- **A standard voice pipeline with tools.** The voice layer is an
+- **A standard voice pipeline with two tools.** The voice layer is an
   ordinary `transport → STT → LLM → TTS` pipeline. Its LLM converses and
-  calls `add_items`, `check_items`, `uncheck_items`, `remove_items`,
-  `clear_checked` and `check_list`, each with the items in the user's
-  words. Every tool sends a job to the UI worker and returns its answer
+  calls `update_list` once per turn with everything the user asked for,
+  the items to add, check off, uncheck or remove, and `check_list` to
+  read the list. Both send a job to the UI worker and return its answer
   as short data. The voice LLM never sees the screen.
 - **A UIWorker with a classifier.** `ListWorker` answers the jobs. For
   an item named in words it asks its classifier which checkbox on the

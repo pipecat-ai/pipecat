@@ -13,9 +13,9 @@ sends a job to the UI worker, which finds the item on screen with its
 classifier and sends the command. Nothing on the UI side runs an LLM turn.
 
 - The **voice layer** is an ordinary voice pipeline (STT, LLM, TTS). Its
-  LLM converses and calls tools: ``add_items``, ``check_items``,
-  ``uncheck_items``, ``remove_items``, ``clear_checked`` and ``check_list``.
-  It never sees the screen; every tool returns short data.
+  LLM converses and calls two tools: ``update_list`` with everything the
+  turn asked for, and ``check_list`` to read the list. It never sees the
+  screen; both return short data.
 - The **UI worker** ("ui") owns the list. Each tool is a job on it. For an
   item named in words, the worker asks its classifier which checkbox on
   the live ``<ui_state>`` the words mean, then sends ``set_checked`` or
@@ -30,16 +30,13 @@ Architecture::
 
     Voice pipeline (PipelineWorker "main", owns transport + RTVI):
       transport.in -> STT -> user_agg -> LLM -> TTS -> transport.out -> assistant_agg
-        └── @tool add_items / check_items / uncheck_items / remove_items /
-            clear_checked / check_list
+        └── @tool update_list(add, check, uncheck, remove, clear_checked) / check_list
               └── params.pipeline_worker.job("ui", name=..., payload=...)
 
     ListWorker (UIWorker "ui", no LLM turn):
-      ├── @job add            -> send_command("add_item") per item
-      ├── @job set_checked    -> classifier picks the checkbox, send_command("set_checked")
-      ├── @job remove         -> classifier picks the checkbox, send_command("remove_item")
-      ├── @job clear_checked  -> send_command("remove_item") per checked item
-      └── @job summary        -> the list from the snapshot, highlighting what is left
+      ├── @job update   -> add_item per text; the classifier picks the checkbox
+      │                    for each item to check, uncheck or remove
+      └── @job summary  -> the list from the snapshot, highlighting what is left
 
 Run::
 
@@ -107,14 +104,14 @@ VOICE_PROMPT = """\
 You are the voice of a shopping-list assistant. You cannot see the \
 screen; the list lives there and your tools change and read it.
 
-When the user wants something added, checked off, unchecked or \
-removed, call the matching tool: add_items, check_items, uncheck_items, \
-remove_items. "Clear the ones I've got" is clear_checked. Name each \
-item as the thing itself, never as a pronoun: if you suggested jamón \
-ibérico and the user says "add that", call add_items(["jamón ibérico"]); \
-"check off the last one" after you listed milk, eggs and bread is \
-check_items(["bread"]). When you are not sure what "that" or "it" \
-refers to, ask before calling a tool. For ANY question about the list, \
+When the user wants the list changed, call update_list once with \
+everything they asked for: items to add, check off, uncheck or remove, \
+and clear_checked for "clear the ones I've got". Name each item as the \
+thing itself, never as a pronoun: if you suggested jamón ibérico and \
+the user says "add that", pass add=["jamón ibérico"]; "check off the \
+last one" after you listed milk, eggs and bread is check=["bread"]. \
+When you are not sure what "that" or "it" refers to, ask before \
+calling the tool. For ANY question about the list, \
 call check_list and answer only from what it returns; the user can edit \
 the list on screen at any time, so call it again every time. If a tool \
 says an item was not found, say so briefly and ask which one they mean.
@@ -150,46 +147,37 @@ class ListWorker(UIWorker):
         classifier = JevClassifier(api_key=api_key) if api_key else None
         super().__init__(UI_NAME, llm=llm, classifier=classifier)
 
-    @job(name="add")
-    async def _add(self, message: BusJobRequestMessage) -> None:
-        items = _texts(message)
-        for text in items:
+    @job(name="update")
+    async def _update(self, message: BusJobRequestMessage) -> None:
+        payload = message.payload or {}
+        done: dict[str, list[str]] = {"added": [], "checked": [], "unchecked": [], "removed": []}
+        not_found: list[str] = []
+
+        for text in _texts(payload.get("add")):
             await self.send_command("add_item", {"text": text})
-        await self.send_job_response(message.job_id, {"added": items})
+            done["added"].append(text)
 
-    @job(name="set_checked")
-    async def _set_checked(self, message: BusJobRequestMessage) -> None:
-        checked = bool((message.payload or {}).get("checked", True))
-        done, missing = [], []
-        for text in _texts(message):
-            ref, label = await self._item(text)
-            if ref:
-                await self.send_command("set_checked", {"ref": ref, "checked": checked})
-                done.append(label)
-            else:
-                missing.append(text)
-        await self.send_job_response(message.job_id, {"done": done, "not_found": missing})
+        for field, command, extra in (
+            ("check", "set_checked", {"checked": True}),
+            ("uncheck", "set_checked", {"checked": False}),
+            ("remove", "remove_item", {}),
+        ):
+            for text in _texts(payload.get(field)):
+                found = await self._item(text)
+                if not found:
+                    not_found.append(text)
+                    continue
+                ref, label = found
+                await self.send_command(command, {"ref": ref, **extra})
+                done[f"{field}ed" if field != "remove" else "removed"].append(label)
 
-    @job(name="remove")
-    async def _remove(self, message: BusJobRequestMessage) -> None:
-        done, missing = [], []
-        for text in _texts(message):
-            ref, label = await self._item(text)
-            if ref:
-                await self.send_command("remove_item", {"ref": ref})
-                done.append(label)
-            else:
-                missing.append(text)
-        await self.send_job_response(message.job_id, {"done": done, "not_found": missing})
+        if payload.get("clear_checked"):
+            for ref, name, checked in self._list():
+                if checked:
+                    await self.send_command("remove_item", {"ref": ref})
+                    done["removed"].append(name)
 
-    @job(name="clear_checked")
-    async def _clear_checked(self, message: BusJobRequestMessage) -> None:
-        removed = []
-        for ref, name, checked in self._list():
-            if checked:
-                await self.send_command("remove_item", {"ref": ref})
-                removed.append(name)
-        await self.send_job_response(message.job_id, {"removed": removed})
+        await self.send_job_response(message.job_id, {**done, "not_found": not_found})
 
     @job(name="summary")
     async def _summary(self, message: BusJobRequestMessage) -> None:
@@ -209,11 +197,11 @@ class ListWorker(UIWorker):
         _checkboxes((self._latest_snapshot or {}).get("root"), items)
         return items
 
-    async def _item(self, text: str) -> tuple[str | None, str | None]:
-        """The checkbox the user's words mean: (ref, label), or (None, None)."""
+    async def _item(self, text: str) -> tuple[str, str] | None:
+        """The checkbox the user's words mean, as (ref, label), or None."""
         items = self._list()
         if not items:
-            return None, None
+            return None
         options: dict[str, Any] = {ref: name for ref, name, _ in items}
         question = ChoiceQuestion(instructions="the list item the user means", options=options)
         result = (await self.classifier.choice(text, {"item": question}))["item"]
@@ -221,13 +209,14 @@ class ListWorker(UIWorker):
             f"{self.name}: {text!r} -> {options[result.choice]!r} ({result.confidence:.2f})"
         )
         if result.confidence < 0.5:
-            return None, None
+            return None
         return result.choice, options[result.choice]
 
 
-def _texts(message: BusJobRequestMessage) -> list[str]:
-    """The non-empty item strings a job's payload carries under ``items``."""
-    items = (message.payload or {}).get("items") or []
+def _texts(items: Any) -> list[str]:
+    """The non-empty strings in a payload field, or none when it is missing."""
+    if not isinstance(items, list):
+        return []
     return [i.strip() for i in items if isinstance(i, str) and i.strip()]
 
 
@@ -244,66 +233,37 @@ async def _ui(params: FunctionCallParams, name: str, payload: dict) -> None:
 
 
 @tool_options(cancel_on_interruption=False, timeout_secs=15)
-async def add_items(params: FunctionCallParams, items: list[str]):
-    """Add items to the shopping list.
+async def update_list(
+    params: FunctionCallParams,
+    add: list[str] | None = None,
+    check: list[str] | None = None,
+    uncheck: list[str] | None = None,
+    remove: list[str] | None = None,
+    clear_checked: bool = False,
+):
+    """Change the shopping list: add, check off, uncheck or remove items.
+
+    One call covers everything the user asked for in a turn. Name each item
+    as the thing itself, never as a pronoun: "add that" after you suggested
+    jamón ibérico is add=["jamón ibérico"], and "check off the last one"
+    after you listed milk, eggs and bread is check=["bread"]. The answer says
+    what was done and which items were not found on the list.
 
     Args:
         params: Framework-provided tool invocation context.
-        items: The items to add, one string each, named as they should
-            appear on the list, such as "jamón ibérico". Resolve "that", "it"
-            or "the one you mentioned" from the conversation; never pass the
-            pronoun.
+        add: Items to add, named as they should appear on the list.
+        check: Items to check off, as on the list or as the user said them.
+        uncheck: Items to put back on the list.
+        remove: Items to remove.
+        clear_checked: Remove every item that is checked off.
     """
-    await _ui(params, "add", {"items": items})
-
-
-@tool_options(cancel_on_interruption=False, timeout_secs=15)
-async def check_items(params: FunctionCallParams, items: list[str]):
-    """Check off items the user has got.
-
-    Args:
-        params: Framework-provided tool invocation context.
-        items: The items, each named as on the list or as the user said
-            it, such as "the bread". Resolve "that" or "the last one" from
-            the conversation; never pass the pronoun.
-    """
-    await _ui(params, "set_checked", {"items": items, "checked": True})
-
-
-@tool_options(cancel_on_interruption=False, timeout_secs=15)
-async def uncheck_items(params: FunctionCallParams, items: list[str]):
-    """Put items back on the list that were checked off.
-
-    Args:
-        params: Framework-provided tool invocation context.
-        items: The items, each named as on the list or as the user said
-            it. Resolve "that" or "it" from the conversation; never pass the
-            pronoun.
-    """
-    await _ui(params, "set_checked", {"items": items, "checked": False})
-
-
-@tool_options(cancel_on_interruption=False, timeout_secs=15)
-async def remove_items(params: FunctionCallParams, items: list[str]):
-    """Remove items from the list.
-
-    Args:
-        params: Framework-provided tool invocation context.
-        items: The items, each named as on the list or as the user said
-            it. Resolve "that" or "it" from the conversation; never pass the
-            pronoun.
-    """
-    await _ui(params, "remove", {"items": items})
-
-
-@tool_options(cancel_on_interruption=False, timeout_secs=15)
-async def clear_checked(params: FunctionCallParams):
-    """Remove every item that is checked off.
-
-    Args:
-        params: Framework-provided tool invocation context.
-    """
-    await _ui(params, "clear_checked", {})
+    payload: dict = {}
+    for field, value in (("add", add), ("check", check), ("uncheck", uncheck), ("remove", remove)):
+        if value:
+            payload[field] = value
+    if clear_checked:
+        payload["clear_checked"] = True
+    await _ui(params, "update", payload)
 
 
 @tool_options(cancel_on_interruption=False, timeout_secs=15)
@@ -335,9 +295,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         settings=OpenAILLMService.Settings(system_instruction=VOICE_PROMPT),
     )
 
-    context = LLMContext(
-        tools=[add_items, check_items, uncheck_items, remove_items, clear_checked, check_list]
-    )
+    context = LLMContext(tools=[update_list, check_list])
     aggregators = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
