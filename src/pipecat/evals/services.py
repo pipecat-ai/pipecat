@@ -375,7 +375,9 @@ def classifier_from_config(config: dict | None, *, where: str) -> BaseClassifier
         The configured classifier.
 
     Raises:
-        ValueError: If ``service`` is unknown or ``factory`` is not a dotted path.
+        ValueError: If ``service`` is unknown, ``factory`` is not a dotted
+            path, or the factory returned neither a classifier nor an LLM
+            service.
     """
     config = config or {}
     custom = config.get("factory")
@@ -386,7 +388,12 @@ def classifier_from_config(config: dict | None, *, where: str) -> BaseClassifier
         built = getattr(importlib.import_module(module_name), attr)(config)
         if isinstance(built, BaseClassifier):
             return built
-        return LLMClassifier(llm=built)
+        if isinstance(built, LLMService):
+            return LLMClassifier(llm=built)
+        raise ValueError(
+            f"{where}.factory {custom!r} returned {type(built).__name__}, "
+            "not a BaseClassifier or an LLM service"
+        )
     return LLMClassifier(llm=llm_service_from_config(config, where=where))
 
 

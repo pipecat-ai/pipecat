@@ -23,6 +23,7 @@ from pipecat.evals.services import (
     tts_service_from_config,
 )
 from pipecat.evals.tts import CachingTTSService, tts_cache_key, tts_sample_rate
+from pipecat.services.llm_service import LLMService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.types import NOT_GIVEN
 
@@ -35,7 +36,17 @@ def _fake_tts(config):
     return ("FAKE_TTS", config)
 
 
+class _FakeJudgeLLM(LLMService):
+    def __init__(self, config):
+        super().__init__()
+        self.config = config
+
+
 def _fake_judge_llm(config):
+    return _FakeJudgeLLM(config)
+
+
+def _not_a_judge(config):
     return ("FAKE_JUDGE", config)
 
 
@@ -246,7 +257,14 @@ class TestClassifierFromConfig(unittest.TestCase):
             {"factory": "tests.test_evals_services._fake_judge_llm"}, where="judge.eval"
         )
         self.assertIsInstance(classifier, LLMClassifier)
-        self.assertEqual(classifier.llm[0], "FAKE_JUDGE")
+        self.assertIsInstance(classifier.llm, _FakeJudgeLLM)
+
+    def test_a_factory_returning_anything_else_is_an_error(self):
+        with self.assertRaises(ValueError) as raised:
+            classifier_from_config(
+                {"factory": "tests.test_evals_services._not_a_judge"}, where="judge.eval"
+            )
+        self.assertIn("tuple", str(raised.exception))
 
 
 class TestJudgeFromConfig(unittest.TestCase):
@@ -257,7 +275,7 @@ class TestJudgeFromConfig(unittest.TestCase):
     def test_factory_escape_hatch(self):
         j = EvalJudge.from_config({"factory": "tests.test_evals_services._fake_judge_llm"})
         self.assertIsNotNone(j)
-        self.assertEqual(j.classifier.llm[0], "FAKE_JUDGE")
+        self.assertIsInstance(j.classifier.llm, _FakeJudgeLLM)
 
 
 if __name__ == "__main__":
