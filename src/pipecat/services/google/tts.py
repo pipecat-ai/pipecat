@@ -34,6 +34,7 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
+    StartFrame,
     TTSAudioRawFrame,
 )
 from pipecat.processors.frame_processor import FrameProcessorSetup
@@ -41,6 +42,7 @@ from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.deprecation import deprecated
+from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 
 try:
@@ -1536,6 +1538,31 @@ class GeminiTTSService(GoogleBaseTTSService):
                 f"Current rate of {self.sample_rate}Hz may cause issues."
             )
 
+    async def start(self, frame: StartFrame):
+        """Start the service.
+
+        Args:
+            frame: The start frame containing initialization parameters.
+        """
+        await super().start(frame)
+        await self._check_genai_model_supported()
+
+    async def _check_genai_model_supported(self):
+        """Report the service unusable if the installed SDK can't drive its model.
+
+        Gemini 3.8 TTS models need ``genai.types.SpeechMetadata``, added in
+        google-genai 2.25.0. The error's category is permanent, so the service
+        stops being given work until its settings change.
+        """
+        if not self._use_genai:
+            return
+        model = assert_given(self._settings.model)
+        if self._is_gemini_38_tts(model) and not hasattr(genai.types, "SpeechMetadata"):
+            await self.push_error(
+                f"Gemini 3.8 TTS models require google-genai >= 2.25.0 (model: {model})",
+                category=ErrorCategory.INVALID_REQUEST,
+            )
+
     async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
         """Apply a settings delta with voice validation.
 
@@ -1560,7 +1587,12 @@ class GeminiTTSService(GoogleBaseTTSService):
                 model=model if is_given(model) else None,
             )
 
-        return await super()._update_settings(delta)
+        changed = await super()._update_settings(delta)
+        # Any settings change makes the service usable again, so check that the
+        # model still works with the installed SDK.
+        if changed:
+            await self._check_genai_model_supported()
+        return changed
 
     @traced_tts
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
@@ -1644,12 +1676,6 @@ class GeminiTTSService(GoogleBaseTTSService):
             model = assert_given(self._settings.model)
             assert model is not None
             is_gemini_38 = self._is_gemini_38_tts(model)
-
-            if is_gemini_38 and not hasattr(genai.types, "SpeechMetadata"):
-                yield ErrorFrame(
-                    error=f"Gemini 3.8 TTS models require google-genai >= 2.25.0 (model: {model})"
-                )
-                return
 
             config_kwargs: dict[str, Any] = {
                 "response_modalities": ["AUDIO"],
