@@ -105,7 +105,7 @@ class UserIdleController(BaseObject):
             self._user_idle_timeout = frame.timeout
             if self._user_idle_timeout <= 0:
                 await self._cancel_idle_timer()
-            elif self._waiting_for_user:
+            elif self._waiting_for_user and not self._user_turn_in_progress:
                 # Apply the new timeout now: restart a running timer with the
                 # new duration, or arm one if idle detection was previously
                 # disabled.
@@ -127,12 +127,12 @@ class UserIdleController(BaseObject):
             # BotStoppedSpeaking when pushing a TTSSpeakFrame in the
             # on_function_calls_started event handler, so the counter guard
             # prevents the timer from starting while a function call is in progress.
-            if not self._user_turn_in_progress and self._function_calls_in_progress == 0:
-                # Track the waiting-for-user window even when the timeout is
-                # currently <= 0 (no timer), so a later timeout update can arm
-                # the timer without waiting for the next bot turn.
+            if self._function_calls_in_progress == 0:
+                # Remember that the bot stopped even if the user is still
+                # speaking, and arm the timer when the user turn ends.
                 self._waiting_for_user = True
-                await self._start_idle_timer()
+                if not self._user_turn_in_progress:
+                    await self._start_idle_timer()
         elif isinstance(frame, BotStartedSpeakingFrame):
             self._waiting_for_user = False
             await self._cancel_idle_timer()
@@ -142,6 +142,8 @@ class UserIdleController(BaseObject):
             await self._cancel_idle_timer()
         elif isinstance(frame, UserStoppedSpeakingFrame):
             self._user_turn_in_progress = False
+            if self._waiting_for_user:
+                await self._start_idle_timer()
         elif isinstance(frame, FunctionCallsStartedFrame):
             self._waiting_for_user = False
             self._function_calls_in_progress += len(frame.function_calls)
