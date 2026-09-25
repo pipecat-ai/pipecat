@@ -497,7 +497,7 @@ class BackendLLMWorker(LLMContextWorker):
                 "Tell the user something now, while you go on working: the result of a "
                 "request, or a question. Call it in the same message as the tool calls that "
                 "go on with other work. A message with no tool calls is told to the user "
-                "as it is, so this is not needed there."
+                "as it is, so this is not needed there. Never repeat what you reported."
             ),
             properties={"text": {"type": "string", "description": "What to tell the user."}},
             required=["text"],
@@ -505,8 +505,10 @@ class BackendLLMWorker(LLMContextWorker):
         # Whether the model's current turn made function calls, which decides
         # whether the text it wrote is a report or notes on the work. The
         # calls are announced before the turn ends, so the flag is read and
-        # cleared as the turn stops.
+        # cleared as the turn stops. A turn whose only calls are reports has
+        # nothing else to bring the next run, so the report's result does.
         self._turn_made_calls = False
+        self._turn_only_reports = False
 
         # Whether the backend is working is read off its pipeline: requests
         # queued but not yet taken up, LLM runs picked up but not yet ended,
@@ -556,6 +558,9 @@ class BackendLLMWorker(LLMContextWorker):
                 self._turn_made_calls = False
             elif isinstance(frame, FunctionCallsStartedFrame):
                 self._turn_made_calls = True
+                self._turn_only_reports = all(
+                    call.function_name == REPORT_TOOL_NAME for call in frame.function_calls
+                )
             await self._on_function_call_frame(frame)
 
         @self.assistant_aggregator.event_handler("on_after_process_frame")
@@ -776,10 +781,12 @@ class BackendLLMWorker(LLMContextWorker):
         text = str(params.arguments.get("text") or "").strip()
         if text:
             await self._emit(BackendOutput(text=text, prefers_spoken=True))
-        # The model goes on with the calls it made beside this one; the report
-        # alone is no reason to run it again.
+        # The results of the calls made beside this one bring the next run;
+        # a report made on its own has to bring it itself, or the work it
+        # was made in the middle of stops there.
         await params.result_callback(
-            {"status": "reported"}, properties=FunctionCallResultProperties(run_llm=False)
+            {"status": "reported", "next": "Go on with the remaining work; do not repeat this."},
+            properties=FunctionCallResultProperties(run_llm=self._turn_only_reports),
         )
 
     async def _on_function_call_frame(self, frame: Frame):
