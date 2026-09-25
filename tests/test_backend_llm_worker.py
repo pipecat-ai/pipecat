@@ -438,6 +438,41 @@ async def test_a_message_sent_while_only_an_asynchronous_tool_is_in_flight_runs_
 
 
 @pytest.mark.asyncio
+async def test_a_request_held_for_a_call_runs_once_a_cancellation_clears_the_call():
+    """The request lands after the cancellation has cleared what it was waiting for."""
+    lookup_started = asyncio.Event()
+
+    async def slow_lookup(params: FunctionCallParams):
+        """Look something up, slowly."""
+        lookup_started.set()
+        await asyncio.sleep(30)
+        await params.result_callback({"found": True})
+
+    llm = _ScriptedLLM(
+        [
+            [("call", "slow_lookup", "call_1", {})],
+            [("text", "On the second thing now.")],
+        ]
+    )
+    backend, requester, runner = _attached_backend(llm, tools=[slow_lookup])
+    events: list = []
+
+    async def body():
+        async with _BackendSession(requester, "backend") as session:
+            await session.send("First")
+            await asyncio.wait_for(lookup_started.wait(), 5)
+            assert (await session.send("Second")) == "working"
+            assert await session.cancel("never mind the first")
+            events.extend(await _until_idle(session))
+
+    await _drive(runner, requester, backend, body)
+
+    assert [e.text for e in events if isinstance(e, BackendOutput)] == ["On the second thing now."]
+    contents = [m.get("content") for m in llm.contexts_seen[-1]]
+    assert "Second" in contents and CANCELLED_NOTE in contents
+
+
+@pytest.mark.asyncio
 async def test_cancel_stops_the_calls_in_flight_and_notes_the_cancellation():
     cancelled: list[str] = []
     started = asyncio.Event()
