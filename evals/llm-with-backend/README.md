@@ -13,7 +13,7 @@ The conversations live once, in `scenarios/turns/`, and are included by two scen
 
 ## Scenarios
 
-The backend is an engineering assistant's: a code change that loops through searching, reading, patching and running the tests until they pass (twenty to thirty seconds), a two-step research task, and quick CI and pull-request lookups. Turns with no `user:` wait for what the bot says on its own, and `send_after:` sends a request while the backend is still working.
+The backend is an engineering assistant's: a code change that loops through searching, reading, patching and running the tests until they pass (twenty to thirty seconds), a two-step research task, and quick CI and pull-request lookups. Turns with no `user:` wait for what the bot says on its own, and `send_after:` sends a request while the backend is still working. The acknowledgement and progress turns also check that the bot speaks as one assistant, with `text_excludes: "backend"` and a judge criterion to match, since the user is not to hear about the split.
 
 | scenario                 | what it checks                                                                                                                               |
 | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |

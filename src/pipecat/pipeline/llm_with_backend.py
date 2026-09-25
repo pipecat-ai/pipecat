@@ -102,6 +102,9 @@ _DELEGATION_POLICY = (
 
 #: What the frontend does with the backend's messages and the stop tool.
 _MESSAGES_INSTRUCTION = (
+    "To the user there is one assistant, you: never mention the backend, delegation, a "
+    'handoff or tools. Say what is being done as your own doing, such as "I\'m checking" or '
+    '"I\'ve fixed it", never "the backend is checking".\n\n'
     "After delegating, acknowledge briefly, without offering updates or asking whether to "
     "go ahead, and do whatever else the user asked that you can do yourself. The result says "
     "whether the backend was idle or already working; if it was working, your request joins "
