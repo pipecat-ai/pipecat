@@ -1,0 +1,44 @@
+# Small talk while the backend works. The user is still waiting for the result;
+# chatting about something else in the meantime is not losing interest in it.
+- expect:
+    - event: response
+      eval: "the bot opens the conversation in some way (a greeting, an introduction, an offer to help, or a question to get the user started)"
+
+- user: "Can you fix the flaky retry test in the HTTP client for me?"
+  expect:
+    - event: function_call
+      calls:
+        - name: delegate
+    - event: response
+      within_ms: 25000
+      eval: "acknowledges that it is starting on the fix"
+
+- user: "While we wait, what's your favorite programming language, and why?"
+  send_after:
+    delay_ms: 3000
+  expect:
+    - event: response
+      within_ms: 25000
+      eval: "responds to the question about programming languages in some way: naming one it favors or recommends, or saying what it likes in languages generally, even if it says it has no personal favorites (it may also mention the fix; that is fine)"
+
+- user: "Ha, nice. Mine is Python. Anyway, do you prefer dogs or cats?"
+  send_after:
+    delay_ms: 3000
+  expect:
+    - event: response
+      within_ms: 25000
+      eval: "answers whether it prefers dogs or cats, in some way (it may also mention the fix; that is fine)"
+
+- user: "Cats, definitely. Okay, unrelated question: what's a good name for a rubber duck?"
+  send_after:
+    delay_ms: 3000
+  expect:
+    - event: response
+      within_ms: 25000
+      eval: "suggests a name for a rubber duck (it may also mention the fix; that is fine)"
+
+# No user turn: the fix is still owed, whatever the chat was about.
+- expect:
+    - event: response
+      within_ms: 150000
+      eval: "reports, on its own, that the retry test was fixed and the tests now pass (if the bot only reports progress or says the work is still underway, answer continue, not no: the report has not come yet)"

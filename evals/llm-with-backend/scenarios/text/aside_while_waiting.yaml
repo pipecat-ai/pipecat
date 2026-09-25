@@ -1,0 +1,5 @@
+name: aside_while_waiting
+judge: !include ../../../release/scenarios/judge_text.yaml
+scenarios:
+  - name: text
+    turns: !include ../turns/aside_while_waiting.yaml

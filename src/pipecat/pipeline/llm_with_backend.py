@@ -67,6 +67,15 @@ BACKEND_WORKING_PREFIX = "Backend (working): "
 #: Every mark a rendered backend message can open with.
 BACKEND_PREFIXES = (BACKEND_MESSAGE_PREFIX, BACKEND_THOUGHT_PREFIX, BACKEND_WORKING_PREFIX)
 
+#: Carried on each spoken backend message, so the frontend relays it on whatever
+#: turn it lands on, a user's turn included, where the standing instruction
+#: alone leaves it unsaid.
+RELAY_NOTE = (
+    "(Relay this to the user now, in your own words, once, even if the conversation has "
+    "moved on. If the user has just said something you have not answered yet, answer that "
+    "first and relay this at the end of the same reply.)"
+)
+
 #: When the frontend delegates and when it does not, ahead of each request
 #: strategy's own guidance. The frontend's own system instruction says what
 #: the backend is for.
@@ -93,16 +102,20 @@ _MESSAGES_INSTRUCTION = (
     "BACKEND MESSAGES: The backend works on its own after you delegate and may be doing "
     "several things at once. What it has to say arrives as messages in the conversation "
     f'marked "{BACKEND_MESSAGE_PREFIX.strip()}": a result, a question for the user, or news '
-    "worth an update. When you are prompted after one arrives, relay what matters in your "
-    f'own words, once. Messages marked "{BACKEND_WORKING_PREFIX.strip()}" and '
-    f'"{BACKEND_THOUGHT_PREFIX.strip()}" are what the backend is doing and thinking. Never '
-    "relay them on their own, but when the user asks how the work is going, answer from the "
-    "latest of them, concretely: name the step, such as which file it is reading or that it "
-    "is running the tests, rather than saying only that it is still working. The "
-    "conversation may have moved on since the backend started: if the user has changed or "
-    "cancelled what they asked for, weigh the message against that and say only what still "
-    "helps. Never state a result you have not received from the backend, and never say work "
-    "is done that the backend has not said is done.\n\n"
+    "worth an update, on whatever turn happens to be in progress by then. Such a message is "
+    "owed to the user, whatever the conversation has moved on to: small talk, other "
+    "questions or a long wait do not make it unwanted. If the user has said something you "
+    "have not answered yet, answer that first, then relay the message at the end of that "
+    "same reply, in your own words. If you have already answered everything the user said, "
+    "relay just the message; do not repeat or rephrase your earlier reply. Relay each "
+    "message once. Only when the user has cancelled or changed what they asked for does a "
+    "message go unsaid, and then say only what still helps. Messages marked "
+    f'"{BACKEND_WORKING_PREFIX.strip()}" and "{BACKEND_THOUGHT_PREFIX.strip()}" are what '
+    "the backend is doing and thinking. Never relay them on their own, but when the user "
+    "asks how the work is going, answer from the latest of them, concretely: name the step, "
+    "such as which file it is reading or that it is running the tests, rather than saying "
+    "only that it is still working. Never state a result you have not received from the "
+    "backend, and never say work is done that the backend has not said is done.\n\n"
     f"Whenever the user says to stop or cancel what the backend is doing, call "
     f"{CANCEL_TOOL_NAME} at once, in that same reply, even if they ask for something else in "
     "the same breath; then delegate the new request as well. Delegating the stop is not "
@@ -540,7 +553,10 @@ class BackendConnector:
                     messages=[
                         {
                             "role": "developer",
-                            "content": f"{BACKEND_MESSAGE_PREFIX}The work could not be completed.",
+                            "content": (
+                                f"{BACKEND_MESSAGE_PREFIX}The work could not be completed."
+                                f"\n\n{RELAY_NOTE}"
+                            ),
                         }
                     ],
                     run_llm=True,
@@ -560,7 +576,8 @@ class BackendConnector:
         Override for another wording, role, or to leave some outputs out by
         returning ``None``. The default marks the message so the frontend can
         tell it from the user's and its own, and so the transcript request
-        strategy can leave it out of what it sends the backend.
+        strategy can leave it out of what it sends the backend; a spoken
+        output carries :data:`RELAY_NOTE` as well.
 
         Args:
             output: The output.
@@ -570,8 +587,10 @@ class BackendConnector:
         """
         if not output.text:
             return None
-        prefix = BACKEND_THOUGHT_PREFIX if output.is_thought else BACKEND_MESSAGE_PREFIX
-        return {"role": "developer", "content": f"{prefix}{output.text}"}
+        if output.is_thought:
+            return {"role": "developer", "content": f"{BACKEND_THOUGHT_PREFIX}{output.text}"}
+        note = f"\n\n{RELAY_NOTE}" if output.prefers_spoken else ""
+        return {"role": "developer", "content": f"{BACKEND_MESSAGE_PREFIX}{output.text}{note}"}
 
     def render_tool_call(self, call: BackendToolCall) -> LLMContextMessage | None:
         """Render a phase of a backend function call as a message the frontend's conversation takes in, silently.

@@ -24,6 +24,7 @@ suite:
       - text/cancel_delegation
       - text/cancel_and_replace
       - text/progress_inquiry
+      - text/aside_while_waiting
       - audio/frontend_only
       - audio/delegate_ack
       - audio/delegate_with_aside
@@ -32,6 +33,8 @@ suite:
       - audio/cancel_delegation
       - audio/cancel_and_replace
       - audio/progress_inquiry
+      - audio/aside_while_waiting
+      - audio/result_during_interruption
   - bot: openai-realtime-frontend.py
     scenarios:
       - audio/frontend_only
@@ -42,6 +45,8 @@ suite:
       - audio/cancel_delegation
       - audio/cancel_and_replace
       - audio/progress_inquiry
+      - audio/aside_while_waiting
+      - audio/result_during_interruption
   - bot: gemini-live-frontend.py
     scenarios:
       - audio/frontend_only
@@ -52,3 +57,5 @@ suite:
       - audio/cancel_delegation
       - audio/cancel_and_replace
       - audio/progress_inquiry
+      - audio/aside_while_waiting
+      - audio/result_during_interruption
