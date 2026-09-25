@@ -30,13 +30,14 @@ Architecture::
 
     Voice pipeline (PipelineWorker "main", owns transport + RTVI):
       transport.in -> STT -> user_agg -> LLM -> TTS -> transport.out -> assistant_agg
-        └── @tool update_list(add, check, uncheck, remove, clear_checked) / check_list
+        └── @tool update_list(add, check, uncheck, remove, highlight, clear_checked)
+            / check_list
               └── params.pipeline_worker.job("ui", name=..., payload=...)
 
     ListWorker (UIWorker "ui", no LLM turn):
       ├── @job update   -> add_item per text; the classifier picks the checkbox
-      │                    for each item to check, uncheck or remove
-      └── @job summary  -> the list from the snapshot, highlighting what is left
+      │                    for each item to check, uncheck, remove or highlight
+      └── @job summary  -> the list from the snapshot
 
 Run::
 
@@ -113,7 +114,9 @@ last one" after you listed milk, eggs and bread is check=["bread"]. \
 When you are not sure what "that" or "it" refers to, ask before \
 calling the tool. For ANY question about the list, \
 call check_list and answer only from what it returns; the user can edit \
-the list on screen at any time, so call it again every time. If a tool \
+the list on screen at any time, so call it again every time. When your \
+answer names items, "the drinks are milk and juice", "you still need \
+eggs", flash them with update_list(highlight=[...]) as you answer. If a tool \
 says an item was not found, say so briefly and ask which one they mean.
 
 Keep every reply to one short spoken sentence. Don't describe how \
@@ -150,17 +153,24 @@ class ListWorker(UIWorker):
     @job(name="update")
     async def _update(self, message: BusJobRequestMessage) -> None:
         payload = message.payload or {}
-        done: dict[str, list[str]] = {"added": [], "checked": [], "unchecked": [], "removed": []}
+        done: dict[str, list[str]] = {
+            "added": [],
+            "checked": [],
+            "unchecked": [],
+            "removed": [],
+            "highlighted": [],
+        }
         not_found: list[str] = []
 
         for text in _texts(payload.get("add")):
             await self.send_command("add_item", {"text": text})
             done["added"].append(text)
 
-        for field, command, extra in (
-            ("check", "set_checked", {"checked": True}),
-            ("uncheck", "set_checked", {"checked": False}),
-            ("remove", "remove_item", {}),
+        for field, verb, command, extra in (
+            ("check", "checked", "set_checked", {"checked": True}),
+            ("uncheck", "unchecked", "set_checked", {"checked": False}),
+            ("remove", "removed", "remove_item", {}),
+            ("highlight", "highlighted", "highlight", {}),
         ):
             for text in _texts(payload.get(field)):
                 found = await self._item(text)
@@ -169,7 +179,7 @@ class ListWorker(UIWorker):
                     continue
                 ref, label = found
                 await self.send_command(command, {"ref": ref, **extra})
-                done[f"{field}ed" if field != "remove" else "removed"].append(label)
+                done[verb].append(label)
 
         if payload.get("clear_checked"):
             for ref, name, checked in self._list():
@@ -181,15 +191,8 @@ class ListWorker(UIWorker):
 
     @job(name="summary")
     async def _summary(self, message: BusJobRequestMessage) -> None:
-        # Flash what is still needed while the voice reads it out.
-        items = self._list()
-        for ref, _, checked in items:
-            if not checked:
-                await self.highlight(ref)
-        await self.send_job_response(
-            message.job_id,
-            {"items": [{"item": name, "checked": checked} for _, name, checked in items]},
-        )
+        items = [{"item": name, "checked": checked} for _, name, checked in self._list()]
+        await self.send_job_response(message.job_id, {"items": items})
 
     def _list(self) -> list[tuple[str, str, bool]]:
         """The list on screen as (ref, text, checked), in page order."""
@@ -239,15 +242,18 @@ async def update_list(
     check: list[str] | None = None,
     uncheck: list[str] | None = None,
     remove: list[str] | None = None,
+    highlight: list[str] | None = None,
     clear_checked: bool = False,
 ):
-    """Change the shopping list: add, check off, uncheck or remove items.
+    """Change the shopping list, or point at items on it.
 
     One call covers everything the user asked for in a turn. Name each item
     as the thing itself, never as a pronoun: "add that" after you suggested
     jamón ibérico is add=["jamón ibérico"], and "check off the last one"
-    after you listed milk, eggs and bread is check=["bread"]. The answer says
-    what was done and which items were not found on the list.
+    after you listed milk, eggs and bread is check=["bread"]. Highlight the
+    items you are talking about when you answer a question about the list,
+    such as the drinks or what is left. The answer says what was done and
+    which items were not found on the list.
 
     Args:
         params: Framework-provided tool invocation context.
@@ -255,10 +261,17 @@ async def update_list(
         check: Items to check off, as on the list or as the user said them.
         uncheck: Items to put back on the list.
         remove: Items to remove.
+        highlight: Items to flash on screen, to show what you are talking about.
         clear_checked: Remove every item that is checked off.
     """
     payload: dict = {}
-    for field, value in (("add", add), ("check", check), ("uncheck", uncheck), ("remove", remove)):
+    for field, value in (
+        ("add", add),
+        ("check", check),
+        ("uncheck", uncheck),
+        ("remove", remove),
+        ("highlight", highlight),
+    ):
         if value:
             payload[field] = value
     if clear_checked:

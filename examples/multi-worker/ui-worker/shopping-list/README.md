@@ -11,8 +11,8 @@ with a classifier. No LLM turn runs on the UI side.
 - **A standard voice pipeline with two tools.** The voice layer is an
   ordinary `transport → STT → LLM → TTS` pipeline. Its LLM converses and
   calls `update_list` once per turn with everything the user asked for,
-  the items to add, check off, uncheck or remove, and `check_list` to
-  read the list. Both send a job to the UI worker and return its answer
+  the items to add, check off, uncheck, remove or highlight, and
+  `check_list` to read the list. Both send a job to the UI worker and return its answer
   as short data. The voice LLM never sees the screen.
 - **A UIWorker with a classifier.** `ListWorker` answers the jobs. For
   an item named in words it asks its classifier which checkbox on the
@@ -70,8 +70,9 @@ Open `http://localhost:5173` and click **Connect**.
 - _"Check off the bread."_ — it gets ticked and struck through.
 - _"Actually, drop the butter."_ — removed.
 - _"Clear the ones I've already got."_ — removes everything checked.
-- _"What's left?"_ — the unchecked items pulse, and the voice reads them
-  out (via `check_list`).
+- _"What's left?"_ — the voice reads the unchecked items out (via
+  `check_list`) and flashes them as it does (`update_list(highlight=...)`).
+- _"Any drinks on the list?"_ — only the drinks flash.
 - _"Check off the brown one."_ with only "bread" on the list — the
   classifier is not sure enough, the tool answers not found, and the
   voice asks which one you mean.
