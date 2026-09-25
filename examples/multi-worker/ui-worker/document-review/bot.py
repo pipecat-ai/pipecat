@@ -339,11 +339,17 @@ class ReviewWorker(UIWorker):
 
     def _selection(self) -> tuple[str, str] | None:
         """The user's current selection from the snapshot, as (ref, text), or None."""
-        selection = (self._latest_snapshot or {}).get("selection")
+        snapshot = self._latest_snapshot or {}
+        selection = snapshot.get("selection")
         if not isinstance(selection, dict):
+            logger.debug(
+                f"{self}: no selection in the snapshot "
+                f"(captured_at={snapshot.get('captured_at')}, keys={sorted(snapshot)})"
+            )
             return None
         ref, text = selection.get("ref"), selection.get("text")
         if not isinstance(ref, str) or not ref or not isinstance(text, str) or not text.strip():
+            logger.debug(f"{self}: unusable selection in the snapshot: {selection!r}")
             return None
         return ref, text.strip()
 
