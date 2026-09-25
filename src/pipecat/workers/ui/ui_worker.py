@@ -26,8 +26,8 @@ from pipecat.bus.messages import (
     BusTTSSpeakMessage,
 )
 from pipecat.bus.ui.messages import (
-    _UI_CANCEL_JOB_GROUP_BUS_EVENT_NAME,
-    _UI_SNAPSHOT_BUS_EVENT_NAME,
+    UI_CANCEL_JOB_GROUP_EVENT_NAME,
+    UI_SNAPSHOT_EVENT_NAME,
     BusUICommandMessage,
     BusUIEventMessage,
     BusUIJobCompletedMessage,
@@ -574,13 +574,13 @@ class UIWorker(LLMContextWorker):
 
         # Reserved snapshot event: store and return without dispatch or
         # ``<ui_event>`` injection. Apps render via ``inject_ui_state``.
-        if message.event_name == _UI_SNAPSHOT_BUS_EVENT_NAME:
+        if message.event_name == UI_SNAPSHOT_EVENT_NAME:
             if isinstance(message.payload, dict):
                 self._latest_snapshot = message.payload
             return
 
         # Reserved cancel event: a cancel request, never an app event.
-        if message.event_name == _UI_CANCEL_JOB_GROUP_BUS_EVENT_NAME:
+        if message.event_name == UI_CANCEL_JOB_GROUP_EVENT_NAME:
             await self._handle_cancel_job_event(message)
             return
 

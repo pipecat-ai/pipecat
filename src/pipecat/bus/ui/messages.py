@@ -38,20 +38,18 @@ from typing import Any
 
 from pipecat.bus.messages import BusDataMessage
 
-#: Internal ``event_name`` used by a client-facing worker when republishing
-#: a ``ui-snapshot`` wire message onto the bus as a
-#: ``BusUIEventMessage``. ``UIWorker``'s bus dispatch matches on this
-#: name to route the snapshot into ``_latest_snapshot`` storage. The
-#: leading double underscore marks the name as internal so app-defined
-#: ``@ui_event`` handlers can't collide with it.
-_UI_SNAPSHOT_BUS_EVENT_NAME = "__ui_snapshot"
+#: The ``event_name`` of the client's accessibility snapshot on the bus. A
+#: client-facing worker republishes a ``ui-snapshot`` wire message as a
+#: ``BusUIEventMessage`` with this name, and ``UIWorker`` keeps the payload as
+#: its latest snapshot. The leading double underscore keeps app-defined
+#: ``@ui_event`` names from colliding with it.
+UI_SNAPSHOT_EVENT_NAME = "__ui_snapshot"
 
-#: Internal ``event_name`` used by a client-facing worker when republishing
-#: a ``ui-cancel-job-group`` wire message onto the bus as a
-#: ``BusUIEventMessage``. ``UIWorker``'s bus dispatch matches on this
-#: name to route to ``cancel_job_group``. Internal; not part of the
-#: public wire format.
-_UI_CANCEL_JOB_GROUP_BUS_EVENT_NAME = "__cancel_job_group"
+#: The ``event_name`` of the client's request to cancel a job group. A
+#: client-facing worker republishes a ``ui-cancel-job-group`` wire message as
+#: a ``BusUIEventMessage`` with this name, and the worker that dispatched the
+#: group turns it into a cancel request.
+UI_CANCEL_JOB_GROUP_EVENT_NAME = "__cancel_job_group"
 
 
 @dataclass

@@ -26,7 +26,7 @@ from pipecat.bus.messages import (
     BusMessage,
 )
 from pipecat.bus.ui.messages import (
-    _UI_CANCEL_JOB_GROUP_BUS_EVENT_NAME,
+    UI_CANCEL_JOB_GROUP_EVENT_NAME,
     BusUIEventMessage,
     BusUIJobCompletedMessage,
     BusUIJobGroupCompletedMessage,
@@ -143,7 +143,7 @@ class BaseUIWorker(BaseWorker):
         await super().on_bus_message(message)
         if (
             isinstance(message, BusUIEventMessage)
-            and message.event_name == _UI_CANCEL_JOB_GROUP_BUS_EVENT_NAME
+            and message.event_name == UI_CANCEL_JOB_GROUP_EVENT_NAME
         ):
             await self._handle_cancel_job_event(message)
 
@@ -257,7 +257,7 @@ class BaseUIWorker(BaseWorker):
         job_id = payload.get("job_id")
         if not isinstance(job_id, str) or not job_id:
             logger.warning(
-                f"Worker '{self.name}': received {_UI_CANCEL_JOB_GROUP_BUS_EVENT_NAME} "
+                f"Worker '{self.name}': received {UI_CANCEL_JOB_GROUP_EVENT_NAME} "
                 "with no job_id; ignoring"
             )
             return
@@ -269,6 +269,6 @@ class BaseUIWorker(BaseWorker):
         )
         if not cancelled:
             logger.debug(
-                f"Worker '{self.name}': {_UI_CANCEL_JOB_GROUP_BUS_EVENT_NAME} for "
+                f"Worker '{self.name}': {UI_CANCEL_JOB_GROUP_EVENT_NAME} for "
                 f"unknown or non-cancellable group {job_id}; ignoring"
             )

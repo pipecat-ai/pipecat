@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, MagicMock
 from pipecat.adapters.schemas.direct_function import DirectFunctionWrapper
 from pipecat.bus.messages import BusJobCancelMessage, BusJobRequestMessage, BusTTSSpeakMessage
 from pipecat.bus.ui.messages import (
-    _UI_SNAPSHOT_BUS_EVENT_NAME,
+    UI_SNAPSHOT_EVENT_NAME,
     BusUICommandMessage,
     BusUIEventMessage,
 )
@@ -324,7 +324,7 @@ class TestUIWorkerSnapshot(unittest.IsolatedAsyncioTestCase):
             BusUIEventMessage(
                 source="music",
                 target="ui",
-                event_name=_UI_SNAPSHOT_BUS_EVENT_NAME,
+                event_name=UI_SNAPSHOT_EVENT_NAME,
                 payload=_SAMPLE_SNAPSHOT,
             ),
         )
@@ -341,7 +341,7 @@ class TestUIWorkerSnapshot(unittest.IsolatedAsyncioTestCase):
             BusUIEventMessage(
                 source="music",
                 target="ui",
-                event_name=_UI_SNAPSHOT_BUS_EVENT_NAME,
+                event_name=UI_SNAPSHOT_EVENT_NAME,
                 payload="not a snapshot",
             ),
         )

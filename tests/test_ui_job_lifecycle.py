@@ -26,7 +26,7 @@ from pipecat.bus.messages import (
     BusJobUpdateMessage,
 )
 from pipecat.bus.ui.messages import (
-    _UI_CANCEL_JOB_GROUP_BUS_EVENT_NAME,
+    UI_CANCEL_JOB_GROUP_EVENT_NAME,
     BusUIEventMessage,
     BusUIJobCompletedMessage,
     BusUIJobGroupCompletedMessage,
@@ -220,7 +220,7 @@ class TestCancelJobEvent(unittest.IsolatedAsyncioTestCase):
             BusUIEventMessage(
                 source="bridge",
                 target=worker.name,
-                event_name=_UI_CANCEL_JOB_GROUP_BUS_EVENT_NAME,
+                event_name=UI_CANCEL_JOB_GROUP_EVENT_NAME,
                 payload={"job_id": "t1", "reason": "user clicked cancel"},
             )
         )
@@ -236,7 +236,7 @@ class TestCancelJobEvent(unittest.IsolatedAsyncioTestCase):
             BusUIEventMessage(
                 source="bridge",
                 target=worker.name,
-                event_name=_UI_CANCEL_JOB_GROUP_BUS_EVENT_NAME,
+                event_name=UI_CANCEL_JOB_GROUP_EVENT_NAME,
                 payload={"job_id": "t1"},
             )
         )
@@ -253,7 +253,7 @@ class TestCancelJobEvent(unittest.IsolatedAsyncioTestCase):
             BusUIEventMessage(
                 source="bridge",
                 target=worker.name,
-                event_name=_UI_CANCEL_JOB_GROUP_BUS_EVENT_NAME,
+                event_name=UI_CANCEL_JOB_GROUP_EVENT_NAME,
                 payload={"job_id": "t1"},
             )
         )
@@ -268,7 +268,7 @@ class TestCancelJobEvent(unittest.IsolatedAsyncioTestCase):
             BusUIEventMessage(
                 source="bridge",
                 target=worker.name,
-                event_name=_UI_CANCEL_JOB_GROUP_BUS_EVENT_NAME,
+                event_name=UI_CANCEL_JOB_GROUP_EVENT_NAME,
                 payload={"job_id": "nope"},
             )
         )
@@ -283,7 +283,7 @@ class TestCancelJobEvent(unittest.IsolatedAsyncioTestCase):
             BusUIEventMessage(
                 source="bridge",
                 target=worker.name,
-                event_name=_UI_CANCEL_JOB_GROUP_BUS_EVENT_NAME,
+                event_name=UI_CANCEL_JOB_GROUP_EVENT_NAME,
                 payload=None,
             )
         )
@@ -291,7 +291,7 @@ class TestCancelJobEvent(unittest.IsolatedAsyncioTestCase):
             BusUIEventMessage(
                 source="bridge",
                 target=worker.name,
-                event_name=_UI_CANCEL_JOB_GROUP_BUS_EVENT_NAME,
+                event_name=UI_CANCEL_JOB_GROUP_EVENT_NAME,
                 payload={"job_id": 42},
             )
         )
@@ -551,7 +551,7 @@ class TestBaseUIWorkerJobGroups(unittest.IsolatedAsyncioTestCase):
             BusUIEventMessage(
                 source="main",
                 target=None,
-                event_name=_UI_CANCEL_JOB_GROUP_BUS_EVENT_NAME,
+                event_name=UI_CANCEL_JOB_GROUP_EVENT_NAME,
                 payload={"job_id": "t1", "reason": "user clicked cancel"},
             )
         )
@@ -567,7 +567,7 @@ class TestBaseUIWorkerJobGroups(unittest.IsolatedAsyncioTestCase):
             BusUIEventMessage(
                 source="main",
                 target=None,
-                event_name=_UI_CANCEL_JOB_GROUP_BUS_EVENT_NAME,
+                event_name=UI_CANCEL_JOB_GROUP_EVENT_NAME,
                 payload={"job_id": "t1"},
             )
         )
