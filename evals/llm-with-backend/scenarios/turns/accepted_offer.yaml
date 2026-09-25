@@ -1,0 +1,33 @@
+# The user says yes to a follow-up and asks for a joke in the same breath.
+# Saying "I'll check" is not checking: the backend hears nothing until the
+# frontend delegates, and when asked whether it is done, the frontend must
+# answer from what the backend has said, never from its own promise.
+- expect:
+    - event: response
+      eval: "the bot opens the conversation in some way (a greeting, an introduction, an offer to help, or a question to get the user started)"
+
+- user: "What does the on-call runbook say to do about upstream timeouts?"
+  expect:
+    - event: function_call
+      calls:
+        - name: delegate
+    - event: response
+      within_ms: 60000
+      eval: "reports what the runbook says about upstream timeouts (check the upstream's status page, then the retry dashboard) (if the bot only says it is looking, answer continue, not no)"
+
+- user: "Great, yeah, go ahead and check whether CI is green on main as well, and tell me a joke while we wait."
+  expect:
+    - event: function_call
+      calls:
+        - name: delegate
+    - event: response
+      within_ms: 30000
+      eval: "tells a joke (it may also say it is checking CI, or report the CI status; either is fine)"
+
+- user: "Is the CI check done?"
+  send_after:
+    delay_ms: 12000
+  expect:
+    - event: response
+      within_ms: 25000
+      eval: "says the CI check is done and that CI on main is green; answer no if it says it is still checking or has not started"
