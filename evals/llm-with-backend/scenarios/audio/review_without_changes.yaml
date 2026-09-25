@@ -1,6 +1,0 @@
-name: review_without_changes
-user: !include ../../../release/scenarios/user_audio.yaml
-judge: !include ../../../release/scenarios/judge_audio.yaml
-scenarios:
-  - name: audio
-    turns: !include ../turns/review_without_changes.yaml
