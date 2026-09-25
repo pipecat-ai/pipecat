@@ -648,6 +648,9 @@ class OpenAIResponsesLLMService(
         self._current_response_id: str | None = None  # ID of current non-cancelled response
         self._cancel_pending_response: bool = False
         self._needs_drain: bool = False
+        # True after this turn's response.create has been written to the socket.
+        # A cancel before that leaves nothing to drain on the server.
+        self._response_create_sent: bool = False
 
     # -- WebsocketLLMService interface ----------------------------------------
 
@@ -866,6 +869,7 @@ class OpenAIResponsesLLMService(
         self._current_response_id = None
         self._cancel_pending_response = False
         self._needs_drain = False
+        self._response_create_sent = False
 
     async def _drain_cancelled_response(self):
         """Drain events from a cancelled response before starting a new one.
@@ -960,14 +964,25 @@ class OpenAIResponsesLLMService(
                         )
                     except Exception:
                         pass
-                else:
+                    self._needs_drain = True
+                elif self._response_create_sent:
+                    # response.create went out but response.created has not
+                    # arrived yet — drain until it does, then cancel.
                     logger.debug(
                         f"{self}: Cancelled before response.created "
                         f"— will cancel on next response.created"
                     )
                     self._cancel_pending_response = True
+                    self._needs_drain = True
+                else:
+                    # Nothing was written for this turn. Do not arm a drain for
+                    # events that will never arrive, and do not clear a drain
+                    # already armed for a prior cancelled response.
+                    logger.debug(
+                        f"{self}: Cancelled before response.create was sent — nothing to drain"
+                    )
                 self._current_response_id = None
-                self._needs_drain = True
+                self._response_create_sent = False
                 raise
             except Exception as e:
                 await self.push_error(error_msg=f"Error during inference: {e}", exception=e)
@@ -1023,6 +1038,7 @@ class OpenAIResponsesLLMService(
             await self._ensure_connected()
             await self.start_ttfb_metrics()
             await self._ws_send({"type": "response.create", **params})
+            self._response_create_sent = True
             await self._receive_response_events(context, full_input, output_timeout_secs)
 
         async def cleanup():
@@ -1214,12 +1230,14 @@ class OpenAIResponsesLLMService(
                     response_output = response.get("output") or []
                     self._store_previous_response_state(response_id, full_input, response_output)
 
+                self._response_create_sent = False
                 break  # Response complete
 
             elif event_type in ("response.failed", "response.incomplete"):
                 response = event.get("response", {})
                 status_details = response.get("status_details") or {}
                 error_info = status_details.get("error") or {}
+                self._response_create_sent = False
                 error_msg = error_info.get("message", f"Response {event_type.split('.')[-1]}")
                 await self.push_error(error_msg=f"LLM response error: {error_msg}")
                 break
