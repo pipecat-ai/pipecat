@@ -26,6 +26,7 @@ suite:
       - text/progress_inquiry
       - text/aside_while_waiting
       - text/accepted_offer
+      - text/review_without_changes
       - audio/frontend_only
       - audio/delegate_ack
       - audio/delegate_with_aside
@@ -37,6 +38,7 @@ suite:
       - audio/aside_while_waiting
       - audio/result_during_interruption
       - audio/accepted_offer
+      - audio/review_without_changes
   - bot: google-frontend.py
     scenarios:
       - text/frontend_only
@@ -49,6 +51,7 @@ suite:
       - text/progress_inquiry
       - text/aside_while_waiting
       - text/accepted_offer
+      - text/review_without_changes
       - audio/frontend_only
       - audio/delegate_ack
       - audio/delegate_with_aside
@@ -60,6 +63,7 @@ suite:
       - audio/aside_while_waiting
       - audio/result_during_interruption
       - audio/accepted_offer
+      - audio/review_without_changes
   - bot: anthropic-frontend.py
     scenarios:
       - text/frontend_only
@@ -72,6 +76,7 @@ suite:
       - text/progress_inquiry
       - text/aside_while_waiting
       - text/accepted_offer
+      - text/review_without_changes
       - audio/frontend_only
       - audio/delegate_ack
       - audio/delegate_with_aside
@@ -83,6 +88,7 @@ suite:
       - audio/aside_while_waiting
       - audio/result_during_interruption
       - audio/accepted_offer
+      - audio/review_without_changes
   - bot: openai-realtime-frontend.py
     scenarios:
       - audio/frontend_only
@@ -96,6 +102,7 @@ suite:
       - audio/aside_while_waiting
       - audio/result_during_interruption
       - audio/accepted_offer
+      - audio/review_without_changes
   - bot: gemini-live-frontend.py
     scenarios:
       - audio/frontend_only
@@ -109,3 +116,4 @@ suite:
       - audio/aside_while_waiting
       - audio/result_during_interruption
       - audio/accepted_offer
+      - audio/review_without_changes
