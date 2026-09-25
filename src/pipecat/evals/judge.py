@@ -503,28 +503,21 @@ class EvalJudge:
         construct ``EvalJudge`` directly and pass it to the session.
 
         Args:
-            judge_config: Mapping with keys ``service`` (default ``"ollama"``),
-                ``model`` (default ``"gemma4:12b"``), optional ``endpoint``
-                (service-specific default if omitted), an optional ``extra``
-                mapping forwarded to the model as top-level request parameters,
-                or a ``factory``; plus an optional ``explainer`` block
-                (``false`` for verdicts without reasons), an optional
-                ``explain_below``, and an optional ``allow_continue`` (``false``
-                judges a reply yes or no only). ``None`` uses all defaults.
+            judge_config: The ``judge.eval:`` block, with the keys the module
+                docstring lists. ``None`` uses all defaults.
 
         Returns:
             A configured EvalJudge.
 
         Raises:
-            ValueError: If ``service`` is unknown (matching
-                :func:`pipecat.evals.services.tts_service_from_config` and
-                :func:`pipecat.evals.services.stt_service_from_config`).
+            ValueError: If the block names an unknown service, or its factory
+                returned neither a classifier nor an LLM service.
 
         Example::
 
-            # In the scenario: judge.eval.factory: "my_pkg.make_judge_llm"
-            def make_judge_llm(config):
-                return TogetherLLMService(...)  # any service exposing run_inference()
+            # In the scenario: judge.eval.factory: "my_pkg.make_judge"
+            def make_judge(config):
+                return JevClassifier(api_key=...)  # or any LLM service with run_inference()
         """
         config = judge_config or {}
         classifier = classifier_from_config(config, where="judge.eval")
