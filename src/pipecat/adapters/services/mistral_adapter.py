@@ -79,8 +79,9 @@ class MistralLLMAdapter(OpenAILLMAdapter):
         Applies three transformation steps in order:
 
         1. **Insert assistant messages after tool messages** — Any ``"tool"``
-           message not followed by an ``"assistant"`` message gets a minimal
-           ``{"role": "assistant", "content": " "}`` inserted after it.
+           message not followed by an ``"assistant"`` or another ``"tool"``
+           message gets a minimal ``{"role": "assistant", "content": " "}``
+           inserted after it, so parallel tool results stay together.
 
         2. **Convert non-initial system messages to user** — System messages
            after the initial contiguous system block are converted to
@@ -106,12 +107,14 @@ class MistralLLMAdapter(OpenAILLMAdapter):
         # Mistral's extended schema even though it doesn't fit OpenAI's.
         msgs: list[dict[str, Any]] = copy.deepcopy([dict(m) for m in messages])
 
-        # Step 1: ensure every "tool" message is followed by an "assistant".
+        # Step 1: ensure every run of "tool" messages is followed by an
+        # "assistant". The results of parallel tool calls stay together: Mistral
+        # rejects an assistant message before every call has its result.
         insert_at: list[int] = []
         for i, msg in enumerate(msgs):
             if msg.get("role") == "tool":
                 is_last = i == len(msgs) - 1
-                if is_last or msgs[i + 1].get("role") != "assistant":
+                if is_last or msgs[i + 1].get("role") not in ("assistant", "tool"):
                     insert_at.append(i + 1)
         for idx in reversed(insert_at):
             msgs.insert(idx, {"role": "assistant", "content": " "})

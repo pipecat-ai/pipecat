@@ -89,6 +89,7 @@ from pipecat.adapters.services.deepseek_adapter import DeepSeekLLMAdapter
 from pipecat.adapters.services.gemini_adapter import GeminiLLMAdapter
 from pipecat.adapters.services.gemini_live_adapter import GeminiLiveLLMAdapter
 from pipecat.adapters.services.grok_realtime_adapter import GrokRealtimeLLMAdapter
+from pipecat.adapters.services.mistral_adapter import MistralLLMAdapter
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter
 from pipecat.adapters.services.open_ai_realtime_adapter import OpenAIRealtimeLLMAdapter
 from pipecat.adapters.services.open_ai_responses_adapter import OpenAIResponsesLLMAdapter
@@ -2502,6 +2503,61 @@ class TestDeepSeekGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(params["messages"][1]["reasoning_content"], "")
         self.assertNotIn("reasoning_content", assistant)
         self.assertNotIn("reasoning_content", context.get_messages()[1])
+
+
+class TestMistralGetLLMInvocationParams(unittest.TestCase):
+    def setUp(self) -> None:
+        """Sets up a common adapter instance for all tests."""
+        self.adapter = MistralLLMAdapter()
+
+    def _tool_call(self, call_id: str, city: str) -> dict:
+        return {
+            "id": call_id,
+            "type": "function",
+            "function": {"name": "get_weather", "arguments": f'{{"city": "{city}"}}'},
+        }
+
+    def test_parallel_tool_results_stay_together(self):
+        """Results of parallel tool calls are not split by a placeholder assistant message.
+
+        Mistral counts the tool messages after an assistant message with tool calls,
+        and rejects the request ("Not the same number of function calls and
+        responses") when another assistant message arrives before all of them.
+        """
+        messages: list[LLMStandardMessage] = [
+            {"role": "user", "content": "Weather in Paris and London?"},
+            {
+                "role": "assistant",
+                "tool_calls": [
+                    self._tool_call("call_1", "Paris"),
+                    self._tool_call("call_2", "London"),
+                ],
+            },
+            {"role": "tool", "content": '{"temp": 20}', "tool_call_id": "call_1"},
+            {"role": "tool", "content": '{"temp": 15}', "tool_call_id": "call_2"},
+            {"role": "user", "content": "Thanks!"},
+        ]
+
+        context = LLMContext(messages=messages)
+        params = self.adapter.get_llm_invocation_params(context, convert_developer_to_user=False)
+
+        roles = [m["role"] for m in params["messages"]]
+        self.assertEqual(roles, ["user", "assistant", "tool", "tool", "assistant", "user"])
+
+    def test_single_tool_result_followed_by_user_gets_placeholder(self):
+        """A tool result followed by a user message still gets a placeholder assistant."""
+        messages: list[LLMStandardMessage] = [
+            {"role": "user", "content": "Weather in Paris?"},
+            {"role": "assistant", "tool_calls": [self._tool_call("call_1", "Paris")]},
+            {"role": "tool", "content": '{"temp": 20}', "tool_call_id": "call_1"},
+            {"role": "user", "content": "Thanks!"},
+        ]
+
+        context = LLMContext(messages=messages)
+        params = self.adapter.get_llm_invocation_params(context, convert_developer_to_user=False)
+
+        roles = [m["role"] for m in params["messages"]]
+        self.assertEqual(roles, ["user", "assistant", "tool", "assistant", "user"])
 
 
 class TestOpenAIResponsesGetLLMInvocationParams(unittest.TestCase):
