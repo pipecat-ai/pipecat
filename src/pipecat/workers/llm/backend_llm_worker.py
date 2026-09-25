@@ -12,7 +12,7 @@ speech-to-speech model delegating on its own, or a pipeline calling a tool.
 A :class:`BackendLLMWorker` runs any Pipecat LLM service, with its own context
 and multi-step tool calling, to do that work.
 
-The frontend and the backend exchange messages, not calls. A frontend
+The frontend and the backend exchange messages. A frontend
 *attaches* to the worker once, for as long as it lives, and from then on
 hears everything the backend produces as a stream: each of its model's turns
 and reasoning summaries as a :class:`BackendOutput`, each phase of the
