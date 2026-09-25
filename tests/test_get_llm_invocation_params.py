@@ -70,6 +70,7 @@ For BaseLLMAdapter helpers:
 2. _resolve_system_instruction: conflict resolution between context and settings
 """
 
+import asyncio
 import subprocess
 import sys
 import unittest
@@ -3466,6 +3467,91 @@ class TestTrailingUserMessageInjection(unittest.TestCase):
         self.assertEqual(params["messages"][-1].role, "user")
         self.assertEqual(params["messages"][-1].parts[0].text, ".")
         self.assertEqual(context.messages[-1]["role"], "assistant")
+
+    def _google_stream_contents(self, service, context):
+        """The contents a streamed Gemini request is sent with."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        service._client = MagicMock()
+        service._client.aio.models.generate_content_stream = AsyncMock()
+        asyncio.run(service._stream_content(context))
+        return service._client.aio.models.generate_content_stream.call_args.kwargs["contents"]
+
+    def _google_run_inference_contents(self, service, context):
+        """The contents a run_inference() Gemini request is sent with."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        service._client = MagicMock()
+        service._client.aio.models.generate_content = AsyncMock()
+        asyncio.run(service.run_inference(context))
+        return service._client.aio.models.generate_content.call_args.kwargs["contents"]
+
+    def _split_turn_context(self, marker):
+        """A user turn sent in two segments, with an incomplete verdict appended after both."""
+        return LLMContext(
+            messages=[
+                {"role": "user", "content": "From now on,"},
+                {"role": "user", "content": "can you talk like a pirate?"},
+                {"role": "assistant", "content": marker},
+            ]
+        )
+
+    def test_google_turn_marker_appends_trailing_user_on_every_model(self):
+        """A trailing incomplete-turn marker gets a user turn, even on models that continue model turns."""
+        for model in ("gemini-3-flash-preview", "gemini-2.5-flash", "gemini-3.6-flash"):
+            for marker in ("◐", "○"):
+                with self.subTest(model=model, marker=marker):
+                    service = self._google(model=model)
+                    context = self._split_turn_context(marker)
+
+                    contents = self._google_stream_contents(service, context)
+
+                    self.assertEqual(contents[-2].role, "model")
+                    self.assertEqual(contents[-2].parts[0].text, marker)
+                    self.assertEqual(contents[-1].role, "user")
+                    self.assertEqual(contents[-1].parts[0].text, ".")
+                    self.assertEqual(context.messages[-1], {"role": "assistant", "content": marker})
+
+    def test_google_run_inference_turn_marker_appends_trailing_user(self):
+        """run_inference() applies the same rule as the streamed request."""
+        service = self._google(model="gemini-3-flash-preview")
+
+        contents = self._google_run_inference_contents(service, self._split_turn_context("◐"))
+
+        self.assertEqual(contents[-1].role, "user")
+        self.assertEqual(contents[-1].parts[0].text, ".")
+
+    def test_google_turn_marker_uses_configured_markers(self):
+        """Custom markers are recognized; the default ones then are not."""
+        from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionConfig
+
+        service = self._google(model="gemini-3-flash-preview")
+        service.set_user_turn_completion_config(
+            UserTurnCompletionConfig(incomplete_short_marker="[wait]")
+        )
+
+        contents = self._google_stream_contents(service, self._split_turn_context("[wait]"))
+        self.assertEqual(contents[-1].role, "user")
+
+        contents = self._google_stream_contents(service, self._split_turn_context("◐"))
+        self.assertEqual(contents[-1].role, "model")
+
+    def test_google_prefill_models_keep_other_trailing_model_turns(self):
+        """Models that continue a trailing model turn still get anything but a lone marker as is."""
+        service = self._google(model="gemini-3-flash-preview")
+        for content in ("Let me check on that.", "◐ one moment", "● Sure."):
+            with self.subTest(content=content):
+                context = LLMContext(
+                    messages=[
+                        {"role": "user", "content": "What's the weather?"},
+                        {"role": "assistant", "content": content},
+                    ]
+                )
+
+                contents = self._google_stream_contents(service, context)
+
+                self.assertEqual(contents[-1].role, "model")
+                self.assertEqual(contents[-1].parts[0].text, content)
 
 
 class TestContextSystemMessageDeprecation(unittest.TestCase):

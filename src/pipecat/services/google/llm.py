@@ -385,7 +385,10 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
         params = adapter.get_llm_invocation_params(
             context,
             system_instruction=effective_instruction,
-            ensure_last_message_is_user=self._should_inject_trailing_user_message(),
+            ensure_last_message_is_user=(
+                self._should_inject_trailing_user_message()
+                or self._context_ends_with_turn_marker(context)
+            ),
         )
         messages = params["messages"]
         system = params["system_instruction"]
@@ -544,7 +547,10 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
     # such requests, so this is a frozen legacy set: any model NOT matching is
     # assumed to reject them and gets a trailing user message injected when
     # needed. gemini-3.5-flash accepts them but shares a prefix with
-    # gemini-3.5-flash-lite, which doesn't, so it's left out.
+    # gemini-3.5-flash-lite, which doesn't, so it's left out. A request ending
+    # with a stand-alone turn completion marker gets the user message on every
+    # model: gemini-3 models asked to continue one can stop with
+    # MALFORMED_RESPONSE and no text, leaving the user's turn unanswered.
     _PREFILL_SUPPORTED_PATTERNS = (
         "gemini-2.",
         "gemini-3-",
@@ -568,7 +574,10 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
         params = adapter.get_llm_invocation_params(
             context,
             system_instruction=assert_given(self._settings.system_instruction),
-            ensure_last_message_is_user=self._should_inject_trailing_user_message(),
+            ensure_last_message_is_user=(
+                self._should_inject_trailing_user_message()
+                or self._context_ends_with_turn_marker(context)
+            ),
         )
 
         logger.debug(

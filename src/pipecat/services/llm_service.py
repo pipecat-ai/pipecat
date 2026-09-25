@@ -823,6 +823,33 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         else:
             await self.push_frame(LLMTextFrame(text))
 
+    def _context_ends_with_turn_marker(self, context: LLMContext) -> bool:
+        """Whether the context's last message is a stand-alone turn completion marker.
+
+        An incomplete-turn verdict (◐/○) is written to the context as an
+        assistant message holding only the marker. A request that ends with one
+        still owes the user a reply, so it is not an assistant turn for the LLM
+        to continue.
+
+        Args:
+            context: The LLM context the request is built from.
+
+        Returns:
+            True if the last message is an assistant message whose content is
+            only one of the configured turn completion markers.
+        """
+        messages = context.messages
+        if not messages:
+            return False
+        last = messages[-1]
+        if not isinstance(last, dict) or last.get("role") != "assistant":
+            return False
+        content = last.get("content")
+        return (
+            isinstance(content, str)
+            and content.strip() in self._user_turn_completion_config.markers
+        )
+
     async def _handle_interruptions(self, _: InterruptionFrame):
         for function_name, entry in self._functions.items():
             if entry.cancel_on_interruption:
