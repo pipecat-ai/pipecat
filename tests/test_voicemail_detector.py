@@ -244,6 +244,32 @@ class TestVoicemailDetectorFallback(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(fired, [detector])
 
+    async def test_the_message_is_left_once(self):
+        # A beep or a prompt heard after the message started must not leave
+        # it again.
+        detector, _ = _detector(("voicemail", 0.9))
+        fired = []
+
+        @detector.event_handler("on_voicemail_detected")
+        async def _on_voicemail(processor):
+            fired.append(processor)
+
+        await run_test(
+            detector,
+            frames_to_send=[
+                UserStartedSpeakingFrame(),
+                _said("Hi, you've reached Sam. Leave a message after the tone."),
+                UserStoppedSpeakingFrame(),
+                SleepFrame(VERDICT_SETTLE),
+                UserStartedSpeakingFrame(),
+                SleepFrame(0.1),
+                UserStoppedSpeakingFrame(),
+                SleepFrame(VERDICT_SETTLE),
+            ],
+            start_timeout=5.0,
+        )
+        self.assertEqual(len(fired), 1)
+
     async def test_more_speech_cancels_the_silence_decision(self):
         classifier = _FakeClassifier(("voicemail", 0.3), ("conversation", 0.3))
         detector = VoicemailDetector(classifier=classifier, decision_timeout=0.3)

@@ -276,6 +276,7 @@ class VoicemailDetector(FrameProcessor):
         self._user_speaking = False
         self._decision_task: asyncio.Task | None = None
         self._message_task: asyncio.Task | None = None
+        self._message_left = False
 
         self._register_event_handler("on_conversation_detected")
         self._register_event_handler("on_voicemail_detected")
@@ -341,7 +342,7 @@ class VoicemailDetector(FrameProcessor):
             self._user_speaking = False
             if not self._decision:
                 await self._restart_decision_timer()
-            elif self._decision == "voicemail":
+            elif self._decision == "voicemail" and not self._message_left:
                 await self._restart_message_timer()
 
         # After a voicemail verdict nothing more should reach the conversation,
@@ -450,8 +451,13 @@ class VoicemailDetector(FrameProcessor):
             self._message_task = None
 
     async def _leave_message_after_quiet(self):
-        """Fire ``on_voicemail_detected`` once the greeting has been quiet for the delay."""
+        """Fire ``on_voicemail_detected`` once the greeting has been quiet for the delay.
+
+        Fires once: a beep or a prompt heard while the message is being left
+        does not start it over.
+        """
         await asyncio.sleep(self._voicemail_response_delay)
+        self._message_left = True
         await self._call_event_handler("on_voicemail_detected")
 
     async def _on_classifier_metrics(self, classifier: BaseClassifier, data: list[MetricsData]):
