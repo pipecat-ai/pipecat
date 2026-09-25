@@ -11,7 +11,8 @@
         - name: delegate
     - event: response
       within_ms: 25000
-      eval: "acknowledges that it is starting on the fix"
+      eval: "acknowledges that it is starting on the fix; speaks as itself, without mentioning a backend or handing work off"
+      text_excludes: "backend"
 
 - user: "While we wait, what's the capital of Australia?"
   send_after:
