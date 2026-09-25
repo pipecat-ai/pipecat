@@ -41,7 +41,7 @@ from pipecat.pipeline.llm_with_backend import (
     LLMWithBackend,
     TranscriptBackendRequestStrategy,
 )
-from pipecat.processors.aggregators.llm_context import NOT_GIVEN, LLMContext
+from pipecat.processors.aggregators.llm_context import NOT_GIVEN, LLMContext, LLMSpecificMessage
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, FunctionCallParams, LLMService
 from pipecat.services.settings import LLMSettings
@@ -199,6 +199,30 @@ def test_the_frontend_guidance_covers_delegation_and_the_backends_messages():
 
 
 @pytest.mark.asyncio
+async def test_the_transcript_request_skips_messages_in_a_services_own_format():
+    """A Google frontend records its calls as LLMSpecificMessage; the transcript leaves them out."""
+    session = _FakeSession()
+    connector = _bound(session=session)
+    context = LLMContext(
+        [
+            {"role": "user", "content": "weather in seattle?"},
+            LLMSpecificMessage(llm="google", message={"parts": [{"text": "call"}]}),
+            {"role": "assistant", "content": "Let me check."},
+        ]
+    )
+
+    await connector.delegate(_params(context))
+
+    assert session.requests == [
+        "Voice conversation so far:\n"
+        "USER: weather in seattle?\n"
+        "ASSISTANT: Let me check.\n"
+        "\n"
+        "Act on the user's most recent request in the conversation above, and report its result as soon as you have it, before going on with other work."
+    ]
+
+
+@pytest.mark.asyncio
 async def test_the_transcript_request_sends_only_what_the_backend_has_not_seen():
     session = _FakeSession()
     connector = _bound(session=session)
@@ -331,7 +355,7 @@ async def test_outputs_are_appended_to_the_frontend_and_run_it_as_flagged():
 
     appended = [c.args[0] for c in frontend.queue_frame.await_args_list]
     assert [(f.messages, f.run_llm) for f in appended] == [
-        ([{"role": "developer", "content": "Backend: Let me check."}], False),
+        ([{"role": "developer", "content": "Backend (note): Let me check."}], False),
         ([{"role": "developer", "content": "Backend (thinking): Weather first."}], False),
         (
             [{"role": "developer", "content": f"Backend: It's 62 and raining.\n\n{RELAY_NOTE}"}],
@@ -481,7 +505,7 @@ async def test_a_local_backend_is_heard_through_the_frontends_conversation():
     assert result.properties == FunctionCallResultProperties(run_llm=True)
     appended = [f for f in down if isinstance(f, LLMMessagesAppendFrame)]
     assert [(f.messages[0]["content"], f.run_llm) for f in appended] == [
-        ("Backend: Let me check.", False),
+        ("Backend (note): Let me check.", False),
         ("Backend (working): get_weather(location='Seattle')", False),
         (f"Backend: It's 62 and raining.\n\n{RELAY_NOTE}", True),
     ]
