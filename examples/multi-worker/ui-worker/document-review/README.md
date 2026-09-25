@@ -25,9 +25,9 @@ plus one custom command and one client-emitted event.
   emits an `add_note` command with its feedback; the client renders a
   note attached to the reviewed paragraph.
 - **Grounded actions**: `add_note(text)` has the worker find the notes
-  textarea and the Save button with its classifier, fill and click. With
-  `TYPESAFE_API_KEY` set the classifier is Jev; otherwise the worker's
-  own LLM answers through an `LLMClassifier`.
+  textarea and the Save button with its classifier, fill and click. The
+  classifier is the worker's own LLM through an `LLMClassifier`; pass a
+  `JevClassifier` for faster, calibrated answers.
 - **Write-side deixis**: "where does it talk about rhythms?" is
   `screen("select_text", "the paragraph about rhythms")`; the classifier
   picks the paragraph by its text and the page selection lands on it.

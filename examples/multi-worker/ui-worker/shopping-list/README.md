@@ -19,10 +19,9 @@ with a classifier. No LLM turn runs on the UI side.
   screen the words mean, one choice question over the list,
   then sends `set_checked` or `remove_item`. `add_item` needs no
   classifier, since the voice LLM already carries the text. `summary`
-  reads the snapshot with plain code. With `TYPESAFE_API_KEY` set the
-  classifier is Jev, about a tenth of a second per question with a
-  calibrated probability; otherwise the worker's own LLM answers through
-  an `LLMClassifier`.
+  reads the snapshot with plain code. The classifier is the
+  worker's own LLM through an `LLMClassifier`; pass a `JevClassifier` for
+  faster, calibrated answers.
 - **Custom UI commands.** `add_item`, `set_checked` and `remove_item` are
   the client's commands. Each item is a checkbox whose accessible name is
   the item text, so the snapshot exposes every item's label and checked
@@ -86,7 +85,6 @@ edits, because `check_list` reads the live snapshot.
 - `OPENAI_API_KEY`
 - `DEEPGRAM_API_KEY`
 - `CARTESIA_API_KEY`
-- `TYPESAFE_API_KEY` (optional, for Jev)
 
 A `.env` in the example folder is the easiest way to set these (see
 `examples/multi-worker/env.example`).

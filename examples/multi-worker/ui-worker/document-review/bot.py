@@ -48,8 +48,8 @@ computed from simple text metrics (word/sentence counts, absolutist /
 hedging words) so different paragraphs get different feedback without
 real NLP.
 
-With ``TYPESAFE_API_KEY`` set the worker uses Jev; otherwise its own LLM
-answers through an ``LLMClassifier``.
+The worker's classifier is its own LLM through an ``LLMClassifier``; pass a
+``JevClassifier`` for faster, calibrated answers.
 
 Run::
 
@@ -62,7 +62,6 @@ Requirements:
 - OPENAI_API_KEY
 - DEEPGRAM_API_KEY
 - CARTESIA_API_KEY
-- TYPESAFE_API_KEY (optional, for Jev)
 """
 
 import asyncio
@@ -75,7 +74,6 @@ from loguru import logger
 from pipecat.adapters.schemas.direct_function import tool_options
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.bus.messages import BusJobRequestMessage, BusJobResponseMessage
-from pipecat.classifiers.jev.classifier import JevClassifier
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame, TTSSpeakFrame
 from pipecat.pipeline.job_context import (
@@ -265,9 +263,7 @@ class ReviewWorker(UIWorker):
 
     def __init__(self):
         llm = OpenAILLMService(api_key=os.environ["OPENAI_API_KEY"])
-        api_key = os.getenv("TYPESAFE_API_KEY")
-        classifier = JevClassifier(api_key=api_key) if api_key else None
-        super().__init__(UI_NAME, llm=llm, classifier=classifier)
+        super().__init__(UI_NAME, llm=llm)
         # job_id -> the paragraph under review, so on_job_response can
         # attach each reviewer's feedback to the right note.
         self._reviews: dict[str, str] = {}

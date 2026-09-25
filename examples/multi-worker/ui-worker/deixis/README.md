@@ -19,8 +19,8 @@ worker selects that paragraph on the page, so you see what the bot means.
   command. The client selects the paragraph and scrolls to it.
 - **A plain UIWorker with a classifier and no LLM turn.** Both tools
   are the built-in `screen` job, so the example has no worker subclass
-  at all. With `TYPESAFE_API_KEY` set the classifier is Jev; otherwise
-  the worker's own LLM answers through an `LLMClassifier`.
+  at all. The classifier is the worker's own LLM through an
+  `LLMClassifier`; pass a `JevClassifier` for faster, calibrated answers.
 
 ## Architecture
 
@@ -79,7 +79,6 @@ paragraphs.
 - `OPENAI_API_KEY`
 - `DEEPGRAM_API_KEY`
 - `CARTESIA_API_KEY`
-- `TYPESAFE_API_KEY` (optional; uses Jev as the classifier)
 
 A `.env` in the example folder is the easiest way to set these (see
 `examples/multi-worker/env.example`).

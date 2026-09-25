@@ -22,8 +22,8 @@ captured before moving on. A user who can't see the screen never has to.
   `screen` job answers every tool call, so the example has no worker
   subclass. For "the email field" the worker asks its classifier which
   element on the screen the words mean, then sends the command.
-  With `TYPESAFE_API_KEY` set the classifier is Jev; otherwise the
-  worker's own LLM answers through an `LLMClassifier`.
+  The classifier is the worker's own LLM through an `LLMClassifier`;
+  pass a `JevClassifier` for faster, calibrated answers.
 - **Driven by the form, not hidden state.** Each turn the voice LLM lists
   the inputs and steers toward the next empty one. Progress is the form;
   there is no separate step counter to keep in sync.

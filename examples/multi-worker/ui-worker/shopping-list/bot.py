@@ -22,9 +22,8 @@ classifier and sends the command. Nothing on the UI side runs an LLM turn.
   ``remove_item``. ``add_item`` needs no classifier: the voice LLM already
   carries the text. ``check_list`` reads the snapshot with plain code.
 
-With ``TYPESAFE_API_KEY`` set the worker uses Jev, which answers in about
-a tenth of a second with a calibrated probability; otherwise the worker's
-own LLM answers through an ``LLMClassifier``.
+The worker's classifier is its own LLM through an ``LLMClassifier``; pass a
+``JevClassifier`` for faster, calibrated answers.
 
 Architecture::
 
@@ -50,7 +49,6 @@ Requirements:
 - OPENAI_API_KEY
 - DEEPGRAM_API_KEY
 - CARTESIA_API_KEY
-- TYPESAFE_API_KEY (optional, for Jev)
 """
 
 import os
@@ -63,7 +61,6 @@ from pipecat.adapters.schemas.direct_function import tool_options
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.bus.messages import BusJobRequestMessage
 from pipecat.classifiers.base_classifier import ChoiceQuestion
-from pipecat.classifiers.jev.classifier import JevClassifier
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.job_context import JobError, JobParams
@@ -146,9 +143,7 @@ class ListWorker(UIWorker):
 
     def __init__(self):
         llm = OpenAILLMService(api_key=os.environ["OPENAI_API_KEY"])
-        api_key = os.getenv("TYPESAFE_API_KEY")
-        classifier = JevClassifier(api_key=api_key) if api_key else None
-        super().__init__(UI_NAME, llm=llm, classifier=classifier)
+        super().__init__(UI_NAME, llm=llm)
 
     @job(name="update")
     async def _update(self, message: BusJobRequestMessage) -> None:

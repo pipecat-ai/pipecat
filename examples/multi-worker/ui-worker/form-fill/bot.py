@@ -25,8 +25,8 @@ The flow is driven off the form itself: each turn the voice LLM lists the
 inputs and steers toward the next empty one, so progress is the form, not
 hidden conversation state.
 
-With ``TYPESAFE_API_KEY`` set the worker uses Jev; otherwise its own LLM
-answers through an ``LLMClassifier``.
+The worker's classifier is its own LLM through an ``LLMClassifier``; pass a
+``JevClassifier`` for faster, calibrated answers.
 
 Architecture::
 
@@ -50,7 +50,6 @@ Requirements:
 - OPENAI_API_KEY
 - DEEPGRAM_API_KEY
 - CARTESIA_API_KEY
-- TYPESAFE_API_KEY (optional, for Jev)
 """
 
 import os
@@ -59,7 +58,6 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.classifiers.jev.classifier import JevClassifier
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
@@ -183,11 +181,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         processor_unusable_policy=ProcessorUnusablePolicy.END,
     )
 
-    api_key = os.getenv("TYPESAFE_API_KEY")
-    classifier = JevClassifier(api_key=api_key) if api_key else None
-    ui_worker = UIWorker(
-        UI_NAME, llm=OpenAILLMService(api_key=os.environ["OPENAI_API_KEY"]), classifier=classifier
-    )
+    ui_worker = UIWorker(UI_NAME, llm=OpenAILLMService(api_key=os.environ["OPENAI_API_KEY"]))
 
     runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
 
