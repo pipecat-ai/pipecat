@@ -66,7 +66,7 @@ from pipecat.classifiers.base_classifier import ChoiceQuestion
 from pipecat.classifiers.jev.classifier import JevClassifier
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
-from pipecat.pipeline.job_context import JobError
+from pipecat.pipeline.job_context import JobError, JobParams
 from pipecat.pipeline.job_decorator import job
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
@@ -226,7 +226,9 @@ def _texts(items: Any) -> list[str]:
 async def _ui(params: FunctionCallParams, name: str, payload: dict) -> None:
     """Send a job to the UI worker and hand its answer to the voice LLM."""
     try:
-        async with params.pipeline_worker.job(UI_NAME, name=name, payload=payload, timeout=15) as t:
+        async with params.pipeline_worker.job(
+            UI_NAME, params=JobParams(name=name, payload=payload, timeout=15)
+        ) as t:
             pass
     except JobError as e:
         logger.warning(f"ui job {name} failed: {e}")

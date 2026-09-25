@@ -30,7 +30,7 @@ from pipecat.frames.frames import (
     LLMMessagesAppendFrame,
     LLMMessagesUpdateFrame,
 )
-from pipecat.pipeline.job_context import JobError, JobStatus
+from pipecat.pipeline.job_context import JobError, JobParams, JobStatus
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.openai.llm import OpenAILLMService
@@ -1175,9 +1175,11 @@ class TestScreenTool(unittest.IsolatedAsyncioTestCase):
 
         params.pipeline_worker.job.assert_called_once_with(
             "ui",
-            name="screen",
-            payload={"action": "find", "target": "the Taylor Swift one"},
-            timeout=5,
+            params=JobParams(
+                name="screen",
+                payload={"action": "find", "target": "the Taylor Swift one"},
+                timeout=5,
+            ),
         )
         params.result_callback.assert_awaited_once_with({"label": "Taylor Swift"})
 

@@ -59,7 +59,7 @@ from pipecat.adapters.schemas.direct_function import tool_options
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
-from pipecat.pipeline.job_context import JobError
+from pipecat.pipeline.job_context import JobError, JobParams
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -183,7 +183,7 @@ async def answer_about_screen(params: FunctionCallParams, query: str):
     logger.info(f"answer_about_screen('{query}')")
     try:
         async with params.pipeline_worker.job(
-            "hello", name="respond", payload={"query": query}, timeout=30
+            "hello", params=JobParams(name="respond", payload={"query": query}, timeout=30)
         ) as t:
             pass
     except JobError as e:

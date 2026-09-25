@@ -14,7 +14,7 @@ subclasses that don't need a custom tool schema. See the class for details.
 from loguru import logger
 
 from pipecat.adapters.schemas.direct_function import tool_options
-from pipecat.pipeline.job_context import JobError
+from pipecat.pipeline.job_context import JobError, JobParams
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.workers.llm.tool_decorator import tool
 
@@ -203,7 +203,7 @@ def screen_tools(worker: str, *, timeout: float = 30.0) -> list:
             payload["value"] = value
         try:
             async with params.pipeline_worker.job(
-                worker, name="screen", payload=payload, timeout=timeout
+                worker, params=JobParams(name="screen", payload=payload, timeout=timeout)
             ) as t:
                 pass
         except JobError as e:

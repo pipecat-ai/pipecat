@@ -57,7 +57,13 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.bus.messages import BusJobRequestMessage
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
-from pipecat.pipeline.job_context import JobError, JobGroupError, JobGroupParams, JobStatus
+from pipecat.pipeline.job_context import (
+    JobError,
+    JobGroupError,
+    JobGroupParams,
+    JobParams,
+    JobStatus,
+)
 from pipecat.pipeline.job_decorator import job
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
@@ -203,7 +209,7 @@ async def research(params: FunctionCallParams, query: str):
     logger.info(f"research('{query}')")
     try:
         async with params.pipeline_worker.job(
-            UI_NAME, name="research", payload={"query": query}, timeout=60
+            UI_NAME, params=JobParams(name="research", payload={"query": query}, timeout=60)
         ) as t:
             pass
     except JobError as e:

@@ -79,7 +79,13 @@ from pipecat.bus.messages import BusJobRequestMessage, BusJobResponseMessage
 from pipecat.classifiers.jev.classifier import JevClassifier
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
-from pipecat.pipeline.job_context import JobError, JobGroupError, JobGroupParams, JobStatus
+from pipecat.pipeline.job_context import (
+    JobError,
+    JobGroupError,
+    JobGroupParams,
+    JobParams,
+    JobStatus,
+)
 from pipecat.pipeline.job_decorator import job
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
@@ -361,7 +367,7 @@ async def _ui(params: FunctionCallParams, name: str, payload: dict, timeout: flo
     """Send a job to the UI worker and hand its answer to the voice LLM."""
     try:
         async with params.pipeline_worker.job(
-            UI_NAME, name=name, payload=payload, timeout=timeout
+            UI_NAME, params=JobParams(name=name, payload=payload, timeout=timeout)
         ) as t:
             pass
     except JobError as e:
