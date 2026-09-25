@@ -264,6 +264,15 @@ class PatternPairAggregator(SimpleTextAggregator):
             start = pattern_info["start"]
             end = pattern_info["end"]
 
+            if start == end:
+                # Identical delimiters alternate between opening and closing a pair.
+                unmatched_start = None
+                for match in re.finditer(re.escape(start), text):
+                    unmatched_start = match.start() if unmatched_start is None else None
+                if unmatched_start is not None:
+                    return (unmatched_start, pattern_info)
+                continue
+
             # Count occurrences
             start_count = text.count(start)
             end_count = text.count(end)
@@ -370,6 +379,18 @@ class PatternPairAggregator(SimpleTextAggregator):
                 held_back = longest_trailing_partial_match(
                     self._text, [pattern["start"] for pattern in self._patterns.values()]
                 )
+                # A completed KEEP pair's closing delimiter cannot start another pair.
+                if held_back:
+                    for pattern in self._patterns.values():
+                        if (
+                            pattern["action"] == MatchAction.KEEP
+                            and pattern["start"] == pattern["end"]
+                        ):
+                            delimiter = re.escape(pattern["start"])
+                            for match in re.finditer(
+                                f"{delimiter}.*?{delimiter}", self._text, re.DOTALL
+                            ):
+                                held_back = min(held_back, len(self._text) - match.end())
                 yield_length = len(self._text) - held_back
                 if yield_length > 0:
                     content = self._text[:yield_length]
