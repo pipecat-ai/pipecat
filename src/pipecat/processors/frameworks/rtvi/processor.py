@@ -25,6 +25,7 @@ from pipecat.frames.frames import (
     FunctionCallResultFrame,
     InputAudioRawFrame,
     InputDTMFFrame,
+    InputTextRawFrame,
     InputTransportMessageFrame,
     InputTransportStartAudioStreamingFrame,
     LLMConfigureOutputFrame,
@@ -489,6 +490,11 @@ class RTVIProcessor(FrameProcessor):
             run_llm=opts.run_immediately,
         )
         await self.push_frame(text_frame)
+        if opts.run_immediately:
+            # Keep the local context in sync via LLMMessagesAppendFrame, and
+            # also send direct text input to speech-to-speech services. The
+            # latter do not create a response from a context update alone.
+            await self.push_frame(InputTextRawFrame(text=data.content))
         if toggle_skip_tts:
             output_frame = LLMConfigureOutputFrame(skip_tts=cur_llm_skip_tts)
             await self.push_frame(output_frame)

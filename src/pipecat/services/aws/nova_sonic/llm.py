@@ -38,6 +38,7 @@ from pipecat.frames.frames import (
     Frame,
     FunctionCallFromLLM,
     InputAudioRawFrame,
+    InputTextRawFrame,
     InterruptionFrame,
     LLMContextFrame,
     LLMFullResponseEndFrame,
@@ -608,6 +609,8 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
 
         if isinstance(frame, LLMContextFrame):
             await self._handle_context(frame.context)
+        elif isinstance(frame, InputTextRawFrame):
+            await self._handle_input_text_frame(frame)
         elif isinstance(frame, InputAudioRawFrame):
             await self._handle_input_audio_frame(frame)
         elif isinstance(frame, InterruptionFrame):
@@ -646,6 +649,10 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
             return
 
         await self._send_user_audio_event(frame.audio)
+
+    async def _handle_input_text_frame(self, frame: InputTextRawFrame):
+        """Send typed user input as an interactive Nova Sonic turn."""
+        await self._send_text_event(frame.text, Role.USER, interactive=True)
 
     async def _handle_interruption_frame(self):
         pass

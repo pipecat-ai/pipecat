@@ -15,7 +15,9 @@ from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.frames.frames import (
     InputAudioRawFrame,
     InputDTMFFrame,
+    InputTextRawFrame,
     InputTransportStartAudioStreamingFrame,
+    LLMMessagesAppendFrame,
 )
 from pipecat.processors.frameworks.rtvi.processor import RTVIProcessor
 
@@ -184,6 +186,43 @@ class TestRTVIFrameBasedAudio(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(pushed), 1)
         self.assertIsInstance(pushed[0], InputAudioRawFrame)
         self.assertEqual(pushed[0].sample_rate, 16000)
+
+
+class TestRTVISendText(unittest.IsolatedAsyncioTestCase):
+    async def asyncTearDown(self):
+        await self.processor.cleanup()
+
+    async def test_immediate_text_pushes_context_and_direct_text_input(self):
+        self.processor = RTVIProcessor()
+        self.processor.push_frame = AsyncMock()
+        self.processor.interrupt_bot = AsyncMock()
+        self.processor._setup = Mock(pipeline_worker=Mock(flush_pipeline=AsyncMock()))
+
+        await self.processor._handle_send_text(RTVI.SendTextData(content="Hello"))
+
+        pushed = [call.args[0] for call in self.processor.push_frame.call_args_list]
+        self.assertEqual(len(pushed), 2)
+        self.assertIsInstance(pushed[0], LLMMessagesAppendFrame)
+        self.assertEqual(pushed[0].messages, [{"role": "user", "content": "Hello"}])
+        self.assertTrue(pushed[0].run_llm)
+        self.assertIsInstance(pushed[1], InputTextRawFrame)
+        self.assertEqual(pushed[1].text, "Hello")
+
+    async def test_deferred_text_only_updates_context(self):
+        self.processor = RTVIProcessor()
+        self.processor.push_frame = AsyncMock()
+
+        await self.processor._handle_send_text(
+            RTVI.SendTextData(
+                content="Hold this thought",
+                options=RTVI.SendTextOptions(run_immediately=False),
+            )
+        )
+
+        pushed = [call.args[0] for call in self.processor.push_frame.call_args_list]
+        self.assertEqual(len(pushed), 1)
+        self.assertIsInstance(pushed[0], LLMMessagesAppendFrame)
+        self.assertFalse(pushed[0].run_llm)
 
 
 class TestRTVIDTMF(unittest.IsolatedAsyncioTestCase):

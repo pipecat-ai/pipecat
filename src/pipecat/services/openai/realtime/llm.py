@@ -32,6 +32,7 @@ from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
     InputImageRawFrame,
+    InputTextRawFrame,
     InterimTranscriptionFrame,
     InterruptionFrame,
     LLMContextFrame,
@@ -647,6 +648,8 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
             pass
         elif isinstance(frame, LLMContextFrame):
             await self._handle_context(frame.context)
+        elif isinstance(frame, InputTextRawFrame):
+            await self._send_user_text(frame.text)
         elif isinstance(frame, InputAudioRawFrame):
             if not self._audio_input_paused:
                 await self._send_user_audio(frame)
@@ -1317,6 +1320,30 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
                 frame.sample_rate * frame.num_channels * 2 * self._user_audio_preroll_secs
             )
             self._user_audio_preroll_buffer = self._user_audio_preroll_buffer[-preroll_len:]
+
+    async def _send_user_text(self, text: str):
+        """Send typed user input and start a new Realtime response."""
+        if not text or self._disconnecting:
+            return
+
+        # The context frame that accompanies an InputTextRawFrame is used to
+        # seed a new session. Sending this item separately before that setup
+        # would duplicate the user message in the remote conversation.
+        if not self._api_session_ready or self._llm_needs_conversation_setup:
+            self._run_llm_when_api_session_ready = True
+            return
+
+        item = events.ConversationItem(
+            type="message",
+            role="user",
+            content=[events.ItemContent(type="input_text", text=text)],
+        )
+        event = events.ConversationItemCreateEvent(item=item)
+        # The local context already contains the text, so do not add the
+        # provider echo to it again when the service receives the item event.
+        self._messages_added_manually[item.id] = True
+        await self.send_client_event(event)
+        await self._create_response()
 
     async def _replay_user_audio_preroll(self):
         """Re-append the buffered pre-roll audio to the input buffer.
