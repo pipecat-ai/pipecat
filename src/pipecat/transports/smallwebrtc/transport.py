@@ -22,6 +22,7 @@ import numpy as np
 from loguru import logger
 from pydantic import BaseModel
 
+from pipecat.audio.utils import _apply_half_hann_fade_out
 from pipecat.frames.frames import (
     CancelFrame,
     ClientConnectedFrame,
@@ -122,6 +123,47 @@ class RawAudioTrack(AudioStreamTrack):
             self._chunk_queue.append((chunk, fut))
 
         return future
+
+    def _release_interrupted_audio(self) -> None:
+        """Release the oldest queued write and discard later stale writes.
+
+        Each non-empty call to :meth:`add_audio_bytes` ends with a
+        future-bearing chunk. Retaining through the first such chunk keeps only
+        the audio already closest to playout. Applying one envelope across that
+        exact remainder preserves its first sample, ends at silence, and adds
+        no duration.
+
+        A rapid second interruption can arrive after a new write was appended
+        behind a previous release tail. Those later writes have not reached
+        playout yet, so they are discarded and their waiters are cancelled.
+        """
+        if not self._chunk_queue:
+            return
+
+        queued_chunks = list(self._chunk_queue)
+        boundary = next(
+            (index for index, (_, future) in enumerate(queued_chunks) if future is not None),
+            len(queued_chunks) - 1,
+        )
+        release_chunks = queued_chunks[: boundary + 1]
+        stale_chunks = queued_chunks[boundary + 1 :]
+
+        for _, future in stale_chunks:
+            if future and not future.done():
+                future.cancel()
+
+        audio = b"".join(chunk for chunk, _ in release_chunks)
+        faded = _apply_half_hann_fade_out(audio)
+
+        faded_chunks = []
+        byte_offset = 0
+        for chunk, future in release_chunks:
+            faded_chunk = faded[byte_offset : byte_offset + len(chunk)]
+            faded_chunks.append((faded_chunk, future))
+            byte_offset += len(chunk)
+
+        self._chunk_queue.clear()
+        self._chunk_queue.extend(faded_chunks)
 
     async def recv(self):
         """Return the next audio frame for WebRTC transmission.
@@ -456,6 +498,11 @@ class SmallWebRTCClient:
             await self._audio_output_track.add_audio_bytes(frame.audio)
             return True
         return False
+
+    def _release_interrupted_audio(self) -> None:
+        """Release audio still waiting in the WebRTC output track."""
+        if self._audio_output_track:
+            self._audio_output_track._release_interrupted_audio()
 
     async def write_video_frame(self, frame: OutputImageRawFrame) -> bool:
         """Write a video frame to the WebRTC connection.
@@ -914,6 +961,22 @@ class SmallWebRTCOutputTransport(BaseOutputTransport):
         """
         await super().cancel(frame)
         await self._teardown()
+
+    def _prepare_audio_interruption(self, destination: str | None) -> bool:
+        """Fade audio already queued for WebRTC playout.
+
+        Args:
+            destination: The interrupted destination. SmallWebRTC currently has
+                only one output audio track, so this value is unused.
+        """
+        # Named media senders share the same RawAudioTrack. Releasing that shared
+        # queue for one sender could cancel another sender's in-flight write, so
+        # retain the existing BaseOutput interruption behavior for that setup.
+        if self._params.audio_out_destinations or self._params.video_out_destinations:
+            return False
+
+        self._client._release_interrupted_audio()
+        return True
 
     async def send_message(
         self, frame: OutputTransportMessageFrame | OutputTransportMessageUrgentFrame
