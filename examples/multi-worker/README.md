@@ -65,8 +65,8 @@ A Pipecat **worker** is a unit of work attached to a shared bus. Workers exchang
 | Example                                                          | What it shows                                                                       |
 | ---------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
 | [`ui-worker/hello-snapshot/`](ui-worker/hello-snapshot/)         | Smallest possible UIWorker example: voice grounded in whatever's on the page.       |
-| [`ui-worker/shopping-list/`](ui-worker/shopping-list/)           | Every voice turn drives the UI; speech is the input modality, the screen is truth.  |
+| [`ui-worker/shopping-list/`](ui-worker/shopping-list/)           | The voice LLM calls tools; the UIWorker grounds items on the page with a classifier. |
 | [`ui-worker/form-fill/`](ui-worker/form-fill/)                   | Accessibility-first voice-guided form walkthrough.                                  |
 | [`ui-worker/deixis/`](ui-worker/deixis/)                         | Worker reads the user's current selection from the snapshot ("explain this").       |
-| [`ui-worker/async-tasks/`](ui-worker/async-tasks/)               | A `BaseUIWorker` dispatcher fans out long-running work, streaming progress + cancellation to UI — no second LLM. |
+| [`ui-worker/async-tasks/`](ui-worker/async-tasks/)               | A UIWorker fans out long-running work as a job group, streaming progress + cancellation to the UI. |
 | [`ui-worker/document-review/`](ui-worker/document-review/)       | Synthesis demo: snapshot + deixis + form-fill actions + async job groups in one app. |

@@ -4,48 +4,42 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Shopping list — every voice turn drives the UI; speech is incidental.
+"""Shopping list: the voice LLM asks, the UI worker finds and acts.
 
 The page renders a shopping list. The user talks: "add milk and eggs",
-"check off the bread", "drop the last one", "what's left?". Every user
-turn updates the list on screen; the assistant may also say something
-back. Updates run in parallel on separate workers — the voice layer
-never mutates the list.
+"check off the bread", "drop the last one", "what's left?". The voice LLM
+understands the words and calls a tool with what it understood; the tool
+sends a job to the UI worker, which finds the item on screen with its
+classifier and sends the command. Nothing on the UI side runs an LLM turn.
 
-This is the pattern for "every input acts, may speak":
+- The **voice layer** is an ordinary voice pipeline (STT, LLM, TTS). Its
+  LLM converses and calls tools: ``add_items``, ``check_items``,
+  ``uncheck_items``, ``remove_items``, ``clear_checked`` and ``check_list``.
+  It never sees the screen; every tool returns short data.
+- The **UI worker** ("ui") owns the list. Each tool is a job on it. For an
+  item named in words, the worker asks its classifier which checkbox on
+  the live ``<ui_state>`` the words mean, then sends ``set_checked`` or
+  ``remove_item``. ``add_item`` needs no classifier: the voice LLM already
+  carries the text. ``check_list`` reads the snapshot with plain code.
 
-- The **voice layer** is an ordinary voice pipeline (STT → LLM → TTS).
-  Its LLM converses and never *mutates* the list. It has one read-only
-  tool, ``check_list``, to look up what's currently on screen when the
-  user asks — otherwise it can't see the page, and so can't know about
-  items the user checked off (or added) by hand.
-- A **UIWorker** ("ui") does all the list work. It is *not* in the voice
-  pipeline. Instead, the voice pipeline's user aggregator fires
-  ``on_user_turn_stopped`` once per user turn; that handler dispatches
-  the transcript to the UIWorker as a ``respond`` job (a bus message).
-  The UIWorker reads the current ``<ui_state>`` snapshot (auto-injected
-  before its inference) and calls ``update_list`` to add / check /
-  remove items. It acts silently — its LLM output never reaches TTS,
-  because it lives on its own worker.
-
-The snapshot is the shared source of truth: the UIWorker acts on it, and
-``check_list`` reads it (via ``ListWorker.list_summary``) so the voice
-layer answers list questions from what's really on screen — including
-manual edits — instead of from conversation memory.
+With ``TYPESAFE_API_KEY`` set the worker uses Jev, which answers in about
+a tenth of a second with a calibrated probability; otherwise the worker's
+own LLM answers through an ``LLMClassifier``.
 
 Architecture::
 
     Voice pipeline (PipelineWorker "main", owns transport + RTVI):
-      transport.in → STT → user_agg → LLM → TTS → transport.out → assistant_agg
-        ├── @on_user_turn_stopped: worker.job("ui", name="respond",
-        │                                     payload={"query": transcript})
-        └── @tool check_list() → list_worker.list_summary()   # read-only
+      transport.in -> STT -> user_agg -> LLM -> TTS -> transport.out -> assistant_agg
+        └── @tool add_items / check_items / uncheck_items / remove_items /
+            clear_checked / check_list
+              └── params.pipeline_worker.job("ui", name=..., payload=...)
 
-    UIWorker "ui" (job-based, acts silently):
-      └── @tool update_list(add, check, uncheck, remove, highlight)
-            └── send_command("add_item" / "set_checked" / "remove_item")
-                + respond_to_job()   # no answer (silent)
-      └── list_summary() → reads the live snapshot for check_list
+    ListWorker (UIWorker "ui", no LLM turn):
+      ├── @job add            -> send_command("add_item") per item
+      ├── @job set_checked    -> classifier picks the checkbox, send_command("set_checked")
+      ├── @job remove         -> classifier picks the checkbox, send_command("remove_item")
+      ├── @job clear_checked  -> send_command("remove_item") per checked item
+      └── @job summary        -> the list from the snapshot, highlighting what is left
 
 Run::
 
@@ -58,18 +52,24 @@ Requirements:
 - OPENAI_API_KEY
 - DEEPGRAM_API_KEY
 - CARTESIA_API_KEY
+- TYPESAFE_API_KEY (optional, for Jev)
 """
 
 import os
+from typing import Any
 
 from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.adapters.schemas.direct_function import tool_options
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.bus.messages import BusJobRequestMessage
+from pipecat.classifiers.base_classifier import ChoiceQuestion
+from pipecat.classifiers.jev.classifier import JevClassifier
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.job_context import JobError
+from pipecat.pipeline.job_decorator import job
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -85,7 +85,6 @@ from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
-from pipecat.workers.llm import tool
 from pipecat.workers.runner import WorkerRunner
 from pipecat.workers.ui import UIWorker
 
@@ -105,175 +104,220 @@ transport_params = {
 
 
 VOICE_PROMPT = """\
-You are the voice of a shopping-list assistant. A separate UI layer \
-sees the list and updates it on screen; you do NOT touch the list \
-yourself and you cannot see the screen.
+You are the voice of a shopping-list assistant. You cannot see the \
+screen; the list lives there and your tools change and read it.
 
-Be a brief, friendly companion. Acknowledge what the user asked for \
-("Sure, adding milk and eggs") and react naturally. For ANY question \
-about the list — what's on it, what's left, how many items, which \
-came first or last, whether something is on it — call ``check_list`` \
-and answer only from what this call returns. The user can add, check \
-off, and remove items on screen at any time, so the conversation \
-(including earlier ``check_list`` results) is always stale: call \
-``check_list`` again every time, even if you asked it a moment ago. \
+When the user wants something added, checked off, unchecked or \
+removed, call the matching tool: add_items, check_items, uncheck_items, \
+remove_items. "Clear the ones I've got" is clear_checked. Name each \
+item as the thing itself, never as a pronoun: if you suggested jamón \
+ibérico and the user says "add that", call add_items(["jamón ibérico"]); \
+"check off the last one" after you listed milk, eggs and bread is \
+check_items(["bread"]). When you are not sure what "that" or "it" \
+refers to, ask before calling a tool. For ANY question about the list, \
+call check_list and answer only from what it returns; the user can edit \
+the list on screen at any time, so call it again every time. If a tool \
+says an item was not found, say so briefly and ask which one they mean.
+
 Keep every reply to one short spoken sentence. Don't describe how \
-you're updating the list — the screen shows that. For a plain \
-greeting, greet back warmly."""
+you're updating the list; the screen shows that. For a plain greeting, \
+greet back warmly."""
 
 
-# The UI wire-format guide (UI_STATE_PROMPT_GUIDE) is appended to the LLM's
-# system instruction automatically by UIWorker, so this prompt only needs the
-# app-specific behavior.
-UI_PROMPT = """\
-You maintain a shopping list by voice. The current ``<ui_state>`` \
-block is in your context. Each list item is a checkbox with a \
-snapshot ref (e.g. ``e5``) and a label (the item text). A checked-off \
-item is tagged ``[checked]`` (unchecked items have no such tag). Use \
-the labels to resolve which item the user means, and the ``[checked]`` \
-tag to tell done from not-done.
-
-## Tool: update_list
-
-Every turn calls ``update_list`` exactly once — even when there's \
-nothing to change (call it with no arguments). One tool call per turn.
-
-``update_list(add=None, check=None, uncheck=None, remove=None, highlight=None)``:
-
-- ``add`` (OPTIONAL): a list of item texts to append. Split a spoken \
-list into separate items ("milk, eggs and bread" → \
-``["milk", "eggs", "bread"]``). Normalize lightly (lowercase, drop \
-filler like "some" / "a couple of").
-- ``check`` (OPTIONAL): a list of refs to mark done.
-- ``uncheck`` (OPTIONAL): a list of refs to mark not done.
-- ``remove`` (OPTIONAL): a list of refs to delete.
-- ``highlight`` (OPTIONAL): a list of refs to flash briefly. Use it to \
-*show* the user something when they ask (e.g. highlight the unchecked \
-items for "what's left?").
-
-## Decision rules
-
-- **"Add X (and Y)"** → ``add`` with one entry per item.
-- **"Check off / got / cross out X"** → resolve X's ref from \
-``<ui_state>``, set ``check``.
-- **"Uncheck / put back X"** → set ``uncheck``.
-- **"Remove / delete / never mind X"**, **"clear the checked ones"** → \
-set ``remove`` with the matching refs (read the checked state from \
-``<ui_state>`` for "the checked ones").
-- **"the last one"** → the last item in ``<ui_state>``.
-- **"What's left? / what do I still need?"** → ``highlight`` the \
-unchecked items. **"What's on my list?"** → ``highlight`` everything. \
-(The voice layer speaks; you just point.)
-- **A greeting or anything not about the list** → call ``update_list`` \
-with no arguments (no-op) so the turn completes.
-
-## Examples
-
-(refs are illustrative; use the actual refs from the current \
-``<ui_state>``)
-
-- "Add milk and a dozen eggs." → \
-``update_list(add=["milk", "eggs"])``
-- "Check off the milk." → ``update_list(check=["e5"])``
-- "Actually drop the eggs." → ``update_list(remove=["e7"])``
-- "Clear the ones I've got." (e5, e9 checked) → \
-``update_list(remove=["e5", "e9"])``
-- "What's left?" (e7, e11 unchecked) → \
-``update_list(highlight=["e7", "e11"])``
-- "Hey there." → ``update_list()``"""
-
-
-def _collect_checkbox_items(node, items: list[tuple[str, bool]]) -> None:
-    """Walk an a11y snapshot node, collecting (text, checked) for each checkbox."""
+def _checkboxes(node: Any, items: list[tuple[str, str, bool]]) -> None:
+    """Walk a snapshot node, collecting (ref, text, checked) for each checkbox."""
     if not isinstance(node, dict):
         return
     if node.get("role") == "checkbox":
-        name = node.get("name")
-        if isinstance(name, str) and name:
-            items.append((name, "checked" in (node.get("state") or [])))
+        ref, name = node.get("ref"), node.get("name")
+        if isinstance(ref, str) and isinstance(name, str) and name:
+            items.append((ref, name, "checked" in (node.get("state") or [])))
     for child in node.get("children") or []:
-        _collect_checkbox_items(child, items)
+        _checkboxes(child, items)
 
 
 class ListWorker(UIWorker):
-    """UIWorker that maintains the shopping list, silently.
+    """UIWorker that keeps the shopping list, with a classifier and no LLM turn.
 
-    A single bundled ``update_list`` tool, always called once per turn,
-    maps the user's request to ``add_item`` / ``set_checked`` /
-    ``remove_item`` UI commands (plus the standard ``highlight``). The
-    tool completes the ``respond`` job with no answer
-    (``respond_to_job()``), so nothing is spoken — the separate voice layer
-    owns speech.
+    Every job takes the items in the user's words. The classifier picks the
+    checkbox each one means among those on screen; adding needs no
+    classifier, since the voice LLM already carries the text.
     """
 
     def __init__(self):
-        llm = OpenAILLMService(
-            api_key=os.environ["OPENAI_API_KEY"],
-            settings=OpenAILLMService.Settings(system_instruction=UI_PROMPT),
-        )
-        super().__init__(UI_NAME, llm=llm)
+        llm = OpenAILLMService(api_key=os.environ["OPENAI_API_KEY"])
+        api_key = os.getenv("TYPESAFE_API_KEY")
+        classifier = JevClassifier(api_key=api_key) if api_key else None
+        super().__init__(UI_NAME, llm=llm, classifier=classifier)
 
-    @tool
-    async def update_list(
-        self,
-        params: FunctionCallParams,
-        add: list[str] | None = None,
-        check: list[str] | None = None,
-        uncheck: list[str] | None = None,
-        remove: list[str] | None = None,
-        highlight: list[str] | None = None,
-    ):
-        """Update the shopping list. Called exactly once per turn.
+    @job(name="add")
+    async def _add(self, message: BusJobRequestMessage) -> None:
+        items = _texts(message)
+        for text in items:
+            await self.send_command("add_item", {"text": text})
+        await self.send_job_response(message.job_id, {"added": items})
 
-        Args:
-            add: New item texts to append (one entry per item).
-            check: Snapshot refs of items to mark done.
-            uncheck: Snapshot refs of items to mark not done.
-            remove: Snapshot refs of items to delete.
-            highlight: Snapshot refs of items to flash briefly (e.g. to
-                show what's left when the user asks).
-        """
-        logger.info(
-            f"{self}: update_list(add={add!r}, check={check!r}, uncheck={uncheck!r}, "
-            f"remove={remove!r}, highlight={highlight!r})"
-        )
-        # Defensive guards: skip malformed entries so a stray value can't
-        # crash the tool before respond_to_job fires (which would hold the
-        # single-flight lock until the requester's timeout).
-        for text in add or []:
-            if isinstance(text, str) and text.strip():
-                await self.send_command("add_item", {"text": text.strip()})
-        for ref in check or []:
-            if isinstance(ref, str):
-                await self.send_command("set_checked", {"ref": ref, "checked": True})
-        for ref in uncheck or []:
-            if isinstance(ref, str):
-                await self.send_command("set_checked", {"ref": ref, "checked": False})
-        for ref in remove or []:
-            if isinstance(ref, str):
+    @job(name="set_checked")
+    async def _set_checked(self, message: BusJobRequestMessage) -> None:
+        checked = bool((message.payload or {}).get("checked", True))
+        done, missing = [], []
+        for text in _texts(message):
+            ref, label = await self._item(text)
+            if ref:
+                await self.send_command("set_checked", {"ref": ref, "checked": checked})
+                done.append(label)
+            else:
+                missing.append(text)
+        await self.send_job_response(message.job_id, {"done": done, "not_found": missing})
+
+    @job(name="remove")
+    async def _remove(self, message: BusJobRequestMessage) -> None:
+        done, missing = [], []
+        for text in _texts(message):
+            ref, label = await self._item(text)
+            if ref:
                 await self.send_command("remove_item", {"ref": ref})
-        for ref in highlight or []:
-            if isinstance(ref, str):
+                done.append(label)
+            else:
+                missing.append(text)
+        await self.send_job_response(message.job_id, {"done": done, "not_found": missing})
+
+    @job(name="clear_checked")
+    async def _clear_checked(self, message: BusJobRequestMessage) -> None:
+        removed = []
+        for ref, name, checked in self._list():
+            if checked:
+                await self.send_command("remove_item", {"ref": ref})
+                removed.append(name)
+        await self.send_job_response(message.job_id, {"removed": removed})
+
+    @job(name="summary")
+    async def _summary(self, message: BusJobRequestMessage) -> None:
+        # Flash what is still needed while the voice reads it out.
+        items = self._list()
+        for ref, _, checked in items:
+            if not checked:
                 await self.highlight(ref)
-        await self.respond_to_job()
-        await params.result_callback(None)
+        await self.send_job_response(
+            message.job_id,
+            {"items": [{"item": name, "checked": checked} for _, name, checked in items]},
+        )
 
-    def list_summary(self) -> str:
-        """Summarize the current list from the live ``<ui_state>`` snapshot.
+    def _list(self) -> list[tuple[str, str, bool]]:
+        """The list on screen as (ref, text, checked), in page order."""
+        items: list[tuple[str, str, bool]] = []
+        _checkboxes((self._latest_snapshot or {}).get("root"), items)
+        return items
 
-        Reads the same snapshot the worker acts on, so it reflects
-        everything on screen — including items the user checked off (or
-        added) by hand. The voice layer's ``check_list`` tool calls this
-        to answer list questions from ground truth, not conversation memory.
-        """
-        items: list[tuple[str, bool]] = []
-        _collect_checkbox_items((self._latest_snapshot or {}).get("root"), items)
+    async def _item(self, text: str) -> tuple[str | None, str | None]:
+        """The checkbox the user's words mean: (ref, label), or (None, None)."""
+        items = self._list()
         if not items:
-            return "The shopping list is empty."
-        entries = [
-            f"{text} ({'checked off' if checked else 'still needed'})" for text, checked in items
-        ]
-        return "Current list: " + "; ".join(entries) + "."
+            return None, None
+        options: dict[str, Any] = {ref: name for ref, name, _ in items}
+        question = ChoiceQuestion(instructions="the list item the user means", options=options)
+        result = (await self.classifier.choice(text, {"item": question}))["item"]
+        logger.debug(
+            f"{self.name}: {text!r} -> {options[result.choice]!r} ({result.confidence:.2f})"
+        )
+        if result.confidence < 0.5:
+            return None, None
+        return result.choice, options[result.choice]
+
+
+def _texts(message: BusJobRequestMessage) -> list[str]:
+    """The non-empty item strings a job's payload carries under ``items``."""
+    items = (message.payload or {}).get("items") or []
+    return [i.strip() for i in items if isinstance(i, str) and i.strip()]
+
+
+async def _ui(params: FunctionCallParams, name: str, payload: dict) -> None:
+    """Send a job to the UI worker and hand its answer to the voice LLM."""
+    try:
+        async with params.pipeline_worker.job(UI_NAME, name=name, payload=payload, timeout=15) as t:
+            pass
+    except JobError as e:
+        logger.warning(f"ui job {name} failed: {e}")
+        await params.result_callback({"error": str(e)})
+        return
+    await params.result_callback(t.response)
+
+
+@tool_options(cancel_on_interruption=False, timeout_secs=15)
+async def add_items(params: FunctionCallParams, items: list[str]):
+    """Add items to the shopping list.
+
+    Args:
+        params: Framework-provided tool invocation context.
+        items: The items to add, one string each, named as they should
+            appear on the list, such as "jamón ibérico". Resolve "that", "it"
+            or "the one you mentioned" from the conversation; never pass the
+            pronoun.
+    """
+    await _ui(params, "add", {"items": items})
+
+
+@tool_options(cancel_on_interruption=False, timeout_secs=15)
+async def check_items(params: FunctionCallParams, items: list[str]):
+    """Check off items the user has got.
+
+    Args:
+        params: Framework-provided tool invocation context.
+        items: The items, each named as on the list or as the user said
+            it, such as "the bread". Resolve "that" or "the last one" from
+            the conversation; never pass the pronoun.
+    """
+    await _ui(params, "set_checked", {"items": items, "checked": True})
+
+
+@tool_options(cancel_on_interruption=False, timeout_secs=15)
+async def uncheck_items(params: FunctionCallParams, items: list[str]):
+    """Put items back on the list that were checked off.
+
+    Args:
+        params: Framework-provided tool invocation context.
+        items: The items, each named as on the list or as the user said
+            it. Resolve "that" or "it" from the conversation; never pass the
+            pronoun.
+    """
+    await _ui(params, "set_checked", {"items": items, "checked": False})
+
+
+@tool_options(cancel_on_interruption=False, timeout_secs=15)
+async def remove_items(params: FunctionCallParams, items: list[str]):
+    """Remove items from the list.
+
+    Args:
+        params: Framework-provided tool invocation context.
+        items: The items, each named as on the list or as the user said
+            it. Resolve "that" or "it" from the conversation; never pass the
+            pronoun.
+    """
+    await _ui(params, "remove", {"items": items})
+
+
+@tool_options(cancel_on_interruption=False, timeout_secs=15)
+async def clear_checked(params: FunctionCallParams):
+    """Remove every item that is checked off.
+
+    Args:
+        params: Framework-provided tool invocation context.
+    """
+    await _ui(params, "clear_checked", {})
+
+
+@tool_options(cancel_on_interruption=False, timeout_secs=15)
+async def check_list(params: FunctionCallParams):
+    """Look up what is on the shopping list and what is checked off.
+
+    Call it for any question about the list. The user can edit the list on
+    screen at any time, so earlier results are stale; call it again every
+    time rather than answering from memory.
+
+    Args:
+        params: Framework-provided tool invocation context.
+    """
+    await _ui(params, "summary", {})
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
@@ -291,41 +335,23 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         settings=OpenAILLMService.Settings(system_instruction=VOICE_PROMPT),
     )
 
-    # The UI worker owns the list; create it up front so the voice layer's
-    # read-only ``check_list`` tool can look at its live snapshot.
-    list_worker = ListWorker()
-
-    @tool_options(timeout_secs=10)
-    async def check_list(params: FunctionCallParams):
-        """Look up what's currently on the shopping list and what's checked off.
-
-        Call this for any question about the list — its contents, what's
-        still needed, counts, order, or a specific item. The user can edit
-        the list on screen at any time, so earlier results are stale;
-        call it again on every list question rather than answering from
-        memory.
-        """
-        summary = list_worker.list_summary()
-        logger.info(f"check_list -> {summary!r}")
-        await params.result_callback(summary)
-
-    context = LLMContext(tools=[check_list])
+    context = LLMContext(
+        tools=[add_items, check_items, uncheck_items, remove_items, clear_checked, check_list]
+    )
     aggregators = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
     )
-    user_aggregator = aggregators.user()
-    assistant_aggregator = aggregators.assistant()
 
     pipeline = Pipeline(
         [
             transport.input(),
             stt,
-            user_aggregator,
+            aggregators.user(),
             llm,
             tts,
             transport.output(),
-            assistant_aggregator,
+            aggregators.assistant(),
         ]
     )
 
@@ -339,27 +365,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
 
-    await runner.add_workers(list_worker, worker)
-
-    # Every user turn drives the UI: forward the transcript to the UIWorker
-    # as a respond job (a bus message). Fire it from the turn-stopped event
-    # so the voice LLM (which runs from the same turn) and the UIWorker act
-    # in parallel — list *changes* never go through a tool call (the voice
-    # LLM only uses a tool to *read* the list, via check_list). This handler
-    # runs in its own task, so awaiting the job here does not block the voice path.
-    @user_aggregator.event_handler("on_user_turn_stopped")
-    async def on_user_turn_stopped(aggregator, strategy, message):
-        transcript = (message.content or "").strip()
-        if not transcript:
-            return
-        logger.info(f"Dispatching turn to UI worker: {transcript!r}")
-        try:
-            async with worker.job(
-                UI_NAME, name="respond", payload={"query": transcript}, timeout=15
-            ):
-                pass
-        except JobError as e:
-            logger.warning(f"ui job failed: {e}")
+    await runner.add_workers(ListWorker(), worker)
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
@@ -369,7 +375,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
                 "role": "developer",
                 "content": (
                     "Greet the user briefly. Tell them they can build their "
-                    "shopping list by voice — add items, check things off, or "
+                    "shopping list by voice: add items, check things off, or "
                     "ask what's left. One short sentence."
                 ),
             }
