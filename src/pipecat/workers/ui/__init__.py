@@ -8,10 +8,9 @@
 
 Composes the RTVI UI wire protocol (client events, accessibility snapshots,
 server UI commands) with ``screen_tools``, the tool a voice LLM uses to ask a
-``UIWorker`` about the screen, and an opt-in ``ReplyToolMixin`` for the bundled
-reply tool. ``PipelineWorker`` connects a ``UIWorker`` to the client
-automatically whenever RTVI is enabled — no decorator or separate component to
-wire up.
+``UIWorker`` about the screen. ``PipelineWorker`` connects a ``UIWorker`` to the
+client automatically whenever RTVI is enabled — no decorator or separate
+component to wire up.
 """
 
 from pipecat.bus.ui.messages import (

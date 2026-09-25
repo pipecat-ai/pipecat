@@ -16,11 +16,20 @@ from loguru import logger
 from pipecat.adapters.schemas.direct_function import tool_options
 from pipecat.pipeline.job_context import JobError, JobParams
 from pipecat.services.llm_service import FunctionCallParams
+from pipecat.utils.deprecation import deprecated
 from pipecat.workers.llm.tool_decorator import tool
 
 
+@deprecated(
+    "`ReplyToolMixin` is deprecated since 1.12.0 and will be removed in 2.0.0. "
+    "Use `screen_tools` instead."
+)
 class ReplyToolMixin:
     """Expose a ``reply`` tool covering the full standard action set.
+
+    .. deprecated:: 1.12.0
+        Use :func:`screen_tools` instead: the voice LLM asks the worker through
+        the ``screen`` job and says the answer itself. Will be removed in 2.0.0.
 
     Single bundled LLM tool with a required spoken ``answer`` plus
     optional visual and state-changing actions. One tool call per

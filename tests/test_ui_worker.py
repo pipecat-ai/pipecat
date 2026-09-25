@@ -9,6 +9,7 @@
 import asyncio
 import json
 import unittest
+import warnings
 from unittest.mock import AsyncMock, MagicMock
 
 from pipecat.adapters.schemas.direct_function import DirectFunctionWrapper
@@ -707,7 +708,8 @@ class TestUIWorkerRespondToJob(unittest.IsolatedAsyncioTestCase):
         message = BusJobRequestMessage(source="voice", target="ui", job_name="respond", job_id="t1")
         t = await _start(worker, message)
 
-        await worker.respond_to_job("spoken phrase", tts_speak=True)
+        with self.assertWarns(DeprecationWarning):
+            await worker.respond_to_job("spoken phrase", tts_speak=True)
         await t
 
         # Responds None so the requester's voice LLM does not run...
@@ -725,7 +727,9 @@ class TestUIWorkerRespondToJob(unittest.IsolatedAsyncioTestCase):
         message = BusJobRequestMessage(source="voice", target="ui", job_name="respond", job_id="t1")
         t = await _start(worker, message)
 
-        await worker.respond_to_job(tts_speak=True)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            await worker.respond_to_job(tts_speak=True)
         await t
 
         worker.send_bus_message.assert_not_awaited()
@@ -1025,21 +1029,6 @@ class TestUIWorkerClassifier(unittest.IsolatedAsyncioTestCase):
         worker = await _make_worker(classifier=classifier)
         self.assertIsNone(await worker.which_element("that one"))
         self.assertEqual(classifier.asked, [])
-
-    async def test_say_asks_the_pipeline_to_speak(self):
-        worker = await _make_worker()
-        worker.send_bus_message = AsyncMock()
-
-        await worker.say("Two items in your cart.")
-
-        sent = worker.send_bus_message.await_args.args[0]
-        self.assertIsInstance(sent, BusTTSSpeakMessage)
-        self.assertEqual(sent.text, "Two items in your cart.")
-        self.assertIsNone(sent.target)
-        self.assertTrue(sent.append_to_context)
-
-        await worker.say("Done.", target="voice")
-        self.assertEqual(worker.send_bus_message.await_args.args[0].target, "voice")
 
 
 def _job(name: str, payload: dict) -> BusJobRequestMessage:

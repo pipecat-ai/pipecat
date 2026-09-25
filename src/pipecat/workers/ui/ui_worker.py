@@ -9,6 +9,7 @@
 import asyncio
 import json
 import time
+import warnings
 from dataclasses import asdict, is_dataclass
 from typing import Any, NamedTuple
 
@@ -116,7 +117,6 @@ class UIWorker(LLMContextWorker):
       the user means (``which_element``), whether something is true of the
       screen (``check_screen``), which elements match a description
       (``select_elements``), and ``act`` on an element named in words.
-      ``say`` speaks a line through the pipeline's TTS.
     - Answer a voice LLM's questions about the screen through the ``screen``
       job: find an element, check whether something is true, select the
       elements matching a description, list what is on screen, read the
@@ -352,8 +352,7 @@ class UIWorker(LLMContextWorker):
         Convenience wrapper around ``send_command("scroll_to", ScrollTo(ref=ref))``.
         These ``scroll_to`` / ``highlight`` / ``select_text`` / ``click`` /
         ``set_input_value`` helpers are plain methods, not LLM tools: compose
-        them inside a custom ``@tool`` body, or use ``ReplyToolMixin`` for the
-        standard shape.
+        them inside a ``@job`` handler or a custom ``@tool`` body.
 
         Args:
             ref: Snapshot ref (e.g. ``"e42"``) from the latest ``<ui_state>``.
@@ -581,21 +580,6 @@ class UIWorker(LLMContextWorker):
             if role is None or e.role == role
         ]
 
-    async def say(self, text: str, *, target: str | None = None) -> None:
-        """Have the pipeline say something through its TTS, with no LLM turn.
-
-        Publishes a ``BusTTSSpeakMessage``; the pipeline worker that receives
-        it queues a ``TTSSpeakFrame``, and the text goes into the conversation
-        context as something the assistant said.
-
-        Args:
-            text: What to say.
-            target: The pipeline worker to address. ``None``, the default,
-                reaches every pipeline worker, which is the one there is in a
-                single-bot app.
-        """
-        await self.send_bus_message(BusTTSSpeakMessage(source=self.name, target=target, text=text))
-
     async def on_bus_message(self, message: BusMessage) -> None:
         """Dispatch UI events alongside base lifecycle handling."""
         await super().on_bus_message(message)
@@ -733,26 +717,29 @@ class UIWorker(LLMContextWorker):
         """Complete the in-flight job with the worker's answer.
 
         The reply the LLM writes completes the job on its own; call this from
-        a ``@tool`` to answer with something else or to deliver the answer
-        differently. ``tts_speak`` picks the delivery; the two modes are
-        mutually exclusive (one voice per turn):
-
-        - default: the job responds with ``{"answer": answer}`` for the
-          requester's voice LLM to phrase.
-        - ``tts_speak=True``: ``answer`` is spoken verbatim by the requester's
-          TTS (via ``BusTTSSpeakMessage``, and added to its context) while the
-          job responds ``None`` so the voice LLM doesn't also speak.
-
-        A falsy ``answer`` completes the turn silently. No-op when no job is in
+        a ``@tool`` to answer with something else. The job responds with
+        ``{"answer": answer}`` for the requester's voice LLM to phrase, and a
+        falsy ``answer`` completes the turn silently. No-op when no job is in
         flight or it was already answered.
 
         Args:
-            answer: The worker's answer -- spoken verbatim (``tts_speak=True``)
-                or handed to the requester's voice LLM to phrase (default).
-            tts_speak: Speak ``answer`` verbatim via the requester's TTS instead
-                of returning it for the requester's voice LLM to phrase.
+            answer: The worker's answer, handed to the requester's voice LLM to
+                phrase.
+            tts_speak: Speak ``answer`` verbatim through the requester's TTS
+                and respond ``None``.
+
+                .. deprecated:: 1.12.0
+                    No replacement: respond with ``answer`` and let the
+                    requester's voice LLM say it. Will be removed in 2.0.0.
             status: Completion status. Defaults to ``JobStatus.COMPLETED``.
         """
+        if tts_speak:
+            warnings.warn(
+                "`tts_speak` on `respond_to_job` is deprecated since 1.12.0 and will be "
+                "removed in 2.0.0. Respond with the answer and let the voice LLM say it.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         pending = self._pending
         if pending is None or pending.done() or self._current_job is None:
             return
