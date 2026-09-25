@@ -111,12 +111,12 @@ IDLE_UPDATE_TYPE = "idle"
 #: The ``type`` of the update that says the backend could not go on.
 ERROR_UPDATE_TYPE = "error"
 
-#: Appended to the backend LLM's system instruction: where its input comes
-#: from and its output goes, whatever the app's prompt says the backend does.
 #: Name of the built-in tool the backend's model calls to tell the user something
 #: while it goes on working.
 REPORT_TOOL_NAME = "report_result"
 
+#: Appended to the backend LLM's system instruction: where its input comes
+#: from and its output goes, whatever the app's prompt says the backend does.
 BACKEND_OUTPUT_INSTRUCTIONS = (
     "You are the backend of a voice assistant. What you receive comes from the assistant: "
     "the conversation it is having with the user, or a request it wrote for you. What "
