@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock
 
 from pipecat.frames.frames import (
     FunctionCallsStartedFrame,
+    LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMarkerFrame,
@@ -21,6 +22,7 @@ from pipecat.frames.frames import (
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
+from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.llm_service import LLMService
 from pipecat.services.settings import LLMSettings
@@ -382,6 +384,9 @@ class TestUserUserTurnCompletionLLMServiceMixin(unittest.IsolatedAsyncioTestCase
         with unittest.mock.patch.object(FrameProcessor, "process_frame", AsyncMock()):
             await processor.process_frame(VADUserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
             await processor.process_frame(VADUserStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+            await processor.process_frame(
+                LLMContextFrame(context=LLMContext()), FrameDirection.DOWNSTREAM
+            )
 
         # A second, legitimate inference completes once the user pauses again.
         await processor._push_turn_text(f"{USER_TURN_COMPLETE_MARKER} Second answer")
@@ -431,10 +436,68 @@ class TestUserUserTurnCompletionLLMServiceMixin(unittest.IsolatedAsyncioTestCase
         await processor._turn_reset()
         with unittest.mock.patch.object(FrameProcessor, "process_frame", AsyncMock()):
             await processor.process_frame(VADUserStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+            await processor.process_frame(
+                LLMContextFrame(context=LLMContext()), FrameDirection.DOWNSTREAM
+            )
         pushed_frames.clear()
         await processor._push_turn_text(f"{USER_TURN_COMPLETE_MARKER} Real answer")
         self.assertEqual(
             [f.text for f in pushed_frames if isinstance(f, LLMTextFrame)], ["Real answer"]
+        )
+
+    async def test_complete_after_user_resumes_and_pauses_is_treated_as_incomplete(self):
+        """A resume after the request keeps a late completion stale after VAD stops.
+
+        The completion verdict can arrive after a brief pause in resumed speech.
+        Checking only the current VAD state would then let the old response talk
+        over the user's continued turn.
+        """
+        processor = MockProcessor()
+        pushed_frames = []
+        processor.push_frame = AsyncMock(
+            side_effect=lambda f, *args, **kwargs: pushed_frames.append(f)
+        )
+        processor._start_incomplete_timeout = AsyncMock()
+
+        with unittest.mock.patch.object(FrameProcessor, "process_frame", AsyncMock()):
+            await processor.process_frame(
+                LLMContextFrame(context=LLMContext()), FrameDirection.DOWNSTREAM
+            )
+            await processor.process_frame(VADUserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+            await processor.process_frame(VADUserStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+
+        self.assertFalse(processor._user_speaking)
+        self.assertTrue(processor._user_resumed_since_request)
+
+        await processor._push_turn_text(f"{USER_TURN_COMPLETE_MARKER} Stale answer")
+
+        self.assertEqual([f for f in pushed_frames if isinstance(f, LLMTextFrame)], [])
+        marker_frames = [f for f in pushed_frames if isinstance(f, LLMMarkerFrame)]
+        self.assertEqual(len(marker_frames), 1)
+        self.assertEqual(marker_frames[0].marker, USER_TURN_INCOMPLETE_SHORT_MARKER)
+        processor._start_incomplete_timeout.assert_awaited_once_with(IncompleteType.SHORT)
+
+    async def test_new_request_clears_the_resumed_speech_latch(self):
+        """A completion for a request made after the user pauses is not stale."""
+        processor = MockProcessor()
+        pushed_frames = []
+        processor.push_frame = AsyncMock(
+            side_effect=lambda f, *args, **kwargs: pushed_frames.append(f)
+        )
+
+        with unittest.mock.patch.object(FrameProcessor, "process_frame", AsyncMock()):
+            await processor.process_frame(VADUserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+            await processor.process_frame(VADUserStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+            await processor.process_frame(
+                LLMContextFrame(context=LLMContext()), FrameDirection.DOWNSTREAM
+            )
+
+        self.assertFalse(processor._user_resumed_since_request)
+
+        await processor._push_turn_text(f"{USER_TURN_COMPLETE_MARKER} Current answer")
+
+        self.assertEqual(
+            [f.text for f in pushed_frames if isinstance(f, LLMTextFrame)], ["Current answer"]
         )
 
     async def test_function_call_resets_completion_latch(self):

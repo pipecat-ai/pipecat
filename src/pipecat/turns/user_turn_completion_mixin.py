@@ -22,6 +22,7 @@ from pipecat.frames.frames import (
     Frame,
     FunctionCallsStartedFrame,
     InterruptionFrame,
+    LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMarkerFrame,
@@ -300,6 +301,9 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
         # permanently silence the turn.
         self._user_turn_completion_voiced = False
         self._user_speaking = False
+        # A VAD onset that arrives after the current request makes a completion
+        # verdict for that request stale, even if the user pauses before it arrives.
+        self._user_resumed_since_request = False
 
         # Timeout handling
         self._user_turn_completion_config = UserTurnCompletionConfig()
@@ -430,9 +434,14 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
             await self._cancel_incomplete_timeout()
             await self._turn_reset()
             self._user_turn_completion_voiced = False
+            self._user_resumed_since_request = False
         elif isinstance(frame, UserStartedSpeakingFrame):
             # A new user turn begins, so allow one fresh spoken completion.
             self._user_turn_completion_voiced = False
+        elif isinstance(frame, LLMContextFrame):
+            # This frame starts an inference. A prior VAD onset belongs to an
+            # earlier request and must not make this response stale.
+            self._user_resumed_since_request = False
         elif isinstance(frame, LLMMessagesAppendFrame) and frame.run_llm:
             # An externally appended message that asks for a run (e.g. a user-idle
             # check-in) is an explicit request for fresh speech, and it arrives
@@ -441,6 +450,7 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
             self._user_turn_completion_voiced = False
         elif isinstance(frame, VADUserStartedSpeakingFrame):
             self._user_speaking = True
+            self._user_resumed_since_request = True
             # The user resumed speaking within the same open turn. A new turn's
             # InterruptionFrame does not fire for a resume inside an already-open
             # turn, so two things that normally reset on a fresh turn need
@@ -609,13 +619,13 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
 
         # Check for ● (COMPLETE) marker - user's turn was complete, respond normally
         if config.complete_marker in self._turn_text_buffer:
-            if self._user_speaking:
+            if self._user_speaking or self._user_resumed_since_request:
                 # Stale: the user resumed speaking after this inference was
                 # triggered, so the turn isn't over after all. Record it as ◐
                 # and re-arm the short timeout, exactly as if the LLM had said
                 # so; the next inference re-evaluates the fuller turn.
                 logger.debug(
-                    f"COMPLETE ({config.complete_marker}) detected while user is speaking, "
+                    f"COMPLETE ({config.complete_marker}) detected after user resumed speaking, "
                     f"treating as stale: suppressing text"
                 )
                 self._turn_marker = TurnMarker.INCOMPLETE
