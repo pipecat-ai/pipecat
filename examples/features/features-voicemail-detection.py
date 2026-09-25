@@ -13,7 +13,7 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.classifiers.jev.classifier import JevClassifier
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.extensions.voicemail.voicemail_detector import VoicemailDetector
-from pipecat.frames.frames import TTSSpeakFrame
+from pipecat.frames.frames import EndWorkerFrame, TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -126,16 +126,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_voicemail_detected(processor):
         logger.info("Voicemail detected! Leaving a message...")
 
-        # Push frames using standard Pipecat pattern
         await processor.push_frame(
             TTSSpeakFrame(
                 "Hello, this is Alex calling about your appointment. Please call me back at 555-0123 when you get this."
             )
         )
-
-        # NOTE: A common pattern is to end pipeline after the voicemail is left.
-        # Uncomment the following line to end the pipeline after leaving the voicemail.
-        # await processor.push_frame(EndWorkerFrame())
+        # The verdict is final and the message is left, so the call is over.
+        await processor.push_frame(EndWorkerFrame())
 
     await runner.run()
 
