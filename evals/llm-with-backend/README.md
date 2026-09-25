@@ -25,6 +25,8 @@ The backend is an engineering assistant's: a code change that loops through sear
 | `cancel_delegation`      | "Never mind": `cancel_delegated_work` is called, the bot confirms, and nothing arrives later.                                                 |
 | `cancel_and_replace`     | A long "stop that, do this instead" timed so a result lands mid-utterance: the stale result is not relayed as wanted, the new request is done. |
 | `progress_inquiry`       | "How's it going?" mid-fix: answered from the backend's silent progress messages, without delegating again.                                   |
+| `aside_while_waiting`    | Small talk while the fix is in progress: the chat is answered, and the fix is still reported when it lands.                                  |
+| `result_during_interruption` | A lookup bundled with a request for a long story, so its result lands while the story is being spoken, which the user then cuts off: the result is reported all the same. Audio only. |
 
 ## Reading a verdict
 
