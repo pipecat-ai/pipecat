@@ -49,12 +49,6 @@ from pipecat.workers.llm.backend_llm_worker import (
     _render_transcript_request,
 )
 
-
-def _dbg(text: str, color: str = "0") -> None:  # TEMP DEBUG
-    """Print one line of the FE <-> BE trace."""
-    print(f"\033[{color}m{text}\033[0m", flush=True)
-
-
 #: Name of the tool the frontend calls to delegate.
 DELEGATE_TOOL_NAME = "delegate"
 
@@ -444,15 +438,8 @@ class BackendConnector:
             ) as session:
                 self._session = session
                 self._session_open.set()
-                _dbg(
-                    f"┌─ FE ⇄ BE  attached to '{session.backend_name}' {session.capabilities}",
-                    "1;36",
-                )  # TEMP DEBUG
                 async for event in session:
                     await self.deliver(frontend, event)
-                _dbg(
-                    f"└─ FE ⇄ BE  stream ended (detached={session.detached})", "1;36"
-                )  # TEMP DEBUG
                 if not session.detached:
                     logger.warning(f"Backend '{self._context.backend_name}' went away")
         except asyncio.CancelledError:
@@ -484,26 +471,14 @@ class BackendConnector:
         if request is None:
             # Nothing new since the previous delegation: the backend has it all.
             logger.debug(f"Delegate call {params.tool_call_id} carries nothing new; not sent")
-            _dbg(
-                f"┌─ FE → BE  delegate({params.tool_call_id}) args={params.arguments}\n│  (nothing new; not sent → already_delegated, run_llm=False)",
-                "1;34",
-            )  # TEMP DEBUG
             await params.result_callback(
                 {"status": "already_delegated"},
                 properties=FunctionCallResultProperties(run_llm=False),
             )
             return
         logger.debug(f"Delegating to '{self._context.backend_name}': {request!r}")
-        _dbg(
-            f"┌─ FE → BE  delegate({params.tool_call_id}) args={params.arguments}", "1;34"
-        )  # TEMP DEBUG
-        _dbg("│  " + request.replace("\n", "\n│  "), "34")  # TEMP DEBUG
         session = await self._open_session()
         status = await session.send(request)
-        _dbg(
-            f"│  ← backend was {status}; result {{status: delegated}} run_llm={self._respond_on_delegate}",
-            "34",
-        )  # TEMP DEBUG
         await params.result_callback(
             {"status": "delegated", "backend": status},
             properties=FunctionCallResultProperties(run_llm=self._respond_on_delegate),
@@ -515,12 +490,8 @@ class BackendConnector:
         Args:
             params: The ``cancel_delegated_work`` call.
         """
-        _dbg(f"┌─ FE → BE  cancel_delegated_work({params.tool_call_id})", "1;34")  # TEMP DEBUG
         session = await self._open_session()
         cancelled = await session.cancel("cancelled by the user")
-        _dbg(
-            f"│  ← {'cancelled' if cancelled else 'nothing_running'}; result run_llm=True", "34"
-        )  # TEMP DEBUG
         await params.result_callback(
             {"status": "cancelled" if cancelled else "nothing_running"},
             properties=FunctionCallResultProperties(run_llm=True),
@@ -548,30 +519,13 @@ class BackendConnector:
                 f"Backend output ({'spoken' if event.prefers_spoken else 'silent'}"
                 f"{', thought' if event.is_thought else ''}): {event.text!r}"
             )
-            kind = (
-                "thought"
-                if event.is_thought
-                else ("SPOKEN " if event.prefers_spoken else "silent ")
-            )  # TEMP DEBUG
-            _dbg(f"├─ BE → FE  output [{kind}]  {event.text!r}", "1;32")  # TEMP DEBUG
             message = self.render_output(event)
             if message is not None:
-                _dbg(
-                    f"│  appended to FE context as {message.get('role') if isinstance(message, dict) else '?'} message, run_llm={event.prefers_spoken}",
-                    "32",
-                )  # TEMP DEBUG
                 await self._append(
                     frontend,
                     LLMMessagesAppendFrame(messages=[message], run_llm=event.prefers_spoken),
                 )
-            else:  # TEMP DEBUG
-                _dbg("│  (dropped by render_output)", "32")  # TEMP DEBUG
         elif isinstance(event, BackendToolCall):
-            _dbg(
-                f"├─ BE → FE  tool {event.phase:<11} {event.function_name}({event.arguments or ''})"
-                + (f" → {str(event.result)[:120]!r}" if event.phase == "result" else ""),
-                "32",
-            )  # TEMP DEBUG
             await frontend.push_frame(event.to_frame())
             message = self.render_tool_call(event)
             if message is not None:
@@ -579,7 +533,6 @@ class BackendConnector:
                     frontend, LLMMessagesAppendFrame(messages=[message], run_llm=False)
                 )
         elif isinstance(event, BackendError):
-            _dbg(f"├─ BE → FE  ERROR  {event.error}", "1;31")  # TEMP DEBUG
             logger.warning(f"Backend error: {event.error}")
             await self._append(
                 frontend,
@@ -594,7 +547,6 @@ class BackendConnector:
                 ),
             )
         elif isinstance(event, BackendIdle):
-            _dbg("└─ BE → FE  idle", "1;32")  # TEMP DEBUG
             logger.debug("Backend is idle")
 
     async def _append(self, frontend: LLMService[Any], frame: LLMMessagesAppendFrame) -> None:
