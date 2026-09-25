@@ -11,8 +11,8 @@ from dataclasses import dataclass
 DEFAULT_EMPTY_USER_TURN_INTERRUPTED_PROMPT = (
     "The user may have said something while you were responding, but it was not "
     "recognized. Your response was cut off there, and the conversation only includes "
-    "the part they heard, which may be none of it. Briefly ask them to repeat it, and "
-    "repeat any question they may have missed."
+    "the part they heard, which may be none of it. Briefly ask them to repeat what they said, and "
+    "repeat any question of yours they may have missed."
 )
 
 
