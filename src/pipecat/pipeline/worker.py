@@ -32,8 +32,8 @@ from pipecat.bus import (
 )
 from pipecat.bus.bridge_processor import _BusEdgeProcessor
 from pipecat.bus.ui.messages import (
-    _UI_CANCEL_JOB_GROUP_BUS_EVENT_NAME,
-    _UI_SNAPSHOT_BUS_EVENT_NAME,
+    UI_CANCEL_JOB_GROUP_EVENT_NAME,
+    UI_SNAPSHOT_EVENT_NAME,
     BusUICommandMessage,
     BusUIDataMessage,
     BusUIEventMessage,
@@ -1100,10 +1100,10 @@ class PipelineWorker(BaseWorker):
             event_name = message.data.event
             payload = message.data.payload
         elif isinstance(message, UISnapshotMessage):
-            event_name = _UI_SNAPSHOT_BUS_EVENT_NAME
+            event_name = UI_SNAPSHOT_EVENT_NAME
             payload = message.data.tree.model_dump(exclude_none=True)
         elif isinstance(message, UICancelJobGroupMessage):
-            event_name = _UI_CANCEL_JOB_GROUP_BUS_EVENT_NAME
+            event_name = UI_CANCEL_JOB_GROUP_EVENT_NAME
             payload = {
                 "job_id": message.data.job_id,
                 "reason": message.data.reason,

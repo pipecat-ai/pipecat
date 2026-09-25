@@ -31,6 +31,9 @@ from pipecat.classifiers.jev.client import JevClient
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
 
+#: The most options Jev takes in one choice question.
+JEV_MAX_CHOICE_OPTIONS = 255
+
 
 class JevClassifier(BaseClassifier):
     """Answers questions by asking Jev.
@@ -120,6 +123,10 @@ class JevClassifier(BaseClassifier):
                 jev["criteria"] = {"true": question.yes or "", "false": question.no or ""}
             return jev
         if isinstance(question, ChoiceQuestion):
+            if len(question.options) > JEV_MAX_CHOICE_OPTIONS:
+                raise ClassifierError(
+                    f"Jev takes at most {JEV_MAX_CHOICE_OPTIONS} options, got {len(question.options)}"
+                )
             return {
                 "type": "choice",
                 "instructions": question.instructions,

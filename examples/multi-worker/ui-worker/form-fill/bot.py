@@ -4,37 +4,40 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Form-fill — a voice-guided, accessible form walkthrough.
+"""Form-fill: a voice-guided, accessible form walkthrough.
 
 An accessibility-oriented take on form filling: instead of waiting for
-the user to dictate values, the assistant *leads*. It walks the user
-through a job application one section at a time — personal information
-(name, email, phone), then job qualifications (years of experience and
-why they're interested), then submit — confirming what it captured
-before moving on. A user who can't see the screen never has to; the
-assistant asks for each piece, writes it into the form, and reads back
-what it heard.
+the user to dictate values, the assistant leads. It walks the user through
+a job application one section at a time, personal information (name,
+email, phone), then job qualifications (years of experience and why they
+are interested), then submit, confirming what it captured before moving
+on. A user who cannot see the screen never has to.
 
-``FormWorker`` composes ``ReplyToolMixin``: the
-``reply(answer, scroll_to, fills, click)`` bundle covers the
-state-changing actions — ``fills`` writes input values (many at once),
-``click`` presses submit. Because the mixin replies with verbatim TTS
-(``tts_speak=True``), the worker authors every spoken line, so all the
-guidance lives in one place (``UI_PROMPT``).
+The voice LLM leads the whole conversation and works the form through
+``UIWorker``'s one screen tool: ``screen("list", "textbox")`` shows it
+which inputs are filled and which are still empty, ``screen("fill", "the
+email field", value)`` writes a value into the field the user means, and
+``screen("click", "the submit button")`` submits. The UI worker finds each
+field with its classifier and sends the command; no LLM turn runs on the
+UI side, and the voice LLM never sees the page.
 
-The flow is driven *statelessly* off ``<ui_state>``: each turn the
-worker sees which fields are already filled and steers toward the next
-empty one — progress is the form itself, not hidden conversation state.
+The flow is driven off the form itself: each turn the voice LLM lists the
+inputs and steers toward the next empty one, so progress is the form, not
+hidden conversation state.
+
+The worker's classifier is its own LLM through an ``LLMClassifier``; pass a
+``JevClassifier`` for faster, calibrated answers.
 
 Architecture::
 
     Main worker (PipelineWorker, owns transport + RTVI):
-      transport.in → STT → user_agg → LLM → TTS → transport.out → assistant_agg
-        └── answer_about_screen(query) tool
-              └── params.pipeline_worker.job("ui", name="respond", payload={query})
+      transport.in -> STT -> user_agg -> LLM -> TTS -> transport.out -> assistant_agg
+        └── screen_tools("ui"): screen(action, target, value)
+              └── params.pipeline_worker.job("ui", name="screen", payload=...)
 
-    FormWorker (ReplyToolMixin + UIWorker):
-      └── inherited: reply(answer, scroll_to, fills, click) — guides the flow
+    UIWorker ("ui", with a classifier, no LLM turn):
+      └── built-in "screen" job -> "list": the inputs with their values
+                                   "fill" / "click": classifier finds the field, sends the command
 
 Run::
 
@@ -54,11 +57,9 @@ import os
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.adapters.schemas.direct_function import tool_options
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
-from pipecat.pipeline.job_context import JobError
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -70,16 +71,16 @@ from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
-from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.workers.runner import WorkerRunner
-from pipecat.workers.ui import ReplyToolMixin, UIWorker
+from pipecat.workers.ui import UIWorker, screen_tools
 
 load_dotenv(override=True)
 
 MAIN_NAME = "main"
+UI_NAME = "ui"
 
 transport_params = {
     "eval": lambda: EvalTransportParams(
@@ -92,148 +93,51 @@ transport_params = {
 
 
 VOICE_PROMPT = """\
-You are the voice front-end of a guided form-fill assistant. A \
-separate UI layer sees the application form, fills it, and speaks the \
-step-by-step guidance. You open the conversation with a brief greeting \
-(you'll be prompted on connect); after that, forward what the user \
-says to that layer.
-
-For every user utterance about the form — a field value, a \
-correction, "submit", or an answer to whatever the assistant just \
-asked — call ``answer_about_screen`` with the user's words verbatim. \
-The UI layer speaks the reply itself, so after calling the tool you \
-don't need to say anything else.
-
-Only respond directly for pure pleasantries (greetings, thanks, \
-goodbyes), in one short spoken sentence."""
-
-
-# The UI wire-format guide (UI_STATE_PROMPT_GUIDE) is appended to the LLM's
-# system instruction automatically by UIWorker, so this prompt only needs the
-# app-specific behavior.
-UI_PROMPT = """\
 You are a warm, patient assistant helping the user fill out a job \
-application entirely by voice. Assume the user cannot see the screen, \
-so YOU lead: ask for each piece of information, write it into the \
-form, and tell the user what you captured before moving on.
+application entirely by voice. The user cannot see the screen, so YOU \
+lead: ask for each piece of information, write it into the form, and \
+tell the user what you captured before moving on. You cannot see the \
+screen either; your tools work the form for you.
 
-The current ``<ui_state>`` block (in your context) is the live form. \
-Each input has a ref (e.g. ``e5``), a label, and its current value. \
-Use the labels to map values to inputs, and use the current values to \
-see how far along you are.
+## The flow, in order
 
-## The flow — work through these in order
+1. Personal information: first name, last name, email, phone number.
+2. Job qualifications: years of relevant experience, and why they are \
+interested in the role.
+3. Submit.
 
-1. **Personal information**: first name, last name, email, phone number.
-2. **Job qualifications**: years of relevant experience, and why they \
-are interested in the role (their reason).
-3. **Submit**.
+## The screen tool
 
-Each turn, look at ``<ui_state>`` to see which fields are already \
-filled and steer toward the next empty one in the current step.
-
-## Tool: reply
-
-Every turn calls ``reply`` exactly once.
-
-``reply(answer, scroll_to=None, fills=None, click=None)``:
-
-- ``answer`` (REQUIRED): what you say to the user — one or two short, \
-warm sentences. Briefly confirm what you just captured, then ask for \
-the next thing.
-- ``fills`` (OPTIONAL): a list of ``{"ref": "eN", "value": "..."}`` \
-objects, one per input to write. Fill as many as the user gives at \
-once (e.g. first + last name together).
-- ``click`` (OPTIONAL): a list of refs to click. Used only for the \
-submit button, at the very end.
-- ``scroll_to`` (OPTIONAL): a single ref, when the field you're \
-working on is tagged ``[offscreen]``.
+- screen(action="list", target="textbox"): the form's inputs with their \
+current values. Call it at the start of every turn to see which fields \
+are filled and steer toward the next empty one in the current step.
+- screen(action="fill", target=..., value=...): write one value into the \
+field the target names, such as "the email field". Call it once per \
+value; several in one turn is fine.
+- screen(action="click", target="the submit button"): submit, at the \
+very end.
 
 ## How to guide
 
-The voice layer opens the conversation (it greets and asks for the \
-user's name), so don't greet again — every turn you get is the user's \
-answer or a new value. Take it, write it, and move the flow forward.
+- User gives one or more values: write them, confirm briefly ("Got it, \
+John Smith"), and ask for the next missing item in the current step.
+- A step is complete: say so and move to the next step's first field.
+- Everything is filled: say the form is complete and ask if they are \
+ready to submit. Do not read the values back; each one was confirmed \
+when captured.
+- User says to submit: click the submit button and give a short send-off \
+only ("Submitting your application now, good luck!"). Nothing after.
+- User corrects a value: write it again and confirm the change.
+- A tool answers that a field was not found: say so and ask again.
 
-- **User gives one or more values:** write them with ``fills``, \
-acknowledge briefly ("Got it, John Smith"), and ask for the next \
-missing item in the current step.
-- **A step is now complete:** acknowledge the step and move to the \
-next one's first field ("Great, that's your contact details — now, \
-how many years of relevant experience do you have?").
-- **Everything is filled:** say the form is complete and ask if \
-they're ready to submit. Do NOT read the values back — each one was \
-already confirmed when captured.
-- **User says to submit:** ``click=[submit_ref]`` with a short \
-send-off only ("Submitting your application now — good luck!"). No \
-recap, no "let me confirm", nothing after; the conversation is over.
-- **User corrects a value:** re-fill that field and confirm the change.
+Ask for one thing at a time (a full name counts as one thing). Keep \
+every reply to one or two short spoken sentences.
 
-Ask for one thing at a time (a full name counts as one thing).
+## Spelling
 
-## Spelling and disambiguation
-
-Convert spoken forms to the stored value: "john at example dot com" → \
-``john@example.com``; "five five five one two three four" → \
-``5551234``; "five years" → ``5``. Don't read the conversions back \
-verbatim; just confirm naturally ("got it, your email's john@example.com").
-
-## Examples
-
-(refs are illustrative; use the actual refs from the current \
-``<ui_state>``)
-
-- "I'm John Smith." (the user's answer to the opening name question) → \
-``reply(answer="Thanks, John. What's the best email to reach you?", fills=[{"ref":"e5","value":"John"}, {"ref":"e7","value":"Smith"}])``
-- "john at example dot com." → \
-``reply(answer="Got it. And a phone number?", fills=[{"ref":"e9","value":"john@example.com"}])``
-- "555 123 4567." (last personal field) → \
-``reply(answer="Perfect — that's your details. Now, how many years of relevant experience do you have?", fills=[{"ref":"e11","value":"5551234567"}])``
-- "Five years, and I love building real-time voice agents." → \
-``reply(answer="Five years, noted — and that's the whole form. Ready to submit?", fills=[{"ref":"e13","value":"5"}, {"ref":"e15","value":"I love building real-time voice agents."}])``
-- "Yes, submit." → \
-``reply(answer="Submitting your application now — good luck!", click=["e17"])``"""
-
-
-class FormWorker(ReplyToolMixin, UIWorker):
-    """UIWorker that guides the user through the form via ``reply``.
-
-    Composes ``ReplyToolMixin``, which exposes a single
-    ``reply(answer, scroll_to=None, fills=None, click=None, ...)`` LLM
-    tool. ``fills`` writes values into inputs (many in one turn) and
-    ``click`` presses submit. ``UI_PROMPT`` turns this into a guided,
-    section-by-section walkthrough; the reply is spoken verbatim
-    (``ReplyToolMixin`` uses ``tts_speak=True``), so the worker voices
-    every prompt and confirmation itself.
-    """
-
-    def __init__(self):
-        llm = OpenAILLMService(
-            api_key=os.environ["OPENAI_API_KEY"],
-            settings=OpenAILLMService.Settings(system_instruction=UI_PROMPT),
-        )
-        super().__init__("ui", llm=llm)
-
-
-@tool_options(cancel_on_interruption=False, timeout_secs=30)
-async def answer_about_screen(params: FunctionCallParams, query: str):
-    """Forward the user's words to the UI worker, which fills the form and guides.
-
-    Args:
-        query (str): The user's request, passed verbatim.
-    """
-    logger.info(f"answer_about_screen('{query}')")
-    try:
-        async with params.pipeline_worker.job(
-            "ui", name="respond", payload={"query": query}, timeout=10
-        ) as t:
-            pass
-    except JobError as e:
-        logger.warning(f"ui job failed: {e}")
-        await params.result_callback("Something went wrong on my side.")
-        return
-
-    await params.result_callback(t.response)
+Convert spoken forms to the stored value: "john at example dot com" is \
+john@example.com; "five five five one two three four" is 5551234; "five \
+years" is 5. Confirm naturally ("got it, your email's john@example.com")."""
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
@@ -251,7 +155,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         settings=OpenAILLMService.Settings(system_instruction=VOICE_PROMPT),
     )
 
-    context = LLMContext(tools=[answer_about_screen])
+    context = LLMContext(tools=screen_tools(UI_NAME))
     aggregators = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
@@ -277,9 +181,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         processor_unusable_policy=ProcessorUnusablePolicy.END,
     )
 
+    # The worker's own LLM answers the classifier questions. To make them
+    # faster, pass a classifier such as JevClassifier(api_key=...).
+    ui_worker = UIWorker(UI_NAME, llm=OpenAILLMService(api_key=os.environ["OPENAI_API_KEY"]))
+
     runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
 
-    await runner.add_workers(FormWorker(), worker)
+    await runner.add_workers(ui_worker, worker)
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):

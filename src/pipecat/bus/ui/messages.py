@@ -25,7 +25,7 @@ dispatches on to pick the outbound ones out of its bus traffic.
 - ``BusUIJobGroupStartedMessage``, ``BusUIJobUpdateMessage``,
   ``BusUIJobCompletedMessage``, and ``BusUIJobGroupCompletedMessage``
   carry the four phases of a user-facing job group's lifecycle (see
-  ``BaseUIWorker``).
+  ``UIWorker``).
 
 The carriers live in the ``bus`` layer (rather than alongside
 ``UIWorker``) because both ``PipelineWorker`` (in ``pipecat.pipeline``)
@@ -38,20 +38,18 @@ from typing import Any
 
 from pipecat.bus.messages import BusDataMessage
 
-#: Internal ``event_name`` used by a client-facing worker when republishing
-#: a ``ui-snapshot`` wire message onto the bus as a
-#: ``BusUIEventMessage``. ``UIWorker``'s bus dispatch matches on this
-#: name to route the snapshot into ``_latest_snapshot`` storage. The
-#: leading double underscore marks the name as internal so app-defined
-#: ``@ui_event`` handlers can't collide with it.
-_UI_SNAPSHOT_BUS_EVENT_NAME = "__ui_snapshot"
+#: The ``event_name`` of the client's accessibility snapshot on the bus. A
+#: client-facing worker republishes a ``ui-snapshot`` wire message as a
+#: ``BusUIEventMessage`` with this name, and ``UIWorker`` keeps the payload as
+#: its latest snapshot. The leading double underscore keeps app-defined
+#: ``@ui_event`` names from colliding with it.
+UI_SNAPSHOT_EVENT_NAME = "__ui_snapshot"
 
-#: Internal ``event_name`` used by a client-facing worker when republishing
-#: a ``ui-cancel-job-group`` wire message onto the bus as a
-#: ``BusUIEventMessage``. ``UIWorker``'s bus dispatch matches on this
-#: name to route to ``cancel_job_group``. Internal; not part of the
-#: public wire format.
-_UI_CANCEL_JOB_GROUP_BUS_EVENT_NAME = "__cancel_job_group"
+#: The ``event_name`` of the client's request to cancel a job group. A
+#: client-facing worker republishes a ``ui-cancel-job-group`` wire message as
+#: a ``BusUIEventMessage`` with this name, and the worker that dispatched the
+#: group turns it into a cancel request.
+UI_CANCEL_JOB_GROUP_EVENT_NAME = "__cancel_job_group"
 
 
 @dataclass
@@ -111,7 +109,7 @@ class BusUICommandMessage(BusUIDataMessage):
 class BusUIJobGroupStartedMessage(BusUIDataMessage):
     """A user-facing job group has been dispatched.
 
-    Published by a ``BaseUIWorker`` as it dispatches the group. The
+    Published by a ``UIWorker`` as it dispatches the group. The
     client-facing worker forwards it as a ``ui-job-group`` envelope with
     ``kind = "group_started"``.
 
@@ -134,7 +132,7 @@ class BusUIJobGroupStartedMessage(BusUIDataMessage):
 class BusUIJobUpdateMessage(BusUIDataMessage):
     """Per-worker progress for a user-facing job group.
 
-    Forwarded by a ``BaseUIWorker`` whenever a worker of one of its job
+    Forwarded by a ``UIWorker`` whenever a worker of one of its job
     groups emits a ``BusJobUpdateMessage``. The client-facing worker
     forwards it as a ``ui-job-group`` envelope with
     ``kind = "job_update"``.
@@ -156,7 +154,7 @@ class BusUIJobUpdateMessage(BusUIDataMessage):
 class BusUIJobCompletedMessage(BusUIDataMessage):
     """A worker in a user-facing job group has completed.
 
-    Forwarded by a ``BaseUIWorker`` when a worker of one of its job groups
+    Forwarded by a ``UIWorker`` when a worker of one of its job groups
     reaches a terminal state. The client-facing worker forwards it as a
     ``ui-job-group`` envelope with ``kind = "job_completed"``.
 
@@ -179,7 +177,7 @@ class BusUIJobCompletedMessage(BusUIDataMessage):
 class BusUIJobGroupCompletedMessage(BusUIDataMessage):
     """A user-facing job group has completed.
 
-    Published by a ``BaseUIWorker`` once every worker in the group has
+    Published by a ``UIWorker`` once every worker in the group has
     finished, or the group was cancelled. The client-facing worker forwards
     it as a ``ui-job-group`` envelope with ``kind = "group_completed"``.
 

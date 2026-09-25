@@ -35,6 +35,7 @@ from pipecat.adapters.schemas.direct_function import tool_options
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMMessagesAppendFrame, LLMRunFrame
+from pipecat.pipeline.job_context import JobParams
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -83,7 +84,9 @@ async def ask_code(params: FunctionCallParams, question: str):
             dependencies, or anything in the project.
     """
     logger.info(f"Asking code worker: '{question}'")
-    async with params.pipeline_worker.job("code-worker", payload={"question": question}) as job:
+    async with params.pipeline_worker.job(
+        "code-worker", params=JobParams(payload={"question": question})
+    ) as job:
         await params.llm.queue_frame(
             LLMMessagesAppendFrame(
                 messages=[{"role": "developer", "content": "Give me a moment."}],

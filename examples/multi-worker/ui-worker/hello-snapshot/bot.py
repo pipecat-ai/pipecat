@@ -4,38 +4,27 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Hello UIWorker — the smallest possible accessibility-snapshot demo.
+"""Hello UIWorker: the smallest example of a voice LLM asking a UIWorker about the page.
 
-A voice bot whose LLM delegates every screen-relevant utterance to a
-``UIWorker`` that sees the page and writes the spoken answer.
+The voice LLM cannot see the page. For any question that could be about
+it, it calls ``ask_page(question)``, which sends the UI worker's built-in
+``respond`` job. The UI worker's LLM sees the latest accessibility
+snapshot of the page and replies in a sentence or two; its reply is the
+job's answer, which comes back to the voice LLM, which speaks it. The UI
+worker is a plain ``UIWorker`` with a system prompt.
 
 Architecture::
 
     Main worker (PipelineWorker, owns transport + RTVI):
       transport.in → STT → user_agg → LLM → TTS → transport.out → assistant_agg
-        └── answer_about_screen(query) tool
-              └── params.pipeline_worker.job("hello", name="respond", payload={query})
+        └── ask_page(question) tool → job "respond" on the UI worker
 
-    HelloWorker (UIWorker):
-      └── @tool answer(text)
+    UIWorker ("ui"):
+      └── its LLM's reply → the job's response
 
-The main LLM is the conversational layer: it forwards every utterance
-to the UI worker via the ``answer_about_screen`` tool and speaks the
-result. The UI worker's built-in ``respond`` job fires, which
-auto-injects the latest ``<ui_state>`` block into its LLM context. The
-UI worker's LLM picks the ``answer`` tool with a spoken reply grounded
-in what's on screen.
-
-The RTVI⇄bus UI wiring is built into ``PipelineWorker`` (active because
-``enable_rtvi=True``), so inbound ``ui-snapshot`` messages from the
-client are broadcast on the bus and the ``UIWorker`` stores them — no
-decorator or manual wiring needed.
-
-Why two LLMs for "hello world": this is the pattern UIWorker's
-auto-inject is built for. The UI worker auto-injects the current screen
-at the start of every delegated job, so the conversational LLM stays
-small and screen-unaware. Later examples (deixis, form-fill,
-async-tasks) compose new tools onto the same skeleton.
+``PipelineWorker`` connects the UI worker to the client on its own (RTVI
+is enabled by default): the client streams snapshots of the page and the
+worker keeps the latest one.
 
 Run::
 
@@ -59,7 +48,7 @@ from pipecat.adapters.schemas.direct_function import tool_options
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
-from pipecat.pipeline.job_context import JobError
+from pipecat.pipeline.job_context import JobError, JobParams
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -75,13 +64,13 @@ from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
-from pipecat.workers.llm import tool
 from pipecat.workers.runner import WorkerRunner
 from pipecat.workers.ui import UIWorker
 
 load_dotenv(override=True)
 
 MAIN_NAME = "main"
+UI_NAME = "ui"
 
 transport_params = {
     "eval": lambda: EvalTransportParams(
@@ -100,97 +89,44 @@ transport_params = {
 
 
 VOICE_PROMPT = """\
-You are the voice layer of a screen-aware assistant. A separate UI \
-layer sees the page the user is looking at and writes the spoken \
-reply for any question that could plausibly involve the page.
+You are a voice assistant. You cannot see the page the user is looking \
+at; the ``ask_page`` tool can. For any question that could be about the \
+page, such as "what's on screen", "what does the second story say" or \
+"is X on the page", call ``ask_page`` with the user's question and \
+answer from what it returns. Answer greetings, thanks and goodbyes \
+yourself.
 
-## Routing rule
-For every user utterance that could involve the page in any way — \
-"what's on screen", "what does this say", "is X on the page", \
-factual questions, navigational questions, anything where the page \
-content might matter — call ``answer_about_screen`` with the user's \
-request verbatim. The tool's response is the spoken reply, already \
-TTS-ready; pass it through without paraphrasing.
-
-If the request has nothing to do with the page, still call the \
-tool — the UI layer falls back to general knowledge.
-
-## When to answer directly
-Only respond directly for pure pleasantries that don't need any \
-content awareness:
-
-- Greetings ("hi", "hello").
-- Acknowledgements ("thanks", "got it").
-- Goodbyes ("bye", "see you").
-
-Keep direct replies to one short spoken sentence. No markdown, no \
+Keep replies to one or two short spoken sentences. No markdown, no \
 lists, no symbols."""
 
 
-# The UI wire-format guide (UI_STATE_PROMPT_GUIDE) is appended to the LLM's
-# system instruction automatically by UIWorker, so this prompt only needs the
-# app-specific behavior.
-HELLO_PROMPT = """\
-You answer the user's question grounded in the page they're looking \
-at. The current ``<ui_state>`` block is in your context — use it for \
-anything the user could be asking about on screen.
-
-Always call exactly one tool: ``answer(text)``. Put the spoken reply \
-in ``text``. Plain language, one or two short sentences, no markdown \
-or symbols.
-
-When the question is about something on the page, ground claims in \
-the ``<ui_state>`` content. When it's general knowledge with no \
-on-page referent (history, geography, definitions), answer from your \
-own knowledge. Don't tell the user what you can't see — just answer \
-or admit you don't know."""
-
-
-class HelloWorker(UIWorker):
-    """Snapshot-aware layer. Answers grounded in ``<ui_state>``.
-
-    A ``UIWorker`` is an always-on delegate: it comes online to receive
-    snapshots and ``respond`` jobs as soon as its pipeline starts.
-    """
-
-    def __init__(self):
-        llm = OpenAILLMService(
-            api_key=os.environ["OPENAI_API_KEY"],
-            settings=OpenAILLMService.Settings(system_instruction=HELLO_PROMPT),
-        )
-        super().__init__("hello", llm=llm)
-
-    @tool
-    async def answer(self, params: FunctionCallParams, text: str):
-        """Speak ``text`` back to the user.
-
-        Args:
-            text: The spoken reply in plain language. One or two short
-                sentences. No markdown, no symbols, no lists.
-        """
-        logger.info(f"{self}: answer('{text[:80]}…')")
-        await self.respond_to_job(text, tts_speak=True)
-        await params.result_callback(None)
+UI_PROMPT = """\
+You answer questions about the page the user is looking at, in one or \
+two plain sentences. When the question is not about the page, answer \
+from general knowledge. Don't tell the user what you can't see; answer, \
+or say you don't know."""
 
 
 @tool_options(cancel_on_interruption=False, timeout_secs=60)
-async def answer_about_screen(params: FunctionCallParams, query: str):
-    """Ask the screen-aware UI layer to answer about the current page.
+async def ask_page(params: FunctionCallParams, question: str):
+    """Ask about the page the user is looking at.
+
+    Call it for any question that could be about the page; nothing else
+    can see it. Returns the answer.
 
     Args:
-        query (str): The user's request, passed verbatim.
+        params: Framework-provided tool invocation context.
+        question: The user's question, as they asked it.
     """
-    logger.info(f"answer_about_screen('{query}')")
     try:
         async with params.pipeline_worker.job(
-            "hello", name="respond", payload={"query": query}, timeout=30
+            UI_NAME, params=JobParams(name="respond", payload={"query": question}, timeout=30)
         ) as t:
             pass
     except JobError as e:
-        logger.warning(f"hello job failed: {e}")
-        await params.result_callback("Something went wrong on my side.")
+        logger.warning(f"ui job respond failed: {e}")
+        await params.result_callback({"error": str(e)})
         return
-
     await params.result_callback(t.response)
 
 
@@ -208,8 +144,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         api_key=os.environ["OPENAI_API_KEY"],
         settings=OpenAILLMService.Settings(system_instruction=VOICE_PROMPT),
     )
+    ui_llm = OpenAILLMService(
+        api_key=os.environ["OPENAI_API_KEY"],
+        settings=OpenAILLMService.Settings(system_instruction=UI_PROMPT),
+    )
 
-    context = LLMContext(tools=[answer_about_screen])
+    context = LLMContext(tools=[ask_page])
     aggregators = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
@@ -238,9 +178,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         processor_unusable_policy=ProcessorUnusablePolicy.END,
     )
 
+    ui_worker = UIWorker(UI_NAME, llm=ui_llm)
+
     runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
 
-    await runner.add_workers(HelloWorker(), worker)
+    await runner.add_workers(ui_worker, worker)
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):

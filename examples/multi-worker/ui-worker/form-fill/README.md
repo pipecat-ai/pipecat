@@ -9,33 +9,31 @@ captured before moving on. A user who can't see the screen never has to.
 
 ## What it shows
 
-- **A proactive, guided flow.** The voice agent greets on connect and
-  asks for the user's name; from there it hands each answer to the UI
-  worker, which writes it into the form with `fills`, reads back what it
-  heard, and asks for the next piece — section by section.
-- **Driven by `<ui_state>`, not hidden state.** `FormWorker` runs
-  stateless (`keep_history=False`): each turn it sees which fields are
-  already filled and steers toward the next empty one. Progress *is* the
-  form — there's no separate step counter to keep in sync.
-- **The worker owns every spoken line.** `FormWorker` composes
-  `ReplyToolMixin`, which replies with verbatim TTS (`tts_speak=True`),
-  so the worker's `answer` is spoken directly by the main pipeline's TTS
-  and the voice LLM never paraphrases it. All the guidance lives in one
-  prompt (`UI_PROMPT`).
-- **The state-changing actions:** `fills` (a list of `{"ref","value"}`,
-  so several fields can be written in one turn — "I'm John Smith" fills
-  first AND last name) and `click` (to press submit at the end). Same
-  `ReplyToolMixin` bundle that `deixis` uses, just exercising the
-  input-writing fields.
+- **A proactive, guided flow.** The voice LLM greets on connect and asks
+  for the user's name; from there it writes each answer into the form,
+  confirms what it heard, and asks for the next piece, section by section.
+  All the guidance lives in one prompt, `VOICE_PROMPT`.
+- **One screen tool.** The voice LLM has a single tool, `screen(action,
+  target, value)`, from `screen_tools("ui")`. `screen("list", "textbox")`
+  returns the inputs with their current values, `screen("fill", "the
+  email field", "john@example.com")` writes a value, and `screen("click",
+  "the submit button")` submits. It never sees the page.
+- **A plain UIWorker with a classifier and no LLM turn.** The built-in
+  `screen` job answers every tool call, so the example has no worker
+  subclass. For "the email field" the worker asks its classifier which
+  element on the screen the words mean, then sends the command.
+  The classifier is the worker's own LLM through an `LLMClassifier`;
+  pass a `JevClassifier` for faster, calibrated answers.
+- **Driven by the form, not hidden state.** Each turn the voice LLM lists
+  the inputs and steers toward the next empty one. Progress is the form;
+  there is no separate step counter to keep in sync.
 
 ## What it adds vs. `deixis`
 
-`deixis` is *reactive* — it answers one-off questions and exercises the
-visual fields of `reply` (`scroll_to`, `highlight`, `select_text`). This
-one is *proactive*: the assistant drives a multi-step flow and exercises
-the state-changing fields (`fills`, `click`). Same composition, same
-mixin — different fields, and a leading
-rather than reacting posture.
+`deixis` is reactive: it answers one-off questions, and its UI worker's
+LLM reads the page to do so. This one is proactive: the voice LLM drives
+a multi-step flow and changes the form through the screen tool, with the
+UI worker only grounding and acting.
 
 ## Run
 

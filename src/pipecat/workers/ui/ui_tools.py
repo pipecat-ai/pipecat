@@ -13,12 +13,23 @@ subclasses that don't need a custom tool schema. See the class for details.
 
 from loguru import logger
 
+from pipecat.adapters.schemas.direct_function import tool_options
+from pipecat.pipeline.job_context import JobError, JobParams
 from pipecat.services.llm_service import FunctionCallParams
+from pipecat.utils.deprecation import deprecated
 from pipecat.workers.llm.tool_decorator import tool
 
 
+@deprecated(
+    "`ReplyToolMixin` is deprecated since 1.12.0 and will be removed in 2.0.0. "
+    "Use `screen_tools` instead."
+)
 class ReplyToolMixin:
     """Expose a ``reply`` tool covering the full standard action set.
+
+    .. deprecated:: 1.12.0
+        Use :func:`screen_tools` instead: the voice LLM asks the worker through
+        the ``screen`` job and says the answer itself. Will be removed in 2.0.0.
 
     Single bundled LLM tool with a required spoken ``answer`` plus
     optional visual and state-changing actions. One tool call per
@@ -141,3 +152,76 @@ class ReplyToolMixin:
                 await self.click(ref)  # type: ignore[attr-defined]
         await self.respond_to_job(answer, tts_speak=True)  # type: ignore[attr-defined]
         await params.result_callback(None)
+
+
+def screen_tools(worker: str, *, timeout: float = 30.0) -> list:
+    """The tools that let a voice LLM ask a ``UIWorker`` about the screen, or act on it.
+
+    One tool, ``screen(action, target, value)``, sends the worker's ``screen``
+    job and returns its answer as data, so the voice LLM learns what it asked
+    and nothing more of the page. Hand them to the voice LLM's context::
+
+        context = LLMContext(tools=screen_tools("ui"))
+
+    Args:
+        worker: The name of the ``UIWorker`` to ask.
+        timeout: Seconds to wait for an answer.
+
+    Returns:
+        The tools, as functions for an ``LLMContext``.
+    """
+
+    @tool_options(cancel_on_interruption=False, timeout_secs=timeout)
+    async def screen(
+        params: FunctionCallParams,
+        action: str,
+        target: str | None = None,
+        value: str | None = None,
+    ):
+        """Ask about what is on the user's screen right now, or act on it.
+
+        Actions, with what ``target`` means for each:
+
+        - "find": which element a description refers to, such as "the
+          checkout button". Returns its label and how confident the match is,
+          or no label when nothing fits.
+        - "check": whether something is true of the screen, such as "is
+          anything on the list still unchecked?". Returns yes or no with a
+          probability.
+        - "select": which elements match a description, such as "dairy
+          products". Returns the matching labels, most likely first.
+        - "list": the named elements on screen, with their state and values,
+          optionally only those of one role such as "checkbox" or "textbox".
+          Use it to see what is on the page and which inputs are filled.
+        - "selection": the text the user has selected on the page, or no text
+          when nothing is selected. Nothing else can tell; call it whenever
+          the user says "this", "that" or "what I selected".
+        - "click", "scroll_to", "highlight", "select_text", "fill": do that to
+          the element a description refers to. "fill" writes ``value`` into
+          it. Returns whether it was done and the label of the element.
+
+        Args:
+            params: Framework-provided tool invocation context.
+            action: One of "find", "check", "select", "list", "selection",
+                "click", "scroll_to", "highlight", "select_text" or "fill".
+            target: The description, criteria or role the action needs; none
+                for "selection".
+            value: The text to write, only for "fill".
+        """
+        payload: dict = {"action": action}
+        if target is not None:
+            payload["target"] = target
+        if value is not None:
+            payload["value"] = value
+        try:
+            async with params.pipeline_worker.job(
+                worker, params=JobParams(name="screen", payload=payload, timeout=timeout)
+            ) as t:
+                pass
+        except JobError as e:
+            logger.warning(f"screen job on {worker} failed: {e}")
+            await params.result_callback({"error": str(e)})
+            return
+        await params.result_callback(t.response)
+
+    return [screen]

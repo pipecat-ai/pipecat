@@ -4,36 +4,25 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Deixis — the UIWorker grounds in what the user just selected.
+"""Deixis: the voice LLM asks the UI worker what the user selected, and points back.
 
-The page renders an article. The user selects a paragraph (or any span
-of text) and asks "explain this", "rephrase that", "where does it talk
-about RNA editing?", and so on. The client captures
-``window.getSelection()`` and emits a ``<selection ref="...">selected
-text</selection>`` block in the snapshot. The UIWorker reads it as a
-deictic reference: "this paragraph" resolves to the selected element.
-
-Two directions:
-
-- **Read**: user selects text → ``<selection>`` block in ``<ui_state>``
-  → the worker grounds its answer in the selected content.
-- **Write**: the worker says "this paragraph" → ``select_text=ref`` puts
-  the page's text selection on that element → the user sees what the
-  worker is referring to.
-
-``DeixisWorker`` composes ``ReplyToolMixin``: the ``reply(answer,
-scroll_to, highlight, select_text)`` bundle covers attention-pointing
-(scroll / highlight) and reading-style (selection) apps.
+The page renders an article. The user selects a paragraph and asks
+"explain this" or "rephrase that". The voice LLM cannot see the page, so
+it calls ``screen("selection")``, which returns the selected text, and
+answers from it. For "where does it talk about RNA editing?" it calls
+``screen("select_text", "the paragraph about RNA editing")``: the UI
+worker's classifier picks that paragraph and the page selects it, so the
+user sees exactly what the bot means. Both are the built-in ``screen``
+job, so the UI worker is a plain ``UIWorker`` with a classifier.
 
 Architecture::
 
     Main worker (PipelineWorker, owns transport + RTVI):
       transport.in → STT → user_agg → LLM → TTS → transport.out → assistant_agg
-        └── answer_about_screen(query) tool
-              └── params.pipeline_worker.job("ui", name="respond", payload={query})
+        └── screen(action, target) tool → job "screen" on the UI worker
 
-    DeixisWorker (ReplyToolMixin + UIWorker):
-      └── inherited: reply(answer, scroll_to, highlight, select_text)
+    UIWorker ("ui", with a classifier, no LLM turn):
+      └── built-in "screen" job: selection / select_text / scroll_to / highlight
 
 Run::
 
@@ -53,11 +42,9 @@ import os
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.adapters.schemas.direct_function import tool_options
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
-from pipecat.pipeline.job_context import JobError
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -69,16 +56,16 @@ from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
-from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.workers.runner import WorkerRunner
-from pipecat.workers.ui import ReplyToolMixin, UIWorker
+from pipecat.workers.ui import UIWorker, screen_tools
 
 load_dotenv(override=True)
 
 MAIN_NAME = "main"
+UI_NAME = "ui"
 
 transport_params = {
     "eval": lambda: EvalTransportParams(
@@ -91,128 +78,26 @@ transport_params = {
 
 
 VOICE_PROMPT = """\
-You are the voice layer of a screen-aware reading assistant. A \
-separate UI layer sees the page (and the user's selection) and \
-writes the spoken reply.
+You help the user read an article on their screen. You cannot see the \
+page and you cannot know what the user has selected; only your tools \
+can. Whenever the user says "this", "that" or "this paragraph", call a \
+tool first and go by what it returns. Never say nothing is selected on \
+your own.
 
-For every user utterance about the article, call \
-``answer_about_screen`` with the user's request verbatim. The tool's \
-response is the spoken reply, already TTS-ready.
+## Tools
 
-Only respond directly for pure pleasantries (greetings, thanks, \
-goodbyes). Keep direct replies to one short spoken sentence."""
+- screen("selection"): the text the user has selected. Call it for \
+"explain this", "rephrase that", "what does this mean" and any other \
+question about the selection, then answer from the text it returns.
+- screen(action, target): "select_text" with a description such as \
+"the paragraph about RNA editing" for "where does it talk about ..." \
+or "show me the part about ...". The page selects that paragraph and \
+scrolls to it, so just say where it is, such as "Here, in the \
+paragraph about RNA editing." "highlight" flashes an element briefly \
+for short emphasis.
 
-
-# The UI wire-format guide (UI_STATE_PROMPT_GUIDE) is appended to the LLM's
-# system instruction automatically by UIWorker, so this prompt only needs the
-# app-specific behavior.
-UI_PROMPT = """\
-You help the user read and understand an article. The current \
-``<ui_state>`` block is in your context, and may contain a \
-``<selection>`` block when the user has highlighted text.
-
-## Tool: reply
-
-Every turn calls ``reply`` exactly once. One tool call per turn, no \
-chaining.
-
-``reply(answer, scroll_to=None, highlight=None, select_text=None)``:
-
-- ``answer`` (REQUIRED): the spoken reply, plain language, two short \
-sentences max. No markdown, no symbols, no quoting long passages.
-- ``scroll_to`` (OPTIONAL): a snapshot ref. Set when the paragraph \
-you want to point at is tagged ``[offscreen]``.
-- ``highlight`` (OPTIONAL): a list of snapshot refs to flash briefly. \
-Use for short emphasis: "look at this fact". Don't use it for a \
-whole paragraph; ``select_text`` is better for that.
-- ``select_text`` (OPTIONAL): a single snapshot ref. Sets the page's \
-text selection to that element. Use this when you say "this \
-paragraph" or "the section that talks about X" so the user sees \
-exactly what you're referring to.
-
-## Reading the user's selection
-
-If ``<ui_state>`` contains a ``<selection ref="...">selected \
-text</selection>`` block, the user has highlighted something. Treat \
-that selection as the deictic referent for words like "this", \
-"that", "this paragraph", "what I selected". Ground your answer in \
-the selected content, not the article as a whole.
-
-When answering about the user's selection, do NOT also call \
-``select_text`` — they already selected it; pointing back at the \
-same span is redundant.
-
-## Decision rules
-
-- User has a selection AND asks something deictic ("explain this", \
-"rephrase that", "what does this mean") → ground in the selection. \
-Just ``answer``; no visual fields.
-- User asks "where does it say X?" or "show me the part about X" → \
-find the matching paragraph, ``answer`` briefly, set \
-``select_text=ref`` to point at it, and ``scroll_to=ref`` if it's \
-``[offscreen]``.
-- User asks a content question without selection → ``answer`` with \
-the relevant fact. Optionally set ``select_text=ref`` if the \
-answer is sourced from one specific paragraph.
-
-## Examples
-
-(refs are illustrative; use the actual refs from the current \
-``<ui_state>``)
-
-- User selects the third paragraph, asks "explain this" → \
-``reply(answer="The skin acts as its own light sensor. Even though \
-octopuses are colorblind, their skin can detect light directly, \
-which is how they match colors so accurately.")``
-- "Where does it talk about RNA editing?" (paragraph e15, offscreen) \
-→ ``reply(answer="Here, in the paragraph about RNA editing.", \
-scroll_to="e15", select_text="e15")``
-- "How many neurons does an octopus have?" (no selection) → \
-``reply(answer="About five hundred million, with two thirds of \
-them in the arms.", select_text="e7")``
-- "Hi, what's this article about?" (no selection) → \
-``reply(answer="It's a short essay on octopus cognition. Select any \
-paragraph and I'll explain it.")``"""
-
-
-class DeixisWorker(ReplyToolMixin, UIWorker):
-    """UIWorker that grounds in the user's selection and points back via select_text.
-
-    Composes ``ReplyToolMixin``, which exposes a single
-    ``reply(answer, scroll_to=None, highlight=None, select_text=None, ...)``
-    LLM tool. The same bundle pointing apps use also covers
-    reading-style apps: ``select_text`` is for "this paragraph" / "the
-    section about X" (durable text selection), while ``highlight``
-    flashes briefly for short emphasis.
-    """
-
-    def __init__(self):
-        llm = OpenAILLMService(
-            api_key=os.environ["OPENAI_API_KEY"],
-            settings=OpenAILLMService.Settings(system_instruction=UI_PROMPT),
-        )
-        super().__init__("ui", llm=llm)
-
-
-@tool_options(cancel_on_interruption=False, timeout_secs=30)
-async def answer_about_screen(params: FunctionCallParams, query: str):
-    """Ask the screen-aware UI worker to answer about the article / selection.
-
-    Args:
-        query (str): The user's request, passed verbatim.
-    """
-    logger.info(f"answer_about_screen('{query}')")
-    try:
-        async with params.pipeline_worker.job(
-            "ui", name="respond", payload={"query": query}, timeout=10
-        ) as t:
-            pass
-    except JobError as e:
-        logger.warning(f"ui job failed: {e}")
-        await params.result_callback("Something went wrong on my side.")
-        return
-
-    await params.result_callback(t.response)
+Keep replies to one or two short spoken sentences. No markdown, no \
+lists, no symbols."""
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
@@ -230,7 +115,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         settings=OpenAILLMService.Settings(system_instruction=VOICE_PROMPT),
     )
 
-    context = LLMContext(tools=[answer_about_screen])
+    context = LLMContext(tools=screen_tools(UI_NAME))
     aggregators = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
@@ -256,9 +141,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         processor_unusable_policy=ProcessorUnusablePolicy.END,
     )
 
+    # The worker's own LLM answers the classifier questions. To make them
+    # faster, pass a classifier such as JevClassifier(api_key=...).
+    ui_worker = UIWorker(UI_NAME, llm=OpenAILLMService(api_key=os.environ["OPENAI_API_KEY"]))
+
     runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
 
-    await runner.add_workers(DeixisWorker(), worker)
+    await runner.add_workers(ui_worker, worker)
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
