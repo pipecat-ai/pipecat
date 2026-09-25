@@ -12,12 +12,12 @@ running a heavier model with the tools, and does the work the frontend hands
 off. :class:`LLMWithBackend` wraps the frontend so the pair drops into a
 pipeline where an LLM goes, and installs the tools that join them.
 
-The two exchange messages, not calls. The frontend's ``delegate`` tool puts a
-message to the backend and returns at once; what the backend has to say comes
-back as a stream of outputs, each appended to the frontend's conversation as
-a message marked ``Backend:``, spoken or silent as the backend's flag says.
-Nothing is a bounded unit of work: a second request joins the first, a
-correction changes it, and ``cancel_delegated_work`` stops it. How a request
+The two exchange messages. The frontend's ``delegate`` tool puts a message
+to the backend and returns at once; what the backend has to say comes back
+as a stream of outputs, each appended to the frontend's conversation as a
+message marked ``Backend:``, spoken or silent as the backend's flag says. A
+second request joins the first, a correction changes it, and
+``cancel_delegated_work`` stops it. How a request
 is worded is the :class:`BackendRequestStrategy`'s business, and the
 :class:`BackendConnector` owns the tools, the session with the backend, and
 how each output is rendered into the conversation.
