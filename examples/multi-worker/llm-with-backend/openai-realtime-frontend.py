@@ -125,11 +125,16 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             enable_metrics=True,
             enable_usage_metrics=True,
         ),
-        # The handoff is hidden, so the backend's calls show at top level, as
-        # they do for OpenAI Live's client delegation. Remove the "delegate"
-        # entry to see the handoff itself as a call.
+        # The backend's calls are reported to the client with their names,
+        # arguments and results, so a UI can show what the backend is doing.
+        # The handoff itself is hidden, so those calls show at top level, as
+        # they do for OpenAI Live's client delegation; remove the "delegate"
+        # entry to see it as a call.
         rtvi_observer_params=RTVIObserverParams(
-            function_call_report_level={"delegate": RTVIFunctionCallReportLevel.DISABLED},
+            function_call_report_level={
+                "*": RTVIFunctionCallReportLevel.FULL,
+                "delegate": RTVIFunctionCallReportLevel.DISABLED,
+            },
         ),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
         processor_unusable_policy=ProcessorUnusablePolicy.END,

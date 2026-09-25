@@ -37,13 +37,18 @@ from backend import FRONTEND_INSTRUCTIONS, build_backend
 from dotenv import load_dotenv
 from loguru import logger
 
+from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.llm_with_backend import LLMWithBackend
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
+)
 from pipecat.processors.frameworks.rtvi import (
     RTVIFunctionCallReportLevel,
     RTVIObserverParams,
@@ -89,7 +94,15 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     context = LLMContext(
         [{"role": "developer", "content": "Greet the user and ask how you can help."}],
     )
-    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(context)
+    # Gemini Live decides turns on its server and reports no turn boundaries,
+    # so a local VAD produces the user-started/stopped-speaking frames that
+    # RTVI clients use to start a new user entry in their transcript.
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+        context,
+        user_params=LLMUserAggregatorParams(
+            vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.5)),
+        ),
+    )
 
     pipeline = Pipeline(
         [
@@ -108,11 +121,16 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             enable_metrics=True,
             enable_usage_metrics=True,
         ),
-        # The handoff is hidden, so the backend's calls show at top level, as
-        # they do for OpenAI Live's client delegation. Remove the "delegate"
-        # entry to see the handoff itself as a call.
+        # The backend's calls are reported to the client with their names,
+        # arguments and results, so a UI can show what the backend is doing.
+        # The handoff itself is hidden, so those calls show at top level, as
+        # they do for OpenAI Live's client delegation; remove the "delegate"
+        # entry to see it as a call.
         rtvi_observer_params=RTVIObserverParams(
-            function_call_report_level={"delegate": RTVIFunctionCallReportLevel.DISABLED},
+            function_call_report_level={
+                "*": RTVIFunctionCallReportLevel.FULL,
+                "delegate": RTVIFunctionCallReportLevel.DISABLED,
+            },
         ),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
         processor_unusable_policy=ProcessorUnusablePolicy.END,

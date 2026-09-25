@@ -1,6 +1,6 @@
 # LLMWithBackend evals
 
-Behavioral evals for the bots in [`examples/multi-worker/llm-with-backend/`](../../examples/multi-worker/llm-with-backend/): a fast frontend that holds the conversation, and a backend it hands work to over messages. Each scenario is one behavior the pair has to show, driven against a real bot by [`pipecat eval`](../release/README.md). The prerequisites are the release suite's: a local Ollama judge (`gemma4:12b`), Kokoro and Moonshine for audio mode, and the bots' API keys in `.env`.
+Behavioral evals for the bots in [`examples/multi-worker/llm-with-backend/`](../../examples/multi-worker/llm-with-backend/): a fast frontend that holds the conversation (three cascade frontends on OpenAI, Gemini and Claude, and two speech-to-speech), and a backend it hands work to over messages. Each scenario is one behavior the pair has to show, driven against a real bot by [`pipecat eval`](../release/README.md). The prerequisites are the release suite's: a local Ollama judge (`gemma4:12b`), Kokoro and Moonshine for audio mode, and the bots' API keys in `.env`.
 
 ```bash
 uv run python -m pipecat.evals suite -d evals/llm-with-backend/manifest.yaml            # everything
@@ -9,7 +9,7 @@ uv run python -m pipecat.evals suite -d evals/llm-with-backend/manifest.yaml -k 
 
 ## Layout
 
-The conversations live once, in `scenarios/turns/`, and are included by two scenario files each: `scenarios/text/<name>.yaml`, which judges the frontend's text, and `scenarios/audio/<name>.yaml`, which synthesizes the user's voice and judges a transcription of the bot's speech. Text mode drives the cascade bot only, since the speech-to-speech bots take audio, and is the fast loop while working on prompts or code; audio mode runs against every bot and is the judgment. The manifest lists which bots run which.
+The conversations live once, in `scenarios/turns/`, and are included by two scenario files each: `scenarios/text/<name>.yaml`, which judges the frontend's text, and `scenarios/audio/<name>.yaml`, which synthesizes the user's voice and judges a transcription of the bot's speech. Text mode drives the cascade bots only, since the speech-to-speech bots take audio, and is the fast loop while working on prompts or code; audio mode runs against every bot and is the judgment. The manifest lists which bots run which.
 
 ## Scenarios
 

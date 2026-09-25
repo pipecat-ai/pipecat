@@ -16,11 +16,13 @@ The two exchange messages. The frontend's `delegate` tool puts a message to the 
 
 ## Examples
 
-One engineering assistant, three frontends. [`backend.py`](backend.py) holds the backend, its tools and both prompts: a code change that loops through searching, reading, patching and running the tests until they pass, a two-step research task, and quick CI and pull-request lookups, each taking about as long as the real thing would.
+One engineering assistant, five frontends. [`backend.py`](backend.py) holds the backend, its tools and both prompts: a code change that loops through searching, reading, patching and running the tests until they pass, a two-step research task, and quick CI and pull-request lookups, each taking about as long as the real thing would.
 
 | Example                                                        | Frontend                                              |
 | -------------------------------------------------------------- | ----------------------------------------------------- |
 | [`openai-responses-frontend.py`](openai-responses-frontend.py) | A cascade pipeline: STT, OpenAI's Responses API, TTS. |
+| [`google-frontend.py`](google-frontend.py)                     | A cascade pipeline with a Gemini frontend.            |
+| [`anthropic-frontend.py`](anthropic-frontend.py)               | A cascade pipeline with a Claude frontend.            |
 | [`openai-realtime-frontend.py`](openai-realtime-frontend.py)   | OpenAI Realtime, speech to speech.                    |
 | [`gemini-live-frontend.py`](gemini-live-frontend.py)           | Gemini Live, speech to speech.                        |
 

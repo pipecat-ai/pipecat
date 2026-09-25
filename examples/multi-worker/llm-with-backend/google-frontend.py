@@ -6,16 +6,14 @@
 
 """An engineering assistant with a backend: a cascade frontend delegating to a backend LLM.
 
-The frontend keeps the conversation moving with a fast model on OpenAI's
-Responses API and no tools of its own. Anything that needs tools or careful
+The frontend keeps the conversation moving with a fast Gemini model and no tools of its own. Anything that needs tools or careful
 reasoning it hands to a backend running Claude, and relays what comes back
 as it comes. ``LLMWithBackend`` wires the two together: it installs the
 ``delegate`` and ``cancel_delegated_work`` tools on the frontend and runs the
 backend as a worker of its own.
 
 The backend, its tools and both prompts are in ``backend.py``, shared with
-``openai-realtime-frontend.py`` and ``gemini-live-frontend.py``, which put a
-speech-to-speech model in the frontend's place. Try: "fix the flaky retry test
+the other frontends in this directory. Try: "fix the flaky retry test
 in the HTTP client", then ask for something else while it works.
 
 Architecture::
@@ -26,7 +24,7 @@ Architecture::
 
 Requirements:
 
-- OPENAI_API_KEY
+- GOOGLE_API_KEY
 - ANTHROPIC_API_KEY
 - DEEPGRAM_API_KEY
 - CARTESIA_API_KEY
@@ -57,7 +55,7 @@ from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
-from pipecat.services.openai.responses.llm import OpenAIResponsesLLMService
+from pipecat.services.google.llm import GoogleLLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.workers.runner import WorkerRunner
@@ -92,9 +90,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     )
 
     llm = LLMWithBackend(
-        frontend=OpenAIResponsesLLMService(
-            api_key=os.environ["OPENAI_API_KEY"],
-            settings=OpenAIResponsesLLMService.Settings(system_instruction=FRONTEND_INSTRUCTIONS),
+        frontend=GoogleLLMService(
+            api_key=os.environ["GOOGLE_API_KEY"],
+            settings=GoogleLLMService.Settings(system_instruction=FRONTEND_INSTRUCTIONS),
         ),
         backend=build_backend(),
     )
