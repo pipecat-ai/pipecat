@@ -90,12 +90,14 @@ class RTVIFunctionCallReportLevel(StrEnum):
         DISABLED: No events emitted for this function call.
         NONE: Events only with tool_call_id, no function name or metadata (most secure).
         NAME: Events with function name, no arguments or results.
+        ARGUMENTS: Events with function name and arguments, no results.
         FULL: Events with function name, arguments, and results.
     """
 
     DISABLED = "disabled"
     NONE = "none"
     NAME = "name"
+    ARGUMENTS = "arguments"
     FULL = "full"
 
 
@@ -165,6 +167,7 @@ class RTVIObserverParams:
                 - DISABLED: No events emitted for this function.
                 - NONE: Events with tool_call_id only (most secure when events needed).
                 - NAME: Adds function name to events.
+                - ARGUMENTS: Adds function name and arguments, no results.
                 - FULL: Adds function name, arguments, and results.
 
             Defaults to ``{"*": RTVIFunctionCallReportLevel.NONE}``.
@@ -536,6 +539,7 @@ class RTVIObserver(BaseObserver):
                 msg_data = RTVI.LLMFunctionCallStartMessageData()
                 if report_level in (
                     RTVIFunctionCallReportLevel.NAME,
+                    RTVIFunctionCallReportLevel.ARGUMENTS,
                     RTVIFunctionCallReportLevel.FULL,
                 ):
                     msg_data.function_name = function_call.function_name
@@ -549,10 +553,14 @@ class RTVIObserver(BaseObserver):
                 )
                 if report_level in (
                     RTVIFunctionCallReportLevel.NAME,
+                    RTVIFunctionCallReportLevel.ARGUMENTS,
                     RTVIFunctionCallReportLevel.FULL,
                 ):
                     msg_data.function_name = frame.function_name
-                if report_level == RTVIFunctionCallReportLevel.FULL:
+                if report_level in (
+                    RTVIFunctionCallReportLevel.ARGUMENTS,
+                    RTVIFunctionCallReportLevel.FULL,
+                ):
                     msg_data.arguments = frame.arguments
                 message = RTVI.LLMFunctionCallInProgressMessage(data=msg_data)
                 await self.send_rtvi_message(message)
@@ -565,6 +573,7 @@ class RTVIObserver(BaseObserver):
                 )
                 if report_level in (
                     RTVIFunctionCallReportLevel.NAME,
+                    RTVIFunctionCallReportLevel.ARGUMENTS,
                     RTVIFunctionCallReportLevel.FULL,
                 ):
                     msg_data.function_name = frame.function_name
@@ -579,6 +588,7 @@ class RTVIObserver(BaseObserver):
                 )
                 if report_level in (
                     RTVIFunctionCallReportLevel.NAME,
+                    RTVIFunctionCallReportLevel.ARGUMENTS,
                     RTVIFunctionCallReportLevel.FULL,
                 ):
                     msg_data.function_name = frame.function_name
