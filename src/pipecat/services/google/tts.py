@@ -1399,7 +1399,7 @@ class GeminiTTSService(GoogleBaseTTSService):
 
         voice = assert_given(default_settings.voice)
         # Custom voice IDs begin with `voice_`
-        if voice not in self.AVAILABLE_VOICES and not voice.startswith("voice_"):
+        if voice not in self.AVAILABLE_VOICES and not (voice and voice.startswith("voice_")):
             logger.warning(
                 f"Voice '{default_settings.voice}' not in known voices list. Using anyway."
             )
@@ -1548,7 +1548,7 @@ class GeminiTTSService(GoogleBaseTTSService):
         if (
             is_given(delta.voice)
             and delta.voice not in self.AVAILABLE_VOICES
-            and not delta.voice.startswith("voice_")
+            and not (delta.voice and delta.voice.startswith("voice_"))
         ):
             logger.warning(f"Voice '{delta.voice}' not in known voices list. Using anyway.")
 
@@ -1642,6 +1642,7 @@ class GeminiTTSService(GoogleBaseTTSService):
 
         try:
             model = assert_given(self._settings.model)
+            assert model is not None
             is_gemini_38 = self._is_gemini_38_tts(model)
 
             if is_gemini_38 and not hasattr(genai.types, "SpeechMetadata"):
@@ -1691,6 +1692,8 @@ class GeminiTTSService(GoogleBaseTTSService):
 
             async def audio_chunks() -> AsyncGenerator[bytes, None]:
                 first_chunk_for_ttfb = False
+                buffer = bytearray()
+                chunk_size = self.chunk_size
                 async for chunk in response:
                     if not (
                         chunk.candidates
@@ -1703,7 +1706,12 @@ class GeminiTTSService(GoogleBaseTTSService):
                             if not first_chunk_for_ttfb:
                                 await self.stop_ttfb_metrics()
                                 first_chunk_for_ttfb = True
-                            yield part.inline_data.data
+                            buffer.extend(part.inline_data.data)
+                            while len(buffer) >= chunk_size:
+                                yield bytes(buffer[:chunk_size])
+                                del buffer[:chunk_size]
+                if buffer:
+                    yield bytes(buffer)
 
             async for frame in self._stream_audio_frames_from_iterator(
                 audio_chunks(), strip_wav_header=is_gemini_38, context_id=context_id
