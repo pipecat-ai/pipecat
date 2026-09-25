@@ -70,9 +70,11 @@ from pipecat.workers.ui.ui_event_decorator import _collect_ui_event_handlers
 from pipecat.workers.ui.ui_prompts import UI_STATE_PROMPT_GUIDE
 
 # The most named elements put to the classifier as the options of one
-# question. It matches Jev's limit on choice options, and an LLM does no
-# better past that many either.
+# question; Jev's limit on choice options.
 _MAX_ELEMENT_OPTIONS = 255
+
+# The confidence below which the classifier's pick of an element is no answer.
+_ELEMENT_THRESHOLD = 0.5
 
 
 class UISelection(NamedTuple):
@@ -123,9 +125,9 @@ class UIWorker(LLMContextWorker):
       job: find an element, check whether something is true, select the
       elements matching a description, list what is on screen, read the
       user's selection, or click, scroll to, highlight, select or fill an
-      element. Every answer is short
-      data and never the page; :func:`~pipecat.workers.ui.ui_tools.screen_tools`
-      gives the voice LLM the tool that sends it.
+      element. Every answer is short data and never the page;
+      :func:`~pipecat.workers.ui.ui_tools.screen_tools` gives the voice LLM the
+      tool that sends it.
     - Answer as a delegate. The built-in single-flight ``respond`` job runs one
       screen-grounded LLM turn and answers with the reply the LLM writes. A
       ``@tool`` that calls ``respond_to_job`` answers instead when it needs to
@@ -461,7 +463,9 @@ class UIWorker(LLMContextWorker):
         logger.debug(f"{self.name}: respond to '{message.event_name}'? {result.probability:.2f}")
         return result.is_yes
 
-    async def which_element(self, description: str, threshold: float = 0.5) -> str | None:
+    async def which_element(
+        self, description: str, threshold: float = _ELEMENT_THRESHOLD
+    ) -> str | None:
         """Ask the classifier which element on screen the user means.
 
         The candidates are the snapshot's named elements, described by their
@@ -1113,7 +1117,11 @@ class UIWorker(LLMContextWorker):
         """The answer to one screen action, as the ``screen`` job returns it."""
         if action == "find":
             found = await self._find(target)
-            return {"label": found["label"], "confidence": found["confidence"]}
+            confident = found["confidence"] >= _ELEMENT_THRESHOLD
+            return {
+                "label": found["label"] if confident else None,
+                "confidence": found["confidence"],
+            }
         if action == "check":
             result = await self.check_screen(target)
             return {"yes": result.is_yes, "probability": result.probability}

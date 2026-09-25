@@ -148,10 +148,9 @@ class ReplyToolMixin:
 def screen_tools(worker: str, *, timeout: float = 30.0) -> list:
     """The tools that let a voice LLM ask a ``UIWorker`` about the screen, or act on it.
 
-    Today that is one tool, ``screen(action, target, value)``, which sends the
-    worker's ``screen`` job and returns its answer as data, so the voice LLM
-    learns what it asked and nothing more of the page. Hand them to the voice
-    LLM's context::
+    One tool, ``screen(action, target, value)``, sends the worker's ``screen``
+    job and returns its answer as data, so the voice LLM learns what it asked
+    and nothing more of the page. Hand them to the voice LLM's context::
 
         context = LLMContext(tools=screen_tools("ui"))
 

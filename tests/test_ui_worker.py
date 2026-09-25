@@ -1088,6 +1088,12 @@ class TestUIWorkerScreenJobs(unittest.IsolatedAsyncioTestCase):
         response, _ = self._response(worker)
         self.assertEqual(response, {"text": None})
 
+    async def test_find_below_the_threshold_answers_no_label(self):
+        worker, _ = await self._worker(probability=0.3)
+        await worker._screen_job(_job("screen", {"action": "find", "target": "the blue one"}))
+        response, _ = self._response(worker)
+        self.assertEqual(response, {"label": None, "confidence": 0.3})
+
     async def test_find_without_named_elements_answers_nothing(self):
         worker, classifier = await self._worker()
         worker._latest_snapshot = None

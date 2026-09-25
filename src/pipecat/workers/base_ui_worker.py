@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""A worker whose job groups surface on the client UI, at its former home.
+"""A worker whose job groups surface on the client UI.
 
 .. deprecated:: 1.12.0
     Use :class:`~pipecat.workers.ui.UIWorker` instead, which reports its
