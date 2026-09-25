@@ -289,14 +289,15 @@ class TestTTFATToolCalls:
             SimpleNamespace(type="message_start"),
             SimpleNamespace(
                 type="content_block_start",
+                index=0,
                 content_block=SimpleNamespace(type="tool_use", id="t1", name="get_weather"),
             ),
             # Arguments stream after the call begins; TTFAT must not wait for them.
             SimpleNamespace(
-                type="content_block_delta", delta=SimpleNamespace(partial_json='{"city":')
+                type="content_block_delta", index=0, delta=SimpleNamespace(partial_json='{"city":')
             ),
             SimpleNamespace(
-                type="content_block_delta", delta=SimpleNamespace(partial_json='"Paris"}')
+                type="content_block_delta", index=0, delta=SimpleNamespace(partial_json='"Paris"}')
             ),
         ]
         assert await self._stop_index(service, patch_stream, events) == 1
