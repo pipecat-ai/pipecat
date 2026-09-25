@@ -12,10 +12,12 @@ the main pipeline execution.
 """
 
 import asyncio
+import weakref
 from typing import Any
 
 from attr import dataclass
 
+from pipecat.frames.frames import Frame
 from pipecat.observers.base_observer import (
     BaseObserver,
     FrameProcessed,
@@ -63,6 +65,9 @@ class WorkerObserver(BaseObserver):
     pipeline by creating a queue and a worker for each user observer. When a frame
     is received, it will be put in a queue for efficiency and later processed by
     each worker.
+
+    It also tells a frame's first push from the ones that follow, and only
+    passes the first one to observers that want a frame once.
     """
 
     def __init__(
@@ -82,6 +87,10 @@ class WorkerObserver(BaseObserver):
         self._proxies: dict[BaseObserver, Proxy] | None = (
             None  # Becomes a dict after start() is called
         )
+        # Frames pushed so far, held weakly: an entry goes away with its
+        # frame, so this tracks the frames in flight, not every frame ever
+        # pushed.
+        self._frames_pushed: weakref.WeakValueDictionary[int, Frame] = weakref.WeakValueDictionary()
 
     def add_observer(self, observer: BaseObserver):
         """Add a new observer to the managed list.
@@ -157,12 +166,24 @@ class WorkerObserver(BaseObserver):
         await self._send_to_proxy(data)
 
     async def on_push_frame(self, data: FramePushed):
-        """Queue frame data for all managed observers.
+        """Queue frame data for the managed observers.
+
+        A repeated push only reaches the observers that want every push.
 
         Args:
             data: The frame push event data to distribute to observers.
         """
-        await self._send_to_proxy(data)
+        if not self._proxies:
+            return
+
+        frame = data.frame
+        data.first_push = frame.id not in self._frames_pushed
+        if data.first_push:
+            self._frames_pushed[frame.id] = frame
+
+        for proxy in self._proxies.values():
+            if data.first_push or proxy.observer.observe_every_push:
+                await proxy.queue.put(data)
 
     async def on_processor_setup(self, data: ProcessorSetUp):
         """Queue processor setup timing for all managed observers.

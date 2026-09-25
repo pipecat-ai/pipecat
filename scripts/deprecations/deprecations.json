@@ -828,6 +828,17 @@
       "location": "pipecat/observers/startup_timing_observer.py"
     },
     {
+      "subject": "TurnTrackingObserver.max_frames",
+      "module": "pipecat.observers.turn_tracking_observer",
+      "kind": "parameter",
+      "deprecated_in": "1.12.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "No replacement. The observer receives each frame once. Will be removed in 2.0.0.",
+      "location": "pipecat/observers/turn_tracking_observer.py"
+    },
+    {
       "subject": "LatencyBreakdown.chronological_events",
       "module": "pipecat.observers.user_bot_latency_observer",
       "kind": "method",
@@ -836,6 +847,17 @@
       "relation": "use_existing",
       "replacement": "LatencyBreakdown.turn_contribution_lines",
       "message": "`LatencyBreakdown.chronological_events` is deprecated since 1.9.0 and will be removed in 2.0.0. Use `LatencyBreakdown.turn_contribution_lines` instead.",
+      "location": "pipecat/observers/user_bot_latency_observer.py"
+    },
+    {
+      "subject": "UserBotLatencyObserver.max_frames",
+      "module": "pipecat.observers.user_bot_latency_observer",
+      "kind": "parameter",
+      "deprecated_in": "1.12.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "No replacement. The observer receives each frame once. Will be removed in 2.0.0.",
       "location": "pipecat/observers/user_bot_latency_observer.py"
     },
     {

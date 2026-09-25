@@ -11,7 +11,7 @@ tracking when turns start and end based on user and bot speech patterns.
 """
 
 import asyncio
-from collections import deque
+import warnings
 
 from loguru import logger
 
@@ -49,17 +49,27 @@ class TurnTrackingObserver(BaseObserver):
       duration in seconds, and whether it was interrupted
     """
 
-    def __init__(self, max_frames=100, turn_end_timeout_secs=2.5, **kwargs):
+    def __init__(self, max_frames: int | None = None, turn_end_timeout_secs: float = 2.5, **kwargs):
         """Initialize the turn tracking observer.
 
         Args:
-            max_frames: Maximum number of frame IDs to keep in history for
-                duplicate detection. Defaults to 100.
+            max_frames: Unused.
+
+                .. deprecated:: 1.12.0
+                    No replacement. The observer receives each frame once.
+                    Will be removed in 2.0.0.
             turn_end_timeout_secs: Timeout in seconds after bot stops speaking
                 before automatically ending the turn. Defaults to 2.5.
             **kwargs: Additional arguments passed to the parent observer.
         """
-        super().__init__(**kwargs)
+        if max_frames is not None:
+            warnings.warn(
+                "`max_frames` parameter of `TurnTrackingObserver` is deprecated since 1.12.0 "
+                "and will be removed in 2.0.0. No replacement.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        super().__init__(observe_every_push=False, **kwargs)
         self._turn_count = 0
         self._is_turn_active = False
         self._is_bot_speaking = False
@@ -67,10 +77,6 @@ class TurnTrackingObserver(BaseObserver):
         self._turn_start_time = 0
         self._turn_end_timeout_secs = turn_end_timeout_secs
         self._end_turn_timer = None
-
-        # Track processed frames to avoid duplicates
-        self._processed_frames = set()
-        self._frame_history = deque(maxlen=max_frames)
 
         self._register_event_handler("on_turn_started")
         self._register_event_handler("on_turn_ended")
@@ -81,19 +87,6 @@ class TurnTrackingObserver(BaseObserver):
         Args:
             data: Frame push event data containing the frame and metadata.
         """
-        # Skip already processed frames
-        if data.frame.id in self._processed_frames:
-            return
-
-        self._processed_frames.add(data.frame.id)
-        self._frame_history.append(data.frame.id)
-
-        # If we've exceeded our history size, remove the oldest frame ID
-        # from the set of processed frames.
-        if len(self._processed_frames) > len(self._frame_history):
-            # Rebuild the set from the current deque contents
-            self._processed_frames = set(self._frame_history)
-
         if isinstance(data.frame, StartFrame):
             # Start the first turn immediately when the pipeline starts
             if self._turn_count == 0:
