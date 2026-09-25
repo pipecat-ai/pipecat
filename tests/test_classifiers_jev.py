@@ -371,6 +371,15 @@ class TestJevClassifier:
         with pytest.raises(ValueError):
             JevClassifier()
 
+    def test_a_client_of_its_own_takes_the_model_endpoint_and_timeout(self):
+        classifier = JevClassifier(
+            api_key="k", model="jev-x", base_url="https://jev.test", timeout=1.5
+        )
+        assert classifier._owns_client
+        assert classifier.client.model == "jev-x"
+        assert str(classifier.client._http.base_url) == "https://jev.test"
+        assert classifier.client._http.timeout.read == 1.5
+
     @pytest.mark.asyncio
     async def test_cleanup_closes_only_an_owned_client(self):
         owned = JevClassifier(api_key="key")

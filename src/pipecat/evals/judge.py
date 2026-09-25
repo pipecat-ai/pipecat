@@ -132,10 +132,9 @@ not given).
 
 Lifecycle:
 
-The judge sets its classifier up when it is created and cleans it up when
-the session closes it at the end of the run. For Jev that opens one HTTP/2
-connection ahead of the first question and keeps it open, so a question
-doesn't wait for a connection and a simulation's questions share one.
+The judge sets its classifier up before its first question and cleans it up
+when the session closes it at the end of the run. For Jev that opens one
+HTTP/2 connection and keeps it open, so a simulation's questions share one.
 
 Example::
 
@@ -154,7 +153,6 @@ Example::
 import asyncio
 import hashlib
 import json
-import os
 import re
 import warnings
 from collections.abc import Awaitable, Callable, Iterable, Sequence
@@ -172,14 +170,10 @@ from pipecat.classifiers.base_classifier import (
     YesNoResult,
 )
 from pipecat.classifiers.llm.classifier import LLMClassifier
-from pipecat.evals.services import DEFAULT_JEV_MODEL, llm_service_from_config
+from pipecat.evals.services import classifier_from_config, llm_service_from_config
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.services.llm_service import LLMService
 from pipecat.utils.asyncio.task_manager import TaskManager
-
-# Seconds to wait for Jev to answer a question. Jev answers in a few hundred
-# milliseconds, so a question still waiting this long is one to ask again.
-JEV_TIMEOUT = 2.5
 
 _R = TypeVar("_R")
 
@@ -468,14 +462,7 @@ class EvalJudge:
         self._transcript: list[dict] = []
         self._cache: dict[str, JudgeVerdict] = {}
         self._run_cache: dict[str, RunVerdicts] = {}
-        # A client the judge built for its classifier, which the classifier
-        # itself does not own, so the judge is the one to close it.
-        self._own_client: Any = None
         self._setup_task: asyncio.Task | None = None
-        try:
-            self._setup_task = asyncio.get_running_loop().create_task(self._setup())
-        except RuntimeError:
-            pass  # no running loop: the first question sets the classifier up
 
     @classmethod
     def from_config(cls, judge_config: dict | None) -> "EvalJudge":
@@ -515,32 +502,23 @@ class EvalJudge:
                 return TogetherLLMService(...)  # any service exposing run_inference()
         """
         config = judge_config or {}
-        allow_continue = config.get("allow_continue", True) is not False
-        explain_below = float(config.get("explain_below", 0.75))
+        classifier = classifier_from_config(config, where="judge.eval")
         explainer_config = config.get("explainer")
-        explainer = None
-        client = None
-        if str(config.get("service", "")).lower() == "typesafe":
-            classifier, client = _jev_classifier(config)
-            if explainer_config is not False:
-                explainer = llm_service_from_config(explainer_config or None, where="judge.eval")
+        if explainer_config is False:
+            explainer = None
+        elif explainer_config:
+            explainer = llm_service_from_config(explainer_config, where="judge.eval.explainer")
+        elif isinstance(classifier, LLMClassifier):
+            # Without a block of its own, the explainer is the judging LLM.
+            explainer = classifier.llm
         else:
-            service = llm_service_from_config(judge_config, where="judge.eval")
-            classifier = LLMClassifier(llm=service)
-            if explainer_config is None:
-                # Without a block of its own, the explainer is the classifying LLM.
-                explainer = service
-            elif explainer_config is not False:
-                explainer = llm_service_from_config(explainer_config, where="judge.eval")
-        judge = cls(
+            explainer = llm_service_from_config(None, where="judge.eval.explainer")
+        return cls(
             classifier,
             explainer=explainer,
-            explain_below=explain_below,
-            allow_continue=allow_continue,
+            explain_below=float(config.get("explain_below", 0.75)),
+            allow_continue=config.get("allow_continue", True) is not False,
         )
-        # A Jev classifier is given a client it does not own, so the judge closes it.
-        judge._own_client = client
-        return judge
 
     @property
     def classifier(self) -> BaseClassifier:
@@ -754,23 +732,21 @@ class EvalJudge:
 
     async def close(self) -> None:
         """Release what the judge holds open; the session calls it when the run ends."""
-        if self._setup_task is not None and not self._setup_task.done():
-            self._setup_task.cancel()
+        if self._setup_task is not None:
+            await self._setup_task
         await self._classifier.cleanup()
-        if self._own_client is not None:
-            await self._own_client.close()
 
     async def _setup(self) -> None:
-        """Wire the classifier up, ahead of the first question.
+        """Wire the classifier up, before the first question.
 
         The judge runs outside any pipeline, so it gives the classifier a task
-        manager of its own. A classifier that cannot be set up now is only a
-        warning: the first question goes out regardless.
+        manager of its own. A classifier that cannot be set up is only a
+        warning: the question goes out regardless.
         """
         try:
             await self._classifier.setup(TaskManager())
         except Exception as e:
-            logger.debug(f"Judge couldn't set its classifier up early: {e}")
+            logger.warning(f"Judge couldn't set its classifier up: {e}")
 
     def _needs_reason(self, verdict: JudgeVerdict) -> bool:
         """Whether a verdict is worth explaining: a ``no``, or an unsure ``yes``."""
@@ -844,10 +820,10 @@ class EvalJudge:
 
     async def _ask(self, state, ask: Callable[[], Awaitable[_R]]) -> "_R | None":
         """The classifier's answer, asked once more if it failed, or ``None``."""
+        # The first question sets the classifier up; the others wait for it.
         if self._setup_task is None:
             self._setup_task = asyncio.get_running_loop().create_task(self._setup())
-        if not self._setup_task.done():
-            await asyncio.shield(self._setup_task)
+        await asyncio.shield(self._setup_task)
         logger.debug(f"Judge asking over state:\n{json.dumps(state)}")
         for attempt in (1, 2):
             try:
@@ -1051,37 +1027,6 @@ class _Explainer:
             return "\0explainer returned empty response"
 
         return response
-
-
-def _jev_classifier(config: dict) -> tuple["BaseClassifier", Any]:
-    """A classifier over Jev, and the client it was given, which it does not own.
-
-    Args:
-        config: The ``judge.eval:`` block, for the ``model`` and the
-            ``endpoint`` the questions go to.
-
-    Returns:
-        The classifier and its client.
-
-    Raises:
-        ValueError: If there is no ``TYPESAFE_API_KEY``.
-    """
-    from pipecat.classifiers.jev.classifier import JevClassifier
-    from pipecat.classifiers.jev.client import JevClient
-
-    api_key = os.environ.get("TYPESAFE_API_KEY")
-    if not api_key:
-        raise ValueError("Judging with Jev needs an API key: set TYPESAFE_API_KEY.")
-    endpoint = config.get("endpoint")
-    # Only a block that names an endpoint overrides the client's own default.
-    client_args: dict[str, Any] = {"base_url": str(endpoint).rstrip("/")} if endpoint else {}
-    client = JevClient(
-        api_key=api_key,
-        model=config.get("model") or DEFAULT_JEV_MODEL,
-        timeout=JEV_TIMEOUT,
-        **client_args,
-    )
-    return JevClassifier(client=client), client
 
 
 def _numbered_turns(transcript: Iterable[dict]) -> list[dict]:

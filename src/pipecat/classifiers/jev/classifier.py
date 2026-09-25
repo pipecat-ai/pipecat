@@ -50,7 +50,16 @@ class JevClassifier(BaseClassifier):
         voicemail_classifier = JevClassifier(client=client)
     """
 
-    def __init__(self, *, api_key: str | None = None, client: JevClient | None = None, **kwargs):
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        client: JevClient | None = None,
+        model: str | None = None,
+        base_url: str | None = None,
+        timeout: float | None = None,
+        **kwargs,
+    ):
         """Initialize the classifier.
 
         Args:
@@ -58,6 +67,12 @@ class JevClassifier(BaseClassifier):
                 of its own.
             client: A client to share. One of ``api_key`` and ``client`` is
                 required.
+            model: The Jev model a client of its own asks; the client's
+                default when ``None``.
+            base_url: Where a client of its own sends its questions; the
+                client's default when ``None``.
+            timeout: Seconds a client of its own waits for an answer; the
+                client's default when ``None``.
             **kwargs: Additional arguments passed to the parent class.
         """
         super().__init__(**kwargs)
@@ -65,7 +80,8 @@ class JevClassifier(BaseClassifier):
         if not client:
             if not api_key:
                 raise ValueError("JevClassifier needs an API key or a JevClient")
-            client = JevClient(api_key=api_key)
+            given = {"model": model, "base_url": base_url, "timeout": timeout}
+            client = JevClient(api_key=api_key, **{k: v for k, v in given.items() if v is not None})
         self._client = client
 
     @property

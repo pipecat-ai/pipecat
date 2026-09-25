@@ -107,7 +107,7 @@ def _judge(responses, **kwargs) -> tuple[EvalJudge, _FakeApi]:
 def _config_judge(api: _FakeApi, config: dict) -> EvalJudge:
     """The judge a ``judge.eval:`` block builds, over a mock connection to ``api``."""
     with patch.dict(os.environ, {"TYPESAFE_API_KEY": "k"}):
-        with patch("pipecat.classifiers.jev.client.JevClient", api.client):
+        with patch("pipecat.classifiers.jev.classifier.JevClient", api.client):
             return EvalJudge.from_config(config)
 
 
