@@ -702,6 +702,7 @@ class LLMUserAggregator(LLMContextAggregator):
                 user_turn_strategies,
                 are_user_provided_custom_strategies=self._params.user_turn_strategies is not None,
             )
+            self._disable_empty_user_turn_recovery()
 
         self._user_is_muted = False
         self._user_turn_start_timestamp = ""
@@ -995,6 +996,20 @@ class LLMUserAggregator(LLMContextAggregator):
         else:
             logger.debug(msg)
 
+    def _disable_empty_user_turn_recovery(self):
+        """Turn off empty user turn recovery for realtime mode.
+
+        A realtime LLM service hears the user's audio directly, so an empty
+        transcript doesn't mean the model missed the speech.
+        """
+        if self._params.empty_user_turn is None:
+            return
+        self._params.empty_user_turn = None
+        logger.debug(
+            f"{self}: realtime mode — empty user turn recovery disabled; the realtime "
+            "LLM service hears the user's audio directly."
+        )
+
     async def _handle_service_metadata(self, frame: ServiceMetadataFrame):
         """Dispatch a service metadata frame.
 
@@ -1115,6 +1130,8 @@ class LLMUserAggregator(LLMContextAggregator):
         if not self._realtime_service_mode:
             # Explicitly disabled — honor it silently; the user opted out.
             return
+
+        self._disable_empty_user_turn_recovery()
 
         strategies = self._user_turn_controller.user_turn_strategies
         self._apply_realtime_mode_strategy_mutations(
