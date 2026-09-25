@@ -31,7 +31,7 @@ Architecture::
     ReviewWorker (ReplyToolMixin + UIWorker, keep_history=True):
       ├── inherited: reply(answer, scroll_to, highlight, select_text, fills, click)
       ├── @tool start_review(answer, paragraph_ref, paragraph_text)
-      │     └── request_job_group("clarity", "tone", params=JobGroupParams(...))
+      │     └── say(answer), then job_group("clarity", "tone", ...) and speak the feedback
       ├── @ui_event("note_click") → scroll_to + select_text(ref)
       └── on_job_response → emit add_note for each reviewer that completes
 
@@ -69,7 +69,7 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.bus.messages import BusJobRequestMessage, BusJobResponseMessage
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
-from pipecat.pipeline.job_context import JobError, JobGroupParams, JobStatus
+from pipecat.pipeline.job_context import JobError, JobGroupError, JobGroupParams, JobStatus
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -163,8 +163,9 @@ Save button after filling the notes textarea.
 For "review this paragraph" / "give me feedback on this" requests. \
 ``start_review(answer, paragraph_ref, paragraph_text)``:
 
-- ``answer`` (REQUIRED): brief acknowledgement spoken right away \
-("Reviewing this paragraph").
+- ``answer`` (REQUIRED): brief acknowledgement, spoken right away \
+("Reviewing this paragraph"). The feedback itself is spoken for you \
+when both reviewers are done.
 - ``paragraph_ref`` (REQUIRED): the snapshot ref of the paragraph \
 under review. When the user has a selection, use the selection's \
 ref. Otherwise pick the right paragraph from ``<ui_state>``.
@@ -174,8 +175,8 @@ attribute on the paragraph node in ``<ui_state>``.
 
 The server fans out two worker reviewers (clarity, tone) in \
 parallel and streams progress to the page. As each worker finishes, \
-their feedback becomes a note attached to the paragraph. You do NOT \
-wait for results.
+their feedback becomes a note attached to the paragraph, and once both \
+are done their feedback is read out. You do not compose that part.
 
 ## Decision rules
 
@@ -323,11 +324,12 @@ class ReviewWorker(ReplyToolMixin, UIWorker):
     """UIWorker that drives the document review workspace.
 
     Composes ``ReplyToolMixin`` for the bundled reply tool and adds a
-    ``start_review`` tool for kicking off paragraph review. A
-    ``@ui_event("note_click")`` handler converts client-side note
-    clicks into ``select_text`` navigation. ``on_job_response`` is
-    overridden to translate each reviewer's response into an ``add_note``
-    UI command so feedback shows up in the notes panel as it lands.
+    ``start_review`` tool that speaks an acknowledgement, runs the two
+    reviewers as a job group, and speaks their feedback once both are in.
+    ``on_job_response`` translates each reviewer's response into an
+    ``add_note`` UI command as it lands, so the notes panel fills in while
+    the review runs. A ``@ui_event("note_click")`` handler converts
+    client-side note clicks into ``select_text`` navigation.
 
     ``keep_history=True`` so the worker can resolve deixis like "can we
     add a note for that?" against its own prior replies.
@@ -351,12 +353,12 @@ class ReviewWorker(ReplyToolMixin, UIWorker):
         paragraph_ref: str,
         paragraph_text: str,
     ):
-        """Kick off a parallel review of one paragraph.
+        """Review one paragraph with the two peer reviewers and speak their feedback.
 
-        Spawns the clarity and tone workers via ``request_job_group``.
-        Workers run in the background; their progress is forwarded to the
-        page automatically. As each completes, ``on_job_response``
-        translates the response into an ``add_note`` UI command.
+        Says ``answer`` at once, runs the clarity and tone workers as a
+        client-visible job group, and answers the job with both reviewers'
+        feedback once they have responded. Each response also becomes a
+        note on the page as it lands, through ``on_job_response``.
 
         Args:
             answer: A short spoken acknowledgement ("Reviewing this
@@ -367,18 +369,40 @@ class ReviewWorker(ReplyToolMixin, UIWorker):
                 this directly.
         """
         logger.info(f"{self}: start_review(ref={paragraph_ref!r})")
-        job_id = await self.request_job_group(
-            "clarity",
-            "tone",
-            params=JobGroupParams(
-                payload={"ref": paragraph_ref, "text": paragraph_text},
-                label=f"Reviewing ¶ {paragraph_ref}",
-            ),
+        await self.say(answer)
+        job_id: str | None = None
+        try:
+            async with self.job_group(
+                "clarity",
+                "tone",
+                params=JobGroupParams(
+                    payload={"ref": paragraph_ref, "text": paragraph_text},
+                    label=f"Reviewing ¶ {paragraph_ref}",
+                    timeout=30,
+                ),
+            ) as group:
+                # Remember which paragraph this review is for so each
+                # reviewer's response can be attached to the right note.
+                job_id = group.job_id
+                self._reviews[job_id] = {"paragraph_ref": paragraph_ref}
+        except JobGroupError as e:
+            logger.warning(f"{self}: review of {paragraph_ref!r} failed: {e}")
+            await self.respond_to_job(
+                "The review did not finish. Please try again.", tts_speak=True
+            )
+            await params.result_callback(None)
+            return
+        finally:
+            if job_id:
+                self._reviews.pop(job_id, None)
+        feedback = [
+            f"{name.capitalize()} says: {text}"
+            for name, response in group.responses.items()
+            if (text := ((response or {}).get("feedback") or "").strip())
+        ]
+        await self.respond_to_job(
+            " ".join(feedback) or "Both reviewers came back with nothing to add.", tts_speak=True
         )
-        # Remember which paragraph this review is for so we can attach
-        # each worker's response to the right note.
-        self._reviews[job_id] = {"paragraph_ref": paragraph_ref}
-        await self.respond_to_job(answer, tts_speak=True)
         await params.result_callback(None)
 
     async def on_job_response(self, message: BusJobResponseMessage) -> None:
