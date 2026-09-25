@@ -140,11 +140,10 @@ class FunctionCallObserver(BaseObserver):
                 a test place moments without waiting.
             **kwargs: Additional arguments passed to parent class.
         """
-        super().__init__(**kwargs)
+        super().__init__(observe_every_push=False, **kwargs)
         self._include_arguments = include_arguments
         self._include_results = include_results
         self._now = time_source
-        self._reported: set[int] = set()
         # When each call started and when it went in progress, so the moment
         # that follows either can carry it.
         self._started_at: dict[str, float] = {}
@@ -153,25 +152,22 @@ class FunctionCallObserver(BaseObserver):
         self._register_event_handler("on_function_call_event")
 
     async def on_push_frame(self, data: FramePushed):
-        """Report the moment a frame represents, the first time it is seen.
+        """Report the moment a frame represents.
 
         Args:
             data: Frame push event containing the frame and direction.
         """
         frame = data.frame
 
-        # These frames are broadcast, arriving as two frames with two IDs, so
-        # an ID alone would not tell them apart. Read the downstream one.
+        # These frames are broadcast, arriving as two frames, each pushed for
+        # the first time once. Read the downstream one.
         if frame.broadcast_sibling_id is not None and data.direction != FrameDirection.DOWNSTREAM:
-            return
-        if frame.id in self._reported:
             return
 
         events = self._as_events(frame)
         if not events:
             return
 
-        self._reported.add(frame.id)
         for event in events:
             await self._call_event_handler("on_function_call_event", event)
 
