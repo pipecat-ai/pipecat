@@ -27,6 +27,11 @@ from unittest.mock import AsyncMock, patch
 
 from pipecat.flows.actions import ActionManager
 from pipecat.flows.exceptions import ActionError
+from pipecat.frames.frames import Frame, InterruptionFrame, TTSSpeakFrame
+from pipecat.pipeline.pipeline import Pipeline
+from pipecat.pipeline.worker import PipelineWorker, WorkerParams
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.utils.asyncio.task_manager import TaskManager
 from tests.flows_test_helpers import (
     assert_end_frame_queued,
     assert_tts_speak_frames_queued,
@@ -288,3 +293,81 @@ class TestActionManager(unittest.IsolatedAsyncioTestCase):
 
         with self.assertRaises(ActionError):
             await action_manager.execute_actions([{"type": "failing_action"}])
+
+
+class HoldingSpeaker(FrameProcessor):
+    """Holds each TTSSpeakFrame, as a TTS service does while synthesizing it."""
+
+    def __init__(self):
+        super().__init__()
+        self.speaking = asyncio.Event()
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+        if isinstance(frame, TTSSpeakFrame):
+            self.speaking.set()
+            await asyncio.sleep(10)
+        await self.push_frame(frame, direction)
+
+
+class TestActionManagerInterruptions(unittest.IsolatedAsyncioTestCase):
+    """ActionManager on a running pipeline, where an interruption flushes queued frames."""
+
+    async def asyncSetUp(self):
+        self.speaker = HoldingSpeaker()
+        self.worker = PipelineWorker(Pipeline([self.speaker]), cancel_on_idle_timeout=False)
+        self.action_manager = ActionManager(self.worker, AsyncMock())
+        self.worker_task = asyncio.create_task(
+            self.worker.run(WorkerParams(task_manager=TaskManager()))
+        )
+
+    async def asyncTearDown(self):
+        await self.worker.cancel()
+        await asyncio.wait_for(self.worker_task, timeout=5.0)
+
+    async def _interrupt_while_speaking(self):
+        await asyncio.wait_for(self.speaker.speaking.wait(), timeout=1.0)
+        await self.worker.queue_frame(InterruptionFrame())
+
+    async def test_tts_action_finishes_when_interrupted(self):
+        """An interrupted tts_say still ends, so execute_actions() returns."""
+        actions = asyncio.create_task(
+            self.action_manager.execute_actions([{"type": "tts_say", "text": "Hello"}])
+        )
+        await self._interrupt_while_speaking()
+
+        await asyncio.wait_for(actions, timeout=1.0)
+        self.assertEqual(self.action_manager._ongoing_actions_count, 0)
+
+    async def test_function_action_runs_when_interrupted(self):
+        """A function action queued behind interrupted speech still runs and ends."""
+        ran = asyncio.Event()
+
+        async def handler(action, flow_manager):
+            ran.set()
+
+        actions = asyncio.create_task(
+            self.action_manager.execute_actions(
+                [
+                    {"type": "tts_say", "text": "Hello"},
+                    {"type": "function", "handler": handler},
+                ]
+            )
+        )
+        await self._interrupt_while_speaking()
+
+        await asyncio.wait_for(actions, timeout=1.0)
+        self.assertTrue(ran.is_set())
+        self.assertEqual(self.action_manager._ongoing_actions_count, 0)
+
+    async def test_function_action_finishes_when_handler_raises(self):
+        """A function action whose handler raises still ends."""
+
+        async def handler(action, flow_manager):
+            raise RuntimeError("handler failed")
+
+        await asyncio.wait_for(
+            self.action_manager.execute_actions([{"type": "function", "handler": handler}]),
+            timeout=1.0,
+        )
+        self.assertEqual(self.action_manager._ongoing_actions_count, 0)
