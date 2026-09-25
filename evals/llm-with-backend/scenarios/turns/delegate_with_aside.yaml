@@ -11,7 +11,8 @@
         - name: delegate
     - event: response
       within_ms: 25000
-      eval: "tells a joke, and acknowledges the fix is underway without claiming it is done"
+      eval: "tells a joke, and acknowledges the fix is underway without claiming it is done; speaks as itself, without mentioning a backend or handing work off"
+      text_excludes: "backend"
 
 - expect:
     - event: response

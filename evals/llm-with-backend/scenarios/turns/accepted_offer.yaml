@@ -22,7 +22,8 @@
         - name: delegate
     - event: response
       within_ms: 30000
-      eval: "tells a joke (it may also say it is checking CI, or report the CI status; either is fine)"
+      eval: "tells a joke (it may also say it is checking CI, or report the CI status; either is fine); speaks as itself, without mentioning a backend or handing work off"
+      text_excludes: "backend"
 
 - user: "Is the CI check done?"
   send_after:

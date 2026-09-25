@@ -13,7 +13,8 @@
         - name: delegate
     - event: response
       within_ms: 25000
-      eval: "acknowledges that it is starting on the fix"
+      eval: "acknowledges that it is starting on the fix; speaks as itself, without mentioning a backend or handing work off"
+      text_excludes: "backend"
 
 - user: "How's it going with that?"
   send_after:
@@ -21,7 +22,8 @@
   expect:
     - event: response
       within_ms: 25000
-      eval: "describes what is being done on the fix at the moment (such as searching or reading the code, patching a file, or running the tests) rather than only a generic 'still working on it'"
+      eval: "describes what is being done on the fix at the moment (such as searching or reading the code, patching a file, or running the tests) rather than only a generic 'still working on it'; speaks as itself, without mentioning a backend or handing work off"
+      text_excludes: "backend"
 
 - expect:
     - event: response
