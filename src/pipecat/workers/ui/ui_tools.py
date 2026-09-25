@@ -153,7 +153,7 @@ def screen_tools(worker: str, *, timeout: float = 30.0) -> list:
     learns what it asked and nothing more of the page. Hand them to the voice
     LLM's context::
 
-        context = LLMContext(tools=[*screen_tools("ui")])
+        context = LLMContext(tools=screen_tools("ui"))
 
     Args:
         worker: The name of the ``UIWorker`` to ask.
