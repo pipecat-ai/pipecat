@@ -100,7 +100,7 @@ class AIService(FrameProcessor):
     async def broadcast_service_metadata(self):
         """Broadcast this service's metadata frame, if any."""
         frame = self.service_metadata_frame()
-        if frame is not None:
+        if frame:
             await self.broadcast_frame_instance(frame)
 
     async def setup(self, setup: FrameProcessorSetup):

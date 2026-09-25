@@ -11,6 +11,7 @@ through the service's ``run_inference()``. The LLM is asked for one JSON
 object with an answer per question, and the object is parsed into results.
 """
 
+import asyncio
 import json
 import re
 from collections.abc import Mapping
@@ -74,6 +75,7 @@ class LLMClassifier(BaseClassifier):
         llm: LLMService[Any],
         instructions: str | None = None,
         max_tokens: int | None = None,
+        timeout: float = 10.0,
         **kwargs,
     ):
         """Initialize the classifier.
@@ -83,12 +85,14 @@ class LLMClassifier(BaseClassifier):
             instructions: System instructions for the LLM. The default asks
                 for one JSON object with an answer per question.
             max_tokens: Cap on the reply's length, for services that take one.
+            timeout: Seconds to wait for the LLM's reply before giving up.
             **kwargs: Additional arguments passed to the parent class.
         """
         super().__init__(**kwargs)
         self._llm = llm
         self._instructions = instructions or DEFAULT_INSTRUCTIONS
         self._max_tokens = max_tokens
+        self._timeout = timeout
 
     @property
     def llm(self) -> LLMService[Any]:
@@ -107,14 +111,21 @@ class LLMClassifier(BaseClassifier):
         """Answer the questions in one LLM call. The call reports no token usage."""
         context = LLMContext([{"role": "user", "content": self._render(state, questions)}])
         try:
-            reply = await self._llm.run_inference(
-                context,
-                max_tokens=self._max_tokens,
-                system_instruction=self._instructions,
-                response_schema=self._schema(questions),
+            reply = await asyncio.wait_for(
+                self._llm.run_inference(
+                    context,
+                    max_tokens=self._max_tokens,
+                    system_instruction=self._instructions,
+                    response_schema=self._schema(questions),
+                ),
+                self._timeout,
             )
         except NotImplementedError as e:
             raise ClassifierError(f"{self._llm} cannot run a one-shot inference") from e
+        except TimeoutError as e:
+            raise ClassifierError(f"{self._llm} did not answer within {self._timeout}s") from e
+        except Exception as e:
+            raise ClassifierError(f"{self._llm} failed to answer: {e}") from e
         answers = self._parse(reply or "")
         if len(questions) == 1 and not any(name in answers for name in questions):
             # A lone answer often comes back without its name around it.

@@ -383,6 +383,13 @@ suite:
     scenarios: [scripted/dtmf_menu]
 
   #
+  # Voicemail detection: the bot holds its speech until a classifier decides
+  # whether a person or a voicemail answered the outbound call.
+  #
+  - bot: features/features-voicemail-detection.py
+    scenarios: [scripted/voicemail_detection]
+
+  #
   # Video avatar services
   #
   - bot: video-avatar/video-avatar-tavus-video-service.py

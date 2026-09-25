@@ -62,7 +62,7 @@ class JevClassifier(BaseClassifier):
         """
         super().__init__(**kwargs)
         self._owns_client = client is None
-        if client is None:
+        if not client:
             if not api_key:
                 raise ValueError("JevClassifier needs an API key or a JevClient")
             client = JevClient(api_key=api_key)

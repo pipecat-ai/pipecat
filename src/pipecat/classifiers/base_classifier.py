@@ -222,7 +222,9 @@ class BaseClassifier(BaseObject):
             its question calls for.
 
         Raises:
-            ClassifierError: If the answers could not be produced.
+            ClassifierError: If the answers could not be produced, or not in
+                time: every classifier answers or raises within a bound of
+                its own, so a caller waiting on it is never left hanging.
         """
         started = time.perf_counter()
         results, usage = await self._ask(state, questions)
@@ -295,7 +297,7 @@ class BaseClassifier(BaseObject):
         data: list[MetricsData] = [
             ProcessingMetricsData(processor=self.name, model=self.model, value=seconds)
         ]
-        if usage is not None:
+        if usage:
             data.append(LLMUsageMetricsData(processor=self.name, model=self.model, value=usage))
         return data
 
