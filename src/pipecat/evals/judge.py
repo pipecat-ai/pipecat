@@ -156,7 +156,7 @@ import hashlib
 import json
 import re
 import warnings
-from collections.abc import Awaitable, Callable, Iterable, Sequence
+from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, TypeVar, cast
 
@@ -350,7 +350,7 @@ _TRANSCRIPTION_NOTE = (
     "spoken meaning, never its spelling ('for' may mean 'four', 'to' may mean 'two')."
 )
 
-_REPLY_OUTCOMES = {
+_REPLY_OUTCOMES: dict[str, Any] = {
     "yes": "The bot has given its answer, and the answer satisfies the criterion.",
     "no": (
         "The bot has given its answer, and the answer does not satisfy the criterion. A reply "
@@ -368,7 +368,7 @@ _REPLY_OUTCOMES = {
 # criterion only applies in some situation ("when the time is taken,
 # apologises"), so "doesn't apply" is an outcome of its own rather than a rule
 # in the instructions.
-_TURN_OUTCOMES = {
+_TURN_OUTCOMES: dict[str, Any] = {
     "meets": "The reply does what the criterion asks.",
     "fails": "The criterion applies to this reply, and the reply does not do what it asks.",
     "not_applicable": (
@@ -573,17 +573,15 @@ class EvalJudge:
         state = {"conversation": _conversation(entries), "latest_bot_reply": latest}
         key = _cache_key("reply", criterion, state)
         if key not in self._cache:
-            answers = await self._choices(
-                state,
-                {
-                    "verdict": (
-                        "Does `latest_bot_reply`, the bot's most recent reply, following "
-                        f"`conversation`, satisfy this criterion? Criterion: "
-                        f"{_sentence(criterion)} {_TRANSCRIPTION_NOTE}",
-                        self._reply_outcomes,
-                    )
-                },
+            question = ChoiceQuestion(
+                instructions=(
+                    "Does `latest_bot_reply`, the bot's most recent reply, following "
+                    f"`conversation`, satisfy this criterion? Criterion: "
+                    f"{_sentence(criterion)} {_TRANSCRIPTION_NOTE}"
+                ),
+                options=self._reply_outcomes,
             )
+            answers = await self._choices(state, {"verdict": question})
             if answers is None:
                 verdict = _failed("no")
             else:
@@ -690,11 +688,13 @@ class EvalJudge:
             f"{_TRANSCRIPTION_NOTE}"
         )
         turn_questions = {
-            name: (
-                "`latest_bot_reply` is the bot's reply following `conversation`. How does it "
-                f"stand against this criterion? Criterion: {_sentence(criteria[name])} "
-                f"{_TRANSCRIPTION_NOTE}",
-                _TURN_OUTCOMES,
+            name: ChoiceQuestion(
+                instructions=(
+                    "`latest_bot_reply` is the bot's reply following `conversation`. How does "
+                    f"it stand against this criterion? Criterion: {_sentence(criteria[name])} "
+                    f"{_TRANSCRIPTION_NOTE}"
+                ),
+                options=_TURN_OUTCOMES,
             )
             for name in names
         }
@@ -800,22 +800,13 @@ class EvalJudge:
         return answers["answer"] if answers else None
 
     async def _choices(
-        self, state, questions: dict[str, tuple[str, dict[str, str]]]
+        self, state, questions: Mapping[str, ChoiceQuestion]
     ) -> dict[str, ChoiceResult] | None:
         """The option chosen for each question, or ``None`` when they failed.
 
         The questions share the state, so they go in one call.
         """
-        return await self._ask(
-            state,
-            lambda: self._classifier.choice(
-                state,
-                {
-                    name: ChoiceQuestion(instructions=instructions, options=dict(options))
-                    for name, (instructions, options) in questions.items()
-                },
-            ),
-        )
+        return await self._ask(state, lambda: self._classifier.choice(state, questions))
 
     async def _ask(self, state, ask: Callable[[], Awaitable[_R]]) -> "_R | None":
         """The classifier's answer, asked once more if it failed, or ``None``."""
