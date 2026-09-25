@@ -38,7 +38,6 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.llm_with_backend import LLMWithBackend
@@ -94,14 +93,14 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     context = LLMContext(
         [{"role": "developer", "content": "Greet the user and ask how you can help."}],
     )
-    # Gemini Live decides turns on its server and reports no turn boundaries,
-    # so a local VAD produces the user-started/stopped-speaking frames that
-    # RTVI clients use to start a new user entry in their transcript.
+    # Gemini Live drives the conversation server-side and emits no turn frames
+    # (UserStartedSpeakingFrame, UserStoppedSpeakingFrame). The local VAD adds
+    # supplemental turn frames for processors that expect them, such as RTVI,
+    # whose clients start a new user transcript entry on them. They are
+    # approximate: they may not always align with the server's turns.
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
-        user_params=LLMUserAggregatorParams(
-            vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.5)),
-        ),
+        user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
     )
 
     pipeline = Pipeline(
