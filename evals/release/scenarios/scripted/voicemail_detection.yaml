@@ -10,7 +10,8 @@ judge: !include ../judge_audio.yaml
 
 scenarios:
   # A voicemail greeting. The bot's own reply to the greeting is held back and
-  # dropped; what it says is the message from the on_voicemail_detected handler.
+  # dropped; what it says is the message from the on_voicemail_detected handler,
+  # which in the example bot starts with "Hello, this is Alex".
   - name: voicemail
     turns:
       - user: "Hi, you've reached Sam. I can't take your call right now, so please leave a message after the tone and I'll get back to you."
