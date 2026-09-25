@@ -181,6 +181,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         processor_unusable_policy=ProcessorUnusablePolicy.END,
     )
 
+    # The worker's own LLM answers the classifier questions. To make them
+    # faster, pass a classifier such as JevClassifier(api_key=...).
     ui_worker = UIWorker(UI_NAME, llm=OpenAILLMService(api_key=os.environ["OPENAI_API_KEY"]))
 
     runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)

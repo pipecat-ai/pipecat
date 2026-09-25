@@ -143,6 +143,8 @@ class ListWorker(UIWorker):
 
     def __init__(self):
         llm = OpenAILLMService(api_key=os.environ["OPENAI_API_KEY"])
+        # The worker's own LLM answers the classifier questions. To make them
+        # faster, pass a classifier such as JevClassifier(api_key=...).
         super().__init__(UI_NAME, llm=llm)
 
     @job(name="update")
