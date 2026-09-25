@@ -40,9 +40,8 @@ A scenario picks one in its ``judge.eval:`` block. All the options::
         explain_below: 0.75      # optional; see "The explainer" below
         allow_continue: true     # optional; false judges a reply yes or no only
 
-The release evals judge with TypeSafe's Jev through a factory of their own
-(``evals/judges.py``); a factory may also return an LLM service, which the
-judge then classifies with.
+A factory may also return an LLM service, which the judge then classifies
+with.
 
 What the judge asks:
 
@@ -135,8 +134,8 @@ not given).
 Lifecycle:
 
 The judge sets its classifier up before its first question and cleans it up
-when the session closes it at the end of the run. For Jev that opens one
-HTTP/2 connection and keeps it open, so a simulation's questions share one.
+when the session closes it at the end of the run, so a classifier that keeps
+a connection opens it once and a simulation's questions share it.
 
 Example::
 
