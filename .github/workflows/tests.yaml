@@ -43,6 +43,7 @@ jobs:
             --extra daily \
             --extra deepgram \
             --extra google \
+            --extra jev \
             --extra langchain \
             --extra livekit \
             --extra moq \

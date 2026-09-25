@@ -10,7 +10,7 @@ import asyncio
 import uuid
 import warnings
 from abc import abstractmethod
-from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Sequence
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import (
@@ -59,6 +59,10 @@ from pipecat.utils.string import resolve_sentence_tokenizer_language
 from pipecat.utils.text.base_text_filter import BaseTextFilter
 from pipecat.utils.text.pattern_pair_aggregator import PatternMatch
 from pipecat.utils.text.simple_text_aggregator import SimpleTextAggregator
+from pipecat.utils.text.transforms.pronunciations import (
+    PronunciationTransform,
+    pronunciation_transform,
+)
 from pipecat.utils.text.word_timestamp_utils import merge_punct_tokens
 from pipecat.utils.time import seconds_to_nanoseconds
 from pipecat.utils.types import is_given
@@ -341,6 +345,9 @@ class TTSService(AIService):
         self._text_transforms: list[
             tuple[AggregationType | str, Callable[[str, AggregationType | str], Awaitable[str]]]
         ] = text_transforms or []
+        # Whether pronunciation transforms are being skipped, so the warning is
+        # logged once each time they start being skipped, not for every sentence.
+        self._skipping_pronunciations = False
         # TODO: Deprecate _text_filters when added to LLMTextProcessor
         self._text_filters: Sequence[BaseTextFilter] = text_filters or []
         self._transport_destination: str | None = transport_destination
@@ -686,6 +693,87 @@ class TTSService(AIService):
             for agg_type, func in self._text_transforms
             if not (agg_type == aggregation_type and func == transform_function)
         ]
+
+    @classmethod
+    def format_pronunciation(cls, word: str, ipa: str) -> str | None:
+        """Render a word's pronunciation in this service's markup.
+
+        Services that support pronunciation hints override this. The base
+        implementation supports none.
+
+        Args:
+            word: The word as it appears in the text.
+            ipa: How to pronounce it, in IPA.
+
+        Returns:
+            The text to send in place of ``word``, or None when this service cannot
+            use the pronunciation.
+        """
+        return None
+
+    @property
+    def supports_pronunciations(self) -> bool:
+        """Whether this service reads pronunciation markup with its current settings.
+
+        Pronunciation transforms are skipped while this is False, so their words
+        are spoken as written. Services whose markup depends on the model or on a
+        setting override this; it is checked for every text sent, so it follows
+        settings updates.
+
+        Returns:
+            True in the base implementation.
+        """
+        return True
+
+    @classmethod
+    def pronunciation_transform_ipa(
+        cls, pronunciations: Mapping[str, str]
+    ) -> PronunciationTransform:
+        """Create a text transform that makes this service say words as IPA describes.
+
+        Each word is replaced with :meth:`format_pronunciation` output, so the
+        same IPA works with any service that supports it. Words the service
+        cannot use are reported once and spoken as written. While the service
+        cannot read pronunciation markup at all (see
+        :attr:`supports_pronunciations`), the transform is skipped.
+
+        Register this transform last in ``text_transforms``. Transforms run in
+        order, and one that runs after it (stripping markdown or symbols,
+        replacing text) can rewrite the markup it inserts, such as Cartesia's
+        ``<<…>>`` blocks or an SSML ``<phoneme>`` tag, and break the hint.
+
+        Args:
+            pronunciations: Word to IPA, e.g. ``{"Metformin": "mɛtˈfɔɹmɪn"}``.
+
+        Returns:
+            A transform to register with ``text_transforms``.
+
+        Example::
+
+            pronounce = CartesiaTTSService.pronunciation_transform_ipa(
+                {"Metformin": "mɛtˈfɔɹmɪn"}
+            )
+            tts = CartesiaTTSService(
+                text_transforms=[
+                    ("*", strip_markdown),
+                    ("*", expand_currency),
+                    ("*", pronounce),  # last, so nothing rewrites its markup
+                ],
+            )
+        """
+        return pronunciation_transform(
+            pronunciations, cls.format_pronunciation, service_name=cls.__name__
+        )
+
+    def _can_apply_pronunciations(self) -> bool:
+        supported = self.supports_pronunciations
+        if not supported and not self._skipping_pronunciations:
+            logger.warning(
+                f"{self} does not read pronunciation markup with its current settings "
+                f"(model {self._settings.model}), so pronunciation hints are spoken as written"
+            )
+        self._skipping_pronunciations = not supported
+        return supported
 
     async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
         """Apply a TTS settings delta.
@@ -1267,6 +1355,10 @@ class TTSService(AIService):
         transformed_text = text
         for aggregation_type, transform in self._text_transforms:
             if aggregation_type == type or aggregation_type == "*":
+                if isinstance(transform, PronunciationTransform) and not (
+                    self._can_apply_pronunciations()
+                ):
+                    continue
                 try:
                     transformed_text = await transform(transformed_text, type)
                 except Exception as e:

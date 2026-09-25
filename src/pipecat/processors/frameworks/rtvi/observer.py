@@ -233,6 +233,8 @@ class RTVIObserver(BaseObserver):
 
         self._ignored_sources: set[FrameProcessor] = set(self._params.ignored_sources)
         self._frames_seen = set()
+        # Frame types no branch of on_push_frame() handles.
+        self._unhandled_frame_types: set[type[Frame]] = set()
 
         self._bot_transcription = ""
         self._last_user_audio_level = 0
@@ -439,6 +441,9 @@ class RTVIObserver(BaseObserver):
         if frame.broadcast_sibling_id is not None and direction != FrameDirection.DOWNSTREAM:
             return
 
+        if type(frame) in self._unhandled_frame_types:
+            return
+
         # If we have already seen this frame, let's skip it.
         if frame.id in self._frames_seen:
             return
@@ -447,16 +452,21 @@ class RTVIObserver(BaseObserver):
         # again the next time we see the frame.
         mark_as_seen = True
 
+        # A frame is handled the first time it is pushed, and a frame type
+        # that no branch handles is skipped from then on. That only works if
+        # each branch matches on the frame type alone: a setting that can
+        # change at runtime (e.g. through RTVIConfigureObserverFrame) is
+        # checked inside its branch, so a frame it disables is still
+        # remembered on its first push rather than handled on a later one,
+        # and its type is never mistaken for an unhandled one.
         if (
             isinstance(frame, (UserStartedSpeakingFrame, UserStoppedSpeakingFrame))
             and self._params.user_speaking_enabled
         ):
             await self._handle_interruptions(frame)
-        elif (
-            isinstance(frame, (VADUserStartedSpeakingFrame, VADUserStoppedSpeakingFrame))
-            and self._params.vad_user_speaking_enabled
-        ):
-            await self._handle_vad_speaking(frame)
+        elif isinstance(frame, (VADUserStartedSpeakingFrame, VADUserStoppedSpeakingFrame)):
+            if self._params.vad_user_speaking_enabled:
+                await self._handle_vad_speaking(frame)
         elif (
             isinstance(frame, (UserMuteStartedFrame, UserMuteStoppedFrame))
             and self._params.user_mute_enabled
@@ -484,17 +494,18 @@ class RTVIObserver(BaseObserver):
             await self.send_rtvi_message(RTVI.BotLLMStoppedMessage())
         elif isinstance(frame, LLMTextFrame) and self._params.bot_llm_enabled:
             await self._handle_llm_text_frame(frame)
-        elif isinstance(frame, LLMMarkerResponseFrame) and self._params.bot_llm_marker_enabled:
-            await self.send_rtvi_message(
-                RTVI.BotLLMMarkerMessage(
-                    data=RTVI.BotLLMMarkerMessageData(
-                        text=frame.marker or "",
-                        kind=frame.kind,
-                        raw=frame.raw,
-                        markers=list(frame.markers),
+        elif isinstance(frame, LLMMarkerResponseFrame):
+            if self._params.bot_llm_marker_enabled:
+                await self.send_rtvi_message(
+                    RTVI.BotLLMMarkerMessage(
+                        data=RTVI.BotLLMMarkerMessageData(
+                            text=frame.marker or "",
+                            kind=frame.kind,
+                            raw=frame.raw,
+                            markers=list(frame.markers),
+                        )
                     )
                 )
-            )
         elif isinstance(frame, TTSStartedFrame) and self._params.bot_tts_enabled:
             await self.send_rtvi_message(RTVI.BotTTSStartedMessage())
         elif isinstance(frame, TTSStoppedFrame) and self._params.bot_tts_enabled:
@@ -614,6 +625,10 @@ class RTVIObserver(BaseObserver):
                 message = RTVI.BotAudioLevelMessage(data=RTVI.AudioLevelMessageData(value=level))
                 await self.send_rtvi_message(message)
                 self._last_bot_audio_level = curr_time
+        else:
+            # The type is remembered instead of the frame.
+            self._unhandled_frame_types.add(type(frame))
+            mark_as_seen = False
 
         if mark_as_seen:
             self._frames_seen.add(frame.id)

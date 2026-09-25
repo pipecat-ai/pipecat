@@ -1751,6 +1751,86 @@ class TestPeerGoodbye(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(client._peer_goodbye)
 
 
+class _FakeCatalogs:
+    """Stands in for a catalog subscription: yields scripted catalogs, then ends."""
+
+    def __init__(self, catalogs):
+        self._catalogs = list(catalogs)
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        if not self._catalogs:
+            raise StopAsyncIteration
+        return self._catalogs.pop(0)
+
+    def cancel(self):
+        pass
+
+
+def _opus_catalog():
+    audio = MagicMock(codec="opus", channel_count=1, sample_rate=48000)
+    return MagicMock(audio={"mic": audio}, video={})
+
+
+class TestSubscribeRefusedAsPeerGone(unittest.IsolatedAsyncioTestCase):
+    """A relay that still announces a path whose route died refuses the
+    subscription itself. That is the peer's tracks ending, which the session
+    loop answers with a retry and then a redial, not a transport failure."""
+
+    DROPPED = moq.Error.Protocol("dropped")
+
+    async def test_a_refused_catalog_subscribe_ends_the_audio_pump(self):
+        client, _stream = _client_with_fake_moq()
+        peer_broadcast = MagicMock()
+        peer_broadcast.subscribe_catalog = AsyncMock(side_effect=self.DROPPED)
+        await client._forward_peer_audio(peer_broadcast)
+        peer_broadcast.subscribe_audio.assert_not_called()
+
+    async def test_a_refused_audio_subscribe_ends_the_audio_pump(self):
+        client, _stream = _client_with_fake_moq()
+        peer_broadcast = MagicMock()
+        peer_broadcast.subscribe_catalog = AsyncMock(return_value=_FakeCatalogs([_opus_catalog()]))
+        peer_broadcast.subscribe_audio = AsyncMock(side_effect=self.DROPPED)
+        await client._forward_peer_audio(peer_broadcast)
+        peer_broadcast.subscribe_audio.assert_awaited_once()
+
+    async def test_a_refused_transcript_subscribe_ends_the_transcript_pump(self):
+        client, _stream = _client_with_fake_moq()
+        peer_broadcast = MagicMock()
+        peer_broadcast.subscribe_json_stream = AsyncMock(side_effect=self.DROPPED)
+        await client._forward_peer_transcript(peer_broadcast)
+        client._callbacks.on_message_received.assert_not_awaited()
+
+    async def test_any_other_subscribe_error_still_propagates(self):
+        client, _stream = _client_with_fake_moq()
+        peer_broadcast = MagicMock()
+        peer_broadcast.subscribe_catalog = AsyncMock(side_effect=moq.Error.Protocol("boom"))
+        with self.assertRaises(moq.Error.Protocol):
+            await client._forward_peer_audio(peer_broadcast)
+
+    async def test_the_session_is_dropped_for_a_fresh_one_rather_than_failed(self):
+        """Through the real pumps, for a peer seen before: both subscriptions
+        refused, so nothing is served and the session is dropped for a
+        redial rather than the transport failing."""
+        client, _stream = _client_with_fake_moq()
+        client._task_manager = TaskManager()
+        client._peer_connected = True
+        peer_broadcast = MagicMock()
+        peer_broadcast.subscribe_catalog = AsyncMock(side_effect=self.DROPPED)
+        peer_broadcast.subscribe_json_stream = AsyncMock(side_effect=self.DROPPED)
+        origin = MagicMock(name="subscribe_origin")
+        origin.consume.return_value.announced_broadcast.side_effect = lambda _path: _FakeAnnounced(
+            peer_broadcast
+        )
+        with patch.object(moq_transport, "_PEER_DATA_GRACE_S", 0.05):
+            gone = await asyncio.wait_for(client._consume_peer(origin), timeout=2)
+        self.assertFalse(gone)
+        peer_broadcast.subscribe_json_stream.assert_awaited_once()
+        client._callbacks.on_error.assert_not_awaited()
+
+
 class TestIsUnauthorized(unittest.TestCase):
     """A refused token shows up either as an HTTP status on the dial or as
     the session closing with moq-net's ``Unauthorized`` code."""

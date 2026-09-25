@@ -1,0 +1,26 @@
+{
+  "evaluation": "test-evaluation",
+  "dataset": "sample-dataset",
+  "services": {
+    "cartesia": {
+      "model": "sonic-3.6",
+      "ipa": {
+        "Adalimumab": "ˌædəˈlɪmumæb",
+        "Alfuzosin": "ælˈfjuzoʊsɪn",
+        "Avandia": "əˈvændiə",
+        "Biaxin": "baɪˈæksən",
+        "Budesonide": "bjuˈdɛsəˌnaɪd",
+        "Bumetanide": "bjuˈmɛtəˌnaɪd"
+      },
+      "arpabet": {},
+      "plain": [
+        "Abilify",
+        "Acetaminophen",
+        "acid",
+        "Actonel",
+        "Actos",
+        "Acyclovir"
+      ]
+    }
+  }
+}

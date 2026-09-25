@@ -92,6 +92,7 @@ from pipecat.processors.aggregators.llm_context_summarizer import (
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 from pipecat.services.stt_latency import DEFAULT_TTFS_P99
+from pipecat.turns.empty_user_turn import EmptyUserTurnConfig
 from pipecat.turns.types import UserTurnSpeculation
 from pipecat.turns.user_idle_controller import UserIdleController
 from pipecat.turns.user_mute import BaseUserMuteStrategy
@@ -148,6 +149,11 @@ class LLMUserAggregatorParams:
             has been idle (not speaking) for this duration. Set to 0 to disable
             idle detection.
         vad_analyzer: Voice Activity Detection analyzer instance.
+        empty_user_turn: How to respond to a user turn that ends with no
+            transcript. By default, the bot answers such a turn when it
+            interrupted the bot, and leaves it unanswered otherwise. ``None``
+            leaves every such turn unanswered. Ignored with a realtime LLM
+            service, which hears the user's audio directly.
         filter_incomplete_user_turns: When enabled, the LLM outputs a
             turn-completion marker at the start of each response: ● (complete),
             ◐ (incomplete short), or ○ (incomplete long). Incomplete
@@ -176,6 +182,7 @@ class LLMUserAggregatorParams:
     user_turn_stop_timeout: float = 5.0
     user_idle_timeout: float = 0
     vad_analyzer: VADAnalyzer | None = None
+    empty_user_turn: EmptyUserTurnConfig | None = field(default_factory=EmptyUserTurnConfig)
     filter_incomplete_user_turns: bool = False
     user_turn_completion_config: UserTurnCompletionConfig | None = None
 
@@ -695,6 +702,7 @@ class LLMUserAggregator(LLMContextAggregator):
                 user_turn_strategies,
                 are_user_provided_custom_strategies=self._params.user_turn_strategies is not None,
             )
+            self._disable_empty_user_turn_recovery()
 
         self._user_is_muted = False
         self._user_turn_start_timestamp = ""
@@ -720,6 +728,10 @@ class LLMUserAggregator(LLMContextAggregator):
         # surfaces the full turn transcript even when several
         # inferences fire before finalization.
         self._full_user_turn_aggregation: str | None = None
+
+        # Whether the current user turn interrupted the bot.
+        self._user_turn_interrupted_bot = False
+        self._consecutive_empty_user_turn_recoveries = 0
 
         self._user_turn_controller = UserTurnController(
             user_turn_strategies=user_turn_strategies,
@@ -984,6 +996,20 @@ class LLMUserAggregator(LLMContextAggregator):
         else:
             logger.debug(msg)
 
+    def _disable_empty_user_turn_recovery(self):
+        """Turn off empty user turn recovery for realtime mode.
+
+        A realtime LLM service hears the user's audio directly, so an empty
+        transcript doesn't mean the model missed the speech.
+        """
+        if self._params.empty_user_turn is None:
+            return
+        self._params.empty_user_turn = None
+        logger.debug(
+            f"{self}: realtime mode — empty user turn recovery disabled; the realtime "
+            "LLM service hears the user's audio directly."
+        )
+
     async def _handle_service_metadata(self, frame: ServiceMetadataFrame):
         """Dispatch a service metadata frame.
 
@@ -1104,6 +1130,8 @@ class LLMUserAggregator(LLMContextAggregator):
         if not self._realtime_service_mode:
             # Explicitly disabled — honor it silently; the user opted out.
             return
+
+        self._disable_empty_user_turn_recovery()
 
         strategies = self._user_turn_controller.user_turn_strategies
         self._apply_realtime_mode_strategy_mutations(
@@ -1320,6 +1348,12 @@ class LLMUserAggregator(LLMContextAggregator):
         self._user_turn_start_timestamp = time_now_iso8601()
         self._full_user_turn_aggregation = None
 
+        # Unless the bot is waiting for the user, it's thinking, speaking or
+        # running a function call, and the interruption below cancels that.
+        self._user_turn_interrupted_bot = (
+            params.enable_interruptions and not self._user_idle_controller.waiting_for_user
+        )
+
         if params.enable_user_speaking_frames:
             await self.broadcast_frame(UserStartedSpeakingFrame)
 
@@ -1475,6 +1509,52 @@ class LLMUserAggregator(LLMContextAggregator):
             )
             await self._call_event_handler("on_user_turn_stopped", strategy, message)
             self._user_turn_start_timestamp = ""
+
+        interrupted_bot = self._user_turn_interrupted_bot
+        self._user_turn_interrupted_bot = False
+
+        if content:
+            self._consecutive_empty_user_turn_recoveries = 0
+        elif not on_session_end:
+            # An empty turn doesn't run the LLM, so the bot stays silent unless
+            # a recovery runs it. Without one, restart the idle timer, which
+            # this turn's start cancelled.
+            if not await self._maybe_recover_empty_user_turn(interrupted_bot):
+                await self._user_idle_controller.wait_for_user()
+
+    async def _maybe_recover_empty_user_turn(self, interrupted_bot: bool) -> bool:
+        """Run the LLM for a user turn that ended with no transcript.
+
+        Args:
+            interrupted_bot: Whether the turn interrupted a response in progress.
+
+        Returns:
+            Whether the LLM was asked to respond.
+        """
+        config = self._params.empty_user_turn
+        if not config:
+            return False
+
+        prompt = config.interrupted_prompt if interrupted_bot else config.idle_prompt
+        if not prompt:
+            return False
+
+        if self._consecutive_empty_user_turn_recoveries >= config.max_consecutive_recoveries:
+            logger.debug(f"{self}: Empty user turn left unanswered (too many in a row)")
+            return False
+
+        # A pending function call result runs the LLM itself, and a muted user
+        # shouldn't be prompted to speak.
+        if self._user_is_muted or self._user_idle_controller.function_calls_in_progress:
+            return False
+
+        logger.debug(
+            f"{self}: Empty user turn ({'interrupted' if interrupted_bot else 'idle'}), running LLM"
+        )
+        self._consecutive_empty_user_turn_recoveries += 1
+        self._context.add_message(cast(LLMContextMessage, {"role": "developer", "content": prompt}))
+        await self.push_context_frame()
+        return True
 
 
 class LLMAssistantAggregator(LLMContextAggregator):
