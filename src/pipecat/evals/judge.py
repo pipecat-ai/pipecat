@@ -352,6 +352,25 @@ _NO_VERDICT = "(judge gave no verdict)"
 # The reason a verdict carries when the judge gave the verdict without one.
 NO_REASON = "(no reason given)"
 
+# The questions the judge asks, each followed by the criterion and the notes
+# that go with every question; see ``EvalJudge._instructions``.
+_REPLY_QUESTION = (
+    "Does `latest_bot_reply`, the bot's most recent reply, following `conversation`, satisfy "
+    "this criterion?"
+)
+_CALL_QUESTION = (
+    "Does the bot's function `call`, judged by its name and arguments, satisfy this criterion?"
+)
+_CALL_NOTE = "`conversation` is context only."
+_GOAL_QUESTION = "Does the conversation as a whole achieve this goal?"
+_GOAL_NOTE = (
+    "A `tool` entry is a function the bot called at that point; a completed call is stronger "
+    "evidence of an action than the bot saying it did it."
+)
+_TURN_QUESTION = (
+    "`latest_bot_reply` is the bot's reply following `conversation`. How does it stand against "
+    "this criterion?"
+)
 _TRANSCRIPTION_NOTE = (
     "The bot's text may be an automatic speech-to-text transcription: judge its intended "
     "spoken meaning, never its spelling ('for' may mean 'four', 'to' may mean 'two')."
@@ -581,11 +600,7 @@ class EvalJudge:
         key = _cache_key("reply", criterion, state)
         if key not in self._cache:
             question = ChoiceQuestion(
-                instructions=(
-                    "Does `latest_bot_reply`, the bot's most recent reply, following "
-                    f"`conversation`, satisfy this criterion? Criterion: "
-                    f"{self._sentence(criterion)} {_TRANSCRIPTION_NOTE}"
-                ),
+                instructions=self._instructions(_REPLY_QUESTION, "Criterion", criterion),
                 options=self._reply_outcomes,
             )
             answers = await self._choices(state, {"verdict": question})
@@ -623,10 +638,7 @@ class EvalJudge:
         key = _cache_key("call", criterion, state)
         if key not in self._cache:
             answer = await self._yes_no(
-                state,
-                "Does the bot's function `call`, judged by its name and arguments, satisfy "
-                f"this criterion? Criterion: {self._sentence(criterion)} `conversation` is context "
-                f"only. {_TRANSCRIPTION_NOTE}",
+                state, self._instructions(_CALL_QUESTION, "Criterion", criterion, _CALL_NOTE)
             )
             if answer is None:
                 verdict = self._failed("no")
@@ -693,19 +705,10 @@ class EvalJudge:
         if key in self._run_cache:
             return self._run_cache[key]
 
-        goal_instructions = (
-            f"Does the conversation as a whole achieve this goal? Goal: {self._sentence(success)} "
-            "A `tool` entry is a function the bot called at that point; a completed "
-            "call is stronger evidence of an action than the bot saying it did it. "
-            f"{_TRANSCRIPTION_NOTE}"
-        )
+        goal_instructions = self._instructions(_GOAL_QUESTION, "Goal", success, _GOAL_NOTE)
         turn_questions = {
             name: ChoiceQuestion(
-                instructions=(
-                    "`latest_bot_reply` is the bot's reply following `conversation`. How does "
-                    f"it stand against this criterion? Criterion: {self._sentence(criteria[name])} "
-                    f"{_TRANSCRIPTION_NOTE}"
-                ),
+                instructions=self._instructions(_TURN_QUESTION, "Criterion", criteria[name]),
                 options=_TURN_OUTCOMES,
             )
             for name in names
@@ -868,10 +871,17 @@ class EvalJudge:
         ]
 
     @staticmethod
-    def _sentence(text: str) -> str:
-        """``text`` ending in punctuation, so the instruction after it reads as a new sentence."""
-        text = text.strip()
-        return text if text.endswith((".", "!", "?")) else f"{text}."
+    def _instructions(question: str, label: str, criterion: str, note: str = "") -> str:
+        """A question's instructions: the question, the labelled criterion, and the notes.
+
+        The criterion gets its final punctuation so the note after it reads as a
+        new sentence, and every question carries the transcription note.
+        """
+        criterion = criterion.strip()
+        if not criterion.endswith((".", "!", "?")):
+            criterion += "."
+        parts = [question, f"{label}: {criterion}", note, _TRANSCRIPTION_NOTE]
+        return " ".join(part for part in parts if part)
 
     @staticmethod
     def _reply_verdict(answer: ChoiceResult) -> JudgeVerdict:
