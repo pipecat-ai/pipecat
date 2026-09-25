@@ -43,15 +43,18 @@ class TestRTVIObserverPushes(unittest.IsolatedAsyncioTestCase):
             )
         )
 
-    async def test_unhandled_frame_types_are_skipped_from_then_on(self):
+    async def test_audio_is_skipped_unless_audio_levels_are_reported(self):
         for frame_type in (InputAudioRawFrame, TTSAudioRawFrame):
-            for _ in range(100):
-                await self._push(frame_type(audio=b"\0" * 320, sample_rate=16000, num_channels=1))
-
-        self.assertEqual(
-            self.observer._unhandled_frame_types, {InputAudioRawFrame, TTSAudioRawFrame}
-        )
+            await self._push(frame_type(audio=b"\0" * 320, sample_rate=16000, num_channels=1))
         self.observer.send_rtvi_message.assert_not_awaited()
+
+        observer = RTVIObserver(
+            params=RTVIObserverParams(user_audio_level_enabled=True, audio_level_period_secs=0)
+        )
+        observer.send_rtvi_message = AsyncMock()
+        self.observer = observer
+        await self._push(InputAudioRawFrame(audio=b"\0" * 320, sample_rate=16000, num_channels=1))
+        observer.send_rtvi_message.assert_awaited_once()
 
     async def test_a_frame_is_handled_on_its_first_push_only(self):
         frame = UserStartedSpeakingFrame()
