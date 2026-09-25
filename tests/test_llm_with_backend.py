@@ -34,6 +34,7 @@ from pipecat.frames.frames import (
     LLMSetToolsFrame,
 )
 from pipecat.pipeline.llm_with_backend import (
+    RELAY_NOTE,
     BackendConnector,
     ConnectorContext,
     ExplicitBackendRequestStrategy,
@@ -332,7 +333,10 @@ async def test_outputs_are_appended_to_the_frontend_and_run_it_as_flagged():
     assert [(f.messages, f.run_llm) for f in appended] == [
         ([{"role": "developer", "content": "Backend: Let me check."}], False),
         ([{"role": "developer", "content": "Backend (thinking): Weather first."}], False),
-        ([{"role": "developer", "content": "Backend: It's 62 and raining."}], True),
+        (
+            [{"role": "developer", "content": f"Backend: It's 62 and raining.\n\n{RELAY_NOTE}"}],
+            True,
+        ),
     ]
     frontend.push_frame.assert_not_awaited()
 
@@ -479,7 +483,7 @@ async def test_a_local_backend_is_heard_through_the_frontends_conversation():
     assert [(f.messages[0]["content"], f.run_llm) for f in appended] == [
         ("Backend: Let me check.", False),
         ("Backend (working): get_weather(location='Seattle')", False),
-        ("Backend: It's 62 and raining.", True),
+        (f"Backend: It's 62 and raining.\n\n{RELAY_NOTE}", True),
     ]
     # A message queued while the bot speaks waits behind the speech; an
     # interruption must not drop it on the way to the aggregator.
