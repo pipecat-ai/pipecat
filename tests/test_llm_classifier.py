@@ -54,6 +54,13 @@ class _NoInferenceLLM(LLMService):
     pass
 
 
+class _FailingLLM(LLMService):
+    """Fails run_inference() the way a provider client does."""
+
+    async def run_inference(self, context, **kwargs) -> str | None:
+        raise RuntimeError("connection reset")
+
+
 class _SilentLLM(LLMService):
     """Never answers run_inference()."""
 
@@ -238,6 +245,13 @@ async def test_a_lone_answer_without_its_name_is_accepted():
         "hi", {"q": ChoiceQuestion(instructions="?", options={"a": "", "b": ""})}
     )
     assert results["q"].choice == "b"
+
+
+@pytest.mark.asyncio
+async def test_a_failed_llm_call_is_a_classifier_error():
+    classifier = LLMClassifier(llm=_FailingLLM())
+    with pytest.raises(ClassifierError, match="connection reset"):
+        await classifier.yes_no("hi", {"q": YesNoQuestion(instructions="?")})
 
 
 @pytest.mark.asyncio

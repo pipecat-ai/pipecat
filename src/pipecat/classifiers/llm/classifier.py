@@ -124,6 +124,8 @@ class LLMClassifier(BaseClassifier):
             raise ClassifierError(f"{self._llm} cannot run a one-shot inference") from e
         except TimeoutError as e:
             raise ClassifierError(f"{self._llm} did not answer within {self._timeout}s") from e
+        except Exception as e:
+            raise ClassifierError(f"{self._llm} failed to answer: {e}") from e
         answers = self._parse(reply or "")
         if len(questions) == 1 and not any(name in answers for name in questions):
             # A lone answer often comes back without its name around it.

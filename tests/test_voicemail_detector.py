@@ -187,6 +187,29 @@ class TestVoicemailDetectorVerdicts(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(fired), 1)
         self.assertEqual(len(classifier.asked), 2)
 
+    async def test_an_unexpected_classifier_error_does_not_hang_the_decision(self):
+        detector, classifier = _detector(RuntimeError("connection reset"), ("conversation", 0.9))
+        fired = []
+
+        @detector.event_handler("on_conversation_detected")
+        async def _on_conversation(processor):
+            fired.append(processor)
+
+        await run_test(
+            detector,
+            frames_to_send=[
+                UserStartedSpeakingFrame(),
+                _said("Hello?"),
+                SleepFrame(0.2),
+                _said("Anyone there?"),
+                UserStoppedSpeakingFrame(),
+                SleepFrame(VERDICT_SETTLE),
+            ],
+            start_timeout=5.0,
+        )
+        self.assertEqual(len(fired), 1)
+        self.assertEqual(len(classifier.asked), 2)
+
     async def test_setup_and_cleanup_reach_the_classifier(self):
         detector, classifier = _detector(("conversation", 0.9))
         await run_test(detector, frames_to_send=[_said("Hello?")], start_timeout=5.0)

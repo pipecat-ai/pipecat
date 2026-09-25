@@ -26,7 +26,6 @@ from pipecat.classifiers.base_classifier import (
     BaseClassifier,
     ChoiceQuestion,
     ChoiceResult,
-    ClassifierError,
 )
 from pipecat.classifiers.llm.classifier import DEFAULT_INSTRUCTIONS, LLMClassifier
 from pipecat.frames.frames import (
@@ -363,18 +362,22 @@ class VoicemailDetector(FrameProcessor):
             while not self._segments.empty():
                 segments.append(self._segments.get_nowait())
             self._transcript.extend(segments)
-            # Nothing to ask once the verdict is in.
-            if not self._decision:
-                await self._classify(" ".join(self._transcript))
-            # Lets the silence timer know the transcript is fully classified.
-            for _ in segments:
-                self._segments.task_done()
+            try:
+                # Nothing to ask once the verdict is in.
+                if not self._decision:
+                    await self._classify(" ".join(self._transcript))
+            finally:
+                # Lets the silence timer know the transcript is fully classified.
+                for _ in segments:
+                    self._segments.task_done()
 
     async def _classify(self, transcript: str):
         """Ask the classifier about the transcript and keep its answer."""
+        # Any failure is one missed answer; the silence timer must never be
+        # left waiting on a classification that will not come.
         try:
             results = await self._classifier.choice(transcript, {"voicemail": VOICEMAIL_QUESTION})
-        except ClassifierError as e:
+        except Exception as e:
             logger.warning(f"{self}: classification failed: {e}")
             return
         result = results["voicemail"]
@@ -403,8 +406,8 @@ class VoicemailDetector(FrameProcessor):
         """
         await asyncio.sleep(self._decision_timeout)
         # The answer for everything heard so far, once a call in flight is
-        # done. This cannot hang: a classifier answers or raises within a
-        # timeout of its own.
+        # done. This cannot hang: the classifier answers or raises within a
+        # timeout of its own, and every segment is marked done either way.
         await self._segments.join()
         if self._decision:
             return
