@@ -471,6 +471,7 @@ class ElevenLabsTTSService(ElevenLabsTTSBase):
         # Context IDs whose context-init has been sent, so the keepalive knows
         # which contexts are safe to target.
         self._context_init_sent: set[str] = set()
+        self._default_context_websocket = None
 
     @classmethod
     def format_pronunciation(cls, word: str, ipa: str) -> str | None:
@@ -541,6 +542,13 @@ class ElevenLabsTTSService(ElevenLabsTTSBase):
 
     def _clear_connection_state(self):
         self._context_init_sent.clear()
+        self._default_context_websocket = None
+
+    async def _before_websocket_close(self):
+        if self._default_context_websocket is self._websocket and self._websocket:
+            # A context-less keepalive opens the default context on the
+            # multi-stream endpoint. Close it so close_socket can complete.
+            await self._websocket.send(json.dumps({"close_context": True}))
 
     async def _close_context(self, context_id: str):
         # ElevenLabs requires that Pipecat explicitly closes contexts to free
@@ -669,9 +677,11 @@ class ElevenLabsTTSService(ElevenLabsTTSBase):
         else:
             # No active context, or the active context's context-init hasn't been
             # sent yet. A context-less keepalive keeps the connection alive without
-            # opening the context prematurely.
+            # opening the named context prematurely; it opens the default context.
             keepalive_message = {"text": ""}
         await self._websocket.send(json.dumps(keepalive_message))
+        if "context_id" not in keepalive_message:
+            self._default_context_websocket = self._websocket
 
     async def _send_context_init(self, context_id: str):
         """Open a context, carrying voice settings and pronunciation dictionaries."""
