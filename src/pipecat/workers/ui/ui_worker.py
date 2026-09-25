@@ -69,10 +69,6 @@ from pipecat.workers.llm.llm_context_worker import LLMContextWorker
 from pipecat.workers.ui.ui_event_decorator import _collect_ui_event_handlers
 from pipecat.workers.ui.ui_prompts import UI_STATE_PROMPT_GUIDE
 
-# The most named elements put to the classifier as the options of one
-# question; Jev's limit on choice options.
-_MAX_ELEMENT_OPTIONS = 255
-
 # The confidence below which the classifier's pick of an element is no answer.
 _ELEMENT_THRESHOLD = 0.5
 
@@ -1076,19 +1072,13 @@ class UIWorker(LLMContextWorker):
         return {"ref": result.choice, "label": label, "confidence": result.confidence}
 
     def _named_elements(self) -> list[_Element]:
-        """The snapshot's named elements, breadth first up to the cap."""
+        """The snapshot's named elements, breadth first."""
         elements: list[_Element] = []
         root = (self._latest_snapshot or {}).get("root")
         if not isinstance(root, dict):
             return elements
         pending = [root]
         while pending:
-            if len(elements) == _MAX_ELEMENT_OPTIONS:
-                logger.debug(
-                    f"{self.name}: the screen has more than {_MAX_ELEMENT_OPTIONS} named "
-                    "elements; deeper ones are not candidates"
-                )
-                break
             node = pending.pop(0)
             ref = node.get("ref")
             name = node.get("name")
