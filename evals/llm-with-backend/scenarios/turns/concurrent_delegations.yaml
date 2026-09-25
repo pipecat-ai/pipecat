@@ -1,0 +1,34 @@
+# A second request while the first is still being worked on. The lookup is
+# quick and lands first; the code fix takes longer and lands after. The two are
+# unrelated, so the backend has no reason to fold one into the other.
+- expect:
+    - event: response
+      eval: "the bot opens the conversation in some way (a greeting, an introduction, an offer to help, or a question to get the user started)"
+
+- user: "Fix the flaky retry test in the HTTP client."
+  expect:
+    - event: function_call
+      calls:
+        - name: delegate
+    - event: response
+      within_ms: 25000
+      eval: "acknowledges that it is starting on the fix"
+
+- user: "Oh, and also, look up what the on-call runbook says to do about upstream timeouts."
+  send_after:
+    delay_ms: 5000
+  expect:
+    - event: function_call
+      calls:
+        - name: delegate
+    - event: response
+      within_ms: 25000
+      eval: "acknowledges the research request, without claiming to have the answer yet"
+
+# No user turn: both results arrive on their own. The lookup is quick and
+# usually comes first, but the two may share one reply, so one turn waits for
+# both.
+- expect:
+    - event: response
+      within_ms: 200000
+      eval: "answer continue, not no, while only one of these two has been reported so far; answer yes once both have been, in either order: what the on-call runbook says about upstream timeouts (check the upstream's status page, then the retry dashboard for a spike in exhausted retries), and that the retry test was fixed and the tests now pass"

@@ -68,9 +68,8 @@ transcript. Work out what is being asked from it and answer that. The
 transcript may contain transcription errors; use the most likely intent.
 
 Use the available tools to answer questions about the weather and
-restaurants. Reply with the verified result in concise, conversational plain
-text that the assistant can say to the user — no Markdown, no raw JSON — and
-never claim an action completed without a tool result confirming it."""
+restaurants. Never claim an action completed without a tool result
+confirming it."""
 
 
 async def get_current_weather(params: FunctionCallParams, location: str, format: str):
@@ -80,6 +79,9 @@ async def get_current_weather(params: FunctionCallParams, location: str, format:
         location: The city and state, e.g. "San Francisco, CA".
         format: The temperature unit to use. Must be either "celsius" or "fahrenheit". Infer this from the user's location.
     """
+    # Uncomment to exercise longer-running backend work.
+    # import asyncio
+    # await asyncio.sleep(6)
     temperature = 75 if format == "fahrenheit" else 24
     await params.result_callback(
         {

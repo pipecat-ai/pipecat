@@ -10,6 +10,7 @@ import asyncio
 import base64
 import json
 import re
+from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Literal, cast
 
@@ -49,7 +50,7 @@ from pipecat.frames.frames import (
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_context import LLMContext, LLMStandardMessage
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
-from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
+from pipecat.services.llm_service import FunctionCallFromLLM, LLMService, LLMWithBackendRole
 from pipecat.services.openai._constants import OPENAI_SAMPLE_RATE
 from pipecat.services.openai.responses.llm import (
     OpenAIResponsesLLMSettings,
@@ -59,10 +60,13 @@ from pipecat.services.settings import LLMSettings
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
-from pipecat.workers.base_worker import BaseWorker
 from pipecat.workers.llm.backend_llm_worker import (
+    BackendError,
+    BackendIdle,
+    BackendLLMWorker,
     BackendOutput,
-    _delegate_to_backend,
+    BackendToolCall,
+    _BackendSession,
     _render_transcript_request,
 )
 
@@ -121,6 +125,21 @@ class _TurnGrouper:
 
 
 @dataclass
+class _LiveDelegation:
+    """A client delegation in progress: what to correlate the backend's outputs with.
+
+    Parameters:
+        id: The delegation's id, which the appends carry.
+        answered: Whether the backend has said anything for it yet.
+        timeout_task: The task that abandons it if the backend takes too long.
+    """
+
+    id: str
+    answered: bool = False
+    timeout_task: asyncio.Task | None = None
+
+
+@dataclass
 class ResponsesDelegation:
     """Responses delegation: OpenAI hosts the backend model the live model delegates to.
 
@@ -153,9 +172,12 @@ class ClientDelegation:
     """Client delegation: a Pipecat worker is the backend the live model delegates to.
 
     A delegation names no task: the live model signals only that it is handing
-    work over. Each one is sent to the backend as a ``run`` job carrying the
+    work over. Each one is put to the backend as a message carrying the
     transcript fragments since the previous delegation, and the backend works
-    out the request from them.
+    out the request from them. The service attaches to the backend for its
+    life and takes delegations one at a time: the next waits until the backend
+    reports it has nothing left to do, since they share one backend
+    conversation.
 
     What comes back is appended to the live session according to each output's
     ``prefers_spoken`` flag: what it wants heard goes as commentary, for the
@@ -163,16 +185,17 @@ class ClientDelegation:
     it can draw on if the conversation turns that way.
 
     Parameters:
-        backend: The worker that runs delegated tasks — normally a
+        backend: The worker that runs delegated work — normally a
             :class:`~pipecat.workers.llm.backend_llm_worker.BackendLLMWorker`
-            wrapping any LLM service. The service registers it as a child of
-            the pipeline worker at setup, so the pipeline must run under a
-            ``WorkerRunner``.
+            wrapping any LLM service, or the name of one registered elsewhere
+            (in the app, or in another process on a shared bus). A worker
+            given here is registered as a child of the pipeline worker at
+            setup, so the pipeline must run under a ``WorkerRunner``.
         timeout_secs: How long a delegation may take before it is
             abandoned.
     """
 
-    backend: BaseWorker
+    backend: BackendLLMWorker | str
     timeout_secs: float = 120.0
 
 
@@ -183,7 +206,7 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
     decides on its own when to answer, when to stop talking when the user
     speaks over it, and when to *delegate* work — search, reasoning, tool use
     — to a backend text model while the conversation continues. In the
-    two-layer terms used throughout, the live model is the *frontend* (the
+    frontend/backend terms used throughout, the live model is the *frontend* (the
     conversational model) and the delegated-to model is the *backend*. There
     is no client-side turn detection or response triggering: the pipeline
     streams audio in and plays audio out.
@@ -338,11 +361,15 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
         self._open_function_calls: dict[str, str] = {}
         self._pending_responses: dict[str, _PendingResponse] = {}
 
-        # Client delegation: the conversation not yet sent to the backend, the
-        # delegations in flight by id, and whether the backend has run before.
+        # Client delegation: the conversation not yet sent to the backend,
+        # whether the backend has run before, the session with it, the
+        # delegation it is working on and the ones waiting their turn.
         self._transcript_fragments: list[dict[str, str]] = []
         self._delegated_before = False
-        self._delegation_tasks: dict[str, asyncio.Task] = {}
+        self._backend_session: _BackendSession | None = None
+        self._backend_session_task: asyncio.Task | None = None
+        self._current_delegation: _LiveDelegation | None = None
+        self._queued_delegations: deque[tuple[events.DelegationMetadata, str]] = deque()
 
         self._register_event_handler("on_session_started")
         self._register_event_handler("on_delegation_created")
@@ -354,6 +381,27 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
             True if metrics generation is supported.
         """
         return True
+
+    @property
+    def accepts_intermediate_function_call_results(self) -> bool:
+        """The Live API takes one output per function call, so intermediate results are dropped."""
+        return False
+
+    def llm_with_backend_role_objection(self, role: LLMWithBackendRole) -> str | None:
+        """Decline both roles: this service is a frontend with a backend of its own.
+
+        Args:
+            role: The role the service is being asked to take.
+
+        Returns:
+            The reason, naming what to use instead.
+        """
+        return (
+            f"{self.__class__.__name__} cannot be an LLMWithBackend {role}: it is already a "
+            "frontend with a backend of its own. Give it a delegation instead — "
+            "OpenAILiveLLMService.ClientDelegation for a backend worker, or "
+            "OpenAILiveLLMService.ResponsesDelegation for OpenAI's own."
+        )
 
     def service_metadata_frame(self) -> LLMServiceMetadataFrame:
         """Recommend external turn strategies, resolved from the API's projected turns.
@@ -380,14 +428,21 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
         """
         await super().setup(setup)
         if isinstance(self._delegation, ClientDelegation):
-            # A child of the pipeline worker: ended and cancelled with it.
-            await self.pipeline_worker.add_workers(self._delegation.backend)
+            if isinstance(self._delegation.backend, BackendLLMWorker):
+                # A child of the pipeline worker: ended and cancelled with it.
+                await self.pipeline_worker.add_workers(self._delegation.backend)
+            self._backend_session_task = self.create_task(
+                self._run_backend_session(), f"{self}::backend_session"
+            )
         await self._connect()
 
     async def cleanup(self):
         """Release resources at teardown."""
         await super().cleanup()
         await self._disconnect()
+        if self._backend_session_task is not None:
+            await self.cancel_task(self._backend_session_task)
+            self._backend_session_task = None
 
     async def stop(self, frame: EndFrame):
         """Close the session gracefully and disconnect.
@@ -636,9 +691,7 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
             if self._receive_task:
                 await self.cancel_task(self._receive_task, timeout=1.0)
                 self._receive_task = None
-            for task in list(self._delegation_tasks.values()):
-                await self.cancel_task(task)
-            self._delegation_tasks.clear()
+            await self._abandon_delegations()
             self._transcript_fragments.clear()
             self._delegated_before = False
             self._sent_tools_snapshot = None
@@ -940,59 +993,140 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
                 spoken=True,
             )
             return
-        task = self.create_task(
-            self._run_client_delegation(delegation), f"delegation:{delegation.id}"
-        )
-        self._delegation_tasks[delegation.id] = task
-        task.add_done_callback(lambda _: self._delegation_tasks.pop(delegation.id, None))
-
-    async def _run_client_delegation(self, delegation: events.DelegationMetadata):
-        config = self._delegation
-        assert isinstance(config, ClientDelegation)
         # The backend is handed the conversation since the last delegation
-        # and works out the request from it.
+        # and works out the request from it. The transcript is taken now, so
+        # a delegation that waits its turn still reads what prompted it.
         request = _render_transcript_request(
             self._take_transcript(), first=not self._delegated_before
         )
         self._delegated_before = True
+        if self._current_delegation is None:
+            await self._start_delegation(delegation, request)
+        else:
+            logger.debug(f"{self}: delegation {delegation.id} waits for the backend to finish")
+            self._queued_delegations.append((delegation, request))
 
-        answered = False
-
-        async def on_update(output: BackendOutput):
-            nonlocal answered
-            answered = True
-            await self._send_context_append(
-                delegation.id, output.text, spoken=output.prefers_spoken
-            )
-
+    async def _run_backend_session(self):
+        """Hold the session with the backend, appending what it produces to the live session."""
+        config = self._delegation
+        assert isinstance(config, ClientDelegation)
+        backend_name = config.backend if isinstance(config.backend, str) else config.backend.name
         try:
-            # Every output, the final answer included, arrives through
-            # on_update, so the job's return value is not needed here.
-            await _delegate_to_backend(
-                self.pipeline_worker,
-                config.backend.name,
-                request=request,
-                on_update=on_update,
-                timeout_secs=config.timeout_secs,
+            async with _BackendSession(
+                self.pipeline_worker, backend_name, timeout_secs=config.timeout_secs
+            ) as session:
+                self._backend_session = session
+                async for event in session:
+                    await self._on_backend_event(event)
+                if not session.detached:
+                    logger.warning(f"{self}: backend '{backend_name}' went away")
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.error(f"{self}: the session with backend '{backend_name}' failed: {e}")
+        finally:
+            self._backend_session = None
+
+    async def _on_backend_event(
+        self, event: BackendOutput | BackendToolCall | BackendIdle | BackendError
+    ):
+        current = self._current_delegation
+        if isinstance(event, BackendToolCall):
+            # Reported for clients, as the Responses-delegation backend's calls
+            # are; the delegation itself is not a call, so no parent.
+            await self.push_frame(event.to_frame())
+        elif isinstance(event, BackendOutput):
+            if not event.text:
+                return
+            if current is not None:
+                current.answered = True
+            await self._send_context_append(
+                current.id if current else None, event.text, spoken=event.prefers_spoken
             )
-            if not answered:
-                # The live model holds the conversation until the delegation
-                # says something, so a run that produced no text still gets a
-                # word back.
-                logger.warning(f"{self}: delegation {delegation.id} produced no output")
+        elif isinstance(event, BackendError):
+            if current is not None:
+                logger.warning(f"{self}: delegation {current.id} failed: {event.error}")
                 await self._send_context_append(
-                    delegation.id,
-                    "The delegated work finished without an answer.",
-                    spoken=True,
+                    current.id, "The delegated work could not be completed.", spoken=True
                 )
+                await self.push_error(error_msg=f"Delegation {current.id} failed: {event.error}")
+                await self._finish_delegation()
+        elif isinstance(event, BackendIdle):
+            if current is not None:
+                if not current.answered:
+                    # The live model holds the conversation until the delegation
+                    # says something, so a run that produced no text still gets
+                    # a word back.
+                    logger.warning(f"{self}: delegation {current.id} produced no output")
+                    await self._send_context_append(
+                        current.id, "The delegated work finished without an answer.", spoken=True
+                    )
+                await self._finish_delegation()
+
+    async def _start_delegation(self, delegation: events.DelegationMetadata, request: str):
+        config = self._delegation
+        assert isinstance(config, ClientDelegation)
+        current = self._current_delegation = _LiveDelegation(id=delegation.id)
+        current.timeout_task = self.create_task(
+            self._delegation_timeout(current, config.timeout_secs),
+            f"{self}::delegation_timeout:{delegation.id}",
+        )
+        try:
+            session = self._backend_session
+            if session is None:
+                raise RuntimeError("the backend is not attached")
+            await session.send(request)
         except Exception as e:
             logger.warning(f"{self}: delegation {delegation.id} failed: {e}")
             await self._send_context_append(
-                delegation.id,
-                "The delegated work could not be completed.",
-                spoken=True,
+                delegation.id, "The delegated work could not be completed.", spoken=True
             )
             await self.push_error(error_msg=f"Delegation {delegation.id} failed: {e}", exception=e)
+            await self._finish_delegation()
+
+    async def _finish_delegation(self):
+        """Close the delegation in progress and start the next one waiting, if any."""
+        current = self._current_delegation
+        self._current_delegation = None
+        if current is not None and current.timeout_task is not None:
+            if current.timeout_task is not asyncio.current_task():
+                await self.cancel_task(current.timeout_task)
+            current.timeout_task = None
+        if self._queued_delegations:
+            delegation, request = self._queued_delegations.popleft()
+            await self._start_delegation(delegation, request)
+
+    async def _delegation_timeout(self, current: "_LiveDelegation", timeout_secs: float):
+        await asyncio.sleep(timeout_secs)
+        if self._current_delegation is not current:
+            return
+        logger.warning(f"{self}: delegation {current.id} timed out; abandoning it")
+        current.timeout_task = None
+        if self._backend_session is not None:
+            try:
+                await self._backend_session.cancel("delegation timed out")
+            except Exception as e:
+                logger.warning(f"{self}: could not stop the backend: {e}")
+        await self._send_context_append(
+            current.id, "The delegated work could not be completed.", spoken=True
+        )
+        await self._finish_delegation()
+
+    async def _abandon_delegations(self):
+        """Drop the delegation in progress and the ones waiting: the session they belong to is over."""
+        self._queued_delegations.clear()
+        current = self._current_delegation
+        self._current_delegation = None
+        if current is None:
+            return
+        if current.timeout_task is not None:
+            await self.cancel_task(current.timeout_task)
+            current.timeout_task = None
+        if self._backend_session is not None:
+            try:
+                await self._backend_session.cancel("session ended")
+            except Exception as e:
+                logger.warning(f"{self}: could not stop the backend: {e}")
 
     async def _send_context_append(self, delegation_id: str | None, text: str, *, spoken: bool):
         """Append text to the live session, for it to speak or to keep to itself.

@@ -1,0 +1,28 @@
+# The user calls the work off. The backend stops, the bot confirms, and no
+# result arrives later.
+- expect:
+    - event: response
+      eval: "the bot opens the conversation in some way (a greeting, an introduction, an offer to help, or a question to get the user started)"
+
+- user: "Fix the flaky retry test in the HTTP client."
+  expect:
+    - event: function_call
+      calls:
+        - name: delegate
+    - event: response
+      within_ms: 25000
+      eval: "acknowledges that it is starting on the fix"
+
+- user: "Actually, never mind. Don't change anything, leave the code as it is."
+  send_after:
+    delay_ms: 6000
+  expect:
+    - event: function_call
+      calls:
+        - name: cancel_delegated_work
+    - event: response
+      within_ms: 25000
+      eval: "says in words that the work has been stopped or cancelled and the code left as it is (a bare acknowledgement such as 'okay' or 'got it' on its own is not enough: answer continue)"
+    - event: response
+      absent: true
+      within_ms: 30000

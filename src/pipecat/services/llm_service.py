@@ -18,6 +18,7 @@ from typing import (
     TYPE_CHECKING,
     Any,
     Generic,
+    Literal,
     Protocol,
     cast,
 )
@@ -88,6 +89,12 @@ if TYPE_CHECKING:
 
 # Type alias for a callable that handles LLM function calls.
 FunctionCallHandler = Callable[["FunctionCallParams"], Awaitable[None]]
+
+
+# The two roles a service can fill in an
+# `~pipecat.pipeline.llm_with_backend.LLMWithBackend`: the conversational
+# frontend, or the LLM inside the backend worker.
+LLMWithBackendRole = Literal["frontend", "backend"]
 
 
 # Type alias for a callback function that handles the result of an LLM function call.
@@ -520,6 +527,36 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         if self._reports_ttfat is None:
             self._reports_ttfat = not self.service_metadata_frame().is_realtime_service
         return self._reports_ttfat
+
+    @property
+    def accepts_intermediate_function_call_results(self) -> bool:
+        """Whether this service delivers a tool's intermediate results to the model.
+
+        An intermediate result is one reported with
+        ``FunctionCallResultProperties(is_final=False)`` while the call keeps
+        running. A text service passes them on as context messages. A
+        speech-to-speech service has to map them onto whatever second channel
+        its provider offers, and not all of them have one.
+
+        Returns:
+            True if intermediate results reach the model.
+        """
+        return True
+
+    def llm_with_backend_role_objection(self, role: LLMWithBackendRole) -> str | None:
+        """Why this service can't take the given role in an ``LLMWithBackend``, if it can't.
+
+        The composite raises with what this returns, so the objection says what
+        to do instead. Services that work in both roles, which is nearly all of
+        them, say nothing.
+
+        Args:
+            role: The role the service is being asked to take.
+
+        Returns:
+            The reason, or None when the service can take the role.
+        """
+        return None
 
     def service_metadata_frame(self) -> LLMServiceMetadataFrame:
         """The metadata frame this LLM service broadcasts at start.
@@ -986,12 +1023,12 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 asynchronous: the LLM continues the conversation immediately
                 without waiting for the result, and the result is injected later
                 via a developer message. Defaults to ``None`` (fall back to the
-                ``@tool_options`` decorator value, then to True). Note: realtime
-                LLM services deliver only the final result to the provider;
-                intermediate streamed results (reported via
-                ``FunctionCallResultProperties(is_final=False)``) are
-                dropped and an error is raised. Use a non-realtime LLM
-                service if your tool needs to stream intermediate results.
+                ``@tool_options`` decorator value, then to True). A speech-to-speech
+                service takes intermediate results (reported via
+                ``FunctionCallResultProperties(is_final=False)``) on whatever
+                second channel its provider offers; one that can't says so with
+                ``accepts_intermediate_function_call_results`` and drops them
+                with a warning.
             timeout_secs: Optional per-tool timeout in seconds, overriding the
                 global ``function_call_timeout_secs``. A call that runs past it is
                 cancelled: the handler is thrown an ``asyncio.CancelledError``, the
@@ -1100,12 +1137,12 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 asynchronous: the LLM continues the conversation immediately
                 without waiting for the result, and the result is injected later
                 via a developer message. Defaults to ``None`` (fall back to the
-                ``@tool_options`` decorator value, then to True).
-                Note: realtime LLM services deliver only the final result to the
-                provider; intermediate streamed results (reported via
-                ``FunctionCallResultProperties(is_final=False)``) are
-                dropped and an error is raised. Use a non-realtime LLM
-                service if your tool needs to stream intermediate results.
+                ``@tool_options`` decorator value, then to True). A speech-to-speech
+                service takes intermediate results (reported via
+                ``FunctionCallResultProperties(is_final=False)``) on whatever
+                second channel its provider offers; one that can't says so with
+                ``accepts_intermediate_function_call_results`` and drops them
+                with a warning.
             timeout_secs: Optional per-tool timeout in seconds, overriding the
                 global ``function_call_timeout_secs``. A call that runs past it is
                 cancelled: the handler is thrown an ``asyncio.CancelledError``, the
@@ -2164,6 +2201,23 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
 
         item = await self._broadcast_function_call_cancelled(runner_item, run_llm=True)
         await self._call_event_handler("on_function_calls_cancelled", [item])
+
+    async def cancel_function_calls(
+        self, *, reason: str = "cancelled"
+    ) -> list[FunctionCallFromLLM]:
+        """Cancel every function call in flight, whether or not it survives interruptions.
+
+        Each handler is thrown ``asyncio.CancelledError``, the call is settled
+        downstream as cancelled, and ``on_function_calls_cancelled`` fires. No
+        inference runs for the cancellations.
+
+        Args:
+            reason: What triggered the cancellation, for the logs.
+
+        Returns:
+            The calls that were cancelled.
+        """
+        return await self._cancel_function_call_tasks(lambda item: True, reason=reason)
 
     async def _cancel_function_calls_by_tool_call_id(self, tool_call_id: str):
         """Cancel in-progress function call tasks by their tool_call_id.

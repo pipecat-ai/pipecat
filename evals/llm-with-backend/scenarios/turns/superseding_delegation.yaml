@@ -1,0 +1,30 @@
+# A correction while the backend works: the result must reflect the latest
+# instruction, not the first.
+- expect:
+    - event: response
+      eval: "the bot opens the conversation in some way (a greeting, an introduction, an offer to help, or a question to get the user started)"
+
+- user: "Fix the flaky retry test in the HTTP client by making the backoff exponential."
+  expect:
+    - event: function_call
+      calls:
+        - name: delegate
+    - event: response
+      within_ms: 25000
+      eval: "acknowledges that it is starting on the fix"
+
+- user: "Actually, make the backoff linear instead of exponential. Linear is what I want."
+  send_after:
+    delay_ms: 6000
+  expect:
+    - event: function_call
+      calls:
+        - name: delegate
+    - event: response
+      within_ms: 25000
+      eval: "acknowledges the change to linear backoff, without claiming the fix is done"
+
+- expect:
+    - event: response
+      within_ms: 150000
+      eval: "reports that the retry test was fixed with a linear backoff and the tests pass; does not say the backoff is exponential (if the bot only reports progress or says the work is still underway, answer continue, not no: the report has not come yet)"

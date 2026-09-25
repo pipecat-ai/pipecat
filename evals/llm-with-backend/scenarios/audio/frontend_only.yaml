@@ -1,0 +1,6 @@
+name: frontend_only
+user: !include ../../../release/scenarios/user_audio.yaml
+judge: !include ../../../release/scenarios/judge_audio.yaml
+scenarios:
+  - name: audio
+    turns: !include ../turns/frontend_only.yaml

@@ -1,0 +1,54 @@
+# LLMWithBackend evals: the example bots and the behaviors they must show.
+# Run with: pipecat eval suite evals/llm-with-backend/manifest.yaml
+#
+# The conversations live once, in scenarios/turns/, and are included by a
+# text and an audio scenario file each. Text mode drives the cascade bot only
+# and is the fast loop; audio mode runs against every bot and is the
+# judgment. See README.md.
+
+bots_dir: ../../examples/multi-worker/llm-with-backend
+scenarios_dir: scenarios
+concurrency: 2
+runs_dir: test-runs
+record: true
+spawn: "{python} {bot} -t eval --port {port}"
+
+suite:
+  - bot: openai-responses-frontend.py
+    scenarios:
+      - text/frontend_only
+      - text/delegate_ack
+      - text/delegate_with_aside
+      - text/concurrent_delegations
+      - text/superseding_delegation
+      - text/cancel_delegation
+      - text/cancel_and_replace
+      - text/progress_inquiry
+      - audio/frontend_only
+      - audio/delegate_ack
+      - audio/delegate_with_aside
+      - audio/concurrent_delegations
+      - audio/superseding_delegation
+      - audio/cancel_delegation
+      - audio/cancel_and_replace
+      - audio/progress_inquiry
+  - bot: openai-realtime-frontend.py
+    scenarios:
+      - audio/frontend_only
+      - audio/delegate_ack
+      - audio/delegate_with_aside
+      - audio/concurrent_delegations
+      - audio/superseding_delegation
+      - audio/cancel_delegation
+      - audio/cancel_and_replace
+      - audio/progress_inquiry
+  - bot: gemini-live-frontend.py
+    scenarios:
+      - audio/frontend_only
+      - audio/delegate_ack
+      - audio/delegate_with_aside
+      - audio/concurrent_delegations
+      - audio/superseding_delegation
+      - audio/cancel_delegation
+      - audio/cancel_and_replace
+      - audio/progress_inquiry

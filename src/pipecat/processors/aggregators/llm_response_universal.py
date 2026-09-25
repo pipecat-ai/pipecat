@@ -1572,6 +1572,12 @@ class LLMAssistantAggregator(LLMContextAggregator):
         # arriving in the same speaking window are bundled into a single deferred push.
         self._push_context_on_bot_stopped_speaking: bool = False
 
+        # A function call result asked to run inference and the push hasn't happened yet:
+        # it was held for results still queued, or for a user who is speaking. Whichever
+        # result is handled once the way is clear makes the push, whatever its own
+        # `run_llm` says.
+        self._context_push_owed: bool = False
+
         self._assistant_turn_start_timestamp = ""
 
         self._thought_append_to_context = False
@@ -1607,6 +1613,21 @@ class LLMAssistantAggregator(LLMContextAggregator):
         """
         return bool(self._function_calls_in_progress)
 
+    @property
+    def has_blocking_function_calls_in_progress(self) -> bool:
+        """Whether a call is in flight whose result the model waits for.
+
+        A synchronous call leaves the context without its result until it
+        returns, so the model cannot run in the meantime; an asynchronous one
+        (``cancel_on_interruption=False``) has a placeholder result in the
+        context and the model runs on. A call announced but not yet started
+        counts as blocking.
+        """
+        return any(
+            frame is None or frame.cancel_on_interruption
+            for frame in self._function_calls_in_progress.values()
+        )
+
     async def setup(self, setup: FrameProcessorSetup):
         """Set up the aggregator.
 
@@ -1627,6 +1648,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         await super().reset()
         await self._reset_thought_aggregation()  # Just to be safe
         self._push_context_on_bot_stopped_speaking = False
+        self._context_push_owed = False
 
     async def _reset_thought_aggregation(self):
         """Reset the thought aggregation state."""
@@ -1707,6 +1729,10 @@ class LLMAssistantAggregator(LLMContextAggregator):
             await self.push_frame(frame, direction)
         elif isinstance(frame, UserStoppedSpeakingFrame):
             self._user_speaking = False
+            # The turn that just ended runs inference on the context as it
+            # stands, results and appends included, so nothing held for the
+            # user to finish is owed any more.
+            self._context_push_owed = False
             await self.push_frame(frame, direction)
         elif isinstance(frame, BotStartedSpeakingFrame):
             self._bot_speaking = True
@@ -1800,14 +1826,22 @@ class LLMAssistantAggregator(LLMContextAggregator):
         """
         await super().push_context_frame(direction)
         self._push_context_on_bot_stopped_speaking = False
+        self._context_push_owed = False
 
     async def _handle_llm_run(self, frame: LLMRunFrame):
         await self.push_context_frame(FrameDirection.UPSTREAM)
 
     async def _handle_llm_messages_append(self, frame: LLMMessagesAppendFrame):
+        # An append that asks to run is treated as a function call result is:
+        # held while the bot speaks, owed while the user speaks, and bundled
+        # with the appends and results queued behind it. Run at once, a message
+        # appended mid-sentence runs the model on a context that lacks the
+        # answer in progress, and the model answers it again.
         self.add_messages(frame.messages)
         if frame.run_llm:
-            await self.push_context_frame(FrameDirection.UPSTREAM)
+            self._context_push_owed = True
+        if self._context_push_owed and not self._user_speaking:
+            await self._maybe_push_context()
 
     async def _handle_llm_messages_update(self, frame: LLMMessagesUpdateFrame):
         self.set_messages(frame.messages)
@@ -1943,8 +1977,11 @@ class LLMAssistantAggregator(LLMContextAggregator):
                 else:
                     run_llm = True
 
-        if run_llm and not self._user_speaking:
-            await self._maybe_push_context_after_function_result()
+        if run_llm:
+            self._context_push_owed = True
+
+        if self._context_push_owed and not self._user_speaking:
+            await self._maybe_push_context()
 
         # Call the `on_context_updated` callback once the function call result
         # is added to the context. Also, run this in a separate task to make
@@ -1955,25 +1992,27 @@ class LLMAssistantAggregator(LLMContextAggregator):
             self._context_updated_tasks.add(task)
             task.add_done_callback(self._context_updated_task_finished)
 
-    async def _maybe_push_context_after_function_result(self) -> None:
-        """Decide whether to push a context frame after a function call settles.
+    async def _maybe_push_context(self) -> None:
+        """Decide whether to push a context frame after a function call settles or a message is appended.
 
         Push an ``LLMContextFrame`` upstream (with care to avoid duplicate
-        pushes while results are queued or the bot is still speaking).
-        Cascade LLMs use the context frame to re-run inference with the
-        new tool result in scope. Realtime LLMs read the new tool result
-        out of the context the same way — they don't get function results
-        from ``FunctionCallResultFrame`` directly — so the same push is
-        load-bearing for both modes.
+        pushes while results or appends are queued or the bot is still
+        speaking). Cascade LLMs use the context frame to re-run inference
+        with the new tool result in scope. Realtime LLMs read the new tool
+        result out of the context the same way — they don't get function
+        results from ``FunctionCallResultFrame`` directly — so the same push
+        is load-bearing for both modes.
         """
-        if self.has_queued_frame(FunctionCallResultFrame):
-            # Another FunctionCallResultFrame is already queued. Defer the context push
-            # to bundle all results into a single LLM call instead of triggering one
-            # inference pass per result. The context will be pushed once the last
-            # function call in the queue is processed.
-            logger.debug(
-                f"{self}: More FunctionCallResultFrames queued — deferring context frame push."
-            )
+        if self.has_queued_frame(FunctionCallResultFrame) or self.has_queued_frame(
+            LLMMessagesAppendFrame
+        ):
+            # Another result or append is already queued. Defer the context push
+            # to bundle them all into a single LLM call instead of triggering one
+            # inference pass per frame. The push is owed until it happens, so the last
+            # frame in the queue makes it whether or not that frame asks to run —
+            # a burst can end with an intermediate result, or a silent message, that
+            # doesn't.
+            logger.debug(f"{self}: More results or appends queued — deferring context frame push.")
         elif self._bot_speaking:
             # Defer the context frame push until the bot finishes speaking. If multiple
             # function call results arrive while the bot is speaking, they all accumulate
@@ -2061,7 +2100,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         ):
             return
 
-        await self._maybe_push_context_after_function_result()
+        await self._maybe_push_context()
 
     async def _handle_user_image_frame(self, frame: UserImageRawFrame):
         image_appended = False
