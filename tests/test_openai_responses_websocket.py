@@ -378,6 +378,7 @@ class TestReceiveResponseEventsText:
                 "response": {
                     "id": "resp_1",
                     "model": "gpt-4.1",
+                    "service_tier": "fast",
                     "usage": {
                         "input_tokens": 100,
                         "output_tokens": 50,
@@ -401,6 +402,7 @@ class TestReceiveResponseEventsText:
         # Both cache buckets sit inside input_tokens, so the totals stay as sent.
         assert tokens.cache_creation_input_tokens == 30
         assert tokens.reasoning_tokens == 10
+        assert tokens.service_tier == "fast"
 
     @pytest.mark.asyncio
     async def test_token_usage_metrics_without_a_cache_write_count(self):
