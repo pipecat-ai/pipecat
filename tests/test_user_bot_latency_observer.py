@@ -1307,6 +1307,63 @@ class TestObserverEdges(_CycleDriver, unittest.IsolatedAsyncioTestCase):
         await self._settle()
         self.assertEqual(self.breakdowns, [])
 
+    async def test_stt_events_before_vad_stop_stay_with_the_current_turn(self):
+        """Streaming STT may finalize while VAD is still waiting out silence."""
+        await self._push(VADUserStartedSpeakingFrame())
+        self._wait(0.6)
+        # The user became silent at 0.5s; STT finalizes before VAD's 0.2s
+        # stop timeout expires and emits its metric at the same time.
+        await self._push(TranscriptionFrame(user_id="u", text="hello", timestamp=""), source="STT#0")
+        await self._push(MetricsFrame(data=[TTFBMetricsData(processor="STT#0", value=0.06)]))
+        self._wait(0.1)
+        await self._push(VADUserStoppedSpeakingFrame(stop_secs=0.2, timestamp=self.clock))
+        self._wait(0.01)
+        await self._push(LLMFullResponseStartFrame(), source="LLM#0")
+        self._wait(0.1)
+        await self._push(MetricsFrame(data=[TTFBMetricsData(processor="LLM#0", value=0.1)]))
+        await self._push(LLMTextFrame("Hi!"), source="LLM#0")
+        self._wait(0.1)
+        await self._push(
+            TTSAudioRawFrame(audio=b"", sample_rate=24000, num_channels=1), source="TTS#0"
+        )
+        await self._push(BotStartedSpeakingFrame(), source="Transport#0")
+        await self._settle()
+
+        breakdown = self.breakdowns[-1]
+        self.assertEqual([metric.processor for metric in breakdown.ttfb], ["STT#0", "LLM#0"])
+        self.assertAlmostEqual(breakdown.ttfb[0].start_time, 1_000_000.54, places=6)
+        self.assertIn("transcription", [contribution.label for contribution in breakdown.contributions])
+        self.assertIn("turn detection", [contribution.label for contribution in breakdown.contributions])
+
+    async def test_new_user_turn_discards_buffered_stt_events(self):
+        """A new VAD start prevents early STT data from leaking into its turn."""
+        await self._push(VADUserStartedSpeakingFrame())
+        await self._push(
+            MetricsFrame(data=[TTFBMetricsData(processor="stale STT#0", value=0.06)])
+        )
+        await self._push(VADUserStartedSpeakingFrame())
+        await self._push(
+            TranscriptionFrame(user_id="u", text="fresh", timestamp=""), source="fresh STT#0"
+        )
+        await self._push(
+            MetricsFrame(data=[TTFBMetricsData(processor="fresh STT#0", value=0.06)])
+        )
+        self._wait(0.2)
+        await self._push(VADUserStoppedSpeakingFrame(stop_secs=0.1, timestamp=self.clock))
+        self._wait(0.01)
+        await self._push(LLMFullResponseStartFrame(), source="LLM#0")
+        self._wait(0.1)
+        await self._push(MetricsFrame(data=[TTFBMetricsData(processor="LLM#0", value=0.1)]))
+        await self._push(LLMTextFrame("Hi!"), source="LLM#0")
+        await self._push(
+            TTSAudioRawFrame(audio=b"", sample_rate=24000, num_channels=1), source="TTS#0"
+        )
+        await self._push(BotStartedSpeakingFrame(), source="Transport#0")
+        await self._settle()
+
+        processors = [metric.processor for metric in self.breakdowns[-1].ttfb]
+        self.assertEqual(processors, ["fresh STT#0", "LLM#0"])
+
     async def test_a_greeting_is_measured_from_where_startup_ends(self):
         """The first thing the bot says has a timeline of its own."""
         await self._push(ClientConnectedFrame())

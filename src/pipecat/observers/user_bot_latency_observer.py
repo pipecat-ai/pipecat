@@ -98,6 +98,11 @@ MIN_CONTRIBUTION_SECS = 0.005
 # would show as zero and so is not part of the timeline at all.
 PRINTS_AS_ZERO_SECS = 0.0005
 
+# A streaming STT service can finalize during the silence VAD is waiting out.
+# Replay that transcript just after VAD's stop moment so the contribution
+# timeline keeps its canonical moment order and still names the STT stage.
+_PRE_VAD_STOP_EPSILON_SECS = 0.001
+
 
 class _MomentKind(StrEnum):
     """A point in a user-to-bot cycle that a contribution can start or end at.
@@ -602,6 +607,13 @@ class UserBotLatencyObserver(BaseObserver):
         self._function_call_starts: dict[str, tuple[str, float]] = {}
         self._function_call_metrics: list[FunctionCallMetrics] = []
 
+        # Streaming STT can reach its own endpoint before VAD has accumulated
+        # enough silence to emit VADUserStoppedSpeakingFrame. Keep events from
+        # that current user turn until VAD opens the measurement window.
+        self._awaiting_vad_stop = False
+        self._pre_vad_stop_transcript_source: str | None = None
+        self._pre_vad_stop_metrics: list[tuple[MetricsFrame, float]] = []
+
         self._register_event_handler("on_latency_measured")
         self._register_event_handler("on_latency_breakdown")
         self._register_event_handler("on_first_bot_speech_latency")
@@ -644,6 +656,7 @@ class UserBotLatencyObserver(BaseObserver):
             self._user_turn_start_time = None
             self._user_turn = None
             self._reset_accumulators()
+            self._awaiting_vad_stop = True
             # If user speaks before the bot's first speech, abandon the
             # first-bot-speech measurement — it's only meaningful for greetings.
             self._first_bot_speech_measured = True
@@ -654,6 +667,8 @@ class UserBotLatencyObserver(BaseObserver):
             self._user_stopped_time = data.frame.timestamp - data.frame.stop_secs
             self._user_turn_start_time = self._user_stopped_time
             self._mark(_MomentKind.VAD_STOP, at=data.frame.timestamp)
+            self._flush_pre_vad_stop_events(data.frame.timestamp)
+            self._awaiting_vad_stop = False
         elif isinstance(data.frame, UserStoppedSpeakingFrame):
             # Measure the user turn duration: from actual user silence to
             # turn release. Includes VAD silence detection, STT finalization,
@@ -666,8 +681,13 @@ class UserBotLatencyObserver(BaseObserver):
             # service stops its own TTFB clock, so a later one replaces the
             # earlier until the LLM is asked.
             if not self._seen(_MomentKind.LLM_REQUEST):
-                self._moments = [m for m in self._moments if m.kind is not _MomentKind.TRANSCRIPT]
-                self._mark(_MomentKind.TRANSCRIPT, source=data.source.name)
+                if self._measuring:
+                    self._moments = [
+                        m for m in self._moments if m.kind is not _MomentKind.TRANSCRIPT
+                    ]
+                    self._mark(_MomentKind.TRANSCRIPT, source=data.source.name)
+                elif self._awaiting_vad_stop:
+                    self._pre_vad_stop_transcript_source = data.source.name
         elif isinstance(data.frame, LLMFullResponseStartFrame):
             self._llm_request = self._mark(_MomentKind.LLM_REQUEST, source=data.source.name)
         elif isinstance(data.frame, LLMMarkerFrame):
@@ -1011,9 +1031,33 @@ class UserBotLatencyObserver(BaseObserver):
             self._client_connected_time is not None and not self._first_bot_speech_measured
         )
         if self._user_stopped_time is None and not waiting_for_first_speech:
+            if self._awaiting_vad_stop:
+                self._pre_vad_stop_metrics.append((frame, self._now()))
             return
 
-        now = self._now()
+        self._accumulate_metrics(frame, now=self._now())
+
+    def _flush_pre_vad_stop_events(self, vad_stop_time: float):
+        """Record current-turn STT events that arrived before VAD stopped.
+
+        The observer's contribution spans require VAD stop to precede the
+        transcript. A streaming STT service can finalize first, so replay its
+        final transcript just after VAD stop while retaining the original
+        timestamp used to place its metrics.
+        """
+        if self._pre_vad_stop_transcript_source is not None:
+            self._mark(
+                _MomentKind.TRANSCRIPT,
+                at=vad_stop_time + _PRE_VAD_STOP_EPSILON_SECS,
+                source=self._pre_vad_stop_transcript_source,
+            )
+        for frame, at in self._pre_vad_stop_metrics:
+            self._accumulate_metrics(frame, now=at)
+        self._pre_vad_stop_transcript_source = None
+        self._pre_vad_stop_metrics = []
+
+    def _accumulate_metrics(self, frame: MetricsFrame, *, now: float):
+        """Add metric data measured during the current latency window."""
         for metrics_data in frame.data:
             if isinstance(metrics_data, TTFBMetricsData) and metrics_data.value > 0:
                 self._ttfb.append(
@@ -1054,3 +1098,5 @@ class UserBotLatencyObserver(BaseObserver):
         self._user_turn = None
         self._function_call_starts = {}
         self._function_call_metrics = []
+        self._pre_vad_stop_transcript_source = None
+        self._pre_vad_stop_metrics = []
