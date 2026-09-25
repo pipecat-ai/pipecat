@@ -115,8 +115,8 @@ class UIWorker(LLMContextWorker):
       job: find an element, check whether something is true, select the
       elements matching a description, list what is on screen, or click,
       scroll to, highlight, select or fill an element. Every answer is short
-      data and never the page; :func:`~pipecat.workers.ui.ui_tools.screen_tool`
-      gives the voice LLM the one tool that sends it.
+      data and never the page; :func:`~pipecat.workers.ui.ui_tools.screen_tools`
+      gives the voice LLM the tool that sends it.
     - Answer as a delegate. The built-in single-flight ``respond`` job runs one
       screen-grounded LLM turn that a ``@tool`` ends by calling ``respond_to_job``
       (which decides how the answer reaches the user).

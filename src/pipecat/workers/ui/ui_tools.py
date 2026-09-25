@@ -145,21 +145,22 @@ class ReplyToolMixin:
         await params.result_callback(None)
 
 
-def screen_tool(worker: str, *, timeout: float = 30.0):
-    """The tool that lets a voice LLM ask a ``UIWorker`` about the screen, or act on it.
+def screen_tools(worker: str, *, timeout: float = 30.0) -> list:
+    """The tools that let a voice LLM ask a ``UIWorker`` about the screen, or act on it.
 
-    One tool, ``screen(action, target, value)``, sends the worker's ``screen``
-    job and returns its answer as data, so the voice LLM learns what it asked
-    and nothing more of the page. Hand it to the voice LLM's context::
+    Today that is one tool, ``screen(action, target, value)``, which sends the
+    worker's ``screen`` job and returns its answer as data, so the voice LLM
+    learns what it asked and nothing more of the page. Hand them to the voice
+    LLM's context::
 
-        context = LLMContext(tools=[screen_tool("ui")])
+        context = LLMContext(tools=[*screen_tools("ui")])
 
     Args:
         worker: The name of the ``UIWorker`` to ask.
         timeout: Seconds to wait for an answer.
 
     Returns:
-        The ``screen`` tool.
+        The tools, as functions for an ``LLMContext``.
     """
 
     @tool_options(cancel_on_interruption=False, timeout_secs=timeout)
@@ -211,4 +212,4 @@ def screen_tool(worker: str, *, timeout: float = 30.0):
             return
         await params.result_callback(t.response)
 
-    return screen
+    return [screen]

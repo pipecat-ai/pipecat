@@ -32,7 +32,7 @@ Architecture::
 
     Main worker (PipelineWorker, owns transport + RTVI):
       transport.in -> STT -> user_agg -> LLM -> TTS -> transport.out -> assistant_agg
-        └── screen_tool("ui"): screen(action, target, value)
+        └── screen_tools("ui"): screen(action, target, value)
               └── params.pipeline_worker.job("ui", name="screen", payload=...)
 
     FormWorker (UIWorker "ui", no LLM turn):
@@ -78,7 +78,7 @@ from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.workers.runner import WorkerRunner
 from pipecat.workers.ui import UIWorker
-from pipecat.workers.ui.ui_tools import screen_tool
+from pipecat.workers.ui.ui_tools import screen_tools
 
 load_dotenv(override=True)
 
@@ -168,7 +168,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         settings=OpenAILLMService.Settings(system_instruction=VOICE_PROMPT),
     )
 
-    context = LLMContext(tools=[screen_tool(UI_NAME)])
+    context = LLMContext(tools=[*screen_tools(UI_NAME)])
     aggregators = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),

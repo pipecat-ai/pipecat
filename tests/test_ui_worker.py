@@ -36,7 +36,7 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.utils.asyncio.task_manager import TaskManager
 from pipecat.workers.ui import UI_STATE_PROMPT_GUIDE, UIWorker, ui_event
-from pipecat.workers.ui.ui_tools import screen_tool
+from pipecat.workers.ui.ui_tools import screen_tools
 
 
 class _StubUIWorker(UIWorker):
@@ -1157,7 +1157,8 @@ class _FakeJob:
 
 class TestScreenTool(unittest.IsolatedAsyncioTestCase):
     def test_the_tool_describes_itself_to_the_llm(self):
-        schema = DirectFunctionWrapper(screen_tool("ui"))
+        (tool,) = screen_tools("ui")
+        schema = DirectFunctionWrapper(tool)
         self.assertEqual(schema.name, "screen")
         self.assertEqual(sorted(schema.properties), ["action", "target", "value"])
         self.assertEqual(schema.required, ["action"])
@@ -1165,7 +1166,7 @@ class TestScreenTool(unittest.IsolatedAsyncioTestCase):
         self.assertIn("checkout button", schema.description)
 
     async def test_the_tool_sends_the_job_and_returns_its_answer(self):
-        tool = screen_tool("ui", timeout=5)
+        (tool,) = screen_tools("ui", timeout=5)
         params = MagicMock()
         params.pipeline_worker.job = MagicMock(return_value=_FakeJob({"label": "Taylor Swift"}))
         params.result_callback = AsyncMock()
@@ -1181,7 +1182,7 @@ class TestScreenTool(unittest.IsolatedAsyncioTestCase):
         params.result_callback.assert_awaited_once_with({"label": "Taylor Swift"})
 
     async def test_a_failed_job_returns_the_error_as_data(self):
-        tool = screen_tool("ui")
+        (tool,) = screen_tools("ui")
         params = MagicMock()
         params.pipeline_worker.job = MagicMock(return_value=_FakeJob(error="no such worker"))
         params.result_callback = AsyncMock()

@@ -14,7 +14,7 @@ captured before moving on. A user who can't see the screen never has to.
   confirms what it heard, and asks for the next piece, section by section.
   All the guidance lives in one prompt, `VOICE_PROMPT`.
 - **One screen tool.** The voice LLM has a single tool, `screen(action,
-  target, value)`, from `screen_tool("ui")`. `screen("list", "textbox")`
+  target, value)`, from `screen_tools("ui")`. `screen("list", "textbox")`
   returns the inputs with their current values, `screen("fill", "the
   email field", "john@example.com")` writes a value, and `screen("click",
   "the submit button")` submits. It never sees the page.
