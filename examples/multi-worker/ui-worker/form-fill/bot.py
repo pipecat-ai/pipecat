@@ -77,8 +77,7 @@ from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.workers.runner import WorkerRunner
-from pipecat.workers.ui import UIWorker
-from pipecat.workers.ui.ui_tools import screen_tools
+from pipecat.workers.ui import UIWorker, screen_tools
 
 load_dotenv(override=True)
 

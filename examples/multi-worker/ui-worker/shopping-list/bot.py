@@ -18,7 +18,7 @@ classifier and sends the command. Nothing on the UI side runs an LLM turn.
   screen; both return short data.
 - The **UI worker** ("ui") owns the list. Each tool is a job on it. For an
   item named in words, the worker asks its classifier which checkbox on
-  the live ``<ui_state>`` the words mean, then sends ``set_checked`` or
+  the screen the words mean, then sends ``set_checked`` or
   ``remove_item``. ``add_item`` needs no classifier: the voice LLM already
   carries the text. ``check_list`` reads the snapshot with plain code.
 

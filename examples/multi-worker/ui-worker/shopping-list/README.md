@@ -16,7 +16,7 @@ with a classifier. No LLM turn runs on the UI side.
   as short data. The voice LLM never sees the screen.
 - **A UIWorker with a classifier.** `ListWorker` answers the jobs. For
   an item named in words it asks its classifier which checkbox on the
-  live `<ui_state>` the words mean, one choice question over the list,
+  screen the words mean, one choice question over the list,
   then sends `set_checked` or `remove_item`. `add_item` needs no
   classifier, since the voice LLM already carries the text. `summary`
   reads the snapshot with plain code. With `TYPESAFE_API_KEY` set the

@@ -1,37 +1,46 @@
 # deixis
 
-The UIWorker grounds in what the user just selected. Highlight a
-paragraph in the article and ask "explain this" — the worker reads your
-selection from the snapshot and answers about that specific content.
+The voice LLM asks the UI worker what the user selected, and points back.
+Select a paragraph in the article and ask "explain this". The voice LLM
+cannot see the page, so it asks the `UIWorker` for the selected text and
+answers from it. Ask "where does it talk about RNA editing?" and the
+worker selects that paragraph on the page, so you see what the bot means.
 
 ## What it shows
 
-- The **read direction**: the client captures `window.getSelection()`
-  and emits a `<selection ref="...">selected text</selection>` block
-  inside `<ui_state>`. The `UIWorker` treats it as the deictic referent
-  for "this", "that", "this paragraph". Asking "what does this mean?"
-  with a paragraph selected resolves cleanly.
-- The **write direction**: the worker says "this paragraph" and issues a
-  `select_text=ref` command. The client puts the page's text selection
-  on that element, so the user sees exactly which paragraph the worker
-  means.
-- `ReplyToolMixin`'s pointing/reading fields: the bundled `reply` tool
-  offers `scroll_to`, `highlight` (brief flash), and `select_text`
-  (durable selection), used per turn as the request needs.
+- **The read direction.** The client captures `window.getSelection()`
+  and sends it with each snapshot. The voice LLM calls `selection()`,
+  a tool that sends a `selection` job to the worker, and gets the
+  selected text back as short data. It never sees the page.
+- **The write direction.** For "where does it talk about X" the voice
+  LLM calls `screen("select_text", "the paragraph about X")`. The
+  worker's classifier picks the paragraph the words mean, one choice
+  question over the elements on screen, and sends the `select_text`
+  command. The client selects the paragraph and scrolls to it.
+- **A UIWorker with a classifier and no LLM turn.** `DeixisWorker`
+  answers the `selection` job from the snapshot with plain code and the
+  built-in `screen` job with its classifier. With `TYPESAFE_API_KEY` set
+  the classifier is Jev; otherwise the worker's own LLM answers through
+  an `LLMClassifier`.
 
-## What it adds vs. `hello-snapshot`
+## Architecture
 
-`hello-snapshot` proved the worker can *read* the page and answer. This
-one proves it can *act* on it: scroll and highlight to point, and
-(uniquely) read the user's text selection and point back via a
-programmatic selection. The new parts are the `scroll_to` / `highlight` /
-`select_text` commands and their client handlers.
+```
+Main worker (PipelineWorker, owns transport + RTVI):
+  transport.in → STT → user_agg → LLM → TTS → transport.out → assistant_agg
+    ├── selection() tool          → job "selection" on the UI worker
+    └── screen(action, target)    → job "screen" on the UI worker
+
+DeixisWorker (UIWorker with a classifier, no LLM turn):
+  ├── @job("selection"): the selected text, read from the snapshot
+  └── built-in "screen" job: select_text / scroll_to / highlight by description
+```
 
 ## Run
 
 Two terminals.
 
-**Terminal 1 — bot:**
+**Terminal 1: bot**
 
 ```bash
 cd examples/multi-worker/ui-worker/deixis
@@ -40,7 +49,7 @@ uv run bot.py
 
 The bot starts on `http://localhost:7860`.
 
-**Terminal 2 — client:**
+**Terminal 2: client**
 
 ```bash
 cd examples/multi-worker/ui-worker/deixis/client
@@ -55,28 +64,25 @@ Open `http://localhost:5173` and click **Connect**.
 The page renders a short essay on octopus cognition with selectable
 paragraphs.
 
-**Read direction (user selects, worker grounds):**
+**Read direction (you select, the bot answers about it):**
 
-- Select the paragraph about RNA editing → _"What does this mean?"_
-- Select any paragraph → _"Explain this in one sentence."_
+- Select the paragraph about RNA editing, then _"What does this mean?"_
+- Select any paragraph, then _"Explain this in one sentence."_
+- With nothing selected, _"Explain this."_ The bot asks you to select
+  something, because the tool told it nothing is selected.
 
-**Write direction (worker points back):**
+**Write direction (the bot points back):**
 
-- _"Where does it talk about how octopuses solve problems?"_ (no
-  selection) — the worker finds the paragraph, speaks a brief reply, and
-  selects it for you.
-- _"How many neurons does an octopus have?"_ — answers and selects the
-  source paragraph.
-
-**Conversational without pointing:**
-
-- _"What's this article about?"_ — a one-sentence summary, no selection.
+- _"Where does it talk about how octopuses solve problems?"_ The bot
+  says where it is and the page selects that paragraph.
+- _"Show me the part about the skin."_ Same, by description.
 
 ## Requirements
 
 - `OPENAI_API_KEY`
 - `DEEPGRAM_API_KEY`
 - `CARTESIA_API_KEY`
+- `TYPESAFE_API_KEY` (optional; uses Jev as the classifier)
 
 A `.env` in the example folder is the easiest way to set these (see
 `examples/multi-worker/env.example`).

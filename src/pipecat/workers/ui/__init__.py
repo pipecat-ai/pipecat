@@ -7,9 +7,11 @@
 """UI worker: an LLM worker that observes and drives a client GUI over RTVI.
 
 Composes the RTVI UI wire protocol (client events, accessibility snapshots,
-server UI commands) with an opt-in ``ReplyToolMixin`` for the bundled reply
-tool. ``PipelineWorker`` connects a ``UIWorker`` to the client automatically
-whenever RTVI is enabled — no decorator or separate component to wire up.
+server UI commands) with ``screen_tools``, the tool a voice LLM uses to ask a
+``UIWorker`` about the screen, and an opt-in ``ReplyToolMixin`` for the bundled
+reply tool. ``PipelineWorker`` connects a ``UIWorker`` to the client
+automatically whenever RTVI is enabled — no decorator or separate component to
+wire up.
 """
 
 from pipecat.bus.ui.messages import (
@@ -23,7 +25,7 @@ from pipecat.bus.ui.messages import (
 from pipecat.workers.base_ui_worker import BaseUIWorker
 from pipecat.workers.ui.ui_event_decorator import ui_event
 from pipecat.workers.ui.ui_prompts import UI_STATE_PROMPT_GUIDE
-from pipecat.workers.ui.ui_tools import ReplyToolMixin
+from pipecat.workers.ui.ui_tools import ReplyToolMixin, screen_tools
 from pipecat.workers.ui.ui_worker import UIWorker
 
 # Built-in UI command payload models (Toast, Navigate, ScrollTo,
@@ -42,5 +44,6 @@ __all__ = [
     "ReplyToolMixin",
     "UIWorker",
     "UI_STATE_PROMPT_GUIDE",
+    "screen_tools",
     "ui_event",
 ]

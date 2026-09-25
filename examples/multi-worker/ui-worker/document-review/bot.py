@@ -104,8 +104,7 @@ from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.workers.base_worker import BaseWorker
 from pipecat.workers.runner import WorkerRunner
-from pipecat.workers.ui import UIWorker, ui_event
-from pipecat.workers.ui.ui_tools import screen_tools
+from pipecat.workers.ui import UIWorker, screen_tools, ui_event
 
 load_dotenv(override=True)
 

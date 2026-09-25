@@ -20,7 +20,7 @@ captured before moving on. A user who can't see the screen never has to.
   "the submit button")` submits. It never sees the page.
 - **A UIWorker with a classifier and no LLM turn.** `FormWorker` answers
   the `screen` job: for "the email field" it asks its classifier which
-  element on the live `<ui_state>` the words mean, then sends the command.
+  element on the screen the words mean, then sends the command.
   With `TYPESAFE_API_KEY` set the classifier is Jev; otherwise the
   worker's own LLM answers through an `LLMClassifier`.
 - **Driven by the form, not hidden state.** Each turn the voice LLM lists
