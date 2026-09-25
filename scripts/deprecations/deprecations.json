@@ -4535,6 +4535,28 @@
       "location": "pipecat/utils/context/llm_context_summarization.py"
     },
     {
+      "subject": "BaseUIWorker",
+      "module": "pipecat.workers.base_ui_worker",
+      "kind": "class",
+      "deprecated_in": "1.12.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "UIWorker",
+      "message": "`BaseUIWorker` is deprecated since 1.12.0 and will be removed in 2.0.0. Use `UIWorker` instead.",
+      "location": "pipecat/workers/base_ui_worker.py"
+    },
+    {
+      "subject": "pipecat.workers.base_ui_worker",
+      "module": "pipecat.workers.base_ui_worker",
+      "kind": "module",
+      "deprecated_in": "1.12.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "pipecat.workers.ui.UIWorker",
+      "message": "Use :class:`~pipecat.workers.ui.UIWorker` instead, which reports its job groups to the client itself; dispatch from one of its ``@job`` handlers where a ``BaseUIWorker`` was used as a dispatcher. Will be removed in 2.0.0.",
+      "location": "pipecat/workers/base_ui_worker.py"
+    },
+    {
       "subject": "BaseWorker.create_job_group_and_request_job.cancel_on_error",
       "module": "pipecat.workers.base_worker",
       "kind": "parameter",

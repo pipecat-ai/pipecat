@@ -482,14 +482,22 @@ class TestUIJobGroupContext(unittest.IsolatedAsyncioTestCase):
 
 
 async def _make_solo_base_worker() -> BaseUIWorker:
-    """A plain BaseUIWorker (no LLM) with a task manager attached."""
-    worker = BaseUIWorker("plain")
+    """A BaseUIWorker with a task manager attached, its deprecation warning silenced."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        worker = BaseUIWorker("plain")
     worker._task_manager = TaskManager()
     return worker
 
 
 class TestBaseUIWorkerJobGroups(unittest.IsolatedAsyncioTestCase):
-    """A BaseUIWorker dispatches client-visible job groups without any LLM."""
+    """The deprecated BaseUIWorker warns and still dispatches client-visible job groups."""
+
+    async def test_constructing_one_warns(self):
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            BaseUIWorker("plain")
+        self.assertTrue(any(issubclass(w.category, DeprecationWarning) for w in caught))
 
     async def test_context_publishes_started_and_completed(self):
         worker = await _make_solo_base_worker()

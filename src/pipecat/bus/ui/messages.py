@@ -25,7 +25,7 @@ dispatches on to pick the outbound ones out of its bus traffic.
 - ``BusUIJobGroupStartedMessage``, ``BusUIJobUpdateMessage``,
   ``BusUIJobCompletedMessage``, and ``BusUIJobGroupCompletedMessage``
   carry the four phases of a user-facing job group's lifecycle (see
-  ``BaseUIWorker``).
+  ``UIWorker``).
 
 The carriers live in the ``bus`` layer (rather than alongside
 ``UIWorker``) because both ``PipelineWorker`` (in ``pipecat.pipeline``)
@@ -111,7 +111,7 @@ class BusUICommandMessage(BusUIDataMessage):
 class BusUIJobGroupStartedMessage(BusUIDataMessage):
     """A user-facing job group has been dispatched.
 
-    Published by a ``BaseUIWorker`` as it dispatches the group. The
+    Published by a ``UIWorker`` as it dispatches the group. The
     client-facing worker forwards it as a ``ui-job-group`` envelope with
     ``kind = "group_started"``.
 
@@ -134,7 +134,7 @@ class BusUIJobGroupStartedMessage(BusUIDataMessage):
 class BusUIJobUpdateMessage(BusUIDataMessage):
     """Per-worker progress for a user-facing job group.
 
-    Forwarded by a ``BaseUIWorker`` whenever a worker of one of its job
+    Forwarded by a ``UIWorker`` whenever a worker of one of its job
     groups emits a ``BusJobUpdateMessage``. The client-facing worker
     forwards it as a ``ui-job-group`` envelope with
     ``kind = "job_update"``.
@@ -156,7 +156,7 @@ class BusUIJobUpdateMessage(BusUIDataMessage):
 class BusUIJobCompletedMessage(BusUIDataMessage):
     """A worker in a user-facing job group has completed.
 
-    Forwarded by a ``BaseUIWorker`` when a worker of one of its job groups
+    Forwarded by a ``UIWorker`` when a worker of one of its job groups
     reaches a terminal state. The client-facing worker forwards it as a
     ``ui-job-group`` envelope with ``kind = "job_completed"``.
 
@@ -179,7 +179,7 @@ class BusUIJobCompletedMessage(BusUIDataMessage):
 class BusUIJobGroupCompletedMessage(BusUIDataMessage):
     """A user-facing job group has completed.
 
-    Published by a ``BaseUIWorker`` once every worker in the group has
+    Published by a ``UIWorker`` once every worker in the group has
     finished, or the group was cancelled. The client-facing worker forwards
     it as a ``ui-job-group`` envelope with ``kind = "group_completed"``.
 
