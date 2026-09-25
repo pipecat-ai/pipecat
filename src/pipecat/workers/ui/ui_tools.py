@@ -145,111 +145,70 @@ class ReplyToolMixin:
         await params.result_callback(None)
 
 
-def screen_tools(worker: str, *, timeout: float = 30.0) -> list:
-    """Tools that let a voice LLM ask a ``UIWorker`` about the screen.
+def screen_tool(worker: str, *, timeout: float = 30.0):
+    """The tool that lets a voice LLM ask a ``UIWorker`` about the screen, or act on it.
 
-    Each tool sends one of the worker's screen jobs and returns its answer
-    as data, so the voice LLM learns what it asked and nothing more of the
-    page. Hand them to the voice LLM's context::
+    One tool, ``screen(action, target, value)``, sends the worker's ``screen``
+    job and returns its answer as data, so the voice LLM learns what it asked
+    and nothing more of the page. Hand it to the voice LLM's context::
 
-        context = LLMContext(tools=[*screen_tools("ui")])
+        context = LLMContext(tools=[screen_tool("ui")])
 
     Args:
         worker: The name of the ``UIWorker`` to ask.
-        timeout: Seconds to wait for each answer.
+        timeout: Seconds to wait for an answer.
 
     Returns:
-        ``find_on_screen``, ``check_screen``, ``select_on_screen``,
-        ``act_on_screen`` and ``list_elements``.
+        The ``screen`` tool.
     """
 
-    async def _ask(params: FunctionCallParams, name: str, payload: dict) -> None:
+    @tool_options(cancel_on_interruption=False, timeout_secs=timeout)
+    async def screen(
+        params: FunctionCallParams,
+        action: str,
+        target: str | None = None,
+        value: str | None = None,
+    ):
+        """Ask about what is on the user's screen right now, or act on it.
+
+        Actions, with what ``target`` means for each:
+
+        - "find": which element a description refers to, such as "the
+          checkout button". Returns its label and how confident the match is,
+          or no label when nothing fits.
+        - "check": whether something is true of the screen, such as "is
+          anything on the list still unchecked?". Returns yes or no with a
+          probability.
+        - "select": which elements match a description, such as "dairy
+          products". Returns the matching labels, most likely first.
+        - "list": the named elements on screen, with their state and values,
+          optionally only those of one role such as "checkbox" or "textbox".
+          Use it to see what is on the page and which inputs are filled.
+        - "click", "scroll_to", "highlight", "select_text", "fill": do that to
+          the element a description refers to. "fill" writes ``value`` into
+          it. Returns whether it was done and the label of the element.
+
+        Args:
+            params: Framework-provided tool invocation context.
+            action: One of "find", "check", "select", "list", "click",
+                "scroll_to", "highlight", "select_text" or "fill".
+            target: The description, criteria or role the action needs.
+            value: The text to write, only for "fill".
+        """
+        payload: dict = {"action": action}
+        if target is not None:
+            payload["target"] = target
+        if value is not None:
+            payload["value"] = value
         try:
             async with params.pipeline_worker.job(
-                worker, name=name, payload=payload, timeout=timeout
+                worker, name="screen", payload=payload, timeout=timeout
             ) as t:
                 pass
         except JobError as e:
-            logger.warning(f"screen job {name} on {worker} failed: {e}")
+            logger.warning(f"screen job on {worker} failed: {e}")
             await params.result_callback({"error": str(e)})
             return
         await params.result_callback(t.response)
 
-    @tool_options(cancel_on_interruption=False, timeout_secs=timeout)
-    async def find_on_screen(params: FunctionCallParams, description: str):
-        """Find the element on screen that a description refers to.
-
-        Use it before acting on something the user named, or to confirm
-        what they mean. Returns the element's label and how confident the
-        match is, or no label when nothing on screen fits.
-
-        Args:
-            params: Framework-provided tool invocation context.
-            description: The element in the user's words, such as "the
-                checkout button" or "the bread".
-        """
-        await _ask(params, "find", {"description": description})
-
-    @tool_options(cancel_on_interruption=False, timeout_secs=timeout)
-    async def check_screen(params: FunctionCallParams, criteria: str):
-        """Check whether something is true of what is on screen right now.
-
-        Returns yes or no with a probability.
-
-        Args:
-            params: Framework-provided tool invocation context.
-            criteria: What to check, as a yes or no question, such as "is
-                anything on the list still unchecked?".
-        """
-        await _ask(params, "check", {"criteria": criteria})
-
-    @tool_options(cancel_on_interruption=False, timeout_secs=timeout)
-    async def select_on_screen(params: FunctionCallParams, criteria: str):
-        """List the elements on screen that match a description.
-
-        Returns the matching labels with a probability each, most likely
-        first, or an empty list.
-
-        Args:
-            params: Framework-provided tool invocation context.
-            criteria: What the elements should be, such as "dairy products"
-                or "fields that are still empty".
-        """
-        await _ask(params, "select", {"criteria": criteria})
-
-    @tool_options(cancel_on_interruption=False, timeout_secs=timeout)
-    async def act_on_screen(
-        params: FunctionCallParams, action: str, description: str, value: str | None = None
-    ):
-        """Do something to the element on screen that a description refers to.
-
-        Returns whether it was done and the label of the element acted on.
-
-        Args:
-            params: Framework-provided tool invocation context.
-            action: One of "click", "scroll_to", "highlight", "select_text"
-                or "set_input_value".
-            description: The element in the user's words, such as "the
-                submit button" or "the email field".
-            value: The text to write, only for "set_input_value".
-        """
-        payload: dict = {"action": action, "description": description}
-        if value is not None:
-            payload["value"] = value
-        await _ask(params, "act", payload)
-
-    @tool_options(cancel_on_interruption=False, timeout_secs=timeout)
-    async def list_elements(params: FunctionCallParams, role: str | None = None):
-        """List the named elements on screen, with their state and values.
-
-        Use it to answer what is on the page, what is on a list, what is
-        checked or selected, and which inputs are filled or still empty.
-
-        Args:
-            params: Framework-provided tool invocation context.
-            role: Only elements of this kind, such as "checkbox", "button"
-                or "textbox". Leave empty for all of them.
-        """
-        await _ask(params, "elements", {"role": role} if role else {})
-
-    return [find_on_screen, check_screen, select_on_screen, act_on_screen, list_elements]
+    return screen

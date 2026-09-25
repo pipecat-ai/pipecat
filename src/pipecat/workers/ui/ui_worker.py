@@ -111,10 +111,12 @@ class UIWorker(LLMContextWorker):
       screen (``check_screen``), which elements match a description
       (``select_elements``), and ``act`` on an element named in words.
       ``say`` speaks a line through the pipeline's TTS.
-    - Answer the voice LLM's questions about the screen as jobs: ``find``,
-      ``check``, ``select``, ``act`` and ``elements``. Each returns short data
-      and never the page; :func:`~pipecat.workers.ui.ui_tools.screen_tools`
-      gives the voice LLM the matching tools.
+    - Answer a voice LLM's questions about the screen through the ``screen``
+      job: find an element, check whether something is true, select the
+      elements matching a description, list what is on screen, or click,
+      scroll to, highlight, select or fill an element. Every answer is short
+      data and never the page; :func:`~pipecat.workers.ui.ui_tools.screen_tool`
+      gives the voice LLM the one tool that sends it.
     - Answer as a delegate. The built-in single-flight ``respond`` job runs one
       screen-grounded LLM turn that a ``@tool`` ends by calling ``respond_to_job``
       (which decides how the answer reaches the user).
@@ -521,7 +523,7 @@ class UIWorker(LLMContextWorker):
             ClassifierError: If the classifier could not answer.
         """
         if action not in _ACTIONS:
-            raise ValueError(f"unknown screen action {action!r}; one of {sorted(_ACTIONS)}")
+            raise ValueError(f"unknown screen action {action!r}, not one of {sorted(_ACTIONS)}")
         ref = await self.which_element(description)
         if not ref:
             return None
@@ -603,52 +605,24 @@ class UIWorker(LLMContextWorker):
     async def _respond_job(self, message: BusJobRequestMessage) -> None:
         await self._run_llm_turn(message)
 
-    @job(name="find")
-    async def _find_job(self, message: BusJobRequestMessage) -> None:
-        """Answer ``{"description"}`` with the element meant: ``ref``, ``label``, ``confidence``."""
-        await self._answer_job(message, self._find, self._text(message, "description"))
+    @job(name="screen")
+    async def _screen_job(self, message: BusJobRequestMessage) -> None:
+        """Answer a question about the screen, or act on it, for a voice LLM.
 
-    @job(name="check")
-    async def _check_job(self, message: BusJobRequestMessage) -> None:
-        """Answer ``{"criteria"}`` with ``yes`` and ``probability``."""
-
-        async def check(criteria: str) -> dict[str, Any]:
-            result = await self.check_screen(criteria)
-            return {"yes": result.is_yes, "probability": result.probability}
-
-        await self._answer_job(message, check, self._text(message, "criteria"))
-
-    @job(name="select")
-    async def _select_job(self, message: BusJobRequestMessage) -> None:
-        """Answer ``{"criteria"}`` with the ``matches``, each ``label`` and ``probability``."""
-
-        async def select(criteria: str) -> dict[str, Any]:
-            matches = await self.select_elements(criteria)
-            return {"matches": [{k: m[k] for k in ("label", "probability")} for m in matches]}
-
-        await self._answer_job(message, select, self._text(message, "criteria"))
-
-    @job(name="act")
-    async def _act_job(self, message: BusJobRequestMessage) -> None:
-        """Do ``{"action", "description", "value"?}`` and answer ``done`` and the ``label``."""
+        The payload names the ``action``, its ``target`` and, for a fill, the
+        ``value``. Every answer is short data and never the page.
+        """
         payload = message.payload or {}
-
-        async def act(description: str) -> dict[str, Any]:
-            value = payload.get("value")
-            ref = await self.act(
-                self._text(message, "action"), description, value=str(value) if value else None
-            )
-            label = next((e.name for e in self._named_elements() if e.ref == ref), None)
-            return {"done": ref is not None, "label": label}
-
-        await self._answer_job(message, act, self._text(message, "description"))
-
-    @job(name="elements")
-    async def _elements_job(self, message: BusJobRequestMessage) -> None:
-        """Answer ``{"role"?}`` with the named ``elements`` on screen."""
-        role = (message.payload or {}).get("role")
-        elements = self.list_elements(str(role) if role else None)
-        await self.send_job_response(message.job_id, {"elements": elements})
+        action = self._text(message, "action")
+        target = self._text(message, "target")
+        value = payload.get("value")
+        try:
+            answer = await self._screen(action, target, str(value) if value else None)
+        except (ClassifierError, ValueError) as e:
+            logger.warning(f"{self.name}: screen {action!r} failed: {e}")
+            await self.send_job_response(message.job_id, {"error": str(e)}, status=JobStatus.ERROR)
+            return
+        await self.send_job_response(message.job_id, answer)
 
     def render_query(self, message: BusJobRequestMessage) -> str:
         """Extract the user's query text from a job request.
@@ -1103,13 +1077,23 @@ class UIWorker(LLMContextWorker):
         value = (message.payload or {}).get(key)
         return value if isinstance(value, str) else ""
 
-    async def _answer_job(self, message: BusJobRequestMessage, ask, argument: str) -> None:
-        """Respond to a screen job with ``ask``'s answer, or with the classifier's error."""
-        try:
-            await self.send_job_response(message.job_id, await ask(argument))
-        except ClassifierError as e:
-            logger.warning(f"{self.name}: {message.job_name} failed: {e}")
-            await self.send_job_response(message.job_id, {"error": str(e)}, status=JobStatus.ERROR)
+    async def _screen(self, action: str, target: str, value: str | None) -> dict[str, Any]:
+        """The answer to one screen action, as the ``screen`` job returns it."""
+        if action == "find":
+            found = await self._find(target)
+            return {"label": found["label"], "confidence": found["confidence"]}
+        if action == "check":
+            result = await self.check_screen(target)
+            return {"yes": result.is_yes, "probability": result.probability}
+        if action == "select":
+            matches = await self.select_elements(target)
+            return {"matches": [{k: m[k] for k in ("label", "probability")} for m in matches]}
+        if action == "list":
+            return {"elements": self.list_elements(target or None)}
+        command = "set_input_value" if action == "fill" else action
+        ref = await self.act(command, target, value=value)
+        label = next((e.name for e in self._named_elements() if e.ref == ref), None)
+        return {"done": ref is not None, "label": label}
 
     async def _send_job_completed(
         self,

@@ -36,7 +36,7 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.utils.asyncio.task_manager import TaskManager
 from pipecat.workers.ui import UI_STATE_PROMPT_GUIDE, UIWorker, ui_event
-from pipecat.workers.ui.ui_tools import screen_tools
+from pipecat.workers.ui.ui_tools import screen_tool
 
 
 class _StubUIWorker(UIWorker):
@@ -1003,22 +1003,26 @@ class TestUIWorkerScreenJobs(unittest.IsolatedAsyncioTestCase):
 
     async def test_find_answers_with_the_element_and_its_confidence(self):
         worker, _ = await self._worker()
-        await worker._find_job(_job("find", {"description": "the Taylor Swift one"}))
+        await worker._screen_job(
+            _job("screen", {"action": "find", "target": "the Taylor Swift one"})
+        )
         response, status = self._response(worker)
         self.assertEqual(status, JobStatus.COMPLETED)
-        self.assertEqual(response, {"ref": "e6", "label": "Taylor Swift", "confidence": 0.9})
+        self.assertEqual(response, {"label": "Taylor Swift", "confidence": 0.9})
 
     async def test_find_without_named_elements_answers_nothing(self):
         worker, classifier = await self._worker()
         worker._latest_snapshot = None
-        await worker._find_job(_job("find", {"description": "anything"}))
+        await worker._screen_job(_job("screen", {"action": "find", "target": "anything"}))
         response, _ = self._response(worker)
-        self.assertEqual(response, {"ref": None, "label": None, "confidence": 0.0})
+        self.assertEqual(response, {"label": None, "confidence": 0.0})
         self.assertEqual(classifier.asked, [])
 
     async def test_check_answers_yes_or_no_about_the_screen(self):
         worker, classifier = await self._worker(probability=0.8)
-        await worker._check_job(_job("check", {"criteria": "is an artist focused?"}))
+        await worker._screen_job(
+            _job("screen", {"action": "check", "target": "is an artist focused?"})
+        )
         response, _ = self._response(worker)
         self.assertEqual(response, {"yes": True, "probability": 0.8})
         state, question = classifier.asked[0]
@@ -1027,7 +1031,7 @@ class TestUIWorkerScreenJobs(unittest.IsolatedAsyncioTestCase):
 
     async def test_select_asks_one_question_per_element_in_one_call(self):
         worker, classifier = await self._worker(probability=0.7)
-        await worker._select_job(_job("select", {"criteria": "musicians"}))
+        await worker._screen_job(_job("screen", {"action": "select", "target": "musicians"}))
         response, _ = self._response(worker)
         self.assertEqual(
             response,
@@ -1046,7 +1050,7 @@ class TestUIWorkerScreenJobs(unittest.IsolatedAsyncioTestCase):
 
     async def test_act_finds_the_element_and_sends_the_command(self):
         worker, _ = await self._worker(choice="e5")
-        await worker._act_job(_job("act", {"action": "click", "description": "Bad Bunny"}))
+        await worker._screen_job(_job("screen", {"action": "click", "target": "Bad Bunny"}))
         response, _ = self._response(worker)
         self.assertEqual(response, {"done": True, "label": "Bad Bunny"})
         sent = worker.send_bus_message.await_args.args[0]
@@ -1056,15 +1060,15 @@ class TestUIWorkerScreenJobs(unittest.IsolatedAsyncioTestCase):
 
     async def test_act_below_the_threshold_does_nothing(self):
         worker, _ = await self._worker(probability=0.2, choice="e5")
-        await worker._act_job(_job("act", {"action": "click", "description": "that"}))
+        await worker._screen_job(_job("screen", {"action": "click", "target": "that"}))
         response, _ = self._response(worker)
         self.assertEqual(response, {"done": False, "label": None})
         worker.send_bus_message.assert_not_awaited()
 
     async def test_act_writes_a_value_into_an_input(self):
         worker, _ = await self._worker(choice="e6")
-        await worker._act_job(
-            _job("act", {"action": "set_input_value", "description": "Taylor", "value": "hi"})
+        await worker._screen_job(
+            _job("screen", {"action": "fill", "target": "Taylor", "value": "hi"})
         )
         sent = worker.send_bus_message.await_args.args[0]
         self.assertEqual(sent.command_name, "set_input_value")
@@ -1077,7 +1081,7 @@ class TestUIWorkerScreenJobs(unittest.IsolatedAsyncioTestCase):
 
     async def test_elements_lists_names_roles_and_state_without_refs(self):
         worker, _ = await self._worker()
-        await worker._elements_job(_job("elements", {"role": "button"}))
+        await worker._screen_job(_job("screen", {"action": "list", "target": "button"}))
         response, _ = self._response(worker)
         self.assertEqual(
             response,
@@ -1101,7 +1105,7 @@ class TestUIWorkerScreenJobs(unittest.IsolatedAsyncioTestCase):
                 ],
             }
         }
-        await worker._elements_job(_job("elements", {"role": "textbox"}))
+        await worker._screen_job(_job("screen", {"action": "list", "target": "textbox"}))
         response, _ = self._response(worker)
         self.assertEqual(
             response,
@@ -1113,6 +1117,13 @@ class TestUIWorkerScreenJobs(unittest.IsolatedAsyncioTestCase):
             },
         )
 
+    async def test_an_unknown_action_answers_with_an_error_status(self):
+        worker, _ = await self._worker()
+        await worker._screen_job(_job("screen", {"action": "explode", "target": "the button"}))
+        response, status = self._response(worker)
+        self.assertEqual(status, JobStatus.ERROR)
+        self.assertIn("explode", response["error"])
+
     async def test_a_classifier_failure_answers_with_an_error_status(self):
         from pipecat.classifiers.base_classifier import ClassifierError
 
@@ -1122,7 +1133,7 @@ class TestUIWorkerScreenJobs(unittest.IsolatedAsyncioTestCase):
 
         worker = await _make_worker(classifier=_Broken(0.9))
         worker._latest_snapshot = _SAMPLE_SNAPSHOT
-        await worker._check_job(_job("check", {"criteria": "?"}))
+        await worker._screen_job(_job("screen", {"action": "check", "target": "?"}))
         response, status = self._response(worker)
         self.assertEqual(status, JobStatus.ERROR)
         self.assertEqual(response, {"error": "down"})
@@ -1144,44 +1155,37 @@ class _FakeJob:
         return False
 
 
-class TestScreenTools(unittest.IsolatedAsyncioTestCase):
-    def test_the_tools_describe_themselves_to_the_llm(self):
-        tools = screen_tools("ui")
-        schemas = [DirectFunctionWrapper(fn) for fn in tools]
-        self.assertEqual(
-            [s.name for s in schemas],
-            [
-                "find_on_screen",
-                "check_screen",
-                "select_on_screen",
-                "act_on_screen",
-                "list_elements",
-            ],
-        )
-        act = next(s for s in schemas if s.name == "act_on_screen")
-        self.assertNotIn("params", act.properties)
-        self.assertEqual(sorted(act.required), ["action", "description"])
-        self.assertIn("click", act.properties["action"]["description"])
+class TestScreenTool(unittest.IsolatedAsyncioTestCase):
+    def test_the_tool_describes_itself_to_the_llm(self):
+        schema = DirectFunctionWrapper(screen_tool("ui"))
+        self.assertEqual(schema.name, "screen")
+        self.assertEqual(sorted(schema.properties), ["action", "target", "value"])
+        self.assertEqual(schema.required, ["action"])
+        self.assertIn("fill", schema.properties["action"]["description"])
+        self.assertIn("checkout button", schema.description)
 
-    async def test_a_tool_sends_the_job_and_returns_its_answer(self):
-        tools = {fn.__name__: fn for fn in screen_tools("ui", timeout=5)}
+    async def test_the_tool_sends_the_job_and_returns_its_answer(self):
+        tool = screen_tool("ui", timeout=5)
         params = MagicMock()
-        params.pipeline_worker.job = MagicMock(return_value=_FakeJob({"ref": "e6"}))
+        params.pipeline_worker.job = MagicMock(return_value=_FakeJob({"label": "Taylor Swift"}))
         params.result_callback = AsyncMock()
 
-        await tools["find_on_screen"](params, description="the Taylor Swift one")
+        await tool(params, action="find", target="the Taylor Swift one")
 
         params.pipeline_worker.job.assert_called_once_with(
-            "ui", name="find", payload={"description": "the Taylor Swift one"}, timeout=5
+            "ui",
+            name="screen",
+            payload={"action": "find", "target": "the Taylor Swift one"},
+            timeout=5,
         )
-        params.result_callback.assert_awaited_once_with({"ref": "e6"})
+        params.result_callback.assert_awaited_once_with({"label": "Taylor Swift"})
 
     async def test_a_failed_job_returns_the_error_as_data(self):
-        tools = {fn.__name__: fn for fn in screen_tools("ui")}
+        tool = screen_tool("ui")
         params = MagicMock()
         params.pipeline_worker.job = MagicMock(return_value=_FakeJob(error="no such worker"))
         params.result_callback = AsyncMock()
 
-        await tools["check_screen"](params, criteria="anything?")
+        await tool(params, action="check", target="anything?")
 
         params.result_callback.assert_awaited_once_with({"error": "no such worker"})
