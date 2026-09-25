@@ -16,10 +16,10 @@ classifier and sends the command. Nothing on the UI side runs an LLM turn.
   LLM converses and calls two tools: ``update_list`` with everything the
   turn asked for, and ``check_list`` to read the list. It never sees the
   screen; both return short data.
-- The **UI worker** ("ui") owns the list. Each tool is a job on it. For an
-  item named in words, the worker asks its classifier which checkbox on
-  the screen the words mean, then sends ``set_checked`` or
-  ``remove_item``. ``add_item`` needs no classifier: the voice LLM already
+- The **UI worker** ("ui") owns the list. Each tool is a job on it. For the
+  items named in words, the worker asks its classifier which checkbox on
+  the screen each one means, all in one call, then sends ``set_checked``
+  or ``remove_item``. ``add_item`` needs no classifier: the voice LLM already
   carries the text. ``check_list`` reads the snapshot with plain code.
 
 The worker's classifier is its own LLM through an ``LLMClassifier``; pass a
@@ -163,18 +163,21 @@ class ListWorker(UIWorker):
             await self.send_command("add_item", {"text": text})
             done["added"].append(text)
 
-        for field, verb, command, extra in (
+        fields = (
             ("check", "checked", "set_checked", {"checked": True}),
             ("uncheck", "unchecked", "set_checked", {"checked": False}),
             ("remove", "removed", "remove_item", {}),
             ("highlight", "highlighted", "highlight", {}),
-        ):
+        )
+        # One classifier call resolves every item named in the request.
+        found = await self._items([t for field, *_ in fields for t in _texts(payload.get(field))])
+        for field, verb, command, extra in fields:
             for text in _texts(payload.get(field)):
-                found = await self._item(text)
-                if not found:
+                item = found.get(text)
+                if not item:
                     not_found.append(text)
                     continue
-                ref, label = found
+                ref, label = item
                 await self.send_command(command, {"ref": ref, **extra})
                 done[verb].append(label)
 
@@ -197,20 +200,25 @@ class ListWorker(UIWorker):
         _checkboxes((self.snapshot or {}).get("root"), items)
         return items
 
-    async def _item(self, text: str) -> tuple[str, str] | None:
-        """The checkbox the user's words mean, as (ref, label), or None."""
+    async def _items(self, texts: list[str]) -> dict[str, tuple[str, str]]:
+        """The checkbox each of the user's words means, as (ref, label), for those found."""
         items = self._list()
-        if not items:
-            return None
+        if not items or not texts:
+            return {}
         options: dict[str, Any] = {ref: name for ref, name, _ in items}
-        question = ChoiceQuestion(instructions="the list item the user means", options=options)
-        result = (await self.classifier.choice(text, {"item": question}))["item"]
-        logger.debug(
-            f"{self.name}: {text!r} -> {options[result.choice]!r} ({result.confidence:.2f})"
-        )
-        if result.confidence < 0.5:
-            return None
-        return result.choice, options[result.choice]
+        questions = {
+            text: ChoiceQuestion(instructions=f"the list item {text!r} refers to", options=options)
+            for text in dict.fromkeys(texts)
+        }
+        results = await self.classifier.choice({"items": list(questions)}, questions)
+        found: dict[str, tuple[str, str]] = {}
+        for text, result in results.items():
+            logger.debug(
+                f"{self.name}: {text!r} -> {options[result.choice]!r} ({result.confidence:.2f})"
+            )
+            if result.confidence >= 0.5:
+                found[text] = (result.choice, options[result.choice])
+        return found
 
 
 def _texts(items: Any) -> list[str]:
