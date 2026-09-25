@@ -24,6 +24,10 @@ lets the user cancel mid-flight.
   immediately so the LLM speaks its acknowledgement
   ("Researching the Mariana Trench now") while the workers run, and is
   free to take follow-up turns.
+- **A spoken completion**: when every worker has finished, the worker's
+  `on_job_completed` hook calls `say()` and the bot tells the user the
+  results are on screen. The line also lands in the conversation, so the
+  voice LLM knows the research is done.
 
 ## What it adds vs. the prior demos
 

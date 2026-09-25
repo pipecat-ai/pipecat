@@ -22,8 +22,9 @@ Architecture::
               └── params.pipeline_worker.job("ui", name="research", payload={query})
 
     ResearchWorker (UIWorker "ui"):
-      └── @job research -> request_job_group("wikipedia", "news", "scholar",
-                               params=JobGroupParams(payload=..., label=...))
+      ├── @job research    -> request_job_group("wikipedia", "news", "scholar",
+      │                          params=JobGroupParams(payload=..., label=...))
+      └── on_job_completed -> say("The research on ... is done.")
 
     Three peer workers (BaseWorker each):
       WikipediaResearcher · NewsResearcher · ScholarResearcher
@@ -56,7 +57,7 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.bus.messages import BusJobRequestMessage
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
-from pipecat.pipeline.job_context import JobError, JobGroupParams
+from pipecat.pipeline.job_context import JobError, JobGroupParams, JobGroupResponse
 from pipecat.pipeline.job_decorator import job
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
@@ -218,7 +219,15 @@ async def research(params: FunctionCallParams, query: str):
 
 
 class ResearchWorker(UIWorker):
-    """UIWorker that fans research out to the peer workers as a client-visible group."""
+    """UIWorker that fans research out to the peer workers as a client-visible group.
+
+    The cards on the client show the progress; when every worker has
+    finished, the worker also says so, since the user may not be looking.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._queries: dict[str, str] = {}
 
     @job(name="research")
     async def _research(self, message: BusJobRequestMessage) -> None:
@@ -229,7 +238,18 @@ class ResearchWorker(UIWorker):
             "scholar",
             params=JobGroupParams(payload={"query": query}, label=f"Research: {query}"),
         )
+        self._queries[job_id] = query
         await self.send_job_response(message.job_id, {"job_id": job_id})
+
+    async def on_job_completed(self, result: JobGroupResponse) -> None:
+        await super().on_job_completed(result)
+        query = self._queries.pop(result.job_id, None)
+        if query:
+            await self.say(f"The research on {query} is done. The results are on your screen.")
+
+    async def cancel_job_group(self, job_id: str, *, reason: str | None = None) -> None:
+        self._queries.pop(job_id, None)
+        await super().cancel_job_group(job_id, reason=reason)
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
