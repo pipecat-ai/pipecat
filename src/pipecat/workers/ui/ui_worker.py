@@ -9,7 +9,7 @@
 import asyncio
 import json
 from dataclasses import asdict, is_dataclass
-from typing import Any
+from typing import Any, NamedTuple
 
 from loguru import logger
 from pydantic import BaseModel
@@ -25,7 +25,13 @@ from pipecat.bus.ui.messages import (
     BusUICommandMessage,
     BusUIEventMessage,
 )
-from pipecat.classifiers.base_classifier import BaseClassifier, ChoiceQuestion, YesNoQuestion
+from pipecat.classifiers.base_classifier import (
+    BaseClassifier,
+    ChoiceQuestion,
+    ClassifierError,
+    YesNoQuestion,
+    YesNoResult,
+)
 from pipecat.classifiers.llm.classifier import LLMClassifier
 from pipecat.frames.frames import LLMContextFrame, LLMMessagesAppendFrame, LLMMessagesUpdateFrame
 from pipecat.pipeline.job_context import JobGroupContext, JobGroupParams, JobStatus
@@ -54,6 +60,20 @@ from pipecat.workers.ui.ui_prompts import UI_STATE_PROMPT_GUIDE
 _MAX_ELEMENT_OPTIONS = 255
 
 
+class _Element(NamedTuple):
+    """A named element of the snapshot, as the screen questions see it."""
+
+    ref: str
+    role: str
+    name: str
+    state: list[str]
+    value: str | None
+
+
+#: What ``act`` can do to an element, each a command helper on the worker.
+_ACTIONS = frozenset({"click", "scroll_to", "highlight", "select_text", "set_input_value"})
+
+
 class UIWorker(BaseUIWorker, LLMContextWorker):
     """LLM worker that reads and drives a client GUI over the RTVI UI channel.
 
@@ -71,9 +91,15 @@ class UIWorker(BaseUIWorker, LLMContextWorker):
     - Drive the UI with ``send_command`` and the ``scroll_to`` / ``highlight`` /
       ``select_text`` / ``click`` / ``set_input_value`` helpers.
     - Decide small things with a classifier, not an LLM turn: whether a UI
-      event deserves a comment (``should_respond``) and which element on
-      screen the user means (``which_element``). ``say`` speaks a line through
-      the pipeline's TTS.
+      event deserves a comment (``should_respond``), which element on screen
+      the user means (``which_element``), whether something is true of the
+      screen (``check_screen``), which elements match a description
+      (``select_elements``), and ``act`` on an element named in words.
+      ``say`` speaks a line through the pipeline's TTS.
+    - Answer the voice LLM's questions about the screen as jobs: ``find``,
+      ``check``, ``select``, ``act`` and ``elements``. Each returns short data
+      and never the page; :func:`~pipecat.workers.ui.ui_tools.screen_tools`
+      gives the voice LLM the matching tools.
     - Answer as a delegate. The built-in single-flight ``respond`` job runs one
       screen-grounded LLM turn that a ``@tool`` ends by calling ``respond_to_job``
       (which decides how the answer reaches the user).
@@ -401,18 +427,108 @@ class UIWorker(BaseUIWorker, LLMContextWorker):
         Raises:
             ClassifierError: If the classifier could not answer.
         """
-        options = self._element_options()
-        if not options:
+        found = await self._find(description)
+        if found["confidence"] < threshold:
             return None
-        state = {"utterance": description, "screen": self.render_ui_state()}
-        question = ChoiceQuestion(
-            instructions="the element on screen the user is referring to", options=options
-        )
-        result = (await self._classifier.choice(state, {"element": question}))["element"]
-        logger.debug(f"{self.name}: '{description}' -> {result.choice} ({result.confidence:.2f})")
-        if result.confidence < threshold:
+        return found["ref"]
+
+    async def check_screen(self, criteria: str) -> YesNoResult:
+        """Ask the classifier whether something is true of the screen.
+
+        Args:
+            criteria: What is being checked for, as a yes or no question, such
+                as "is anything on the list still unchecked?".
+
+        Returns:
+            How likely the answer is yes.
+
+        Raises:
+            ClassifierError: If the classifier could not answer.
+        """
+        question = YesNoQuestion(instructions=criteria)
+        state = {"screen": self.render_ui_state()}
+        result = (await self._classifier.yes_no(state, {"check": question}))["check"]
+        logger.debug(f"{self.name}: '{criteria}'? {result.probability:.2f}")
+        return result
+
+    async def select_elements(self, criteria: str) -> list[dict[str, Any]]:
+        """Ask the classifier which named elements on screen match a description.
+
+        One yes or no question per element, all in one call.
+
+        Args:
+            criteria: What the elements should be, such as "dairy products".
+
+        Returns:
+            The matching elements, each as ``ref``, ``label`` and
+            ``probability``, most likely first. Empty when nothing on screen
+            matches or there is no snapshot.
+
+        Raises:
+            ClassifierError: If the classifier could not answer.
+        """
+        elements = self._named_elements()
+        if not elements:
+            return []
+        questions = {
+            e.ref: YesNoQuestion(instructions=f'{criteria}: does {e.role} "{e.name}" match?')
+            for e in elements
+        }
+        state = {"criteria": criteria, "screen": self.render_ui_state()}
+        results = await self._classifier.yes_no(state, questions)
+        matches = [
+            {"ref": e.ref, "label": e.name, "probability": results[e.ref].probability}
+            for e in elements
+            if results[e.ref].is_yes
+        ]
+        matches.sort(key=lambda m: m["probability"], reverse=True)
+        logger.debug(f"{self.name}: '{criteria}' -> {[m['label'] for m in matches]}")
+        return matches
+
+    async def act(self, action: str, description: str, *, value: str | None = None) -> str | None:
+        """Find the element the description means and act on it.
+
+        Args:
+            action: One of ``click``, ``scroll_to``, ``highlight``,
+                ``select_text`` or ``set_input_value``.
+            description: The element in words, such as "the checkout button".
+            value: The text to write, for ``set_input_value``.
+
+        Returns:
+            The ref of the element acted on, or ``None`` when no element
+            matched with enough confidence.
+
+        Raises:
+            ValueError: If ``action`` is not one of the five.
+            ClassifierError: If the classifier could not answer.
+        """
+        if action not in _ACTIONS:
+            raise ValueError(f"unknown screen action {action!r}; one of {sorted(_ACTIONS)}")
+        ref = await self.which_element(description)
+        if not ref:
             return None
-        return result.choice
+        if action == "set_input_value":
+            await self.set_input_value(ref, value or "")
+        else:
+            await getattr(self, action)(ref)
+        return ref
+
+    def list_elements(self, role: str | None = None) -> list[dict[str, Any]]:
+        """The named elements on screen, without their refs.
+
+        Args:
+            role: Only elements of this role, such as ``checkbox``; all when
+                ``None``.
+
+        Returns:
+            One entry per element: ``role``, ``name``, its ``state`` tags and,
+            for an input, its ``value``.
+        """
+        return [
+            {"role": e.role, "name": e.name, "state": e.state, "value": e.value}
+            for e in self._named_elements()
+            if role is None or e.role == role
+        ]
 
     async def say(self, text: str, *, target: str | None = None) -> None:
         """Have the pipeline say something through its TTS, with no LLM turn.
@@ -471,6 +587,53 @@ class UIWorker(BaseUIWorker, LLMContextWorker):
     @job(name="respond", sequential=True)
     async def _respond_job(self, message: BusJobRequestMessage) -> None:
         await self._run_llm_turn(message)
+
+    @job(name="find")
+    async def _find_job(self, message: BusJobRequestMessage) -> None:
+        """Answer ``{"description"}`` with the element meant: ``ref``, ``label``, ``confidence``."""
+        await self._answer_job(message, self._find, self._text(message, "description"))
+
+    @job(name="check")
+    async def _check_job(self, message: BusJobRequestMessage) -> None:
+        """Answer ``{"criteria"}`` with ``yes`` and ``probability``."""
+
+        async def check(criteria: str) -> dict[str, Any]:
+            result = await self.check_screen(criteria)
+            return {"yes": result.is_yes, "probability": result.probability}
+
+        await self._answer_job(message, check, self._text(message, "criteria"))
+
+    @job(name="select")
+    async def _select_job(self, message: BusJobRequestMessage) -> None:
+        """Answer ``{"criteria"}`` with the ``matches``, each ``label`` and ``probability``."""
+
+        async def select(criteria: str) -> dict[str, Any]:
+            matches = await self.select_elements(criteria)
+            return {"matches": [{k: m[k] for k in ("label", "probability")} for m in matches]}
+
+        await self._answer_job(message, select, self._text(message, "criteria"))
+
+    @job(name="act")
+    async def _act_job(self, message: BusJobRequestMessage) -> None:
+        """Do ``{"action", "description", "value"?}`` and answer ``done`` and the ``label``."""
+        payload = message.payload or {}
+
+        async def act(description: str) -> dict[str, Any]:
+            value = payload.get("value")
+            ref = await self.act(
+                self._text(message, "action"), description, value=str(value) if value else None
+            )
+            label = next((e.name for e in self._named_elements() if e.ref == ref), None)
+            return {"done": ref is not None, "label": label}
+
+        await self._answer_job(message, act, self._text(message, "description"))
+
+    @job(name="elements")
+    async def _elements_job(self, message: BusJobRequestMessage) -> None:
+        """Answer ``{"role"?}`` with the named ``elements`` on screen."""
+        role = (message.payload or {}).get("role")
+        elements = self.list_elements(str(role) if role else None)
+        await self.send_job_response(message.job_id, {"elements": elements})
 
     def render_query(self, message: BusJobRequestMessage) -> str:
         """Extract the user's query text from a job request.
@@ -749,15 +912,36 @@ class UIWorker(BaseUIWorker, LLMContextWorker):
             f"{self.name}::ui_event_{message.event_name}",
         )
 
-    def _element_options(self) -> dict[str, str | dict[str, Any] | list[Any] | None]:
-        """The snapshot's named elements, ref to description, breadth first up to the cap."""
-        options: dict[str, str | dict[str, Any] | list[Any] | None] = {}
+    async def _find(self, description: str) -> dict[str, Any]:
+        """The element the description means: ``ref``, ``label`` and ``confidence``.
+
+        The candidates are the snapshot's named elements, described by role
+        and name; ``ref`` and ``label`` are ``None`` when there are none.
+        """
+        elements = self._named_elements()
+        if not elements:
+            return {"ref": None, "label": None, "confidence": 0.0}
+        options: dict[str, str | dict[str, Any] | list[Any] | None] = {
+            e.ref: f'{e.role} "{e.name}"' for e in elements
+        }
+        state = {"utterance": description, "screen": self.render_ui_state()}
+        question = ChoiceQuestion(
+            instructions="the element on screen the user is referring to", options=options
+        )
+        result = (await self._classifier.choice(state, {"element": question}))["element"]
+        logger.debug(f"{self.name}: '{description}' -> {result.choice} ({result.confidence:.2f})")
+        label = next(e.name for e in elements if e.ref == result.choice)
+        return {"ref": result.choice, "label": label, "confidence": result.confidence}
+
+    def _named_elements(self) -> list[_Element]:
+        """The snapshot's named elements, breadth first up to the cap."""
+        elements: list[_Element] = []
         root = (self._latest_snapshot or {}).get("root")
         if not isinstance(root, dict):
-            return options
+            return elements
         pending = [root]
         while pending:
-            if len(options) == _MAX_ELEMENT_OPTIONS:
+            if len(elements) == _MAX_ELEMENT_OPTIONS:
                 logger.debug(
                     f"{self.name}: the screen has more than {_MAX_ELEMENT_OPTIONS} named "
                     "elements; deeper ones are not candidates"
@@ -767,10 +951,33 @@ class UIWorker(BaseUIWorker, LLMContextWorker):
             ref = node.get("ref")
             name = node.get("name")
             if isinstance(ref, str) and ref and isinstance(name, str) and name:
-                options[ref] = f'{node.get("role", "element")} "{name}"'
+                state = [s for s in node.get("state") or [] if isinstance(s, str)]
+                value = node.get("value")
+                elements.append(
+                    _Element(
+                        ref=ref,
+                        role=str(node.get("role", "element")),
+                        name=name,
+                        state=state,
+                        value=value if isinstance(value, str) else None,
+                    )
+                )
             children = node.get("children") or []
             pending.extend(c for c in children if isinstance(c, dict))
-        return options
+        return elements
+
+    def _text(self, message: BusJobRequestMessage, key: str) -> str:
+        """The string a job's payload carries under ``key``, empty when missing."""
+        value = (message.payload or {}).get(key)
+        return value if isinstance(value, str) else ""
+
+    async def _answer_job(self, message: BusJobRequestMessage, ask, argument: str) -> None:
+        """Respond to a screen job with ``ask``'s answer, or with the classifier's error."""
+        try:
+            await self.send_job_response(message.job_id, await ask(argument))
+        except ClassifierError as e:
+            logger.warning(f"{self.name}: {message.job_name} failed: {e}")
+            await self.send_job_response(message.job_id, {"error": str(e)}, status=JobStatus.ERROR)
 
 
 def _is_user_turn(context: LLMContext) -> bool:

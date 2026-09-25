@@ -11,9 +11,11 @@ import json
 import unittest
 from unittest.mock import AsyncMock, MagicMock
 
+from pipecat.adapters.schemas.direct_function import DirectFunctionWrapper
 from pipecat.bus.messages import BusJobCancelMessage, BusJobRequestMessage, BusTTSSpeakMessage
 from pipecat.bus.ui.messages import (
     _UI_SNAPSHOT_BUS_EVENT_NAME,
+    BusUICommandMessage,
     BusUIEventMessage,
 )
 from pipecat.classifiers.base_classifier import (
@@ -28,11 +30,13 @@ from pipecat.frames.frames import (
     LLMMessagesAppendFrame,
     LLMMessagesUpdateFrame,
 )
+from pipecat.pipeline.job_context import JobError, JobStatus
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.utils.asyncio.task_manager import TaskManager
 from pipecat.workers.ui import UI_STATE_PROMPT_GUIDE, UIWorker, ui_event
+from pipecat.workers.ui.ui_tools import screen_tools
 
 
 class _StubUIWorker(UIWorker):
@@ -976,3 +980,208 @@ class TestUIWorkerClassifier(unittest.IsolatedAsyncioTestCase):
 
         await worker.say("Done.", target="voice")
         self.assertEqual(worker.send_bus_message.await_args.args[0].target, "voice")
+
+
+def _job(name: str, payload: dict) -> BusJobRequestMessage:
+    return BusJobRequestMessage(
+        source="voice", target="ui", job_name=name, job_id="j1", payload=payload
+    )
+
+
+class TestUIWorkerScreenJobs(unittest.IsolatedAsyncioTestCase):
+    async def _worker(self, probability: float = 0.9, choice: str = "e6"):
+        classifier = _FakeClassifier(probability)
+        classifier.choice_label = choice
+        worker = await _make_worker(classifier=classifier)
+        worker._latest_snapshot = _SAMPLE_SNAPSHOT
+        worker.send_bus_message = AsyncMock()
+        return worker, classifier
+
+    def _response(self, worker):
+        args, kwargs = worker.send_job_response.await_args
+        return args[1], kwargs.get("status", JobStatus.COMPLETED)
+
+    async def test_find_answers_with_the_element_and_its_confidence(self):
+        worker, _ = await self._worker()
+        await worker._find_job(_job("find", {"description": "the Taylor Swift one"}))
+        response, status = self._response(worker)
+        self.assertEqual(status, JobStatus.COMPLETED)
+        self.assertEqual(response, {"ref": "e6", "label": "Taylor Swift", "confidence": 0.9})
+
+    async def test_find_without_named_elements_answers_nothing(self):
+        worker, classifier = await self._worker()
+        worker._latest_snapshot = None
+        await worker._find_job(_job("find", {"description": "anything"}))
+        response, _ = self._response(worker)
+        self.assertEqual(response, {"ref": None, "label": None, "confidence": 0.0})
+        self.assertEqual(classifier.asked, [])
+
+    async def test_check_answers_yes_or_no_about_the_screen(self):
+        worker, classifier = await self._worker(probability=0.8)
+        await worker._check_job(_job("check", {"criteria": "is an artist focused?"}))
+        response, _ = self._response(worker)
+        self.assertEqual(response, {"yes": True, "probability": 0.8})
+        state, question = classifier.asked[0]
+        self.assertTrue(state["screen"].startswith("<ui_state>"))
+        self.assertEqual(question.instructions, "is an artist focused?")
+
+    async def test_select_asks_one_question_per_element_in_one_call(self):
+        worker, classifier = await self._worker(probability=0.7)
+        await worker._select_job(_job("select", {"criteria": "musicians"}))
+        response, _ = self._response(worker)
+        self.assertEqual(
+            response,
+            {
+                "matches": [
+                    {"label": "Home", "probability": 0.7},
+                    {"label": "Trending artists", "probability": 0.7},
+                    {"label": "Bad Bunny", "probability": 0.7},
+                    {"label": "Taylor Swift", "probability": 0.7},
+                ]
+            },
+        )
+        # One call, four questions, keyed by ref.
+        self.assertEqual(len({id(state) for state, _ in classifier.asked}), 1)
+        self.assertEqual(len(classifier.asked), 4)
+
+    async def test_act_finds_the_element_and_sends_the_command(self):
+        worker, _ = await self._worker(choice="e5")
+        await worker._act_job(_job("act", {"action": "click", "description": "Bad Bunny"}))
+        response, _ = self._response(worker)
+        self.assertEqual(response, {"done": True, "label": "Bad Bunny"})
+        sent = worker.send_bus_message.await_args.args[0]
+        self.assertIsInstance(sent, BusUICommandMessage)
+        self.assertEqual(sent.command_name, "click")
+        self.assertEqual(sent.payload["ref"], "e5")
+
+    async def test_act_below_the_threshold_does_nothing(self):
+        worker, _ = await self._worker(probability=0.2, choice="e5")
+        await worker._act_job(_job("act", {"action": "click", "description": "that"}))
+        response, _ = self._response(worker)
+        self.assertEqual(response, {"done": False, "label": None})
+        worker.send_bus_message.assert_not_awaited()
+
+    async def test_act_writes_a_value_into_an_input(self):
+        worker, _ = await self._worker(choice="e6")
+        await worker._act_job(
+            _job("act", {"action": "set_input_value", "description": "Taylor", "value": "hi"})
+        )
+        sent = worker.send_bus_message.await_args.args[0]
+        self.assertEqual(sent.command_name, "set_input_value")
+        self.assertEqual((sent.payload["ref"], sent.payload["value"]), ("e6", "hi"))
+
+    async def test_act_with_an_unknown_action_is_a_value_error(self):
+        worker, _ = await self._worker()
+        with self.assertRaises(ValueError):
+            await worker.act("explode", "the button")
+
+    async def test_elements_lists_names_roles_and_state_without_refs(self):
+        worker, _ = await self._worker()
+        await worker._elements_job(_job("elements", {"role": "button"}))
+        response, _ = self._response(worker)
+        self.assertEqual(
+            response,
+            {
+                "elements": [
+                    {"role": "button", "name": "Bad Bunny", "state": [], "value": None},
+                    {"role": "button", "name": "Taylor Swift", "state": ["focused"], "value": None},
+                ]
+            },
+        )
+
+    async def test_elements_carry_an_input_value(self):
+        worker, _ = await self._worker()
+        worker._latest_snapshot = {
+            "root": {
+                "ref": "e1",
+                "role": "form",
+                "children": [
+                    {"ref": "e2", "role": "textbox", "name": "Email", "value": "a@b.c"},
+                    {"ref": "e3", "role": "textbox", "name": "Phone"},
+                ],
+            }
+        }
+        await worker._elements_job(_job("elements", {"role": "textbox"}))
+        response, _ = self._response(worker)
+        self.assertEqual(
+            response,
+            {
+                "elements": [
+                    {"role": "textbox", "name": "Email", "state": [], "value": "a@b.c"},
+                    {"role": "textbox", "name": "Phone", "state": [], "value": None},
+                ]
+            },
+        )
+
+    async def test_a_classifier_failure_answers_with_an_error_status(self):
+        from pipecat.classifiers.base_classifier import ClassifierError
+
+        class _Broken(_FakeClassifier):
+            async def _ask(self, state, questions):
+                raise ClassifierError("down")
+
+        worker = await _make_worker(classifier=_Broken(0.9))
+        worker._latest_snapshot = _SAMPLE_SNAPSHOT
+        await worker._check_job(_job("check", {"criteria": "?"}))
+        response, status = self._response(worker)
+        self.assertEqual(status, JobStatus.ERROR)
+        self.assertEqual(response, {"error": "down"})
+
+
+class _FakeJob:
+    """What ``pipeline_worker.job(...)`` returns: a context whose response is scripted."""
+
+    def __init__(self, response=None, error: str | None = None):
+        self.response = response
+        self._error = error
+
+    async def __aenter__(self):
+        if self._error:
+            raise JobError(self._error)
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+class TestScreenTools(unittest.IsolatedAsyncioTestCase):
+    def test_the_tools_describe_themselves_to_the_llm(self):
+        tools = screen_tools("ui")
+        schemas = [DirectFunctionWrapper(fn) for fn in tools]
+        self.assertEqual(
+            [s.name for s in schemas],
+            [
+                "find_on_screen",
+                "check_screen",
+                "select_on_screen",
+                "act_on_screen",
+                "list_elements",
+            ],
+        )
+        act = next(s for s in schemas if s.name == "act_on_screen")
+        self.assertNotIn("params", act.properties)
+        self.assertEqual(sorted(act.required), ["action", "description"])
+        self.assertIn("click", act.properties["action"]["description"])
+
+    async def test_a_tool_sends_the_job_and_returns_its_answer(self):
+        tools = {fn.__name__: fn for fn in screen_tools("ui", timeout=5)}
+        params = MagicMock()
+        params.pipeline_worker.job = MagicMock(return_value=_FakeJob({"ref": "e6"}))
+        params.result_callback = AsyncMock()
+
+        await tools["find_on_screen"](params, description="the Taylor Swift one")
+
+        params.pipeline_worker.job.assert_called_once_with(
+            "ui", name="find", payload={"description": "the Taylor Swift one"}, timeout=5
+        )
+        params.result_callback.assert_awaited_once_with({"ref": "e6"})
+
+    async def test_a_failed_job_returns_the_error_as_data(self):
+        tools = {fn.__name__: fn for fn in screen_tools("ui")}
+        params = MagicMock()
+        params.pipeline_worker.job = MagicMock(return_value=_FakeJob(error="no such worker"))
+        params.result_callback = AsyncMock()
+
+        await tools["check_screen"](params, criteria="anything?")
+
+        params.result_callback.assert_awaited_once_with({"error": "no such worker"})
