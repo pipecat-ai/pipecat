@@ -26,7 +26,7 @@ from pipecat.workers.base_ui_worker import BaseUIWorker
 from pipecat.workers.ui.ui_event_decorator import ui_event
 from pipecat.workers.ui.ui_prompts import UI_STATE_PROMPT_GUIDE
 from pipecat.workers.ui.ui_tools import ReplyToolMixin, screen_tools
-from pipecat.workers.ui.ui_worker import UIWorker
+from pipecat.workers.ui.ui_worker import UISelection, UIWorker
 
 # Built-in UI command payload models (Toast, Navigate, ScrollTo,
 # Highlight, Focus, Click, SetInputValue, SelectText) live in
@@ -42,6 +42,7 @@ __all__ = [
     "BusUIJobGroupStartedMessage",
     "BusUIJobUpdateMessage",
     "ReplyToolMixin",
+    "UISelection",
     "UIWorker",
     "UI_STATE_PROMPT_GUIDE",
     "screen_tools",

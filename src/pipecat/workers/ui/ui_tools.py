@@ -185,15 +185,19 @@ def screen_tools(worker: str, *, timeout: float = 30.0) -> list:
         - "list": the named elements on screen, with their state and values,
           optionally only those of one role such as "checkbox" or "textbox".
           Use it to see what is on the page and which inputs are filled.
+        - "selection": the text the user has selected on the page, or no text
+          when nothing is selected. Nothing else can tell; call it whenever
+          the user says "this", "that" or "what I selected".
         - "click", "scroll_to", "highlight", "select_text", "fill": do that to
           the element a description refers to. "fill" writes ``value`` into
           it. Returns whether it was done and the label of the element.
 
         Args:
             params: Framework-provided tool invocation context.
-            action: One of "find", "check", "select", "list", "click",
-                "scroll_to", "highlight", "select_text" or "fill".
-            target: The description, criteria or role the action needs.
+            action: One of "find", "check", "select", "list", "selection",
+                "click", "scroll_to", "highlight", "select_text" or "fill".
+            target: The description, criteria or role the action needs; none
+                for "selection".
             value: The text to write, only for "fill".
         """
         payload: dict = {"action": action}

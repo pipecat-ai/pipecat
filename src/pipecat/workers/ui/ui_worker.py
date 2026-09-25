@@ -75,6 +75,13 @@ from pipecat.workers.ui.ui_prompts import UI_STATE_PROMPT_GUIDE
 _MAX_ELEMENT_OPTIONS = 255
 
 
+class UISelection(NamedTuple):
+    """The text the user has selected on the page, and the element it is in."""
+
+    ref: str
+    text: str
+
+
 class _Element(NamedTuple):
     """A named element of the snapshot, as the screen questions see it."""
 
@@ -102,6 +109,7 @@ class UIWorker(LLMContextWorker):
 
     - See the screen. The latest accessibility snapshot is rendered as
       ``<ui_state>`` and auto-injected into the LLM context before each inference.
+      Code reads it through ``snapshot`` and the user's ``selection``.
     - React to UI events, dispatched to ``@ui_event(name)`` handlers.
     - Drive the UI with ``send_command`` and the ``scroll_to`` / ``highlight`` /
       ``select_text`` / ``click`` / ``set_input_value`` helpers.
@@ -113,13 +121,15 @@ class UIWorker(LLMContextWorker):
       ``say`` speaks a line through the pipeline's TTS.
     - Answer a voice LLM's questions about the screen through the ``screen``
       job: find an element, check whether something is true, select the
-      elements matching a description, list what is on screen, or click,
-      scroll to, highlight, select or fill an element. Every answer is short
+      elements matching a description, list what is on screen, read the
+      user's selection, or click, scroll to, highlight, select or fill an
+      element. Every answer is short
       data and never the page; :func:`~pipecat.workers.ui.ui_tools.screen_tools`
       gives the voice LLM the tool that sends it.
     - Answer as a delegate. The built-in single-flight ``respond`` job runs one
-      screen-grounded LLM turn that a ``@tool`` ends by calling ``respond_to_job``
-      (which decides how the answer reaches the user).
+      screen-grounded LLM turn and answers with the reply the LLM writes. A
+      ``@tool`` that calls ``respond_to_job`` answers instead when it needs to
+      decide how the answer reaches the user.
     - Surface long work. Every job group this worker dispatches is reported
       to the client as it goes: a card when the group starts, a line per
       worker's progress and completion, and the close when the group
@@ -127,9 +137,9 @@ class UIWorker(LLMContextWorker):
       can cancel a group dispatched as cancellable.
 
     ``PipelineWorker`` connects a UIWorker to the client automatically when RTVI
-    is enabled -- no extra wiring. A working subclass needs only an LLM and a
-    ``@tool`` that calls ``respond_to_job``; override ``render_query`` to read a
-    non-default job payload.
+    is enabled -- no extra wiring. A working worker needs only an LLM; subclass
+    it to react to UI events or add jobs and tools, and override
+    ``render_query`` to read a non-default job payload.
 
     Example::
 
@@ -138,11 +148,6 @@ class UIWorker(LLMContextWorker):
             async def on_nav(self, message):
                 view = message.payload.get("view")
                 ...
-
-            @tool
-            async def answer(self, params, text: str):
-                await self.respond_to_job(text)
-                await params.result_callback(None)
 
         worker = MyUIWorker("ui", llm=OpenAILLMService(api_key="..."))
 
@@ -258,10 +263,36 @@ class UIWorker(LLMContextWorker):
             if content:
                 frame.context.add_message({"role": "developer", "content": content})
 
+        # The reply the LLM writes answers the in-flight job, unless a tool is
+        # answering it: a reply that comes with tool calls is a preamble.
+        @self.assistant_aggregator.event_handler("on_assistant_turn_stopped")
+        async def _answer_with_reply(aggregator, message):
+            if message.interrupted or not message.content:
+                return
+            if aggregator.has_function_calls_in_progress:
+                return
+            await self.respond_to_job(message.content)
+
     @property
     def classifier(self) -> BaseClassifier:
         """The classifier this worker asks the small questions about the screen."""
         return self._classifier
+
+    @property
+    def snapshot(self) -> dict[str, Any] | None:
+        """The latest accessibility snapshot of the page, or ``None`` before the first."""
+        return self._latest_snapshot
+
+    @property
+    def selection(self) -> UISelection | None:
+        """The text the user has selected on the page, or ``None`` when nothing is."""
+        selection = (self._latest_snapshot or {}).get("selection")
+        if not isinstance(selection, dict):
+            return None
+        ref, text = selection.get("ref"), selection.get("text")
+        if not isinstance(ref, str) or not ref or not isinstance(text, str) or not text.strip():
+            return None
+        return UISelection(ref=ref, text=text.strip())
 
     async def on_activated(self, args: dict | None) -> None:
         """Set the classifier up with this worker's task manager, then activate as usual.
@@ -640,14 +671,14 @@ class UIWorker(LLMContextWorker):
         return (message.payload or {}).get("query", "")
 
     async def _run_llm_turn(self, message: BusJobRequestMessage) -> None:
-        """Run one LLM turn for a job and respond when a ``@tool`` completes it.
+        """Run one LLM turn for a job and respond when the turn answers it.
 
         Body of the built-in ``respond`` job. Records the in-flight job, clears
         the context when ``keep_history=False``, appends the rendered query, and
         runs the LLM (the current ``<ui_state>`` is injected by the
-        ``on_before_process_frame`` hook). Then blocks until a ``@tool`` calls
-        ``respond_to_job``, which chooses how the answer is delivered, and sends
-        the job response.
+        ``on_before_process_frame`` hook). Then blocks until the LLM's reply
+        ends the turn or a ``@tool`` calls ``respond_to_job``, which chooses
+        how the answer is delivered, and sends the job response.
 
         Spanning the full round-trip is what makes the job single-flight
         (``@job(..., sequential=True)``; see the class docstring).
@@ -701,9 +732,10 @@ class UIWorker(LLMContextWorker):
     ) -> None:
         """Complete the in-flight job with the worker's answer.
 
-        Called from a ``@tool`` once the worker has decided how to answer.
-        ``tts_speak`` picks the delivery; the two modes are mutually exclusive
-        (one voice per turn):
+        The reply the LLM writes completes the job on its own; call this from
+        a ``@tool`` to answer with something else or to deliver the answer
+        differently. ``tts_speak`` picks the delivery; the two modes are
+        mutually exclusive (one voice per turn):
 
         - default: the job responds with ``{"answer": answer}`` for the
           requester's voice LLM to phrase.
@@ -1090,6 +1122,8 @@ class UIWorker(LLMContextWorker):
             return {"matches": [{k: m[k] for k in ("label", "probability")} for m in matches]}
         if action == "list":
             return {"elements": self.list_elements(target or None)}
+        if action == "selection":
+            return {"text": self.selection.text if self.selection else None}
         command = "set_input_value" if action == "fill" else action
         ref = await self.act(command, target, value=value)
         label = next((e.name for e in self._named_elements() if e.ref == ref), None)

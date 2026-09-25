@@ -32,10 +32,11 @@ from pipecat.frames.frames import (
 )
 from pipecat.pipeline.job_context import JobError, JobParams, JobStatus
 from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import AssistantTurnStoppedMessage
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.utils.asyncio.task_manager import TaskManager
-from pipecat.workers.ui import UI_STATE_PROMPT_GUIDE, UIWorker, ui_event
+from pipecat.workers.ui import UI_STATE_PROMPT_GUIDE, UISelection, UIWorker, ui_event
 from pipecat.workers.ui.ui_tools import screen_tools
 
 
@@ -332,6 +333,24 @@ class TestUIWorkerSnapshot(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(worker._latest_snapshot, _SAMPLE_SNAPSHOT)
         self.assertEqual(worker.captured, [])
         self.assertEqual(_append_frames(worker), [])
+
+    async def test_snapshot_and_selection_read_the_latest_snapshot(self):
+        worker = await _make_worker()
+        self.assertIsNone(worker.snapshot)
+        self.assertIsNone(worker.selection)
+
+        worker._latest_snapshot = {
+            **_SAMPLE_SNAPSHOT,
+            "selection": {"ref": "e2", "text": "  the highlighted passage\n"},
+        }
+        self.assertIs(worker.snapshot, worker._latest_snapshot)
+        self.assertEqual(worker.selection, UISelection(ref="e2", text="the highlighted passage"))
+
+    async def test_selection_is_none_without_a_ref_and_text(self):
+        worker = await _make_worker()
+        for selection in (None, "e2", {"ref": "e2"}, {"text": "stuff"}, {"ref": "e2", "text": " "}):
+            worker._latest_snapshot = {**_SAMPLE_SNAPSHOT, "selection": selection}
+            self.assertIsNone(worker.selection, selection)
 
     async def test_non_dict_snapshot_payload_is_ignored(self):
         worker = await _make_worker()
@@ -801,6 +820,47 @@ class TestUIWorkerRespondJob(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(worker.current_job)
         worker.send_job_response.assert_awaited_once()
 
+    async def _stop_assistant_turn(self, worker, content, *, interrupted=False):
+        message = AssistantTurnStoppedMessage(
+            content=content, interrupted=interrupted, timestamp=""
+        )
+        await worker.assistant_aggregator._call_event_handler("on_assistant_turn_stopped", message)
+        await _settle()
+
+    async def test_the_llm_reply_answers_the_job(self):
+        worker = await _make_worker()
+        t = await _start(
+            worker,
+            BusJobRequestMessage(source="voice", target="ui", job_id="t1", payload={"query": "hi"}),
+        )
+
+        await self._stop_assistant_turn(worker, "Three stories and a sidebar.")
+        await asyncio.wait_for(t, timeout=2)
+
+        worker.send_job_response.assert_awaited_once_with(
+            "t1", response={"answer": "Three stories and a sidebar."}, status=JobStatus.COMPLETED
+        )
+        self.assertIsNone(worker.current_job)
+
+    async def test_a_reply_that_comes_with_tool_calls_does_not_answer(self):
+        worker = await _make_worker()
+        t = await _start(
+            worker,
+            BusJobRequestMessage(source="voice", target="ui", job_id="t1", payload={"query": "hi"}),
+        )
+
+        await self._stop_assistant_turn(worker, "", interrupted=True)
+        await self._stop_assistant_turn(worker, "")
+        worker.assistant_aggregator._function_calls_in_progress["c1"] = None
+        await self._stop_assistant_turn(worker, "Let me check.")
+        self.assertEqual(worker.current_job.job_id, "t1")
+
+        await worker.respond_to_job("done")
+        await t
+        worker.send_job_response.assert_awaited_once_with(
+            "t1", response={"answer": "done"}, status=JobStatus.COMPLETED
+        )
+
     async def test_render_query_override(self):
         class _Custom(_StubUIWorker):
             def render_query(self, message):
@@ -1009,6 +1069,24 @@ class TestUIWorkerScreenJobs(unittest.IsolatedAsyncioTestCase):
         response, status = self._response(worker)
         self.assertEqual(status, JobStatus.COMPLETED)
         self.assertEqual(response, {"label": "Taylor Swift", "confidence": 0.9})
+
+    async def test_selection_answers_with_the_selected_text(self):
+        worker, classifier = await self._worker()
+        worker._latest_snapshot = {
+            **_SAMPLE_SNAPSHOT,
+            "selection": {"ref": "e2", "text": "the highlighted passage"},
+        }
+        await worker._screen_job(_job("screen", {"action": "selection"}))
+        response, status = self._response(worker)
+        self.assertEqual(status, JobStatus.COMPLETED)
+        self.assertEqual(response, {"text": "the highlighted passage"})
+        self.assertEqual(classifier.asked, [])
+
+    async def test_selection_answers_no_text_when_nothing_is_selected(self):
+        worker, _ = await self._worker()
+        await worker._screen_job(_job("screen", {"action": "selection"}))
+        response, _ = self._response(worker)
+        self.assertEqual(response, {"text": None})
 
     async def test_find_without_named_elements_answers_nothing(self):
         worker, classifier = await self._worker()
