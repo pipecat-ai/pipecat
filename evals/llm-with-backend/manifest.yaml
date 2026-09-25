@@ -37,6 +37,52 @@ suite:
       - audio/aside_while_waiting
       - audio/result_during_interruption
       - audio/accepted_offer
+  - bot: google-frontend.py
+    scenarios:
+      - text/frontend_only
+      - text/delegate_ack
+      - text/delegate_with_aside
+      - text/concurrent_delegations
+      - text/superseding_delegation
+      - text/cancel_delegation
+      - text/cancel_and_replace
+      - text/progress_inquiry
+      - text/aside_while_waiting
+      - text/accepted_offer
+      - audio/frontend_only
+      - audio/delegate_ack
+      - audio/delegate_with_aside
+      - audio/concurrent_delegations
+      - audio/superseding_delegation
+      - audio/cancel_delegation
+      - audio/cancel_and_replace
+      - audio/progress_inquiry
+      - audio/aside_while_waiting
+      - audio/result_during_interruption
+      - audio/accepted_offer
+  - bot: anthropic-frontend.py
+    scenarios:
+      - text/frontend_only
+      - text/delegate_ack
+      - text/delegate_with_aside
+      - text/concurrent_delegations
+      - text/superseding_delegation
+      - text/cancel_delegation
+      - text/cancel_and_replace
+      - text/progress_inquiry
+      - text/aside_while_waiting
+      - text/accepted_offer
+      - audio/frontend_only
+      - audio/delegate_ack
+      - audio/delegate_with_aside
+      - audio/concurrent_delegations
+      - audio/superseding_delegation
+      - audio/cancel_delegation
+      - audio/cancel_and_replace
+      - audio/progress_inquiry
+      - audio/aside_while_waiting
+      - audio/result_during_interruption
+      - audio/accepted_offer
   - bot: openai-realtime-frontend.py
     scenarios:
       - audio/frontend_only
