@@ -9,14 +9,14 @@ plus one custom command and one client-emitted event.
 ## What it shows
 
 - **The voice LLM leads, the UI worker grounds and acts.** The voice LLM
-  has four tools: `review_selection()`, `add_note(text)`, `selection()`
-  and the generic `screen(action, target, value)` from
-  `screen_tools("ui")`. Each sends a job to `ReviewWorker` and returns
-  short data. The voice LLM never sees the page, and the UI worker never
-  runs an LLM turn.
+  has three tools: `review_selection()`, `add_note(text)` and the generic
+  `screen(action, target, value)` from `screen_tools("ui")`. Each sends a
+  job to `ReviewWorker` and returns short data. The voice LLM never sees
+  the page, and the UI worker never runs an LLM turn.
 - **Read-side deixis**: select a paragraph and ask "review this" or
-  "explain this". The worker reads the selection from its own snapshot,
-  so no tool needs a ref.
+  "explain this". The worker reads its `selection` from its own snapshot,
+  and `screen("selection")` hands the text to the voice, so no tool needs
+  a ref.
 - **Async fan-out**: `review_selection` runs two peer workers (clarity +
   tone) in parallel as a job group. The voice says "Reviewing this
   paragraph" in the same turn, the in-flight card streams each worker's

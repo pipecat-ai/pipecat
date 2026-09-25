@@ -12,9 +12,10 @@ about it, and speaks the answer.
   latest one.
 - **Asking the UI worker a question.** The voice LLM has one tool,
   `ask_page(question)`, which sends the worker's built-in `respond` job.
-  The worker's LLM sees the latest snapshot, answers in a sentence or
-  two through its `answer` tool, and the answer comes back to the voice
-  LLM as the tool's result. The voice LLM never sees the page.
+  The worker's LLM sees the latest snapshot and replies in a sentence or
+  two; its reply is the job's answer, which comes back to the voice LLM
+  as the tool's result. The voice LLM never sees the page, and the UI
+  worker is a plain `UIWorker` with a system prompt.
 
 ## Architecture
 
@@ -23,8 +24,8 @@ Main worker (PipelineWorker, owns transport + RTVI):
   transport.in → STT → user_agg → LLM → TTS → transport.out → assistant_agg
     └── ask_page(question) tool → job "respond" on the UI worker
 
-HelloWorker (UIWorker):
-  └── @tool answer(text) → the job's response
+UIWorker ("ui"):
+  └── its LLM's reply → the job's response
 ```
 
 ## Run

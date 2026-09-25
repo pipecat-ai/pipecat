@@ -197,7 +197,7 @@ class ListWorker(UIWorker):
     def _list(self) -> list[tuple[str, str, bool]]:
         """The list on screen as (ref, text, checked), in page order."""
         items: list[tuple[str, str, bool]] = []
-        _checkboxes((self._latest_snapshot or {}).get("root"), items)
+        _checkboxes((self.snapshot or {}).get("root"), items)
         return items
 
     async def _item(self, text: str) -> tuple[str, str] | None:

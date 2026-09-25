@@ -9,9 +9,9 @@
 The voice LLM cannot see the page. For any question that could be about
 it, it calls ``ask_page(question)``, which sends the UI worker's built-in
 ``respond`` job. The UI worker's LLM sees the latest accessibility
-snapshot of the page, answers in a sentence or two through its
-``answer`` tool, and that answer comes back to the voice LLM, which
-speaks it.
+snapshot of the page and replies in a sentence or two; its reply is the
+job's answer, which comes back to the voice LLM, which speaks it. The UI
+worker is a plain ``UIWorker`` with a system prompt.
 
 Architecture::
 
@@ -19,8 +19,8 @@ Architecture::
       transport.in → STT → user_agg → LLM → TTS → transport.out → assistant_agg
         └── ask_page(question) tool → job "respond" on the UI worker
 
-    HelloWorker (UIWorker):
-      └── @tool answer(text) → the job's response
+    UIWorker ("ui"):
+      └── its LLM's reply → the job's response
 
 ``PipelineWorker`` connects the UI worker to the client on its own (RTVI
 is enabled by default): the client streams snapshots of the page and the
@@ -64,7 +64,6 @@ from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
-from pipecat.workers.llm import tool
 from pipecat.workers.runner import WorkerRunner
 from pipecat.workers.ui import UIWorker
 
@@ -101,34 +100,11 @@ Keep replies to one or two short spoken sentences. No markdown, no \
 lists, no symbols."""
 
 
-HELLO_PROMPT = """\
-You answer questions about the page the user is looking at. Reply with \
-the ``answer`` tool, in one or two plain sentences. When the question \
-is not about the page, answer from general knowledge. Don't tell the \
-user what you can't see; answer, or say you don't know."""
-
-
-class HelloWorker(UIWorker):
-    """UIWorker whose LLM answers questions about the page for the voice LLM."""
-
-    def __init__(self):
-        llm = OpenAILLMService(
-            api_key=os.environ["OPENAI_API_KEY"],
-            settings=OpenAILLMService.Settings(system_instruction=HELLO_PROMPT),
-        )
-        super().__init__(UI_NAME, llm=llm)
-
-    @tool
-    async def answer(self, params: FunctionCallParams, text: str):
-        """Answer the question with ``text``.
-
-        Args:
-            text: The answer in plain language. One or two short sentences.
-                No markdown, no symbols, no lists.
-        """
-        logger.debug(f"{self}: answer({text[:80]!r})")
-        await self.respond_to_job(text)
-        await params.result_callback(None)
+UI_PROMPT = """\
+You answer questions about the page the user is looking at, in one or \
+two plain sentences. When the question is not about the page, answer \
+from general knowledge. Don't tell the user what you can't see; answer, \
+or say you don't know."""
 
 
 @tool_options(cancel_on_interruption=False, timeout_secs=60)
@@ -168,6 +144,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         api_key=os.environ["OPENAI_API_KEY"],
         settings=OpenAILLMService.Settings(system_instruction=VOICE_PROMPT),
     )
+    ui_llm = OpenAILLMService(
+        api_key=os.environ["OPENAI_API_KEY"],
+        settings=OpenAILLMService.Settings(system_instruction=UI_PROMPT),
+    )
 
     context = LLMContext(tools=[ask_page])
     aggregators = LLMContextAggregatorPair(
@@ -200,7 +180,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
 
-    await runner.add_workers(HelloWorker(), worker)
+    await runner.add_workers(UIWorker(UI_NAME, llm=ui_llm), worker)
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):

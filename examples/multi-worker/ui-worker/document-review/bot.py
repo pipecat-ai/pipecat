@@ -27,7 +27,7 @@ Architecture::
 
     Main worker (PipelineWorker, owns transport + RTVI):
       transport.in -> STT -> user_agg -> LLM -> TTS -> transport.out -> assistant_agg
-        ├── review_selection() / add_note(text) / selection()
+        ├── review_selection() / add_note(text)
         └── screen(action, target, value)
               └── params.pipeline_worker.job("ui", name=..., payload=...)
 
@@ -35,7 +35,6 @@ Architecture::
       ├── @job review     -> job_group("clarity", "tone", ...) on the selection,
       │                      answers with both reviewers' feedback
       ├── @job add_note   -> classifier finds the textarea and Save, fills and clicks
-      ├── @job selection  -> the selected text
       ├── @job screen     -> built in: find, select_text, scroll_to, ...
       ├── on_job_response -> add_note command for each reviewer that completes
       └── @ui_event("note_click") -> scroll_to + select_text(ref)
@@ -137,9 +136,9 @@ give in one or two spoken sentences.
 - add_note(text): add a note to the notes panel, attached to the \
 selected paragraph. Pass the note's text as it should read; resolve \
 "that" from the conversation, never pass the pronoun.
-- selection(): the text the user has selected. Call it for "explain \
-this", "rephrase that", "what does this mean" and any other question \
-about the selection, then answer from the text it returns.
+- screen("selection"): the text the user has selected. Call it for \
+"explain this", "rephrase that", "what does this mean" and any other \
+question about the selection, then answer from the text it returns.
 - screen(action, target): "select_text" or "scroll_to" with a \
 description such as "the paragraph about circadian rhythms" for \
 "where does it talk about ...". "find" to check what a description \
@@ -275,7 +274,7 @@ class ReviewWorker(UIWorker):
 
     @job(name="review")
     async def _review(self, message: BusJobRequestMessage) -> None:
-        selected = self._selection()
+        selected = self.selection
         if not selected:
             await self.send_job_response(
                 message.job_id, {"error": "nothing is selected"}, status=JobStatus.ERROR
@@ -317,11 +316,6 @@ class ReviewWorker(UIWorker):
         await self.click(save)
         await self.send_job_response(message.job_id, {"done": True})
 
-    @job(name="selection")
-    async def _selection_job(self, message: BusJobRequestMessage) -> None:
-        selected = self._selection()
-        await self.send_job_response(message.job_id, {"text": selected[1] if selected else None})
-
     async def on_job_response(self, message: BusJobResponseMessage) -> None:
         """Turn reviewer responses into ``add_note`` UI commands."""
         await super().on_job_response(message)
@@ -344,22 +338,6 @@ class ReviewWorker(UIWorker):
         logger.info(f"{self}: note_click -> scroll_to + select_text({ref!r})")
         await self.scroll_to(ref)
         await self.select_text(ref)
-
-    def _selection(self) -> tuple[str, str] | None:
-        """The user's current selection from the snapshot, as (ref, text), or None."""
-        snapshot = self._latest_snapshot or {}
-        selection = snapshot.get("selection")
-        if not isinstance(selection, dict):
-            logger.debug(
-                f"{self}: no selection in the snapshot "
-                f"(captured_at={snapshot.get('captured_at')}, keys={sorted(snapshot)})"
-            )
-            return None
-        ref, text = selection.get("ref"), selection.get("text")
-        if not isinstance(ref, str) or not ref or not isinstance(text, str) or not text.strip():
-            logger.debug(f"{self}: unusable selection in the snapshot: {selection!r}")
-            return None
-        return ref, text.strip()
 
 
 async def _ui(params: FunctionCallParams, name: str, payload: dict, timeout: float = 30) -> None:
@@ -400,20 +378,6 @@ async def add_note(params: FunctionCallParams, text: str):
     await _ui(params, "add_note", {"text": text}, timeout=15)
 
 
-@tool_options(cancel_on_interruption=False, timeout_secs=10)
-async def selection(params: FunctionCallParams):
-    """The text the user has selected on the page.
-
-    Call it whenever the user refers to "this", "this paragraph" or a
-    selection; nothing else can tell whether anything is selected. Returns
-    the selected text, or no text when nothing is selected.
-
-    Args:
-        params: Framework-provided tool invocation context.
-    """
-    await _ui(params, "selection", {}, timeout=10)
-
-
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info("Starting document-review bot")
 
@@ -429,7 +393,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         settings=OpenAILLMService.Settings(system_instruction=VOICE_PROMPT),
     )
 
-    context = LLMContext(tools=[review_selection, add_note, selection, *screen_tools(UI_NAME)])
+    context = LLMContext(tools=[review_selection, add_note, *screen_tools(UI_NAME)])
     aggregators = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
