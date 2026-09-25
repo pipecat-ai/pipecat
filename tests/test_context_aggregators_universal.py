@@ -3010,6 +3010,19 @@ class TestFunctionCallLimit(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual([run.tool_choice for run in runs], ["none"])
 
+    async def test_run_deferred_to_the_bot_stop_gets_the_limit(self):
+        limit = FunctionCallLimitConfig(max_iterations=1, prompt=LIMIT_PROMPT)
+        frames = [
+            BotStartedSpeakingFrame(),
+            *_response_with_function_call("1", text="Let me check."),
+            BotStoppedSpeakingFrame(),
+        ]
+
+        _, runs = await self._run(frames, limit)
+
+        self.assertEqual([run.tool_choice for run in runs], ["none"])
+        self.assertEqual(runs[0].last_message, {"role": "developer", "content": LIMIT_PROMPT})
+
     async def test_interruption_ends_the_limit(self):
         limit = FunctionCallLimitConfig(max_iterations=1, prompt=LIMIT_PROMPT)
         frames = [
