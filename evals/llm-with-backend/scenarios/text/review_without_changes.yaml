@@ -1,5 +1,0 @@
-name: review_without_changes
-judge: !include ../../../release/scenarios/judge_text.yaml
-scenarios:
-  - name: text
-    turns: !include ../turns/review_without_changes.yaml
