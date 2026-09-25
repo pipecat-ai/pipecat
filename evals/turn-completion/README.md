@@ -25,8 +25,9 @@ that rejects tool definitions; such an entry runs the scenario files without
 the tool scenarios.
 
 `scenarios/<category>.yaml` holds the scenarios of one category, sharing the
-judge in `judge_text.yaml`: TypeSafe's Jev (`service: typesafe`, see
-`pipecat.evals.judge`), with `gemma4:12b` on a local Ollama as the
+judge in `judge_text.yaml`: TypeSafe's Jev (`factory:
+evals.judges.typesafe_classifier`, see `evals/judges.py`), with `gemma4:12b`
+on a local Ollama as the
 explainer that gives the reason for every `no` and every verdict Jev is unsure
 of. Every judged reply follows a `●`, so it's a final answer, and the judge
 sets `allow_continue: false`: a reply is right or wrong, never "still working

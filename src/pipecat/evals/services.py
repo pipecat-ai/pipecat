@@ -349,7 +349,6 @@ def moonshine_service(config: dict) -> STTService:
 
 DEFAULT_OLLAMA_JUDGE_MODEL = "gemma4:12b"
 DEFAULT_OPENAI_MODEL = "gpt-4o"
-DEFAULT_JEV_MODEL = "jev-latest"
 
 # The default judge is thinking-capable, and only its JSON verdict is ever read,
 # so reasoning buys nothing while costing latency and eating into the token
@@ -357,63 +356,38 @@ DEFAULT_JEV_MODEL = "jev-latest"
 DEFAULT_OLLAMA_JUDGE_EXTRA = {"reasoning_effort": "none"}
 
 
-# Seconds to wait for Jev to answer a question. Jev answers in a few hundred
-# milliseconds, so a question still waiting this long is one to ask again.
-JEV_TIMEOUT = 2.5
-
-
 def classifier_from_config(config: dict | None, *, where: str) -> BaseClassifier:
-    """Build the classifier a ``service:`` block names, the judge's.
+    """Build the classifier a ``judge.eval:`` block names.
 
-    ``service: typesafe`` is TypeSafe's Jev; any other block builds an LLM
-    service, as :func:`llm_service_from_config` does, and the classifier asks
-    it.
+    A ``factory`` (a dotted path to a callable taking the config) builds it,
+    and may return a :class:`~pipecat.classifiers.base_classifier.BaseClassifier`
+    or an LLM service, which an
+    :class:`~pipecat.classifiers.llm.classifier.LLMClassifier` then asks.
+    Otherwise the block names an LLM, as :func:`llm_service_from_config`
+    reads it, and an ``LLMClassifier`` asks that.
 
     Args:
-        config: Mapping with the keys :func:`llm_service_from_config` reads,
-            or ``service: typesafe`` with an optional ``model`` and
-            ``endpoint``. ``None`` uses all defaults.
+        config: Mapping with a ``factory``, or the keys
+            :func:`llm_service_from_config` reads. ``None`` uses all defaults.
         where: The config block's name in the file, for error messages.
 
     Returns:
         The configured classifier.
 
     Raises:
-        ValueError: If ``service`` is unknown, or ``service: typesafe`` has no
-            ``TYPESAFE_API_KEY``.
+        ValueError: If ``service`` is unknown or ``factory`` is not a dotted path.
     """
     config = config or {}
-    if str(config.get("service", "")).lower() == "typesafe":
-        return typesafe_classifier(config)
+    custom = config.get("factory")
+    if custom:
+        module_name, _, attr = custom.rpartition(".")
+        if not module_name:
+            raise ValueError(f"{where}.factory must be a dotted path: {custom!r}")
+        built = getattr(importlib.import_module(module_name), attr)(config)
+        if isinstance(built, BaseClassifier):
+            return built
+        return LLMClassifier(llm=built)
     return LLMClassifier(llm=llm_service_from_config(config, where=where))
-
-
-def typesafe_classifier(config: dict) -> BaseClassifier:
-    """Build a classifier over TypeSafe's Jev from a ``service: typesafe`` block.
-
-    Args:
-        config: Mapping with an optional ``model`` (default ``"jev-latest"``)
-            and ``endpoint`` (the API's base URL, the client's default if
-            omitted). The API key comes from ``TYPESAFE_API_KEY``.
-
-    Returns:
-        The configured classifier.
-
-    Raises:
-        ValueError: If there is no ``TYPESAFE_API_KEY``.
-    """
-    from pipecat.classifiers.jev.classifier import JevClassifier
-
-    api_key = os.environ.get("TYPESAFE_API_KEY")
-    if not api_key:
-        raise ValueError("Judging with Jev needs an API key: set TYPESAFE_API_KEY.")
-    endpoint = config.get("endpoint")
-    return JevClassifier(
-        api_key=api_key,
-        model=config.get("model") or DEFAULT_JEV_MODEL,
-        base_url=str(endpoint).rstrip("/") if endpoint else None,
-        timeout=JEV_TIMEOUT,
-    )
 
 
 def llm_service_from_config(config: dict | None, *, where: str) -> LLMService[Any]:

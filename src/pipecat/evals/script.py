@@ -258,9 +258,8 @@ Top-level optional fields:
           eval:                    # what judges (default ollama)
             service: ollama
             model: gemma4:12b
-            # or, for any other LLM: factory: my_evals.judge (a callable
-            # taking this mapping and returning an OpenAI-compatible service)
-            # or, for TypeSafe's Jev: service: typesafe
+            # or factory: my_evals.judge, a callable taking this mapping and
+            # returning a BaseClassifier or an OpenAI-compatible LLM service
             # explainer: an LLM block giving the reasons behind the verdicts
             # (see pipecat.evals.judge)
           transcription:           # required when modality is audio

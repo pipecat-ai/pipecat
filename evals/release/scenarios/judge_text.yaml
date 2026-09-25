@@ -1,5 +1,5 @@
 eval:
-  service: typesafe
+  factory: evals.judges.typesafe_classifier
   explainer:
     service: ollama
     model: gemma4:12b

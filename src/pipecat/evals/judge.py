@@ -30,17 +30,19 @@ A scenario picks one in its ``judge.eval:`` block. All the options::
 
     judge:
       eval:
-        service: typesafe        # or ollama (the default), openai, ...
-        model: jev-latest        # the model the service answers with
-        endpoint: https://...    # optional; the API's base URL
+        service: ollama          # the LLM that classifies (the default), or
+        model: gemma4:12b        #   factory: a dotted path to a callable that
+                                 #   takes this block and returns a classifier
         explainer:               # optional; the LLM that gives reasons
-          service: ollama        #   (the judging LLM if omitted, and for
-          model: gemma4:12b      #   service: typesafe the default judge LLM;
-                                 #   none if set to false)
+          service: ollama        #   (the judging LLM if omitted, the default
+          model: gemma4:12b      #   LLM for a factory's classifier; none if
+                                 #   set to false)
         explain_below: 0.75      # optional; see "The explainer" below
         allow_continue: true     # optional; false judges a reply yes or no only
 
-``service: typesafe`` takes its API key from ``TYPESAFE_API_KEY``.
+The release evals judge with TypeSafe's Jev through a factory of their own
+(``evals/judges.py``); a factory may also return an LLM service, which the
+judge then classifies with.
 
 What the judge asks:
 
@@ -468,23 +470,22 @@ class EvalJudge:
     def from_config(cls, judge_config: dict | None) -> "EvalJudge":
         """Build a judge from a scenario's ``judge.eval:`` block.
 
-        ``service: typesafe`` judges with Jev and explains with the LLM the
-        ``explainer:`` block names, the default LLM when it names none.
-        Any other block judges and explains with one LLM: a ``factory`` (a
-        dotted path to a callable taking the config) builds the service,
-        otherwise the ``service`` name picks a provider, ``ollama`` by
-        default. For a fully custom judge, construct ``EvalJudge`` directly
-        and pass it to the session.
+        The block names an LLM, ``ollama`` by default, and the judge classifies
+        and explains with it. A ``factory`` (a dotted path to a callable taking
+        the config) builds the classifier instead, or an LLM service to
+        classify with; the explainer is then the ``explainer:`` block's LLM, or
+        the default LLM when the block names none. For a fully custom judge,
+        construct ``EvalJudge`` directly and pass it to the session.
 
         Args:
             judge_config: Mapping with keys ``service`` (default ``"ollama"``),
                 ``model`` (default ``"gemma4:12b"``), optional ``endpoint``
                 (service-specific default if omitted), an optional ``extra``
                 mapping forwarded to the model as top-level request parameters,
-                an optional ``explainer`` block (``false`` for verdicts without
-                reasons), an optional ``explain_below``, and an optional
-                ``allow_continue`` (``false`` judges a reply yes or no only).
-                ``None`` uses all defaults.
+                or a ``factory``; plus an optional ``explainer`` block
+                (``false`` for verdicts without reasons), an optional
+                ``explain_below``, and an optional ``allow_continue`` (``false``
+                judges a reply yes or no only). ``None`` uses all defaults.
 
         Returns:
             A configured EvalJudge.
@@ -492,8 +493,7 @@ class EvalJudge:
         Raises:
             ValueError: If ``service`` is unknown (matching
                 :func:`pipecat.evals.services.tts_service_from_config` and
-                :func:`pipecat.evals.services.stt_service_from_config`), or if
-                ``service: typesafe`` has no API key.
+                :func:`pipecat.evals.services.stt_service_from_config`).
 
         Example::
 

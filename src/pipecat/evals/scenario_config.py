@@ -16,7 +16,6 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from pipecat.evals.services import (
-    DEFAULT_JEV_MODEL,
     DEFAULT_OLLAMA_JUDGE_EXTRA,
     DEFAULT_OLLAMA_JUDGE_MODEL,
     DEFAULT_OPENAI_MODEL,
@@ -97,11 +96,7 @@ class EvalConfigured(Protocol):
 
 
 # The model each LLM service builds with when the block names none.
-_DEFAULT_LLM_MODELS = {
-    "ollama": DEFAULT_OLLAMA_JUDGE_MODEL,
-    "openai": DEFAULT_OPENAI_MODEL,
-    "typesafe": DEFAULT_JEV_MODEL,
-}
+_DEFAULT_LLM_MODELS = {"ollama": DEFAULT_OLLAMA_JUDGE_MODEL, "openai": DEFAULT_OPENAI_MODEL}
 
 
 def _svc_model(

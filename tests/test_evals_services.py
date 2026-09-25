@@ -11,11 +11,10 @@ import unittest
 import warnings
 from unittest.mock import patch
 
-from pipecat.classifiers.jev.classifier import JevClassifier
+from pipecat.classifiers.base_classifier import BaseClassifier
 from pipecat.classifiers.llm.classifier import LLMClassifier
 from pipecat.evals.judge import EvalJudge
 from pipecat.evals.services import (
-    JEV_TIMEOUT,
     _cartesia_service,
     _cfg_language,
     classifier_from_config,
@@ -217,27 +216,37 @@ class TestCachingTTSCache(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(inner24.calls, 1)
 
 
+def _fake_classifier(config):
+    return _FakeClassifier(config)
+
+
+class _FakeClassifier(BaseClassifier):
+    def __init__(self, config):
+        super().__init__()
+        self.config = config
+
+    async def _ask(self, state, questions):
+        raise NotImplementedError
+
+
 class TestClassifierFromConfig(unittest.TestCase):
     def test_an_llm_block_builds_an_llm_classifier_over_it(self):
         classifier = classifier_from_config({"service": "ollama", "model": "a"}, where="judge.eval")
         self.assertIsInstance(classifier, LLMClassifier)
         self.assertEqual(classifier.llm.settings.model, "a")
 
-    def test_typesafe_builds_a_jev_classifier_with_the_block_and_the_judge_timeout(self):
-        with patch.dict("os.environ", {"TYPESAFE_API_KEY": "k"}):
-            classifier = classifier_from_config(
-                {"service": "typesafe", "model": "jev-x", "endpoint": "https://jev.test/"},
-                where="judge.eval",
-            )
-        self.assertIsInstance(classifier, JevClassifier)
-        self.assertEqual(classifier.client.model, "jev-x")
-        self.assertEqual(str(classifier.client._http.base_url), "https://jev.test")
-        self.assertEqual(classifier.client._http.timeout.read, JEV_TIMEOUT)
+    def test_a_factory_returning_a_classifier_is_used_as_is(self):
+        config = {"factory": "tests.test_evals_services._fake_classifier", "model": "x"}
+        classifier = classifier_from_config(config, where="judge.eval")
+        self.assertIsInstance(classifier, _FakeClassifier)
+        self.assertIs(classifier.config, config)
 
-    def test_typesafe_needs_the_api_key(self):
-        with patch.dict("os.environ", {}, clear=True):
-            with self.assertRaises(ValueError):
-                classifier_from_config({"service": "typesafe"}, where="judge.eval")
+    def test_a_factory_returning_an_llm_is_classified_with(self):
+        classifier = classifier_from_config(
+            {"factory": "tests.test_evals_services._fake_judge_llm"}, where="judge.eval"
+        )
+        self.assertIsInstance(classifier, LLMClassifier)
+        self.assertEqual(classifier.llm[0], "FAKE_JUDGE")
 
 
 class TestJudgeFromConfig(unittest.TestCase):

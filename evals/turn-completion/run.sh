@@ -17,4 +17,7 @@
 #
 set -e
 here="$(cd "$(dirname "$0")" && pwd)"
+# The suite runs from the repository root, where the judge factory
+# (evals/judges.py) resolves.
+cd "$here/../.."
 exec uv run python -m pipecat.evals suite "$here/manifest.yaml" -t 30 "$@"

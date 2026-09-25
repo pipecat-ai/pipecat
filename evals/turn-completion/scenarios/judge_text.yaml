@@ -1,5 +1,5 @@
 eval:
-  service: typesafe
+  factory: evals.judges.typesafe_classifier
   # Every judged reply follows a complete marker, so it is a final answer:
   # right or wrong, never "still working on it".
   allow_continue: false

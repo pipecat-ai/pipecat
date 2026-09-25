@@ -36,8 +36,9 @@ The harness runs the judge, the user's voice, and the bot-speech transcriber,
 so you need a few things in place:
 
 - **The judge: TypeSafe's Jev, with a local LLM for reasons.** Scenarios are
-  judged by [Jev](https://typesafe.ai), a hosted classifier (`service:
-  typesafe` in `judge_text.yaml`, `judge_audio.yaml`, and the audio scenario of
+  judged by [Jev](https://typesafe.ai), a hosted classifier, through the
+  factory in `evals/judges.py` (`factory: evals.judges.typesafe_classifier` in
+  `judge_text.yaml`, `judge_audio.yaml`, and the audio scenario of
   `language_switch.yaml`; see `pipecat.evals.judge`). It needs
   `TYPESAFE_API_KEY` **exported in the shell that runs the suite**: the harness
   doesn't read `.env` (the bots do). Jev answers each `eval:` in a few hundred
@@ -91,9 +92,10 @@ but misread short interim replies: a bot that has so far only said "Let me
 check on that." should score `continue` (wait for the rest), and scoring it
 `yes` passes a turn in which the bot said nothing. Older models also reject
 correct spoken answers the transcriber mangled into a homophone ("four" heard
-as "for"). A scenario's `judge.eval:` block can also point at any other LLM
-through a `factory:`, a dotted path to a callable that takes the block and
-returns an OpenAI-compatible service.
+as "for"). A scenario's `judge.eval:` block can also point at any other
+classifier or LLM through a `factory:`, a dotted path to a callable that takes
+the block and returns a `BaseClassifier` or an OpenAI-compatible service, the
+way `evals/judges.py` does for Jev.
 
 ## Running
 

@@ -104,6 +104,17 @@ def _judge(responses, **kwargs) -> tuple[EvalJudge, _FakeApi]:
     return EvalJudge(classifier=api.classifier(), **kwargs), api
 
 
+_FACTORY = "tests.test_evals_judge_jev.typesafe_classifier"
+
+
+def typesafe_classifier(config: dict) -> JevClassifier:
+    """A factory like the release evals' own, over the patched client."""
+    api_key = os.environ.get("TYPESAFE_API_KEY")
+    if not api_key:
+        raise ValueError("no key")
+    return JevClassifier(api_key=api_key, model=config.get("model"), timeout=2.5)
+
+
 def _config_judge(api: _FakeApi, config: dict) -> EvalJudge:
     """The judge a ``judge.eval:`` block builds, over a mock connection to ``api``."""
     with patch.dict(os.environ, {"TYPESAFE_API_KEY": "k"}):
@@ -195,7 +206,7 @@ class TestJevConnection(unittest.IsolatedAsyncioTestCase):
 
     async def test_the_connection_is_opened_when_the_judge_is_created(self):
         api = _FakeApi([_ok({"verdict": _choice("yes")})])
-        judge = _config_judge(api, {"service": "typesafe", "explainer": False})
+        judge = _config_judge(api, {"factory": _FACTORY, "explainer": False})
         await self._ask(judge)
         self.assertEqual([r["method"] for r in api.requests], ["GET", "POST"])
         self.assertTrue(api.requests[0]["url"].endswith("/v1/models"))
@@ -203,7 +214,7 @@ class TestJevConnection(unittest.IsolatedAsyncioTestCase):
 
     async def test_close_releases_a_connection_the_judge_opened(self):
         api = _FakeApi([])
-        judge = _config_judge(api, {"service": "typesafe", "explainer": False})
+        judge = _config_judge(api, {"factory": _FACTORY, "explainer": False})
         await judge.close()
         self.assertTrue(judge.classifier.client._http.is_closed)
 
@@ -216,19 +227,19 @@ class TestJevConnection(unittest.IsolatedAsyncioTestCase):
 
 class TestJevConfig(unittest.IsolatedAsyncioTestCase):
     async def test_service_typesafe_judges_with_jev_and_explains_with_an_llm(self):
-        judge = _config_judge(_FakeApi([]), {"service": "typesafe", "model": "jev-9"})
+        judge = _config_judge(_FakeApi([]), {"factory": _FACTORY, "model": "jev-9"})
         self.assertIsInstance(judge.classifier, JevClassifier)
         self.assertEqual(judge.classifier.model, "jev-9")
         self.assertIsNotNone(judge._explainer)
         await judge.close()
 
     async def test_explainer_false_builds_no_explainer(self):
-        judge = _config_judge(_FakeApi([]), {"service": "typesafe", "explainer": False})
+        judge = _config_judge(_FakeApi([]), {"factory": _FACTORY, "explainer": False})
         self.assertIsNone(judge._explainer)
         await judge.close()
 
     async def test_the_explainer_follows_allow_continue(self):
-        judge = _config_judge(_FakeApi([]), {"service": "typesafe", "allow_continue": False})
+        judge = _config_judge(_FakeApi([]), {"factory": _FACTORY, "allow_continue": False})
         self.assertNotIn("continue", judge._reply_outcomes)
         self.assertFalse(judge._explainer._allow_continue)
         await judge.close()
@@ -236,7 +247,7 @@ class TestJevConfig(unittest.IsolatedAsyncioTestCase):
     def test_a_missing_api_key_is_an_error(self):
         with patch.dict(os.environ, {}, clear=True):
             with self.assertRaises(ValueError):
-                EvalJudge.from_config({"service": "typesafe"})
+                EvalJudge.from_config({"factory": _FACTORY})
 
 
 if __name__ == "__main__":
