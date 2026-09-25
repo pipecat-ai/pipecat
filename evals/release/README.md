@@ -39,7 +39,8 @@ so you need a few things in place:
   judged by [Jev](https://typesafe.ai), a hosted classifier, through the
   factory in `evals/judges.py` (`factory: evals.judges.typesafe_classifier` in
   `judge_text.yaml`, `judge_audio.yaml`, and the audio scenario of
-  `language_switch.yaml`; see `pipecat.evals.judge`). It needs
+  `language_switch.yaml`; see `pipecat.evals.judge`). It needs the `jev`
+  extra (`--all-extras` below installs it) and
   `TYPESAFE_API_KEY` **exported in the shell that runs the suite**: the harness
   doesn't read `.env` (the bots do). Jev answers each `eval:` in a few hundred
   milliseconds but gives no reasons, so a local LLM, the *explainer*, gives the
