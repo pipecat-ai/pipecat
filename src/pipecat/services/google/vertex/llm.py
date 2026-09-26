@@ -20,6 +20,7 @@ os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "false"
 
 from loguru import logger
 
+from pipecat.adapters.services.gemini_adapter import GeminiVertexLLMAdapter
 from pipecat.services.google.llm import GoogleLLMService
 
 try:
@@ -56,6 +57,8 @@ class GoogleVertexLLMService(GoogleLLMService):
     Reference:
         https://cloud.google.com/vertex-ai/generative-ai/docs/model-reference/inference
     """
+
+    adapter_class = GeminiVertexLLMAdapter
 
     Settings = GoogleVertexLLMSettings
     _settings: Settings

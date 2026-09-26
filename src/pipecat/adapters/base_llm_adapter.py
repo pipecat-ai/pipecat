@@ -10,10 +10,13 @@ This module provides the abstract base class for implementing LLM provider-speci
 adapters that handle tool format conversion and standardization.
 """
 
+import asyncio
+import base64
 import warnings
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic, TypeVar, cast
+from urllib.parse import urlsplit
 
 from loguru import logger
 
@@ -25,6 +28,7 @@ from pipecat.processors.aggregators.llm_context import (
     LLMSpecificMessage,
     NotGiven,
 )
+from pipecat.utils.file_resolver import FileResolver
 
 # Should be a TypedDict
 TLLMInvocationParams = TypeVar("TLLMInvocationParams", bound=Mapping[str, Any])
@@ -135,6 +139,126 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
             provider.
         """
         pass
+
+    # Whether this provider's conversion consumes raw bytes (rather than the
+    # base64 payload of a data URL) for inline file content. When set, the
+    # resolution pass decodes each file's base64 once and caches the bytes on
+    # the content item, so conversion doesn't re-decode on every turn.
+    prefers_raw_file_bytes: bool = False
+
+    def supports_file_url(self, url: str, mime_type: str) -> bool:
+        """Whether the provider can be handed `url` to fetch itself.
+
+        This covers both URLs the provider fetches over the public internet
+        and cloud-storage URIs it resolves through its own IAM (e.g. Bedrock
+        reading ``s3://``). A URL the provider can't consume is instead fetched
+        by the file resolution pass and inlined as bytes — see
+        :meth:`resolve_file_items`.
+
+        Args:
+            url: The file URL from a ``file_url`` context content item.
+            mime_type: The file's MIME type.
+
+        Returns:
+            True if conversion can pass `url` through to the provider.
+        """
+        return False
+
+    async def resolve_file_items(self, context: LLMContext, resolver: FileResolver) -> None:
+        """Resolve the context's file content items into forms this provider can consume.
+
+        Runs before each conversion to provider format. A ``file_url`` item
+        whose URL the provider can consume directly (:meth:`supports_file_url`,
+        and — for ``http(s)`` — publicly routable) is left for conversion to
+        pass through. Any other ``file_url`` item is fetched via `resolver`
+        and rewritten in place to a ``file_base64`` item, so the inline
+        conversion path handles it; the rewrite persists in the context, so
+        the fetch happens once, not per turn. When the provider consumes raw
+        bytes (``prefers_raw_file_bytes``), the decoded bytes are cached on
+        inline items for the same reason.
+
+        Args:
+            context: The LLM context whose messages to resolve.
+            resolver: Fetches the bytes behind URLs the provider can't.
+
+        Raises:
+            LLMContextConversionError: If a file URL can't be resolved (refused
+                by the reachability policy, download failure, unresolvable
+                scheme). The service handles it like any other conversion
+                failure, including invalid-file-message cleanup.
+        """
+        for message in context.get_messages():
+            if isinstance(message, LLMSpecificMessage):
+                continue
+            content = message.get("content")
+            if not isinstance(content, list):
+                continue
+            for raw_item in content:
+                if not isinstance(raw_item, dict):
+                    continue
+                item = cast("dict[str, Any]", raw_item)
+                if item.get("type") == "file_url":
+                    await self._resolve_file_url_item(item, resolver)
+                elif item.get("type") == "file_base64" and self.prefers_raw_file_bytes:
+                    file_data = item["file"]
+                    if "_raw_bytes" not in file_data:
+                        try:
+                            file_data["_raw_bytes"] = await asyncio.to_thread(
+                                self._decode_file_data, file_data["file_data"]
+                            )
+                        except Exception as e:
+                            # Corrupt base64 is an invalid file, the same as a
+                            # conversion-time decode failure.
+                            raise LLMContextConversionError(e) from e
+
+    async def _resolve_file_url_item(self, item: dict[str, Any], resolver: FileResolver) -> None:
+        """Fetch a ``file_url`` item's bytes if needed and rewrite it to ``file_base64``."""
+        file_data = item["file"]
+        # A pass-through decision is provider-specific, so it's memoized per
+        # adapter class: switching LLM services mid-session re-evaluates the
+        # URL (and may fetch it) rather than inheriting the old provider's
+        # answer. The class (not id_for_llm_specific_messages) is the key
+        # because adapters for variants of the same provider share an id while
+        # differing in URL support (e.g. Gemini on Vertex vs the developer API).
+        marker = f"{type(self).__module__}.{type(self).__qualname__}"
+        if file_data.get("_resolved") == marker:
+            return
+        url = file_data["url"]
+        mime_type = file_data["mime_type"]
+
+        if self.supports_file_url(url, mime_type):
+            if urlsplit(url).scheme not in ("http", "https"):
+                # A cloud-storage URI resolved via the provider's own IAM;
+                # reachability from here is irrelevant.
+                file_data["_resolved"] = marker
+                return
+            if await resolver.classify(url) == "public":
+                file_data["_resolved"] = marker
+                return
+            # Not publicly routable: the provider can't fetch it even though
+            # it supports the URL form, so fall through to fetching it here
+            # (the resolver enforces the allowed-networks policy).
+
+        try:
+            raw_bytes = await resolver.fetch(url)
+        except Exception as e:
+            raise LLMContextConversionError(e) from e
+
+        encoded = await asyncio.to_thread(lambda: base64.b64encode(raw_bytes).decode("utf-8"))
+        new_file: dict[str, Any] = {
+            "file_data": f"data:{mime_type};base64,{encoded}",
+            "filename": file_data.get("filename", ""),
+            "mime_type": mime_type,
+        }
+        if self.prefers_raw_file_bytes:
+            new_file["_raw_bytes"] = raw_bytes
+        item.clear()
+        item.update({"type": "file_base64", "file": new_file})
+
+    @staticmethod
+    def _decode_file_data(file_data_url: str) -> bytes:
+        """Decode the base64 payload of a ``file_base64`` item's data URL."""
+        return base64.b64decode(file_data_url.split(",", 1)[1])
 
     def create_llm_specific_message(self, message: Any) -> LLMSpecificMessage:
         """Create an LLM-specific message (as opposed to a standard message) for use in an LLMContext.

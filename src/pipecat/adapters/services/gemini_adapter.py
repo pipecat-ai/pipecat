@@ -10,6 +10,7 @@ import base64
 import json
 from dataclasses import dataclass, field
 from typing import Any, TypedDict, cast
+from urllib.parse import urlsplit
 
 from loguru import logger
 
@@ -286,6 +287,22 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
         content: Content | None = None
         tool_call_id_to_name_mapping: dict[str, str] = field(default_factory=dict)
 
+    # Gemini's inline_data parts take raw bytes.
+    prefers_raw_file_bytes = True
+
+    def supports_file_url(self, url: str, mime_type: str) -> bool:
+        """The Gemini developer API consumes its own Files API URIs; other URLs must be inlined.
+
+        A ``gs://`` URI is not consumable here: the developer API requires
+        registering it with the Files API first (which returns a Files API URI
+        to use instead). Only Vertex reads ``gs://`` directly — see
+        :class:`GeminiVertexLLMAdapter`.
+        """
+        hostname = urlsplit(url).hostname or ""
+        return url.startswith("https://") and (
+            hostname == "googleapis.com" or hostname.endswith(".googleapis.com")
+        )
+
     @dataclass
     class MessageConversionParams:
         """Parameters for converting a single universal context message to Google format."""
@@ -548,12 +565,14 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
                 elif c["type"] == "file_base64":
                     f_data = c["file"]
                     mime_type = f_data["mime_type"]
-                    file_data_url = f_data["file_data"]
+                    raw_bytes = f_data.get("_raw_bytes")
+                    if raw_bytes is None:
+                        raw_bytes = base64.b64decode(f_data["file_data"].split(",")[1])
                     parts.append(
                         Part(
                             inline_data=Blob(
                                 mime_type=mime_type,
-                                data=base64.b64decode(file_data_url.split(",")[1]),
+                                data=raw_bytes,
                             )
                         )
                     )
@@ -869,3 +888,16 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
             return True
 
         return False
+
+
+class GeminiVertexLLMAdapter(GeminiLLMAdapter):
+    """Gemini adapter for Vertex AI.
+
+    Identical to :class:`GeminiLLMAdapter` except for file URL support:
+    Vertex reads ``gs://`` URIs directly through its own IAM, with no
+    registration step.
+    """
+
+    def supports_file_url(self, url: str, mime_type: str) -> bool:
+        """Vertex additionally consumes ``gs://`` URIs directly."""
+        return url.startswith("gs://") or super().supports_file_url(url, mime_type)
