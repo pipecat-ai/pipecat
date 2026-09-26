@@ -288,7 +288,7 @@ class PipelineWorker(BaseWorker):
         enable_tracing: bool = False,
         enable_turn_tracking: bool = True,
         handle_flush_frame: bool | None = None,
-        enable_rtvi: bool = True,
+        enable_rtvi: bool | None = None,
         exclude_frames: tuple[type[Frame], ...] | None = None,
         idle_timeout_frames: tuple[type[Frame], ...] = (
             BotSpeakingFrame,
@@ -362,7 +362,11 @@ class PipelineWorker(BaseWorker):
                 manager; otherwise the runner reports dangling tasks.
             clock: Clock implementation for timing operations.
             conversation_id: Optional custom ID for the conversation.
-            enable_rtvi: Whether to automatically add RTVI support to the pipeline.
+            enable_rtvi: Whether to automatically add RTVI support to the
+                pipeline. ``None``, the default, adds it unless the pipeline
+                is bridged: a bridged worker has no client of its own, and
+                its RTVI would report every frame a second time as it
+                crosses the bridge.
             enable_tracing: Whether to enable tracing.
             enable_turn_tracking: Whether to enable turn tracking.
             exclude_frames: When ``bridged`` is set, extra frame types
@@ -485,6 +489,8 @@ class PipelineWorker(BaseWorker):
         self._heartbeat_monitor_task: asyncio.Task | None = None
 
         # RTVI support
+        if enable_rtvi is None:
+            enable_rtvi = bridged is None
         self._rtvi = None
         prepend_rtvi = False
         external_rtvi = self._find_processor(pipeline, RTVIProcessor)
