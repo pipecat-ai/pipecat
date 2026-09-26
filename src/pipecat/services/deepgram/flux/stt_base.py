@@ -645,22 +645,36 @@ class DeepgramFluxSTTBase(EagerEndOfTurnSTTServiceMixin, STTService):
     async def _update_settings(self, delta: Settings) -> dict[str, Any]:
         """Apply a settings delta.
 
-        Configure-able fields (keyterm, eot_threshold, eager_eot_threshold,
-        eot_timeout_ms, language_hints) are sent to Deepgram via a Configure
-        message. Fields Flux only reads from the connection URL trigger a
-        reconnect, which waits until the user stops speaking.
+        On a connection Flux has confirmed, Configure-able fields are sent in a
+        Configure message and fields Flux only reads from the connection URL
+        reconnect once the user stops speaking. Without such a connection any
+        update reconnects immediately, since the new settings reach Flux in the
+        connection URL and there is no turn in progress to interrupt.
+
+        Args:
+            delta: A settings delta.
+
+        Returns:
+            Dict mapping changed field names to their previous values.
         """
         changed = await super()._update_settings(delta)
 
         if not changed:
             return changed
 
-        configure_fields = changed.keys() & self._CONFIGURE_FIELDS
-        if configure_fields and self._transport_is_active():
-            await self._send_configure(configure_fields)
-
-        if changed.keys() & self._CONNECTION_FIELDS:
-            await self._request_reconnect()
+        # SageMaker reports its stream active before Flux has accepted it, and a
+        # server-closed socket stays confirmed until the next connect, so neither
+        # reading alone identifies a connection Flux will honor.
+        if self._transport_is_active() and self._connection_established_event.is_set():
+            configure_fields = changed.keys() & self._CONFIGURE_FIELDS
+            if configure_fields:
+                await self._send_configure(configure_fields)
+            if changed.keys() & self._CONNECTION_FIELDS:
+                await self._request_reconnect()
+        elif not self._reconnecting:
+            # Not _request_reconnect(): its deferral ends on a turn that only a
+            # connected Flux can report.
+            await self._reconnect()
 
         self._warn_unhandled_updated_settings(
             changed.keys() - self._CONFIGURE_FIELDS - self._CONNECTION_FIELDS - self._LOCAL_FIELDS
