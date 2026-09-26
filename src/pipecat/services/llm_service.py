@@ -13,7 +13,7 @@ import json
 import uuid
 import warnings
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -223,6 +223,12 @@ class FunctionCallRunnerItem:
         group_id: Shared identifier for all function calls from the same LLM
             response batch. Used to trigger the LLM exactly once when the last
             call in the group completes.
+        batch: All function calls from the same LLM response, this one
+            included, in the order the LLM issued them. Whichever of them runs
+            first announces the whole batch before running its handler.
+        announced: Whether this call's in-progress frame has been broadcast.
+        announcement_lock: Shared batch lock held until every in-progress
+            frame has been broadcast, including when frame delivery yields.
         settled: Whether the call has already reached a terminal state — a
             final result, a timeout, or a cancellation. Results reported after
             that are rejected, since the rest of the pipeline has stopped
@@ -236,6 +242,9 @@ class FunctionCallRunnerItem:
     context: LLMContext
     run_llm: bool | None = None
     group_id: str | None = None
+    batch: Sequence[FunctionCallRunnerItem] = ()
+    announced: bool = False
+    announcement_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     settled: bool = False
 
 
@@ -1636,10 +1645,47 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 )
             )
 
+        announcement_lock = asyncio.Lock()
+        for runner_item in runner_items:
+            runner_item.batch = runner_items
+            runner_item.announcement_lock = announcement_lock
+
         if self._run_in_parallel:
             await self._run_parallel_function_calls(runner_items)
         else:
             await self._run_sequential_function_calls(runner_items)
+
+    async def _announce_function_call_batch(self, runner_item: FunctionCallRunnerItem):
+        """Broadcast the in-progress frames for every call in the batch.
+
+        The frames let the assistant context aggregator know that function
+        calls are underway. Some contexts/aggregators may not need this. But
+        some definitely do (Anthropic, for example).
+
+        The whole batch is announced before any of its handlers runs. The
+        aggregator only holds inference for calls it has seen an in-progress
+        frame for, so a handler that finishes without yielding to the event
+        loop would otherwise deliver its result before its siblings are
+        announced, and the LLM would run with the rest of the batch still
+        pending. The same goes for the sequential runner, which starts the
+        calls one at a time.
+
+        Args:
+            runner_item: The call about to run.
+        """
+        async with runner_item.announcement_lock:
+            for item in runner_item.batch or (runner_item,):
+                if item.announced:
+                    continue
+                await self.broadcast_frame(
+                    FunctionCallInProgressFrame,
+                    function_name=item.function_name,
+                    tool_call_id=item.tool_call_id,
+                    arguments=item.arguments,
+                    cancel_on_interruption=item.registry_item.cancel_on_interruption,
+                    group_id=item.group_id,
+                )
+                item.announced = True
 
     async def _create_sequential_runner_task(self):
         if not self._sequential_runner_task:
@@ -1724,18 +1770,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             f"{self} Calling function [{runner_item.function_name}:{runner_item.tool_call_id}] with arguments {runner_item.arguments}"
         )
 
-        # Broadcast function call in-progress. This frame will let our assistant
-        # context aggregator know that we are in the middle of a function
-        # call. Some contexts/aggregators may not need this. But some definitely
-        # do (Anthropic, for example).
-        await self.broadcast_frame(
-            FunctionCallInProgressFrame,
-            function_name=runner_item.function_name,
-            tool_call_id=runner_item.tool_call_id,
-            arguments=runner_item.arguments,
-            cancel_on_interruption=item.cancel_on_interruption,
-            group_id=runner_item.group_id,
-        )
+        await self._announce_function_call_batch(runner_item)
 
         timeout_task: asyncio.Task | None = None
         # Set when the handler raises, so the result settling the call on its
