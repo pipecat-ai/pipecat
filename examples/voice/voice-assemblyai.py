@@ -118,7 +118,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         context.add_message(
             {
                 "role": "developer",
-                "content": "Contact center flow. Ask a question where they need to answer A, B, or C.",
+                "content": "Please introduce yourself to the user.",
             }
         )
         await worker.queue_frames([LLMRunFrame()])
