@@ -11,9 +11,15 @@ import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from websockets.asyncio.server import serve
 
 from pipecat.frames.frames import (
+    InterruptionFrame,
+    LLMContextFrame,
+    LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
     LLMMessagesAppendFrame,
+    LLMTextFrame,
     LLMThoughtEndFrame,
     LLMThoughtStartFrame,
     LLMThoughtTextFrame,
@@ -24,6 +30,9 @@ from pipecat.services.openai.responses.llm import (
     OpenAIResponsesLLMService,
     _model_supports_reasoning,
 )
+from pipecat.tests.utils import SleepFrame, run_test
+from pipecat.utils.asyncio.task_manager import TaskManager
+from tests.openai_responses_lane_server import LaneServer
 
 
 def _make_service(**kwargs):
@@ -45,6 +54,7 @@ def _ws_events(*events):
     ws.send = AsyncMock()
     ws.close = AsyncMock()
     ws.close_code = None
+    ws.transport = MagicMock()
     return ws
 
 
@@ -642,12 +652,13 @@ class TestDrainCancelledResponse:
         assert not service._needs_drain
 
     @pytest.mark.asyncio
-    async def test_drain_handles_pending_cancel(self):
-        """If cancelled before response.created, drain should send cancel
-        once it sees the response.created, then continue draining."""
+    async def test_drain_reads_through_a_late_response_created(self):
+        """A cancel before response.created leaves that event on the socket. The
+        drain reads past it and the deltas to the terminal event, sending nothing."""
         service = _make_service()
         service._needs_drain = True
-        service._cancel_pending_response = True
+        service._lane_id = "lane-1"
+        service._lane_busy = True
 
         mock_ws = AsyncMock()
         mock_ws.recv = AsyncMock(
@@ -663,28 +674,121 @@ class TestDrainCancelledResponse:
         await service._drain_cancelled_response()
 
         assert not service._needs_drain
-        assert not service._cancel_pending_response
-        # Should have sent response.cancel
-        cancel_calls = [
-            call for call in mock_ws.send.call_args_list if "response.cancel" in call.args[0]
-        ]
-        assert len(cancel_calls) == 1
+        assert not service._lane_busy
+        mock_ws.send.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_drain_timeout_clears_state(self):
-        """If draining times out, should clear cancellation state."""
+    async def test_drain_timeout_clears_state_and_reconnects(self):
+        """A drain that times out leaves the abandoned response's events on the
+        socket, so the connection is replaced rather than reused."""
         service = _make_service()
         service._needs_drain = True
+        service._try_reconnect = AsyncMock(return_value=True)
 
         mock_ws = AsyncMock()
         # recv() never returns a terminal event — times out
         mock_ws.recv = AsyncMock(side_effect=asyncio.TimeoutError)
+        mock_ws.transport = MagicMock()
         service._websocket = mock_ws
 
         await service._drain_cancelled_response()
 
         assert not service._needs_drain
-        assert not service._cancel_pending_response
+        # Dropped without a closing handshake, then reconnected.
+        mock_ws.transport.abort.assert_called_once()
+        service._try_reconnect.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_drain_gives_up_after_its_budget(self):
+        """The budget bounds the whole drain, not each event."""
+        service = _make_service()
+        service._needs_drain = True
+        service._try_reconnect = AsyncMock(return_value=True)
+        service._websocket = _ws_script(
+            {"type": "response.output_text.delta", "delta": "stale"},
+            0.2,  # longer than the budget below
+            {"type": "response.completed", "response": {"id": "resp_old"}},
+        )
+
+        with patch("pipecat.services.openai.responses.llm.CANCELLED_RESPONSE_DRAIN_SECS", 0.05):
+            await service._drain_cancelled_response()
+
+        assert not service._needs_drain
+        service._try_reconnect.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_drain_within_budget_keeps_the_connection(self):
+        service = _make_service()
+        service._needs_drain = True
+        service._try_reconnect = AsyncMock(return_value=True)
+        ws = _ws_events(
+            {"type": "response.output_text.delta", "delta": "stale"},
+            {"type": "response.completed", "response": {"id": "resp_old"}},
+        )
+        service._websocket = ws
+
+        await service._drain_cancelled_response()
+
+        assert not service._needs_drain
+        assert service._websocket is ws
+        service._try_reconnect.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_drain_clears_previous_response_state(self):
+        """The cancelled response replaces the one the next request would chain
+        from, so the next request must send the full context."""
+        service = _make_service()
+        service._needs_drain = True
+        service._store_previous_response_state("resp_1", [{"role": "user", "content": "hi"}], [])
+        service._websocket = _ws_events(
+            {"type": "response.completed", "response": {"id": "resp_old"}},
+        )
+
+        await service._drain_cancelled_response()
+
+        assert service._previous_response_id is None
+        assert service._previous_input_hash is None
+
+    @pytest.mark.asyncio
+    async def test_failed_reconnect_after_drain_timeout_fails_the_inference(self):
+        """When the connection cannot be replaced, the next inference reports an
+        error rather than sending its request on the socket that still carries
+        the abandoned response's events."""
+        from pipecat.frames.frames import LLMContextFrame
+
+        service = _make_service()
+        service._needs_drain = True
+        service.push_frame = AsyncMock()
+        service.push_error = AsyncMock()
+        service.start_ttfb_metrics = AsyncMock()
+        service.stop_ttfb_metrics = AsyncMock()
+        service.stop_processing_metrics = AsyncMock()
+
+        old_ws = AsyncMock()
+        old_ws.recv = AsyncMock(side_effect=asyncio.TimeoutError)
+        old_ws.send = AsyncMock()
+        old_ws.transport = MagicMock()
+        service._websocket = old_ws
+
+        async def fail_to_reconnect(**kwargs):
+            service._websocket = None
+            return False
+
+        service._try_reconnect = AsyncMock(side_effect=fail_to_reconnect)
+
+        context = MagicMock(spec=LLMContext)
+        context.tools = None
+        context.tool_choice = None
+        context.messages = [{"role": "user", "content": "hi"}]
+
+        await service.process_frame(LLMContextFrame(context=context), FrameDirection.DOWNSTREAM)
+
+        assert not service._needs_drain
+        # Once when the drain gives up, once more before the request goes out.
+        assert service._try_reconnect.await_count == 2
+        old_ws.send.assert_not_called()
+        service.push_error.assert_awaited_once()
+        assert "Error during inference" in service.push_error.call_args.kwargs["error_msg"]
 
 
 # ---------------------------------------------------------------------------
@@ -736,6 +840,7 @@ class TestConnectionLifecycle:
         service = _make_service()
         service.stop_processing_metrics = AsyncMock()
         service.push_frame = AsyncMock()
+        service.create_task = MagicMock()
 
         mock_ws = AsyncMock()
         mock_ws.recv = AsyncMock(side_effect=asyncio.CancelledError)
@@ -756,6 +861,9 @@ class TestConnectionLifecycle:
         assert service._websocket is mock_ws
         # Should be flagged for draining before next inference
         assert service._needs_drain
+        # Nothing is sent on the cancel; the idle reader takes the socket over.
+        assert not any("response.cancel" in c.args[0] for c in mock_ws.send.call_args_list)
+        service.create_task.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_ensure_connected_raises_on_failure(self):
@@ -1046,6 +1154,7 @@ def _ws_script(*items):
     ws.send = AsyncMock()
     ws.close = AsyncMock()
     ws.close_code = None
+    ws.transport = MagicMock()
     return ws
 
 
@@ -1142,3 +1251,579 @@ class TestRetryOnTimeout:
         sent = [call.args[0] for call in service._ws_send.await_args_list]
         assert len(sent) == 2
         assert "previous_response_id" not in sent[1]
+
+
+# ---------------------------------------------------------------------------
+# Lanes
+# ---------------------------------------------------------------------------
+
+
+def _created(rid, lane=None):
+    event = {"type": "response.created", "response": {"id": rid}}
+    return {**event, "stream_id": lane} if lane else event
+
+
+def _delta(text, lane=None):
+    event = {"type": "response.output_text.delta", "delta": text}
+    return {**event, "stream_id": lane} if lane else event
+
+
+def _completed(rid, lane=None, usage=None):
+    response = {"id": rid, "model": "gpt-4.1", "output": []}
+    if usage:
+        response["usage"] = usage
+    event = {"type": "response.completed", "response": response}
+    return {**event, "stream_id": lane} if lane else event
+
+
+def _lane_service(**kwargs):
+    """A service ready to run _process_context against a scripted socket."""
+    service = _make_service(**kwargs)
+    service._ensure_connected = AsyncMock()
+    service._ws_send = AsyncMock()
+    service._push_llm_text = AsyncMock()
+    service.start_ttfb_metrics = AsyncMock()
+    service.stop_ttfb_metrics = AsyncMock()
+    service.start_llm_usage_metrics = AsyncMock()
+    return service
+
+
+def _sent(service):
+    return [call.args[0] for call in service._ws_send.await_args_list]
+
+
+class TestLanes:
+    @pytest.mark.asyncio
+    async def test_requests_carry_a_lane_and_keep_it_between_turns(self):
+        service = _lane_service()
+        service._websocket = _ws_events(
+            _created("resp_1", "lane-1"),
+            _delta("hi", "lane-1"),
+            _completed("resp_1", "lane-1"),
+            _created("resp_2", "lane-1"),
+            _delta("again", "lane-1"),
+            _completed("resp_2", "lane-1"),
+        )
+        context = LLMContext(messages=[{"role": "user", "content": "hi"}])
+
+        await service._process_context(context)
+        context.add_message({"role": "assistant", "content": "hi"})
+        context.add_message({"role": "user", "content": "more"})
+        await service._process_context(context)
+
+        sent = _sent(service)
+        assert [m["stream_id"] for m in sent] == ["lane-1", "lane-1"]
+        assert sent[1]["previous_response_id"] == "resp_1"
+        assert service._lane_tagging is True
+        assert not service._lane_busy
+
+    @pytest.mark.asyncio
+    async def test_cancel_on_a_tagging_server_leaves_the_lane_and_skips_the_drain(self):
+        service = _lane_service()
+        service._lane_tagging = True
+        service._lane_id = "lane-1"
+        service._lane_counter = 1
+        service._lane_busy = True
+        service._current_response_id = "resp_1"
+        service._store_previous_response_state("resp_0", [{"role": "user", "content": "hi"}], [])
+
+        service._abandon_response()
+
+        assert service._abandoned_lanes == {"lane-1"}
+        assert service._lane_id is None
+        assert not service._lane_busy
+        assert not service._needs_drain
+        assert service._previous_response_id is None
+
+        # The next request goes out at once, on a new lane, with the full
+        # context, while the abandoned reply's events are dropped as they come.
+        service._websocket = _ws_events(
+            _delta("stale", "lane-1"),
+            _created("resp_2", "lane-2"),
+            _completed("resp_1", "lane-1"),
+            _delta("fresh", "lane-2"),
+            _completed("resp_2", "lane-2"),
+        )
+        await service._process_context(LLMContext(messages=[{"role": "user", "content": "hi"}]))
+
+        (sent,) = _sent(service)
+        assert sent["stream_id"] == "lane-2"
+        assert "previous_response_id" not in sent
+        service._push_llm_text.assert_awaited_once_with("fresh")
+        assert service._abandoned_lanes == set()
+        assert service._free_lanes == ["lane-1"]
+
+    def test_cancel_before_the_request_is_sent_changes_nothing(self):
+        service = _make_service()
+        service._lane_tagging = True
+        service._lane_id = "lane-1"
+        service._store_previous_response_state("resp_0", [{"role": "user", "content": "hi"}], [])
+
+        service._abandon_response()
+
+        assert service._lane_id == "lane-1"
+        assert service._abandoned_lanes == set()
+        assert not service._needs_drain
+        assert service._previous_response_id == "resp_0"
+
+    def test_cancel_before_tagging_is_known_arms_the_drain(self):
+        service = _make_service()
+        service._lane_id = "lane-1"
+        service._lane_busy = True
+        service._current_response_id = "resp_1"
+
+        service._abandon_response()
+
+        assert service._needs_drain
+        assert service._current_response_id is None
+        assert service._lane_id == "lane-1"
+
+    @pytest.mark.asyncio
+    async def test_a_freed_lane_is_reused_before_a_new_one_is_named(self):
+        service = _make_service()
+        service._websocket = _ws_events()
+        service._lane_counter = 2
+        service._free_lanes = ["lane-1"]
+
+        await service._prepare_lane()
+
+        assert service._lane_id == "lane-1"
+        assert service._lane_counter == 2
+        assert service._free_lanes == []
+
+    @pytest.mark.asyncio
+    async def test_in_flight_cap_replaces_the_connection_before_the_request(self):
+        service = _make_service()
+        service._websocket = _ws_events()
+        service._replace_connection = AsyncMock()
+        service._abandoned_lanes = {f"lane-{n}" for n in range(1, 17)}
+
+        await service._prepare_lane()
+
+        service._replace_connection.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_lane_cap_replaces_the_connection_only_when_a_lane_is_needed(self):
+        service = _make_service()
+        service._websocket = _ws_events()
+        service._replace_connection = AsyncMock()
+        service._lane_counter = 32
+        service._lane_id = "lane-32"
+
+        await service._prepare_lane()
+        service._replace_connection.assert_not_awaited()
+
+        service._lane_id = None
+        await service._prepare_lane()
+        service._replace_connection.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_stale_lane_events_are_dropped_and_their_usage_reported(self):
+        service = _lane_service()
+        service._lane_tagging = True
+        service._lane_id = "lane-2"
+        service._abandoned_lanes = {"lane-1"}
+        usage = {"input_tokens": 3, "output_tokens": 7, "total_tokens": 10}
+        service._websocket = _ws_events(
+            _delta("stale", "lane-1"),
+            _created("resp_2", "lane-2"),
+            _completed("resp_1", "lane-1", usage=usage),
+            _delta("hi", "lane-2"),
+            _completed("resp_2", "lane-2"),
+        )
+
+        await service._receive_response_events(MagicMock(spec=LLMContext), [])
+
+        service._push_llm_text.assert_awaited_once_with("hi")
+        assert service.stop_ttfb_metrics.await_count == 1
+        assert service._abandoned_lanes == set()
+        assert service._free_lanes == ["lane-1"]
+        # The abandoned reply was generated in full and billed, so it is reported.
+        reported = [c.args[0] for c in service.start_llm_usage_metrics.await_args_list]
+        assert [t.completion_tokens for t in reported] == [7]
+
+    @pytest.mark.asyncio
+    async def test_stale_events_do_not_close_the_retry_window(self):
+        from pipecat.services.openai.responses.llm import _ResponseTimeoutError
+
+        service = _lane_service()
+        service._lane_tagging = True
+        service._lane_id = "lane-2"
+        service._websocket = _ws_script(_delta("stale", "lane-1"), _delta("stale", "lane-1"))
+
+        with pytest.raises(_ResponseTimeoutError):
+            await asyncio.wait_for(
+                service._receive_response_events(MagicMock(spec=LLMContext), [], 0.05),
+                timeout=2,
+            )
+
+    @pytest.mark.asyncio
+    async def test_unacknowledged_request_among_abandoned_responses_is_given_up(self):
+        """Only abandoned-lane events arrive: the request is presumed queued behind them."""
+        from pipecat.services.openai.responses.llm import _LaneStalledError
+
+        service = _lane_service()
+        service._lane_tagging = True
+        service._lane_id = "lane-2"
+        service._abandoned_lanes = {"lane-1"}
+        service._websocket = _ws_script(_delta("stale", "lane-1"), 0.2, _delta("stale", "lane-1"))
+
+        with patch("pipecat.services.openai.responses.llm.LANE_ACK_SECS", 0.05):
+            with pytest.raises(_LaneStalledError):
+                await asyncio.wait_for(
+                    service._receive_response_events(MagicMock(spec=LLMContext), []), timeout=2
+                )
+
+    @pytest.mark.asyncio
+    async def test_queued_request_is_given_up(self):
+        from pipecat.services.openai.responses.llm import _LaneStalledError
+
+        service = _lane_service()
+        service._lane_tagging = True
+        service._lane_id = "lane-2"
+        service._websocket = _ws_events({"type": "response.queued", "stream_id": "lane-2"})
+
+        with pytest.raises(_LaneStalledError):
+            await service._receive_response_events(MagicMock(spec=LLMContext), [])
+
+    @pytest.mark.asyncio
+    async def test_stalled_request_is_reissued_on_a_new_connection(self):
+        service = _lane_service()
+        service._lane_tagging = True
+        service._lane_id = "lane-2"
+        service._abandoned_lanes = {"lane-1"}
+        service._store_previous_response_state("resp_0", [{"role": "user", "content": "hi"}], [])
+        old_ws = _ws_events({"type": "response.queued", "stream_id": "lane-2"})
+        service._websocket = old_ws
+
+        async def reconnect(**kwargs):
+            service._websocket = _ws_events(
+                _created("resp_1", "lane-1"), _delta("hi", "lane-1"), _completed("resp_1", "lane-1")
+            )
+            return True
+
+        service._try_reconnect = AsyncMock(side_effect=reconnect)
+
+        await service._process_context(LLMContext(messages=[{"role": "user", "content": "hi"}]))
+
+        old_ws.transport.abort.assert_called_once()
+        sent = _sent(service)
+        assert [m["stream_id"] for m in sent] == ["lane-2", "lane-1"]
+        assert "previous_response_id" not in sent[1]
+        service._push_llm_text.assert_awaited_once_with("hi")
+        assert service._abandoned_lanes == set()
+
+    @pytest.mark.asyncio
+    async def test_lane_limit_error_replaces_the_connection_and_retries(self):
+        service = _lane_service()
+        service._lane_tagging = True
+        service._lane_id = "lane-2"
+        old_ws = _ws_events(
+            {
+                "type": "error",
+                "stream_id": "lane-2",
+                "error": {"code": "websocket_stream_limit_reached", "message": "too many"},
+            }
+        )
+        service._websocket = old_ws
+
+        async def reconnect(**kwargs):
+            service._websocket = _ws_events(
+                _created("resp_1", "lane-1"), _completed("resp_1", "lane-1")
+            )
+            return True
+
+        service._try_reconnect = AsyncMock(side_effect=reconnect)
+
+        await service._process_context(LLMContext(messages=[{"role": "user", "content": "hi"}]))
+
+        old_ws.transport.abort.assert_called_once()
+        assert [m["stream_id"] for m in _sent(service)] == ["lane-2", "lane-1"]
+
+    @pytest.mark.asyncio
+    async def test_rejected_stream_id_disables_lanes(self):
+        service = _lane_service()
+        service._websocket = _ws_events(
+            {
+                "type": "error",
+                "error": {
+                    "code": "unknown_parameter",
+                    "param": "stream_id",
+                    "message": "Unknown parameter: 'stream_id'.",
+                },
+            },
+            _created("resp_1"),
+            _delta("hi"),
+            _completed("resp_1"),
+        )
+
+        await service._process_context(LLMContext(messages=[{"role": "user", "content": "hi"}]))
+
+        sent = _sent(service)
+        assert "stream_id" in sent[0]
+        assert "stream_id" not in sent[1]
+        assert service._lanes_supported is False
+        service._push_llm_text.assert_awaited_once_with("hi")
+
+        # With no lanes, a cancel falls back to draining.
+        service._lane_busy = True
+        service._abandon_response()
+        assert service._needs_drain
+
+    @pytest.mark.asyncio
+    async def test_untagged_response_created_marks_the_server_as_not_tagging(self):
+        service = _lane_service()
+        service._lane_id = "lane-1"
+        service._websocket = _ws_events(_created("resp_1"), _delta("hi"), _completed("resp_1"))
+
+        await service._receive_response_events(MagicMock(spec=LLMContext), [])
+
+        assert service._lane_tagging is False
+        service._push_llm_text.assert_awaited_once_with("hi")
+
+    @pytest.mark.asyncio
+    async def test_untagged_events_are_ignored_once_the_server_tags(self):
+        service = _lane_service()
+        service.push_error = AsyncMock()
+        service._lane_tagging = True
+        service._lane_id = "lane-1"
+        service._websocket = _ws_events(
+            _delta("ghost"),
+            {"type": "error", "error": {"code": "some_error", "message": "not ours"}},
+            _created("resp_1", "lane-1"),
+            _delta("hi", "lane-1"),
+            _completed("resp_1", "lane-1"),
+        )
+
+        await service._receive_response_events(MagicMock(spec=LLMContext), [])
+
+        service._push_llm_text.assert_awaited_once_with("hi")
+        service.push_error.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_connection_scoped_errors_are_never_ignored(self):
+        from pipecat.services.openai.responses.llm import _ConnectionLimitReachedError
+
+        service = _lane_service()
+        service._lane_tagging = True
+        service._lane_id = "lane-1"
+        service._websocket = _ws_events(
+            {
+                "type": "error",
+                "error": {"code": "websocket_connection_limit_reached", "message": "limit"},
+            }
+        )
+
+        with pytest.raises(_ConnectionLimitReachedError):
+            await service._receive_response_events(MagicMock(spec=LLMContext), [])
+
+    @pytest.mark.asyncio
+    async def test_drain_adopts_lane_tagging_from_the_first_event(self):
+        service = _make_service()
+        service._needs_drain = True
+        service._lane_id = "lane-1"
+        service._lane_busy = True
+        service._try_reconnect = AsyncMock(return_value=True)
+        service._websocket = _ws_events(_delta("stale", "lane-1"))
+
+        await service._drain_cancelled_response()
+
+        assert service._lane_tagging is True
+        assert not service._needs_drain
+        assert service._abandoned_lanes == {"lane-1"}
+        assert service._lane_id is None
+        service._try_reconnect.assert_not_awaited()
+
+
+class TestIdleReader:
+    """Between inferences a reader keeps the socket drained while abandoned
+    responses stream, so the connection is not throttled and closed under them."""
+
+    def _service(self):
+        service = _make_service()
+        service._task_manager = TaskManager()
+        service.start_llm_usage_metrics = AsyncMock()
+        return service
+
+    @pytest.mark.asyncio
+    async def test_reader_frees_abandoned_lanes_between_turns(self):
+        service = self._service()
+        service._lane_tagging = True
+        service._abandoned_lanes = {"lane-1"}
+        usage = {"input_tokens": 1, "output_tokens": 2, "total_tokens": 3}
+        service._websocket = _ws_script(
+            _delta("stale", "lane-1"), _completed("resp_1", "lane-1", usage=usage)
+        )
+
+        service._start_idle_reader()
+        assert service._idle_reader_task is not None
+        await asyncio.sleep(0.05)
+
+        assert service._abandoned_lanes == set()
+        assert service._free_lanes == ["lane-1"]
+        assert service._idle_reader_task is None  # nothing left to read for
+        service.start_llm_usage_metrics.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_reader_is_not_started_with_nothing_to_read_for(self):
+        service = self._service()
+        service._websocket = _ws_script()
+
+        service._start_idle_reader()
+
+        assert service._idle_reader_task is None
+
+    @pytest.mark.asyncio
+    async def test_reader_finishes_a_pending_drain(self):
+        service = self._service()
+        service._needs_drain = True
+        service._lane_busy = True
+        service._websocket = _ws_script(_delta("stale"), _completed("resp_1"))
+
+        service._start_idle_reader()
+        await asyncio.sleep(0.05)
+
+        assert not service._needs_drain
+        assert not service._lane_busy
+        assert service._idle_reader_task is None
+
+    @pytest.mark.asyncio
+    async def test_reader_adopts_lane_tagging(self):
+        service = self._service()
+        service._needs_drain = True
+        service._lane_id = "lane-1"
+        service._lane_busy = True
+        service._websocket = _ws_script(_delta("stale", "lane-1"), _completed("resp_1", "lane-1"))
+
+        service._start_idle_reader()
+        await asyncio.sleep(0.05)
+
+        assert service._lane_tagging is True
+        assert not service._needs_drain
+        assert service._abandoned_lanes == set()
+        assert service._free_lanes == ["lane-1"]
+
+    @pytest.mark.asyncio
+    async def test_reader_keeps_connection_scoped_events_for_the_next_loop(self):
+        from pipecat.services.openai.responses.llm import _ConnectionLimitReachedError
+
+        service = self._service()
+        service._lane_tagging = True
+        service._abandoned_lanes = {"lane-1"}
+        service._websocket = _ws_script(
+            {
+                "type": "error",
+                "error": {"code": "websocket_connection_limit_reached", "message": "limit"},
+            }
+        )
+
+        service._start_idle_reader()
+        await asyncio.sleep(0.05)
+        assert len(service._pending_events) == 1
+
+        await service._stop_idle_reader()
+        service._lane_id = "lane-2"
+        with pytest.raises(_ConnectionLimitReachedError):
+            await service._receive_response_events(MagicMock(spec=LLMContext), [])
+
+    @pytest.mark.asyncio
+    async def test_inference_takes_the_socket_back_from_the_reader(self):
+        service = self._service()
+        service._lane_tagging = True
+        service._abandoned_lanes = {"lane-1"}
+        service._websocket = _ws_script()  # never answers
+        service._start_idle_reader()
+        reader = service._idle_reader_task
+        service._ensure_connected = AsyncMock()
+        service._ws_send = AsyncMock()
+        service.start_ttfb_metrics = AsyncMock()
+        service.stop_ttfb_metrics = AsyncMock()
+        service._receive_response_events = AsyncMock()
+
+        await service._process_context(LLMContext(messages=[{"role": "user", "content": "hi"}]))
+
+        assert reader.done()
+        assert service._idle_reader_task is None
+
+    @pytest.mark.asyncio
+    async def test_disconnect_stops_the_reader_and_clears_lane_state(self):
+        service = self._service()
+        service.stop_all_metrics = AsyncMock()
+        service._lane_tagging = True
+        service._abandoned_lanes = {"lane-1"}
+        service._lane_id = "lane-2"
+        service._lane_counter = 2
+        service._websocket = _ws_script()
+        service._start_idle_reader()
+        reader = service._idle_reader_task
+
+        await service._disconnect_websocket()
+
+        assert reader.done()
+        assert service._idle_reader_task is None
+        assert service._abandoned_lanes == set()
+        assert service._lane_id is None
+        assert service._lane_counter == 0
+        # What is known about the server survives the connection.
+        assert service._lane_tagging is True
+
+
+class TestLanesAgainstAServer:
+    """The service against a local server that implements lanes as documented."""
+
+    @staticmethod
+    def _turn_texts(down_frames) -> list[str]:
+        turns, current = [], None
+        for frame in down_frames:
+            if isinstance(frame, LLMFullResponseStartFrame):
+                current = []
+            elif isinstance(frame, LLMTextFrame) and current is not None:
+                current.append(frame.text)
+            elif isinstance(frame, LLMFullResponseEndFrame) and current is not None:
+                turns.append("".join(current).strip())
+                current = None
+        return turns
+
+    @pytest.mark.asyncio
+    async def test_interrupted_reply_neither_delays_nor_pollutes_the_next(self):
+        server = LaneServer(
+            answers={
+                1: "TURN-1 ANSWER (the cancelled one).",
+                2: "TURN-2 ANSWER.",
+                3: "TURN-3 ANSWER.",
+            },
+            first_response_gap=3.0,
+        )
+        async with serve(server.handler, "127.0.0.1", 0) as ws_server:
+            host, port = next(iter(ws_server.sockets)).getsockname()[:2]
+            llm = OpenAIResponsesLLMService(api_key="test-key", ws_url=f"ws://{host}:{port}")
+
+            first = LLMContext(messages=[{"role": "user", "content": "q1"}])
+            second = LLMContext(messages=[{"role": "user", "content": "q2"}])
+            third = LLMContext(
+                messages=[
+                    {"role": "user", "content": "q2"},
+                    {"role": "assistant", "content": "TURN-2 ANSWER. "},
+                    {"role": "user", "content": "q3"},
+                ]
+            )
+            down_frames, _ = await run_test(
+                llm,
+                frames_to_send=[
+                    LLMContextFrame(context=first),
+                    SleepFrame(0.3),  # created, still in its long gap
+                    InterruptionFrame(),
+                    SleepFrame(0.1),
+                    LLMContextFrame(context=second),
+                    SleepFrame(0.8),
+                    LLMContextFrame(context=third),
+                    SleepFrame(0.8),
+                ],
+            )
+
+        assert self._turn_texts(down_frames) == ["", "TURN-2 ANSWER.", "TURN-3 ANSWER."]
+        # One connection, the second turn on a fresh lane, the third chained on it.
+        assert server.connections == 1
+        assert [r.get("stream_id") for r in server.requests] == ["lane-1", "lane-2", "lane-2"]
+        assert server.requests[2]["previous_response_id"] == "resp_2"
+        assert server.errors == []
