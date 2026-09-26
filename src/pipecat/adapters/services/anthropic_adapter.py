@@ -9,10 +9,11 @@
 import copy
 import json
 from dataclasses import dataclass
-from typing import Any, TypedDict, TypeGuard, TypeVar, cast
+from typing import Any, Literal, TypedDict, TypeGuard, TypeVar, cast
 
 from anthropic import NOT_GIVEN as ANTHROPIC_NOT_GIVEN
 from anthropic import NotGiven as AnthropicNotGiven
+from anthropic.types.cache_control_ephemeral_param import CacheControlEphemeralParam
 from anthropic.types.message_param import MessageParam
 from anthropic.types.text_block_param import TextBlockParam
 from anthropic.types.tool_union_param import ToolUnionParam
@@ -29,6 +30,9 @@ from pipecat.processors.aggregators.llm_context import (
 )
 
 _T = TypeVar("_T")
+
+AnthropicCacheTTL = Literal["5m", "1h"]
+"""Lifetime of an Anthropic prompt cache entry after it was last written or read."""
 
 
 def anthropic_is_given(value: _T | AnthropicNotGiven) -> TypeGuard[_T]:
@@ -78,6 +82,7 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
         enable_prompt_caching: bool,
         system_instruction: str | None = None,
         ensure_last_message_is_user: bool = False,
+        system_prompt_cache_ttl: AnthropicCacheTTL | None = None,
     ) -> AnthropicLLMInvocationParams:
         """Get Anthropic-specific LLM invocation parameters from a universal LLM context.
 
@@ -90,6 +95,9 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
                 when the converted message list ends with an assistant message.
                 Required by models without assistant-prefill support, which
                 reject requests ending with an assistant message.
+            system_prompt_cache_ttl: Lifetime of the system prompt's cache
+                entry when prompt caching is enabled. ``None`` uses Anthropic's
+                default of 5 minutes.
 
         Returns:
             Dictionary of parameters for invoking Anthropic's LLM API.
@@ -107,7 +115,9 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
         system_param: str | list[TextBlockParam] | AnthropicNotGiven = ANTHROPIC_NOT_GIVEN
         if system is not None:
             system_param = (
-                self._system_with_cache_control(system) if enable_prompt_caching else system
+                self._system_with_cache_control(system, system_prompt_cache_ttl)
+                if enable_prompt_caching
+                else system
             )
         return {
             "system": system_param,
@@ -474,26 +484,31 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
             return messages_with_markers
 
     @staticmethod
-    def _system_with_cache_control(system: str) -> list[TextBlockParam]:
+    def _system_with_cache_control(
+        system: str, ttl: AnthropicCacheTTL | None = None
+    ) -> list[TextBlockParam]:
         """Add a cache breakpoint to the end of a system prompt.
 
         Anthropic accepts system prompts as either a string or a list of content
         blocks. Converting a string to one text block lets the shared system
         prompt be cached independently of the conversation messages.
 
+        A TTL longer than the message breakpoints' keeps the shared prefix
+        cached across gaps between conversations. Anthropic requires longer-TTL
+        breakpoints to come before shorter ones, which the system prompt always
+        does.
+
         Args:
             system: The system prompt to mark for caching.
+            ttl: Lifetime of the cache entry. ``None`` uses Anthropic's default.
 
         Returns:
             The system prompt as one cacheable text block.
         """
-        return [
-            {
-                "type": "text",
-                "text": system,
-                "cache_control": {"type": "ephemeral"},
-            }
-        ]
+        cache_control: CacheControlEphemeralParam = {"type": "ephemeral"}
+        if ttl is not None:
+            cache_control["ttl"] = ttl
+        return [{"type": "text", "text": system, "cache_control": cache_control}]
 
     @staticmethod
     def _to_anthropic_function_format(function: FunctionSchema) -> dict[str, Any]:

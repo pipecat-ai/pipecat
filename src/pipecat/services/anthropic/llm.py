@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 
 from pipecat.adapters.base_llm_adapter import LLMContextConversionError
 from pipecat.adapters.services.anthropic_adapter import (
+    AnthropicCacheTTL,
     AnthropicLLMAdapter,
     AnthropicLLMInvocationParams,
     anthropic_is_given,
@@ -135,6 +136,11 @@ class AnthropicLLMSettings(LLMSettings):
 
     Parameters:
         enable_prompt_caching: Whether to enable prompt caching.
+        system_prompt_cache_ttl: Lifetime of the system prompt's cache entry
+            when prompt caching is enabled: "5m" or "1h". ``None`` uses
+            Anthropic's default of 5 minutes. "1h" keeps a system prompt shared
+            by many conversations cached across gaps between them, at twice
+            the base input price per cache write instead of 1.25 times.
         thinking: Thinking configuration. If this is not provided, Pipecat
             disables thinking on Sonnet 5 and later, which otherwise decide
             per request whether to think, to reduce latency; Opus and Fable
@@ -142,6 +148,9 @@ class AnthropicLLMSettings(LLMSettings):
     """
 
     enable_prompt_caching: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    system_prompt_cache_ttl: AnthropicCacheTTL | None | NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
     # Override inherited LLMSettings fields to also accept the Anthropic SDK's
     # sentinel, which the service stores here so these fields can be passed
     # through unchanged to the AsyncAnthropic client.
@@ -272,6 +281,7 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
             system_instruction=None,
             max_tokens=4096,
             enable_prompt_caching=False,
+            system_prompt_cache_ttl=None,
             temperature=ANTHROPIC_NOT_GIVEN,
             top_k=ANTHROPIC_NOT_GIVEN,
             top_p=ANTHROPIC_NOT_GIVEN,
@@ -421,6 +431,7 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
             enable_prompt_caching=assert_given(self._settings.enable_prompt_caching),
             system_instruction=effective_instruction,
             ensure_last_message_is_user=self._should_inject_trailing_user_message(),
+            system_prompt_cache_ttl=assert_given(self._settings.system_prompt_cache_ttl),
         )
         messages = invocation_params["messages"]
         system = invocation_params["system"]
@@ -489,6 +500,7 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
             enable_prompt_caching=assert_given(self._settings.enable_prompt_caching),
             system_instruction=assert_given(self._settings.system_instruction),
             ensure_last_message_is_user=self._should_inject_trailing_user_message(),
+            system_prompt_cache_ttl=assert_given(self._settings.system_prompt_cache_ttl),
         )
         return params
 
