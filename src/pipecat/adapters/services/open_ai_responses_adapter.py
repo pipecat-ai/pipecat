@@ -11,6 +11,7 @@ from typing import Any, Required, TypedDict, cast
 
 from openai._types import NotGiven as OpenAINotGiven
 from openai.types.responses import FunctionToolParam, ResponseInputItemParam, ToolParam
+from openai.types.responses.response_create_params import ToolChoice  # not re-exported
 
 from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
 from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
@@ -18,7 +19,9 @@ from pipecat.adapters.services.open_ai_adapter import openai_from_llm_context_to
 from pipecat.processors.aggregators.llm_context import (
     LLMContext,
     LLMContextMessage,
+    LLMContextToolChoice,
     LLMSpecificMessage,
+    is_given,
 )
 
 
@@ -26,10 +29,12 @@ class OpenAIResponsesLLMInvocationParams(TypedDict, total=False):
     """Context-based parameters for invoking OpenAI Responses API."""
 
     # `input` and `tools` are always populated by `get_llm_invocation_params`;
-    # `instructions` is only set when a system instruction is present.
+    # `instructions` is only set when a system instruction is present, and
+    # `tool_choice` only when the context carries one.
     input: Required[list[ResponseInputItemParam]]
     tools: Required[list[ToolParam] | OpenAINotGiven]
     instructions: str
+    tool_choice: ToolChoice
 
 
 class OpenAIResponsesLLMAdapter(BaseLLMAdapter[OpenAIResponsesLLMInvocationParams]):
@@ -86,6 +91,13 @@ class OpenAIResponsesLLMAdapter(BaseLLMAdapter[OpenAIResponsesLLMInvocationParam
             # NOTE: LLMContext's tools are guaranteed to be a ToolsSchema (or NOT_GIVEN)
             "tools": openai_from_llm_context_tools(self.from_standard_tools(context.tools)),
         }
+
+        # `None` isn't a valid tool choice; like NOT_GIVEN it means none was set.
+        tool_choice = context.tool_choice
+        if is_given(tool_choice) and tool_choice is not None:
+            params["tool_choice"] = self._from_llm_context_tool_choice(
+                cast(LLMContextToolChoice, tool_choice)
+            )
 
         if system_instruction:
             # Compatibility: The Responses API requires at least one input
@@ -168,6 +180,56 @@ class OpenAIResponsesLLMAdapter(BaseLLMAdapter[OpenAIResponsesLLMInvocationParam
             else:
                 messages_for_logging.append(cast(dict[str, Any], message))
         return messages_for_logging
+
+    def _from_llm_context_tool_choice(self, tool_choice: LLMContextToolChoice) -> ToolChoice:
+        """Convert an LLMContext tool choice to the Responses API's format.
+
+        A context spells its tool choice in Chat Completions' vocabulary, which
+        wraps a chosen tool one level deeper than the Responses API does. The
+        string options are identical in both and pass through, as does anything
+        this can't confidently reshape, for the API to accept or reject.
+
+        Args:
+            tool_choice: A context's tool choice.
+
+        Returns:
+            The tool choice in Responses API format.
+        """
+        # A union of TypedDicts doesn't narrow on a "type" lookup.
+        choice = cast(Any, tool_choice)
+        if not isinstance(choice, dict):
+            return cast(ToolChoice, choice)
+
+        kind = choice.get("type")
+
+        # A named tool is wrapped under a key matching its type:
+        # {"type": "function", "function": {"name": ...}}.
+        if kind in ("function", "custom"):
+            named = choice.get(kind)
+            if isinstance(named, dict) and "name" in named:
+                return cast(ToolChoice, {"type": kind, "name": named["name"]})
+        elif kind == "allowed_tools":
+            allowed = choice.get("allowed_tools")
+            # `tools` is required, so a missing one is malformed, not empty.
+            tools = allowed.get("tools") if isinstance(allowed, dict) else None
+            if (
+                isinstance(allowed, dict)
+                and "mode" in allowed
+                # Typed as an iterable, but a one-shot one would be consumed
+                # even on the paths that decline to convert.
+                and isinstance(tools, (list, tuple))
+            ):
+                return {
+                    "type": "allowed_tools",
+                    "mode": allowed["mode"],
+                    # The tools it lists carry the same per-tool shapes.
+                    "tools": [
+                        cast(dict[str, object], self._from_llm_context_tool_choice(tool))
+                        for tool in tools
+                    ],
+                }
+
+        return cast(ToolChoice, choice)
 
     def _convert_messages_to_input(
         self, messages: list[LLMContextMessage]
