@@ -6,6 +6,7 @@
 
 """Tests for ElevenLabs TTS alignment handling."""
 
+import asyncio
 import json
 import unittest
 from typing import Any
@@ -354,6 +355,141 @@ async def test_keepalive_without_active_context_sends_empty():
     await service._send_keepalive()
 
     assert ws.sent == [{"text": ""}]
+
+
+@pytest.mark.asyncio
+async def test_keepalive_does_not_target_a_closed_context():
+    """Once a context is closed, the keepalive no longer names it."""
+    service = _make_service()
+    ws = _FakeWebSocket()
+    service._websocket = ws
+    service._turn_context_id = "ctx-1"
+    service._playing_context_id = None
+    await service._send_context_init("ctx-1")
+    await service._close_context("ctx-1")
+
+    await service._send_keepalive()
+
+    assert ws.sent[-1] == {"text": ""}
+
+
+# ---------------------------------------------------------------------------
+# Disconnect vs open contexts
+#
+# ElevenLabs acts on close_socket only while no context is open on the
+# multi-stream socket. A "text" message opens its context (the default one when
+# it names none), so a context-less keepalive or a turn still in flight would
+# otherwise leave the disconnect waiting out its full 2s ceiling, on the
+# EndFrame path.
+# ---------------------------------------------------------------------------
+
+
+class _FakeMultiStreamWebSocket(_FakeWebSocket):
+    """Records sends and closes the way ElevenLabs closes the multi-stream socket."""
+
+    def __init__(self):
+        super().__init__()
+        self.open_contexts: set[str | None] = set()
+        self._closed = asyncio.Event()
+
+    async def send(self, data: str):
+        await super().send(data)
+        msg = self.sent[-1]
+        if msg.get("close_socket"):
+            if not self.open_contexts:
+                self._closed.set()
+        elif msg.get("close_context"):
+            self.open_contexts.discard(msg.get("context_id"))
+        elif "text" in msg:
+            self.open_contexts.add(msg.get("context_id"))
+
+    async def wait_closed(self):
+        await self._closed.wait()
+
+    async def close(self):
+        self.state = State.CLOSED
+
+    @property
+    def closed_by_server(self) -> bool:
+        return self._closed.is_set()
+
+
+@pytest.mark.asyncio
+async def test_disconnect_with_no_open_context_closes_socket_directly():
+    """With nothing open there is nothing to close ahead of close_socket."""
+    service = _make_service()
+    ws = _FakeMultiStreamWebSocket()
+    service._websocket = ws
+
+    await service._disconnect_websocket()
+
+    assert ws.sent == [{"close_socket": True}]
+    assert ws.closed_by_server
+
+
+@pytest.mark.asyncio
+async def test_disconnect_closes_default_context_opened_by_keepalive():
+    """A context-less keepalive opens the default context; disconnect closes it first."""
+    service = _make_service()
+    ws = _FakeMultiStreamWebSocket()
+    service._websocket = ws
+    await service._send_keepalive()
+    assert ws.open_contexts == {None}
+
+    await service._disconnect_websocket()
+
+    assert ws.sent[-2:] == [{"close_context": True}, {"close_socket": True}]
+    assert ws.closed_by_server
+
+
+@pytest.mark.asyncio
+async def test_disconnect_closes_open_named_context():
+    """A turn still open at disconnect is closed by id ahead of close_socket."""
+    service = _make_service()
+    ws = _FakeMultiStreamWebSocket()
+    service._websocket = ws
+    await service._send_context_init("ctx-1")
+    await service._send_text("Hello", "ctx-1")
+
+    await service._disconnect_websocket()
+
+    assert ws.sent[-2:] == [
+        {"context_id": "ctx-1", "close_context": True},
+        {"close_socket": True},
+    ]
+    assert ws.closed_by_server
+
+
+@pytest.mark.asyncio
+async def test_disconnect_does_not_reclose_a_closed_context():
+    """A context closed at end of turn is not named again at disconnect."""
+    service = _make_service()
+    ws = _FakeMultiStreamWebSocket()
+    service._websocket = ws
+    await service._send_context_init("ctx-1")
+    await service._close_context("ctx-1")
+
+    await service._disconnect_websocket()
+
+    closes = [msg for msg in ws.sent if msg.get("close_context")]
+    assert closes == [{"context_id": "ctx-1", "close_context": True}]
+    assert ws.sent[-1] == {"close_socket": True}
+    assert ws.closed_by_server
+
+
+@pytest.mark.asyncio
+async def test_disconnect_clears_context_bookkeeping():
+    """Nothing from the old connection may be named on the next one."""
+    service = _make_service()
+    ws = _FakeMultiStreamWebSocket()
+    service._websocket = ws
+    await service._send_context_init("ctx-1")
+    await service._send_keepalive()
+
+    await service._disconnect_websocket()
+
+    assert service._context_init_sent == set()
+    assert service._default_context_open is False
 
 
 class _FakeHttpResponse:

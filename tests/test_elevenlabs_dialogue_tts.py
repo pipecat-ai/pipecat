@@ -36,6 +36,12 @@ class _FakeWebSocket:
     async def send(self, data: str):
         self.sent.append(json.loads(data))
 
+    async def wait_closed(self):
+        pass
+
+    async def close(self):
+        self.state = State.CLOSED
+
 
 def _make_dialogue_service(**settings_kwargs) -> ElevenLabsDialogueTTSService:
     settings = ElevenLabsDialogueTTSService.Settings(voice="test-voice", **settings_kwargs)
@@ -474,3 +480,26 @@ async def test_dialogue_drained_alignment_does_not_disturb_the_next_turn():
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@pytest.mark.asyncio
+async def test_dialogue_disconnect_closes_contexts_before_close_socket():
+    """Every registered context, the keepalive one included, is closed ahead of close_socket.
+
+    ElevenLabs acts on close_socket only while no context is open, and the
+    keepalive context is open for the life of the connection.
+    """
+    service = _make_dialogue_service()
+    ws = _FakeWebSocket()
+    service._websocket = ws
+    await service._register_keepalive_context()
+    await _open_dialogue_context(service, ws, "ctx-1")
+
+    await service._disconnect_websocket()
+
+    assert ws.sent[-3:] == [
+        {"context_id": _KEEPALIVE_CONTEXT_ID, "close_context": True},
+        {"context_id": "ctx-1", "close_context": True},
+        {"close_socket": True},
+    ]
+    assert service._contexts == {}

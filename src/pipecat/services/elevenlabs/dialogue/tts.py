@@ -315,6 +315,20 @@ class ElevenLabsDialogueTTSService(ElevenLabsTTSBase):
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
 
+    async def _close_open_contexts(self):
+        # The keepalive context is registered for the life of the connection,
+        # so at least one context is open at every disconnect.
+        if not self._websocket:
+            return
+        for context_id, context in self._contexts.items():
+            if not context.registered:
+                continue
+            context.registered = False
+            logger.trace(f"{self}: Closing context {context_id}")
+            await self._websocket.send(
+                json.dumps({"context_id": context_id, "close_context": True})
+            )
+
     async def on_turn_context_completed(self):
         """Close the turn's context, which generates any text still buffered in it."""
         context_id = self._turn_context_id
