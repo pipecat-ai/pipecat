@@ -475,6 +475,9 @@ class BaseOutputTransport(FrameProcessor):
             self._bot_speech_last_time = 0
 
             self._audio_task: asyncio.Task | None = None
+            # The frame the audio task is handling right now, already taken off
+            # the audio queue.
+            self._audio_current_frame: Frame | None = None
             self._video_task: asyncio.Task | None = None
             self._clock_task: asyncio.Task | None = None
 
@@ -582,9 +585,13 @@ class BaseOutputTransport(FrameProcessor):
             await self._cancel_clock_task()
             await self._cancel_video_task()
 
-            if self._audio_queue.has_uninterruptible or self._mixer:
+            current = self._audio_current_frame
+            current_is_uninterruptible = current is not None and not current.interruptible
+            if current_is_uninterruptible or self._audio_queue.has_uninterruptible or self._mixer:
                 # Keep the audio task running but drain all interruptible frames
-                # so the pending uninterruptible ones are still delivered. With
+                # so the uninterruptible ones, including one the task is
+                # handling right now (e.g. an action awaited inside
+                # `write_transport_frame()`), are still delivered. With
                 # a mixer, cancelling the task would also stop mixer-only output
                 # during the restart, causing an audible gap in the background
                 # audio (made worse by telephony serializers that clear the
@@ -701,6 +708,7 @@ class BaseOutputTransport(FrameProcessor):
             if self._audio_task:
                 await self._transport.cancel_task(self._audio_task)
                 self._audio_task = None
+                self._audio_current_frame = None
 
         async def _bot_started_speaking(self):
             """Handle bot started speaking event."""
@@ -955,31 +963,35 @@ class BaseOutputTransport(FrameProcessor):
         async def _audio_task_handler(self):
             """Main audio processing task handler."""
             async for frame in self._next_frame():
-                # No need to push EndFrame, it's pushed from process_frame().
-                if isinstance(frame, EndFrame):
-                    # Send some final silence so words don't cut out.
-                    await self._send_silence(self._params.audio_out_end_silence_secs)
-                    break
-
-                # Handle frame.
-                await self._handle_frame(frame)
-
-                # If we are not able to write to the transport we shouldn't
-                # push downstream.
-                push_downstream = True
-
-                # Try to send audio to the transport.
+                self._audio_current_frame = frame
                 try:
-                    if isinstance(frame, OutputAudioRawFrame):
-                        push_downstream = await self._internal_write_audio_frame(frame)
-                except Exception as e:
-                    logger.error(f"{self} Error writing {frame} to transport: {e}")
-                    push_downstream = False
+                    # No need to push EndFrame, it's pushed from process_frame().
+                    if isinstance(frame, EndFrame):
+                        # Send some final silence so words don't cut out.
+                        await self._send_silence(self._params.audio_out_end_silence_secs)
+                        break
 
-                # If we were able to send to the transport, push the frame
-                # downstream in case anyone else needs it.
-                if push_downstream:
-                    await self._transport.push_frame(frame)
+                    # Handle frame.
+                    await self._handle_frame(frame)
+
+                    # If we are not able to write to the transport we shouldn't
+                    # push downstream.
+                    push_downstream = True
+
+                    # Try to send audio to the transport.
+                    try:
+                        if isinstance(frame, OutputAudioRawFrame):
+                            push_downstream = await self._internal_write_audio_frame(frame)
+                    except Exception as e:
+                        logger.error(f"{self} Error writing {frame} to transport: {e}")
+                        push_downstream = False
+
+                    # If we were able to send to the transport, push the frame
+                    # downstream in case anyone else needs it.
+                    if push_downstream:
+                        await self._transport.push_frame(frame)
+                finally:
+                    self._audio_current_frame = None
 
         async def _internal_write_audio_frame(self, frame: OutputAudioRawFrame) -> bool:
             """Write a frame to the transport, giving up if the write never returns.

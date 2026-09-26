@@ -8,6 +8,7 @@
 
 import asyncio
 import unittest
+from dataclasses import dataclass
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -19,6 +20,7 @@ from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     CancelFrame,
+    DataFrame,
     EndFrame,
     InterruptionFrame,
     MixerControlFrame,
@@ -150,6 +152,99 @@ class TestBaseOutputTransportInterruptions(unittest.IsolatedAsyncioTestCase):
             # The queued bot audio was dropped by the reset.
             self.assertTrue(sender._audio_queue.empty())
             release_write.set()
+        finally:
+            await transport.cancel(CancelFrame())
+
+
+@dataclass
+class _ActionFrame(DataFrame):
+    """A frame the transport acts on in ``write_transport_frame()``, like a call transfer."""
+
+
+class TestBaseOutputTransportInFlightInterruptions(unittest.IsolatedAsyncioTestCase):
+    """An interruption arriving while the audio task awaits ``write_transport_frame()``."""
+
+    async def _start_slow_action(self, transport: BaseOutputTransport, frame: _ActionFrame):
+        """Queue ``frame`` and wait until the transport is inside its action."""
+        started = asyncio.Event()
+        release = asyncio.Event()
+        finished = asyncio.Event()
+
+        async def slow_action(_frame):
+            started.set()
+            await release.wait()
+            finished.set()
+
+        transport.write_transport_frame = AsyncMock(side_effect=slow_action)
+        await transport.process_frame(frame, FrameDirection.DOWNSTREAM)
+        await asyncio.wait_for(started.wait(), timeout=1)
+        return release, finished
+
+    def _pushed(self, transport: BaseOutputTransport, frame_type: type) -> list:
+        return [
+            c.args[0] for c in transport.push_frame.call_args_list if type(c.args[0]) is frame_type
+        ]
+
+    async def test_uninterruptible_frame_in_flight_survives_interruption(self):
+        transport = await _make_transport()
+        try:
+            sender = transport._media_senders[None]
+            task_before = sender._audio_task
+
+            action = _ActionFrame()
+            action.interruptible = False
+            release, finished = await self._start_slow_action(transport, action)
+
+            await transport.process_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
+
+            self.assertIs(sender._audio_task, task_before)
+            release.set()
+            await asyncio.wait_for(finished.wait(), timeout=1)
+            await asyncio.sleep(0)
+            self.assertEqual(self._pushed(transport, _ActionFrame), [action])
+        finally:
+            await transport.cancel(CancelFrame())
+
+    async def test_interruptible_frames_queued_behind_it_are_still_dropped(self):
+        transport = await _make_transport()
+        try:
+            sender = transport._media_senders[None]
+
+            action = _ActionFrame()
+            action.interruptible = False
+            release, finished = await self._start_slow_action(transport, action)
+
+            queued = _ActionFrame()
+            await transport.process_frame(queued, FrameDirection.DOWNSTREAM)
+            self.assertFalse(sender._audio_queue.empty())
+
+            await transport.process_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
+
+            self.assertTrue(sender._audio_queue.empty())
+            release.set()
+            await asyncio.wait_for(finished.wait(), timeout=1)
+            await asyncio.sleep(0.05)
+            self.assertEqual(transport.write_transport_frame.call_count, 1)
+            self.assertEqual(self._pushed(transport, _ActionFrame), [action])
+        finally:
+            await transport.cancel(CancelFrame())
+
+    async def test_interruptible_frame_in_flight_is_cancelled(self):
+        transport = await _make_transport()
+        try:
+            sender = transport._media_senders[None]
+            task_before = sender._audio_task
+
+            release, finished = await self._start_slow_action(transport, _ActionFrame())
+
+            await transport.process_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
+
+            self.assertTrue(task_before.cancelled())
+            self.assertIsNot(sender._audio_task, task_before)
+            release.set()
+            await asyncio.sleep(0.05)
+            self.assertFalse(finished.is_set())
+            self.assertEqual(self._pushed(transport, _ActionFrame), [])
         finally:
             await transport.cancel(CancelFrame())
 
