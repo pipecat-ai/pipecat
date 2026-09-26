@@ -104,12 +104,13 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
             system_instruction,
             discard_context_system=True,
         )
+        system_param: str | list[TextBlockParam] | AnthropicNotGiven = ANTHROPIC_NOT_GIVEN
+        if system is not None:
+            system_param = (
+                self._system_with_cache_control(system) if enable_prompt_caching else system
+            )
         return {
-            "system": self._system_with_cache_control(system)
-            if enable_prompt_caching
-            else system
-            if system is not None
-            else ANTHROPIC_NOT_GIVEN,
+            "system": system_param,
             "messages": (
                 self._with_cache_control_markers(converted.messages)
                 if enable_prompt_caching
@@ -473,24 +474,19 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
             return messages_with_markers
 
     @staticmethod
-    def _system_with_cache_control(
-        system: str | None,
-    ) -> str | list[TextBlockParam] | AnthropicNotGiven:
-        """Add a cache breakpoint to a system prompt when one is present.
+    def _system_with_cache_control(system: str) -> list[TextBlockParam]:
+        """Add a cache breakpoint to the end of a system prompt.
 
         Anthropic accepts system prompts as either a string or a list of content
         blocks. Converting a string to one text block lets the shared system
         prompt be cached independently of the conversation messages.
 
         Args:
-            system: The system prompt to mark for caching, if present.
+            system: The system prompt to mark for caching.
 
         Returns:
-            The system prompt as one cacheable text block, or Anthropic's
-            ``NOT_GIVEN`` sentinel when there is no system prompt.
+            The system prompt as one cacheable text block.
         """
-        if system is None:
-            return ANTHROPIC_NOT_GIVEN
         return [
             {
                 "type": "text",
