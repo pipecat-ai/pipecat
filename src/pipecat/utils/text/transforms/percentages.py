@@ -12,12 +12,18 @@ from num2words import num2words
 
 from pipecat.frames.frames import AggregationType
 
-_PERCENT_RE = re.compile(r"(\d+(?:\.\d+)?)\s*%")
+# Matches integers and decimals, with optional thousand separators.
+_PERCENT_RE = re.compile(r"(\d{1,3}(?:,\d{3})*|\d+)(?:\.(\d+))?\s*%")
 
 
 def _percent_to_words(match: re.Match) -> str:
-    value = match.group(1)
-    number_str = num2words(float(value), lang="en")
+    whole = int(match.group(1).replace(",", ""))
+    frac_str = match.group(2)
+    number_str = num2words(whole, lang="en")
+    if frac_str:
+        # Read the fraction one digit at a time, like expand_numbers, so every
+        # written digit is spoken ("1.10%" is "one point one zero percent").
+        number_str += " point " + " ".join(num2words(int(digit), lang="en") for digit in frac_str)
     return f"{number_str} percent"
 
 
