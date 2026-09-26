@@ -816,7 +816,9 @@ class EvalJudge:
         logger.debug(f"Judge asking over state:\n{json.dumps(state)}")
         for attempt in (1, 2):
             try:
-                return await ask()
+                answers = await ask()
+                logger.debug(f"Judge answered: {answers!r}")
+                return answers
             except ClassifierError as e:
                 if attempt == 1:
                     logger.warning(f"Judge question failed, asking again: {e}")
@@ -1132,6 +1134,7 @@ class _Explainer:
         if not response:
             logger.error("Explainer returned an empty response")
             return None
+        logger.debug(f"Explainer answered: {response}")
         return response
 
     @staticmethod
