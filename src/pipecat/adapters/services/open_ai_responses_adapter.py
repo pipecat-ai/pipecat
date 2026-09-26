@@ -14,7 +14,10 @@ from openai.types.responses import FunctionToolParam, ResponseInputItemParam, To
 
 from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
 from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
-from pipecat.adapters.services.open_ai_adapter import openai_from_llm_context_tools
+from pipecat.adapters.services.open_ai_adapter import (
+    openai_from_llm_context_tools,
+    openai_strict_parameters,
+)
 from pipecat.processors.aggregators.llm_context import (
     LLMContext,
     LLMContextMessage,
@@ -118,6 +121,12 @@ class OpenAIResponsesLLMAdapter(BaseLLMAdapter[OpenAIResponsesLLMInvocationParam
     def to_provider_tools_format(self, tools_schema: ToolsSchema) -> list[ToolParam]:
         """Convert function schemas to Responses API function tool format.
 
+        A schema asking for ``strict`` gets the ``additionalProperties: false``
+        that strict mode requires on each of its objects. Strict mode also
+        requires every property to be listed in ``required``, which is left to
+        the schema's author since adding it would make optional parameters
+        mandatory.
+
         Args:
             tools_schema: The Pipecat tools schema to convert.
 
@@ -128,11 +137,12 @@ class OpenAIResponsesLLMAdapter(BaseLLMAdapter[OpenAIResponsesLLMInvocationParam
         result = []
         for func in functions_schema:
             d = func.to_default_dict()
+            parameters = d.get("parameters", {})
             tool: FunctionToolParam = {
                 "type": "function",
                 "name": d["name"],
-                "parameters": d.get("parameters", {}),
-                "strict": d.get("strict", None),
+                "parameters": openai_strict_parameters(parameters) if func.strict else parameters,
+                "strict": func.strict,
             }
             if "description" in d:
                 tool["description"] = d["description"]
