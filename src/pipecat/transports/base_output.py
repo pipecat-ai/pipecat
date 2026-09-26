@@ -480,6 +480,8 @@ class BaseOutputTransport(FrameProcessor):
             self._audio_current_frame: Frame | None = None
             self._video_task: asyncio.Task | None = None
             self._clock_task: asyncio.Task | None = None
+            # Set once stop() has queued its EndFrame.
+            self._stopping = False
 
             # If timestamps are equal, use this count to preserve the insertion order
             self._clock_queue_counter = itertools.count()
@@ -534,6 +536,7 @@ class BaseOutputTransport(FrameProcessor):
                 frame: The end frame signaling sender shutdown.
             """
             # Let the sink tasks process the queue until they reach this EndFrame.
+            self._stopping = True
             await self._clock_queue.put((float("inf"), next(self._clock_queue_counter), frame))
             await self._audio_queue.put(frame)
 
@@ -581,8 +584,14 @@ class BaseOutputTransport(FrameProcessor):
             Args:
                 _: The start interruption frame (unused).
             """
-            # Cancel tasks.
-            await self._cancel_clock_task()
+            if self._stopping:
+                # stop() is waiting for the clock task to reach the EndFrame it
+                # queued (or has already seen it get there), so keep the task.
+                self._reset_clock_queue()
+            else:
+                await self._cancel_clock_task()
+                self._create_clock_task()
+
             await self._cancel_video_task()
 
             current = self._audio_current_frame
@@ -601,9 +610,7 @@ class BaseOutputTransport(FrameProcessor):
                 await self._cancel_audio_task()
                 self._create_audio_task()
 
-            # Create tasks.
             self._create_video_task()
-            self._create_clock_task()
 
             # Let's send a bot stopped speaking if we have to.
             await self._bot_stopped_speaking()
@@ -1146,6 +1153,18 @@ class BaseOutputTransport(FrameProcessor):
             if self._clock_task:
                 await self._transport.cancel_task(self._clock_task)
                 self._clock_task = None
+
+        def _reset_clock_queue(self):
+            """Remove the interruptible timed frames, keeping the uninterruptible ones."""
+            kept = []
+            while not self._clock_queue.empty():
+                item = self._clock_queue.get_nowait()
+                _, _, frame = item
+                if not frame.interruptible:
+                    kept.append(item)
+                self._clock_queue.task_done()
+            for item in kept:
+                self._clock_queue.put_nowait(item)
 
         async def _clock_task_handler(self):
             """Main clock/timing task handler for timed frame delivery."""

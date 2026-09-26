@@ -52,12 +52,15 @@ class _PassthroughMixer(BaseAudioMixer):
 
 
 async def _make_transport(
-    mixer: BaseAudioMixer | None = None, audio_out_sample_rate: int | None = None
+    mixer: BaseAudioMixer | None = None,
+    audio_out_sample_rate: int | None = None,
+    audio_out_end_silence_secs: int = 2,
 ) -> BaseOutputTransport:
     params = TransportParams(
         audio_out_enabled=True,
         audio_out_mixer=mixer,
         audio_out_sample_rate=audio_out_sample_rate,
+        audio_out_end_silence_secs=audio_out_end_silence_secs,
     )
     transport = BaseOutputTransport(params)
     transport.push_frame = AsyncMock()
@@ -245,6 +248,67 @@ class TestBaseOutputTransportInFlightInterruptions(unittest.IsolatedAsyncioTestC
             await asyncio.sleep(0.05)
             self.assertFalse(finished.is_set())
             self.assertEqual(self._pushed(transport, _ActionFrame), [])
+        finally:
+            await transport.cancel(CancelFrame())
+
+
+class TestBaseOutputTransportInterruptionWhileStopping(unittest.IsolatedAsyncioTestCase):
+    """An interruption arriving after the EndFrame, while ``stop()`` waits for the sender."""
+
+    async def _paced_transport(self, *, end_silence_secs: int) -> BaseOutputTransport:
+        transport = await _make_transport(audio_out_end_silence_secs=end_silence_secs)
+
+        async def paced_write(frame):
+            # Take as long as the audio lasts, like a transport pacing playout.
+            await asyncio.sleep(len(frame.audio) / (frame.sample_rate * 2))
+            return True
+
+        transport.write_audio_frame = AsyncMock(side_effect=paced_write)
+        return transport
+
+    def _pushed_end_frames(self, transport: BaseOutputTransport) -> list:
+        return [
+            c.args[0]
+            for c in transport.push_frame.call_args_list
+            if isinstance(c.args[0], EndFrame)
+        ]
+
+    async def test_end_frame_queued_behind_audio_is_still_delivered(self):
+        transport = await self._paced_transport(end_silence_secs=0)
+        try:
+            # A goodbye queued ahead of the EndFrame, interrupted while it plays.
+            await transport.process_frame(
+                TTSAudioRawFrame(audio=b"\x01\x00" * 8000, sample_rate=16000, num_channels=1),
+                FrameDirection.DOWNSTREAM,
+            )
+            end_frame = EndFrame()
+            stopping = asyncio.create_task(
+                transport.process_frame(end_frame, FrameDirection.DOWNSTREAM)
+            )
+            await asyncio.sleep(0.05)
+            self.assertGreater(transport.write_audio_frame.call_count, 0)
+
+            await transport.process_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
+
+            await asyncio.wait_for(stopping, timeout=1)
+            self.assertEqual(self._pushed_end_frames(transport), [end_frame])
+        finally:
+            await transport.cancel(CancelFrame())
+
+    async def test_interruption_during_end_silence_lets_stop_finish(self):
+        transport = await self._paced_transport(end_silence_secs=1)
+        try:
+            end_frame = EndFrame()
+            stopping = asyncio.create_task(
+                transport.process_frame(end_frame, FrameDirection.DOWNSTREAM)
+            )
+            await asyncio.sleep(0.05)
+            self.assertGreater(transport.write_audio_frame.call_count, 0)
+
+            await transport.process_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
+
+            await asyncio.wait_for(stopping, timeout=2)
+            self.assertEqual(self._pushed_end_frames(transport), [end_frame])
         finally:
             await transport.cancel(CancelFrame())
 
