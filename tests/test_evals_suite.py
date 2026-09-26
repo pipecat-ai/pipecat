@@ -375,7 +375,7 @@ class TestBotConcurrency(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(peak["total"], 2)
         self.assertEqual([r.status for r in runs], ["done"] * 6)
 
-    async def test_runs_are_taken_from_the_entries_in_turn(self):
+    async def test_runs_are_taken_in_manifest_order(self):
         runs = [
             EvalRun(
                 bot=bot,
@@ -412,16 +412,16 @@ class TestBotConcurrency(unittest.IsolatedAsyncioTestCase):
 
         await suite.run(self.logs_dir)
 
-        # One at a time, each entry gets its turn before any entry gets a second.
+        # One at a time, each entry's scenarios run together, in manifest order.
         self.assertEqual(
             started,
             [
                 ("a.py", "s1"),
+                ("a.py", "s2"),
+                ("a.py", "s3"),
                 ("b.py", "s1"),
                 ("c.py", "s1"),
-                ("a.py", "s2"),
                 ("c.py", "s2"),
-                ("a.py", "s3"),
             ],
         )
 

@@ -74,8 +74,8 @@ TURN_COMPLETION_PROMPT=v3 evals/turn-completion/run.sh -n v3  # a prompt variant
 ```
 
 `run.sh` is `pipecat eval suite` over the manifest, which spawns a bot per
-scenario run. Up to 32 runs go at once, taken from the models in turn, so a
-slow provider never holds up the others; a full sweep is about 8,500 runs. An expectation without its own `within_ms` times out
+scenario run. Up to 32 runs go at once, taken in manifest order, so no slot
+sits idle while a model still has scenarios; a full sweep is about 8,500 runs. An expectation without its own `within_ms` times out
 after 30 s (`run.sh` passes `-t 30`, and a `-t` of your own overrides it),
 since a model that follows the protocol answers within seconds. Entries whose
 provider rate-limits (Groq, NVIDIA, Mistral Large) cap their own concurrency;

@@ -77,10 +77,10 @@ needed when several entries share a bot, as when sweeping a model with
 label.
 
 ``concurrency`` is how many runs execute at once. The suite keeps that many
-going, taking the next run from the entries in turn, so every entry makes
-progress and no slot waits while any entry still has runs. An entry whose
-provider rate-limits sets its own ``concurrency:``, and never has more than
-that many runs in flight.
+going, taking the next run from the first entry in manifest order that still
+has one, so an entry's scenarios finish together and no slot waits while any
+entry still has runs. An entry whose provider rate-limits sets its own
+``concurrency:``, and never has more than that many runs in flight.
 
 Manifest-relative paths (``bot``/``bots_dir``, ``scenarios_dir``,
 ``runs_dir``) resolve relative to the manifest file, so a manifest is portable;
@@ -749,12 +749,12 @@ class EvalManifest:
 
 
 class _RunQueue:
-    """The suite's runs, handed out to workers from the entries in turn.
+    """The suite's runs, handed out to workers in manifest order.
 
     Each queue is one entry's runs for one attempt, in the order the entries
-    were given. A worker takes the next run from the first queue, in that
-    order and round-robin, whose entry is under its cap; when every queue
-    with runs left is at its cap, it waits for a run to finish.
+    were given. A worker takes the next run from the first queue whose entry
+    is under its cap; when every queue with runs left is at its cap, it waits
+    for a run to finish.
     """
 
     def __init__(self, queues: list[tuple[str, int | None, deque[EvalRun]]]):
@@ -767,7 +767,6 @@ class _RunQueue:
         self._queues = queues
         self._caps = {label: cap for label, cap, _ in queues}
         self._in_flight = {label: 0 for label, _, _ in queues}
-        self._next = 0
         self._changed = asyncio.Condition()
 
     async def take(self) -> EvalRun | None:
@@ -787,13 +786,9 @@ class _RunQueue:
             self._changed.notify_all()
 
     def _pick(self) -> EvalRun | None:
-        """The next run whose entry is under its cap, round-robin from the last one taken."""
-        count = len(self._queues)
-        for offset in range(count):
-            index = (self._next + offset) % count
-            label, cap, queue = self._queues[index]
+        """The first queued run whose entry is under its cap."""
+        for label, cap, queue in self._queues:
             if queue and (cap is None or self._in_flight[label] < cap):
-                self._next = index + 1
                 self._in_flight[label] += 1
                 return queue.popleft()
         return None
@@ -962,11 +957,11 @@ class EvalSuite(BaseObject):
 
         Each run gets its own port (``base_port + index``). ``concurrency``
         workers each take the next run and run it until none is left. Runs are
-        taken from the entries in turn, every entry's first attempt before any
-        entry's second, so every entry makes progress and no worker waits
-        while any entry still has runs. An entry with a ``concurrency:`` of
-        its own never has more than that many runs in flight, across its
-        attempts; a worker that finds it full takes another entry's run.
+        taken in manifest order, every entry's first attempt before any
+        entry's second, so an entry's scenarios finish together and no worker
+        waits while any entry still has runs. An entry with a ``concurrency:``
+        of its own never has more than that many runs in flight, across its
+        attempts; a worker that finds it full takes the next entry's run.
 
         Args:
             logs_dir: Directory for per-run logs.
