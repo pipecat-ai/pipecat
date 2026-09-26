@@ -12,7 +12,7 @@ import sys
 from collections.abc import Awaitable, Callable
 from contextlib import AsyncExitStack, asynccontextmanager
 from datetime import timedelta
-from typing import Any, TypeAlias, cast
+from typing import Any, TypeAlias
 
 from loguru import logger
 
@@ -31,19 +31,12 @@ try:
     from mcp.client.sse import sse_client
     from mcp.client.stdio import stdio_client
     from mcp.client.streamable_http import streamable_http_client
-    from mcp.shared import exceptions as mcp_exceptions
+    from mcp.shared.exceptions import MCPError
     from mcp.types import CONNECTION_CLOSED, TextContent
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error('In order to use an MCP client, you need to `uv add "pipecat-ai[mcp]"`.')
     raise ImportError(f"Missing module: {e}") from e
-
-# The SDK names the class McpError on 1.x and MCPError on 2.x. The string cast
-# keeps the 1.x name out of a 2.x import.
-_MCPError = cast(
-    "type[mcp_exceptions.McpError]",
-    getattr(mcp_exceptions, "MCPError", None) or mcp_exceptions.McpError,
-)
 
 ServerParameters: TypeAlias = StdioServerParameters | SseServerParameters | StreamableHttpParameters
 
@@ -62,7 +55,7 @@ def _is_connection_lost(error: BaseException) -> bool:
     """
     if isinstance(error, BaseExceptionGroup):
         return any(_is_connection_lost(sub) for sub in error.exceptions)
-    if isinstance(error, _MCPError):
+    if isinstance(error, MCPError):
         return error.error.code == CONNECTION_CLOSED
     return isinstance(
         error, (anyio.ClosedResourceError, anyio.BrokenResourceError, anyio.EndOfStream)
@@ -339,19 +332,17 @@ class MCPClient(BaseObject):
 
         try:
             if isinstance(self._server_params, StdioServerParameters):
-                streams = await exit_stack.enter_async_context(stdio_client(self._server_params))
-                read_stream, write_stream = streams[0], streams[1]
+                read_stream, write_stream = await exit_stack.enter_async_context(
+                    stdio_client(self._server_params)
+                )
             elif isinstance(self._server_params, SseServerParameters):
                 read_stream, write_stream = await exit_stack.enter_async_context(
                     sse_client(**self._server_params.model_dump())
                 )
             else:  # StreamableHttpParameters (validated in __init__)
-                # Indexed rather than unpacked: the transport yields three
-                # stream elements on the SDK's 1.x line and two on 2.x.
-                streams = await exit_stack.enter_async_context(
+                read_stream, write_stream = await exit_stack.enter_async_context(
                     _streamable_http_transport(self._server_params)
                 )
-                read_stream, write_stream = streams[0], streams[1]
 
             session = await exit_stack.enter_async_context(ClientSession(read_stream, write_stream))
             await session.initialize()
@@ -662,14 +653,9 @@ class MCPClient(BaseObject):
             logger.debug(f"Tool description: {tool.description}")
 
             try:
-                # Convert the schema
-                # The SDK spells this field inputSchema on 1.x, input_schema on 2.x.
-                input_schema = (
-                    tool.input_schema if hasattr(tool, "input_schema") else tool.inputSchema
-                )
                 function_schema = self._convert_mcp_schema_to_pipecat(
                     tool_name,
-                    {"description": tool.description, "input_schema": input_schema},
+                    {"description": tool.description, "input_schema": tool.input_schema},
                     handler=self._tool_wrapper_with_cleanup if attach_handlers else None,
                 )
 
