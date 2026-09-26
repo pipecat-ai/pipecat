@@ -7,6 +7,8 @@
 import io
 import json
 import unittest
+from dataclasses import dataclass
+from typing import Any
 
 from loguru import logger
 
@@ -58,6 +60,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.aggregators import async_tool_messages
+from pipecat.processors.aggregators.function_call_limit import FunctionCallLimitConfig
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     AssistantThoughtMessage,
@@ -2892,6 +2895,154 @@ class TestRealtimeServiceModeAggregator(unittest.IsolatedAsyncioTestCase):
         assistant = LLMAssistantAggregator(context, _realtime_service_mode=True)
         with self.assertRaises(RuntimeError):
             assistant._require_paired_user_aggregator()
+
+
+LIMIT_PROMPT = "Answer now with what you have."
+
+
+def _response_with_function_call(
+    tool_call_id: str, *, text: str = "", speech: str = ""
+) -> list[Frame]:
+    """One LLM response that calls a function, then the function's result.
+
+    ``speech`` is spoken while the function runs, as a ``TTSSpeakFrame`` is.
+    """
+    call = FunctionCallFromLLM(
+        function_name="lookup", tool_call_id=tool_call_id, arguments={}, context=None
+    )
+    return [
+        LLMFullResponseStartFrame(),
+        *([LLMTextFrame(text)] if text else []),
+        FunctionCallsStartedFrame(function_calls=[call]),
+        FunctionCallInProgressFrame(
+            function_name="lookup",
+            tool_call_id=tool_call_id,
+            arguments={},
+            cancel_on_interruption=True,
+        ),
+        LLMFullResponseEndFrame(),
+        *(_speech(speech) if speech else []),
+        FunctionCallResultFrame(
+            function_name="lookup", tool_call_id=tool_call_id, arguments={}, result="found"
+        ),
+        SleepFrame(sleep=0.05),
+    ]
+
+
+def _response(text: str = "") -> list[Frame]:
+    """One LLM response with no function call."""
+    return [
+        LLMFullResponseStartFrame(),
+        *([LLMTextFrame(text)] if text else []),
+        LLMFullResponseEndFrame(),
+    ]
+
+
+def _speech(text: str) -> list[Frame]:
+    """One utterance outside an LLM response."""
+    return [
+        TTSStartedFrame(append_to_context=True),
+        TTSTextFrame(text, aggregated_by=AggregationType.SENTENCE),
+        LLMAssistantPushAggregationFrame(),
+    ]
+
+
+@dataclass
+class _LLMRun:
+    tool_choice: Any
+    last_message: Any
+
+
+class _LLMRunRecorder(FrameProcessor):
+    """Records the tool choice and the last message of each LLM run pushed upstream."""
+
+    def __init__(self):
+        super().__init__()
+        self.runs: list[_LLMRun] = []
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+        if isinstance(frame, LLMContextFrame) and direction == FrameDirection.UPSTREAM:
+            context = frame.context
+            self.runs.append(_LLMRun(context.tool_choice, context.messages[-1]))
+        await self.push_frame(frame, direction)
+
+
+class TestFunctionCallLimit(unittest.IsolatedAsyncioTestCase):
+    """Coverage for ``LLMAssistantAggregatorParams.function_call_limit``."""
+
+    async def _run(self, frames: list[Frame], limit: FunctionCallLimitConfig | None):
+        context = LLMContext(tools=_tools("lookup"), tool_choice="auto")
+        params = LLMAssistantAggregatorParams(function_call_limit=limit)
+        recorder = _LLMRunRecorder()
+        pipeline = Pipeline([recorder, LLMAssistantAggregator(context, params=params)])
+        await run_test(pipeline, frames_to_send=frames)
+        return context, recorder.runs
+
+    async def test_run_past_the_limit_gets_tool_choice_none_and_the_prompt(self):
+        limit = FunctionCallLimitConfig(max_iterations=2, prompt=LIMIT_PROMPT)
+        frames = [
+            *_response_with_function_call("1", text="Let me check."),
+            *_response_with_function_call("2", text="One more look."),
+            *_response("Here is the answer."),
+        ]
+
+        context, runs = await self._run(frames, limit)
+
+        self.assertEqual([run.tool_choice for run in runs], ["auto", "none"])
+        self.assertEqual(runs[1].last_message, {"role": "developer", "content": LIMIT_PROMPT})
+        self.assertEqual(context.tool_choice, "auto")
+
+    async def test_empty_response_ends_the_limit(self):
+        limit = FunctionCallLimitConfig(max_iterations=1, prompt=LIMIT_PROMPT)
+        frames = [*_response_with_function_call("1"), *_response()]
+
+        context, runs = await self._run(frames, limit)
+
+        self.assertEqual([run.tool_choice for run in runs], ["none"])
+        self.assertEqual(context.tool_choice, "auto")
+
+    async def test_speech_while_a_function_runs_keeps_the_chain(self):
+        limit = FunctionCallLimitConfig(max_iterations=1, prompt=LIMIT_PROMPT)
+        frames = _response_with_function_call("1", speech="Let me check on that.")
+
+        _, runs = await self._run(frames, limit)
+
+        self.assertEqual([run.tool_choice for run in runs], ["none"])
+
+    async def test_run_deferred_to_the_bot_stop_gets_the_limit(self):
+        limit = FunctionCallLimitConfig(max_iterations=1, prompt=LIMIT_PROMPT)
+        frames = [
+            BotStartedSpeakingFrame(),
+            *_response_with_function_call("1", text="Let me check."),
+            BotStoppedSpeakingFrame(),
+        ]
+
+        _, runs = await self._run(frames, limit)
+
+        self.assertEqual([run.tool_choice for run in runs], ["none"])
+        self.assertEqual(runs[0].last_message, {"role": "developer", "content": LIMIT_PROMPT})
+
+    async def test_interruption_ends_the_limit(self):
+        limit = FunctionCallLimitConfig(max_iterations=1, prompt=LIMIT_PROMPT)
+        frames = [
+            *_response_with_function_call("1"),
+            InterruptionFrame(),
+            *_response_with_function_call("2"),
+        ]
+
+        _, runs = await self._run(frames, limit)
+
+        self.assertEqual([run.tool_choice for run in runs], ["none", "none"])
+        self.assertEqual([run.last_message["content"] for run in runs], [LIMIT_PROMPT] * 2)
+
+    async def test_no_limit_by_default(self):
+        frames = [frame for i in range(3) for frame in _response_with_function_call(str(i))]
+
+        context, runs = await self._run(frames, None)
+
+        self.assertEqual([run.tool_choice for run in runs], ["auto"] * 3)
+        self.assertEqual(_developer_messages(context), [])
 
 
 if __name__ == "__main__":
