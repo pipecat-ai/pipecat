@@ -1658,6 +1658,12 @@ class DailyTransportClient(EventHandler):
         """
         logger.debug(f"Transcription started: {status}")
         self._transcription_status = status
+
+        # Daily reports this for every transcription in the room, not just ours,
+        # and an empty allow-list tells it to transcribe nobody.
+        if not self._params.transcription_enabled:
+            return
+
         self._call_event_callback(self.update_transcription, self._transcription_ids)
 
     def on_transcription_stopped(self, stopped_by, stopped_by_error):
