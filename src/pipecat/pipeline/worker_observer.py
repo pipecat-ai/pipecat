@@ -110,20 +110,28 @@ class WorkerObserver(BaseObserver):
     async def remove_observer(self, observer: BaseObserver):
         """Remove an observer and clean up its resources.
 
+        When called from the observer's own callback, the callback finishes
+        before its proxy exits. Pending events for that proxy are discarded.
+
         Args:
             observer: The observer to remove.
         """
         # If the observer has a proxy, remove it.
+        proxy = None
         if self._proxies and observer in self._proxies:
             proxy = self._proxies[observer]
             # Remove the proxy so it doesn't get called anymore.
             del self._proxies[observer]
-            # Cancel the proxy worker right away.
-            await self.cancel_task(proxy.task)
+            # A self-removing proxy exits after its current callback returns.
+            if proxy.task is not asyncio.current_task():
+                await self.cancel_task(proxy.task)
 
         # Remove the observer from the list.
         if observer in self._observers:
             self._observers.remove(observer)
+
+        if proxy is not None:
+            await observer.cleanup()
 
     async def setup(self, task_manager: BaseTaskManager):
         """Set up a proxy for every managed observer.
@@ -232,6 +240,7 @@ class WorkerObserver(BaseObserver):
 
     async def _proxy_task_handler(self, queue: asyncio.Queue, observer: BaseObserver):
         """Handle frame processing for a single observer."""
+        task = asyncio.current_task()
         while True:
             data = await queue.get()
 
@@ -247,3 +256,8 @@ class WorkerObserver(BaseObserver):
                 await observer.on_startup_warmup(data)
 
             queue.task_done()
+
+            # Reattaching the same observer creates a different proxy task.
+            proxy = self._proxies.get(observer) if self._proxies is not None else None
+            if proxy is None or proxy.task is not task:
+                return
