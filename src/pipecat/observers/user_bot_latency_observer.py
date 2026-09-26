@@ -98,11 +98,6 @@ MIN_CONTRIBUTION_SECS = 0.005
 # would show as zero and so is not part of the timeline at all.
 PRINTS_AS_ZERO_SECS = 0.0005
 
-# A streaming STT service can finalize during the silence VAD is waiting out.
-# Replay that transcript just after VAD's stop moment so the contribution
-# timeline keeps its canonical moment order and still names the STT stage.
-_PRE_VAD_STOP_EPSILON_SECS = 0.001
-
 
 class _MomentKind(StrEnum):
     """A point in a user-to-bot cycle that a contribution can start or end at.
@@ -403,7 +398,8 @@ class LatencyBreakdown(BaseModel):
 
     Collected between ``VADUserStoppedSpeakingFrame`` and
     ``BotStartedSpeakingFrame`` when ``enable_metrics=True`` in
-    :class:`~pipecat.pipeline.worker.PipelineParams`.
+    :class:`~pipecat.pipeline.worker.PipelineParams`. Also includes STT
+    metrics from the current user turn that arrive before VAD stop.
 
     Parameters:
         ttfb: Time-to-first-byte metrics from each service in the pipeline.
@@ -612,7 +608,7 @@ class UserBotLatencyObserver(BaseObserver):
         # that current user turn until VAD opens the measurement window.
         self._awaiting_vad_stop = False
         self._pre_vad_stop_transcript_source: str | None = None
-        self._pre_vad_stop_metrics: list[tuple[MetricsFrame, float]] = []
+        self._pre_vad_stop_ttfb: dict[str, TTFBBreakdownMetrics] = {}
 
         self._register_event_handler("on_latency_measured")
         self._register_event_handler("on_latency_breakdown")
@@ -682,6 +678,7 @@ class UserBotLatencyObserver(BaseObserver):
             # earlier until the LLM is asked.
             if not self._seen(_MomentKind.LLM_REQUEST):
                 if self._measuring:
+                    self._collect_pre_vad_stop_ttfb(data.source.name)
                     self._moments = [
                         m for m in self._moments if m.kind is not _MomentKind.TRANSCRIPT
                     ]
@@ -689,6 +686,7 @@ class UserBotLatencyObserver(BaseObserver):
                 elif self._awaiting_vad_stop:
                     self._pre_vad_stop_transcript_source = data.source.name
         elif isinstance(data.frame, LLMFullResponseStartFrame):
+            self._pre_vad_stop_ttfb.clear()
             self._llm_request = self._mark(_MomentKind.LLM_REQUEST, source=data.source.name)
         elif isinstance(data.frame, LLMMarkerFrame):
             # A stand-alone marker holds the turn open; one that prefixes a
@@ -1032,32 +1030,21 @@ class UserBotLatencyObserver(BaseObserver):
         )
         if self._user_stopped_time is None and not waiting_for_first_speech:
             if self._awaiting_vad_stop:
-                self._pre_vad_stop_metrics.append((frame, self._now()))
+                # Keep at most one candidate per processor. A transcript
+                # identifies which processor's TTFB belongs to this turn;
+                # late LLM/TTS metrics from an interrupted reply do not.
+                now = self._now()
+                for metric in frame.data:
+                    if isinstance(metric, TTFBMetricsData) and metric.value > 0:
+                        self._pre_vad_stop_ttfb[metric.processor] = TTFBBreakdownMetrics(
+                            processor=metric.processor,
+                            model=metric.model,
+                            start_time=now - metric.value,
+                            duration_secs=metric.value,
+                        )
             return
 
-        self._accumulate_metrics(frame, now=self._now())
-
-    def _flush_pre_vad_stop_events(self, vad_stop_time: float):
-        """Record current-turn STT events that arrived before VAD stopped.
-
-        The observer's contribution spans require VAD stop to precede the
-        transcript. A streaming STT service can finalize first, so replay its
-        final transcript just after VAD stop while retaining the original
-        timestamp used to place its metrics.
-        """
-        if self._pre_vad_stop_transcript_source is not None:
-            self._mark(
-                _MomentKind.TRANSCRIPT,
-                at=vad_stop_time + _PRE_VAD_STOP_EPSILON_SECS,
-                source=self._pre_vad_stop_transcript_source,
-            )
-        for frame, at in self._pre_vad_stop_metrics:
-            self._accumulate_metrics(frame, now=at)
-        self._pre_vad_stop_transcript_source = None
-        self._pre_vad_stop_metrics = []
-
-    def _accumulate_metrics(self, frame: MetricsFrame, *, now: float):
-        """Add metric data measured during the current latency window."""
+        now = self._now()
         for metrics_data in frame.data:
             if isinstance(metrics_data, TTFBMetricsData) and metrics_data.value > 0:
                 self._ttfb.append(
@@ -1088,6 +1075,25 @@ class UserBotLatencyObserver(BaseObserver):
                         duration_secs=metrics_data.value,
                     )
 
+    def _flush_pre_vad_stop_events(self, vad_stop_time: float):
+        """Place an early transcript at VAD stop without adding latency.
+
+        Endpointing and streaming STT run concurrently. A transcript already
+        available at VAD stop adds no transcription wait to the critical path;
+        its service's TTFB retains the original measurement timestamp.
+        """
+        source = self._pre_vad_stop_transcript_source
+        if source is not None:
+            self._mark(_MomentKind.TRANSCRIPT, at=vad_stop_time, source=source)
+            self._collect_pre_vad_stop_ttfb(source)
+        self._pre_vad_stop_transcript_source = None
+
+    def _collect_pre_vad_stop_ttfb(self, source: str):
+        """Collect an early TTFB only for the processor supplying a transcript."""
+        metric = self._pre_vad_stop_ttfb.pop(source, None)
+        if metric is not None:
+            self._ttfb.append(metric)
+
     def _reset_accumulators(self):
         """Clear per-cycle metric accumulators."""
         self._moments = []
@@ -1099,4 +1105,4 @@ class UserBotLatencyObserver(BaseObserver):
         self._function_call_starts = {}
         self._function_call_metrics = []
         self._pre_vad_stop_transcript_source = None
-        self._pre_vad_stop_metrics = []
+        self._pre_vad_stop_ttfb = {}
