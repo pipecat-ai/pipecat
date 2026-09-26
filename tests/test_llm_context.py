@@ -342,5 +342,221 @@ class TestGetMessagesTruncateLargeValues(unittest.TestCase):
         self.assertEqual(specific_msg.message["signature"], long_sig)
 
 
+class TestCreateFileMessage(unittest.IsolatedAsyncioTestCase):
+    """Tests for LLMContext.create_file_message and create_file_url_message."""
+
+    async def test_bytes_type_produces_file_content_item(self):
+        b64 = "JVBERi0xLjQ="
+        msg = await LLMContext.create_file_message(
+            type="bytes", format="application/pdf", file=f"data:application/pdf;base64,{b64}"
+        )
+        self.assertEqual(msg["role"], "user")
+        content = msg["content"]
+        self.assertEqual(len(content), 1)
+        item = content[0]
+        self.assertEqual(item["type"], "file_base64")
+        self.assertEqual(item["file"]["file_data"], f"data:application/pdf;base64,{b64}")
+        self.assertEqual(item["file"]["mime_type"], "application/pdf")
+
+    async def test_bytes_type_includes_filename_when_provided(self):
+        msg = await LLMContext.create_file_message(
+            type="bytes",
+            format="application/pdf",
+            file="data:application/pdf;base64,abc123",
+            name="report.pdf",
+        )
+        self.assertEqual(msg["content"][0]["file"]["filename"], "report.pdf")
+
+    async def test_bytes_type_filename_empty_string_when_not_provided(self):
+        msg = await LLMContext.create_file_message(
+            type="bytes", format="application/pdf", file="data:application/pdf;base64,abc123"
+        )
+        self.assertEqual(msg["content"][0]["file"]["filename"], "")
+
+    async def test_bytes_type_includes_text_when_provided(self):
+        msg = await LLMContext.create_file_message(
+            type="bytes",
+            format="application/pdf",
+            file="data:application/pdf;base64,abc123",
+            text="Please summarize this document",
+        )
+        content = msg["content"]
+        self.assertEqual(len(content), 2)
+        self.assertEqual(content[0]["type"], "text")
+        self.assertEqual(content[0]["text"], "Please summarize this document")
+        self.assertEqual(content[1]["type"], "file_base64")
+
+    async def test_url_type_delegates_to_file_url_message(self):
+        msg = await LLMContext.create_file_message(
+            type="url",
+            format="application/pdf",
+            file="https://example.com/doc.pdf",
+            name="doc.pdf",
+        )
+        content = msg["content"]
+        self.assertEqual(len(content), 1)
+        item = content[0]
+        self.assertEqual(item["type"], "file_url")
+        self.assertEqual(item["file"]["url"], "https://example.com/doc.pdf")
+        self.assertEqual(item["file"]["filename"], "doc.pdf")
+        self.assertEqual(item["file"]["mime_type"], "application/pdf")
+
+    def test_create_file_url_message_structure(self):
+        msg = LLMContext.create_file_url_message(
+            format="image/jpeg",
+            url="https://example.com/photo.jpg",
+            filename="photo.jpg",
+            text="What is in this image?",
+        )
+        content = msg["content"]
+        self.assertEqual(len(content), 2)
+        self.assertEqual(content[0]["type"], "text")
+        self.assertEqual(content[0]["text"], "What is in this image?")
+        self.assertEqual(content[1]["type"], "file_url")
+        self.assertEqual(content[1]["file"]["url"], "https://example.com/photo.jpg")
+        self.assertEqual(content[1]["file"]["filename"], "photo.jpg")
+        self.assertEqual(content[1]["file"]["mime_type"], "image/jpeg")
+
+    async def test_add_file_frame_message_appends_to_context(self):
+        context = LLMContext()
+        await context.add_file_frame_message(
+            type="bytes",
+            format="application/pdf",
+            file="data:application/pdf;base64,abc123",
+            name="test.pdf",
+        )
+        messages = context.get_messages()
+        self.assertEqual(len(messages), 1)
+        self.assertEqual(messages[0]["role"], "user")
+        self.assertEqual(messages[0]["content"][0]["file"]["filename"], "test.pdf")
+
+
+class TestRemoveInvalidFileMessage(unittest.IsolatedAsyncioTestCase):
+    """Tests for LLMContext.remove_invalid_file_message.
+
+    Deciding *when* a request was invalid is the calling LLM service's job
+    (it's the one that understands its own provider's error shape); these
+    tests cover which message gets picked, derived purely from message-list
+    structure — no separate tracking state. See test_openai_llm_timeout.py
+    and test_google_stream_timeout.py for the service-level wiring.
+    """
+
+    async def test_removes_the_only_file_message(self):
+        context = LLMContext()
+        context.add_message({"role": "user", "content": "hello"})
+        await context.add_file_frame_message(
+            type="bytes", format="application/pdf", file="data:application/pdf;base64,abc123"
+        )
+
+        removed = context.remove_invalid_file_message()
+
+        self.assertTrue(removed)
+        messages = context.get_messages()
+        self.assertEqual(len(messages), 1)
+        self.assertEqual(messages[0]["content"], "hello")
+
+    async def test_recognizes_file_url_type(self):
+        context = LLMContext(
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "file_url", "file": {"url": "https://example.com/doc.pdf"}}
+                    ],
+                }
+            ]
+        )
+
+        removed = context.remove_invalid_file_message()
+
+        self.assertTrue(removed)
+        self.assertEqual(len(context.get_messages()), 0)
+
+    async def test_removes_oldest_of_several_pending_files(self):
+        """Several files sent before either went through a completion.
+
+        Removing the oldest first means a wrong guess self-corrects: if it
+        wasn't the culprit, the next retry fails again and removes the
+        next-oldest.
+        """
+        context = LLMContext()
+        await context.add_file_frame_message(
+            type="bytes", format="application/pdf", file="data:application/pdf;base64,first"
+        )
+        await context.add_file_frame_message(
+            type="bytes", format="application/pdf", file="data:application/pdf;base64,second"
+        )
+
+        removed = context.remove_invalid_file_message()
+
+        self.assertTrue(removed)
+        messages = context.get_messages()
+        self.assertEqual(len(messages), 1)
+        self.assertEqual(
+            messages[0]["content"][0]["file"]["file_data"],
+            "data:application/pdf;base64,second",
+        )
+
+    async def test_does_not_remove_a_file_already_confirmed_by_an_assistant_reply(self):
+        """A file from an already-successful turn is never a removal candidate."""
+        context = LLMContext()
+        await context.add_file_frame_message(
+            type="bytes", format="application/pdf", file="data:application/pdf;base64,abc123"
+        )
+        context.add_message({"role": "assistant", "content": "Here's a summary."})
+        context.add_message({"role": "user", "content": "what does it say?"})
+
+        removed = context.remove_invalid_file_message()
+
+        self.assertFalse(removed)
+        self.assertEqual(len(context.get_messages()), 3)
+
+    async def test_removes_file_message_despite_a_newer_non_file_message(self):
+        """A file is still found even if it's no longer the newest message.
+
+        A file arriving alongside a separately-aggregated user utterance
+        (e.g. the user was mid-turn when the file was sent) can end up with a
+        plain-text message added after it, before either has gone through a
+        completion. Since no assistant reply has confirmed either, the file
+        is still the right removal candidate.
+        """
+        context = LLMContext()
+        await context.add_file_frame_message(
+            type="bytes", format="application/pdf", file="data:application/pdf;base64,abc123"
+        )
+        context.add_message({"role": "user", "content": "what does it say?"})
+
+        removed = context.remove_invalid_file_message()
+
+        self.assertTrue(removed)
+        messages = context.get_messages()
+        self.assertEqual(len(messages), 1)
+        self.assertEqual(messages[0]["content"], "what does it say?")
+
+    async def test_returns_false_when_no_file_message_present(self):
+        context = LLMContext(messages=[{"role": "user", "content": "hello"}])
+
+        removed = context.remove_invalid_file_message()
+
+        self.assertFalse(removed)
+        self.assertEqual(len(context.get_messages()), 1)
+
+    async def test_skips_llm_specific_messages(self):
+        context = LLMContext(
+            messages=[
+                LLMSpecificMessage(
+                    llm="openai",
+                    message={"role": "user", "content": [{"type": "file_base64", "file": {}}]},
+                ),
+                {"role": "user", "content": "plain text"},
+            ]
+        )
+
+        removed = context.remove_invalid_file_message()
+
+        self.assertFalse(removed)
+        self.assertEqual(len(context.get_messages()), 2)
+
+
 if __name__ == "__main__":
     unittest.main()
