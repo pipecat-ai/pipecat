@@ -141,7 +141,7 @@ Supported expectation fields (per event):
 
 ``eval: <str>``
     natural-language criterion the event's text content must satisfy, evaluated
-    by a judge LLM (see :mod:`pipecat.evals.judge`).
+    by the judge (see :mod:`pipecat.evals.judge`).
 
     On ``function_call`` the criterion is about the call instead: each call
     ``calls:`` (or the ``name:``/``args:`` shorthand) matches is put to the
@@ -251,15 +251,17 @@ Top-level optional fields:
     spoken turns all name an ``audio:`` recording needs no ``speech:`` block.
 
 ``judge:``
-    what the judge evaluates, and with which LLM::
+    what the judge evaluates, and what decides the verdicts::
 
         judge:
           modality: audio          # audio | text (default text)
-          eval:                    # the judge LLM (default ollama)
+          eval:                    # what judges (default ollama)
             service: ollama
             model: gemma4:12b
-            # or, for any other LLM: factory: my_evals.judge (a callable
-            # taking this mapping and returning an OpenAI-compatible service)
+            # or factory: my_evals.judge, a callable taking this mapping and
+            # returning a BaseClassifier or an OpenAI-compatible LLM service
+            # explainer: an LLM block giving the reasons behind the verdicts
+            # (see pipecat.evals.judge)
           transcription:           # required when modality is audio
             service: moonshine     # STT for the bot's audio (or whisper, or a factory)
             model: small-streaming # optional

@@ -11,15 +11,19 @@ import unittest
 import warnings
 from unittest.mock import patch
 
+from pipecat.classifiers.base_classifier import BaseClassifier
+from pipecat.classifiers.llm.classifier import LLMClassifier
 from pipecat.evals.judge import EvalJudge
 from pipecat.evals.services import (
     _cartesia_service,
     _cfg_language,
+    classifier_from_config,
     llm_service_from_config,
     stt_service_from_config,
     tts_service_from_config,
 )
 from pipecat.evals.tts import CachingTTSService, tts_cache_key, tts_sample_rate
+from pipecat.services.llm_service import LLMService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.types import NOT_GIVEN
 
@@ -32,7 +36,17 @@ def _fake_tts(config):
     return ("FAKE_TTS", config)
 
 
+class _FakeJudgeLLM(LLMService):
+    def __init__(self, config):
+        super().__init__()
+        self.config = config
+
+
 def _fake_judge_llm(config):
+    return _FakeJudgeLLM(config)
+
+
+def _not_a_judge(config):
     return ("FAKE_JUDGE", config)
 
 
@@ -213,6 +227,46 @@ class TestCachingTTSCache(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(inner24.calls, 1)
 
 
+def _fake_classifier(config):
+    return _FakeClassifier(config)
+
+
+class _FakeClassifier(BaseClassifier):
+    def __init__(self, config):
+        super().__init__()
+        self.config = config
+
+    async def _ask(self, state, questions):
+        raise NotImplementedError
+
+
+class TestClassifierFromConfig(unittest.TestCase):
+    def test_an_llm_block_builds_an_llm_classifier_over_it(self):
+        classifier = classifier_from_config({"service": "ollama", "model": "a"}, where="judge.eval")
+        self.assertIsInstance(classifier, LLMClassifier)
+        self.assertEqual(classifier.llm.settings.model, "a")
+
+    def test_a_factory_returning_a_classifier_is_used_as_is(self):
+        config = {"factory": "tests.test_evals_services._fake_classifier", "model": "x"}
+        classifier = classifier_from_config(config, where="judge.eval")
+        self.assertIsInstance(classifier, _FakeClassifier)
+        self.assertIs(classifier.config, config)
+
+    def test_a_factory_returning_an_llm_is_classified_with(self):
+        classifier = classifier_from_config(
+            {"factory": "tests.test_evals_services._fake_judge_llm"}, where="judge.eval"
+        )
+        self.assertIsInstance(classifier, LLMClassifier)
+        self.assertIsInstance(classifier.llm, _FakeJudgeLLM)
+
+    def test_a_factory_returning_anything_else_is_an_error(self):
+        with self.assertRaises(ValueError) as raised:
+            classifier_from_config(
+                {"factory": "tests.test_evals_services._not_a_judge"}, where="judge.eval"
+            )
+        self.assertIn("tuple", str(raised.exception))
+
+
 class TestJudgeFromConfig(unittest.TestCase):
     def test_unknown_service_rejected(self):
         with self.assertRaises(ValueError):
@@ -221,7 +275,7 @@ class TestJudgeFromConfig(unittest.TestCase):
     def test_factory_escape_hatch(self):
         j = EvalJudge.from_config({"factory": "tests.test_evals_services._fake_judge_llm"})
         self.assertIsNotNone(j)
-        self.assertEqual(j._service[0], "FAKE_JUDGE")
+        self.assertIsInstance(j.classifier.llm, _FakeJudgeLLM)
 
 
 if __name__ == "__main__":

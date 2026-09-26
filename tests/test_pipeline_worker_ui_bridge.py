@@ -286,3 +286,22 @@ class TestUISpeakBridge(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestRTVIDefault(unittest.TestCase):
+    """RTVI is on by default for the worker that owns the client, and off for a bridged one."""
+
+    def _worker(self, **kwargs) -> PipelineWorker:
+        return PipelineWorker(
+            Pipeline([IdentityFilter()]), name="w", cancel_on_idle_timeout=False, **kwargs
+        )
+
+    def test_an_unbridged_worker_has_rtvi(self):
+        self.assertIsNotNone(self._worker()._rtvi)
+
+    def test_a_bridged_worker_has_no_rtvi(self):
+        self.assertIsNone(self._worker(bridged=())._rtvi)
+
+    def test_an_explicit_choice_wins(self):
+        self.assertIsNotNone(self._worker(bridged=(), enable_rtvi=True)._rtvi)
+        self.assertIsNone(self._worker(enable_rtvi=False)._rtvi)

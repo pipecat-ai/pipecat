@@ -46,6 +46,7 @@ jobs:
             --extra jev \
             --extra langchain \
             --extra livekit \
+            --extra mcp \
             --extra moq \
             --extra pgmq \
             --extra piper \

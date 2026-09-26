@@ -126,7 +126,6 @@ class LLMWorker(PipelineWorker):
             pipeline,
             name=name,
             bridged=bridged,
-            enable_rtvi=bridged is None,
             idle_timeout_secs=None,
             params=PipelineParams(
                 enable_metrics=True,

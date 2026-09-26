@@ -25,7 +25,14 @@ that rejects tool definitions; such an entry runs the scenario files without
 the tool scenarios.
 
 `scenarios/<category>.yaml` holds the scenarios of one category, sharing the
-local Ollama judge in `judge_text.yaml`. Each scenario's `context:` is the
+judge in `judge_text.yaml`: TypeSafe's Jev (`factory:
+evals.judges.typesafe_classifier`, see `evals/judges.py`), with `gemma4:12b`
+on a local Ollama as the
+explainer that gives the reason for every `no` and every verdict Jev is unsure
+of. Every judged reply follows a `●`, so it's a final answer, and the judge
+sets `allow_continue: false`: a reply is right or wrong, never "still working
+on it". To judge with Ollama alone, replace the `eval:` block with the
+explainer's own. Each scenario's `context:` is the
 history the assistant aggregator would have left (`● reply` entries, bare `◐`
 or `○` entries, and the developer message that kicked the conversation off),
 and its `turns:` carry the user's words with what the LLM must produce:
@@ -67,12 +74,15 @@ TURN_COMPLETION_PROMPT=v3 evals/turn-completion/run.sh -n v3  # a prompt variant
 ```
 
 `run.sh` is `pipecat eval suite` over the manifest, which spawns a bot per
-scenario run, eight at a time, taking the queue round-robin across the models
-so a slow provider holds only its share of the slots. A full sweep of about
-8,500 runs takes around an hour. Entries whose provider rate-limits (Groq,
-NVIDIA, Mistral Large) cap their own concurrency; Ollama is capped at one
-because the judge shares it, and is usually left out. Keys come from the
-repo's `.env`.
+scenario run. Up to 32 runs go at once, taken in manifest order, so no slot
+sits idle while a model still has scenarios; a full sweep is about 8,500 runs. An expectation without its own `within_ms` times out
+after 30 s (`run.sh` passes `-t 30`, and a `-t` of your own overrides it),
+since a model that follows the protocol answers within seconds. Entries whose
+provider rate-limits (Groq, NVIDIA, Mistral Large) cap their own concurrency;
+Ollama is capped at one because the judge's explainer shares it, and is
+usually left out. The models' keys come from the repo's `.env`; the judge's
+`TYPESAFE_API_KEY` must be exported in the shell, since the harness doesn't
+read `.env`.
 
 A run writes `test-runs/<name>/results.jsonl` (one record per scenario run: the
 model, the scenario, pass or fail, each expectation and what it matched, and
