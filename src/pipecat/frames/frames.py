@@ -628,10 +628,22 @@ class LLMContextFrame(Frame):
             provisional context that is not part of the conversation. Its
             response must not reach the user or the context until the turn is
             confirmed, and the service must not execute tool calls for it.
+        appended_messages: Messages explicitly appended since the previous
+            context frame. They are already in context; continuous-session
+            services use them to deliver new input without replaying history.
+        messages: Shallow snapshot of the message list when this frame was
+            created. Initial session seeding uses it so later queued appends
+            are not included prematurely through the shared context.
     """
 
     context: LLMContext
     speculation: bool = False
+    appended_messages: list[LLMContextMessage] = field(default_factory=list)
+    messages: list[LLMContextMessage] = field(init=False, repr=False)
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.messages = list(self.context.get_messages())
 
 
 @dataclass
