@@ -261,8 +261,8 @@ class JobGroupContext:
 
     On normal completion, results are available via ``responses``.
     On worker error (with ``cancel_on_error=True``) or timeout, raises
-    ``JobGroupError``. If the ``async with`` block raises, remaining
-    jobs are cancelled.
+    ``JobGroupError``. If the ``async with`` block raises, or the caller
+    is cancelled while waiting for responses on exit, remaining jobs are cancelled.
 
     Example::
 
@@ -343,7 +343,16 @@ class JobGroupContext:
             return False
 
         assert self._group is not None
-        await self._group.wait()
+        try:
+            await self._group.wait()
+        except asyncio.CancelledError:
+            if self._group.job_id in self._worker.job_groups:
+                await asyncio.shield(
+                    self._worker.cancel_job_group(
+                        self._group.job_id, reason="context exited with error"
+                    )
+                )
+            raise
         return False
 
 
@@ -356,7 +365,8 @@ class JobContext:
 
     On normal completion, the result is available via ``response``.
     On worker error or timeout, raises ``JobError``. If the
-    ``async with`` block raises, the job is cancelled.
+    ``async with`` block raises, or the caller is cancelled while waiting
+    for the response on exit, the job is cancelled.
 
     Example::
 
@@ -436,6 +446,14 @@ class JobContext:
         assert self._group is not None
         try:
             await self._group.wait()
+        except asyncio.CancelledError:
+            if self._group.job_id in self._worker.job_groups:
+                await asyncio.shield(
+                    self._worker.cancel_job_group(
+                        self._group.job_id, reason="context exited with error"
+                    )
+                )
+            raise
         except JobGroupError as e:
             raise JobError(str(e)) from e
         return False
