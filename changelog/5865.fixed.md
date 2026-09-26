@@ -1,0 +1,1 @@
+- Fixed `RNNoiseFilter` failing to process audio with an incompatible `audiolab` release.

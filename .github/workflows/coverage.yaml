@@ -46,6 +46,7 @@ jobs:
             --extra pgmq \
             --extra piper \
             --extra redis \
+            --extra rnnoise \
             --extra runner \
             --extra sagemaker \
             --extra sarvam \

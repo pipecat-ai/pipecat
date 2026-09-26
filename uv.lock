@@ -441,7 +441,7 @@ wheels = [
 
 [[package]]
 name = "audiolab"
-version = "0.5.2"
+version = "0.5.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "av" },
@@ -451,11 +451,10 @@ dependencies = [
     { name = "requests" },
     { name = "smart-open" },
     { name = "soundfile" },
-    { name = "soxr" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/35/e4/465891822307e4ab4a7665fab9c3b5059ecc3d8e39f033b6d05392400bdb/audiolab-0.5.2.tar.gz", hash = "sha256:f9e8da42784dfd40595bd4fbda24ad96a7e07d261cf4caac74d15bb161293ba6", size = 46682, upload-time = "2026-08-27T09:06:55.323Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/6d/94/80508c4e87b7da67e0817c5dd6863716ccfd0e7d706c931d9dc6c06d6363/audiolab-0.5.1.tar.gz", hash = "sha256:8f19a7d1cc915c1f9e25fc4f1c61ed3c86ea30147d60e3385ddf027c43cda3e2", size = 33277, upload-time = "2026-03-25T07:41:19.247Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/94/81/5bff5f43003dc2b72497c85c391cb87e1a9ff0b55c359bdf774fe8779c36/audiolab-0.5.2-py3-none-any.whl", hash = "sha256:657cbabc358d6ff04b69f13d52ffa53288acf4cbcbc792c1cc8b112b670749da", size = 61895, upload-time = "2026-08-27T09:06:54.193Z" },
+    { url = "https://files.pythonhosted.org/packages/4e/4f/e80942de3c6f4338334473fe9d5cf19a07eee967306524fc9708b2336bb2/audiolab-0.5.1-py3-none-any.whl", hash = "sha256:89e0549083aa78423f9f8ca16963595f7923b51511ff77d32eeb6b48ec388633", size = 52355, upload-time = "2026-03-25T07:41:18.291Z" },
 ]
 
 [[package]]
@@ -5831,6 +5830,7 @@ redis = [
     { name = "redis", extra = ["hiredis"] },
 ]
 rnnoise = [
+    { name = "audiolab" },
     { name = "av" },
     { name = "pyrnnoise" },
 ]
@@ -5915,6 +5915,7 @@ requires-dist = [
     { name = "aiortc", marker = "extra == 'webrtc'", specifier = ">=1.14.0,<2" },
     { name = "anthropic", marker = "extra == 'anthropic'", specifier = ">=0.49.0,<2" },
     { name = "asyncpg", marker = "extra == 'pgmq'", specifier = ">=0.30.0" },
+    { name = "audiolab", marker = "extra == 'rnnoise'", specifier = "<0.5.2" },
     { name = "audioop-lts", marker = "python_full_version >= '3.13'", specifier = "~=0.2.1" },
     { name = "av", marker = "extra == 'rnnoise'", specifier = "<17.1.0" },
     { name = "aws-sdk-bedrock-runtime", marker = "python_full_version >= '3.12' and extra == 'aws-nova-sonic'", specifier = ">=0.6.0,<0.10" },
