@@ -31,6 +31,9 @@ class TransportParams(BaseModel):
         audio_out_channels: Number of output audio channels.
         audio_out_bitrate: Output audio bitrate in bits per second.
         audio_out_10ms_chunks: Number of 10ms chunks to buffer for output.
+        audio_out_filter: Audio filter to apply to output audio of the default destination,
+            before the mixer. Audio the transport generates itself (mixer audio, end silence,
+            DTMF tones) is not filtered.
         audio_out_mixer: Audio mixer instance or destination mapping.
         audio_out_destinations: List of audio output destination identifiers.
         audio_out_end_silence_secs: How much silence to send after an EndFrame (0 for no silence).
@@ -70,6 +73,7 @@ class TransportParams(BaseModel):
     audio_out_channels: int = 1
     audio_out_bitrate: int = 96000
     audio_out_10ms_chunks: int = 4
+    audio_out_filter: BaseAudioFilter | None = None
     audio_out_mixer: BaseAudioMixer | Mapping[str | None, BaseAudioMixer] | None = None
     audio_out_destinations: list[str] = Field(default_factory=list)
     audio_out_end_silence_secs: int = 2

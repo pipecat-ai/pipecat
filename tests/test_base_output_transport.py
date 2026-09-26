@@ -7,12 +7,14 @@
 """Tests for interruption handling in :class:`BaseOutputTransport`."""
 
 import asyncio
+import hashlib
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import numpy as np
 
+from pipecat.audio.filters.base_audio_filter import BaseAudioFilter
 from pipecat.audio.mixers.base_audio_mixer import BaseAudioMixer
 from pipecat.clocks.system_clock import SystemClock
 from pipecat.frames.frames import (
@@ -20,6 +22,9 @@ from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
+    FilterControlFrame,
+    FilterEnableFrame,
+    FilterUpdateSettingsFrame,
     InterruptionFrame,
     MixerControlFrame,
     OutputAudioRawFrame,
@@ -49,12 +54,46 @@ class _PassthroughMixer(BaseAudioMixer):
         return audio
 
 
+class _InvertingFilter(BaseAudioFilter):
+    """Filter that inverts every byte and records its calls in order."""
+
+    def __init__(self):
+        self.sample_rate = 0
+        self.stops = 0
+        self.calls: list[str | FilterControlFrame] = []
+
+    async def start(self, sample_rate: int):
+        self.sample_rate = sample_rate
+
+    async def stop(self):
+        self.stops += 1
+
+    async def process_frame(self, frame: FilterControlFrame):
+        self.calls.append(frame)
+
+    async def filter(self, audio: bytes) -> bytes:
+        self.calls.append(_fingerprint(audio))
+        return _inverted(audio)
+
+
+def _inverted(audio: bytes) -> bytes:
+    return bytes(b ^ 0xFF for b in audio)
+
+
+def _fingerprint(audio: bytes) -> str:
+    """Name a chunk by its length and hash, so a failed comparison prints short."""
+    return f"{len(audio)}:{hashlib.sha256(audio).hexdigest()[:12]}"
+
+
 async def _make_transport(
-    mixer: BaseAudioMixer | None = None, audio_out_sample_rate: int | None = None
+    mixer: BaseAudioMixer | None = None,
+    audio_out_sample_rate: int | None = None,
+    audio_filter: BaseAudioFilter | None = None,
 ) -> BaseOutputTransport:
     params = TransportParams(
         audio_out_enabled=True,
         audio_out_mixer=mixer,
+        audio_out_filter=audio_filter,
         audio_out_sample_rate=audio_out_sample_rate,
     )
     transport = BaseOutputTransport(params)
@@ -506,5 +545,97 @@ class TestBaseOutputTransportResampling(unittest.IsolatedAsyncioTestCase):
             samples = np.frombuffer(after, dtype=np.int16)
             self.assertGreater(len(samples), 0)
             self.assertLessEqual(int(samples.max()), 0)
+        finally:
+            await transport.cancel(CancelFrame())
+
+
+class TestBaseOutputTransportAudioFilter(unittest.IsolatedAsyncioTestCase):
+    """The output filter runs on the audio the pipeline sends, before it is written."""
+
+    def _audio(self, transport: BaseOutputTransport, fill: int = 1) -> OutputAudioRawFrame:
+        """One chunk of audio, every byte set to ``fill``."""
+        sender = transport._media_senders[None]
+        return OutputAudioRawFrame(
+            audio=bytes([fill]) * sender.audio_chunk_size,
+            sample_rate=sender.sample_rate,
+            num_channels=1,
+        )
+
+    def _written(self, transport: BaseOutputTransport) -> list[str]:
+        calls = transport.write_audio_frame.call_args_list
+        return [_fingerprint(call.args[0].audio) for call in calls]
+
+    async def test_transport_writes_the_filtered_audio(self):
+        audio_filter = _InvertingFilter()
+        transport = await _make_transport(audio_filter=audio_filter)
+        try:
+            self.assertEqual(audio_filter.sample_rate, transport.sample_rate)
+
+            frame = self._audio(transport)
+            audio = frame.audio
+            await transport.process_frame(frame, FrameDirection.DOWNSTREAM)
+            await asyncio.sleep(0.1)
+            self.assertEqual(self._written(transport), [_fingerprint(_inverted(audio))])
+        finally:
+            await transport.cleanup()
+        self.assertEqual(audio_filter.stops, 1)
+
+    async def test_transport_skips_a_chunk_the_filter_empties(self):
+        audio_filter = _InvertingFilter()
+        audio_filter.filter = AsyncMock(return_value=b"")
+        transport = await _make_transport(audio_filter=audio_filter)
+        try:
+            await transport.process_frame(self._audio(transport), FrameDirection.DOWNSTREAM)
+            await asyncio.sleep(0.1)
+
+            self.assertEqual(audio_filter.filter.call_count, 1)
+            self.assertEqual(self._written(transport), [])
+        finally:
+            await transport.cancel(CancelFrame())
+
+    async def test_filter_runs_before_the_mixer_and_skips_mixer_audio(self):
+        audio_filter = _InvertingFilter()
+        mixer = _PassthroughMixer()
+        mixer.mix = AsyncMock(side_effect=lambda audio: audio)
+        transport = await _make_transport(mixer=mixer, audio_filter=audio_filter)
+        try:
+            frame = self._audio(transport)
+            audio = frame.audio
+            await transport.process_frame(frame, FrameDirection.DOWNSTREAM)
+            await asyncio.sleep(0.1)
+
+            # The mixer mixes a silent chunk on each pass with an empty queue,
+            # and the filter gets none of them.
+            self.assertEqual(audio_filter.calls, [_fingerprint(audio)])
+            mixed = [_fingerprint(call.args[0]) for call in mixer.mix.call_args_list]
+            self.assertIn(_fingerprint(_inverted(audio)), mixed)
+        finally:
+            await transport.cancel(CancelFrame())
+
+    async def test_control_frames_reach_the_filter_in_order_with_the_audio(self):
+        audio_filter = _InvertingFilter()
+        transport = await _make_transport(audio_filter=audio_filter)
+        try:
+            release_write = asyncio.Event()
+
+            async def held_write(frame):
+                await release_write.wait()
+                return True
+
+            transport.write_audio_frame = AsyncMock(side_effect=held_write)
+            first, second, third = (self._audio(transport, fill) for fill in (1, 2, 3))
+            audio = [_fingerprint(frame.audio) for frame in (first, second, third)]
+            controls = [FilterEnableFrame(enable=False), FilterUpdateSettingsFrame(settings={})]
+
+            # The first chunk holds the write, so the second chunk is still
+            # queued when the control frames arrive.
+            await transport.process_frame(first, FrameDirection.DOWNSTREAM)
+            await asyncio.sleep(0.1)
+            for frame in (second, *controls, third):
+                await transport.process_frame(frame, FrameDirection.DOWNSTREAM)
+            release_write.set()
+            await asyncio.sleep(0.1)
+
+            self.assertEqual(audio_filter.calls, [audio[0], audio[1], *controls, audio[2]])
         finally:
             await transport.cancel(CancelFrame())

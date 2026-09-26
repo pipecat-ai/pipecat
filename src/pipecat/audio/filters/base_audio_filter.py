@@ -4,10 +4,11 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Base audio filter interface for input transport audio processing.
+"""Base audio filter interface for transport audio processing.
 
 This module provides the abstract base class for implementing audio filters
-that process audio data before VAD and downstream processing in input transports.
+that process audio data before VAD and downstream processing in input transports,
+or before the mixer and the write in output transports.
 """
 
 from abc import ABC, abstractmethod
@@ -16,32 +17,34 @@ from pipecat.frames.frames import FilterControlFrame
 
 
 class BaseAudioFilter(ABC):
-    """Base class for input transport audio filters.
+    """Base class for transport audio filters.
 
-    This is a base class for input transport audio filters. If an audio
-    filter is provided to the input transport it will be used to process audio
-    before VAD and before pushing it downstream. There are control frames to
-    update filter settings or to enable or disable the filter at runtime.
+    This is a base class for transport audio filters. If an audio filter is
+    provided to the input transport it will be used to process audio before VAD
+    and before pushing it downstream. If an audio filter is provided to the
+    output transport it will be used to process the audio it receives before
+    mixing and writing it. There are control frames to update filter settings
+    or to enable or disable the filter at runtime.
     """
 
     @abstractmethod
     async def start(self, sample_rate: int):
-        """Initialize the filter when the input transport is set up.
+        """Initialize the filter when the transport is set up.
 
-        Called once, from the input transport's setup, and paired with
-        :meth:`stop`. The input transport sample rate is provided so the filter
-        can adjust to that sample rate.
+        Called once, from the transport's setup, and paired with :meth:`stop`.
+        The transport sample rate is provided so the filter can adjust to that
+        sample rate.
 
         Args:
-            sample_rate: The sample rate of the input transport in Hz.
+            sample_rate: The sample rate of the transport in Hz.
         """
         pass
 
     @abstractmethod
     async def stop(self):
-        """Clean up the filter when the input transport is cleaned up.
+        """Clean up the filter when the transport is cleaned up.
 
-        Called once, from the input transport's cleanup, and paired with
+        Called once, from the transport's cleanup, and paired with
         :meth:`start`.
         """
         pass
@@ -50,8 +53,7 @@ class BaseAudioFilter(ABC):
     async def process_frame(self, frame: FilterControlFrame):
         """Process control frames for runtime filter configuration.
 
-        This will be called when the input transport receives a
-        FilterControlFrame.
+        This will be called when the transport receives a FilterControlFrame.
 
         Args:
             frame: The control frame containing filter commands or settings.
