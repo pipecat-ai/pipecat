@@ -9,7 +9,12 @@
 import json
 import unittest
 
-from pipecat.frames.frames import InterruptionFrame, OutputAudioRawFrame
+from pipecat.frames.frames import (
+    CancelFrame,
+    EndFrame,
+    InterruptionFrame,
+    OutputAudioRawFrame,
+)
 from pipecat.serializers.exotel import ExotelFrameSerializer
 from tests.frame_processor_helpers import frame_processor_setup
 
@@ -57,6 +62,32 @@ class TestExotelDeserialize(unittest.IsolatedAsyncioTestCase):
         frame = await self.serializer.deserialize(outbound)
         self.assertEqual(frame.audio, audio)
         self.assertEqual(frame.sample_rate, SAMPLE_RATE)
+
+
+class TestExotelTerminalFrames(unittest.IsolatedAsyncioTestCase):
+    """Exotel does not hang up the call itself.
+
+    Unlike the Twilio, Telnyx and Plivo serializers, ExotelFrameSerializer has no
+    ``auto_hang_up`` parameter and ignores terminal frames; termination is left to
+    the transport closing the WebSocket. These tests pin that documented behavior.
+    """
+
+    async def asyncSetUp(self):
+        self.serializer = ExotelFrameSerializer(stream_sid=STREAM_SID, call_sid="call123")
+        await self.serializer.setup(
+            frame_processor_setup(
+                audio_in_sample_rate=SAMPLE_RATE, audio_out_sample_rate=SAMPLE_RATE
+            )
+        )
+
+    async def test_end_frame_is_ignored(self):
+        self.assertIsNone(await self.serializer.serialize(EndFrame()))
+
+    async def test_cancel_frame_is_ignored(self):
+        self.assertIsNone(await self.serializer.serialize(CancelFrame()))
+
+    async def test_no_auto_hang_up_parameter(self):
+        self.assertNotIn("auto_hang_up", ExotelFrameSerializer.InputParams.model_fields)
 
 
 if __name__ == "__main__":
