@@ -9,6 +9,7 @@
 import asyncio
 import hashlib
 import json
+import math
 import os
 import re
 import time
@@ -69,7 +70,7 @@ from pipecat.utils.tracing.service_decorators import traced_llm
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
 # ---------------------------------------------------------------------------
-# Private retry exception classes
+# Private exception classes
 # ---------------------------------------------------------------------------
 
 
@@ -93,6 +94,12 @@ class _ConnectionLimitReachedError(_RetryableError):
 
 class _ResponseTimeoutError(_RetryableError):
     """Response did not begin producing output within the retry timeout."""
+
+    pass
+
+
+class _ResponseStreamIdleTimeoutError(TimeoutError):
+    """A response stream stopped sending events and must not be replayed."""
 
     pass
 
@@ -268,7 +275,7 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
                 ``retry_on_timeout`` is set. Defaults to 5.0 seconds.
             retry_on_timeout: Whether to re-issue the request once if the first
                 attempt produces no output within ``retry_timeout_secs``. The
-                retry is unbounded.
+                retry is not subject to this first-output deadline.
             **kwargs: Additional arguments passed to the parent LLMService.
         """
         default_settings = self.Settings(
@@ -623,6 +630,7 @@ class OpenAIResponsesLLMService(
         self,
         *,
         ws_url: str = "wss://api.openai.com/v1/responses",
+        stream_idle_timeout_secs: float | None = 20.0,
         **kwargs,
     ):
         """Initialize the WebSocket-based OpenAI Responses API LLM service.
@@ -630,13 +638,26 @@ class OpenAIResponsesLLMService(
         Args:
             ws_url: WebSocket endpoint URL.
                 Defaults to ``wss://api.openai.com/v1/responses``.
+            stream_idle_timeout_secs: Maximum wait for the next response event,
+                in seconds. Defaults to 20.0; None disables it. A stall closes
+                the connection, reports a completion timeout, and ends the turn
+                without replaying it. When enabled, the first attempt's
+                ``retry_timeout_secs`` takes precedence until output begins;
+                this idle timeout also applies to the retry. Increase it for
+                models that reason silently for longer between events.
             **kwargs: Additional arguments passed to the base class (api_key,
                 base_url, organization, project, default_headers, service_tier,
                 settings, etc.).
         """
+        if stream_idle_timeout_secs is not None and (
+            not math.isfinite(stream_idle_timeout_secs) or stream_idle_timeout_secs <= 0
+        ):
+            raise ValueError("stream_idle_timeout_secs must be positive and finite, or None")
+
         super().__init__(**kwargs)
 
         self._ws_url = ws_url
+        self._stream_idle_timeout_secs = stream_idle_timeout_secs
 
         # State for previous_response_id optimization
         self._previous_response_id: str | None = None
@@ -969,6 +990,11 @@ class OpenAIResponsesLLMService(
                 self._current_response_id = None
                 self._needs_drain = True
                 raise
+            except _ResponseStreamIdleTimeoutError as e:
+                await self._call_event_handler("on_completion_timeout")
+                await self.push_error(
+                    error_msg=f"LLM response stream idle timeout: {e}", exception=e
+                )
             except Exception as e:
                 await self.push_error(error_msg=f"Error during inference: {e}", exception=e)
             finally:
@@ -987,7 +1013,7 @@ class OpenAIResponsesLLMService(
         retriable error (cache miss, connection limit, connection drop, or —
         when ``retry_on_timeout`` is set — a response that produces no output
         in time), clears state and retries once with the full context and no
-        timeout.  Transport-level
+        first-output deadline. The stream idle timeout still applies. Transport-level
         ``ConnectionClosed`` errors are handled transparently by
         ``_ws_send``/``_ws_recv`` (auto-reconnect → ``WebsocketReconnectedError``).
 
@@ -1089,14 +1115,15 @@ class OpenAIResponsesLLMService(
             full_input: The complete input items list (for storing state on success).
             output_timeout_secs: How long to wait for the response to start
                 producing output before raising ``_ResponseTimeoutError``. Once
-                the first output event arrives the wait becomes unbounded, since
-                by then content is already on its way downstream and re-issuing
-                would duplicate it. None waits indefinitely throughout.
+                the first output event arrives, only the stream idle timeout
+                applies, since re-issuing would duplicate downstream content.
+                None disables this first-output deadline, not the idle timeout.
 
         Raises:
             _PreviousResponseNotFoundError: Server couldn't find previous response.
             _ConnectionLimitReachedError: 60-minute connection limit reached.
             _ResponseTimeoutError: Response produced no output in time.
+            _ResponseStreamIdleTimeoutError: The stream stopped sending events.
             WebsocketReconnectedError: Connection was lost and auto-recovered.
             ConnectionClosed: Connection was lost and could not be recovered.
         """
@@ -1108,7 +1135,19 @@ class OpenAIResponsesLLMService(
 
         while True:
             if deadline is None:
-                event = await self._ws_recv()
+                try:
+                    event = await asyncio.wait_for(
+                        self._ws_recv(), timeout=self._stream_idle_timeout_secs
+                    )
+                except TimeoutError:
+                    # Discard the socket so late events cannot become the next
+                    # turn's response. Do not replay a partially delivered turn.
+                    await self._disconnect_websocket()
+                    if reasoning_summary_open:
+                        await self.push_frame(LLMThoughtEndFrame())
+                    raise _ResponseStreamIdleTimeoutError(
+                        f"No response event within {self._stream_idle_timeout_secs}s"
+                    ) from None
             else:
                 try:
                     event = await asyncio.wait_for(
