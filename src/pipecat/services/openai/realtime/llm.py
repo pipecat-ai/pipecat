@@ -32,7 +32,6 @@ from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
     InputImageRawFrame,
-    InputTextRawFrame,
     InterimTranscriptionFrame,
     InterruptionFrame,
     LLMContextFrame,
@@ -369,6 +368,7 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
         )
 
         self._messages_added_manually = {}
+        self._initial_context_frame: LLMContextFrame | None = None
         self._pending_function_calls = {}  # Track function calls by call_id
         self._completed_tool_calls = set()
         # Whether we've already emitted the "stripping `reasoning`" warning
@@ -647,9 +647,16 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
         if isinstance(frame, TranscriptionFrame):
             pass
         elif isinstance(frame, LLMContextFrame):
+            if self._llm_needs_conversation_setup:
+                self._initial_context_frame = frame
+            send_appended_messages = (
+                self._context is not None
+                and self._api_session_ready
+                and not self._llm_needs_conversation_setup
+            )
             await self._handle_context(frame.context)
-        elif isinstance(frame, InputTextRawFrame):
-            await self._send_user_text(frame.text)
+            if send_appended_messages:
+                await self._send_appended_messages(frame)
         elif isinstance(frame, InputAudioRawFrame):
             if not self._audio_input_paused:
                 await self._send_user_audio(frame)
@@ -1192,7 +1199,14 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
             )
 
             # Send initial messages
-            llm_invocation_params = adapter.get_llm_invocation_params(self._context)
+            initial_context = self._context
+            if self._initial_context_frame is not None:
+                initial_context = LLMContext(
+                    messages=self._initial_context_frame.messages,
+                    tools=self._context.tools,
+                    tool_choice=self._context.tool_choice,
+                )
+            llm_invocation_params = adapter.get_llm_invocation_params(initial_context)
             messages = llm_invocation_params["messages"]
             for item in messages:
                 evt = events.ConversationItemCreateEvent(item=item)
@@ -1204,6 +1218,7 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
 
             # We're done configuring the LLM for this session
             self._llm_needs_conversation_setup = False
+            self._initial_context_frame = None
 
         logger.debug("Creating response")
 
@@ -1321,29 +1336,25 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
             )
             self._user_audio_preroll_buffer = self._user_audio_preroll_buffer[-preroll_len:]
 
-    async def _send_user_text(self, text: str):
-        """Send typed user input and start a new Realtime response."""
-        if not text or self._disconnecting:
+    async def _send_appended_messages(self, frame: LLMContextFrame):
+        """Deliver explicitly appended user input to an initialized conversation."""
+        if self._disconnecting:
             return
 
-        # The context frame that accompanies an InputTextRawFrame is used to
-        # seed a new session. Sending this item separately before that setup
-        # would duplicate the user message in the remote conversation.
-        if not self._api_session_ready or self._llm_needs_conversation_setup:
-            self._run_llm_when_api_session_ready = True
-            return
-
-        item = events.ConversationItem(
-            type="message",
-            role="user",
-            content=[events.ItemContent(type="input_text", text=text)],
-        )
-        event = events.ConversationItemCreateEvent(item=item)
-        # The local context already contains the text, so do not add the
-        # provider echo to it again when the service receives the item event.
-        self._messages_added_manually[item.id] = True
-        await self.send_client_event(event)
-        await self._create_response()
+        messages = [
+            message
+            for message in frame.appended_messages
+            if isinstance(message, dict) and message.get("role") == "user"
+        ]
+        if messages:
+            for message in messages:
+                params = self.get_llm_adapter().get_llm_invocation_params(
+                    LLMContext(messages=[message])
+                )
+                for item in params["messages"]:
+                    self._messages_added_manually[item.id] = True
+                    await self.send_client_event(events.ConversationItemCreateEvent(item=item))
+            await self._create_response()
 
     async def _replay_user_audio_preroll(self):
         """Re-append the buffered pre-roll audio to the input buffer.

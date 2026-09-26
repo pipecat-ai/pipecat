@@ -38,7 +38,6 @@ from pipecat.frames.frames import (
     Frame,
     FunctionCallFromLLM,
     InputAudioRawFrame,
-    InputTextRawFrame,
     InterruptionFrame,
     LLMContextFrame,
     LLMFullResponseEndFrame,
@@ -465,6 +464,7 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
         self._user_text_buffer = ""
         self._completed_tool_calls = set()
         self._audio_input_started = False
+        self._initial_context_frame: LLMContextFrame | None = None
 
         # Session continuation helper. The service itself implements the
         # NovaSonicSessionSender protocol (see methods below) so the helper can
@@ -608,9 +608,12 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, LLMContextFrame):
+            if not self._audio_input_started:
+                self._initial_context_frame = frame
+            send_appended_messages = self._context is not None and self._audio_input_started
             await self._handle_context(frame.context)
-        elif isinstance(frame, InputTextRawFrame):
-            await self._handle_input_text_frame(frame)
+            if send_appended_messages:
+                await self._send_appended_messages(frame)
         elif isinstance(frame, InputAudioRawFrame):
             await self._handle_input_audio_frame(frame)
         elif isinstance(frame, InterruptionFrame):
@@ -650,9 +653,19 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
 
         await self._send_user_audio_event(frame.audio)
 
-    async def _handle_input_text_frame(self, frame: InputTextRawFrame):
-        """Send typed user input as an interactive Nova Sonic turn."""
-        await self._send_text_event(frame.text, Role.USER, interactive=True)
+    async def _send_appended_messages(self, frame: LLMContextFrame):
+        """Deliver explicitly appended user input to an initialized conversation."""
+        if self._disconnecting:
+            return
+        messages = [
+            message
+            for message in frame.appended_messages
+            if isinstance(message, dict) and message.get("role") == "user"
+        ]
+        if messages:
+            params = self.get_llm_adapter().get_llm_invocation_params(LLMContext(messages=messages))
+            text = "\n".join(message.text for message in params["messages"])
+            await self._send_text_event(text, Role.USER, interactive=True)
 
     async def _handle_interruption_frame(self):
         pass
@@ -766,8 +779,15 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
 
         # Read context
         adapter = self.get_llm_adapter()
+        initial_context = self._context
+        if self._initial_context_frame is not None:
+            initial_context = LLMContext(
+                messages=self._initial_context_frame.messages,
+                tools=self._context.tools,
+                tool_choice=self._context.tool_choice,
+            )
         llm_connection_params = adapter.get_llm_invocation_params(
-            self._context, system_instruction=assert_given(self._settings.system_instruction)
+            initial_context, system_instruction=assert_given(self._settings.system_instruction)
         )
 
         # Send prompt start event, specifying tools.
@@ -817,6 +837,7 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
 
         # Record finished connecting time (must be done before sending assistant response trigger)
         self._connected_time = time.time()
+        self._initial_context_frame = None
 
         logger.info("Finished connecting")
 
