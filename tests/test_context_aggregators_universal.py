@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import asyncio
 import io
 import json
 import unittest
@@ -15,6 +16,7 @@ from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
+    EndFrame,
     Frame,
     FunctionCallCancelFrame,
     FunctionCallFromLLM,
@@ -69,6 +71,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMUserAggregatorParams,
     UserTurnMessageAddedMessage,
     UserTurnStoppedMessage,
+    _AssistantTurnInterruptedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.tests.utils import SleepFrame, run_test
@@ -1376,10 +1379,10 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
             LLMFullResponseEndFrame(),
         ]
         expected_down_frames = [
+            InterruptionFrame,
             LLMContextFrame,
             LLMContextAssistantTimestampFrame,
             LLMContextAssistantTurnFrame,
-            InterruptionFrame,
             LLMContextFrame,
             LLMContextAssistantTimestampFrame,
             LLMContextAssistantTurnFrame,
@@ -1395,6 +1398,148 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stop_messages[0].content, "Hello")
         self.assertFalse(stop_messages[1].interrupted)
         self.assertEqual(stop_messages[1].content, "Hello there!")
+
+    async def test_interruption_keeps_overtaken_text_in_the_interrupted_turn(self):
+        """Text the interruption overtook in the queue lands in the interrupted turn.
+
+        The output transport releases each word downstream as it is played, and
+        the InterruptionFrame is a system frame, so it is dequeued ahead of words
+        that arrived before it. The user heard those words: they are written to
+        the interrupted turn, reported in its turn-stopped message, and kept off
+        the front of the next turn.
+        """
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+
+        stop_messages = []
+
+        @aggregator.event_handler("on_assistant_turn_stopped")
+        async def on_assistant_turn_stopped(aggregator, message: AssistantTurnStoppedMessage):
+            stop_messages.append(message)
+
+        def word(text: str) -> TTSTextFrame:
+            return TTSTextFrame(text, aggregated_by=AggregationType.WORD)
+
+        frames_to_send = [
+            LLMFullResponseStartFrame(),
+            word("The"),
+            word("pool"),
+            word("opens"),
+            SleepFrame(),
+            # Sent back-to-back with the interruption, so both words sit in the
+            # aggregator's queue when the interruption is dequeued past them.
+            word("at"),
+            word("six"),
+            InterruptionFrame(),
+            SleepFrame(),
+            LLMFullResponseStartFrame(),
+            word("We"),
+            word("close"),
+            word("at"),
+            word("nine."),
+            LLMFullResponseEndFrame(),
+        ]
+        expected_down_frames = [
+            InterruptionFrame,
+            LLMContextFrame,
+            LLMContextAssistantTimestampFrame,
+            LLMContextAssistantTurnFrame,
+            LLMContextFrame,
+            LLMContextAssistantTimestampFrame,
+            LLMContextAssistantTurnFrame,
+        ]
+        await run_test(
+            aggregator,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+        )
+        self.assertEqual(context.messages[0]["content"], "The pool opens at six")
+        self.assertEqual(context.messages[1]["content"], "We close at nine.")
+        self.assertEqual(len(stop_messages), 2)
+        self.assertTrue(stop_messages[0].interrupted)
+        self.assertEqual(stop_messages[0].content, "The pool opens at six")
+        self.assertFalse(stop_messages[1].interrupted)
+        self.assertEqual(stop_messages[1].content, "We close at nine.")
+
+    async def test_tts_speak_after_interruption_gets_its_own_turn(self):
+        """A TTSSpeakFrame utterance that reaches the aggregator before the
+        interrupted turn's deferred close still opens a turn of its own."""
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+
+        stop_messages = []
+
+        @aggregator.event_handler("on_assistant_turn_stopped")
+        async def on_assistant_turn_stopped(aggregator, message: AssistantTurnStoppedMessage):
+            stop_messages.append(message)
+
+        frames_to_send = [
+            LLMFullResponseStartFrame(),
+            TTSTextFrame("Hello", aggregated_by=AggregationType.WORD),
+            SleepFrame(),
+            # No SleepFrame after the interruption: the utterance's frames are
+            # queued before the aggregator's own closing frame.
+            InterruptionFrame(),
+            TTSStartedFrame(append_to_context=True),
+            TTSTextFrame("Sorry", aggregated_by=AggregationType.WORD),
+            LLMAssistantPushAggregationFrame(),
+            SleepFrame(),
+        ]
+        expected_down_frames = [
+            InterruptionFrame,
+            LLMContextFrame,
+            LLMContextAssistantTimestampFrame,
+            LLMContextAssistantTurnFrame,
+            TTSStartedFrame,
+            LLMContextFrame,
+            LLMContextAssistantTimestampFrame,
+            LLMContextAssistantTurnFrame,
+        ]
+        await run_test(
+            aggregator,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+        )
+        self.assertEqual([m["content"] for m in context.messages], ["Hello", "Sorry"])
+        self.assertEqual(len(stop_messages), 2)
+        self.assertTrue(stop_messages[0].interrupted)
+        self.assertEqual(stop_messages[0].content, "Hello")
+        self.assertFalse(stop_messages[1].interrupted)
+        self.assertEqual(stop_messages[1].content, "Sorry")
+
+    async def test_interruption_with_no_open_turn_writes_nothing(self):
+        """An interruption between turns leaves the context alone."""
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+
+        stop_messages = []
+
+        @aggregator.event_handler("on_assistant_turn_stopped")
+        async def on_assistant_turn_stopped(aggregator, message: AssistantTurnStoppedMessage):
+            stop_messages.append(message)
+
+        frames_to_send = [
+            LLMFullResponseStartFrame(),
+            LLMTextFrame("Hello there!"),
+            LLMFullResponseEndFrame(),
+            SleepFrame(),
+            InterruptionFrame(),
+            SleepFrame(),
+        ]
+        expected_down_frames = [
+            LLMContextFrame,
+            LLMContextAssistantTimestampFrame,
+            LLMContextAssistantTurnFrame,
+            InterruptionFrame,
+        ]
+        await run_test(
+            aggregator,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+        )
+        self.assertEqual([m["content"] for m in context.messages], ["Hello there!"])
+        self.assertEqual(len(stop_messages), 1)
+        self.assertFalse(stop_messages[0].interrupted)
 
     async def test_function_call(self):
         context = LLMContext()
@@ -1982,10 +2127,10 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
         ]
         expected_down_frames = [
             TTSStartedFrame,
+            InterruptionFrame,
             LLMContextFrame,
             LLMContextAssistantTimestampFrame,
             LLMContextAssistantTurnFrame,
-            InterruptionFrame,
         ]
         await run_test(
             aggregator,
@@ -2896,3 +3041,135 @@ class TestRealtimeServiceModeAggregator(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestLLMAssistantAggregatorDeferredClose(unittest.IsolatedAsyncioTestCase):
+    """Every way an interrupted turn can close, one handler call at a time.
+
+    The frame-driven tests leave it to scheduling which frame reaches the
+    aggregator first after an interruption; these pin each path.
+    """
+
+    async def asyncSetUp(self):
+        self.context = LLMContext()
+        self.aggregator = LLMAssistantAggregator(self.context)
+        self.stop_messages: list[AssistantTurnStoppedMessage] = []
+
+        @self.aggregator.event_handler("on_assistant_turn_stopped")
+        async def on_assistant_turn_stopped(aggregator, message: AssistantTurnStoppedMessage):
+            self.stop_messages.append(message)
+
+    async def _settle(self):
+        """Let the event-handler tasks run."""
+        await asyncio.gather(*(task for _, task in self.aggregator._event_tasks))
+
+    def _closing_frame(self) -> _AssistantTurnInterruptedFrame:
+        return _AssistantTurnInterruptedFrame(turn_serial=self.aggregator._assistant_turn_serial)
+
+    def _contents(self) -> list[str]:
+        return [m["content"] for m in self.context.messages]
+
+    async def _speak_and_get_interrupted(self):
+        """Open a turn, speak, get interrupted, then receive the word the
+        interruption overtook."""
+        await self.aggregator._trigger_assistant_turn_started()
+        await self.aggregator._handle_text(
+            TTSTextFrame("Hello", aggregated_by=AggregationType.WORD)
+        )
+        await self.aggregator._handle_interruptions(InterruptionFrame())
+        await self.aggregator._handle_text(
+            TTSTextFrame("there", aggregated_by=AggregationType.WORD)
+        )
+
+    async def test_closing_frame_closes_the_interrupted_turn(self):
+        await self._speak_and_get_interrupted()
+        closing = self._closing_frame()
+
+        await self.aggregator._handle_assistant_turn_interrupted(closing)
+        await self._settle()
+
+        self.assertEqual(self._contents(), ["Hello there"])
+        self.assertEqual([m.interrupted for m in self.stop_messages], [True])
+        self.assertEqual(self.stop_messages[0].content, "Hello there")
+        self.assertFalse(self.aggregator._assistant_turn_start_timestamp)
+
+    async def test_closing_frame_for_an_earlier_turn_leaves_the_current_one_open(self):
+        await self._speak_and_get_interrupted()
+        stale = self._closing_frame()
+        await self.aggregator._trigger_assistant_turn_started()
+        await self.aggregator._handle_text(TTSTextFrame("Next", aggregated_by=AggregationType.WORD))
+
+        await self.aggregator._handle_assistant_turn_interrupted(stale)
+        await self._settle()
+
+        self.assertEqual(self._contents(), ["Hello there"])
+        self.assertEqual(len(self.stop_messages), 1)
+        self.assertTrue(self.aggregator._assistant_turn_start_timestamp)
+
+    async def test_next_turn_start_closes_the_interrupted_turn(self):
+        await self._speak_and_get_interrupted()
+
+        await self.aggregator._trigger_assistant_turn_started()
+        await self.aggregator._handle_text(TTSTextFrame("Next", aggregated_by=AggregationType.WORD))
+        await self.aggregator._trigger_assistant_turn_stopped()
+        await self._settle()
+
+        self.assertEqual(self._contents(), ["Hello there", "Next"])
+        self.assertEqual([m.interrupted for m in self.stop_messages], [True, False])
+
+    async def test_end_frame_closes_the_interrupted_turn_as_interrupted(self):
+        await self._speak_and_get_interrupted()
+        closing = self._closing_frame()
+
+        await self.aggregator._handle_end_or_cancel(EndFrame())
+        await self._settle()
+
+        self.assertEqual(self._contents(), ["Hello there"])
+        self.assertEqual([m.interrupted for m in self.stop_messages], [True])
+
+        # The closing frame, arriving later, finds nothing left to close.
+        await self.aggregator._handle_assistant_turn_interrupted(closing)
+        await self._settle()
+        self.assertEqual(len(self.stop_messages), 1)
+
+    async def test_tts_started_closes_the_interrupted_turn(self):
+        await self._speak_and_get_interrupted()
+
+        await self.aggregator._handle_tts_started(TTSStartedFrame(append_to_context=True))
+        await self.aggregator._handle_text(
+            TTSTextFrame("Sorry", aggregated_by=AggregationType.WORD)
+        )
+        await self.aggregator._handle_push_aggregation()
+        await self._settle()
+
+        self.assertEqual(self._contents(), ["Hello there", "Sorry"])
+        self.assertEqual([m.interrupted for m in self.stop_messages], [True, False])
+
+    async def test_two_interruptions_close_the_turn_once(self):
+        await self._speak_and_get_interrupted()
+        first = self._closing_frame()
+        await self.aggregator._handle_interruptions(InterruptionFrame())
+        second = self._closing_frame()
+
+        await self.aggregator._handle_assistant_turn_interrupted(first)
+        await self.aggregator._handle_assistant_turn_interrupted(second)
+        await self._settle()
+
+        self.assertEqual(self._contents(), ["Hello there"])
+        self.assertEqual([m.interrupted for m in self.stop_messages], [True])
+
+    async def test_interruption_with_no_open_turn_arms_no_close(self):
+        await self.aggregator._handle_interruptions(InterruptionFrame())
+
+        self.assertIsNone(self.aggregator._interrupted_turn_serial)
+
+        # The next turn is an ordinary one.
+        await self.aggregator._trigger_assistant_turn_started()
+        await self.aggregator._handle_text(
+            TTSTextFrame("Hello", aggregated_by=AggregationType.WORD)
+        )
+        await self.aggregator._trigger_assistant_turn_stopped()
+        await self._settle()
+
+        self.assertEqual(self._contents(), ["Hello"])
+        self.assertEqual([m.interrupted for m in self.stop_messages], [False])

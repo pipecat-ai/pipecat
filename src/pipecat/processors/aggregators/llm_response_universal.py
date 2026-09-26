@@ -30,6 +30,7 @@ from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     CancelFrame,
+    DataFrame,
     EagerEndOfTurnCancelFrame,
     EagerTranscriptionFrame,
     EndFrame,
@@ -1557,6 +1558,26 @@ class LLMUserAggregator(LLMContextAggregator):
         return True
 
 
+@dataclass
+class _AssistantTurnInterruptedFrame(DataFrame):
+    """Closes an interrupted assistant turn once the text it overtook has landed.
+
+    The assistant aggregator queues one to itself on ``InterruptionFrame``. The
+    interruption is a system frame, so it outranks the text frames already
+    waiting in the aggregator's queue, among them the words the output
+    transport released just before it. Those words were played to the user, so
+    they belong in the interrupted turn: a data frame queued behind them is
+    processed only once they have been aggregated.
+
+    Parameters:
+        turn_serial: The serial of the turn the interruption cut short. The
+            frame closes that turn only; a later frame may already have closed
+            it, or started the next one.
+    """
+
+    turn_serial: int = 0
+
+
 class LLMAssistantAggregator(LLMContextAggregator):
     """Assistant LLM aggregator that processes bot responses and function calls.
 
@@ -1653,6 +1674,10 @@ class LLMAssistantAggregator(LLMContextAggregator):
         self._push_context_on_bot_stopped_speaking: bool = False
 
         self._assistant_turn_start_timestamp = ""
+        # Counts assistant turns as they start, so the deferred close of an
+        # interrupted turn can tell that turn from any started after it.
+        self._assistant_turn_serial = 0
+        self._interrupted_turn_serial: int | None = None
 
         self._thought_append_to_context = False
         self._thought_llm: str = ""
@@ -1736,6 +1761,8 @@ class LLMAssistantAggregator(LLMContextAggregator):
             await self.push_frame(frame, direction)
         elif isinstance(frame, LLMAssistantPushAggregationFrame):
             await self._handle_push_aggregation()
+        elif isinstance(frame, _AssistantTurnInterruptedFrame):
+            await self._handle_assistant_turn_interrupted(frame)
         elif isinstance(frame, TTSStartedFrame):
             await self._handle_tts_started(frame)
             await self.push_frame(frame, direction)
@@ -1900,6 +1927,33 @@ class LLMAssistantAggregator(LLMContextAggregator):
             await self.push_context_frame(FrameDirection.UPSTREAM)
 
     async def _handle_interruptions(self, frame: InterruptionFrame):
+        # Deferred context pushes and thoughts belong to the response the
+        # interruption just cancelled; nothing that arrives later revives them.
+        self._push_context_on_bot_stopped_speaking = False
+        await self._reset_thought_aggregation()
+
+        if not self._assistant_turn_start_timestamp:
+            await self.reset()
+            return
+
+        # The interruption outran any text still queued here, including the
+        # words the output transport released just before it. Close the turn
+        # behind that text, so what the user heard is written to the turn they
+        # heard it in rather than to the front of the next one. Whichever
+        # arrives first closes the turn: this frame, the next turn's start, or
+        # the end of the pipeline.
+        self._interrupted_turn_serial = self._assistant_turn_serial
+        await self.queue_frame(
+            _AssistantTurnInterruptedFrame(turn_serial=self._assistant_turn_serial)
+        )
+
+    async def _handle_assistant_turn_interrupted(self, frame: _AssistantTurnInterruptedFrame):
+        # Only the turn this frame was queued for, and only while it is still open.
+        if (
+            not self._assistant_turn_start_timestamp
+            or frame.turn_serial != self._assistant_turn_serial
+        ):
+            return
         await self._trigger_assistant_turn_stopped(interrupted=True)
         await self.reset()
 
@@ -2220,7 +2274,12 @@ class LLMAssistantAggregator(LLMContextAggregator):
         # open assistant turn, open one. This handles the case of TTSSpeakFrame-driven
         # utterances that have no surrounding LLM response frames to signal assistant
         # turn boundaries, while rightly deferring to any earlier LLM-driven turn start.
-        if frame.append_to_context and not self._assistant_turn_start_timestamp:
+        # An interrupted turn still waiting for its deferred close counts as
+        # closed here too, so the utterance gets a turn of its own.
+        if frame.append_to_context and (
+            not self._assistant_turn_start_timestamp
+            or self._interrupted_turn_serial == self._assistant_turn_serial
+        ):
             await self._trigger_assistant_turn_started()
 
     async def _handle_push_aggregation(self):
@@ -2406,6 +2465,16 @@ class LLMAssistantAggregator(LLMContextAggregator):
         self._context_updated_tasks.discard(task)
 
     async def _trigger_assistant_turn_started(self):
+        # The next response can start before the interrupted turn's deferred
+        # close lands; close that turn first so the two are not merged.
+        if (
+            self._assistant_turn_start_timestamp
+            and self._interrupted_turn_serial == self._assistant_turn_serial
+        ):
+            await self._trigger_assistant_turn_stopped(interrupted=True)
+            await self.reset()
+
+        self._assistant_turn_serial += 1
         self._assistant_turn_start_timestamp = time_now_iso8601()
 
         await self._call_event_handler("on_assistant_turn_started")
@@ -2413,6 +2482,11 @@ class LLMAssistantAggregator(LLMContextAggregator):
     async def _trigger_assistant_turn_stopped(self, *, interrupted: bool = False):
         if not self._assistant_turn_start_timestamp:
             return
+
+        # A turn an interruption cut short is reported as interrupted whichever
+        # frame ends up closing it.
+        interrupted = interrupted or self._interrupted_turn_serial == self._assistant_turn_serial
+        self._interrupted_turn_serial = None
 
         aggregation = await self.push_aggregation()
         if aggregation:
