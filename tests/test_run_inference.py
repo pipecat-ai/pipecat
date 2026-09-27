@@ -181,6 +181,7 @@ async def test_anthropic_run_inference_with_llm_context():
         enable_prompt_caching=False,
         system_instruction=None,
         ensure_last_message_is_user=False,
+        system_prompt_cache_ttl=None,
     )
     service._client.beta.messages.create.assert_called_once_with(
         model="claude-3-sonnet-20240229",
@@ -542,7 +543,32 @@ async def test_anthropic_run_inference_system_instruction_overrides_context():
         enable_prompt_caching=False,
         system_instruction="New system instruction",
         ensure_last_message_is_user=False,
+        system_prompt_cache_ttl=None,
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ttl", [None, "1h"])
+async def test_anthropic_run_inference_system_prompt_cache_ttl(ttl):
+    """The system_prompt_cache_ttl setting reaches the system prompt sent to Anthropic."""
+    service = AnthropicLLMService(
+        api_key="test-key",
+        settings=AnthropicLLMService.Settings(
+            model="claude-3-sonnet-20240229",
+            enable_prompt_caching=True,
+            system_prompt_cache_ttl=ttl,
+        ),
+    )
+    service._client = AsyncMock()
+    service._client.beta.messages.create.return_value = MagicMock(content=[])
+
+    await service.run_inference(
+        LLMContext(messages=[{"role": "user", "content": "Hello"}]),
+        system_instruction="Be helpful.",
+    )
+
+    [system_block] = service._client.beta.messages.create.call_args.kwargs["system"]
+    assert system_block["cache_control"].get("ttl") == ttl
 
 
 @pytest.mark.asyncio
