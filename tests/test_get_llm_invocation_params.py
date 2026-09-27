@@ -76,7 +76,6 @@ import unittest
 import warnings
 from unittest.mock import patch
 
-import pytest
 from google.genai.types import Content, FunctionCall, FunctionResponse, Part
 from openai._types import NotGiven as OpenAINotGiven
 
@@ -1495,6 +1494,35 @@ class TestAnthropicGetLLMInvocationParams(unittest.TestCase):
 
         self.assertIs(params["system"], NOT_GIVEN)
 
+    def test_prompt_caching_system_instruction_ttl(self):
+        """The system prompt's cache breakpoint carries the configured TTL."""
+        context = LLMContext(messages=[{"role": "user", "content": "Hello"}])
+
+        for ttl in (None, "5m", "1h"):
+            with self.subTest(ttl=ttl):
+                params = self.adapter.get_llm_invocation_params(
+                    context,
+                    enable_prompt_caching=True,
+                    system_instruction="Be helpful.",
+                    system_prompt_cache_ttl=ttl,
+                )
+
+                [system_block] = params["system"]
+                self.assertEqual(system_block["cache_control"].get("ttl"), ttl)
+
+    def test_prompt_caching_system_instruction_ttl_ignored_when_disabled(self):
+        """A TTL doesn't mark the system prompt when prompt caching is disabled."""
+        context = LLMContext(messages=[{"role": "user", "content": "Hello"}])
+
+        params = self.adapter.get_llm_invocation_params(
+            context,
+            enable_prompt_caching=False,
+            system_instruction="Be helpful.",
+            system_prompt_cache_ttl="1h",
+        )
+
+        self.assertEqual(params["system"], "Be helpful.")
+
     def test_initial_developer_message_becomes_user(self):
         """Initial developer message without system_instruction becomes user, not system."""
         from anthropic import NOT_GIVEN
@@ -1722,32 +1750,6 @@ class TestAnthropicGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(len(params["messages"]), 2)
         self.assertEqual(params["messages"][0]["content"], "What's the weather?")
         self.assertEqual(params["messages"][1]["content"], "It's sunny.")
-
-
-@pytest.mark.parametrize("ttl", [None, "5m", "1h"])
-def test_anthropic_system_prompt_cache_ttl(ttl):
-    """The system prompt's cache breakpoint carries the configured TTL."""
-    params = AnthropicLLMAdapter().get_llm_invocation_params(
-        LLMContext(messages=[{"role": "user", "content": "Hello"}]),
-        enable_prompt_caching=True,
-        system_instruction="Be helpful.",
-        system_prompt_cache_ttl=ttl,
-    )
-
-    [system_block] = params["system"]
-    assert system_block["cache_control"].get("ttl") == ttl
-
-
-def test_anthropic_system_prompt_cache_ttl_ignored_without_caching():
-    """A TTL doesn't mark the system prompt when prompt caching is disabled."""
-    params = AnthropicLLMAdapter().get_llm_invocation_params(
-        LLMContext(messages=[{"role": "user", "content": "Hello"}]),
-        enable_prompt_caching=False,
-        system_instruction="Be helpful.",
-        system_prompt_cache_ttl="1h",
-    )
-
-    assert params["system"] == "Be helpful."
 
 
 class TestAWSBedrockGetLLMInvocationParams(unittest.TestCase):

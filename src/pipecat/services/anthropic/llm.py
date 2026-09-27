@@ -141,6 +141,8 @@ class AnthropicLLMSettings(LLMSettings):
             Anthropic's default of 5 minutes. "1h" keeps a system prompt shared
             by many conversations cached across gaps between them, at twice
             the base input price per cache write instead of 1.25 times.
+            Anthropic caches nothing when the tools and system prompt together
+            fall below the model's minimum cacheable prompt length.
         thinking: Thinking configuration. If this is not provided, Pipecat
             disables thinking on Sonnet 5 and later, which otherwise decide
             per request whether to think, to reduce latency; Opus and Fable
