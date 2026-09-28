@@ -4,10 +4,10 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Voice bot using ElevenLabs Text-to-Dialogue for Eleven v3 speech.
+"""Voice bot using ElevenLabs Text-to-Dialogue for Eleven v4 Turbo speech.
 
-Text-to-Dialogue is the only way to reach ``eleven_v3`` models. It requires
-workspace access to the Text-to-Dialogue WebSocket. For Flash, Turbo, and
+Text-to-Dialogue serves the ``eleven_v3`` and ``eleven_v4`` models. It requires
+workspace access to the Text-to-Dialogue WebSocket. For Flash, Turbo v2.5, and
 Multilingual models, use ``voice-elevenlabs.py`` instead.
 """
 
@@ -70,7 +70,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         api_key=os.getenv("ELEVENLABS_API_KEY", ""),
         settings=ElevenLabsDialogueTTSService.Settings(
             voice=os.getenv("ELEVENLABS_VOICE_ID", ""),
-            model="eleven_v3_conversational",
+            model="eleven_v4_turbo",
         ),
     )
 

@@ -7,7 +7,7 @@
 """ElevenLabs Text-to-Dialogue text-to-speech service implementation.
 
 This module provides a WebSocket TTS service for ElevenLabs' multi-context
-Text-to-Dialogue endpoint, the only way to reach Eleven v3 models.
+Text-to-Dialogue endpoint, which serves the Eleven v3 and v4 dialogue models.
 """
 
 import base64
@@ -132,17 +132,17 @@ class _DialogueContext:
 
 
 class ElevenLabsDialogueTTSService(ElevenLabsTTSBase):
-    """ElevenLabs Text-to-Dialogue WebSocket TTS service for Eleven v3 models.
+    """ElevenLabs Text-to-Dialogue WebSocket TTS service for Eleven v3 and v4 models.
 
-    Uses the multi-context Text-to-Dialogue endpoint, which is the only way to
-    reach ``eleven_v3`` models. Use
+    Uses the multi-context Text-to-Dialogue endpoint, which serves the
+    ``eleven_v3`` and ``eleven_v4`` model families. The default model is
+    ``eleven_v4_turbo``. Use
     :class:`~pipecat.services.elevenlabs.tts.ElevenLabsTTSService` for Flash,
-    Turbo, and Multilingual models — it has lower latency and a fuller set of
-    voice controls.
+    Turbo v2.5, and Multilingual models — it has a fuller set of voice controls.
 
-    Eleven v3 performs inline audio tags such as ``[laughs]`` and ``[excited]``.
-    They come back as spoken characters in the alignment, so they reach the LLM
-    context as text unless a text filter removes them.
+    Eleven v3 and v4 perform inline audio tags such as ``[laughs]`` and
+    ``[excited]``. They come back as spoken characters in the alignment, so they
+    reach the LLM context as text unless a text filter removes them.
     """
 
     Settings = ElevenLabsDialogueTTSSettings
@@ -177,7 +177,7 @@ class ElevenLabsDialogueTTSService(ElevenLabsTTSBase):
             **kwargs: Additional arguments passed to the parent service.
         """
         default_settings = self.Settings(
-            model="eleven_v3_conversational",
+            model="eleven_v4_turbo",
             voice=None,
             language=None,
             stability=None,
@@ -204,10 +204,11 @@ class ElevenLabsDialogueTTSService(ElevenLabsTTSBase):
         )
 
         model = default_settings.model
-        if isinstance(model, str) and not model.startswith("eleven_v3"):
+        if isinstance(model, str) and not model.startswith(("eleven_v3", "eleven_v4")):
             logger.warning(
-                f"{self}: Text-to-Dialogue requires an eleven_v3 model, got {model!r}. "
-                "Use ElevenLabsTTSService for Flash, Turbo, and Multilingual models."
+                f"{self}: Text-to-Dialogue requires an eleven_v3 or eleven_v4 model, "
+                f"got {model!r}. "
+                "Use ElevenLabsTTSService for Flash, Turbo v2.5, and Multilingual models."
             )
 
         if (
