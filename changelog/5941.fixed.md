@@ -1,0 +1,2 @@
+- `GrokRealtimeLLMService` now accepts 11025 Hz PCM audio, which xAI's realtime
+  API supports but Pipecat rejected.
