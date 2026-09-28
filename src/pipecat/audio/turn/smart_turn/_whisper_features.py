@@ -3,6 +3,16 @@
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
+# Portions derived from Hugging Face Transformers
+# (src/transformers/models/whisper/feature_extraction_whisper.py and
+# src/transformers/audio_utils.py):
+#
+#   Copyright 2022 The HuggingFace Inc. team.
+#   Copyright 2023 The HuggingFace Inc. team and the librosa & torchaudio authors.
+#
+#   Licensed under the Apache License, Version 2.0
+#   (https://www.apache.org/licenses/LICENSE-2.0). Modified by Daily.
+#
 
 """Numpy-only Whisper-style log-mel feature extraction for Smart Turn v3.
 
