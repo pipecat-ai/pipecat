@@ -17,6 +17,7 @@ def assert_pipecat_ui_source(client_path, src):
         "components/pipecat/user-audio-control.tsx",
         "components/pipecat/text-input.tsx",
         "components/ui/select.tsx",
+        "components/ui/LICENSE-shadcn.md",
         "hooks/use-pipecat-app.ts",
         "hooks/use-pipecat-event-stream.ts",
         "lib/transports.ts",
