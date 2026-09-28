@@ -77,6 +77,12 @@ _ASYNC_TOOL_STARTED_RESULT = (
 # tool-result update rather than fresh user input.
 _ASYNC_TOOL_FINAL_RESULT_TEMPLATE = "[Async tool result for tool_call_id={tool_call_id}] {result}"
 
+# Template for the user-side text we inject when an intermediate result
+# arrives: the same framing as the final one, saying the task is still running.
+_ASYNC_TOOL_PROGRESS_TEMPLATE = (
+    "[Async tool progress for tool_call_id={tool_call_id}, still running] {result}"
+)
+
 
 @dataclass
 class UltravoxRealtimeLLMSettings(LLMSettings):
@@ -456,11 +462,22 @@ class UltravoxRealtimeLLMService(LLMService):
             )
         return None
 
+    @property
+    def accepts_intermediate_function_call_results(self) -> bool:
+        """Intermediate results reach the model as user-side text.
+
+        A client tool takes one result, which Ultravox is given as soon as an
+        async call starts so the conversation isn't frozen; what the call
+        produces after that goes in as text (see :meth:`push_frame`).
+        """
+        return True
+
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
         """Push a frame, sending function call results to Ultravox on the way.
 
         Results are broadcast by the base service; the downstream copy is
-        observed here and sent as it is produced.
+        observed here and sent as it is produced, so a tool that reports
+        progress reaches the model while it is still working.
 
         Args:
             frame: The frame to push.
@@ -473,18 +490,24 @@ class UltravoxRealtimeLLMService(LLMService):
     async def _handle_function_call_result(self, frame: FunctionCallResultFrame):
         """Send one result to Ultravox as it is produced.
 
-        A final result settles the call — through the tool channel, or as text
-        when the call was already settled with the placeholder that unfreezes
-        an async one. A client tool takes one result, so an intermediate one
-        is dropped with an error.
+        An intermediate result goes in as user-side text, urgent enough to
+        speak about when the result asks the model to run, and as context to
+        draw on otherwise. A final result settles the call — through the tool
+        channel, or as text when the call was already settled with the
+        placeholder that unfreezes an async one.
         """
         result = json.dumps(frame.result, ensure_ascii=False) if frame.result else "COMPLETED"
         is_final = frame.properties.is_final if frame.properties else True
 
         if not is_final:
-            await self.push_error(
-                f"{self}: Ultravox takes one result per client tool call; dropping the "
-                f"intermediate result for {frame.function_name}"
+            run_llm = frame.properties.run_llm if frame.properties else None
+            if run_llm is None:
+                run_llm = frame.run_llm if frame.run_llm is not None else True
+            await self._send_user_text(
+                _ASYNC_TOOL_PROGRESS_TEMPLATE.format(
+                    tool_call_id=frame.tool_call_id, result=result
+                ),
+                urgency="soon" if run_llm else "later",
             )
             return
 
@@ -543,7 +566,7 @@ class UltravoxRealtimeLLMService(LLMService):
                     # call. Nothing more to do here.
                     continue
                 if async_payload.kind == "intermediate":
-                    # Dropped with an error when it was produced.
+                    # Sent as text when it was produced.
                     continue
                 if async_payload.kind == "final":
                     if async_payload.tool_call_id in self._completed_tool_calls:
