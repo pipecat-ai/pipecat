@@ -424,7 +424,13 @@ def test_dialogue_token_aggregation_is_refused():
     assert service._is_streaming_tokens is False
 
 
-def test_dialogue_non_v3_model_warns_without_raising():
+def test_dialogue_defaults_to_eleven_v4_turbo():
+    service = _make_dialogue_service()
+
+    assert service._settings.model == "eleven_v4_turbo"
+
+
+def test_dialogue_non_dialogue_model_warns_without_raising():
     """The wrong-model warning names the service, so it needs a constructed one."""
     service = _make_dialogue_service(model="eleven_flash_v2_5")
 
