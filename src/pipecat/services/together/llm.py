@@ -6,19 +6,29 @@
 
 """Together.ai LLM service implementation using OpenAI-compatible interface."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
 
 from loguru import logger
 
+from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
 from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
 
 @dataclass
 class TogetherLLMSettings(BaseOpenAILLMService.Settings):
-    """Settings for TogetherLLMService."""
+    """Settings for TogetherLLMService.
 
-    pass
+    Parameters:
+        reasoning: Together's reasoning toggle, for the models that support one,
+            e.g. ``{"enabled": False}``. A reasoning model such as GLM runs a
+            reasoning pass before every answer, which delays the first spoken
+            token. ``None`` leaves the choice to the model's own default.
+    """
+
+    reasoning: dict[str, Any] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class TogetherLLMService(OpenAILLMService):
@@ -61,7 +71,7 @@ class TogetherLLMService(OpenAILLMService):
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = self.Settings(model="zai-org/GLM-5.2")
+        default_settings = self.Settings(model="zai-org/GLM-5.2", reasoning=None)
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
@@ -89,3 +99,27 @@ class TogetherLLMService(OpenAILLMService):
         """
         logger.debug(f"Creating Together.ai client with api {base_url}")
         return super().create_client(api_key, base_url, **kwargs)
+
+    def build_chat_completion_params(
+        self, params_from_context: OpenAILLMInvocationParams
+    ) -> dict[str, Any]:
+        """Build parameters for a Together.ai chat completion request.
+
+        Args:
+            params_from_context: Parameters, derived from the LLM context, to
+                use for the chat completion. Contains messages, tools, and tool
+                choice.
+
+        Returns:
+            Dictionary of parameters for the chat completion request.
+        """
+        params = super().build_chat_completion_params(params_from_context)
+
+        # `reasoning` is Together's own field, so it travels in the OpenAI
+        # client's `extra_body` rather than as a client keyword argument. An
+        # `extra_body` supplied through `Settings.extra` wins key by key.
+        reasoning = assert_given(self._settings.reasoning)
+        if reasoning is not None:
+            params["extra_body"] = {"reasoning": reasoning, **params.get("extra_body", {})}
+
+        return params
