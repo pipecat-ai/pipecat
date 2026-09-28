@@ -184,3 +184,23 @@ async def test_every_frame_is_paced_when_payloads_are_coalesced():
     assert written == [True] * 9
     assert output._write_audio_sleep.await_count == 9
     assert connection.send.await_count == 3
+
+
+@pytest.mark.asyncio
+async def test_frame_is_not_written_when_sending_fails():
+    """A send that fails leaves the frame unwritten, and unpaced."""
+    params = WebsocketClientParams(audio_out_enabled=True)
+    output = WebsocketClientTransport(uri="ws://localhost:1", params=params).output()
+    output._sample_rate = 16000
+    output._write_audio_sleep = AsyncMock()
+
+    connection = AsyncMock()
+    connection.state = websockets.State.OPEN
+    connection.send.side_effect = websockets.exceptions.ConnectionClosedError(None, None)
+    output._session._websocket = connection
+
+    frame = OutputAudioRawFrame(audio=b"\x00" * 320, sample_rate=16000, num_channels=1)
+    written = await output.write_audio_frame(frame)
+
+    assert not written
+    output._write_audio_sleep.assert_not_awaited()

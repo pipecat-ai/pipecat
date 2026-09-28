@@ -180,6 +180,9 @@ class WebsocketClientSession:
 
         Args:
             message: The message data to send.
+
+        Returns:
+            Whether the message was sent.
         """
         result = False
         try:
@@ -465,10 +468,10 @@ class WebsocketClientOutputTransport(BaseOutputTransport):
             return False
 
         payload = await self._params.serializer.serialize(frame)
-        if payload:
-            await self._session.send(payload)
+        if not payload:
+            return True
 
-        return True
+        return await self._session.send(payload)
 
     async def _write_audio_sleep(self):
         """Simulate audio playback timing with sleep delays."""
