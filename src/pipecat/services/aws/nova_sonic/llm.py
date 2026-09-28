@@ -307,11 +307,8 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
             secret_access_key: AWS secret access key for authentication.
             access_key_id: AWS access key ID for authentication.
             session_token: AWS session token for authentication.
-            region: AWS region where the service is hosted.
-                Supported regions:
-                - Nova 2 Sonic (the default model): "us-east-1", "us-west-2", "eu-north-1",
-                  "ap-northeast-1"
-                - Nova Sonic (the older model): "us-east-1", "eu-north-1", "ap-northeast-1"
+            region: AWS region where the service is hosted. Supported regions:
+                "us-east-1", "us-west-2", "eu-north-1", "ap-northeast-1".
             model: Model identifier. Defaults to "amazon.nova-2-sonic-v1:0".
 
                 .. deprecated:: 0.0.105
@@ -320,9 +317,8 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
 
             voice_id: Voice ID for speech synthesis.
                 Note that some voices are designed for use with a specific language.
-                Options:
-                - Nova 2 Sonic (the default model): see https://docs.aws.amazon.com/nova/latest/nova2-userguide/sonic-language-support.html
-                - Nova Sonic (the older model): see https://docs.aws.amazon.com/nova/latest/userguide/available-voices.html.
+                For the available voices, see
+                https://docs.aws.amazon.com/nova/latest/nova2-userguide/sonic-language-support.html.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=AWSNovaSonicLLMService.Settings(voice=...)`` instead.
