@@ -16,6 +16,7 @@ from pipecat.services.inception.llm import InceptionLLMService
 from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.sarvam.llm import SarvamLLMService
 from pipecat.services.together.llm import TogetherLLMService
+from pipecat.services.xai.llm import GrokLLMService
 from pipecat.utils.types import NOT_GIVEN
 
 
@@ -63,6 +64,26 @@ def test_together_reasoning_in_extra_body():
     )
     assert "reasoning" not in params
     assert params["extra_body"] == {"reasoning": {"enabled": False}, "user_field": 1}
+
+
+def test_grok_reasoning_effort_unset_by_default():
+    params = _build_params(GrokLLMService)
+    assert "reasoning_effort" not in params
+    assert "extra_body" not in params
+
+
+def test_grok_reasoning_effort_is_top_level():
+    params = _build_params(GrokLLMService, GrokLLMService.Settings(reasoning_effort="low"))
+    assert params["reasoning_effort"] == "low"
+    assert "extra_body" not in params
+
+
+def test_grok_settings_extra_reasoning_effort_wins():
+    params = _build_params(
+        GrokLLMService,
+        GrokLLMService.Settings(reasoning_effort="low", extra={"reasoning_effort": "high"}),
+    )
+    assert params["reasoning_effort"] == "high"
 
 
 def test_deepseek_disables_thinking_by_default():

@@ -11,7 +11,7 @@ OpenAI-compatible interface.
 """
 
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Any, Literal
 
 from loguru import logger
 
@@ -107,7 +107,9 @@ class GrokLLMService(OpenAILLMService):
         logger.debug(f"Creating Grok client with api {base_url}")
         return super().create_client(api_key, base_url, **kwargs)
 
-    def build_chat_completion_params(self, params_from_context: OpenAILLMInvocationParams) -> dict:
+    def build_chat_completion_params(
+        self, params_from_context: OpenAILLMInvocationParams
+    ) -> dict[str, Any]:
         """Build parameters for Grok chat completion request.
 
         Extends the base OpenAI parameters with Grok's reasoning effort control.
@@ -122,10 +124,8 @@ class GrokLLMService(OpenAILLMService):
         """
         params = super().build_chat_completion_params(params_from_context)
 
-        if (
-            is_given(self._settings.reasoning_effort)
-            and self._settings.reasoning_effort is not None
-        ):
-            params["reasoning_effort"] = self._settings.reasoning_effort
+        reasoning_effort = self._settings.reasoning_effort
+        if is_given(reasoning_effort) and reasoning_effort is not None:
+            params.setdefault("reasoning_effort", reasoning_effort)
 
         return params
