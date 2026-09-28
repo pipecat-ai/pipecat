@@ -167,7 +167,9 @@ class OpenAIImageGenService(ImageGenService):
             yield ErrorFrame("Image generation failed")
             return
 
-        generated = Image.open(io.BytesIO(image_bytes))
+        # GPT Image PNGs can carry an alpha channel, while output transports
+        # render RGB video by default.
+        generated = Image.open(io.BytesIO(image_bytes)).convert("RGB")
         yield URLImageRawFrame(
             image=generated.tobytes(),
             size=generated.size,
