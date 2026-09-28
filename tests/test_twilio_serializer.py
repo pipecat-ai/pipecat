@@ -4,12 +4,10 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Tests for TwilioFrameSerializer deserialize() robustness.
+"""Tests for TwilioFrameSerializer deserialize().
 
-Regression tests: a malformed or unexpectedly-shaped WebSocket message from
-Twilio used to raise (JSONDecodeError/KeyError) straight out of deserialize(),
-which the transport's receive loop treats as fatal -- silently ending the
-call. Plivo/Vonage/Genesys already guard this; Twilio should behave the same.
+Malformed JSON and messages missing expected fields are ignored rather than
+raised, since the transport's receive loop ends the call on any exception.
 """
 
 import json
