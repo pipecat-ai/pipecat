@@ -458,17 +458,6 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
             )
         return None
 
-    @property
-    def accepts_intermediate_function_call_results(self) -> bool:
-        """Intermediate results don't reach the model here.
-
-        The API takes one output per function call, and the model behind it
-        does not act on a result put in beside the call: given one it calls the
-        tool again rather than telling the user about it. This is the same
-        model that makes ``cancel_on_interruption=False`` unreliable here.
-        """
-        return False
-
     def service_metadata_frame(self) -> LLMServiceMetadataFrame:
         """Realtime service; recommends external turn strategies when server-side VAD is active."""
         # In manual mode the server doesn't emit VAD events, so there are no turn frames.
@@ -629,7 +618,7 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
 
         Function call results and cancellations are broadcast by the base
         service; the downstream copy is observed here and sent to the API as it
-        is produced, intermediate results included. The frames travel on to the
+        is produced. The frames travel on to the
         assistant aggregator, which records them in the context and decides when
         inference should run.
 
@@ -647,19 +636,18 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
     async def _handle_function_call_result(self, frame: FunctionCallResultFrame):
         """Send one function call result to the API as it is produced.
 
-        An intermediate result can't go through the tool-result channel — the
-        API takes one output per call — so it goes in as a message carrying the
-        same envelope a text LLM would read from the context. A final result
-        answers the call, unless a reconnect has left the API without the id to
-        answer, in which case it goes in as a message too.
+        A final result answers the call, unless a reconnect has left the API
+        without the id to answer, in which case it goes in as a message. The
+        API takes one output per call, so an intermediate result is dropped
+        with an error.
         """
         result = json.dumps(frame.result, ensure_ascii=False) if frame.result else "COMPLETED"
         is_final = frame.properties.is_final if frame.properties else True
 
         if not is_final:
-            logger.warning(
-                f"{self}: Inworld Realtime does not act on a tool's intermediate results; "
-                f"dropping the one for {frame.function_name}"
+            await self.push_error(
+                f"{self}: Inworld Realtime takes one output per function call; dropping the "
+                f"intermediate result for {frame.function_name}"
             )
             return
         if frame.tool_call_id in self._open_function_calls:
@@ -1294,8 +1282,7 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
                     # awaits a result; nothing to send for the started marker.
                     continue
                 if async_payload.kind == "intermediate":
-                    # Sent as a message when it was produced; the call stays
-                    # open for the final result.
+                    # Dropped with an error when it was produced.
                     continue
                 if async_payload.kind == "final":
                     # Deliver via the formal tool-result channel — same path
