@@ -1,0 +1,1 @@
+- Fixed `FastAPIWebsocketClient.disconnect()` leaving the `_closing` latch set, which silently muted a replacement WebSocket, and scoped `on_client_disconnected` to the connection its receive loop was actually reading, so a loop draining an already-replaced socket no longer reports the live connection as dropped.
