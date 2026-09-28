@@ -64,7 +64,8 @@ MAX_AGENT_CONTEXT_CHARS = 1500
 # Model-name prefixes shared by every Universal-3 Pro streaming variant, all of
 # which expose the full U3 Pro feature set: built-in turn detection, prompting,
 # continuous partials, interruption_delay, context carryover, and voice focus.
-# universal-3-6-pro is universal-3-5-pro upgraded — same model, same features.
+# universal-3-6-pro and universal-3-5-pro share that feature set; 3.6 covers 32
+# declared languages against 3.5's 19.
 U3_PRO_MODEL_PREFIXES = ("u3-rt-pro", "universal-3-5-pro", "universal-3-6-pro")
 
 # Settings AssemblyAI accepts in an ``UpdateConfiguration`` message, so changing
@@ -398,7 +399,7 @@ class AssemblyAISTTService(WebsocketSTTService):
         """
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
-            model="universal-3-5-pro",
+            model="universal-3-6-pro",
             language=Language.EN,
             formatted_finals=True,
             word_finalization_max_wait_time=None,
@@ -463,7 +464,7 @@ class AssemblyAISTTService(WebsocketSTTService):
                 f"AssemblyAI turn detection mode (vad_force_turn_endpoint=False) requires "
                 f"a U3 Pro model for SpeechStarted support. Either set "
                 f"vad_force_turn_endpoint=True for {default_settings.model}, "
-                f"or use model='universal-3-5-pro'."
+                f"or use model='universal-3-6-pro'."
             )
 
         if not is_u3_pro and default_settings.prompt is not None:
