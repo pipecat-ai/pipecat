@@ -1,0 +1,1 @@
+- Added `BlyntSTTService` (`pipecat-ai[blynt]`), a streaming speech-to-text service for the Blynt realtime API. Turns follow the pipeline's VAD, and a `BlyntSessionContext` of facts and hints can bias recognition for the whole session.

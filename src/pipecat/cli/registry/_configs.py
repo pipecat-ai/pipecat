@@ -25,6 +25,7 @@ SERVICE_CONFIGS = {
         '        region=os.getenv("AZURE_SPEECH_REGION")\n'
         "    )\n"
     ),
+    "blynt_stt": "BlyntSTTService(options=BlyntSTTOptions())",
     "cartesia_stt": 'CartesiaSTTService(api_key=os.getenv("CARTESIA_API_KEY"))',
     "cartesia_turns_stt": 'CartesiaTurnsSTTService(api_key=os.getenv("CARTESIA_API_KEY"))',
     "deepgram_stt": 'DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))',

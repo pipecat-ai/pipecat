@@ -276,6 +276,15 @@ class ServiceRegistry:
             include_params=["api_key", "region"],
         ),
         ServiceDefinition(
+            value="blynt_stt",
+            label="Blynt",
+            package="pipecat-ai[blynt]",
+            class_name=["BlyntSTTService"],
+            env_prefix="BLYNT",
+            manual_config=True,
+            additional_imports=["from pipecat.services.blynt.stt import BlyntSTTOptions"],
+        ),
+        ServiceDefinition(
             value="cartesia_stt",
             label="Cartesia",
             package="pipecat-ai[cartesia]",
@@ -1165,6 +1174,7 @@ class ServiceRegistry:
 # These services have complex initialization logic that cannot be auto-generated
 # (e.g., nested InputParams, SessionProperties, or other special requirements)
 MANUAL_SERVICE_CONFIGS = {
+    "blynt_stt": "BlyntSTTService(options=BlyntSTTOptions())",
     "nvidia_sagemaker_stt": (
         "NvidiaSageMakerSTTService(\n"
         '    endpoint_name=os.getenv("NVIDIA_SAGEMAKER_STT_ENDPOINT_NAME"),\n'
