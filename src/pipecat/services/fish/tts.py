@@ -56,6 +56,12 @@ class FishAudioTTSSettings(TTSSettings):
         top_p: Controls diversity via nucleus sampling (0.0-1.0).
         prosody_speed: Speech speed multiplier (0.5-2.0). Defaults to 1.0.
         prosody_volume: Volume adjustment in dB (-20 to 20). Defaults to 0.
+        prosody_normalize_loudness: Whether to normalize output loudness for a more
+            consistent perceived volume. Applies to the S2 family.
+        chunk_length: Text segment size for processing (100-300).
+        min_chunk_length: Minimum characters before splitting into a new chunk (0-100).
+        condition_on_previous_chunks: Whether to use previously generated audio as
+            context, for voice consistency across chunks.
     """
 
     latency: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -64,6 +70,10 @@ class FishAudioTTSSettings(TTSSettings):
     top_p: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     prosody_speed: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     prosody_volume: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    prosody_normalize_loudness: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    chunk_length: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    min_chunk_length: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    condition_on_previous_chunks: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
     @classmethod
     def from_mapping(cls, settings: Mapping[str, Any]) -> Self:
@@ -71,8 +81,14 @@ class FishAudioTTSSettings(TTSSettings):
         flat = dict(settings)
         nested = flat.pop("prosody", None)
         if isinstance(nested, dict):
-            flat.setdefault("prosody_speed", nested.get("speed"))
-            flat.setdefault("prosody_volume", nested.get("volume"))
+            # Keys missing from the nested dict stay unset in the delta.
+            for key, name in (
+                ("speed", "prosody_speed"),
+                ("volume", "prosody_volume"),
+                ("normalize_loudness", "prosody_normalize_loudness"),
+            ):
+                if key in nested:
+                    flat.setdefault(name, nested[key])
         return super().from_mapping(flat)
 
 
@@ -163,6 +179,10 @@ class FishAudioTTSService(InterruptibleTTSService):
             top_p=None,
             prosody_speed=1.0,
             prosody_volume=0,
+            prosody_normalize_loudness=None,
+            chunk_length=None,
+            min_chunk_length=None,
+            condition_on_previous_chunks=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -293,22 +313,33 @@ class FishAudioTTSService(InterruptibleTTSService):
             websocket = await self._websocket_connect(self._base_url, additional_headers=headers)
             self._websocket = websocket
 
+            prosody: dict[str, Any] = {
+                "speed": self._settings.prosody_speed,
+                "volume": self._settings.prosody_volume,
+            }
+            if self._settings.prosody_normalize_loudness is not None:
+                prosody["normalize_loudness"] = self._settings.prosody_normalize_loudness
+
             # Send initial start message with ormsgpack
-            request_settings = {
+            request_settings: dict[str, Any] = {
                 "sample_rate": self._fish_sample_rate,
                 "latency": self._settings.latency,
                 "format": self._output_format,
                 "normalize": self._settings.normalize,
-                "prosody": {
-                    "speed": self._settings.prosody_speed,
-                    "volume": self._settings.prosody_volume,
-                },
+                "prosody": prosody,
                 "reference_id": self._settings.voice,
             }
-            if self._settings.temperature is not None:
-                request_settings["temperature"] = self._settings.temperature
-            if self._settings.top_p is not None:
-                request_settings["top_p"] = self._settings.top_p
+            # Fish applies its own defaults to whatever the request leaves out.
+            for name in (
+                "temperature",
+                "top_p",
+                "chunk_length",
+                "min_chunk_length",
+                "condition_on_previous_chunks",
+            ):
+                value = getattr(self._settings, name)
+                if value is not None:
+                    request_settings[name] = value
             start_message = {"event": "start", "request": {"text": "", **request_settings}}
             await websocket.send(ormsgpack.packb(start_message))
             logger.debug("Sent start message to Fish Audio")
