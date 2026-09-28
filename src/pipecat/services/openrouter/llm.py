@@ -11,7 +11,7 @@ extending the base OpenAI LLM service functionality.
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Literal, Union
+from typing import Any, Literal
 
 from loguru import logger
 from pydantic import BaseModel, ConfigDict
@@ -28,25 +28,36 @@ class OpenRouterProviderPreferences(BaseModel):
     Every model on OpenRouter can be served by several providers, and by
     default OpenRouter picks among them and falls back to another when one
     fails. These preferences constrain that choice. See
-    https://openrouter.ai/docs/features/provider-routing for the provider
+    https://openrouter.ai/docs/guides/routing/provider-selection for the provider
     slugs and the full semantics.
 
     Parameters:
-        order: Provider slugs to try, in order, before any others.
+        order: Provider slugs to try, in order, before any others. Setting it
+            turns off load balancing.
         allow_fallbacks: Whether to fall back to providers outside ``order``,
             ``only`` and ``quantizations``. Defaults to true.
         require_parameters: Whether to route only to providers that support
-            every parameter in the request.
+            every parameter in the request. Defaults to false.
         data_collection: "deny" restricts routing to providers that do not
-            store prompts.
+            collect user data. Defaults to "allow".
         zdr: Whether to route only to zero-data-retention endpoints.
+        enforce_distillable_text: Whether to route only to models that allow
+            text distillation.
         only: Provider slugs to route to, to the exclusion of all others.
         ignore: Provider slugs never to route to.
         quantizations: Quantization levels to accept, e.g. ``["fp8", "bf16"]``.
         sort: Attribute to rank providers by — "price", "throughput" or
-            "latency" — which turns off load balancing.
-        max_price: Ceilings on what a request may cost, per key ("prompt",
-            "completion", "request", "image"), in USD per million tokens.
+            "latency" — or an object of the form ``{"by": ..., "partition":
+            "model" | "none"}``. Setting it turns off load balancing.
+        preferred_min_throughput: Throughput, in tokens per second, below which
+            a provider is deprioritized. Either a number or percentile
+            thresholds keyed "p50", "p75", "p90" and "p99".
+        preferred_max_latency: Latency, in seconds, above which a provider is
+            deprioritized. Either a number or percentile thresholds keyed
+            "p50", "p75", "p90" and "p99".
+        max_price: Ceilings on what a request may cost, in USD: "prompt" and
+            "completion" per million tokens, "request" per request, and
+            "image" per image.
     """
 
     # Why `extra="allow"`, and `| str` and `| dict` on the constrained fields?
@@ -60,10 +71,13 @@ class OpenRouterProviderPreferences(BaseModel):
     require_parameters: bool | None = None
     data_collection: Literal["allow", "deny"] | str | None = None
     zdr: bool | None = None
+    enforce_distillable_text: bool | None = None
     only: list[str] | None = None
     ignore: list[str] | None = None
     quantizations: list[str] | None = None
     sort: Literal["price", "throughput", "latency"] | str | dict[str, Any] | None = None
+    preferred_min_throughput: float | dict[str, float] | None = None
+    preferred_max_latency: float | dict[str, float] | None = None
     max_price: dict[str, float] | None = None
 
 
@@ -72,13 +86,20 @@ class OpenRouterLLMSettings(BaseOpenAILLMService.Settings):
     """Settings for OpenRouterLLMService.
 
     Parameters:
-        provider: Which upstream providers may serve the request. Left unset,
-            OpenRouter routes by its own default order.
+        provider: Which upstream providers may serve the request. A plain dict
+            is converted to :class:`OpenRouterProviderPreferences`. Left unset,
+            or set to ``None``, the request omits it and OpenRouter routes by
+            its own default order.
     """
 
-    provider: Union["OpenRouterLLMService.ProviderPreferences", dict[str, Any], NotGiven] = field(
+    provider: OpenRouterProviderPreferences | dict[str, Any] | None | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
+
+    def __post_init__(self):
+        """Coerce a plain ``provider`` dict to :class:`OpenRouterProviderPreferences`."""
+        if isinstance(self.provider, dict):
+            self.provider = OpenRouterProviderPreferences(**self.provider)
 
 
 class OpenRouterLLMService(OpenAILLMService):
@@ -166,10 +187,8 @@ class OpenRouterLLMService(OpenAILLMService):
         if not is_given(preferences) or preferences is None:
             return
 
-        if isinstance(preferences, BaseModel):
-            preferences = preferences.model_dump(exclude_none=True)
-
-        self._merge_extra_body(params, {"provider": preferences})
+        preferences = OpenRouterProviderPreferences.model_validate(preferences)
+        self._merge_extra_body(params, {"provider": preferences.model_dump(exclude_none=True)})
 
     def build_chat_completion_params(
         self, params_from_context: OpenAILLMInvocationParams
