@@ -98,7 +98,7 @@ class OpenAIImageGenService(ImageGenService):
                     Use ``settings=OpenAIImageGenService.Settings(image_size=...)`` instead.
                     Will be removed in 2.0.0.
 
-            model: Image generation model to use. Defaults to "gpt-image-2".
+            model: Image generation model to use. Defaults to "gpt-image-2.5-flare".
 
                 .. deprecated:: 0.0.105
                     Use ``settings=OpenAIImageGenService.Settings(model=...)`` instead.
@@ -109,7 +109,7 @@ class OpenAIImageGenService(ImageGenService):
         """
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
-            model="gpt-image-2",
+            model="gpt-image-2.5-flare",
             image_size=None,
         )
 
