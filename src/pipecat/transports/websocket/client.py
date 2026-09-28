@@ -139,20 +139,26 @@ class WebsocketClientSession:
 
         An input and an output transport share this session and both connect
         while they are set up, concurrently, so only the first of them dials.
+        A failure to connect is raised to both, and the pipeline reports it as
+        an error from each.
+
+        Raises:
+            websockets.exceptions.InvalidURI: If the URI isn't a valid WebSocket URI.
+            websockets.exceptions.InvalidHandshake: If the server rejects the
+                opening handshake.
+            OSError: If the TCP connection fails.
+            TimeoutError: If the opening handshake times out.
         """
-        try:
-            self._websocket = await websocket_connect(
-                uri=self._uri,
-                open_timeout=10,
-                additional_headers=self._params.additional_headers,
-            )
-            self._client_task = self.task_manager.create_task(
-                self._client_task_handler(),
-                f"{self._transport_name}::WebsocketClientSession::_client_task_handler",
-            )
-            await self._callbacks.on_connected(self._websocket)
-        except TimeoutError:
-            logger.error(f"Timeout connecting to {self._uri}")
+        self._websocket = await websocket_connect(
+            uri=self._uri,
+            open_timeout=10,
+            additional_headers=self._params.additional_headers,
+        )
+        self._client_task = self.task_manager.create_task(
+            self._client_task_handler(),
+            f"{self._transport_name}::WebsocketClientSession::_client_task_handler",
+        )
+        await self._callbacks.on_connected(self._websocket)
 
     @releases("connection")
     async def disconnect(self):
