@@ -1239,6 +1239,10 @@ class SpeechmaticsSTTService(STTService):
             Language.ES: "es",
             Language.SV: "sv",
             Language.SW: "sw",
+            # Speechmatics' Tagalog pack also covers Filipino, its standardized register,
+            # so both map onto the one code the provider offers.
+            Language.TL: "tl",
+            Language.FIL: "tl",
             Language.TA: "ta",
             Language.TH: "th",
             Language.TR: "tr",
