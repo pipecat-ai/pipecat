@@ -442,6 +442,16 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
     # Overriding the default adapter to use the Gemini Live one.
     adapter_class = GeminiLiveLLMAdapter
 
+    @property
+    def accepts_intermediate_function_call_results(self) -> bool:
+        """Whether the model takes a call's intermediate results.
+
+        They ride the tool-response channel as a generator (``will_continue``),
+        which only a NON_BLOCKING call allows, so this follows the same model
+        gating as the rest of the async-tool support.
+        """
+        return self._supports_non_blocking_tools
+
     def service_metadata_frame(self) -> LLMServiceMetadataFrame:
         """Realtime service; emits no server-side turn frames, so recommends no external strategies."""
         # The API exposes an `interrupted` event but no turn-start/-end.
@@ -1019,7 +1029,8 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
         """Push a frame, sending function call results to the API on the way.
 
         Results are broadcast by the base service; the downstream copy is
-        observed here and sent as it is produced.
+        observed here and sent as it is produced, so a tool that reports
+        progress reaches the model while it is still working.
 
         Args:
             frame: The frame to push.
@@ -1030,16 +1041,12 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
         await super().push_frame(frame, direction)
 
     async def _handle_function_call_result(self, frame: FunctionCallResultFrame):
-        """Send one result to the API, and say whether the model should answer it.
-
-        The API takes one response per function call, so an intermediate
-        result is dropped with an error.
-        """
+        """Send one result to the API, and say whether the model should answer it."""
         is_final = frame.properties.is_final if frame.properties else True
-        if not is_final:
-            await self.push_error(
-                f"{self}: Gemini Live takes one response per function call; dropping the "
-                f"intermediate result for {frame.function_name}"
+        if not is_final and not self.accepts_intermediate_function_call_results:
+            logger.warning(
+                f"{self}: {self._settings.model} takes one result per function call; "
+                f"dropping the intermediate result for {frame.function_name}"
             )
             return
         run_llm = frame.properties.run_llm if frame.properties else None
@@ -1051,9 +1058,11 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
             frame.tool_call_id,
             tool_name,
             GeminiLiveLLMAdapter.to_function_response_dict(result),
+            is_final=is_final,
             spoken=bool(run_llm),
         )
-        self._completed_tool_calls.add(frame.tool_call_id)
+        if is_final:
+            self._completed_tool_calls.add(frame.tool_call_id)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process incoming frames for the Gemini Live service.
@@ -1290,7 +1299,8 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
                     # awaits a result; nothing to send for the started marker.
                     continue
                 if async_payload.kind == "intermediate":
-                    # Dropped with an error when it was produced.
+                    # Sent as it was produced, keeping the call open for the
+                    # result that settles it.
                     continue
                 if async_payload.kind == "final":
                     # Deliver via the formal tool-response channel — same
@@ -2074,6 +2084,7 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
         tool_name: str,
         tool_result_message: dict[str, Any],
         *,
+        is_final: bool = True,
         spoken: bool = True,
     ):
         """Send tool result back to the API.
@@ -2082,6 +2093,9 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
             tool_call_id: The call the result belongs to.
             tool_name: The function that was called.
             tool_result_message: The result, as a response dict.
+            is_final: Whether this result completes the call. An intermediate
+                one keeps it open (``will_continue``), which only a NON_BLOCKING
+                call allows.
             spoken: Whether the model should address the result. It is told to
                 stay silent otherwise, so the result is context it can draw on
                 if the conversation turns that way.
@@ -2112,9 +2126,12 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
         response = FunctionResponse(name=tool_name, id=tool_call_id, response=response_payload)
         # The guides document scheduling inside the response, the API reference
         # as a field of its own; set both so whichever the server reads is
-        # there.
+        # there. will_continue only exists as a field: True keeps the call open
+        # for more responses, and False closes it, which the last response has
+        # to say or the call stays open for good.
         if non_blocking:
             response.scheduling = FunctionResponseScheduling(scheduling)
+            response.will_continue = not is_final
 
         try:
             await self._session.send_tool_response(function_responses=response)
