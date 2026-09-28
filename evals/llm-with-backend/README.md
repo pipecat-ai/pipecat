@@ -22,8 +22,10 @@ The backend is an engineering assistant's: a code change that loops through sear
 | `delegate_with_aside`    | The same, plus a joke the user asked for while waiting: the ack and the joke come in one reply.                                              |
 | `concurrent_delegations` | A research request while the fix is in progress: a second `delegate`, the research reported first, the fix after.                            |
 | `superseding_delegation` | A correction while the fix is in progress: the result reflects the latest instruction.                                                       |
-| `cancel_delegation`      | "Never mind": `cancel_delegated_work` is called, the bot confirms, and nothing arrives later.                                                 |
+| `cancel_delegation`      | "Never mind": delegated like any other message; the backend stops, the bot confirms, and nothing arrives later.                             |
 | `cancel_and_replace`     | A long "stop that, do this instead" timed so a result lands mid-utterance: the stale result is not relayed as wanted, the new request is done. |
+| `implicit_cancel`        | A change of mind while the integration tests run, with no "stop" said: the backend cancels `run_integration_tests`, the bot acknowledges once, and nothing arrives later. |
+| `partial_cancel`         | Integration tests and a runbook lookup in flight, then "forget the tests": `run_integration_tests` is cancelled, the runbook answer still arrives, no test result does.    |
 | `progress_inquiry`       | "How's it going?" mid-fix: answered from the backend's silent progress messages, without delegating again.                                   |
 | `aside_while_waiting`    | Small talk while the fix is in progress: the chat is answered, and the fix is still reported when it lands.                                  |
 | `result_during_interruption` | A lookup bundled with a request for a long story, so its result lands while the story is being spoken, which the user then cuts off: the result is reported all the same. Audio only. |

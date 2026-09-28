@@ -23,6 +23,8 @@ suite:
       - text/superseding_delegation
       - text/cancel_delegation
       - text/cancel_and_replace
+      - text/implicit_cancel
+      - text/partial_cancel
       - text/progress_inquiry
       - text/aside_while_waiting
       - text/accepted_offer
@@ -33,6 +35,8 @@ suite:
       - audio/superseding_delegation
       - audio/cancel_delegation
       - audio/cancel_and_replace
+      - audio/implicit_cancel
+      - audio/partial_cancel
       - audio/progress_inquiry
       - audio/aside_while_waiting
       - audio/result_during_interruption
@@ -46,6 +50,8 @@ suite:
       - text/superseding_delegation
       - text/cancel_delegation
       - text/cancel_and_replace
+      - text/implicit_cancel
+      - text/partial_cancel
       - text/progress_inquiry
       - text/aside_while_waiting
       - text/accepted_offer
@@ -56,6 +62,8 @@ suite:
       - audio/superseding_delegation
       - audio/cancel_delegation
       - audio/cancel_and_replace
+      - audio/implicit_cancel
+      - audio/partial_cancel
       - audio/progress_inquiry
       - audio/aside_while_waiting
       - audio/result_during_interruption
@@ -69,6 +77,8 @@ suite:
       - text/superseding_delegation
       - text/cancel_delegation
       - text/cancel_and_replace
+      - text/implicit_cancel
+      - text/partial_cancel
       - text/progress_inquiry
       - text/aside_while_waiting
       - text/accepted_offer
@@ -79,6 +89,8 @@ suite:
       - audio/superseding_delegation
       - audio/cancel_delegation
       - audio/cancel_and_replace
+      - audio/implicit_cancel
+      - audio/partial_cancel
       - audio/progress_inquiry
       - audio/aside_while_waiting
       - audio/result_during_interruption
@@ -92,6 +104,8 @@ suite:
       - audio/superseding_delegation
       - audio/cancel_delegation
       - audio/cancel_and_replace
+      - audio/implicit_cancel
+      - audio/partial_cancel
       - audio/progress_inquiry
       - audio/aside_while_waiting
       - audio/result_during_interruption
@@ -105,6 +119,8 @@ suite:
       - audio/superseding_delegation
       - audio/cancel_delegation
       - audio/cancel_and_replace
+      - audio/implicit_cancel
+      - audio/partial_cancel
       - audio/progress_inquiry
       - audio/aside_while_waiting
       - audio/result_during_interruption
