@@ -2335,6 +2335,17 @@
       "location": "pipecat/services/google/image.py"
     },
     {
+      "subject": "GoogleImageGenSettings.negative_prompt",
+      "module": "pipecat.services.google.image",
+      "kind": "parameter",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "No replacement. Gemini image models do not accept a negative prompt, so the value is ignored. Will be removed in 2.0.0.",
+      "location": "pipecat/services/google/image.py"
+    },
+    {
       "subject": "GoogleLLMService.InputParams",
       "module": "pipecat.services.google.llm",
       "kind": "class",
