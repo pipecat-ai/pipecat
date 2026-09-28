@@ -689,6 +689,10 @@ class MOQTransportClient:
 
         self._audio_out_sample_rate = sample_rate
         self._audio_out = self._publish_audio_track(sample_rate)
+        # Announce broadcast to peers now that subscriber-needed tracks exist
+        # (catalog via audio rendition above, transcript stream). moq-rs 0.5
+        # requires explicit announce; until announced, broadcast is unroutable.
+        self._publish_broadcast.announce()
         logger.debug(
             f"MOQ: publishing audio as Opus "
             f"(pipeline rate={sample_rate}Hz, opus rate={OPUS_SAMPLE_RATE}Hz, "
@@ -746,6 +750,9 @@ class MOQTransportClient:
         self._audio_out = None
         if self._audio_out_sample_rate is not None and self._params.audio_out_enabled:
             self._audio_out = self._publish_audio_track(self._audio_out_sample_rate)
+        # Re-announce rebuilt broadcast (moq-rs 0.5 requires explicit
+        # announce; see open_audio_track).
+        self._publish_broadcast.announce()
         # By index against the live log: a record published while the
         # replay yields is only logged (see publish_transcript), and is
         # written from here, after the records before it.
