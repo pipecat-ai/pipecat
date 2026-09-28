@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal, Union
 
 from loguru import logger
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
 from pipecat.services.openai.base_llm import BaseOpenAILLMService
@@ -49,9 +49,12 @@ class OpenRouterProviderPreferences(BaseModel):
             "completion", "request", "image"), in USD per million tokens.
     """
 
-    # Why `| str` and `| dict` on the constrained fields? OpenRouter adds
-    # routing options regularly, and a request should not be rejected here
-    # for using one that landed after this model was written.
+    # Why `extra="allow"`, and `| str` and `| dict` on the constrained fields?
+    # OpenRouter adds routing options regularly, and one that landed after this
+    # model was written should still reach the request rather than be rejected
+    # or dropped here.
+    model_config = ConfigDict(extra="allow")
+
     order: list[str] | None = None
     allow_fallbacks: bool | None = None
     require_parameters: bool | None = None
@@ -156,7 +159,8 @@ class OpenRouterLLMService(OpenAILLMService):
 
         ``provider`` is OpenRouter's own request field rather than an OpenAI
         one, so it travels in ``extra_body``, which the OpenAI client merges
-        into the JSON body it sends.
+        into the JSON body it sends. A ``provider`` already in ``extra_body``,
+        supplied through ``Settings.extra``, wins.
         """
         preferences = self._settings.provider
         if not is_given(preferences) or preferences is None:
@@ -165,9 +169,7 @@ class OpenRouterLLMService(OpenAILLMService):
         if isinstance(preferences, BaseModel):
             preferences = preferences.model_dump(exclude_none=True)
 
-        extra_body = dict(params.get("extra_body") or {})
-        extra_body["provider"] = preferences
-        params["extra_body"] = extra_body
+        self._merge_extra_body(params, {"provider": preferences})
 
     def build_chat_completion_params(
         self, params_from_context: OpenAILLMInvocationParams
