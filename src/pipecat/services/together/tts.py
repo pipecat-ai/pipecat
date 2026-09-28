@@ -17,6 +17,7 @@ import json
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import quote
 
 from loguru import logger
 from websockets.protocol import State
@@ -149,7 +150,11 @@ class TogetherTTSService(WebsocketTTSService):
 
     def _build_websocket_url(self) -> str:
         """Build the WebSocket URL with query parameters."""
-        url = f"{self._url}?model={self._settings.model}&voice={self._settings.voice}"
+        # Kokoro blends voices with a `+`-separated name such as
+        # "af_bella(2)+af_heart(1)", which has to be escaped or the server reads
+        # the `+` as a space and rejects the voice.
+        voice = quote(str(self._settings.voice), safe="")
+        url = f"{self._url}?model={self._settings.model}&voice={voice}"
         if self._settings.max_partial_length is not None:
             url += f"&max_partial_length={self._settings.max_partial_length}"
         return url
