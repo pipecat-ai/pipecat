@@ -1,0 +1,1 @@
+- Fixed `OpenAIImageGenService` failing against OpenAI's GPT Image models. Those models return the image inline as base64 rather than as a hosted URL, which the service reported as `Image generation failed`; it now decodes the inline data and emits the frame either way.
