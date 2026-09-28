@@ -136,10 +136,16 @@ class ExotelFrameSerializer(FrameSerializer):
         Returns:
             A Pipecat frame corresponding to the Exotel event, or None if unhandled.
         """
-        message = json.loads(data)
+        try:
+            message = json.loads(data)
+        except json.JSONDecodeError:
+            logger.warning(f"Failed to parse JSON message: {data}")
+            return None
 
-        if message["event"] == "media":
-            payload_base64 = message["media"]["payload"]
+        if message.get("event") == "media":
+            payload_base64 = message.get("media", {}).get("payload")
+            if not payload_base64:
+                return None
             payload = base64.b64decode(payload_base64)
 
             deserialized_data = await self._input_resampler.resample(
@@ -158,7 +164,7 @@ class ExotelFrameSerializer(FrameSerializer):
                 sample_rate=self._sample_rate,  # Use the configured pipeline input rate
             )
             return audio_frame
-        elif message["event"] == "dtmf":
+        elif message.get("event") == "dtmf":
             digit = message.get("dtmf", {}).get("digit")
 
             try:

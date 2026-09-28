@@ -254,10 +254,16 @@ class TelnyxFrameSerializer(FrameSerializer):
         Raises:
             ValueError: If an unsupported encoding is specified.
         """
-        message = json.loads(data)
+        try:
+            message = json.loads(data)
+        except json.JSONDecodeError:
+            logger.warning(f"Failed to parse JSON message: {data}")
+            return None
 
-        if message["event"] == "media":
-            payload_base64 = message["media"]["payload"]
+        if message.get("event") == "media":
+            payload_base64 = message.get("media", {}).get("payload")
+            if not payload_base64:
+                return None
             payload = base64.b64decode(payload_base64)
 
             # Input: Convert Telnyx's 8kHz encoded audio to PCM at pipeline input rate
@@ -286,7 +292,7 @@ class TelnyxFrameSerializer(FrameSerializer):
                 audio=deserialized_data, num_channels=1, sample_rate=self._sample_rate
             )
             return audio_frame
-        elif message["event"] == "dtmf":
+        elif message.get("event") == "dtmf":
             digit = message.get("dtmf", {}).get("digit")
 
             try:
