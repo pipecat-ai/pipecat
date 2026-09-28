@@ -11,6 +11,7 @@ from unittest.mock import patch
 from openai._types import NOT_GIVEN as OPENAI_NOT_GIVEN
 
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
+from pipecat.services.deepseek.llm import DeepSeekLLMService
 from pipecat.services.inception.llm import InceptionLLMService
 from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.sarvam.llm import SarvamLLMService
@@ -62,6 +63,29 @@ def test_together_reasoning_in_extra_body():
     )
     assert "reasoning" not in params
     assert params["extra_body"] == {"reasoning": {"enabled": False}, "user_field": 1}
+
+
+def test_deepseek_disables_thinking_by_default():
+    params = _build_params(DeepSeekLLMService)
+    assert params["extra_body"] == {"thinking": {"type": "disabled"}}
+    assert "seed" not in params
+    assert "max_completion_tokens" not in params
+
+
+def test_deepseek_thinking_none_leaves_default_to_deepseek():
+    params = _build_params(DeepSeekLLMService, DeepSeekLLMService.Settings(thinking=None))
+    assert "extra_body" not in params
+
+
+def test_deepseek_thinking_keeps_user_extra_body():
+    params = _build_params(
+        DeepSeekLLMService,
+        DeepSeekLLMService.Settings(
+            thinking=DeepSeekLLMService.ThinkingConfig(type="enabled"),
+            extra={"extra_body": {"user_field": 1}},
+        ),
+    )
+    assert params["extra_body"] == {"thinking": {"type": "enabled"}, "user_field": 1}
 
 
 def test_inception_realtime_keeps_user_extra_body():
