@@ -62,6 +62,11 @@ class AWSBedrockLLMSettings(LLMSettings):
     Parameters:
         stop_sequences: List of strings that stop generation.
         latency: Performance mode - "standard" or "optimized".
+        effort: How much reasoning the model spends before answering — "low",
+            "medium", "high", "xhigh" or "max". Sent as Converse's
+            ``outputConfig.effort``; only reasoning models accept it, and a model
+            that does not support it rejects the request. See:
+            https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_OutputConfig.html
         enable_prompt_caching: Whether to enable prompt caching by adding cachePoint
             markers to system prompts and tool definitions. Can reduce TTFT by up to
             85% for multi-turn conversations. See:
@@ -71,6 +76,7 @@ class AWSBedrockLLMSettings(LLMSettings):
 
     stop_sequences: list[str] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     latency: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    effort: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     enable_prompt_caching: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     additional_model_request_fields: dict[str, Any] | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
@@ -186,6 +192,7 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
             user_turn_completion_config=None,
             stop_sequences=None,
             latency=None,
+            effort=None,
             enable_prompt_caching=False,
             additional_model_request_fields={},
         )
@@ -324,6 +331,9 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
 
         if inference_config:
             request_params["inferenceConfig"] = inference_config
+
+        if self._settings.effort:
+            request_params["outputConfig"] = {"effort": self._settings.effort}
 
         if system:
             request_params["system"] = system
@@ -513,6 +523,9 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
             # Add performance config if latency is specified
             if self._settings.latency in ["standard", "optimized"]:
                 request_params["performanceConfig"] = {"latency": self._settings.latency}
+
+            if self._settings.effort:
+                request_params["outputConfig"] = {"effort": self._settings.effort}
 
             # Add cache checkpoints to system prompts and tool definitions.
             # This enables prompt caching for providers that support it (e.g.
