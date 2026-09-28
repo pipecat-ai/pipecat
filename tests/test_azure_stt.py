@@ -61,6 +61,39 @@ class TestAzureSTTProfanitySetting(unittest.TestCase):
             mock_set.assert_not_called()
 
 
+class TestAzureSTTSegmentationSilenceTimeout(unittest.TestCase):
+    """The ``segmentation_silence_timeout_ms`` setting surfaces Azure's
+    ``Speech_SegmentationSilenceTimeoutMs`` property, which decides how long a
+    pause has to be before Azure finalizes a phrase."""
+
+    def _segmentation_calls(self, mock_set):
+        from azure.cognitiveservices.speech import PropertyId
+
+        # SpeechConfig itself sets the recognition language through
+        # ``set_property``, so look only at the segmentation property.
+        return [
+            call
+            for call in mock_set.call_args_list
+            if call.args[0] == PropertyId.Speech_SegmentationSilenceTimeoutMs
+        ]
+
+    def test_timeout_sets_speech_config_property(self):
+        with patch("pipecat.services.azure.stt.SpeechConfig.set_property") as mock_set:
+            AzureSTTService(
+                api_key="fake",
+                region="eastus",
+                settings=AzureSTTService.Settings(segmentation_silence_timeout_ms=1200),
+            )
+            calls = self._segmentation_calls(mock_set)
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(calls[0].args[1], "1200")
+
+    def test_timeout_omitted_is_no_op(self):
+        with patch("pipecat.services.azure.stt.SpeechConfig.set_property") as mock_set:
+            AzureSTTService(api_key="fake", region="eastus")
+            self.assertEqual(self._segmentation_calls(mock_set), [])
+
+
 class TestAzureSTTFinalizedFlag(unittest.IsolatedAsyncioTestCase):
     """Azure's ``RecognizedSpeech`` event is the final recognition for an
     utterance — the emitted ``TranscriptionFrame`` must carry

@@ -20,12 +20,11 @@ from pipecat.frames.frames import (
     Frame,
     InterruptionFrame,
     OutputImageRawFrame,
-    StartFrame,
     TTSAudioRawFrame,
     TTSStoppedFrame,
     UserStartedSpeakingFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.ai_service import AIService
 from pipecat.services.settings import ServiceSettings
 from pipecat.utils.deprecation import deprecated
@@ -171,13 +170,13 @@ class SimliVideoService(AIService):
         self._previously_interrupted = is_trinity_avatar
         self._audio_buffer = bytearray()
 
-    async def start(self, frame: StartFrame):
-        """Start the Simli video service.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service.
 
         Args:
-            frame: The start frame containing initialization parameters.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         await self._start_connection()
 
     async def stop(self, frame: EndFrame):

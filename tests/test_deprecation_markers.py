@@ -17,9 +17,11 @@ assertions over its validators, plus runtime checks that the converted shims
 still emit ``DeprecationWarning`` without warning at import time.
 """
 
+import inspect
 import json
 import subprocess
 import sys
+import warnings
 from pathlib import Path
 
 import pytest
@@ -36,6 +38,7 @@ from pipecat.frames.frames import (  # noqa: E402
     CancelTaskFrame,
     EndTaskFrame,
     InterruptionTaskFrame,
+    StartFrame,
     StopTaskFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline  # noqa: E402
@@ -211,6 +214,64 @@ def test_no_deprecation_warnings_at_import_time():
     )
     result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
+
+
+# --- Intercepted field reads (warn_deprecated_read) ---------------------------
+#
+# A field whose reads are intercepted by ``__getattribute__`` warns once per call
+# site. The helper finds that site by walking two frames up and reports it with a
+# matching ``stacklevel``, so the tests below pin both the count and the reported
+# location: a call layer added between the shim and the helper would otherwise
+# silently collapse every reader into one entry.
+
+
+def _read_enable_metrics(frame):
+    return frame.enable_metrics
+
+
+def test_intercepted_read_warns_once_per_call_site():
+    frame = StartFrame()
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        for _ in range(10):
+            _read_enable_metrics(frame)
+    assert len(caught) == 1
+
+
+def test_intercepted_read_warns_for_every_call_site():
+    frame = StartFrame()
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        _ = frame.enable_metrics
+        _ = frame.enable_metrics  # Same field, second call site.
+    assert len(caught) == 2
+
+
+def test_intercepted_read_reports_the_reading_line():
+    frame = StartFrame()
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        _ = frame.enable_metrics
+        lineno = inspect.currentframe().f_lineno - 1
+    assert caught[0].filename == __file__
+    assert caught[0].lineno == lineno
+
+
+def test_intercepted_read_warns_through_an_ignore_filter():
+    """The warning reaches a reader who has filtered ``DeprecationWarning`` out.
+
+    Deprecations that only reach ``__main__`` would miss every caller inside a
+    library, so the warning is raised under its own ``always`` filter. Run in a
+    subprocess to get an interpreter whose filters ignore the category.
+    """
+    script = "from pipecat.frames.frames import StartFrame\n_ = StartFrame().enable_metrics\n"
+    result = subprocess.run(
+        [sys.executable, "-W", "ignore::DeprecationWarning", "-c", script],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "`StartFrame.enable_metrics` is deprecated" in result.stderr
 
 
 # --- Removal history (removals.json) ------------------------------------------

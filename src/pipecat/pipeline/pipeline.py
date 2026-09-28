@@ -173,12 +173,12 @@ class Pipeline(BasePipeline):
             setup: Configuration for frame processor setup.
         """
         await super().setup(setup)
-        await self._setup_processors(setup)
+        await self._setup_processors(self._processors, setup)
 
     async def cleanup(self):
         """Clean up the pipeline and all contained processors."""
         await super().cleanup()
-        await self._cleanup_processors()
+        await self._cleanup_processors(self._processors)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames by routing them through the pipeline.
@@ -193,16 +193,6 @@ class Pipeline(BasePipeline):
             await self._source.queue_frame(frame, FrameDirection.DOWNSTREAM)
         elif direction == FrameDirection.UPSTREAM:
             await self._sink.queue_frame(frame, FrameDirection.UPSTREAM)
-
-    async def _setup_processors(self, setup: FrameProcessorSetup):
-        """Set up all processors in the pipeline."""
-        for p in self._processors:
-            await p.setup(setup)
-
-    async def _cleanup_processors(self):
-        """Clean up all processors in the pipeline."""
-        for p in self._processors:
-            await p.cleanup()
 
     def _link_processors(self):
         """Link all processors in sequence and set their parent."""

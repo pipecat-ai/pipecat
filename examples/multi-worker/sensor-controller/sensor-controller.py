@@ -58,8 +58,9 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.bus import BusJobRequestMessage
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMMessagesAppendFrame, LLMRunFrame
+from pipecat.pipeline.job_context import JobParams
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     AssistantTurnStoppedMessage,
@@ -186,7 +187,9 @@ def build_sensor_controller() -> PipelineWorker:
         ]
     )
 
-    worker = PipelineWorker(pipeline, name="sensor-controller")
+    worker = PipelineWorker(
+        pipeline, name="sensor-controller", processor_unusable_policy=ProcessorUnusablePolicy.END
+    )
 
     # The controller handles one job at a time (the LLM pipeline can only
     # run one turn at a time). ``state["job_id"]`` pairs the in-flight
@@ -194,8 +197,8 @@ def build_sensor_controller() -> PipelineWorker:
     state: dict[str, str | None] = {"job_id": None}
 
     @worker.event_handler("on_job_request")
-    async def on_request(_task, message: BusJobRequestMessage):
-        question = message.payload["question"]
+    async def on_request(_worker, message: BusJobRequestMessage):
+        question = (message.payload or {})["question"]
         logger.info(f"Controller: received question '{question}'")
         state["job_id"] = message.job_id
         await worker.queue_frame(
@@ -247,7 +250,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         """
         logger.info(f"Voice agent: forwarding to controller: '{question}'")
         async with params.pipeline_worker.job(
-            "sensor-controller", payload={"question": question}, timeout=30
+            "sensor-controller", params=JobParams(payload={"question": question}, timeout=30)
         ) as t:
             pass
         await params.result_callback(t.response["answer"])
@@ -291,6 +294,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             enable_usage_metrics=True,
         ),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
+        processor_unusable_policy=ProcessorUnusablePolicy.END,
     )
 
     runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)

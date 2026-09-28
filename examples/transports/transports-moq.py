@@ -38,7 +38,7 @@ from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import EndWorkerFrame, LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
@@ -107,7 +107,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     tts = CartesiaTTSService(
         api_key=os.environ["CARTESIA_API_KEY"],
         settings=CartesiaTTSService.Settings(
-            voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+            voice="86e30c1d-714b-4074-a1f2-1cb6b552fb49",
         ),
     )
 
@@ -156,6 +156,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             enable_usage_metrics=True,
         ),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
+        processor_unusable_policy=ProcessorUnusablePolicy.END,
     )
 
     runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
@@ -170,10 +171,16 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         )
         await worker.queue_frames([LLMRunFrame()])
 
+    @transport.event_handler("on_client_disconnected")
+    async def on_client_disconnected(transport):
+        logger.info("Client disconnected")
+        await runner.cancel()
+
     @transport.event_handler("on_disconnected")
     async def on_disconnected(transport):
+        # In client mode the transport redials the relay, so this is not
+        # the end of the call; on_client_disconnected is.
         logger.info("Disconnected from MOQ relay")
-        await runner.cancel()
 
     @transport.event_handler("on_error")
     async def on_error(transport, message, exception):

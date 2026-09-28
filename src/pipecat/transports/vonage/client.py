@@ -26,7 +26,6 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     OutputAudioRawFrame,
     OutputImageRawFrame,
-    StartFrame,
     TranscriptionFrame,
     UserAudioRawFrame,
     UserImageRawFrame,
@@ -41,6 +40,7 @@ from pipecat.transports.vonage.utils import (
     process_audio,
 )
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
+from pipecat.utils.shared import acquires, releases
 from pipecat.utils.time import time_now_iso8601
 
 try:
@@ -323,16 +323,19 @@ class VonageClient:
             self._video_out_color_format_vonage
         ]
 
+    @acquires("client")
     async def setup(self, setup: FrameProcessorSetup) -> None:
         """Setup the client with task manager and event queues.
 
         Args:
             setup: The frame processor setup configuration.
         """
-        if self._task_manager:
-            return
-
         self._task_manager = setup.task_manager
+
+        if self._params.audio_in_sample_rate is None:
+            self._audio_in_sample_rate = setup.audio_in_sample_rate
+        if self._params.audio_out_sample_rate is None:
+            self._audio_out_sample_rate = setup.audio_out_sample_rate
 
         # tasks from the generic event queue should allow concurrent processing as they
         # may await on new events posted to the same queue
@@ -355,18 +358,33 @@ class VonageClient:
 
     async def cleanup(self) -> None:
         """Cleanup the client, disconnecting if necessary."""
-        if self._connected:
-            await self.disconnect()
+        try:
+            if self._connected:
+                await self.disconnect()
 
-        if self._event_task and self._task_manager:
-            await self._task_manager.cancel_task(self._event_task)
-            self._event_task = None
-        if self._audio_task and self._task_manager:
-            await self._task_manager.cancel_task(self._audio_task)
-            self._audio_task = None
-        if self._video_task and self._task_manager:
-            await self._task_manager.cancel_task(self._video_task)
-            self._video_task = None
+            if self._event_task and self._task_manager:
+                await self._task_manager.cancel_task(self._event_task)
+                self._event_task = None
+            if self._audio_task and self._task_manager:
+                await self._task_manager.cancel_task(self._audio_task)
+                self._audio_task = None
+            if self._video_task and self._task_manager:
+                await self._task_manager.cancel_task(self._video_task)
+                self._video_task = None
+        finally:
+            # Released even when disconnecting raised, which is the case where
+            # the thread is most likely still blocked in the SDK.
+            await self._release_executor()
+
+    @releases("client")
+    async def _release_executor(self) -> None:
+        """Release the thread the SDK's blocking calls run on.
+
+        An input and an output transport share this client and both clean it up,
+        and the last of them is the one that actually disconnects, so the thread
+        it disconnects on has to outlive the others.
+        """
+        self._executor.shutdown(wait=False)
 
     def add_listener(self, listener: VonageClientListener) -> int:
         """Add a listener to the Vonage client.
@@ -389,12 +407,8 @@ class VonageClient:
         """
         self._listeners.pop(listener_id, None)
 
-    async def connect(self, frame: StartFrame | None = None) -> None:
-        """Connect to the Vonage session.
-
-        Args:
-            frame: Optional StartFrame to configure audio sample rates if not already set.
-        """
+    async def connect(self) -> None:
+        """Connect to the Vonage session."""
         logger.info(f"Connecting with session string {self._session_id}")
 
         if self._disconnecting_future is not None:
@@ -415,13 +429,6 @@ class VonageClient:
             await self._connecting_future
             self._connection_counter += 1
             return
-
-        # Set audio sample rates from StartFrame if params are not set
-        if frame:
-            if self._params.audio_in_sample_rate is None:
-                self._audio_in_sample_rate = frame.audio_in_sample_rate
-            if self._params.audio_out_sample_rate is None:
-                self._audio_out_sample_rate = frame.audio_out_sample_rate
 
         # this future will allow concurrent calls to connect to wait until the first connect call is done
         self._connecting_future = self._get_event_loop().create_future()

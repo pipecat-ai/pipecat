@@ -23,13 +23,14 @@ from websockets.protocol import State
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
-    StartFrame,
     TTSAudioRawFrame,
     TTSStoppedFrame,
 )
+from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TextAggregationMode, TTSService, WebsocketTTSService
 from pipecat.transcriptions.language import Language, resolve_language
+from pipecat.utils.text.phonemes import ipa_phones, normalize_ipa, stress_before_vowels
 from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
 from pipecat.utils.tracing.service_decorators import traced_tts
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
@@ -59,7 +60,7 @@ class GenerationConfig(BaseModel):
     """Configuration for Cartesia generation parameters.
 
     Cartesia interprets these parameters as guidance to ensure natural speech.
-    Test against your content for best results. Applicable to sonic-3 and sonic-3.5 models.
+    Test against your content for best results. Applicable to sonic-3 series models.
 
     Parameters:
         volume: Volume multiplier for generated speech. Valid range: [0.5, 2.0]. Default is 1.0.
@@ -115,6 +116,7 @@ def language_to_cartesia_language(language: Language) -> str:
         Language.MS: "ms",
         Language.NL: "nl",
         Language.NO: "no",
+        Language.OR: "or",
         Language.PA: "pa",
         Language.PL: "pl",
         Language.PT: "pt",
@@ -128,11 +130,34 @@ def language_to_cartesia_language(language: Language) -> str:
         Language.TL: "tl",
         Language.TR: "tr",
         Language.UK: "uk",
+        Language.UR: "ur",
         Language.VI: "vi",
         Language.ZH: "zh",
     }
 
     return resolve_language(language, LANGUAGE_MAP, use_base_code=True)
+
+
+def format_cartesia_pronunciation(word: str, ipa: str) -> str | None:
+    """Render a pronunciation as Cartesia inline phonemes.
+
+    Cartesia reads ``<<…>>`` blocks of ``|``-separated IPA phones, with stress
+    marks directly before the vowel they stress. Each word of the IPA becomes its
+    own block.
+
+    Args:
+        word: The word being pronounced (unused: the block replaces it).
+        ipa: The pronunciation, in IPA.
+
+    Returns:
+        The inline phoneme blocks, e.g. ``<<m|ɛ|t|f|ˈ|ɔ|ɹ|m|ɪ|n>>``, or None for an
+        empty pronunciation.
+    """
+    blocks = [
+        "<<" + "|".join(stress_before_vowels(ipa_phones(w))) + ">>"
+        for w in normalize_ipa(ipa).split()
+    ]
+    return " ".join(blocks) or None
 
 
 class CartesiaEmotion(StrEnum):
@@ -326,7 +351,7 @@ class CartesiaTTSService(WebsocketTTSService):
 
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
-            model="sonic-3.5",
+            model="sonic-3.6",
             voice=None,
             language=Language.EN,
             generation_config=None,
@@ -396,6 +421,21 @@ class CartesiaTTSService(WebsocketTTSService):
         self._max_buffer_delay_ms = max_buffer_delay_ms
 
         self._receive_task = None
+
+    @classmethod
+    def format_pronunciation(cls, word: str, ipa: str) -> str | None:
+        """Render a pronunciation as Cartesia inline phonemes.
+
+        See :func:`format_cartesia_pronunciation`.
+
+        Args:
+            word: The word being pronounced.
+            ipa: The pronunciation, in IPA.
+
+        Returns:
+            The inline phoneme blocks, or None when the pronunciation cannot be used.
+        """
+        return format_cartesia_pronunciation(word, ipa)
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -482,42 +522,22 @@ class CartesiaTTSService(WebsocketTTSService):
         """Normalize raw word timestamps from Cartesia before further processing.
 
         Strips Cartesia SSML tags (spell, emotion, break, volume, speed) from each word
-        and drops entries that become empty after stripping.
-
-        For Chinese and Japanese, Cartesia groups related characters in the same timestamp
-        message.
-        For example, in Japanese a single message might be `['こ', 'ん', 'に', 'ち', 'は', '。']`.
-        We combine these into single words so the downstream aggregator can add natural
-        spacing between meaningful units rather than individual characters.
-
-        For other languages, words are already properly separated and are used as-is.
+        and drops entries that become empty after stripping. Each entry keeps its own
+        start time, so one entry in is at most one token out, whatever the language.
 
         Args:
             words: List of words/characters from Cartesia.
             starts: List of start timestamps for each word/character.
 
         Returns:
-            List of (word, start_time) tuples processed for the language.
+            List of (word, start_time) tuples.
         """
-        current_language = assert_given(self._settings.language)
-
-        # Check if this is a Chinese/Japanese language (if language is None, treat as other)
-        if current_language and self._is_chinese_or_japanese_language(current_language):
-            # For Chinese/Japanese, combine all characters in this message into one word
-            # using the first character's start time.
-            if words and starts:
-                combined_word = "".join(self._strip_cartesia_tags(w) for w in words)
-                first_start = starts[0]
-                return [(combined_word, first_start)] if combined_word else []
-            else:
-                return []
-        else:
-            result = []
-            for word, start in zip(words, starts):
-                cleaned = self._strip_cartesia_tags(word)
-                if cleaned:
-                    result.append((cleaned, start))
-            return result
+        result = []
+        for word, start in zip(words, starts):
+            cleaned = self._strip_cartesia_tags(word)
+            if cleaned:
+                result.append((cleaned, start))
+        return result
 
     def _word_timestamps_include_inter_frame_spaces(self) -> bool:
         """Whether timestamp text should be treated as carrying its own spacing."""
@@ -565,13 +585,13 @@ class CartesiaTTSService(WebsocketTTSService):
 
         return json.dumps(msg)
 
-    async def start(self, frame: StartFrame):
-        """Start the Cartesia TTS service.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
 
         Args:
-            frame: The start frame containing initialization parameters.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         self._output_sample_rate = self.sample_rate
         await self._connect()
 
@@ -616,7 +636,7 @@ class CartesiaTTSService(WebsocketTTSService):
             await self.stop_all_metrics()
 
             if self._websocket:
-                logger.debug("Disconnecting from Cartesia")
+                logger.debug(f"{self}: Disconnecting from Cartesia")
                 await self._websocket.close()
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
@@ -867,7 +887,7 @@ class CartesiaHttpTTSService(TTSService):
         """
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
-            model="sonic-3.5",
+            model="sonic-3.6",
             voice=None,
             language=Language.EN,
             generation_config=None,
@@ -918,6 +938,21 @@ class CartesiaHttpTTSService(TTSService):
         self._session: aiohttp.ClientSession | None = aiohttp_session
         self._owns_session = aiohttp_session is None
 
+    @classmethod
+    def format_pronunciation(cls, word: str, ipa: str) -> str | None:
+        """Render a pronunciation as Cartesia inline phonemes.
+
+        See :func:`format_cartesia_pronunciation`.
+
+        Args:
+            word: The word being pronounced.
+            ipa: The pronunciation, in IPA.
+
+        Returns:
+            The inline phoneme blocks, or None when the pronunciation cannot be used.
+        """
+        return format_cartesia_pronunciation(word, ipa)
+
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
 
@@ -937,13 +972,14 @@ class CartesiaHttpTTSService(TTSService):
         """
         return language_to_cartesia_language(language)
 
-    async def start(self, frame: StartFrame):
-        """Start the Cartesia HTTP TTS service.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service.
 
         Args:
-            frame: The start frame containing initialization parameters.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
+
         self._output_sample_rate = self.sample_rate
         if self._owns_session:
             self._session = aiohttp.ClientSession()

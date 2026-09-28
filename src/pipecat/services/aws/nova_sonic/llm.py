@@ -44,7 +44,6 @@ from pipecat.frames.frames import (
     LLMFullResponseStartFrame,
     LLMServiceMetadataFrame,
     LLMTextFrame,
-    StartFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
@@ -56,7 +55,7 @@ from pipecat.frames.frames import (
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators import async_tool_messages
 from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.aws.nova_sonic.session_continuation import (
     SessionContinuationHelper,
     SessionContinuationParams,
@@ -308,10 +307,8 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
             secret_access_key: AWS secret access key for authentication.
             access_key_id: AWS access key ID for authentication.
             session_token: AWS session token for authentication.
-            region: AWS region where the service is hosted.
-                Supported regions:
-                - Nova 2 Sonic (the default model): "us-east-1", "us-west-2", "ap-northeast-1"
-                - Nova Sonic (the older model): "us-east-1", "ap-northeast-1"
+            region: AWS region where the service is hosted. Supported regions:
+                "us-east-1", "us-west-2", "eu-north-1", "ap-northeast-1".
             model: Model identifier. Defaults to "amazon.nova-2-sonic-v1:0".
 
                 .. deprecated:: 0.0.105
@@ -320,9 +317,8 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
 
             voice_id: Voice ID for speech synthesis.
                 Note that some voices are designed for use with a specific language.
-                Options:
-                - Nova 2 Sonic (the default model): see https://docs.aws.amazon.com/nova/latest/nova2-userguide/sonic-language-support.html
-                - Nova Sonic (the older model): see https://docs.aws.amazon.com/nova/latest/userguide/available-voices.html.
+                For the available voices, see
+                https://docs.aws.amazon.com/nova/latest/nova2-userguide/sonic-language-support.html.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=AWSNovaSonicLLMService.Settings(voice=...)`` instead.
@@ -509,13 +505,13 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
     # standard AIService frame handling
     #
 
-    async def start(self, frame: StartFrame):
-        """Start the service and initiate connection to AWS Nova Sonic.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service.
 
         Args:
-            frame: The start frame triggering service initialization.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         self._wants_connection = True
         await self._start_connecting()
 

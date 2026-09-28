@@ -152,7 +152,7 @@ class ErrorOnTextService(FrameProcessor):
             await self.push_error(
                 "service connection lost",
                 category=self._category,
-                treat_as_permanent=self._becomes_unusable,
+                force_treat_as_permanent=self._becomes_unusable,
             )
         await self.push_frame(frame, direction)
 
@@ -174,7 +174,7 @@ class RepeatedlyErroringService(FrameProcessor):
         await super().process_frame(frame, direction)
         if isinstance(frame, TextFrame) and self.errors == 0:
             self.errors += 1
-            await self.push_error("service connection lost", treat_as_permanent=True)
+            await self.push_error("service connection lost", force_treat_as_permanent=True)
             self.create_task(self._retry_loop(), name="retry")
         await self.push_frame(frame, direction)
 
@@ -183,7 +183,7 @@ class RepeatedlyErroringService(FrameProcessor):
             await asyncio.sleep(0.02)
             self.errors += 1
             await self.push_error(
-                f"reconnection attempt {attempt + 1} failed", treat_as_permanent=True
+                f"reconnection attempt {attempt + 1} failed", force_treat_as_permanent=True
             )
 
 
@@ -1301,6 +1301,49 @@ class TestServiceSwitcherStrategyFailover(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(switched_events), 1)
         self.assertEqual(switched_events[0], self.service2)
+
+
+class TestServiceSwitcherSetupFailure(unittest.IsolatedAsyncioTestCase):
+    """Test cases for a service that fails while the pipeline is setting up."""
+
+    class FailsToConnectService(MockFrameProcessor):
+        """A service whose connection attempt fails while it is set up."""
+
+        async def setup(self, setup):
+            await super().setup(setup)
+            await asyncio.sleep(0.01)
+            raise RuntimeError(f"{self.name} could not connect")
+
+    async def test_failover_moves_off_a_service_that_cannot_be_set_up(self):
+        """A service that fails to set up is one the switcher moves off.
+
+        Services connect while the pipeline is setting up, so a service can
+        fail before a single frame has been pushed. Setting up is not attempted
+        again, so the service is finished rather than having a bad moment, and
+        the switcher settles on the backup before the pipeline starts.
+        """
+        failing_service = self.FailsToConnectService("failing_service")
+        backup_service = MockFrameProcessor("backup_service")
+        switcher = ServiceSwitcher(
+            [failing_service, backup_service],
+            strategy_type=ServiceSwitcherStrategyFailover,
+        )
+
+        await run_test(
+            switcher,
+            frames_to_send=[TextFrame(text="test")],
+            expected_down_frames=[TextFrame],
+            # The switcher recovered on its own, so the error goes no further.
+            expected_up_frames=[],
+        )
+
+        self.assertFalse(failing_service.is_usable)
+        self.assertIs(switcher.strategy.active_service, backup_service)
+        self.assertTrue(switcher.is_usable)
+
+        # The work reached the backup, never the service that failed.
+        self.assertIn(TextFrame, [type(f) for f in backup_service.processed_frames])
+        self.assertNotIn(TextFrame, [type(f) for f in failing_service.processed_frames])
 
 
 if __name__ == "__main__":

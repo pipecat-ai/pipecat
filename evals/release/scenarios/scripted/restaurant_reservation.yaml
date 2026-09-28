@@ -1,0 +1,80 @@
+name: restaurant_reservation
+
+# Text modality, against flows/restaurant_reservation.py: a scripted customer
+# books a table for two. The restaurant has no table at 7 PM or 8 PM. The bot
+# asks the party size, then the time, checks availability, and ends the call
+# itself once the customer is done. The last turn of each scenario asserts the
+# function call only: end_conversation tears the pipeline down before the
+# farewell llm_response reaches the harness.
+
+judge: !include ../judge_text.yaml
+
+scenarios:
+  # A free time: the reservation goes through first try.
+  - name: available
+    turns:
+      - expect:
+          - event: response
+            eval: "the bot greets the customer and asks how many people are in their party"
+
+      - user: "There will be two of us."
+        expect:
+          - event: function_call
+            calls:
+              - name: collect_party_size
+                args: { size: 2 }
+          - event: response
+            eval: "the bot asks what time they would like to dine"
+
+      - user: "We'd like to come at six PM."
+        expect:
+          - event: function_call
+            calls:
+              - name: check_availability
+          - event: response
+            eval: "the bot confirms a reservation is available at the requested time"
+
+      - user: "No, that's all, thank you."
+        expect:
+          - event: function_call
+            calls:
+              - name: end_conversation
+
+  # A taken time: the bot must say so, offer alternatives, and book the one the
+  # customer picks.
+  - name: no_availability
+    turns:
+      - expect:
+          - event: response
+            eval: "the bot greets the customer and asks how many people are in their party"
+
+      - user: "Two people, please."
+        expect:
+          - event: function_call
+            calls:
+              - name: collect_party_size
+                args: { size: 2 }
+          - event: response
+            eval: "the bot asks what time they would like to dine"
+
+      - user: "We'd like to come at seven PM."
+        expect:
+          - event: function_call
+            calls:
+              - name: check_availability
+          - event: response
+            eval: "the bot says the requested time is unavailable and offers alternative times"
+
+      - user: "Okay, let's come at six PM instead."
+        expect:
+          - event: function_call
+            calls:
+              - name: check_availability
+          - event: response
+            eval: "the bot confirms a reservation is available at the new time"
+
+      - user: "No, that's everything, thanks."
+        expect:
+          - event: function_call
+            calls:
+              - name: end_conversation

@@ -75,8 +75,6 @@ class HeyGenInputTransport(BaseInputTransport):
         super().__init__(params, **kwargs)
         self._client = client
         self._params = params
-        # Whether we have seen a StartFrame already.
-        self._initialized = False
 
     async def setup(self, setup: FrameProcessorSetup):
         """Setup the input transport.
@@ -99,11 +97,6 @@ class HeyGenInputTransport(BaseInputTransport):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-
-        if self._initialized:
-            return
-
-        self._initialized = True
 
         await self.set_transport_ready(frame)
 
@@ -172,8 +165,6 @@ class HeyGenOutputTransport(BaseOutputTransport):
         self._params = params
         self._resampler = create_stream_resampler()
 
-        # Whether we have seen a StartFrame already.
-        self._initialized = False
         self._event_id = None
 
     async def setup(self, setup: FrameProcessorSetup):
@@ -183,6 +174,7 @@ class HeyGenOutputTransport(BaseOutputTransport):
             setup: The frame processor setup configuration.
         """
         await super().setup(setup)
+
         await self._client.setup(setup)
 
     async def cleanup(self):
@@ -197,12 +189,6 @@ class HeyGenOutputTransport(BaseOutputTransport):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-
-        if self._initialized:
-            return
-
-        self._initialized = True
-        await self._client.start(frame)
         await self.set_transport_ready(frame)
         self._client.transport_ready()
 

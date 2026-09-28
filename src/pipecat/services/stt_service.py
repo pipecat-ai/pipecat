@@ -18,11 +18,11 @@ from websockets.protocol import State
 
 from pipecat.audio.utils import pcm_to_wav
 from pipecat.frames.frames import (
-    AudioRawFrame,
     CancelFrame,
     EndFrame,
     ErrorFrame,
     Frame,
+    InputAudioRawFrame,
     InterruptionFrame,
     LLMContextAssistantTurnFrame,
     StartFrame,
@@ -36,7 +36,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.metrics.metrics import STTUsage
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.ai_service import AIService
 from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import DEFAULT_TTFS_P99
@@ -192,7 +192,7 @@ class STTService(AIService):
         # Whether a reconnect cycle is currently in progress.
         self._reconnecting: bool = False
         # Audio frames received while _reconnecting is True, replayed after reconnect.
-        self._reconnect_audio_buffer: list[tuple[AudioRawFrame, FrameDirection]] = []
+        self._reconnect_audio_buffer: list[tuple[InputAudioRawFrame, FrameDirection]] = []
 
         self._register_event_handler("on_connected")
         self._register_event_handler("on_disconnected")
@@ -348,14 +348,21 @@ class STTService(AIService):
         raise NotImplementedError
         yield  # pragma: no cover
 
-    async def start(self, frame: StartFrame):
-        """Start the STT service.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service.
 
         Args:
-            frame: The start frame containing initialization parameters.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
-        self._sample_rate = self._init_sample_rate or frame.audio_in_sample_rate
+        await super().setup(setup)
+        self._sample_rate = self._init_sample_rate or setup.audio_in_sample_rate
+
+    async def cleanup(self):
+        """Clean up STT service resources."""
+        await super().cleanup()
+        await self._cancel_ttfb_timeout()
+        await self._cancel_keepalive_task()
+        self._reconnect_audio_buffer.clear()
 
     async def stop(self, frame: EndFrame):
         """Stop the STT service on a graceful end.
@@ -374,13 +381,6 @@ class STTService(AIService):
         """
         await super().cancel(frame)
         await self._flush_stt_usage_metrics()
-
-    async def cleanup(self):
-        """Clean up STT service resources."""
-        await super().cleanup()
-        await self._cancel_ttfb_timeout()
-        await self._cancel_keepalive_task()
-        self._reconnect_audio_buffer.clear()
 
     async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
         """Apply an STT settings delta.
@@ -419,7 +419,7 @@ class STTService(AIService):
         changed = await super()._update_settings(delta)
         return changed
 
-    async def process_audio_frame(self, frame: AudioRawFrame, direction: FrameDirection):
+    async def process_audio_frame(self, frame: InputAudioRawFrame, direction: FrameDirection):
         """Process an audio frame for speech recognition.
 
         If a reconnect is in progress, the frame is buffered and replayed
@@ -448,7 +448,7 @@ class STTService(AIService):
         # UserAudioRawFrame contains a user_id (e.g. Daily, Livekit)
         if isinstance(frame, UserAudioRawFrame):
             self._user_id = frame.user_id
-        # AudioRawFrame does not have a user_id (e.g. SmallWebRTCTransport, websockets)
+        # InputAudioRawFrame does not have a user_id (e.g. SmallWebRTCTransport, websockets)
         else:
             self._user_id = ""
 
@@ -472,7 +472,7 @@ class STTService(AIService):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, AudioRawFrame):
+        if isinstance(frame, InputAudioRawFrame):
             # In this service we accumulate audio internally and at the end we
             # push a TextFrame. We also push audio downstream in case someone
             # else needs it.
@@ -593,6 +593,7 @@ class STTService(AIService):
         while user is still speaking.
         """
         await self._cancel_ttfb_timeout()
+        await self.cancel_ttfb_metrics()
 
     async def _handle_vad_user_started_speaking(self, frame: VADUserStartedSpeakingFrame):
         """Handle VAD user started speaking frame to start tracking transcriptions.
@@ -657,12 +658,21 @@ class STTService(AIService):
         This timeout allows the final transcription to arrive before we calculate
         and report TTFB. Uses _last_transcript_time as the end time so we measure
         to when the transcript actually arrived, not when the timeout fired.
-        If no transcription arrived, no TTFB is reported.
+
+        A transcript that predates the end of speech belongs to an earlier
+        segment the service finalized on its own endpointing; the metrics
+        collector refuses it rather than report the negative interval it would
+        produce.
         """
         try:
             await asyncio.sleep(self._stt_ttfb_timeout)
             if self._last_transcript_time > 0:
                 await self.stop_ttfb_metrics(end_time=self._last_transcript_time)
+            else:
+                # No transcript at all, so there is no end time to measure to.
+                # Close the measurement rather than leave it open for the next
+                # transcript to be measured against.
+                await self.cancel_ttfb_metrics()
         except asyncio.CancelledError:
             # Task was cancelled (new utterance or interruption), which is expected behavior
             pass
@@ -801,31 +811,86 @@ class SegmentedSTTService(STTService):
     :attr:`wants_wav_segments` to return ``False`` so they receive the
     unwrapped buffer instead. This is a subclass-level contract, not a
     user-configurable option: the format is dictated by what the model expects.
+
+    A segment ends right where the VAD stopped, and models tend to drop or
+    garble the final word when the audio ends that abruptly, so each segment
+    is padded with ``trailing_silence_secs`` of silence before transcription.
+
+    Transcription runs off the audio path. When the VAD stops, the segment is
+    queued and one background task transcribes queued segments in order,
+    pushing each transcript as it completes; meanwhile audio and other frames
+    keep flowing through the service, as they do through a streaming STT whose
+    transcripts arrive asynchronously. A graceful stop transcribes what is
+    queued before the service stops; a cancel drops it.
     """
 
-    def __init__(self, *, sample_rate: int | None = None, **kwargs):
+    def __init__(
+        self,
+        *,
+        sample_rate: int | None = None,
+        trailing_silence_secs: float = 0.5,
+        **kwargs,
+    ):
         """Initialize the segmented STT service.
 
         Args:
             sample_rate: The sample rate for audio input. If None, will be determined
                 from the start frame.
+            trailing_silence_secs: Seconds of silence appended to each segment
+                before it is transcribed, so the model hears the end of speech
+                and can finish the last word. Set to 0 to disable.
             **kwargs: Additional arguments passed to the parent STTService.
         """
         super().__init__(sample_rate=sample_rate, **kwargs)
+        self._trailing_silence_secs = trailing_silence_secs
         self._content = None
         self._wave = None
         self._audio_buffer = bytearray()
         self._audio_buffer_size_1s = 0
         self._user_speaking = False
+        # Segments awaiting transcription, drained in order by _segment_task;
+        # None tells the task to finish.
+        self._segment_queue: asyncio.Queue[bytes | None] = asyncio.Queue()
+        self._segment_task: asyncio.Task | None = None
 
-    async def start(self, frame: StartFrame):
-        """Start the segmented STT service and initialize audio buffer.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service.
 
         Args:
-            frame: The start frame containing initialization parameters.
+            setup: Configuration object containing setup parameters.
+        """
+        await super().setup(setup)
+        self._audio_buffer_size_1s = self.sample_rate * 2
+
+    async def start(self, frame: StartFrame):
+        """Start the service and its transcription task.
+
+        Args:
+            frame: The start frame.
         """
         await super().start(frame)
-        self._audio_buffer_size_1s = self.sample_rate * 2
+        self._segment_task = self.create_task(self._segment_task_handler())
+
+    async def stop(self, frame: EndFrame):
+        """Transcribe the queued segments, then stop the service.
+
+        Args:
+            frame: The end frame.
+        """
+        if self._segment_task is not None:
+            await self._segment_queue.put(None)
+            await self._segment_task
+            self._segment_task = None
+        await super().stop(frame)
+
+    async def cancel(self, frame: CancelFrame):
+        """Stop the service at once, dropping any queued segments.
+
+        Args:
+            frame: The cancel frame.
+        """
+        await self._cancel_segment_task()
+        await super().cancel(frame)
 
     @property
     def wants_wav_segments(self) -> bool:
@@ -872,24 +937,47 @@ class SegmentedSTTService(STTService):
             self._audio_buffer.clear()
             return
 
-        # Report usage for the raw segment before transcription so tracing can
-        # attach it to the STT span the resulting TranscriptionFrame closes.
-        self._record_stt_audio_usage(self._audio_buffer)
+        pcm = bytes(self._audio_buffer) + self._trailing_silence()
+        self._audio_buffer.clear()
+
+        # The padded segment is what the provider receives, so it is what
+        # usage measures. Usage is reported before transcription so tracing
+        # can attach it to the STT span the resulting TranscriptionFrame closes.
+        self._record_stt_audio_usage(pcm)
         await self.emit_stt_usage_metrics()
 
         if self.wants_wav_segments:
-            audio = pcm_to_wav(self._audio_buffer, self.sample_rate)
+            audio = pcm_to_wav(pcm, self.sample_rate)
         else:
             # Local models read the buffer as raw 16-bit PCM; wrapping it in a
             # WAV container would make them misread the 44-byte header as audio.
-            audio = bytes(self._audio_buffer)
+            audio = pcm
 
-        # Start clean.
-        self._audio_buffer.clear()
+        await self._segment_queue.put(audio)
 
-        await self.process_generator(self.run_stt(audio))
+    async def _segment_task_handler(self):
+        """Transcribe queued segments one at a time, in order, until told to finish."""
+        running = True
+        while running:
+            audio = await self._segment_queue.get()
+            running = audio is not None
+            if audio:
+                try:
+                    await self.process_generator(self.run_stt(audio))
+                except Exception as e:
+                    await self.push_error(f"{self}: transcription failed: {e}", exception=e)
 
-    async def process_audio_frame(self, frame: AudioRawFrame, direction: FrameDirection):
+    async def _cancel_segment_task(self):
+        if self._segment_task is not None:
+            await self.cancel_task(self._segment_task)
+            self._segment_task = None
+
+    def _trailing_silence(self) -> bytes:
+        """Silence appended to a segment, as 16-bit mono PCM at the service sample rate."""
+        num_samples = max(0, int(self.sample_rate * self._trailing_silence_secs))
+        return bytes(num_samples * 2)
+
+    async def process_audio_frame(self, frame: InputAudioRawFrame, direction: FrameDirection):
         """Process audio frames by buffering them for segmented transcription.
 
         Continuously buffers audio, growing the buffer while user is speaking and
@@ -904,7 +992,7 @@ class SegmentedSTTService(STTService):
         # UserAudioRawFrame contains a user_id (e.g. Daily, Livekit)
         if isinstance(frame, UserAudioRawFrame):
             self._user_id = frame.user_id
-        # AudioRawFrame does not have a user_id (e.g. SmallWebRTCTransport, websockets)
+        # InputAudioRawFrame does not have a user_id (e.g. SmallWebRTCTransport, websockets)
         else:
             self._user_id = ""
 
@@ -1026,6 +1114,6 @@ class WebsocketSTTService(STTService, WebsocketService):
         # counts toward usage.
         self._record_stt_audio_usage(silence)
 
-    async def _report_error(self, error: ErrorFrame, treat_as_permanent: bool = False):
+    async def _report_error(self, error: ErrorFrame, force_treat_as_permanent: bool = False):
         await self._call_event_handler("on_connection_error", error.error)
-        await self.push_error_frame(error, treat_as_permanent=treat_as_permanent)
+        await self.push_error_frame(error, force_treat_as_permanent=force_treat_as_permanent)

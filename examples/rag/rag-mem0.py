@@ -46,7 +46,7 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
@@ -178,7 +178,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     #     "llm": {
     #         "provider": "anthropic",
     #         "config": {
-    #             "model": "claude-3-5-sonnet-20240620",
+    #             "model": "claude-sonnet-4-6",
     #             "api_key": os.getenv("ANTHROPIC_API_KEY"),  # Make sure to set this in your .env
     #         }
     #     },
@@ -239,6 +239,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             enable_usage_metrics=True,
         ),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
+        processor_unusable_policy=ProcessorUnusablePolicy.END,
     )
 
     runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)

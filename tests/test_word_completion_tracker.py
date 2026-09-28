@@ -7,7 +7,7 @@
 import unittest
 
 from pipecat.utils.context.word_completion_tracker import WordCompletionTracker
-from pipecat.utils.text.transforms._alnum_utils import normalize
+from pipecat.utils.text.alnum_utils import alnum_only
 
 
 class TestWordCompletionTrackerBasic(unittest.TestCase):
@@ -91,6 +91,32 @@ class TestWordCompletionTrackerNormalization(unittest.TestCase):
         self.assertTrue(tracker.add_word_and_check_complete("that"))
         self.assertEqual(tracker.get_word_for_frame(), "that")
         self.assertTrue(tracker.is_complete)
+
+    def test_repeated_mark_is_kept_without_an_llm_text(self):
+        """The mark is this frame's text when no span is recorded to carry it.
+
+        A provider may report the comma of "Yeah," with the *following* word
+        instead. With an ``llm_text`` that repeat is trimmed, because the span
+        attributed to "Yeah" already ends in it. Without one nothing records
+        spans, and the frame word is the provider's own token -- which never
+        carried the comma -- so trimming here would delete it outright.
+        """
+        tracker = WordCompletionTracker("Yeah, I can")
+        words = []
+        for word in ("Yeah", ", I", " can"):
+            tracker.add_word_and_check_complete(word)
+            words.append(tracker.get_word_for_frame())
+        self.assertEqual(words, ["Yeah", ", I", "can"])
+
+    def test_repeated_mark_is_trimmed_with_an_llm_text(self):
+        """The same stream, where the recorded span does carry the mark."""
+        text = "Yeah, I can"
+        tracker = WordCompletionTracker(text, llm_text=text, user_facing_text=text)
+        spans = []
+        for word in ("Yeah", ", I", " can"):
+            tracker.add_word_and_check_complete(word)
+            spans.append(tracker.get_llm_consumed())
+        self.assertEqual(spans, ["Yeah,", "I", "can"], "the comma is recorded once")
 
     def test_punctuation_ignored_in_words(self):
         """Punctuation attached to TTS word tokens is also stripped."""
@@ -184,22 +210,44 @@ class TestWordCompletionTrackerNormalization(unittest.TestCase):
         self.assertTrue(tracker.add_word_and_check_complete("hello"))
 
     def test_curly_apostrophe_in_llm_text_matches_straight_apostrophe_in_tts_word(self):
-        """LLM curly apostrophe must not trigger the safeguard when TTS uses straight."""
-        llm = "you’re welcome"  # LLM: RIGHT SINGLE QUOTATION MARK
+        """LLM curly apostrophe must still match when the TTS reports a straight one."""
+        llm = "you’re welcome"  # U+2019 RIGHT SINGLE QUOTATION MARK
         tracker = WordCompletionTracker(llm, llm_text=llm)
-        tracker.add_word_and_check_complete("you’re")  # TTS: straight apostrophe
-        self.assertIsNotNone(tracker.get_llm_consumed())
+        self.assertTrue(tracker.word_belongs_here("you're"))  # ASCII apostrophe
+        tracker.add_word_and_check_complete("you're")
+        # The frame word is the token the provider reported; the LLM span keeps the
+        # original typography, which is what reaches the conversation context.
+        self.assertEqual(tracker.get_word_for_frame(), "you're")
+        self.assertEqual(tracker.get_llm_consumed(), "you’re")
         tracker.add_word_and_check_complete("welcome")
         self.assertTrue(tracker.is_complete)
 
     def test_curly_apostrophe_in_tts_word_matches_straight_apostrophe_in_llm_text(self):
-        """TTS curly apostrophe must not trigger the safeguard when LLM uses straight."""
-        llm = "you’re welcome"  # LLM: straight apostrophe
+        """LLM straight apostrophe must still match when the TTS reports a curly one."""
+        llm = "you're welcome"  # ASCII apostrophe
         tracker = WordCompletionTracker(llm, llm_text=llm)
-        tracker.add_word_and_check_complete("you’re")  # TTS: RIGHT SINGLE QUOTATION MARK
-        self.assertIsNotNone(tracker.get_llm_consumed())
+        self.assertTrue(tracker.word_belongs_here("you’re"))  # U+2019
+        tracker.add_word_and_check_complete("you’re")
+        self.assertEqual(tracker.get_word_for_frame(), "you’re")
+        self.assertEqual(tracker.get_llm_consumed(), "you're")
         tracker.add_word_and_check_complete("welcome")
         self.assertTrue(tracker.is_complete)
+
+    def test_typographic_mismatch_does_not_collapse_the_rest_of_the_sentence(self):
+        """A normalized apostrophe must not force-complete the slot mid-sentence."""
+        text = "I don’t think so"
+        tracker = WordCompletionTracker(text, user_facing_text=text)
+        for word in ["I", "don't", "think"]:
+            self.assertFalse(tracker.add_word_and_check_complete(word))
+        self.assertTrue(tracker.add_word_and_check_complete("so"))
+        self.assertEqual(tracker.get_word_for_frame(), "so")
+
+    def test_en_dash_reported_as_hyphen(self):
+        """A provider reporting an ASCII hyphen matches an en dash in the source."""
+        text = "the 2020–2021 report"
+        tracker = WordCompletionTracker(text, user_facing_text=text)
+        tracker.add_word_and_check_complete("the")
+        self.assertTrue(tracker.word_belongs_here("2020-2021"))
 
 
 class TestWordCompletionTrackerReset(unittest.TestCase):
@@ -1741,7 +1789,7 @@ class TestWordCompletionTrackerUnicodeSymbolSubstitution(unittest.TestCase):
     """Guards against the regression where ElevenLabs maps Unicode symbols such
     as '→' to ASCII punctuation like '-' in word-timestamp events.
 
-    The literal-substring check in TextSegmentMap._symbol_word_belongs failed to find '-'
+    The literal-substring check in TextSegmentMap._symbol_belongs_here failed to find '-'
     inside '→ Santiago…', which caused premature force-completion of the whole
     frame after 'Paulo' was consumed.  The symbol-substitution fallback (check
     whether the next non-space char in the TTS text is itself a non-alnum symbol)
@@ -1835,7 +1883,7 @@ class TestWordCompletionTrackerCJK(unittest.TestCase):
         self.assertTrue(tracker.add_word_and_check_complete(words[-1]))
 
     def test_korean_normalized_char_count_matches_raw_alnum(self):
-        """Each Hangul syllable must normalize to exactly one char.
+        """Each Hangul syllable must alnum_only to exactly one char.
 
         The NFKD decomposition would expand each syllable into 2-3 conjoining
         jamo, making the normalized length much larger than the raw alnum count
@@ -1845,11 +1893,11 @@ class TestWordCompletionTrackerCJK(unittest.TestCase):
         samples = ["저는여러분의", "안녕하세요", "어시스턴트"]
         for text in samples:
             raw_count = sum(1 for c in text if c.isalnum())
-            norm_count = len(normalize(text))
+            norm_count = len(alnum_only(text))
             self.assertEqual(
                 norm_count,
                 raw_count,
-                f"normalize({text!r}): got {norm_count} chars, want {raw_count}",
+                f"alnum_only({text!r}): got {norm_count} chars, want {raw_count}",
             )
 
     def test_korean_force_complete_remaining_text_is_correct(self):
@@ -1874,12 +1922,19 @@ class TestWordCompletionTrackerCJK(unittest.TestCase):
         """word_belongs_here distinguishes Korean words based on remaining content."""
         tracker = WordCompletionTracker("저는 여러분의")
         self.assertTrue(tracker.word_belongs_here("저는"))
-        # "여러분의" starts with chars that follow "저는", so before consuming
-        # "저는" the next word doesn't belong here yet.
-        self.assertFalse(tracker.word_belongs_here("여러분의"))
+        # A word further into the frame belongs here too: its event arriving means
+        # the ones before it were dropped, not that the frame has moved on.
+        self.assertTrue(tracker.word_belongs_here("여러분의"))
+        self.assertFalse(tracker.word_belongs_here("안녕하세요"))
 
         tracker.add_word_and_check_complete("저는")
         self.assertTrue(tracker.word_belongs_here("여러분의"))
+
+    def test_korean_word_after_a_dropped_event_takes_the_text_before_it(self):
+        """The event for "저는" never arrives, so the next word carries it."""
+        tracker = WordCompletionTracker("저는 여러분의")
+        self.assertTrue(tracker.add_word_and_check_complete("여러분의"))
+        self.assertEqual(tracker.get_word_for_frame(), "저는 여러분의")
 
     # --- Japanese ---
 
@@ -2305,7 +2360,7 @@ class TestWordCompletionTrackerTokenChangingReplacements(unittest.TestCase):
 
     def test_inline_ipa_tag_does_not_shift_next_word_boundary(self):
         """An inline IPA substitution ("leisure" -> "<<l|ɛ|ʒ|ə|r>>") normalizes
-        to no alnum content on the TTS side, since normalize()'s tag-stripping
+        to no alnum content on the TTS side, since alnum_only()'s tag-stripping
         regex treats the double angle brackets as a single (malformed) tag.
         That must not corrupt the word boundary of the following word."""
         sentence = "The leisure centre opens at six."
@@ -2559,6 +2614,37 @@ class TestWordCompletionTrackerAccentFolding(unittest.TestCase):
             self.assertFalse(tracker.add_word_and_check_complete(word))
         self.assertTrue(tracker.add_word_and_check_complete(self.TTS_WORDS[-1]))
 
+    def test_accented_word_keeps_its_accent_in_the_attributed_span(self):
+        """The span carries the LLM's spelling, not the provider's folded one."""
+        tracker = WordCompletionTracker(
+            self.SENTENCE, llm_text=self.SENTENCE, user_facing_text=self.SENTENCE
+        )
+        for word in self.TTS_WORDS[:2]:
+            tracker.add_word_and_check_complete(word)
+        tracker.add_word_and_check_complete("cafe")
+        self.assertEqual(tracker.get_llm_consumed(), "café")
+
+
+class TestForceCompleteAttributesTaggedRemainder(unittest.TestCase):
+    """A force-completed slot keeps the LLM tags on its unspoken remainder.
+
+    The remaining TTS text carries synthesis tags (``<spell>``) and the remaining
+    LLM text carries pattern delimiters (``<card>``). They differ by construction,
+    so the remainder must be attributed on position alone.
+    """
+
+    TTS_TEXT = "<spell>4111 1111 1111 1111</spell>"
+    LLM_TEXT = "<card>4111 1111 1111 1111</card>"
+    USER_FACING = "4111 1111 1111 1111"
+
+    def test_remainder_carries_the_llm_delimiters(self):
+        tracker = WordCompletionTracker(
+            self.TTS_TEXT, llm_text=self.LLM_TEXT, user_facing_text=self.USER_FACING
+        )
+        tracker.add_word_and_check_complete("4111")
+        self.assertTrue(tracker.add_word_and_check_complete("WRONG"))
+        self.assertEqual(tracker.get_llm_consumed(), "1111 1111 1111</card>")
+
 
 class TestTextNoWordArrivesFor(unittest.TestCase):
     """Markup occupies a segment of its own and no word-timestamp event names one,
@@ -2619,6 +2705,494 @@ class TestTextNoWordArrivesFor(unittest.TestCase):
         self.assertNotIn("?", tracker.get_accumulated_user_facing_text())
         self.assertTrue(tracker.add_word_and_check_complete("?"))
         self.assertEqual(tracker.get_accumulated_user_facing_text(), text)
+
+
+# ---------------------------------------------------------------------------
+# Resync: a provider garbles one token, then carries on correctly
+# ---------------------------------------------------------------------------
+
+
+class TestWordCompletionTrackerResync(unittest.TestCase):
+    """A token matching nothing at the cursor, followed by one that matches ahead.
+
+    A garbled token is not this frame's text and must not be attributed to it. The
+    frame recovers on a later token, found a short way past the cursor -- the text
+    skipped in between never gets an event of its own, so the word that resyncs
+    carries it.
+
+    Neither the caller nor the frame has to know which case it is in.
+    :meth:`word_belongs_here` accepts a word anywhere within reach of the cursor,
+    and consuming it takes everything up to it, so a garbled token costs the frame
+    nothing but its own event.
+    """
+
+    SENTENCE = "This is how it is supposed to work"
+
+    def _tracker(self, llm_text=None):
+        """A tracker three words in, with " it is supposed to work" left to speak."""
+        tracker = WordCompletionTracker(self.SENTENCE, llm_text=llm_text)
+        for word in ("This", "is", "how"):
+            tracker.add_word_and_check_complete(word)
+        return tracker
+
+    def test_garbled_token_belongs_nowhere(self):
+        tracker = self._tracker()
+        self.assertFalse(tracker.word_belongs_here("ity"))
+
+    def test_rejected_token_leaves_the_cursor_untouched(self):
+        tracker = self._tracker()
+        tracker.word_belongs_here("ity")
+        self.assertEqual(tracker.get_remaining_tts_text(), "it is supposed to work")
+        self.assertEqual(tracker.get_accumulated_user_facing_text(), "This is how")
+
+    def test_resyncing_word_belongs_here(self):
+        tracker = self._tracker()
+        self.assertTrue(tracker.word_belongs_here("ís"))
+
+    def test_resyncing_word_carries_the_text_it_skipped(self):
+        tracker = self._tracker()
+        tracker.add_word_and_check_complete("ís")
+        self.assertEqual(tracker.get_word_for_frame(), "it is")
+
+    def test_resync_attributes_the_skipped_llm_text(self):
+        tracker = self._tracker(llm_text=self.SENTENCE)
+        tracker.add_word_and_check_complete("ís")
+        self.assertEqual(tracker.get_llm_consumed(), "it is")
+
+    def test_progress_covers_the_skipped_text(self):
+        tracker = self._tracker()
+        tracker.add_word_and_check_complete("ís")
+        self.assertEqual(tracker.get_accumulated_user_facing_text(), "This is how it is")
+        self.assertEqual(tracker.get_remaining_user_facing_text(), "supposed to work")
+
+    def test_frame_completes_normally_after_a_resync(self):
+        tracker = self._tracker()
+        tracker.add_word_and_check_complete("ís")
+        for word in ("supposed", "to"):
+            self.assertTrue(tracker.word_belongs_here(word), f"{word!r} should belong")
+            self.assertFalse(tracker.add_word_and_check_complete(word))
+        self.assertTrue(tracker.add_word_and_check_complete("work"))
+        self.assertEqual(tracker.get_remaining_tts_text(), "")
+
+    def test_lookahead_places_only_whole_words(self):
+        """Resyncing is error recovery, so a partial prefix is not enough to
+        anchor on -- only a token covering a whole word may skip text.
+        """
+        tracker = self._tracker()
+        self.assertFalse(tracker.word_belongs_here("supp"))
+        self.assertTrue(tracker.word_belongs_here("supposed"))
+
+    def test_word_further_ahead_sweeps_everything_before_it(self):
+        tracker = self._tracker()
+        tracker.add_word_and_check_complete("supposed")
+        self.assertEqual(tracker.get_word_for_frame(), "it is supposed")
+
+    def test_foreign_word_is_never_placed(self):
+        tracker = self._tracker()
+        self.assertFalse(tracker.word_belongs_here("banana"))
+
+    def test_lookahead_reach_is_bounded(self):
+        """Recovery spans a garbled token or two, not an arbitrary jump: a word
+        matching far down the sentence is a coincidence, not a resync.
+        """
+        tracker = WordCompletionTracker(self.SENTENCE)
+        tracker.add_word_and_check_complete("This")
+        self.assertFalse(tracker.word_belongs_here("work"))
+
+    def test_a_word_at_the_cursor_is_placed_without_sweeping(self):
+        tracker = self._tracker()
+        tracker.add_word_and_check_complete("it")
+        self.assertEqual(tracker.get_word_for_frame(), "it")
+
+
+class TestWordCompletionTrackerResyncWithSymbols(unittest.TestCase):
+    """Symbols inside the span a resync sweeps up.
+
+    Brackets and arrows never arrive as word events of their own here, so they
+    reach the frame only by riding along with the word that resyncs.
+    """
+
+    def test_brackets_around_the_skipped_word_are_swept_up(self):
+        text = "This is how (it) is supposed to work"
+        tracker = WordCompletionTracker(text, llm_text=text)
+        for word in ("This", "is", "how"):
+            tracker.add_word_and_check_complete(word)
+
+        self.assertFalse(tracker.word_belongs_here("ity"))
+        tracker.add_word_and_check_complete("ís")
+        self.assertEqual(tracker.get_word_for_frame(), "(it) is")
+        self.assertEqual(tracker.get_llm_consumed(), "(it) is")
+
+    def test_arrow_between_the_skipped_word_and_the_match_is_swept_up(self):
+        text = "This is how it → is supposed to work"
+        tracker = WordCompletionTracker(text, llm_text=text)
+        for word in ("This", "is", "how"):
+            tracker.add_word_and_check_complete(word)
+
+        tracker.add_word_and_check_complete("ís")
+        self.assertEqual(tracker.get_word_for_frame(), "it → is")
+        self.assertEqual(tracker.get_accumulated_user_facing_text(), "This is how it → is")
+
+    def test_a_symbol_token_still_takes_the_symbol_path(self):
+        """A token with nothing to match on is judged by the symbol rule, which
+        lookahead must leave alone.
+        """
+        text = "This is how it → is supposed to work"
+        tracker = WordCompletionTracker(text, llm_text=text)
+        for word in ("This", "is", "how", "it"):
+            tracker.add_word_and_check_complete(word)
+        self.assertTrue(tracker.word_belongs_here("-"))
+
+
+class TestWordCompletionTrackerResyncWithTags(unittest.TestCase):
+    """Resyncing in a frame that also carries synthesis and LLM markup.
+
+    The tags are their own segment, so a resync in the text after them has to keep
+    the LLM cursor -- still sitting before the closing ``</card>`` -- in step.
+    """
+
+    TTS = "Call <spell>4111</spell> when it is ready"
+    LLM = "Call <card>4111</card> when it is ready"
+    USER_FACING = "Call 4111 when it is ready"
+
+    def _tracker(self):
+        tracker = WordCompletionTracker(
+            self.TTS, llm_text=self.LLM, user_facing_text=self.USER_FACING
+        )
+        for word in ("Call", "4111"):
+            tracker.add_word_and_check_complete(word)
+        return tracker
+
+    def test_garbled_token_after_the_tag_belongs_nowhere(self):
+        tracker = self._tracker()
+        self.assertFalse(tracker.word_belongs_here("whenx"))
+
+    def test_resync_after_the_tag_sweeps_the_skipped_words(self):
+        tracker = self._tracker()
+        tracker.add_word_and_check_complete("ís")
+        self.assertEqual(tracker.get_word_for_frame(), "when it is")
+
+    def test_resync_after_the_tag_carries_the_closing_tag_into_context(self):
+        tracker = self._tracker()
+        tracker.add_word_and_check_complete("ís")
+        self.assertEqual(tracker.get_llm_consumed(), "</card> when it is")
+
+    def test_progress_skips_the_tag_it_never_shows(self):
+        tracker = self._tracker()
+        tracker.add_word_and_check_complete("ís")
+        self.assertEqual(tracker.get_accumulated_user_facing_text(), "Call 4111 when it is")
+
+    def test_frame_completes_normally_after_the_resync(self):
+        tracker = self._tracker()
+        tracker.add_word_and_check_complete("ís")
+        self.assertTrue(tracker.add_word_and_check_complete("ready"))
+
+    def test_lookahead_does_not_reach_past_a_transformed_span(self):
+        """A rewritten span lands all at once, so there is no honest position on
+        its far side to resync to. Whatever follows it waits for force-complete.
+        """
+        tracker = WordCompletionTracker(
+            self.TTS, llm_text=self.LLM, user_facing_text=self.USER_FACING
+        )
+        tracker.add_word_and_check_complete("Call")
+        self.assertFalse(tracker.word_belongs_here("ís"))
+
+
+class TestWordCompletionTrackerResyncInsideTransform(unittest.TestCase):
+    """Resyncing within a rewritten span, which lands all at once.
+
+    The span's spoken words are what the resync steps over, so the word that
+    finishes it still attributes the whole span to the text the LLM wrote.
+    """
+
+    TTS = "Your balance is five dollars, due on 3/15."
+    ORIGINAL = "Your balance is $5, due on 3/15."
+
+    def _tracker(self):
+        tracker = WordCompletionTracker(
+            self.TTS, llm_text=self.ORIGINAL, user_facing_text=self.ORIGINAL
+        )
+        for word in ("Your", "balance", "is"):
+            tracker.add_word_and_check_complete(word)
+        return tracker
+
+    def test_garbled_word_inside_the_span_belongs_nowhere(self):
+        tracker = self._tracker()
+        self.assertFalse(tracker.word_belongs_here("fivex"))
+
+    def test_resync_emits_the_spoken_form_it_stepped_over(self):
+        tracker = self._tracker()
+        tracker.add_word_and_check_complete("dollars,")
+        self.assertEqual(tracker.get_word_for_frame(), "five dollars,")
+
+    def test_resync_completing_the_span_attributes_the_original(self):
+        tracker = self._tracker()
+        tracker.add_word_and_check_complete("dollars,")
+        self.assertEqual(tracker.get_llm_consumed(), "$5,")
+        self.assertEqual(tracker.get_accumulated_user_facing_text(), "Your balance is $5,")
+
+    def test_frame_completes_normally_after_the_resync(self):
+        tracker = self._tracker()
+        tracker.add_word_and_check_complete("dollars,")
+        for word in ("due", "on"):
+            self.assertFalse(tracker.add_word_and_check_complete(word))
+        self.assertTrue(tracker.add_word_and_check_complete("3/15."))
+
+
+class TestWordsWithNoLlmSpanOfTheirOwn(unittest.TestCase):
+    """A word the LLM text has nothing left to attribute to.
+
+    The conversation context falls back to a word's spoken text when it carries no
+    span, so a word that stands for nothing must say so, or the fallback records
+    text the LLM never wrote -- or records it twice.
+    """
+
+    def test_a_mark_an_earlier_word_carried_is_suppressed(self):
+        text = "Yeah, I can help"
+        tracker = WordCompletionTracker(text, llm_text=text, user_facing_text=text)
+        tracker.add_word_and_check_complete("Yeah")
+        self.assertFalse(tracker.suppress_in_context())
+        tracker.add_word_and_check_complete(",")
+        self.assertIsNone(tracker.get_llm_consumed(), "the comma went with 'Yeah'")
+        self.assertTrue(tracker.suppress_in_context())
+        tracker.add_word_and_check_complete("I")
+        self.assertFalse(tracker.suppress_in_context())
+
+    def test_text_the_llm_never_wrote_is_suppressed(self):
+        """Spoken text absent from ``llm_text`` has no span, so it is not recorded."""
+        tracker = WordCompletionTracker("Hello 😊", llm_text="Hello", user_facing_text="Hello 😊")
+        tracker.add_word_and_check_complete("Hello")
+        self.assertFalse(tracker.suppress_in_context())
+        tracker.add_word_and_check_complete("😊")
+        self.assertIsNone(tracker.get_llm_consumed())
+        self.assertTrue(tracker.suppress_in_context())
+
+    def test_without_an_llm_text_nothing_is_suppressed(self):
+        """No spans exist at all, so every word is recorded from its spoken text."""
+        tracker = WordCompletionTracker("Hello world")
+        for word in ("Hello", "world"):
+            tracker.add_word_and_check_complete(word)
+            self.assertFalse(tracker.suppress_in_context())
+
+
+class TestPunctuationReportedOnItsOwn(unittest.TestCase):
+    """A provider that reports a punctuation mark as its own word-timestamp entry.
+
+    ``advance_by_alnums`` pulls trailing punctuation along with the word before it,
+    so by the time the mark's own event arrives the llm cursor is already past it.
+    Both cursors have to stay in step, and the unspoken tail has to keep the mark.
+    """
+
+    def test_mark_alone_leaves_the_two_remainders_in_step(self):
+        """'Yeah' then ',' then 'I': the comma travelled with 'Yeah'."""
+        text = "Yeah, I can help"
+        tracker = WordCompletionTracker(text, llm_text=text, user_facing_text=text)
+        for word in ("Yeah", ",", "I"):
+            tracker.add_word_and_check_complete(word)
+        self.assertEqual(tracker.get_remaining_tts_text(), "can help")
+        self.assertEqual(tracker.get_remaining_llm_text(), "can help")
+
+    def test_mark_between_two_words_leaves_the_remainders_in_step(self):
+        """'1' then '-' then '2': the hyphen travelled with '1'."""
+        text = "1-2 and more text"
+        tracker = WordCompletionTracker(text, llm_text=text, user_facing_text=text)
+        for word in ("1", "-", "2"):
+            tracker.add_word_and_check_complete(word)
+        self.assertEqual(tracker.get_remaining_tts_text(), "and more text")
+        self.assertEqual(tracker.get_remaining_llm_text(), "and more text")
+
+    def test_a_mark_not_yet_reported_stays_in_the_remainder(self):
+        """Ending the frame before the mark arrives: it is still unspoken.
+
+        Nothing has reported the mark, so it belongs to the text left to say. This
+        is the case a caller ending a frame early emits, and dropping it there
+        loses the tail from the conversation context.
+        """
+        text = "It is done. Next sentence here."
+        tracker = WordCompletionTracker(text, llm_text=text, user_facing_text=text)
+        for word in ("It", "is", "done"):
+            tracker.add_word_and_check_complete(word)
+        self.assertEqual(tracker.get_remaining_tts_text(), ". Next sentence here.")
+        self.assertEqual(tracker.get_remaining_llm_text(), ". Next sentence here.")
+
+    def test_a_mark_the_provider_spoke_is_not_owed_back(self):
+        """The usual case: the mark arrives inside its word, so nothing is outstanding.
+
+        The counterpart of the test above -- treating this period as unspoken would
+        drop it from the accumulated text and repeat it in the remainder.
+        """
+        text = "It is done. Next sentence here."
+        tracker = WordCompletionTracker(text, llm_text=text, user_facing_text=text)
+        for word in ("It", "is", "done."):
+            tracker.add_word_and_check_complete(word)
+        self.assertEqual(tracker.get_accumulated_llm_text(), "It is done.")
+        self.assertEqual(tracker.get_remaining_llm_text(), "Next sentence here.")
+
+    def test_cjk_marks_reported_alone_keep_the_remainders_in_step(self):
+        """The token shape Cartesia reports for Japanese.
+
+        One entry per character, so every mark arrives on its own, and the service
+        merges the entries of a single message into one token ("きゅ" here).
+        """
+        text = "確認いたします…ゼロ、きゅう、ゼロ"
+        tracker = WordCompletionTracker(text, llm_text=text, user_facing_text=text)
+        for word in (
+            "確",
+            "認",
+            "い",
+            "た",
+            "し",
+            "ま",
+            "す",
+            "…",
+            "ゼ",
+            "ロ",
+            "、",
+            "きゅ",
+            "う",
+        ):
+            tracker.add_word_and_check_complete(word)
+        self.assertEqual(tracker.get_remaining_tts_text(), "、ゼロ")
+        self.assertEqual(tracker.get_remaining_llm_text(), "、ゼロ")
+        self.assertEqual(
+            tracker.get_accumulated_llm_text(),
+            "確認いたします…ゼロ、きゅう",
+        )
+
+    def test_cjk_frame_ended_before_the_mark_is_reported(self):
+        """The provider stops reporting mid-turn, one character short of the mark.
+
+        The mark travelled with the character before it, so without it being owed
+        back the tail loses it and force_complete discards the whole tail.
+        """
+        text = "確認いたします…ゼロ、いち"
+        tracker = WordCompletionTracker(text, llm_text=text, user_facing_text=text)
+        for word in ("確", "認", "い", "た", "し", "ま", "す"):
+            tracker.add_word_and_check_complete(word)
+        self.assertEqual(tracker.get_remaining_tts_text(), "…ゼロ、いち")
+        self.assertEqual(tracker.get_remaining_llm_text(), "…ゼロ、いち")
+
+
+class TestWordCompletionTrackerMarkdownTokens(unittest.TestCase):
+    """Markdown sent to the TTS verbatim, reported the way Cartesia reports it.
+
+    Cartesia keeps the markdown on each whitespace-separated token (``**General``,
+    ``Overview**``) and appends a period to the last token of every line, even one
+    made only of punctuation (``---.``). Every such token must be placed where it
+    is, without the frame ending early: once a frame is force-completed, every
+    word after it is dropped for the rest of the turn.
+    """
+
+    def _assert_tracks_to_the_end(self, text: str, words: list[str]):
+        tracker = WordCompletionTracker(text, llm_text=text, user_facing_text=text)
+        for i, word in enumerate(words):
+            self.assertTrue(tracker.word_belongs_here(word), f"word {i} {word!r} rejected")
+            complete = tracker.add_word_and_check_complete(word)
+            is_last = i == len(words) - 1
+            self.assertEqual(complete, is_last, f"word {i} {word!r} complete={complete}")
+        self.assertEqual(tracker.get_accumulated_user_facing_text(), text)
+
+    def test_horizontal_rule_then_heading(self):
+        text = "Look:\n\n---\n\n### **Title**\nBody text."
+        self._assert_tracks_to_the_end(
+            text, ["Look:.", "---.", "###", "**Title**.", "Body", "text."]
+        )
+
+    def test_horizontal_rule_at_frame_start(self):
+        text = "---\n\n### **Summary**\nThe provided images are comprehensive."
+        self._assert_tracks_to_the_end(
+            text,
+            ["---.", "###", "**Summary**.", "The", "provided", "images", "are", "comprehensive."],
+        )
+
+    def test_bold_label_after_a_line_ending_in_bold(self):
+        text = "#### **Week 1 (SY 25/26)**\n- **Monday**:\n  - **ENTREE**: Chicken Sandwich"
+        self._assert_tracks_to_the_end(
+            text,
+            [
+                "####",
+                "**Week",
+                "1",
+                "(SY",
+                "25/26)**.",
+                "-",
+                "**Monday**:.",
+                "-",
+                "**ENTREE**:",
+                "Chicken",
+                "Sandwich.",
+            ],
+        )
+
+    def test_bullet_with_bold_label(self):
+        text = "- **Structure**: Each day has a designated **ENTREE** (main course)."
+        self._assert_tracks_to_the_end(
+            text,
+            [
+                "-",
+                "**Structure**:",
+                "Each",
+                "day",
+                "has",
+                "a",
+                "designated",
+                "**ENTREE**",
+                "(main",
+                "course).",
+            ],
+        )
+
+    def test_frame_from_the_log(self):
+        """The frame that fell out of step in the reported session."""
+        text = (
+            "Below is a detailed description of the content across the images:\n\n---\n\n"
+            "### **General Overview**\n"
+            "- **Purpose**: These menus are designed for elementary and high school "
+            "students, offering a variety of meals each day."
+        )
+        words = [
+            "Below", "is", "a", "detailed", "description", "of", "the", "content", "across",
+            "the", "images:.", "---.", "###", "**General", "Overview**.", "-", "**Purpose**:",
+            "These", "menus", "are", "designed", "for", "elementary", "and", "high", "school",
+            "students,", "offering", "a", "variety", "of", "meals", "each", "day.",
+        ]  # fmt: skip
+        self._assert_tracks_to_the_end(text, words)
+
+
+class TestWordCompletionTrackerUnmatchedSymbolStaysPut(unittest.TestCase):
+    """A symbol token that matches nothing must not jump over symbols still to come.
+
+    A provider can report a symbol other than the one it was given -- ElevenLabs
+    reports ``→`` as ``-`` -- so the token is accepted without being placed. The
+    cursor may step past the unmatched symbol, but not past whitespace into the
+    symbol tokens that follow it (``###``, ``-``). Those arrive as their own
+    events, and once the cursor is past them they no longer belong here, so the
+    frame is force-completed and every later word of the turn is dropped.
+    """
+
+    def _assert_tracks_to_the_end(self, text: str, words: list[str]):
+        tracker = WordCompletionTracker(text, llm_text=text, user_facing_text=text)
+        for i, word in enumerate(words):
+            self.assertTrue(tracker.word_belongs_here(word), f"word {i} {word!r} rejected")
+            complete = tracker.add_word_and_check_complete(word)
+            is_last = i == len(words) - 1
+            self.assertEqual(complete, is_last, f"word {i} {word!r} complete={complete}")
+        self.assertEqual(tracker.get_accumulated_user_facing_text(), text)
+
+    def test_swapped_symbol_before_a_heading(self):
+        text = "Step one →\n\n### **Step two**\nDone."
+        self._assert_tracks_to_the_end(
+            text, ["Step", "one", "-", "###", "**Step", "two**", "Done."]
+        )
+
+    def test_swapped_symbol_before_a_real_one(self):
+        text = "Step one → - step two"
+        self._assert_tracks_to_the_end(text, ["Step", "one", "-", "-", "step", "two"])
+
+    def test_swapped_symbol_before_a_word(self):
+        """A letter right after the symbol already stops the step."""
+        text = "Step one → step two"
+        self._assert_tracks_to_the_end(text, ["Step", "one", "-", "step", "two"])
 
 
 if __name__ == "__main__":

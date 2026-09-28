@@ -34,7 +34,7 @@ class ExternalUserTurnCompletionStopStrategy(BaseUserTurnStopStrategy):
     instead, which additionally pushes the ``LLMUpdateSettingsFrame``
     that enables the marker protocol on the LLM.
 
-    A completion resolves with some latency (e.g. the LLM ``✓`` arrives
+    A completion resolves with some latency (e.g. the LLM ``●`` arrives
     after the inference finishes), so the user may have resumed speaking
     in the meantime. The controller drops a finalization that arrives
     while the user is speaking, so a stale completion does not end the

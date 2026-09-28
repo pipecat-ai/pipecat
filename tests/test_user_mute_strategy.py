@@ -9,6 +9,7 @@ import unittest
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
+    ErrorFrame,
     FunctionCallCancelFrame,
     FunctionCallFromLLM,
     FunctionCallResultFrame,
@@ -50,6 +51,22 @@ class TestMuteUntilFirstBotCompleteUserMuteStrategy(unittest.IsolatedAsyncioTest
 
         self.assertTrue(await strategy.process_frame(InterruptionFrame()))
         self.assertTrue(await strategy.process_frame(BotStartedSpeakingFrame()))
+        self.assertTrue(await strategy.process_frame(InterruptionFrame()))
+        self.assertFalse(await strategy.process_frame(BotStoppedSpeakingFrame()))
+        self.assertFalse(await strategy.process_frame(InterruptionFrame()))
+
+    async def test_error_before_first_speech(self):
+        strategy = MuteUntilFirstBotCompleteUserMuteStrategy()
+
+        self.assertTrue(await strategy.process_frame(InterruptionFrame()))
+        self.assertFalse(await strategy.process_frame(ErrorFrame(error="TTS failed")))
+        self.assertFalse(await strategy.process_frame(InterruptionFrame()))
+
+    async def test_error_while_bot_speaking(self):
+        strategy = MuteUntilFirstBotCompleteUserMuteStrategy()
+
+        self.assertTrue(await strategy.process_frame(BotStartedSpeakingFrame()))
+        self.assertTrue(await strategy.process_frame(ErrorFrame(error="TTS failed")))
         self.assertTrue(await strategy.process_frame(InterruptionFrame()))
         self.assertFalse(await strategy.process_frame(BotStoppedSpeakingFrame()))
         self.assertFalse(await strategy.process_frame(InterruptionFrame()))

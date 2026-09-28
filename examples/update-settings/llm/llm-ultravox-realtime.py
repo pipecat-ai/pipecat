@@ -11,12 +11,11 @@ import os
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.adapters.base_llm_adapter import LLMContextMessage
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame, LLMUpdateSettingsFrame
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     AssistantTurnStoppedMessage,
@@ -67,14 +66,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         one_shot_selected_tools=ToolsSchema(standard_tools=[]),
     )
 
-    messages: list[LLMContextMessage] = [
-        {
-            "role": "system",
-            "content": system_prompt,
-        },
-    ]
-
-    context = LLMContext(messages)
+    # The prompt is already set on the service via OneShotInputParams.
+    context = LLMContext()
     # Ultravox doesn't emit user-turn frames. To get them (for RTVI
     # speech events, turn observers, etc.) uncomment the local-VAD
     # imports + `user_params=` below. See realtime-ultravox.py for the
@@ -106,6 +99,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             enable_usage_metrics=True,
         ),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
+        processor_unusable_policy=ProcessorUnusablePolicy.END,
     )
 
     runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)

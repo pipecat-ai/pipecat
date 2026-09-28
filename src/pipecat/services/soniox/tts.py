@@ -30,10 +30,10 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
-    StartFrame,
     TTSAudioRawFrame,
     TTSStoppedFrame,
 )
+from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TextAggregationMode, WebsocketTTSService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -125,19 +125,29 @@ def language_to_soniox_tts_language(language: Language) -> str | None:
 class SonioxTTSSettings(TTSSettings):
     """Settings for SonioxTTSService.
 
-    ``voice``, ``model``, ``language``, and ``speed`` travel in the per-stream
-    config message, so changing any of them does not require reconnecting the
-    WebSocket. The current context is flushed so the next stream opens with the
-    new values.
+    ``voice``, ``model``, ``language``, ``speed``, ``reduce_silence`` and
+    ``client_reference_id`` travel in the per-stream config message, so changing
+    any of them does not require reconnecting the WebSocket. The current context
+    is flushed so the next stream opens with the new values.
 
     Parameters:
         voice: Voice name (e.g. ``"Adrian"``) or the UUID of a cloned voice in
             the project owning the API key.
         speed: Speech rate multiplier in the range 0.7-1.3. ``None`` leaves it
             unset and uses the Soniox server default (1.0).
+        reduce_silence: Shorten the pauses between words so the speech flows
+            more tightly, without changing how fast the words themselves are
+            spoken. Only models whose catalogue entry reports
+            ``supports_silence_reduction`` accept it. ``None`` leaves it unset
+            and uses the Soniox server default (false).
+        client_reference_id: Client-defined identifier recorded with each
+            request in the Soniox usage logs, for attributing usage to a
+            customer or session. Ignored for temporary API keys.
     """
 
     speed: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    reduce_silence: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    client_reference_id: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class SonioxTTSService(WebsocketTTSService):
@@ -190,6 +200,8 @@ class SonioxTTSService(WebsocketTTSService):
             voice="Bryce",
             language=Language.EN,
             speed=None,
+            reduce_silence=None,
+            client_reference_id=None,
         )
 
         # Settings delta (canonical API, always wins)
@@ -247,13 +259,13 @@ class SonioxTTSService(WebsocketTTSService):
         """
         return language_to_soniox_tts_language(language)
 
-    async def start(self, frame: StartFrame):
-        """Start the Soniox TTS service.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
 
         Args:
-            frame: The start frame containing initialization parameters.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         if self._audio_format.startswith("pcm_") and self.sample_rate not in VALID_SAMPLE_RATES:
             logger.warning(
                 f"{self}: sample_rate={self.sample_rate} is not in Soniox supported rates "
@@ -362,7 +374,14 @@ class SonioxTTSService(WebsocketTTSService):
         if not changed:
             return changed
 
-        if changed.keys() & {"voice", "model", "language", "speed"}:
+        if changed.keys() & {
+            "voice",
+            "model",
+            "language",
+            "speed",
+            "reduce_silence",
+            "client_reference_id",
+        }:
             if self._turn_context_id:
                 # Finalize the old context's still-pending sentence so its
                 # already-heard prefix still emits progress frames (mirrors the
@@ -455,6 +474,10 @@ class SonioxTTSService(WebsocketTTSService):
             config["language"] = s.language
         if s.speed is not None:
             config["speed"] = s.speed
+        if s.reduce_silence is not None:
+            config["reduce_silence"] = s.reduce_silence
+        if s.client_reference_id is not None:
+            config["client_reference_id"] = s.client_reference_id
         # Character-level timestamps drive the word-aligned TTSTextFrames.
         config["return_timestamps"] = True
         if self._audio_format.startswith("pcm_"):

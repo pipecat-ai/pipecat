@@ -22,10 +22,9 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     InterruptionFrame,
-    StartFrame,
     TTSAudioRawFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.aws.sagemaker.bidi_client import SageMakerBidiClient
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import InterruptibleTTSService, TTSService
@@ -114,13 +113,13 @@ class NvidiaSageMakerHTTPTTSService(TTSService):
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
-    async def start(self, frame: StartFrame):
-        """Start the TTS service and create the SageMaker client.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service.
 
         Args:
-            frame: The start frame containing initialization parameters.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         session = aiobotocore.session.get_session()
         self._client_ctx = session.create_client(  # pyright: ignore[reportGeneralTypeIssues]
             "sagemaker-runtime",
@@ -130,6 +129,11 @@ class NvidiaSageMakerHTTPTTSService(TTSService):
         )
         self._client = await self._client_ctx.__aenter__()
         logger.debug(f"{self}: connected to SageMaker endpoint '{self._endpoint_name}'")
+
+    async def cleanup(self):
+        """Release the SageMaker client at teardown."""
+        await super().cleanup()
+        await self._close_client()
 
     async def _close_client(self):
         if self._client_ctx is not None:
@@ -156,11 +160,6 @@ class NvidiaSageMakerHTTPTTSService(TTSService):
             frame: The cancel frame.
         """
         await super().cancel(frame)
-        await self._close_client()
-
-    async def cleanup(self):
-        """Release the SageMaker client at teardown."""
-        await super().cleanup()
         await self._close_client()
 
     # ── Synthesis ─────────────────────────────────────────────────────────────
@@ -309,13 +308,13 @@ class NvidiaSageMakerTTSService(InterruptibleTTSService):
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
-    async def start(self, frame: StartFrame):
-        """Start the TTS service and connect to the SageMaker endpoint.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
 
         Args:
-            frame: The start frame containing initialization parameters.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         await self._connect()
 
     # Teardown is handled by the base WebsocketTTSService, whose stop/cancel/

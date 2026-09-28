@@ -382,10 +382,9 @@ def _offer_context_hub_index() -> None:
     leaves the MCP server dead and the agent relying on it having read AGENTS.md, which
     is a weaker path than tools it can always see.
     """
-    from pipecat.cli.hub_status import read_hub_metadata
+    from pipecat.cli.hub_status import index_is_built
 
-    metadata = read_hub_metadata()
-    if metadata and metadata.get("last_refresh_at"):
+    if index_is_built():
         return
 
     build_now = False

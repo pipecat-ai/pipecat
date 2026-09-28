@@ -69,6 +69,468 @@
       "location": "pipecat/audio/vad/aic_quail_vad.py"
     },
     {
+      "subject": "BusBridgeProcessor.target_task",
+      "module": "pipecat.bus.bridge_processor",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "target_worker",
+      "message": "Use ``target_worker`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/bus/bridge_processor.py"
+    },
+    {
+      "subject": "pipecat.evals.harness",
+      "module": "pipecat.evals.harness",
+      "kind": "module",
+      "deprecated_in": "1.9.0",
+      "removed_in": "2.0.0",
+      "relation": "move",
+      "replacement": "pipecat.evals.session",
+      "message": "Moved to :mod:`pipecat.evals.session` (the session and its default timeout) and :mod:`pipecat.evals.script_session` (the rest). Will be removed in 2.0.0.",
+      "location": "pipecat/evals/harness.py"
+    },
+    {
+      "subject": "EvalJudge.evaluate_run.transcript",
+      "module": "pipecat.evals.judge",
+      "kind": "parameter",
+      "deprecated_in": "1.11.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "add_user_message",
+      "message": "Feed the judge with :meth:`add_user_message`, :meth:`add_assistant_message` and :meth:`add_tool_call` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/evals/judge.py"
+    },
+    {
+      "subject": "EvalJudge.service",
+      "module": "pipecat.evals.judge",
+      "kind": "parameter",
+      "deprecated_in": "1.12.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "pipecat.classifiers.llm.classifier.LLMClassifier",
+      "message": "Use :class:`~pipecat.classifiers.llm.classifier.LLMClassifier` over the service as the ``classifier``, passing the service as the ``explainer`` for the reasons. Will be removed in 2.0.0.",
+      "location": "pipecat/evals/judge.py"
+    },
+    {
+      "subject": "EvalResult",
+      "module": "pipecat.evals.results",
+      "kind": "class",
+      "deprecated_in": "1.9.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "EvalScriptResult",
+      "message": "`EvalResult` is deprecated since 1.9.0 and will be removed in 2.0.0. Use `EvalScriptResult` instead.",
+      "location": "pipecat/evals/results.py"
+    },
+    {
+      "subject": "EvalTurnProgress",
+      "module": "pipecat.evals.results",
+      "kind": "class",
+      "deprecated_in": "1.9.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "EvalScriptTurnProgress",
+      "message": "`EvalTurnProgress` is deprecated since 1.9.0 and will be removed in 2.0.0. Use `EvalScriptTurnProgress` instead.",
+      "location": "pipecat/evals/results.py"
+    },
+    {
+      "subject": "EvalTurnResult",
+      "module": "pipecat.evals.results",
+      "kind": "class",
+      "deprecated_in": "1.9.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "EvalScriptTurnResult",
+      "message": "`EvalTurnResult` is deprecated since 1.9.0 and will be removed in 2.0.0. Use `EvalScriptTurnResult` instead.",
+      "location": "pipecat/evals/results.py"
+    },
+    {
+      "subject": "load_scenario_file",
+      "module": "pipecat.evals.scenario",
+      "kind": "function",
+      "deprecated_in": "1.11.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "EvalScenarioFile.load",
+      "message": "`load_scenario_file` is deprecated since 1.11.0 and will be removed in 2.0.0. Use `EvalScenarioFile.load` instead.",
+      "location": "pipecat/evals/scenario.py"
+    },
+    {
+      "subject": "pipecat.evals.scenario",
+      "module": "pipecat.evals.scenario",
+      "kind": "module",
+      "deprecated_in": "1.11.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "scenarios:",
+      "message": "Use a ``scenarios:`` list instead of a scenario's own keys (``turns:`` or ``persona:``) at a file's top level. Such a file still loads, as that one scenario under the file's ``name:``, with a ``DeprecationWarning``. Will be removed in 2.0.0.",
+      "location": "pipecat/evals/scenario.py"
+    },
+    {
+      "subject": "EvalScenario",
+      "module": "pipecat.evals.script",
+      "kind": "class",
+      "deprecated_in": "1.9.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "EvalScriptScenario",
+      "message": "`EvalScenario` is deprecated since 1.9.0 and will be removed in 2.0.0. Use `EvalScriptScenario` instead.",
+      "location": "pipecat/evals/script.py"
+    },
+    {
+      "subject": "EvalScriptScenario.load",
+      "module": "pipecat.evals.script",
+      "kind": "method",
+      "deprecated_in": "1.11.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "EvalScenarioFile.load",
+      "message": "`EvalScriptScenario.load` is deprecated since 1.11.0 and will be removed in 2.0.0. Use `EvalScenarioFile.load` instead.",
+      "location": "pipecat/evals/script.py"
+    },
+    {
+      "subject": "EvalTurn",
+      "module": "pipecat.evals.script",
+      "kind": "class",
+      "deprecated_in": "1.9.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "EvalScriptTurn",
+      "message": "`EvalTurn` is deprecated since 1.9.0 and will be removed in 2.0.0. Use `EvalScriptTurn` instead.",
+      "location": "pipecat/evals/script.py"
+    },
+    {
+      "subject": "EvalScriptSession.from_scenario.cache_dir",
+      "module": "pipecat.evals.script_session",
+      "kind": "parameter",
+      "deprecated_in": "1.9.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "params",
+      "message": "Use ``params`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/evals/script_session.py"
+    },
+    {
+      "subject": "EvalScriptSession.from_scenario.connect_timeout_s",
+      "module": "pipecat.evals.script_session",
+      "kind": "parameter",
+      "deprecated_in": "1.9.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "params",
+      "message": "Use ``params`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/evals/script_session.py"
+    },
+    {
+      "subject": "EvalScriptSession.from_scenario.default_timeout_ms",
+      "module": "pipecat.evals.script_session",
+      "kind": "parameter",
+      "deprecated_in": "1.9.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "params",
+      "message": "Use ``params`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/evals/script_session.py"
+    },
+    {
+      "subject": "EvalScriptSession.from_scenario.on_progress",
+      "module": "pipecat.evals.script_session",
+      "kind": "parameter",
+      "deprecated_in": "1.9.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "on_progress",
+      "message": "Use the ``on_progress`` event handler instead. Will be removed in 2.0.0.",
+      "location": "pipecat/evals/script_session.py"
+    },
+    {
+      "subject": "EvalScriptSession.from_scenario.record_path",
+      "module": "pipecat.evals.script_session",
+      "kind": "parameter",
+      "deprecated_in": "1.9.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "params",
+      "message": "Use ``params`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/evals/script_session.py"
+    },
+    {
+      "subject": "EvalScriptSession.from_scenario.stop_bot",
+      "module": "pipecat.evals.script_session",
+      "kind": "parameter",
+      "deprecated_in": "1.9.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "params",
+      "message": "Use ``params`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/evals/script_session.py"
+    },
+    {
+      "subject": "EvalScriptSession.from_scenario.trigger_disconnect",
+      "module": "pipecat.evals.script_session",
+      "kind": "parameter",
+      "deprecated_in": "1.9.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "params",
+      "message": "Use ``params`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/evals/script_session.py"
+    },
+    {
+      "subject": "EvalScriptSession.from_scenario.use_cache",
+      "module": "pipecat.evals.script_session",
+      "kind": "parameter",
+      "deprecated_in": "1.9.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "params",
+      "message": "Use ``params`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/evals/script_session.py"
+    },
+    {
+      "subject": "EvalScriptSession.on_progress",
+      "module": "pipecat.evals.script_session",
+      "kind": "parameter",
+      "deprecated_in": "1.9.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "on_progress",
+      "message": "Use the ``on_progress`` event handler instead. Will be removed in 2.0.0.",
+      "location": "pipecat/evals/script_session.py"
+    },
+    {
+      "subject": "RTVIEvalSerializer",
+      "module": "pipecat.evals.serializer",
+      "kind": "class",
+      "deprecated_in": "1.9.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "EvalSerializer",
+      "message": "`RTVIEvalSerializer` is deprecated since 1.9.0 and will be removed in 2.0.0. Use `EvalSerializer` instead.",
+      "location": "pipecat/evals/serializer.py"
+    },
+    {
+      "subject": "cartesia_service",
+      "module": "pipecat.evals.services",
+      "kind": "function",
+      "deprecated_in": "1.9.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "user.speech.factory",
+      "message": "`cartesia_service` is deprecated since 1.9.0 and will be removed in 2.0.0. Use `user.speech.factory` instead.",
+      "location": "pipecat/evals/services.py"
+    },
+    {
+      "subject": "llm_service_from_config.config",
+      "module": "pipecat.evals.services",
+      "kind": "parameter",
+      "deprecated_in": "1.9.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "factory",
+      "message": "Use ``factory`` instead of ``service: openai``. Will be removed in 2.0.0.",
+      "location": "pipecat/evals/services.py"
+    },
+    {
+      "subject": "openai_service",
+      "module": "pipecat.evals.services",
+      "kind": "function",
+      "deprecated_in": "1.9.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "judge.eval.factory",
+      "message": "`openai_service` is deprecated since 1.9.0 and will be removed in 2.0.0. Use `judge.eval.factory` instead.",
+      "location": "pipecat/evals/services.py"
+    },
+    {
+      "subject": "tts_service_from_config.voice_cfg",
+      "module": "pipecat.evals.services",
+      "kind": "parameter",
+      "deprecated_in": "1.9.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "factory",
+      "message": "Use ``factory`` instead of ``service: cartesia``. Will be removed in 2.0.0.",
+      "location": "pipecat/evals/services.py"
+    },
+    {
+      "subject": "EvalSession.from_scenario.cache_dir",
+      "module": "pipecat.evals.session",
+      "kind": "parameter",
+      "deprecated_in": "1.9.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "params",
+      "message": "Use ``params`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/evals/session.py"
+    },
+    {
+      "subject": "EvalSession.from_scenario.connect_timeout_s",
+      "module": "pipecat.evals.session",
+      "kind": "parameter",
+      "deprecated_in": "1.9.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "params",
+      "message": "Use ``params`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/evals/session.py"
+    },
+    {
+      "subject": "EvalSession.from_scenario.default_timeout_ms",
+      "module": "pipecat.evals.session",
+      "kind": "parameter",
+      "deprecated_in": "1.9.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "params",
+      "message": "Use ``params`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/evals/session.py"
+    },
+    {
+      "subject": "EvalSession.from_scenario.on_progress",
+      "module": "pipecat.evals.session",
+      "kind": "parameter",
+      "deprecated_in": "1.9.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "on_progress",
+      "message": "Use the ``on_progress`` event handler instead. Will be removed in 2.0.0.",
+      "location": "pipecat/evals/session.py"
+    },
+    {
+      "subject": "EvalSession.from_scenario.record_path",
+      "module": "pipecat.evals.session",
+      "kind": "parameter",
+      "deprecated_in": "1.9.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "params",
+      "message": "Use ``params`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/evals/session.py"
+    },
+    {
+      "subject": "EvalSession.from_scenario.stop_bot",
+      "module": "pipecat.evals.session",
+      "kind": "parameter",
+      "deprecated_in": "1.9.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "params",
+      "message": "Use ``params`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/evals/session.py"
+    },
+    {
+      "subject": "EvalSession.from_scenario.trigger_disconnect",
+      "module": "pipecat.evals.session",
+      "kind": "parameter",
+      "deprecated_in": "1.9.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "params",
+      "message": "Use ``params`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/evals/session.py"
+    },
+    {
+      "subject": "EvalSession.from_scenario.use_cache",
+      "module": "pipecat.evals.session",
+      "kind": "parameter",
+      "deprecated_in": "1.9.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "params",
+      "message": "Use ``params`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/evals/session.py"
+    },
+    {
+      "subject": "EvalSimulationScenario.load",
+      "module": "pipecat.evals.simulation",
+      "kind": "method",
+      "deprecated_in": "1.11.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "EvalScenarioFile.load",
+      "message": "`EvalSimulationScenario.load` is deprecated since 1.11.0 and will be removed in 2.0.0. Use `EvalScenarioFile.load` instead.",
+      "location": "pipecat/evals/simulation.py"
+    },
+    {
+      "subject": "EvalSimulationDriver.transcript",
+      "module": "pipecat.evals.simulation_driver",
+      "kind": "method",
+      "deprecated_in": "1.11.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "`EvalSimulationDriver.transcript` is deprecated since 1.11.0 and will be removed in 2.0.0. No replacement.",
+      "location": "pipecat/evals/simulation_driver.py"
+    },
+    {
+      "subject": "EvalSuite.run.default_timeout_ms",
+      "module": "pipecat.evals.suite",
+      "kind": "parameter",
+      "deprecated_in": "1.9.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "params",
+      "message": "Use ``params`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/evals/suite.py"
+    },
+    {
+      "subject": "EvalSuite.run.on_update",
+      "module": "pipecat.evals.suite",
+      "kind": "parameter",
+      "deprecated_in": "1.9.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "on_update",
+      "message": "Use the ``on_update`` event handler instead. Will be removed in 2.0.0.",
+      "location": "pipecat/evals/suite.py"
+    },
+    {
+      "subject": "EvalSuite.run.use_cache",
+      "module": "pipecat.evals.suite",
+      "kind": "parameter",
+      "deprecated_in": "1.9.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "params",
+      "message": "Use ``params`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/evals/suite.py"
+    },
+    {
+      "subject": "pipecat.evals.suite",
+      "module": "pipecat.evals.suite",
+      "kind": "module",
+      "deprecated_in": "1.11.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "runner_body: {path: <file>}",
+      "message": "Use ``runner_body: {path: <file>}`` instead of a bare ``runner_body: <file>``. Will be removed in 2.0.0.",
+      "location": "pipecat/evals/suite.py"
+    },
+    {
+      "subject": "VoicemailDetector.custom_system_prompt",
+      "module": "pipecat.extensions.voicemail.voicemail_detector",
+      "kind": "parameter",
+      "deprecated_in": "1.12.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "classifier",
+      "message": "Use ``classifier`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/extensions/voicemail/voicemail_detector.py"
+    },
+    {
+      "subject": "VoicemailDetector.llm",
+      "module": "pipecat.extensions.voicemail.voicemail_detector",
+      "kind": "parameter",
+      "deprecated_in": "1.12.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "classifier",
+      "message": "Use ``classifier`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/extensions/voicemail/voicemail_detector.py"
+    },
+    {
       "subject": "FlowManager.task",
       "module": "pipecat.flows.manager",
       "kind": "parameter",
@@ -168,6 +630,28 @@
       "location": "pipecat/frames/frames.py"
     },
     {
+      "subject": "ErrorFrame.fatal",
+      "module": "pipecat.frames.frames",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "FrameProcessor.push_error",
+      "message": "Use :meth:`FrameProcessor.push_error` with ``force_treat_as_permanent=True`` instead, when the error leaves its originating processor unable to do its job: it marks that processor unusable and the pipeline worker applies its :class:`ProcessorUnusablePolicy`. For an error that isn't about a processor's state, push an :class:`EndWorkerFrame` after the error to end the pipeline. Will be removed in 2.0.0.",
+      "location": "pipecat/frames/frames.py"
+    },
+    {
+      "subject": "FatalErrorFrame",
+      "module": "pipecat.frames.frames",
+      "kind": "class",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "ErrorFrame",
+      "message": "`FatalErrorFrame` is deprecated since 1.8.0 and will be removed in 2.0.0. Use `ErrorFrame` instead. See the `ErrorFrame.fatal` docstring for how to report an error that used to be fatal.",
+      "location": "pipecat/frames/frames.py"
+    },
+    {
       "subject": "InterruptionTaskFrame",
       "module": "pipecat.frames.frames",
       "kind": "class",
@@ -187,6 +671,83 @@
       "relation": "use_existing",
       "replacement": "delta",
       "message": "Use ``delta`` with a typed settings object instead. Will be removed in 2.0.0.",
+      "location": "pipecat/frames/frames.py"
+    },
+    {
+      "subject": "StartFrame.audio_in_sample_rate",
+      "module": "pipecat.frames.frames",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "audio_in_sample_rate",
+      "message": "Read ``audio_in_sample_rate`` in ``FrameProcessorSetup.setup()`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/frames/frames.py"
+    },
+    {
+      "subject": "StartFrame.audio_out_sample_rate",
+      "module": "pipecat.frames.frames",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "audio_out_sample_rate",
+      "message": "Read ``audio_out_sample_rate`` in ``FrameProcessorSetup.setup()`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/frames/frames.py"
+    },
+    {
+      "subject": "StartFrame.enable_metrics",
+      "module": "pipecat.frames.frames",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "enable_metrics",
+      "message": "Read ``enable_metrics`` in ``FrameProcessorSetup.setup()`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/frames/frames.py"
+    },
+    {
+      "subject": "StartFrame.enable_tracing",
+      "module": "pipecat.frames.frames",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "enable_tracing",
+      "message": "Read ``enable_tracing`` in ``FrameProcessorSetup.setup()`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/frames/frames.py"
+    },
+    {
+      "subject": "StartFrame.enable_usage_metrics",
+      "module": "pipecat.frames.frames",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "enable_usage_metrics",
+      "message": "Read ``enable_usage_metrics`` in ``FrameProcessorSetup.setup()`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/frames/frames.py"
+    },
+    {
+      "subject": "StartFrame.report_only_initial_ttfb",
+      "module": "pipecat.frames.frames",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "report_only_initial_ttfb",
+      "message": "Read ``report_only_initial_ttfb`` in ``FrameProcessorSetup.setup()`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/frames/frames.py"
+    },
+    {
+      "subject": "StartFrame.tracing_context",
+      "module": "pipecat.frames.frames",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "tracing_context",
+      "message": "Read ``tracing_context`` in ``FrameProcessorSetup.setup()`` instead. Will be removed in 2.0.0.",
       "location": "pipecat/frames/frames.py"
     },
     {
@@ -223,6 +784,17 @@
       "location": "pipecat/frames/frames.py"
     },
     {
+      "subject": "UninterruptibleFrame",
+      "module": "pipecat.frames.frames",
+      "kind": "class",
+      "deprecated_in": "1.11.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "interruptible",
+      "message": "`UninterruptibleFrame` is deprecated since 1.11.0 and will be removed in 2.0.0. Use the `interruptible` field with `default=False` instead.",
+      "location": "pipecat/frames/frames.py"
+    },
+    {
       "subject": "SmartTurnMetricsData",
       "module": "pipecat.metrics.metrics",
       "kind": "class",
@@ -232,6 +804,105 @@
       "replacement": "TurnMetricsData",
       "message": "`SmartTurnMetricsData` is deprecated since 0.0.104 and will be removed in 2.0.0. Use `TurnMetricsData` instead.",
       "location": "pipecat/metrics/metrics.py"
+    },
+    {
+      "subject": "BaseObserver.on_startup_warmup",
+      "module": "pipecat.observers.base_observer",
+      "kind": "method",
+      "deprecated_in": "1.12.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "`BaseObserver.on_startup_warmup` is deprecated since 1.12.0 and will be removed in 2.0.0. No replacement.",
+      "location": "pipecat/observers/base_observer.py"
+    },
+    {
+      "subject": "StartupWarmup",
+      "module": "pipecat.observers.base_observer",
+      "kind": "class",
+      "deprecated_in": "1.12.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "`StartupWarmup` is deprecated since 1.12.0 and will be removed in 2.0.0. No replacement.",
+      "location": "pipecat/observers/base_observer.py"
+    },
+    {
+      "subject": "StartupTimingObserver.on_startup_warmup",
+      "module": "pipecat.observers.startup_timing_observer",
+      "kind": "method",
+      "deprecated_in": "1.12.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "`StartupTimingObserver.on_startup_warmup` is deprecated since 1.12.0 and will be removed in 2.0.0. No replacement.",
+      "location": "pipecat/observers/startup_timing_observer.py"
+    },
+    {
+      "subject": "StartupTimingReport.warmup",
+      "module": "pipecat.observers.startup_timing_observer",
+      "kind": "parameter",
+      "deprecated_in": "1.12.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "No replacement. Nothing warms deferred imports at startup. Will be removed in 2.0.0.",
+      "location": "pipecat/observers/startup_timing_observer.py"
+    },
+    {
+      "subject": "StartupWarmupTiming",
+      "module": "pipecat.observers.startup_timing_observer",
+      "kind": "class",
+      "deprecated_in": "1.12.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "`StartupWarmupTiming` is deprecated since 1.12.0 and will be removed in 2.0.0. No replacement.",
+      "location": "pipecat/observers/startup_timing_observer.py"
+    },
+    {
+      "subject": "TurnTrackingObserver.max_frames",
+      "module": "pipecat.observers.turn_tracking_observer",
+      "kind": "parameter",
+      "deprecated_in": "1.12.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "No replacement. The observer receives each frame once. Will be removed in 2.0.0.",
+      "location": "pipecat/observers/turn_tracking_observer.py"
+    },
+    {
+      "subject": "LatencyBreakdown.chronological_events",
+      "module": "pipecat.observers.user_bot_latency_observer",
+      "kind": "method",
+      "deprecated_in": "1.9.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "LatencyBreakdown.turn_contribution_lines",
+      "message": "`LatencyBreakdown.chronological_events` is deprecated since 1.9.0 and will be removed in 2.0.0. Use `LatencyBreakdown.turn_contribution_lines` instead.",
+      "location": "pipecat/observers/user_bot_latency_observer.py"
+    },
+    {
+      "subject": "UserBotLatencyObserver.max_frames",
+      "module": "pipecat.observers.user_bot_latency_observer",
+      "kind": "parameter",
+      "deprecated_in": "1.12.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "No replacement. The observer receives each frame once. Will be removed in 2.0.0.",
+      "location": "pipecat/observers/user_bot_latency_observer.py"
+    },
+    {
+      "subject": "resolve_job_params",
+      "module": "pipecat.pipeline.job_context",
+      "kind": "function",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "No replacement. Will be removed in 2.0.0, along with the individual arguments it exists to absorb.",
+      "location": "pipecat/pipeline/job_context.py"
     },
     {
       "subject": "LLMSwitcher.register_direct_function",
@@ -263,7 +934,7 @@
       "removed_in": "2.0.0",
       "relation": "move",
       "replacement": "pipecat.pipeline.worker",
-      "message": "Import from :mod:`pipecat.pipeline.worker` instead. Constructing :class:`PipelineTask` directly is also deprecated; use :class:`PipelineWorker`. Will be removed in 2.0.0.",
+      "message": "Import from :mod:`pipecat.pipeline.worker` instead. Constructing :class:`PipelineTask` directly is also deprecated; use :class:`~pipecat.pipeline.worker.PipelineWorker`. Will be removed in 2.0.0.",
       "location": "pipecat/pipeline/task.py"
     },
     {
@@ -298,6 +969,17 @@
       "replacement": "app_resources",
       "message": "Use ``app_resources`` instead. ``tool_resources`` will be removed in 2.0.0.",
       "location": "pipecat/pipeline/worker.py"
+    },
+    {
+      "subject": "WorkerObserver.on_startup_warmup",
+      "module": "pipecat.pipeline.worker_observer",
+      "kind": "method",
+      "deprecated_in": "1.12.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "`WorkerObserver.on_startup_warmup` is deprecated since 1.12.0 and will be removed in 2.0.0. No replacement.",
+      "location": "pipecat/pipeline/worker_observer.py"
     },
     {
       "subject": "LLMAssistantAggregatorParams.context_summarization_config",
@@ -396,6 +1078,17 @@
       "relation": "use_existing",
       "replacement": "pipeline_worker",
       "message": "`FrameProcessor.pipeline_task` is deprecated since 1.3.0 and will be removed in 2.0.0. Use `pipeline_worker` instead.",
+      "location": "pipecat/processors/frame_processor.py"
+    },
+    {
+      "subject": "FrameProcessor.push_error.fatal",
+      "module": "pipecat.processors.frame_processor",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "force_treat_as_permanent=True",
+      "message": "Use ``force_treat_as_permanent=True`` instead, when the error leaves its originating processor unable to do its job: the pipeline worker then applies its :class:`ProcessorUnusablePolicy`, of which ``CANCEL`` matches what ``fatal=True`` did. For an error that isn't about that processor's state, push an :class:`EndWorkerFrame` after the error to end the pipeline. Will be removed in 2.0.0.",
       "location": "pipecat/processors/frame_processor.py"
     },
     {
@@ -804,6 +1497,17 @@
       "replacement": "settings=AzureImageGenServiceREST.Settings(model=...)",
       "message": "Use ``settings=AzureImageGenServiceREST.Settings(model=...)`` instead. Will be removed in 2.0.0.",
       "location": "pipecat/services/azure/image.py"
+    },
+    {
+      "subject": "AzureLLMService.api_version",
+      "module": "pipecat.services.azure.llm",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "endpoint",
+      "message": "Use an ``endpoint`` ending in ``/openai/v1`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/services/azure/llm.py"
     },
     {
       "subject": "AzureLLMService.model",
@@ -2302,39 +3006,6 @@
       "location": "pipecat/services/llm_service.py"
     },
     {
-      "subject": "LmntTTSService.language",
-      "module": "pipecat.services.lmnt.tts",
-      "kind": "parameter",
-      "deprecated_in": "0.0.106",
-      "removed_in": "2.0.0",
-      "relation": "use_existing",
-      "replacement": "settings=LmntTTSService.Settings(language=...)",
-      "message": "Use ``settings=LmntTTSService.Settings(language=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/lmnt/tts.py"
-    },
-    {
-      "subject": "LmntTTSService.model",
-      "module": "pipecat.services.lmnt.tts",
-      "kind": "parameter",
-      "deprecated_in": "0.0.105",
-      "removed_in": "2.0.0",
-      "relation": "use_existing",
-      "replacement": "settings=LmntTTSService.Settings(model=...)",
-      "message": "Use ``settings=LmntTTSService.Settings(model=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/lmnt/tts.py"
-    },
-    {
-      "subject": "LmntTTSService.voice_id",
-      "module": "pipecat.services.lmnt.tts",
-      "kind": "parameter",
-      "deprecated_in": "0.0.105",
-      "removed_in": "2.0.0",
-      "relation": "use_existing",
-      "replacement": "settings=LmntTTSService.Settings(voice=...)",
-      "message": "Use ``settings=LmntTTSService.Settings(voice=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/lmnt/tts.py"
-    },
-    {
       "subject": "MCPClient.get_tools_schema",
       "module": "pipecat.services.mcp_service",
       "kind": "method",
@@ -3171,17 +3842,6 @@
       "location": "pipecat/services/sarvam/stt.py"
     },
     {
-      "subject": "SarvamSTTService.set_prompt",
-      "module": "pipecat.services.sarvam.stt",
-      "kind": "method",
-      "deprecated_in": "0.0.104",
-      "removed_in": "2.0.0",
-      "relation": "use_existing",
-      "replacement": "STTUpdateSettingsFrame(SarvamSTTService.Settings(prompt=...))",
-      "message": "`SarvamSTTService.set_prompt` is deprecated since 0.0.104 and will be removed in 2.0.0. Use `STTUpdateSettingsFrame(SarvamSTTService.Settings(prompt=...))` instead.",
-      "location": "pipecat/services/sarvam/stt.py"
-    },
-    {
       "subject": "SarvamHttpTTSService.InputParams",
       "module": "pipecat.services.sarvam.tts",
       "kind": "class",
@@ -3223,6 +3883,17 @@
       "relation": "use_existing",
       "replacement": "settings=SarvamHttpTTSService.Settings(voice=...)",
       "message": "Use ``settings=SarvamHttpTTSService.Settings(voice=...)`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/services/sarvam/tts.py"
+    },
+    {
+      "subject": "SarvamTTSModel.BULBUL_V2",
+      "module": "pipecat.services.sarvam.tts",
+      "kind": "parameter",
+      "deprecated_in": "1.9.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "SarvamTTSModel.BULBUL_V3",
+      "message": "Use :attr:`SarvamTTSModel.BULBUL_V3` instead. Will be removed in 2.0.0.",
       "location": "pipecat/services/sarvam/tts.py"
     },
     {
@@ -3358,14 +4029,14 @@
       "location": "pipecat/services/soniox/stt.py"
     },
     {
-      "subject": "SpeechmaticsSTTService.UpdateParams",
+      "subject": "SpeechmaticsSTTService.InputParams.operating_point",
       "module": "pipecat.services.speechmatics.stt",
-      "kind": "class",
-      "deprecated_in": "0.0.104",
+      "kind": "parameter",
+      "deprecated_in": "1.10.0",
       "removed_in": "2.0.0",
       "relation": "use_existing",
-      "replacement": "SpeechmaticsSTTService.Settings",
-      "message": "`SpeechmaticsSTTService.UpdateParams` is deprecated since 0.0.104 and will be removed in 2.0.0. Use `SpeechmaticsSTTService.Settings` instead.",
+      "replacement": "model",
+      "message": "Use ``model`` instead. Will be removed in 2.0.0.",
       "location": "pipecat/services/speechmatics/stt.py"
     },
     {
@@ -3380,14 +4051,14 @@
       "location": "pipecat/services/speechmatics/stt.py"
     },
     {
-      "subject": "SpeechmaticsSTTService.update_params",
+      "subject": "SpeechmaticsSTTSettings.operating_point",
       "module": "pipecat.services.speechmatics.stt",
-      "kind": "method",
-      "deprecated_in": "0.0.104",
+      "kind": "parameter",
+      "deprecated_in": "1.10.0",
       "removed_in": "2.0.0",
       "relation": "use_existing",
-      "replacement": "STTUpdateSettingsFrame",
-      "message": "`SpeechmaticsSTTService.update_params` is deprecated since 0.0.104 and will be removed in 2.0.0. Use `STTUpdateSettingsFrame` instead.",
+      "replacement": "model",
+      "message": "Use ``model`` instead. Will be removed in 2.0.0.",
       "location": "pipecat/services/speechmatics/stt.py"
     },
     {
@@ -3498,6 +4169,17 @@
       "relation": "use_existing",
       "replacement": "text_aggregation_mode",
       "message": "Use ``text_aggregation_mode`` instead. Set to ``TextAggregationMode.SENTENCE`` to aggregate text into sentences before synthesis, or ``TextAggregationMode.TOKEN`` to stream tokens directly for lower latency. Will be removed in 2.0.0.",
+      "location": "pipecat/services/tts_service.py"
+    },
+    {
+      "subject": "TTSService.pause_watchdog_timeout_s",
+      "module": "pipecat.services.tts_service",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "No replacement. Frame processing is now paused only while there is audio still to be played, so the pause is lifted by the ``BotStoppedSpeakingFrame`` that follows playback or by the audio context completing in silence, and no timer is needed to break it. Will be removed in 2.0.0.",
       "location": "pipecat/services/tts_service.py"
     },
     {
@@ -3908,6 +4590,270 @@
       "location": "pipecat/utils/context/llm_context_summarization.py"
     },
     {
+      "subject": "BaseUIWorker",
+      "module": "pipecat.workers.base_ui_worker",
+      "kind": "class",
+      "deprecated_in": "1.12.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "UIWorker",
+      "message": "`BaseUIWorker` is deprecated since 1.12.0 and will be removed in 2.0.0. Use `UIWorker` instead.",
+      "location": "pipecat/workers/base_ui_worker.py"
+    },
+    {
+      "subject": "pipecat.workers.base_ui_worker",
+      "module": "pipecat.workers.base_ui_worker",
+      "kind": "module",
+      "deprecated_in": "1.12.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "pipecat.workers.ui.UIWorker",
+      "message": "Use :class:`~pipecat.workers.ui.UIWorker` instead, which reports its job groups to the client itself; dispatch from one of its ``@job`` handlers where a ``BaseUIWorker`` was used as a dispatcher. Will be removed in 2.0.0.",
+      "location": "pipecat/workers/base_ui_worker.py"
+    },
+    {
+      "subject": "BaseWorker.create_job_group_and_request_job.cancel_on_error",
+      "module": "pipecat.workers.base_worker",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "params=JobGroupParams(cancel_on_error=...)",
+      "message": "Use ``params=JobGroupParams(cancel_on_error=...)`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/workers/base_worker.py"
+    },
+    {
+      "subject": "BaseWorker.create_job_group_and_request_job.name",
+      "module": "pipecat.workers.base_worker",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "params=JobGroupParams(name=...)",
+      "message": "Use ``params=JobGroupParams(name=...)`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/workers/base_worker.py"
+    },
+    {
+      "subject": "BaseWorker.create_job_group_and_request_job.payload",
+      "module": "pipecat.workers.base_worker",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "params=JobGroupParams(payload=...)",
+      "message": "Use ``params=JobGroupParams(payload=...)`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/workers/base_worker.py"
+    },
+    {
+      "subject": "BaseWorker.create_job_group_and_request_job.timeout",
+      "module": "pipecat.workers.base_worker",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "params=JobGroupParams(timeout=...)",
+      "message": "Use ``params=JobGroupParams(timeout=...)`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/workers/base_worker.py"
+    },
+    {
+      "subject": "BaseWorker.job.name",
+      "module": "pipecat.workers.base_worker",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "params=JobParams(name=...)",
+      "message": "Use ``params=JobParams(name=...)`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/workers/base_worker.py"
+    },
+    {
+      "subject": "BaseWorker.job.payload",
+      "module": "pipecat.workers.base_worker",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "params=JobParams(payload=...)",
+      "message": "Use ``params=JobParams(payload=...)`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/workers/base_worker.py"
+    },
+    {
+      "subject": "BaseWorker.job.timeout",
+      "module": "pipecat.workers.base_worker",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "params=JobParams(timeout=...)",
+      "message": "Use ``params=JobParams(timeout=...)`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/workers/base_worker.py"
+    },
+    {
+      "subject": "BaseWorker.job_group.cancel_on_error",
+      "module": "pipecat.workers.base_worker",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "params=JobGroupParams(cancel_on_error=...)",
+      "message": "Use ``params=JobGroupParams(cancel_on_error=...)`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/workers/base_worker.py"
+    },
+    {
+      "subject": "BaseWorker.job_group.name",
+      "module": "pipecat.workers.base_worker",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "params=JobGroupParams(name=...)",
+      "message": "Use ``params=JobGroupParams(name=...)`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/workers/base_worker.py"
+    },
+    {
+      "subject": "BaseWorker.job_group.payload",
+      "module": "pipecat.workers.base_worker",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "params=JobGroupParams(payload=...)",
+      "message": "Use ``params=JobGroupParams(payload=...)`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/workers/base_worker.py"
+    },
+    {
+      "subject": "BaseWorker.job_group.timeout",
+      "module": "pipecat.workers.base_worker",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "params=JobGroupParams(timeout=...)",
+      "message": "Use ``params=JobGroupParams(timeout=...)`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/workers/base_worker.py"
+    },
+    {
+      "subject": "BaseWorker.request_job.name",
+      "module": "pipecat.workers.base_worker",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "params=JobParams(name=...)",
+      "message": "Use ``params=JobParams(name=...)`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/workers/base_worker.py"
+    },
+    {
+      "subject": "BaseWorker.request_job.payload",
+      "module": "pipecat.workers.base_worker",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "params=JobParams(payload=...)",
+      "message": "Use ``params=JobParams(payload=...)`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/workers/base_worker.py"
+    },
+    {
+      "subject": "BaseWorker.request_job.timeout",
+      "module": "pipecat.workers.base_worker",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "params=JobParams(timeout=...)",
+      "message": "Use ``params=JobParams(timeout=...)`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/workers/base_worker.py"
+    },
+    {
+      "subject": "BaseWorker.request_job_group.cancel_on_error",
+      "module": "pipecat.workers.base_worker",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "params=JobGroupParams(cancel_on_error=...)",
+      "message": "Use ``params=JobGroupParams(cancel_on_error=...)`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/workers/base_worker.py"
+    },
+    {
+      "subject": "BaseWorker.request_job_group.name",
+      "module": "pipecat.workers.base_worker",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "params=JobGroupParams(name=...)",
+      "message": "Use ``params=JobGroupParams(name=...)`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/workers/base_worker.py"
+    },
+    {
+      "subject": "BaseWorker.request_job_group.payload",
+      "module": "pipecat.workers.base_worker",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "params=JobGroupParams(payload=...)",
+      "message": "Use ``params=JobGroupParams(payload=...)`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/workers/base_worker.py"
+    },
+    {
+      "subject": "BaseWorker.request_job_group.timeout",
+      "module": "pipecat.workers.base_worker",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "params=JobGroupParams(timeout=...)",
+      "message": "Use ``params=JobGroupParams(timeout=...)`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/workers/base_worker.py"
+    },
+    {
+      "subject": "LLMWorker.activate_worker.messages",
+      "module": "pipecat.workers.llm.llm_worker",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "params.result_callback(result)",
+      "message": "Call ``params.result_callback(result)`` before :meth:`activate_worker` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/workers/llm/llm_worker.py"
+    },
+    {
+      "subject": "LLMWorker.activate_worker.result_callback",
+      "module": "pipecat.workers.llm.llm_worker",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "params.result_callback(result)",
+      "message": "Call ``params.result_callback(result)`` before :meth:`activate_worker` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/workers/llm/llm_worker.py"
+    },
+    {
+      "subject": "LLMWorker.end.messages",
+      "module": "pipecat.workers.llm.llm_worker",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "params.result_callback(result)",
+      "message": "Call ``params.result_callback(result)`` before :meth:`end` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/workers/llm/llm_worker.py"
+    },
+    {
+      "subject": "LLMWorker.end.result_callback",
+      "module": "pipecat.workers.llm.llm_worker",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "params.result_callback(result)",
+      "message": "Call ``params.result_callback(result)`` before :meth:`end` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/workers/llm/llm_worker.py"
+    },
+    {
       "subject": "tool.timeout",
       "module": "pipecat.workers.llm.tool_decorator",
       "kind": "parameter",
@@ -3939,6 +4885,61 @@
       "replacement": "add_workers",
       "message": "Register the worker with :meth:`add_workers` before calling ``run()`` instead. Will be removed in 2.0.0.",
       "location": "pipecat/workers/runner.py"
+    },
+    {
+      "subject": "UIJobGroupContext",
+      "module": "pipecat.workers.ui.ui_job_context",
+      "kind": "class",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "JobGroupContext",
+      "message": "`UIJobGroupContext` is deprecated since 1.8.0 and will be removed in 2.0.0. Use `JobGroupContext` instead.",
+      "location": "pipecat/workers/ui/ui_job_context.py"
+    },
+    {
+      "subject": "ReplyToolMixin",
+      "module": "pipecat.workers.ui.ui_tools",
+      "kind": "class",
+      "deprecated_in": "1.12.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "screen_tools",
+      "message": "`ReplyToolMixin` is deprecated since 1.12.0 and will be removed in 2.0.0. Use `screen_tools` instead.",
+      "location": "pipecat/workers/ui/ui_tools.py"
+    },
+    {
+      "subject": "UIWorker.respond_to_job.tts_speak",
+      "module": "pipecat.workers.ui.ui_worker",
+      "kind": "parameter",
+      "deprecated_in": "1.12.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "No replacement: respond with ``answer`` and let the requester's voice LLM say it. Will be removed in 2.0.0.",
+      "location": "pipecat/workers/ui/ui_worker.py"
+    },
+    {
+      "subject": "UIWorker.start_ui_job_group",
+      "module": "pipecat.workers.ui.ui_worker",
+      "kind": "method",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "request_job_group",
+      "message": "`UIWorker.start_ui_job_group` is deprecated since 1.8.0 and will be removed in 2.0.0. Use `request_job_group` instead.",
+      "location": "pipecat/workers/ui/ui_worker.py"
+    },
+    {
+      "subject": "UIWorker.ui_job_group",
+      "module": "pipecat.workers.ui.ui_worker",
+      "kind": "method",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "job_group",
+      "message": "`UIWorker.ui_job_group` is deprecated since 1.8.0 and will be removed in 2.0.0. Use `job_group` instead.",
+      "location": "pipecat/workers/ui/ui_worker.py"
     }
   ]
 }

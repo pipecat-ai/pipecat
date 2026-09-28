@@ -26,7 +26,7 @@ from pipecat.frames.frames import (
     StartFrame,
 )
 from pipecat.metrics.metrics import MetricsData
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 from pipecat.services.settings import ServiceSettings
 
 
@@ -57,6 +57,16 @@ class AIService(FrameProcessor):
         self._session_properties: dict[str, Any] = {}
         self._tracing_enabled: bool = False
         self._tracing_context = None
+
+    @property
+    def settings(self) -> ServiceSettings:
+        """The service's current settings, for reading.
+
+        Change them with a
+        :class:`~pipecat.frames.frames.ServiceUpdateSettingsFrame`, so the
+        service applies the change and its metrics keep the model in sync.
+        """
+        return self._settings
 
     def _sync_model_name_to_metrics(self):
         """Sync the current AI model name (in `self._settings.model`) for usage in metrics.
@@ -90,8 +100,18 @@ class AIService(FrameProcessor):
     async def broadcast_service_metadata(self):
         """Broadcast this service's metadata frame, if any."""
         frame = self.service_metadata_frame()
-        if frame is not None:
+        if frame:
             await self.broadcast_frame_instance(frame)
+
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service.
+
+        Args:
+            setup: Configuration object containing setup parameters.
+        """
+        await super().setup(setup)
+        self._tracing_enabled = setup.enable_tracing
+        self._tracing_context = setup.tracing_context
 
     async def start(self, frame: StartFrame):
         """Start the AI service.
@@ -103,8 +123,6 @@ class AIService(FrameProcessor):
             frame: The start frame containing initialization parameters.
         """
         self._settings.validate_complete()
-        self._tracing_enabled = frame.enable_tracing
-        self._tracing_context = frame.tracing_context
 
     async def stop(self, frame: EndFrame):
         """Stop the AI service on a graceful end (``EndFrame``).

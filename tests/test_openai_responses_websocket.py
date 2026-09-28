@@ -382,7 +382,7 @@ class TestReceiveResponseEventsText:
                         "input_tokens": 100,
                         "output_tokens": 50,
                         "total_tokens": 150,
-                        "input_tokens_details": {"cached_tokens": 20},
+                        "input_tokens_details": {"cached_tokens": 20, "cache_write_tokens": 30},
                         "output_tokens_details": {"reasoning_tokens": 10},
                     },
                 },
@@ -398,7 +398,41 @@ class TestReceiveResponseEventsText:
         assert tokens.completion_tokens == 50
         assert tokens.total_tokens == 150
         assert tokens.cache_read_input_tokens == 20
+        # Both cache buckets sit inside input_tokens, so the totals stay as sent.
+        assert tokens.cache_creation_input_tokens == 30
         assert tokens.reasoning_tokens == 10
+
+    @pytest.mark.asyncio
+    async def test_token_usage_metrics_without_a_cache_write_count(self):
+        """A server without prompt caching omits the field entirely."""
+        service = _make_service()
+        service._push_llm_text = AsyncMock()
+        service.stop_ttfb_metrics = AsyncMock()
+        service.start_llm_usage_metrics = AsyncMock()
+
+        ws = _ws_events(
+            {
+                "type": "response.completed",
+                "response": {
+                    "id": "resp_1",
+                    "model": "gpt-4.1",
+                    "usage": {
+                        "input_tokens": 100,
+                        "output_tokens": 50,
+                        "total_tokens": 150,
+                        "input_tokens_details": {"cached_tokens": 0},
+                        "output_tokens_details": {"reasoning_tokens": 0},
+                    },
+                },
+            },
+        )
+        service._websocket = ws
+
+        context = MagicMock(spec=LLMContext)
+        await service._receive_response_events(context, [])
+
+        tokens = service.start_llm_usage_metrics.call_args[0][0]
+        assert tokens.cache_creation_input_tokens == 0
 
 
 # ---------------------------------------------------------------------------
@@ -777,6 +811,12 @@ class TestReasoningParams:
         params = self._params(service)
         assert "reasoning" not in params
 
+    def test_gpt_6_astra_left_untouched(self):
+        """gpt-6-astra reasons but rejects effort="none", so leave it at the default."""
+        service = _make_service(settings=OpenAIResponsesLLMService.Settings(model="gpt-6-astra"))
+        params = self._params(service)
+        assert "reasoning" not in params
+
     def test_gpt5_chat_variant_left_untouched(self):
         """The non-reasoning gpt-5-chat variant is excluded from the default-off logic."""
         service = _make_service(
@@ -796,6 +836,17 @@ class TestReasoningParams:
         params = self._params(service)
         assert params["reasoning"] == {"effort": "high", "summary": "auto"}
         assert params["include"] == ["reasoning.encrypted_content"]
+
+    def test_reasoning_mode_is_passed_through(self):
+        """`mode` reaches the request alongside `effort`."""
+        service = _make_service(
+            settings=OpenAIResponsesLLMService.Settings(
+                model="gpt-5.6-sol",
+                reasoning=OpenAIResponsesLLMService.ReasoningConfig(effort="low", mode="pro"),
+            )
+        )
+        params = self._params(service)
+        assert params["reasoning"] == {"effort": "low", "mode": "pro"}
 
     def test_empty_reasoning_config_falls_back_to_default(self):
         """An all-unset config is treated as unconfigured (none default on gpt-5.x)."""

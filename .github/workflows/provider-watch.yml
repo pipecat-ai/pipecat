@@ -1,0 +1,364 @@
+name: Provider watch
+
+# Provider research, every other week. Research jobs run the /provider-research skill,
+# which only researches: one matrix job per group of units, each writing
+# reports and local provider-watch/* branches. Publishing — pushing reports,
+# opening draft PRs here, filing the digest issue on
+# pipecat-ai/provider-watch-reports — is scripts/provider-watch/publish.py's
+# job, run by dedicated steps: once after each group's research (with a fresh
+# GitHub App token, since installation tokens expire after one hour) and once
+# at the end, after the /provider-research-digest skill renders the digest
+# with authored highlights from every report carrying the run's date.
+
+on:
+  schedule:
+    # Mondays; the plan job's cadence gate skips every other one.
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+    inputs:
+      only:
+        description: "Comma-separated providers or unit ids (e.g. openai,deepgram/stt); empty = all"
+        required: false
+        type: string
+      limit:
+        description: "Research only the first N selected units; 0 researches nothing and just re-renders and re-publishes today's digest and issue"
+        required: false
+        type: string
+      dry_run:
+        description: "Dry run: push nothing, open nothing; reports are uploaded as an artifact"
+        required: false
+        type: boolean
+        default: false
+
+# One sweep at a time; a manual run waits for a scheduled one to finish.
+concurrency:
+  group: provider-watch
+  cancel-in-progress: false
+
+# Each research job runs its whole group as a single concurrent wave of
+# researchers, so this one knob is both the plan group size and the skill's
+# --concurrency. It trades sweep wall-clock (fewer, larger groups mean fewer
+# matrix waves) against the burst of concurrent researchers (max-parallel
+# jobs × this many) that the Anthropic rate limits see.
+env:
+  PW_GROUP_SIZE: "8"
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      groups: ${{ steps.groups.outputs.value }}
+      # One date for the whole sweep, so groups that publish after UTC
+      # midnight still write and publish under the date the run started.
+      run_date: ${{ steps.groups.outputs.run_date }}
+      skip: ${{ steps.cadence.outputs.skip }}
+    steps:
+      - name: Decide whether this scheduled Monday runs
+        id: cadence
+        # The sweep runs every other week. Cron can only say "every Monday",
+        # so the off Mondays are skipped here by epoch-week parity (stable
+        # across year boundaries, unlike ISO week numbers; even weeks run).
+        # Manual dispatches always run.
+        run: |
+          SKIP=false
+          if [ "${{ github.event_name }}" = "schedule" ] && [ $(( $(date -u +%s) / 604800 % 2 )) -eq 1 ]; then
+            SKIP=true
+          fi
+          echo "skip=$SKIP" >> "$GITHUB_OUTPUT"
+          echo "skip=$SKIP"
+
+      - name: Checkout pipecat
+        uses: actions/checkout@v4
+
+      # plan.py parses the services tree with ast, which needs the tree's own
+      # Python generation; the runner default is not guaranteed to be it.
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Slice the units into groups
+        id: groups
+        run: |
+          ONLY="${{ inputs.only }}"
+          LIMIT="${{ inputs.limit }}"
+          ARGS=(--json --group-size "$PW_GROUP_SIZE")
+          [ -n "$ONLY" ] && ARGS+=(--only "$ONLY")
+          [ -n "$LIMIT" ] && ARGS+=(--limit "$LIMIT")
+          GROUPS_JSON=$(python3 scripts/provider-watch/plan.py "${ARGS[@]}")
+          echo "value=$GROUPS_JSON" >> "$GITHUB_OUTPUT"
+          echo "run_date=$(date -u +%F)" >> "$GITHUB_OUTPUT"
+          echo "Groups: $GROUPS_JSON"
+
+  research:
+    needs: plan
+    # An empty plan is a digest-only run; skipping here keeps the empty
+    # matrix expression from ever being evaluated.
+    if: needs.plan.outputs.skip != 'true' && needs.plan.outputs.groups != '[]'
+    runs-on: ubuntu-latest
+    # The publish step mints its own token, so research only has to leave it
+    # room inside the job timeout; the step timeout does that.
+    timeout-minutes: 70
+    # Provider API keys live in this environment (deployment branch: main only).
+    environment: provider-watch
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+    strategy:
+      fail-fast: false
+      # Five jobs at a time bounds the researcher burst to 5 × PW_GROUP_SIZE.
+      max-parallel: 5
+      matrix:
+        group: ${{ fromJSON(needs.plan.outputs.groups) }}
+    name: research (${{ matrix.group.name }})
+
+    steps:
+      - name: Generate app token
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.PROVIDER_WATCH_APP_ID }}
+          private-key: ${{ secrets.PROVIDER_WATCH_APP_PRIVATE_KEY }}
+          owner: pipecat-ai
+          repositories: |
+            pipecat
+            provider-watch-reports
+
+      - name: Checkout pipecat
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Checkout reports
+        uses: actions/checkout@v4
+        with:
+          repository: pipecat-ai/provider-watch-reports
+          token: ${{ steps.app-token.outputs.token }}
+          path: _reports
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        # The extras excluded here need system libraries or Apple hardware; the
+        # same set is excluded by the Read the Docs build.
+        run: |
+          uv sync --group dev --all-extras \
+            --no-extra gstreamer \
+            --no-extra local \
+            --no-extra local-smart-turn \
+            --no-extra moondream \
+            --no-extra mlx-whisper
+
+      - name: Export provider credentials
+        # Every environment/repository secret whose name appears in env.example
+        # becomes an environment variable for the probes. Adding a provider key
+        # to the environment is enough; the workflow needs no edit.
+        env:
+          SECRETS_JSON: ${{ toJSON(secrets) }}
+        run: |
+          python3 - <<'EOF'
+          import json, os, re
+          wanted = set(re.findall(r"^([A-Z][A-Z0-9_]*)=", open("env.example").read(), re.M))
+          secrets = json.loads(os.environ["SECRETS_JSON"])
+          exported = []
+          with open(os.environ["GITHUB_ENV"], "a") as env_file:
+              for name, value in secrets.items():
+                  if name in wanted and value:
+                      delimiter = f"__PW_{name}__"
+                      env_file.write(f"{name}<<{delimiter}\n{value}\n{delimiter}\n")
+                      exported.append(name)
+          print(f"Exported {len(exported)} provider variables: {', '.join(sorted(exported))}")
+          EOF
+
+      - name: Configure git identity
+        run: |
+          for dir in . _reports; do
+            git -C "$dir" config user.name "pipecat-provider-watch-bot[bot]"
+            git -C "$dir" config user.email "321038859+pipecat-provider-watch-bot[bot]@users.noreply.github.com"
+          done
+
+      - name: Run provider research
+        timeout-minutes: 55
+        uses: anthropics/claude-code-action@v1
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          # Researcher launches must block until the researcher returns
+          # (launches in one message still run concurrently): in a
+          # non-interactive session, an orchestrator turn that ends with more
+          # than one subagent still pending ends the session and kills them.
+          CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1"
+        with:
+          # The provider-watch environment holds the bot's dedicated key,
+          # shadowing the repo-level ANTHROPIC_API_KEY for this job.
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ steps.app-token.outputs.token }}
+          prompt: |
+            Run the provider-research skill unattended:
+
+            /provider-research --only ${{ matrix.group.units }} --date ${{ needs.plan.outputs.run_date }} --concurrency ${{ env.PW_GROUP_SIZE }}
+
+            Read `.claude/skills/provider-research/SKILL.md` and follow it
+            exactly, including its "Unattended runs" section. This job
+            researches one group of a fanned-out sweep and publishes nothing:
+            write reports into `./_reports` (checked out on `main`) and leave
+            `provider-watch/*` branches locally; later workflow steps run
+            publish.py over what you leave behind. `gh` is authenticated for
+            the read-only lookups the guide calls for. Use
+            `$GITHUB_WORKSPACE/.pw-scratch` as the scratch directory.
+
+            Before finishing — including when something stops you early —
+            write your Step 6 summary (or whatever explanation you have) to
+            `$GITHUB_WORKSPACE/.pw-scratch/summary.md`: the workflow uploads
+            it, and it is the only record of your reasoning that survives the
+            runner.
+          claude_args: |
+            --model claude-opus-5
+            --max-turns 120
+            --allowedTools "Read,Write,Edit,Glob,Grep,Bash,Agent,Task,WebFetch,WebSearch"
+
+      - name: Verify the group was researched
+        # A run that exits cleanly without doing the work should fail loudly,
+        # not upload an empty artifact and stay green.
+        if: inputs.dry_run != true
+        run: |
+          EXPECTED=$(( $(echo -n "${{ matrix.group.units }}" | tr -cd ',' | wc -c) + 1 ))
+          GOT=$(wc -l < .pw-scratch/run.jsonl 2>/dev/null || echo 0)
+          echo "run.jsonl covers $GOT of $EXPECTED units"
+          [ -f .pw-scratch/summary.md ] && { echo "--- orchestrator summary:"; cat .pw-scratch/summary.md; }
+          [ "$GOT" -ge "$EXPECTED" ]
+
+      - name: Generate app token for publishing
+        id: publish-token
+        if: always() && inputs.dry_run != true
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.PROVIDER_WATCH_APP_ID }}
+          private-key: ${{ secrets.PROVIDER_WATCH_APP_PRIVATE_KEY }}
+          owner: pipecat-ai
+          repositories: |
+            pipecat
+            provider-watch-reports
+
+      - name: Publish this group's results
+        # The skill only researches; this step pushes the group's branches,
+        # opens their draft PRs, and pushes its reports. The research step's
+        # token has likely aged toward its one-hour expiry, so the remotes get
+        # the fresh one.
+        if: always() && inputs.dry_run != true
+        env:
+          GH_TOKEN: ${{ steps.publish-token.outputs.token }}
+        run: |
+          git remote set-url origin "https://x-access-token:${{ steps.publish-token.outputs.token }}@github.com/pipecat-ai/pipecat.git"
+          git -C _reports remote set-url origin "https://x-access-token:${{ steps.publish-token.outputs.token }}@github.com/pipecat-ai/provider-watch-reports.git"
+          uv run python scripts/provider-watch/publish.py --date "${{ needs.plan.outputs.run_date }}"
+
+      - name: Upload run artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: provider-watch-${{ github.run_id }}-${{ matrix.group.name }}
+          if-no-files-found: ignore
+          retention-days: 14
+          path: |
+            _reports/reports
+            _reports/digests
+            .pw-scratch/run.jsonl
+            .pw-scratch/summary.md
+
+  digest:
+    needs: [plan, research]
+    # Digests even when some groups failed; whatever they pushed is in the
+    # reports repo and belongs in it.
+    if: always() && needs.plan.result == 'success' && needs.plan.outputs.skip != 'true' && inputs.dry_run != true
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    # The digest skill authors highlights with the bot's Anthropic key, which
+    # lives in this environment.
+    environment: provider-watch
+    permissions:
+      contents: write
+      issues: write
+    steps:
+      - name: Generate app token
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.PROVIDER_WATCH_APP_ID }}
+          private-key: ${{ secrets.PROVIDER_WATCH_APP_PRIVATE_KEY }}
+          owner: pipecat-ai
+          repositories: |
+            pipecat
+            provider-watch-reports
+
+      - name: Checkout pipecat
+        uses: actions/checkout@v4
+
+      - name: Checkout reports
+        uses: actions/checkout@v4
+        with:
+          repository: pipecat-ai/provider-watch-reports
+          token: ${{ steps.app-token.outputs.token }}
+          path: _reports
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        # The extras excluded here need system libraries or Apple hardware; the
+        # same set is excluded by the Read the Docs build.
+        run: |
+          uv sync --group dev --all-extras \
+            --no-extra gstreamer \
+            --no-extra local \
+            --no-extra local-smart-turn \
+            --no-extra moondream \
+            --no-extra mlx-whisper
+
+      - name: Configure git identity
+        run: |
+          git -C _reports config user.name "pipecat-provider-watch-bot[bot]"
+          git -C _reports config user.email "321038859+pipecat-provider-watch-bot[bot]@users.noreply.github.com"
+
+      - name: Author the digest
+        timeout-minutes: 20
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ steps.app-token.outputs.token }}
+          prompt: |
+            Run the provider-research-digest skill unattended:
+
+            /provider-research-digest --date ${{ needs.plan.outputs.run_date }}
+
+            Read `.claude/skills/provider-research-digest/SKILL.md` and follow
+            it exactly. `./_reports` is already checked out on `main` with
+            every report published for the date; write the digest there and
+            publish nothing — the next workflow step runs publish.py.
+          claude_args: |
+            --model claude-opus-5
+            --max-turns 40
+            --allowedTools "Read,Write,Edit,Glob,Grep,Bash"
+
+      - name: Publish the digest
+        # Pushes the digest and opens (or updates) the digest issue. Runs even
+        # when authoring failed: publish.py then renders a highlights-less
+        # digest, so the issue still goes out.
+        if: always()
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: uv run python scripts/provider-watch/publish.py --date "${{ needs.plan.outputs.run_date }}" --finalize

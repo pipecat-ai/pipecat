@@ -35,11 +35,10 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     InterimTranscriptionFrame,
-    StartFrame,
     TranscriptionFrame,
     VADUserStoppedSpeakingFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.aws.sagemaker.bidi_client import SageMakerBidiClient
 from pipecat.services.deepgram.stt import DeepgramSTTService, LiveOptions
 from pipecat.services.settings import STTSettings
@@ -146,13 +145,14 @@ class DeepgramSageMakerSTTService(STTService):
             keyterm=None,
             keywords=None,
             numerals=False,
-            profanity_filter=True,
+            profanity_filter=None,
             punctuate=True,
             redact=None,
             replace=None,
             search=None,
             smart_format=False,
             utterance_end_ms=None,
+            version=None,
         )
 
         # 2. Apply live_options overrides — only if settings not provided
@@ -185,6 +185,11 @@ class DeepgramSageMakerSTTService(STTService):
 
         # 3. Apply settings delta (canonical API, always wins)
         if settings is not None:
+            # Sync the delta first: on a delta, an unset field is NOT_GIVEN, so a
+            # matching extra key can still be promoted. On the merged store every
+            # field already holds a default and the value would be dropped.
+            settings = settings.copy()
+            settings._sync_extra_to_fields()
             default_settings.apply_update(settings)
 
         # Sync extra to top-level fields so self._settings is unambiguous
@@ -221,6 +226,10 @@ class DeepgramSageMakerSTTService(STTService):
 
     async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
         """Apply a settings delta and warn about unhandled changes."""
+        if isinstance(delta, self.Settings):
+            delta = delta.copy()
+            delta._sync_extra_to_fields()
+
         changed = await super()._update_settings(delta)
 
         if not changed:
@@ -239,13 +248,13 @@ class DeepgramSageMakerSTTService(STTService):
 
         return changed
 
-    async def start(self, frame: StartFrame):
-        """Start the Deepgram SageMaker STT service.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
 
         Args:
-            frame: The start frame containing initialization parameters.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         await self._connect()
 
     async def stop(self, frame: EndFrame):
@@ -382,7 +391,7 @@ class DeepgramSageMakerSTTService(STTService):
             self._connection_task = None
 
         if self._client and self._client.is_active:
-            logger.debug("Disconnecting from Deepgram on SageMaker...")
+            logger.debug(f"{self}: Disconnecting from Deepgram on SageMaker...")
 
             # Send CloseStream message to Deepgram
             try:

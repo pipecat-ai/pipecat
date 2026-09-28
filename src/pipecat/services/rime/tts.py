@@ -24,11 +24,11 @@ from websockets.protocol import State
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
-    StartFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
 )
+from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import (
     InterruptibleTTSService,
@@ -50,16 +50,22 @@ def language_to_rime_language(language: Language) -> str:
         language: The pipecat Language enum value.
 
     Returns:
-        Three-letter language code used by Rime (e.g., 'eng' for English).
+        Language code used by Rime (e.g., 'eng' for English). Rime accepts both
+        ISO 639-2/3 and ISO 639-1 codes, so a region-qualified language falls
+        back to its two-letter base code.
     """
     LANGUAGE_MAP = {
+        Language.AR: "ara",
         Language.DE: "ger",
-        Language.FR: "fra",
         Language.EN: "eng",
         Language.ES: "spa",
+        Language.FR: "fra",
         Language.HI: "hin",
+        Language.IT: "ita",
+        Language.JA: "jpn",
+        Language.PT: "por",
     }
-    return resolve_language(language, LANGUAGE_MAP, use_base_code=False)
+    return resolve_language(language, LANGUAGE_MAP)
 
 
 @dataclass
@@ -421,13 +427,13 @@ class RimeTTSService(WebsocketTTSService):
         """Build end-of-stream operation message."""
         return {"operation": "eos"}
 
-    async def start(self, frame: StartFrame):
-        """Start the service and establish websocket connection.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
 
         Args:
-            frame: The start frame containing initialization parameters.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         self._sampling_rate = self.sample_rate
         await self._connect()
 
@@ -850,6 +856,8 @@ class RimeHttpTTSService(TTSService):
                 payload["pauseBetweenBrackets"] = self._settings.pauseBetweenBrackets
             if self._settings.phonemizeBetweenBrackets is not None:
                 payload["phonemizeBetweenBrackets"] = self._settings.phonemizeBetweenBrackets
+            if self._settings.noTextNormalization is not None:
+                payload["noTextNormalization"] = self._settings.noTextNormalization
 
         try:
             async with self._session.post(
@@ -1057,13 +1065,13 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
         """
         return language_to_rime_language(language)
 
-    async def start(self, frame: StartFrame):
-        """Start the Rime Non-JSON WebSocket TTS service.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
 
         Args:
-            frame: The start frame containing initialization parameters.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         self._sampling_rate = self.sample_rate
         await self._connect()
 

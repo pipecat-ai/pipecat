@@ -30,11 +30,10 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     InterimTranscriptionFrame,
-    StartFrame,
     TranscriptionFrame,
     VADUserStoppedSpeakingFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import ELEVENLABS_REALTIME_TTFS_P99, ELEVENLABS_TTFS_P99
 from pipecat.services.stt_service import SegmentedSTTService, WebsocketSTTService
@@ -56,8 +55,9 @@ def language_to_elevenlabs_language(language: Language) -> str:
 
     Returns:
         The corresponding service language code. If ``language`` is not in
-        the verified mapping, falls back to the full language code string and
-        logs a warning (via ``resolve_language(..., use_base_code=False)``).
+        the verified mapping, falls back to its base language's code (``en-US``
+        becomes ``eng``) and logs a warning (via
+        ``resolve_language(..., use_base_code=True)``).
     """
     LANGUAGE_MAP = {
         Language.AF: "afr",  # Afrikaans
@@ -161,7 +161,7 @@ def language_to_elevenlabs_language(language: Language) -> str:
         Language.ZU: "zul",  # Zulu
     }
 
-    return resolve_language(language, LANGUAGE_MAP, use_base_code=False)
+    return resolve_language(language, LANGUAGE_MAP, use_base_code=True)
 
 
 class CommitStrategy(StrEnum):
@@ -179,10 +179,13 @@ class ElevenLabsSTTSettings(STTSettings):
         tag_audio_events: Whether to include audio events like (laughter),
             (coughing) in the transcription.
         keyterms: List of key terms or phrases to bias transcription towards.
+        no_verbatim: Whether to drop filler words, false starts and non-speech
+            sounds from the transcript. Supported by ``scribe_v2`` only.
     """
 
     tag_audio_events: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     keyterms: list[str] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    no_verbatim: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 @dataclass
@@ -193,6 +196,8 @@ class ElevenLabsRealtimeSTTSettings(STTSettings):
 
     Parameters:
         keyterms: List of key terms or phrases to bias transcription towards.
+        no_verbatim: Whether to drop filler words, false starts and non-speech
+            sounds from the transcript.
         vad_silence_threshold_secs: Seconds of silence before VAD commits (0.3-3.0).
         vad_threshold: VAD sensitivity (0.1-0.9, lower is more sensitive).
         min_speech_duration_ms: Minimum speech duration for VAD (50-2000ms).
@@ -201,6 +206,7 @@ class ElevenLabsRealtimeSTTSettings(STTSettings):
     """
 
     keyterms: list[str] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    no_verbatim: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     vad_silence_threshold_secs: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     vad_threshold: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     min_speech_duration_ms: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -282,6 +288,7 @@ class ElevenLabsSTTService(SegmentedSTTService):
             language=Language.EN,
             tag_audio_events=None,
             keyterms=None,
+            no_verbatim=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -365,6 +372,9 @@ class ElevenLabsSTTService(SegmentedSTTService):
         if is_given(keyterms) and keyterms is not None:
             for keyterm in keyterms:
                 data.add_field("keyterms", keyterm)
+        no_verbatim = self._settings.no_verbatim
+        if is_given(no_verbatim) and no_verbatim is not None:
+            data.add_field("no_verbatim", str(no_verbatim).lower())
 
         async with self._session.post(url, data=data, headers=headers) as response:
             if response.status != 200:
@@ -557,6 +567,7 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
             min_speech_duration_ms=None,
             min_silence_duration_ms=None,
             keyterms=None,
+            no_verbatim=None,
             filter_background_audio=None,
         )
 
@@ -615,6 +626,17 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         """
         return True
 
+    def language_to_service_language(self, language: Language) -> str | None:
+        """Convert a Language enum to ElevenLabs service-specific language code.
+
+        Args:
+            language: The language to convert.
+
+        Returns:
+            The ElevenLabs-specific language code, or None if not supported.
+        """
+        return language_to_elevenlabs_language(language)
+
     async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
         """Apply a settings delta and reconnect if anything changed.
 
@@ -635,13 +657,13 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
 
         return changed
 
-    async def start(self, frame: StartFrame):
-        """Start the STT service and establish WebSocket connection.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
 
         Args:
-            frame: Frame indicating service should start.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         self._audio_format = audio_format_from_sample_rate(self.sample_rate)
         await self._connect()
 
@@ -770,6 +792,10 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
                 for keyterm in keyterms:
                     params.append(urlencode({"keyterms": keyterm}))
 
+            no_verbatim = self._settings.no_verbatim
+            if is_given(no_verbatim) and no_verbatim is not None:
+                params.append(f"no_verbatim={str(no_verbatim).lower()}")
+
             # Add optional parameters
             if self._include_timestamps:
                 params.append(f"include_timestamps={str(self._include_timestamps).lower()}")
@@ -874,12 +900,12 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         elif message_type in (
             "error",
             "auth_error",
-            "quota_exceeded_error",
+            "quota_exceeded",
             "transcriber_error",
             "input_error",
+            "invalid_request",
             "commit_throttled",
-            "transcriber_error",
-            "unaccepted_terms_error",
+            "unaccepted_terms",
             "rate_limited",
             "queue_overflow",
             "resource_exhausted",

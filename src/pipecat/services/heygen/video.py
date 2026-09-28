@@ -133,6 +133,12 @@ class HeyGenVideoService(AIService):
             setup: Configuration parameters for the frame processor.
         """
         await super().setup(setup)
+
+        # First chunk: 400ms for faster initial response
+        self._first_chunk_size = int(HEY_GEN_SAMPLE_RATE * 2 * 0.4)  # 19200 bytes
+        # Subsequent chunks: 1000ms for efficient streaming
+        self._chunk_size = int(HEY_GEN_SAMPLE_RATE * 2 * 1.0)  # 48000 bytes
+
         self._client = HeyGenClient(
             api_key=self._api_key,
             session=self._session,
@@ -216,11 +222,6 @@ class HeyGenVideoService(AIService):
         if not self._client:
             return
 
-        # First chunk: 400ms for faster initial response
-        self._first_chunk_size = int(HEY_GEN_SAMPLE_RATE * 2 * 0.4)  # 19200 bytes
-        # Subsequent chunks: 1000ms for efficient streaming
-        self._chunk_size = int(HEY_GEN_SAMPLE_RATE * 2 * 1.0)  # 48000 bytes
-        await self._client.start(frame)
         await self._create_send_task()
 
     async def stop(self, frame: EndFrame):

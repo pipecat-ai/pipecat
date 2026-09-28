@@ -135,8 +135,9 @@ def _get_system_instruction(service, context) -> str | None:
     Returns:
         The system instruction text, or None if none is present.
     """
-    if hasattr(service, "_settings") and getattr(service._settings, "system_instruction", None):
-        return service._settings.system_instruction
+    system_instruction = getattr(getattr(service, "settings", None), "system_instruction", None)
+    if system_instruction:
+        return system_instruction
 
     if not context:
         return None

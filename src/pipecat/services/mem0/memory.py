@@ -58,7 +58,9 @@ class Mem0MemoryService(FrameProcessor):
                     removed in 2.0.0.
 
             system_prompt: Prefix text for memory context messages.
-            add_as_system_message: Whether to add memories as system messages.
+            add_as_system_message: Whether to add memories as instruction
+                messages ("developer" role) rather than user messages.
+                Providers without a "developer" role receive them as "user".
             position: Position to insert memory messages in context.
         """
 
@@ -279,9 +281,9 @@ class Mem0MemoryService(FrameProcessor):
         for i, memory in enumerate(memories, 1):
             memory_text += f"{i}. {memory.get('memory', '')}\n\n"
 
-        # Add memories as a system message or user message based on configuration
+        # Add memories as a developer message or user message based on configuration
         memory_message: LLMStandardMessage = (
-            {"role": "system", "content": memory_text}
+            {"role": "developer", "content": memory_text}
             if self.add_as_system_message
             else {"role": "user", "content": memory_text}
         )

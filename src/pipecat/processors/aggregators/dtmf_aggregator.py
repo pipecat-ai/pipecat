@@ -78,8 +78,8 @@ class DTMFAggregator(FrameProcessor):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, StartFrame):
-            self._create_aggregation_task()
             await self.push_frame(frame, direction)
+            self._create_aggregation_task()
         elif isinstance(frame, (EndFrame, CancelFrame)):
             if self._aggregation:
                 await self._flush_aggregation()

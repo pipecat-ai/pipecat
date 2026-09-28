@@ -71,6 +71,7 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
     def __init__(self):
         """Initialize the adapter."""
         self._warned_system_instruction = False
+        self._warned_context_system_message = False
         self._builtin_tools: dict[str, FunctionSchema] = {}
 
     @property
@@ -205,6 +206,33 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
         # Fallback to return the same tools in case they are not in a standard format
         return tools
 
+    def _warn_context_system_message(self):
+        """Warn once that the initial ``"system"`` context message is deprecated.
+
+        The system prompt belongs on the LLM service, where it composes with
+        the instructions the framework contributes — appended instructions,
+        turn-completion guidance, async-tool guidance. A prompt carried in the
+        context bypasses that composition, and providers that take the system
+        instruction as a separate parameter drop it entirely when the service
+        also has one.
+        """
+        if self._warned_context_system_message:
+            return
+        self._warned_context_system_message = True
+        # Raised under an `always` filter so it survives the default
+        # `ignore::DeprecationWarning` that hides call sites outside
+        # `__main__` — every caller here is inside an LLM service. The flag
+        # above supplies the deduplication that filter would provide.
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                'Passing the system prompt as an initial "system" message in `LLMContext` is'
+                " deprecated since 1.9.0 and will be removed in 2.0.0. Set `system_instruction`"
+                " on the LLM service instead.",
+                DeprecationWarning,
+                stacklevel=3,
+            )
+
     def _extract_initial_system(
         self,
         messages: list,
@@ -243,6 +271,8 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
 
         if messages[0].get("role") != "system":
             return None
+
+        self._warn_context_system_message()
 
         # Would extracting empty the list? Convert to "user" instead.
         if len(messages) == 1:
@@ -296,9 +326,13 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
             if not self._warned_system_instruction:
                 self._warned_system_instruction = True
                 if discard_context_system:
+                    # This provider takes the system instruction as a separate
+                    # parameter, so only one of the two can be sent.
                     logger.warning(
-                        "Both system_instruction and an initial system message"
-                        " in context are set. Using system_instruction."
+                        "Both system_instruction and an initial system message in"
+                        " context are set. Using system_instruction; the context"
+                        " system message is not sent to the model. Move the prompt"
+                        " to system_instruction on the LLM service."
                     )
                 else:
                     logger.warning(

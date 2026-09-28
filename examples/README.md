@@ -105,9 +105,13 @@ Changing service settings at runtime, organized by service type:
 
 Turn detection, interruption handling, and user input management.
 
-### [`thinking-and-mcp/`](./thinking-and-mcp/)
+### [`thinking/`](./thinking/)
 
-LLM thinking/reasoning modes and MCP (Model Context Protocol) tool server integration.
+LLM thinking/reasoning modes.
+
+### [`mcp/`](./mcp/)
+
+MCP (Model Context Protocol) tool server integration.
 
 ### [`transports/`](./transports/)
 

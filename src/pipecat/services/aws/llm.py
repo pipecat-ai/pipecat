@@ -62,6 +62,11 @@ class AWSBedrockLLMSettings(LLMSettings):
     Parameters:
         stop_sequences: List of strings that stop generation.
         latency: Performance mode - "standard" or "optimized".
+        effort: How much reasoning the model spends before answering — "low",
+            "medium", "high", "xhigh" or "max". Sent as Converse's
+            ``outputConfig.effort``; only reasoning models accept it, and a model
+            that does not support it rejects the request. See:
+            https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_OutputConfig.html
         enable_prompt_caching: Whether to enable prompt caching by adding cachePoint
             markers to system prompts and tool definitions. Can reduce TTFT by up to
             85% for multi-turn conversations. See:
@@ -71,6 +76,7 @@ class AWSBedrockLLMSettings(LLMSettings):
 
     stop_sequences: list[str] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     latency: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    effort: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     enable_prompt_caching: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     additional_model_request_fields: dict[str, Any] | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
@@ -186,6 +192,7 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
             user_turn_completion_config=None,
             stop_sequences=None,
             latency=None,
+            effort=None,
             enable_prompt_caching=False,
             additional_model_request_fields={},
         )
@@ -278,6 +285,7 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
         context: LLMContext,
         max_tokens: int | None = None,
         system_instruction: str | None = None,
+        response_schema: dict[str, Any] | None = None,
     ) -> str | None:
         """Run a one-shot, out-of-band (i.e. out-of-pipeline) inference with the given LLM context.
 
@@ -287,10 +295,13 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
                 overrides the service's default max_tokens setting.
             system_instruction: Optional system instruction to use for this inference.
                 If provided, overrides any system instruction in the context.
+            response_schema: Accepted for interface compatibility. Bedrock's
+                Converse API has no reply schema, so it is not enforced.
 
         Returns:
             The LLM's response as a string, or None if no response is generated.
         """
+        self._check_response_schema(response_schema)
         messages = []
         system = []
         effective_instruction = system_instruction or assert_given(
@@ -320,6 +331,9 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
 
         if inference_config:
             request_params["inferenceConfig"] = inference_config
+
+        if self._settings.effort:
+            request_params["outputConfig"] = {"effort": self._settings.effort}
 
         if system:
             request_params["system"] = system
@@ -510,6 +524,9 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
             if self._settings.latency in ["standard", "optimized"]:
                 request_params["performanceConfig"] = {"latency": self._settings.latency}
 
+            if self._settings.effort:
+                request_params["outputConfig"] = {"effort": self._settings.effort}
+
             # Add cache checkpoints to system prompts and tool definitions.
             # This enables prompt caching for providers that support it (e.g.
             # Anthropic Claude on Bedrock), reducing TTFT by up to 85% on
@@ -576,6 +593,10 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
                         block = event["contentBlockStart"]
                         content_block_start = block["start"]
                         if "toolUse" in content_block_start:
+                            # A turn that only calls tools produces no answer text,
+                            # so the call itself is what the caller gets and TTFAT
+                            # ends here rather than going unmeasured.
+                            await self.stop_ttfat_metrics()
                             index = block["contentBlockIndex"]
                             tool_use_blocks[index] = {
                                 "id": content_block_start["toolUse"].get("toolUseId", ""),

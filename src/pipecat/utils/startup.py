@@ -6,12 +6,13 @@
 
 """Shared loader for ``PIPECAT_SETUP_FILES`` hooks.
 
-Each file listed in the ``PIPECAT_SETUP_FILES`` environment variable (colon
-separated) may define one or both of the following async functions:
+Each file listed in the ``PIPECAT_SETUP_FILES`` environment variable (separated
+by the platform path separator) may define one or both of the following async
+functions:
 
-- ``setup_worker_runner(runner)`` — invoked once per :class:`WorkerRunner`
+- ``setup_worker_runner(runner)`` — invoked once per :class:`~pipecat.workers.runner.WorkerRunner`
   before its spawned workers start.
-- ``setup_pipeline_worker(worker)`` — invoked once per :class:`PipelineWorker` while
+- ``setup_pipeline_worker(worker)`` — invoked once per :class:`~pipecat.pipeline.worker.PipelineWorker` while
   the worker sets up its pipeline. The legacy name ``setup_pipeline_task`` is
   still recognized but emits a ``DeprecationWarning``; rename it to
   ``setup_pipeline_worker``.
@@ -34,7 +35,9 @@ _module_cache: dict[str, ModuleType] = {}
 
 
 def _setup_file_paths() -> list[Path]:
-    return [Path(f).resolve() for f in os.environ.get("PIPECAT_SETUP_FILES", "").split(":") if f]
+    return [
+        Path(f).resolve() for f in os.environ.get("PIPECAT_SETUP_FILES", "").split(os.pathsep) if f
+    ]
 
 
 def _load_module(path: Path) -> ModuleType | None:

@@ -130,6 +130,7 @@ def pcm_to_wav(
     Returns:
         A complete in-memory WAV file as bytes.
     """
+    pcm = memoryview(pcm).cast("B")
     block_align = 2 * num_channels
     remainder = len(pcm) % block_align
     if remainder:
@@ -160,7 +161,7 @@ def normalize_value(value, min_value, max_value):
     return normalized_clamped
 
 
-def calculate_audio_volume(audio: bytes, sample_rate: int) -> float:
+def calculate_audio_volume(audio: bytes | bytearray | memoryview, sample_rate: int) -> float:
     """Calculate the loudness level of audio data using ITU-R BS.1770.
 
     Args:
@@ -317,7 +318,7 @@ def is_silence(pcm_bytes: bytes) -> bool:
     audio_data = np.frombuffer(pcm_bytes, dtype=np.int16)
 
     # Check the maximum absolute amplitude in the frame
-    max_value = np.abs(audio_data).max()
+    max_value = np.abs(audio_data.astype(np.int32)).max()
 
     # If max value is lower than SPEAKING_THRESHOLD, consider it as silence
     return max_value <= SPEAKING_THRESHOLD

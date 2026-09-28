@@ -30,11 +30,11 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
-    StartFrame,
     STTMetadataFrame,
     TranscriptionFrame,
     TranslationFrame,
 )
+from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.gladia.config import (
     GladiaInputParams,
     LanguageConfig,
@@ -428,13 +428,13 @@ class GladiaSTTService(WebsocketSTTService):
 
         return settings
 
-    async def start(self, frame: StartFrame):
-        """Start the Gladia STT websocket connection.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
 
         Args:
-            frame: The start frame triggering service startup.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         await self._connect()
 
     async def _update_settings(self, delta: Settings) -> dict[str, Any]:
@@ -470,9 +470,12 @@ class GladiaSTTService(WebsocketSTTService):
         Args:
             frame: The end frame triggering service shutdown.
         """
-        await super().stop(frame)
+        # stop_recording ends the session server-side and has to reach the
+        # socket before teardown closes it. Trailing transcripts are not
+        # waited for: Gladia finalizes the session and its stored result
+        # either way.
         await self._send_stop_recording()
-        await self._disconnect()
+        await super().stop(frame)
 
     async def cancel(self, frame: CancelFrame):
         """Cancel the Gladia STT websocket connection.
@@ -691,6 +694,10 @@ class GladiaSTTService(WebsocketSTTService):
                             self._audio_buffer = self._audio_buffer[trim_size:]
                             self._bytes_sent = end_byte
 
+                elif content["type"] == "audio_chunk":
+                    error = (content.get("error") or {}).get("message", "Unknown error")
+                    await self.push_error(error_msg=f"Gladia rejected an audio chunk: {error}")
+
                 elif content["type"] == "transcript":
                     utterance = content["data"]["utterance"]
                     language = utterance["language"]
@@ -726,6 +733,10 @@ class GladiaSTTService(WebsocketSTTService):
                             )
                         )
                 elif content["type"] == "translation":
+                    if content.get("error") or content.get("data") is None:
+                        error = (content.get("error") or {}).get("message", "Unknown error")
+                        await self.push_error(error_msg=f"Gladia translation addon error: {error}")
+                        continue
                     translated_utterance = content["data"]["translated_utterance"]
                     original_language = content["data"]["original_language"]
                     translated_language = translated_utterance["language"]

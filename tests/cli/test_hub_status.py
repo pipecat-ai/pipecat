@@ -5,7 +5,10 @@ every CLI command, so a bad index, a locked database, or an odd project layout
 must never break the command the user actually asked for.
 
 Fixtures build a real SQLite database rather than mocking the reader, so the
-tests exercise the same contract an installed hub publishes.
+tests exercise the same contract an installed hub publishes. That includes
+indexes stamped with a contract version this reader has never heard of: the
+checks here are validated per value rather than gated on the contract number,
+and must keep working across a hub that bumps it.
 """
 
 import sqlite3
@@ -15,6 +18,7 @@ import pytest
 
 from pipecat.cli.hub_status import (
     freshness_warning,
+    index_is_built,
     project_pipecat_version,
     read_hub_metadata,
 )
@@ -85,14 +89,31 @@ class TestReadHubMetadata:
         sqlite3.connect(data_dir / "metadata.db").close()
         assert read_hub_metadata() is None
 
-    def test_newer_contract_version_is_ignored(self, tmp_path):
-        """A hub that changed the contract must not be second-guessed."""
-        _write_index(tmp_path, metadata_contract_version=99, last_refresh_at=_ago(1))
-        assert read_hub_metadata() is None
-
-    def test_current_contract_version_is_accepted(self, tmp_path):
-        _write_index(tmp_path, metadata_contract_version=1, last_refresh_at=_ago(1))
+    @pytest.mark.parametrize("version", [None, 1, 2, 99])
+    def test_any_contract_version_is_read(self, tmp_path, version):
+        """A hub bump must not silence a check whose keys still parse."""
+        extra = {} if version is None else {"metadata_contract_version": version}
+        _write_index(tmp_path, last_refresh_at=_ago(1), **extra)
         assert read_hub_metadata() is not None
+
+
+class TestIndexIsBuilt:
+    """`init` asks this before offering a multi-minute, ~900 MB rebuild."""
+
+    def test_no_index(self):
+        assert index_is_built() is False
+
+    def test_a_completed_refresh(self, tmp_path):
+        _write_index(tmp_path, metadata_contract_version=2, last_refresh_at=_ago(1))
+        assert index_is_built() is True
+
+    def test_an_index_from_a_newer_hub(self, tmp_path):
+        _write_index(tmp_path, metadata_contract_version=99, last_refresh_at=_ago(1))
+        assert index_is_built() is True
+
+    def test_metadata_without_a_completed_refresh(self, tmp_path):
+        _write_index(tmp_path, metadata_contract_version=2)
+        assert index_is_built() is False
 
 
 class TestStaleness:
@@ -122,9 +143,26 @@ class TestStaleness:
         monkeypatch.setenv("PIPECAT_HUB_STALE_AFTER_DAYS", "0")
         assert freshness_warning() is None
 
+    def test_a_stale_index_from_a_newer_hub_still_warns(self, tmp_path):
+        """A bumped contract must not mute staleness."""
+        _write_index(tmp_path, metadata_contract_version=99, last_refresh_at=_ago(30))
+        assert freshness_warning() is not None
+
+    def test_mild_clock_skew_reads_as_just_refreshed(self, tmp_path):
+        """A clock that runs a little fast must not produce a spurious warning."""
+        _write_index(tmp_path, last_refresh_at=_ago(-0.5))
+        assert freshness_warning() is None
+
+    def test_a_refresh_far_in_the_future_is_not_trusted(self, tmp_path):
+        """Believing it would call the index fresh for as long as the date holds."""
+        _write_index(tmp_path, last_refresh_at=_ago(-400))
+        warning = freshness_warning()
+        assert warning is not None
+        assert "unbuilt" in warning
+
     def test_index_without_a_completed_refresh(self, tmp_path):
         """Reporting an age would be a lie; 'stale' would be the wrong advice."""
-        _write_index(tmp_path, metadata_contract_version=1)
+        _write_index(tmp_path, metadata_contract_version=2)
         warning = freshness_warning()
         assert warning is not None
         assert "unbuilt" in warning
@@ -231,7 +269,7 @@ class TestVersionMismatch:
         self._fresh_index(tmp_path, "1.9.0")
         assert freshness_warning(_make_project(tmp_path, "1.6.0")) is None
 
-    def test_unpinned_index_gets_a_minor_of_slack(self, tmp_path):
+    def test_default_branch_index_gets_a_minor_of_slack(self, tmp_path):
         """Tracking the default branch means the recorded tag is a floor.
 
         An index 55 commits past v1.6.0 may already contain 1.7.0's code, so
@@ -241,7 +279,7 @@ class TestVersionMismatch:
         assert freshness_warning(_make_project(tmp_path, "1.7.0")) is None
         assert freshness_warning(_make_project(tmp_path, "1.8.0")) is not None
 
-    def test_pinned_index_gets_no_slack(self, tmp_path):
+    def test_release_tag_index_gets_no_slack(self, tmp_path):
         self._fresh_index(tmp_path, "1.6.0", commits_ahead=0)
         assert freshness_warning(_make_project(tmp_path, "1.7.0")) is not None
 

@@ -20,6 +20,14 @@ progresses:
   finishes. A task that is cancelled instead of finishing settles the same
   way, carrying a cancellation notice in place of a result.
 
+The ``final`` message exists so a result that arrives after the LLM has
+moved on still reaches it. When the result arrives first, before any model
+response or any new user or assistant message, there is nothing to catch up
+on: the ``started`` message is overwritten with the result, as for a
+synchronous call, and no ``final`` message is written. A cancellation always
+gets a ``final`` message, because it has to tell the LLM the task did not
+complete.
+
 This module is the single source of truth for the on-the-wire payload shape:
 
 - The aggregator uses the ``build_*_message`` functions when injecting messages.

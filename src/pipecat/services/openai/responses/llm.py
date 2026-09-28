@@ -17,7 +17,6 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-import httpx
 from loguru import logger
 from openai import NOT_GIVEN as OPENAI_NOT_GIVEN
 from openai import APITimeoutError, AsyncOpenAI, AsyncStream, DefaultAsyncHttpxClient
@@ -63,7 +62,9 @@ from pipecat.services.llm_service import (
     WebsocketLLMService,
     WebsocketReconnectedError,
 )
+from pipecat.services.openai.base_llm import OPENAI_MODEL_WITHOUT_RESPONSE_SCHEMA
 from pipecat.services.settings import LLMSettings
+from pipecat.utils.http import TIMEOUT_EXCEPTIONS, connection_limits
 from pipecat.utils.tracing.service_decorators import traced_llm
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
@@ -118,19 +119,26 @@ class OpenAIResponsesReasoningConfig(BaseModel):
     Parameters:
         effort: How much reasoning effort the model applies. ``None`` (the
             default) leaves the field unset, so the model's own default applies;
-            ``"none"`` disables reasoning for latency-sensitive use. At lower
-            efforts (e.g. ``"low"``) the model reasons only when a turn calls for
-            it, so simple prompts may produce no summary at all.
+            ``"none"`` disables reasoning for latency-sensitive use and
+            ``"max"`` applies the model's deepest reasoning. At lower efforts
+            (e.g. ``"low"``) the model reasons only when a turn calls for it, so
+            simple prompts may produce no summary at all.
         summary: Verbosity of the reasoning summary to return. ``None`` (the
             default) requests no summary. Any summary is surfaced via thought
             frames (the ``on_assistant_thought`` event); the encrypted reasoning
             itself is preserved across turns regardless of this setting.
+        mode: Reasoning mode for models that offer one, such as the gpt-5.6
+            series: ``"standard"`` or the slower, more thorough ``"pro"``.
+            ``None`` (the default) leaves the field unset, so the model's own
+            default applies. ``effort`` selects the reasoning intensity within
+            the chosen mode.
     """
 
     # ``| str`` for forward compatibility: if OpenAI adds new levels, users can
     # pass the new string without waiting for a Pipecat release.
-    effort: Literal["none", "minimal", "low", "medium", "high", "xhigh"] | str | None = None
+    effort: Literal["none", "minimal", "low", "medium", "high", "xhigh", "max"] | str | None = None
     summary: Literal["auto", "concise", "detailed"] | str | None = None
+    mode: Literal["standard", "pro"] | str | None = None
 
 
 @dataclass
@@ -167,6 +175,16 @@ class OpenAIResponsesLLMSettings(LLMSettings):
 def _is_o_series(model: str) -> bool:
     """Whether the model is an o-series reasoning model (o1, o3, o4-mini, ...)."""
     return bool(re.match(r"o\d", model.lower()))
+
+
+def _rejects_effort_none(model: str) -> bool:
+    """Whether a reasoning model rejects ``effort="none"`` with an API error.
+
+    The reasoning-first o-series and ``gpt-6-astra`` accept only a positive
+    effort level, so reasoning cannot be switched off for them.
+    """
+    model = model.lower()
+    return _is_o_series(model) or model.startswith("gpt-6-astra")
 
 
 def _model_supports_reasoning(model: str) -> bool | None:
@@ -216,6 +234,8 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
 
     adapter_class = OpenAIResponsesLLMAdapter
 
+    supports_response_schema: bool = True
+
     def __init__(
         self,
         *,
@@ -238,7 +258,10 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
             organization: OpenAI organization ID.
             project: OpenAI project ID.
             default_headers: Additional HTTP headers to include in requests.
-            service_tier: Service tier to use (e.g., "auto", "flex", "priority").
+            service_tier: Service tier to use: "auto", "default", "flex",
+                "scale", "fast" or "priority". "fast" is OpenAI's low-latency
+                tier, the name that replaced "priority"; both values are
+                accepted.
             settings: Runtime-updatable settings.
             retry_timeout_secs: How long an inference may go without producing
                 output before it is abandoned and re-issued, when
@@ -320,7 +343,7 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
             organization=organization,
             project=project,
             http_client=DefaultAsyncHttpxClient(
-                limits=httpx.Limits(
+                limits=connection_limits(
                     max_keepalive_connections=100, max_connections=1000, keepalive_expiry=None
                 )
             ),
@@ -392,11 +415,23 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
 
         return params
 
+    @staticmethod
+    def model_supports_response_schema(model: str) -> bool:
+        """Whether a model can enforce a response schema.
+
+        OpenAI models before gpt-4o-mini and gpt-4o-2024-08-06 cannot.
+
+        Args:
+            model: The model name.
+        """
+        return not OPENAI_MODEL_WITHOUT_RESPONSE_SCHEMA.match(model)
+
     async def run_inference(
         self,
         context: LLMContext,
         max_tokens: int | None = None,
         system_instruction: str | None = None,
+        response_schema: dict[str, Any] | None = None,
     ) -> str | None:
         """Run a one-shot, out-of-band inference with the given LLM context.
 
@@ -406,6 +441,9 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
             context: The LLM context containing conversation history.
             max_tokens: Optional maximum number of tokens to generate.
             system_instruction: Optional system instruction for this inference.
+            response_schema: Optional JSON schema the reply must follow. The
+                service asks the provider to enforce it, so the reply is JSON
+                text matching the schema.
 
         Returns:
             The LLM's response as a string, or None if no response is generated.
@@ -425,6 +463,17 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
 
         if max_tokens is not None:
             params["max_output_tokens"] = max_tokens
+
+        response_schema = self._check_response_schema(response_schema)
+        if response_schema is not None:
+            params["text"] = {
+                "format": {
+                    "type": "json_schema",
+                    "name": "response",
+                    "schema": response_schema,
+                    "strict": True,
+                }
+            }
 
         response = await self._client.responses.create(**params)
 
@@ -471,20 +520,17 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
         When the caller hasn't configured ``reasoning``, request ``effort="none"``
         for whatever models possible. Note that this is a no-op for models like
         ``gpt-5.4`` that already default to ``none``. Some models are left at the
-        provider default: the reasoning-first o-series doesn't accept
-        ``effort="none"`` (and choosing one is a deliberate decision to reason),
-        and gpt-4.x and earlier don't reason at all. Mirrors Gemini's
-        ``_maybe_unset_thinking_budget``, which disables or minimizes thinking on
-        its latency-sensitive models.
+        provider default: those that reject ``effort="none"`` outright (see
+        :func:`_rejects_effort_none`), and gpt-4.x and earlier, which don't reason
+        at all. Mirrors Gemini's ``_maybe_unset_thinking_budget``, which disables
+        or minimizes thinking on its latency-sensitive models.
 
         Args:
             params: The response params dict (modified in place).
         """
         model = assert_given(self._settings.model)
         # Lower reasoning only for models that reason *and* accept effort="none".
-        # The o-series reasons but rejects "none" (and choosing it is a deliberate
-        # decision to reason), so exclude it.
-        if model and _model_supports_reasoning(model) and not _is_o_series(model):
+        if model and _model_supports_reasoning(model) and not _rejects_effort_none(model):
             params["reasoning"] = {"effort": "none"}
 
     def _warn_if_reasoning_unsupported(self):
@@ -1099,6 +1145,10 @@ class OpenAIResponsesLLMService(
                 await self.stop_ttfb_metrics()
                 item = event.get("item", {})
                 if item.get("type") == "function_call":
+                    # A turn that only calls tools produces no answer text, so the
+                    # call itself is what the caller gets and TTFAT ends here
+                    # rather than going unmeasured.
+                    await self.stop_ttfat_metrics()
                     item_id = item.get("id", "")
                     function_calls[item_id] = {
                         "name": item.get("name", ""),
@@ -1149,6 +1199,7 @@ class OpenAIResponsesLLMService(
                         completion_tokens=usage.get("output_tokens", 0),
                         total_tokens=usage.get("total_tokens", 0),
                         cache_read_input_tokens=input_details.get("cached_tokens", 0),
+                        cache_creation_input_tokens=input_details.get("cache_write_tokens", 0),
                         reasoning_tokens=output_details.get("reasoning_tokens", 0),
                     )
                     await self.start_llm_usage_metrics(tokens)
@@ -1236,7 +1287,7 @@ class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
                 await self.push_frame(LLMFullResponseStartFrame())
                 await self.start_processing_metrics()
                 await self._process_context(frame.context)
-            except httpx.TimeoutException as e:
+            except TIMEOUT_EXCEPTIONS as e:
                 await self._call_event_handler("on_completion_timeout")
                 await self.push_error(error_msg="LLM completion timeout", exception=e)
             except Exception as e:
@@ -1330,6 +1381,10 @@ class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
                     await self.stop_ttfb_metrics()
                     item = event.item
                     if isinstance(item, ResponseFunctionToolCall):
+                        # A turn that only calls tools produces no answer text, so
+                        # the call itself is what the caller gets and TTFAT ends
+                        # here rather than going unmeasured.
+                        await self.stop_ttfat_metrics()
                         item_id = item.id or ""
                         function_calls[item_id] = {
                             "name": item.name,
@@ -1387,6 +1442,11 @@ class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
                             completion_tokens=usage.output_tokens or 0,
                             total_tokens=usage.total_tokens or 0,
                             cache_read_input_tokens=(input_details.cached_tokens or 0)
+                            if input_details
+                            else 0,
+                            cache_creation_input_tokens=(
+                                getattr(input_details, "cache_write_tokens", None) or 0
+                            )
                             if input_details
                             else 0,
                             reasoning_tokens=(output_details.reasoning_tokens or 0)

@@ -61,9 +61,8 @@ class BasetenLLMService(OpenAILLMService):
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
         # Initialize default_settings with hardcoded defaults.
-        # Kimi K2.6 streams visible content immediately, keeping time-to-first-word low.
         default_settings = self.Settings(
-            model="moonshotai/Kimi-K2.6",
+            model="zai-org/GLM-5.3",
         )
 
         # Apply settings delta (canonical API, always wins)

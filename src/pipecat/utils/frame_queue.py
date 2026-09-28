@@ -10,24 +10,24 @@ import asyncio
 from collections.abc import Callable
 from typing import Any
 
-from pipecat.frames.frames import Frame, UninterruptibleFrame
+from pipecat.frames.frames import Frame
 
 
 class FrameQueue(asyncio.Queue):
-    """An asyncio.Queue that tracks whether any UninterruptibleFrame is enqueued.
+    """An asyncio.Queue that knows whether any uninterruptible frame is enqueued.
 
-    Extends ``asyncio.Queue`` and maintains an O(1) ``has_uninterruptible``
-    flag so interrupt-handling code can decide whether to cancel a task or
-    merely drain non-uninterruptible items without scanning the queue.
+    Extends ``asyncio.Queue`` with ``has_uninterruptible``, so interrupt-handling
+    code can decide whether to cancel a task or merely drain the interruptible
+    items, and with ``reset()``, which does that draining: it removes every
+    interruptible item and keeps the uninterruptible ones
+    (``Frame.interruptible`` False) in place. Both read the frames' flags as
+    they are at that moment.
 
     Items may be raw ``Frame`` objects or tuples whose first element is a
     ``Frame`` (e.g. ``(frame, direction, callback)``).  Pass a ``frame_getter``
     callable to extract the frame from each item; the default treats the item
     itself as the frame. Queues that also carry non-frame items should return
     ``None`` from their getter for those.
-
-    Also exposes a ``reset()`` helper that drains all non-``UninterruptibleFrame``
-    items while keeping uninterruptible ones in place.
     """
 
     def __init__(self, frame_getter: Callable[[Any], Frame | None] = lambda item: item):
@@ -42,13 +42,9 @@ class FrameQueue(asyncio.Queue):
         """
         super().__init__()
         self._frame_getter = frame_getter
-        self._uninterruptible_count: int = 0
 
-    def has_frame(self, frame_type: type[Frame] | type[UninterruptibleFrame]) -> bool:
+    def has_frame(self, frame_type: type[Frame]) -> bool:
         """Return True if any frame of the given type is in the queue.
-
-        ``frame_type`` may be ``Frame``, ``UninterruptibleFrame`` (a mixin, not a
-        ``Frame`` subclass), or any concrete frame type.
 
         Note:
             This inspects the internal `_queue` (deque) of asyncio.Queue.
@@ -60,36 +56,32 @@ class FrameQueue(asyncio.Queue):
         Returns:
             True if at least one enqueued frame is an instance of ``frame_type``.
         """
-        for item in self._queue:  # pyright: ignore[reportAttributeAccessIssue]
-            if isinstance(self._frame_getter(item), frame_type):
-                return True
-        return False
+        return any(
+            isinstance(self._frame_getter(item), frame_type)
+            for item in self._queue  # pyright: ignore[reportAttributeAccessIssue]
+        )
 
     @property
     def has_uninterruptible(self) -> bool:
-        """Return True if any UninterruptibleFrame is currently in the queue."""
-        return self._uninterruptible_count > 0
-
-    def _put(self, item: Any) -> None:
-        if isinstance(self._frame_getter(item), UninterruptibleFrame):
-            self._uninterruptible_count += 1
-        super()._put(item)
-
-    def _get(self) -> Any:
-        item = super()._get()
-        if isinstance(self._frame_getter(item), UninterruptibleFrame):
-            self._uninterruptible_count -= 1
-        return item
+        """Return True if any uninterruptible frame is currently in the queue."""
+        # O(n), but it runs only when an interruption is being handled, so its
+        # cost is small next to what follows it.
+        return any(
+            self._is_uninterruptible(item)
+            for item in self._queue  # pyright: ignore[reportAttributeAccessIssue]
+        )
 
     def reset(self) -> None:
-        """Remove all non-UninterruptibleFrame items, keeping uninterruptible ones."""
-        kept: asyncio.Queue = asyncio.Queue()
+        """Remove all interruptible items, keeping uninterruptible ones."""
+        kept = []
         while not self.empty():
             item = self.get_nowait()
-            if isinstance(self._frame_getter(item), UninterruptibleFrame):
-                kept.put_nowait(item)
+            if self._is_uninterruptible(item):
+                kept.append(item)
             self.task_done()
-        while not kept.empty():
-            item = kept.get_nowait()
+        for item in kept:
             self.put_nowait(item)
-            kept.task_done()
+
+    def _is_uninterruptible(self, item: Any) -> bool:
+        frame = self._frame_getter(item)
+        return frame is not None and not frame.interruptible

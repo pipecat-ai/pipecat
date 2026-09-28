@@ -38,11 +38,12 @@ from pipecat.frames.frames import (
     UserImageRawFrame,
     UserImageRequestFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection, SmallWebRTCTrack
+from pipecat.utils.shared import acquires, releases
 
 try:
     from aiortc import VideoStreamTrack
@@ -236,7 +237,6 @@ class SmallWebRTCClient:
         self._audio_in_channels = 0
         self._in_sample_rate = 0
         self._out_sample_rate = 0
-        self._leave_counter = 0
 
         # Audio resampler - will be configured during setup with target sample rate/layout
         self._audio_in_resampler = None
@@ -471,23 +471,23 @@ class SmallWebRTCClient:
             return True
         return False
 
-    async def setup(self, _params: TransportParams, frame):
+    async def setup(self, _params: TransportParams, setup: FrameProcessorSetup):
         """Set up the client with transport parameters.
 
         Args:
             _params: Transport configuration parameters.
-            frame: The initialization frame containing setup data.
+            setup: Configuration object containing setup parameters.
         """
         self._audio_in_channels = _params.audio_in_channels
-        self._in_sample_rate = _params.audio_in_sample_rate or frame.audio_in_sample_rate
-        self._out_sample_rate = _params.audio_out_sample_rate or frame.audio_out_sample_rate
+        self._in_sample_rate = _params.audio_in_sample_rate or setup.audio_in_sample_rate
+        self._out_sample_rate = _params.audio_out_sample_rate or setup.audio_out_sample_rate
         self._params = _params
-        self._leave_counter += 1
         self._audio_in_layout = "stereo" if self._audio_in_channels == 2 else "mono"
         self._audio_in_resampler = AudioResampler(
             "s16", self._audio_in_layout, self._in_sample_rate
         )
 
+    @acquires("connection")
     async def connect(self):
         """Establish the WebRTC connection."""
         if self._webrtc_connection.is_connected():
@@ -497,12 +497,9 @@ class SmallWebRTCClient:
         logger.info("Connecting to Small WebRTC")
         await self._webrtc_connection.connect()
 
+    @releases("connection")
     async def disconnect(self):
         """Disconnect from the WebRTC peer."""
-        self._leave_counter -= 1
-        if self._leave_counter > 0:
-            return
-
         if self.is_connected and not self.is_closing:
             logger.info("Disconnecting to Small WebRTC")
             self._closing = True
@@ -631,8 +628,21 @@ class SmallWebRTCInputTransport(BaseInputTransport):
         self._receive_screen_video_task = None
         self._image_requests: list[UserImageRequestFrame] = []
 
-        # Whether we have seen a StartFrame already.
-        self._initialized = False
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the transport and establish the WebRTC connection.
+
+        Args:
+            setup: Configuration object containing setup parameters.
+        """
+        await super().setup(setup)
+
+        await self._client.setup(self._params, setup)
+        await self._client.connect()
+
+    async def cleanup(self):
+        """Release resources during teardown."""
+        await super().cleanup()
+        await self._teardown()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process incoming frames including user image requests.
@@ -645,27 +655,6 @@ class SmallWebRTCInputTransport(BaseInputTransport):
 
         if isinstance(frame, UserImageRequestFrame):
             await self.request_participant_image(frame)
-
-    async def start(self, frame: StartFrame):
-        """Start the input transport and establish WebRTC connection.
-
-        Args:
-            frame: The start frame containing initialization parameters.
-        """
-        await super().start(frame)
-
-        if self._initialized:
-            return
-
-        self._initialized = True
-
-        await self._client.setup(self._params, frame)
-        await self._client.connect()
-        await self.set_transport_ready(frame)
-        if not self._receive_audio_task and self._params.audio_in_enabled:
-            self._receive_audio_task = self.create_task(self._receive_audio())
-        if not self._receive_video_task and self._params.video_in_enabled:
-            self._receive_video_task = self.create_task(self._receive_video(CAM_VIDEO_SOURCE))
 
     async def _stop_tasks(self):
         """Stop all background tasks."""
@@ -688,6 +677,21 @@ class SmallWebRTCInputTransport(BaseInputTransport):
         await self._stop_tasks()
         await self._client.disconnect()
 
+    async def start(self, frame: StartFrame):
+        """Start receiving media from the WebRTC connection.
+
+        Args:
+            frame: The start frame containing initialization parameters.
+        """
+        await super().start(frame)
+
+        if not self._receive_audio_task and self._params.audio_in_enabled:
+            self._receive_audio_task = self.create_task(self._receive_audio())
+        if not self._receive_video_task and self._params.video_in_enabled:
+            self._receive_video_task = self.create_task(self._receive_video(CAM_VIDEO_SOURCE))
+
+        await self.set_transport_ready(frame)
+
     async def stop(self, frame: EndFrame):
         """Stop the input transport and disconnect from WebRTC.
 
@@ -704,11 +708,6 @@ class SmallWebRTCInputTransport(BaseInputTransport):
             frame: The cancel frame signaling immediate cancellation.
         """
         await super().cancel(frame)
-        await self._teardown()
-
-    async def cleanup(self):
-        """Release resources during teardown."""
-        await super().cleanup()
         await self._teardown()
 
     async def _receive_audio(self):
@@ -864,24 +863,30 @@ class SmallWebRTCOutputTransport(BaseOutputTransport):
         self._client = client
         self._params = params
 
-        # Whether we have seen a StartFrame already.
-        self._initialized = False
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the transport and establish the WebRTC connection.
+
+        Args:
+            setup: Configuration object containing setup parameters.
+        """
+        await super().setup(setup)
+
+        await self._client.setup(self._params, setup)
+        await self._client.connect()
+
+    async def cleanup(self):
+        """Release resources during teardown."""
+        await super().cleanup()
+        await self._teardown()
 
     async def start(self, frame: StartFrame):
-        """Start the output transport and establish WebRTC connection.
+        """Start the output transport.
 
         Args:
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
 
-        if self._initialized:
-            return
-
-        self._initialized = True
-
-        await self._client.setup(self._params, frame)
-        await self._client.connect()
         await self.set_transport_ready(frame)
 
     async def _teardown(self):
@@ -908,11 +913,6 @@ class SmallWebRTCOutputTransport(BaseOutputTransport):
             frame: The cancel frame signaling immediate cancellation.
         """
         await super().cancel(frame)
-        await self._teardown()
-
-    async def cleanup(self):
-        """Release resources during teardown."""
-        await super().cleanup()
         await self._teardown()
 
     async def send_message(

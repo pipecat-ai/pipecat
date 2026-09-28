@@ -53,9 +53,7 @@ class SentryMetrics(FrameProcessorMetrics):
         await super().setup(task_manager)
         if self._sentry_available:
             self._sentry_queue = asyncio.Queue()
-            self._sentry_task = self.task_manager.create_task(
-                self._sentry_task_handler(), name=f"{self}::_sentry_task_handler"
-            )
+            self._sentry_task = self.create_task(self._sentry_task_handler())
 
     async def cleanup(self):
         """Clean up Sentry resources and flush pending transactions.

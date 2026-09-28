@@ -14,7 +14,7 @@ Test groups:
 - register_skipped: immediate flush vs. blocked by a preceding spoken slot
 - register_spoken / complete_spoken_slot: push_text_frames=True path (build_tracker=False)
 - flush: pts propagation, transport_destination, stops at incomplete spoken slot
-- process_word: normal, completing, passthrough, raw_text propagation
+- process_word: normal, completing, dropped, raw_text propagation
 - process_word overflow: single token spanning two slot boundaries
 - process_word force-complete via belongs_here failure
 - force_complete: remaining text emission, raw_text, corrupt raw discard, slot ordering
@@ -293,13 +293,12 @@ class TestProcessWordBasic(unittest.IsolatedAsyncioTestCase):
         result = seq.process_word("hello", pts=1, context_id="ctx-unknown")
         self.assertEqual(result, [])
 
-    async def test_unrecognised_word_emits_passthrough(self):
+    async def test_unrecognised_word_is_dropped(self):
+        # "zzz" is nowhere in "hello world", there is no next slot, and no resync
+        # can place it -- so it is not this turn's text and must not be emitted.
         seq = _seq()
         await seq.register_spoken(_spoken_frame("hello world"), "ctx1", "hello world", True)
-        # "zzz" doesn't belong to "hello world" and there is no next slot
-        result = seq.process_word("zzz", pts=5, context_id="ctx1")
-        self.assertEqual(len(result), 1)
-        self.assertEqual(result[0].text, "zzz")
+        self.assertEqual(seq.process_word("zzz", pts=5, context_id="ctx1"), [])
 
     async def test_none_context_word_completes_registered_slot(self):
         # Legacy providers register slots under real context IDs but emit word
@@ -592,10 +591,10 @@ class TestWordsAfterUnrepeatedPunctuation(unittest.IsolatedAsyncioTestCase):
     attached to the previous word (e.g. Inworld reporting "Yeah" then "I" for
     "Yeah, I can do that.").
 
-    Every word after the comma must be attributed to the slot -- carrying its
-    raw_text into the conversation context -- rather than falling through to the
-    passthrough path, which loses raw_text and strands the slot so force_complete
-    re-emits (or discards) the rest of the sentence.
+    Every word after the comma must be attributed to the slot, carrying its
+    raw_text into the conversation context. A word the slot turns down is dropped
+    and the slot is left stranded at the cursor, so the rest of the sentence
+    arrives in one lump from force_complete instead of word by word.
     """
 
     SENTENCE = "Yeah, I can do that. "
@@ -616,11 +615,9 @@ class TestWordsAfterUnrepeatedPunctuation(unittest.IsolatedAsyncioTestCase):
             emitted.extend(f for f in frames if isinstance(f, TTSTextFrame))
 
         self.assertEqual([f.text for f in emitted], self.WORDS)
-        # A passthrough frame carries no raw_text; every word here should have one.
+        # Only a word attributed to the slot carries raw_text.
         for frame in emitted:
-            self.assertIsNotNone(
-                frame.raw_text, f"'{frame.text}' lost raw_text (emitted as passthrough)"
-            )
+            self.assertIsNotNone(frame.raw_text, f"'{frame.text}' was not attributed to the slot")
 
     async def test_force_complete_has_nothing_left_to_emit(self):
         seq = _seq()
@@ -702,6 +699,61 @@ class TestTokenizationShapeResilience(unittest.IsolatedAsyncioTestCase):
         for name, words in self.SHAPES.items():
             with self.subTest(shape=name):
                 self.assertEqual(await self._run_shape(words), self.SENTENCE.strip())
+
+
+class TestPunctuationTokensWithoutPreMerge(unittest.IsolatedAsyncioTestCase):
+    """A service forwarding raw tokens, so a mark reaches the sequencer on its own.
+
+    ``merge_punct_tokens`` folds a punctuation-only token into the word before it,
+    but only where the service asks for it (``pre_merge_tokens=True``). Without it
+    the mark arrives as its own event, after the word it trails already carried it
+    into the context.
+    """
+
+    @staticmethod
+    def _context(frames) -> str:
+        return concatenate_aggregated_text(
+            [
+                TextPartForConcatenation(
+                    f.raw_text if f.raw_text else f.text,
+                    includes_inter_part_spaces=f.includes_inter_frame_spaces,
+                )
+                for f in frames
+                if isinstance(f, TTSTextFrame) and f.append_to_context
+            ]
+        )
+
+    async def _run(self, text: str, tokens: list[str]):
+        seq = _seq()
+        await seq.register_spoken(
+            _spoken_frame(text, raw_text=text), "ctx1", text, append_to_context=True
+        )
+        frames = []
+        for word in tokens:
+            frames.extend(seq.process_word(word, pts=10, context_id="ctx1"))
+        return frames
+
+    async def test_the_mark_reaches_the_context_once(self):
+        frames = await self._run("Yeah, I can help", ["Yeah", ",", "I", "can", "help"])
+        self.assertEqual(self._context(frames), "Yeah, I can help")
+
+    async def test_the_mark_is_still_emitted_on_the_word_channel(self):
+        """It is what the provider reported speaking, so a word consumer sees it."""
+        frames = await self._run("Yeah, I can help", ["Yeah", ",", "I", "can", "help"])
+        spoken = [f.text for f in frames if isinstance(f, TTSTextFrame)]
+        self.assertEqual(spoken, ["Yeah", ",", "I", "can", "help"])
+
+    async def test_a_mark_carrying_its_own_spacing(self):
+        """The token shape Inworld reports: the mark arrives with a trailing space."""
+        text = "hello world! How are you"
+        frames = await self._run(text, ["hello", " world", "! ", "How", " are", " you"])
+        self.assertEqual(self._context(frames), text)
+
+    async def test_a_symbol_the_source_spells_differently(self):
+        """ElevenLabs reports an arrow as a dash; the arrow still reaches the context."""
+        text = "Step one → step two"
+        frames = await self._run(text, ["Step", "one", "-", "step", "two"])
+        self.assertEqual(self._context(frames), text)
 
 
 class TestClear(unittest.IsolatedAsyncioTestCase):
@@ -1002,8 +1054,10 @@ class TestAggregatedTextProgressFrame(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(progress[0].remaining_text, " world")
 
     def test_no_progress_frame_for_passthrough(self):
+        # A word emitted beside the queue rather than against a slot has no slot to
+        # report progress for.
         seq = _seq()
-        result = seq.process_word("hello", pts=1, context_id="ctx-unknown")
+        result = seq.process_word("hello", pts=1, context_id=None)
         progress = [f for f in result if isinstance(f, AggregatedTextProgressFrame)]
         self.assertEqual(progress, [])
 
@@ -1561,12 +1615,12 @@ class TestRegisterSpokenBufferedWords(unittest.IsolatedAsyncioTestCase):
         word_frames = [f for f in result if isinstance(f, TTSTextFrame)]
         self.assertTrue(any(f.text == "How" for f in word_frames))
 
-    async def test_non_streaming_sequencer_keeps_passthrough_path(self):
+    async def test_non_streaming_sequencer_drops_instead_of_buffering(self):
+        # Buffering only makes sense while a sentence may still be promoted. With
+        # every slot already registered, an unplaceable word is simply dropped.
         seq = _seq(streaming=False)
         await seq.register_spoken(_spoken_frame("hello world"), "ctx1", "hello world", True)
-        result = seq.process_word("zzz", pts=5, context_id="ctx1")
-        self.assertEqual(len(result), 1)
-        self.assertEqual(result[0].text, "zzz")
+        self.assertEqual(seq.process_word("zzz", pts=5, context_id="ctx1"), [])
         self.assertEqual(seq._buffered_words, [])
 
 
@@ -2025,6 +2079,294 @@ class TestParallelSentenceAggregator(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             [e[0] for e in out],
             ["five dollars spent!", " Buy more!"],
+        )
+
+
+# ---------------------------------------------------------------------------
+# process_word — a garbled word-timestamp event, then a resync
+# ---------------------------------------------------------------------------
+
+
+class TestProcessWordResync(unittest.IsolatedAsyncioTestCase):
+    """A word no slot recognises is dropped, and the next good one resyncs.
+
+    Emitting such a word verbatim would put text the LLM never wrote into the
+    conversation context and leave the slot stranded at the cursor, so every word
+    after it is unrecognised too. Dropping it costs nothing: the text it should
+    have covered still reaches the context, carried either by the word that
+    resyncs or -- if none does -- by force_complete.
+    """
+
+    SENTENCE = "This is how it is supposed to work"
+
+    async def _seq_three_words_in(self):
+        seq = _seq()
+        await seq.register_spoken(
+            _spoken_frame(self.SENTENCE, raw_text=self.SENTENCE),
+            "ctx1",
+            self.SENTENCE,
+            append_to_context=True,
+        )
+        for word in ("This", "is", "how"):
+            seq.process_word(word, pts=10, context_id="ctx1")
+        return seq
+
+    @staticmethod
+    def _words(frames):
+        return [f for f in frames if isinstance(f, TTSTextFrame)]
+
+    async def test_garbled_word_emits_nothing(self):
+        seq = await self._seq_three_words_in()
+        self.assertEqual(seq.process_word("ity", pts=20, context_id="ctx1"), [])
+
+    async def test_next_word_resyncs_and_carries_the_skipped_text(self):
+        seq = await self._seq_three_words_in()
+        seq.process_word("ity", pts=20, context_id="ctx1")
+        words = self._words(seq.process_word("ís", pts=30, context_id="ctx1"))
+        self.assertEqual([f.text for f in words], ["it is"])
+        self.assertEqual(words[0].raw_text, "it is")
+
+    async def test_progress_follows_the_resync(self):
+        seq = await self._seq_three_words_in()
+        seq.process_word("ity", pts=20, context_id="ctx1")
+        frames = seq.process_word("ís", pts=30, context_id="ctx1")
+        progress = [f for f in frames if isinstance(f, AggregatedTextProgressFrame)]
+        self.assertEqual(len(progress), 1)
+        self.assertEqual(progress[0].accumulated_text, "This is how it is")
+        self.assertEqual(progress[0].remaining_text, " supposed to work")
+
+    async def test_slot_completes_and_leaves_force_complete_nothing_to_do(self):
+        seq = await self._seq_three_words_in()
+        seq.process_word("ity", pts=20, context_id="ctx1")
+        for word in ("ís", "supposed", "to", "work"):
+            seq.process_word(word, pts=30, context_id="ctx1")
+        self.assertEqual(seq.force_complete("ctx1", last_word_pts=40), [])
+
+    async def test_context_reassembles_the_whole_sentence(self):
+        seq = await self._seq_three_words_in()
+        frames = []
+        for word in ("ity", "ís", "supposed", "to", "work"):
+            frames.extend(seq.process_word(word, pts=30, context_id="ctx1"))
+        spoken = ["This", "is", "how"] + [f.raw_text for f in self._words(frames)]
+        self.assertEqual(" ".join(spoken), self.SENTENCE)
+
+    async def test_word_no_resync_can_place_is_dropped(self):
+        seq = await self._seq_three_words_in()
+        self.assertEqual(seq.process_word("banana", pts=20, context_id="ctx1"), [])
+
+    async def test_force_complete_recovers_what_no_word_resynced(self):
+        seq = await self._seq_three_words_in()
+        seq.process_word("banana", pts=20, context_id="ctx1")
+        words = self._words(seq.force_complete("ctx1", last_word_pts=30))
+        self.assertEqual([f.text for f in words], ["it is supposed to work"])
+
+    async def test_a_word_both_slots_could_take_still_reconstructs_both(self):
+        """ "Is" opens the second sentence, but "is" is also still unspoken in the
+        first, so the first slot takes it along with the words before it. The word
+        after it matches nothing there, which force-completes the first slot and
+        hands that word to the second, where looking ahead recovers "Is" too. The
+        word boundaries shift; the text of both sentences does not.
+        """
+        seq = _seq()
+        for text in (self.SENTENCE, "Is that clear?"):
+            await seq.register_spoken(
+                _spoken_frame(text, raw_text=text), "ctx1", text, append_to_context=True
+            )
+        for word in ("This", "is", "how"):
+            seq.process_word(word, pts=10, context_id="ctx1")
+
+        frames = []
+        for word in ("Is", "that", "clear?"):
+            frames.extend(seq.process_word(word, pts=20, context_id="ctx1"))
+        frames.extend(seq.force_complete("ctx1", last_word_pts=30))
+
+        spoken = ["This", "is", "how"] + [f.raw_text for f in self._words(frames)]
+        self.assertEqual(" ".join(spoken), f"{self.SENTENCE} Is that clear?")
+
+
+class TestProcessWordResyncWithMarkup(unittest.IsolatedAsyncioTestCase):
+    """Resync in a slot whose TTS text carries synthesis tags and whose LLM text
+    carries delimiters of its own."""
+
+    TTS = "Call <spell>4111</spell> when it is ready"
+    LLM = "Call <card>4111</card> when it is ready"
+    USER_FACING = "Call 4111 when it is ready"
+
+    async def _seq_past_the_tag(self):
+        seq = _seq()
+        frame = _spoken_frame(self.USER_FACING, raw_text=self.LLM)
+        await seq.register_spoken(frame, "ctx1", self.TTS, append_to_context=True)
+        for word in ("Call", "4111"):
+            seq.process_word(word, pts=10, context_id="ctx1")
+        return seq
+
+    async def test_garbled_word_after_the_tag_emits_nothing(self):
+        seq = await self._seq_past_the_tag()
+        self.assertEqual(seq.process_word("whenx", pts=20, context_id="ctx1"), [])
+
+    async def test_resync_carries_the_closing_delimiter_into_context(self):
+        seq = await self._seq_past_the_tag()
+        seq.process_word("whenx", pts=20, context_id="ctx1")
+        words = [
+            f
+            for f in seq.process_word("ís", pts=30, context_id="ctx1")
+            if isinstance(f, TTSTextFrame)
+        ]
+        self.assertEqual([f.text for f in words], ["when it is"])
+        self.assertEqual(words[0].raw_text, "</card> when it is")
+
+    async def test_slot_completes_after_the_resync(self):
+        seq = await self._seq_past_the_tag()
+        seq.process_word("whenx", pts=20, context_id="ctx1")
+        seq.process_word("ís", pts=30, context_id="ctx1")
+        seq.process_word("ready", pts=40, context_id="ctx1")
+        self.assertEqual(seq._slots, [])
+
+
+class TestForceCompleteWordStream(unittest.IsolatedAsyncioTestCase):
+    """What a context ending has to account for: text no word arrived for, which the
+    progress view has to reach, and a buffered word no slot ever matched, which is
+    dropped where sentence mode would have dropped it on arrival.
+    """
+
+    async def _streamed_slot(self, *tokens: str) -> AggregatedFrameSequencer:
+        seq = _seq(streaming=True)
+        for t in tokens:
+            await seq.register_spoken(_spoken_frame(t, raw_text=t), "ctx1", t, True)
+        return seq
+
+    async def test_buffered_word_is_dropped_at_context_end(self):
+        # "。" is taken by "好" as trailing punctuation, so the slot is already
+        # complete when the provider reports the mark on its own, so it is buffered.
+        seq = await self._streamed_slot("您好", "。", "谢谢")
+        for i, ch in enumerate(["您", "好", "。"]):
+            seq.process_word(ch, pts=(i + 1) * 10, context_id="ctx1")
+        self.assertEqual([w.word for w in seq._buffered_words], ["。"])
+
+        words = [f for f in seq.force_complete("ctx1", 30) if isinstance(f, TTSTextFrame)]
+        self.assertEqual(words, [])
+        self.assertEqual(seq._buffered_words, [])
+
+    async def test_buffered_word_for_another_context_is_left_alone(self):
+        seq = await self._streamed_slot("您好", "。", "谢谢")
+        for i, ch in enumerate(["您", "好", "。"]):
+            seq.process_word(ch, pts=(i + 1) * 10, context_id="ctx1")
+        seq._buffered_words[0].context_id = "ctx2"
+        seq.force_complete("ctx1", 30)
+        self.assertEqual([w.word for w in seq._buffered_words], ["。"])
+
+    async def test_forced_tail_reports_progress_to_the_end(self):
+        seq = _seq()
+        text = "Hello there friend"
+        await seq.register_spoken(_spoken_frame(text, raw_text=text), "ctx1", text, True)
+        seq.process_word("Hello", pts=10, context_id="ctx1")
+
+        frames = seq.force_complete("ctx1", 20)
+        words = [f for f in frames if isinstance(f, TTSTextFrame)]
+        progress = [f for f in frames if isinstance(f, AggregatedTextProgressFrame)]
+        self.assertEqual([f.text for f in words], ["there friend"])
+        self.assertEqual(progress[-1].accumulated_text, text)
+        self.assertEqual(progress[-1].remaining_text, "")
+
+
+class TestMarkdownResponseStaysInSync(unittest.IsolatedAsyncioTestCase):
+    """A markdown-heavy LLM response spoken by Cartesia, several sentences queued.
+
+    Cartesia keeps the markdown on each token and appends a period to the last
+    token of every line. One misplaced token force-completes its slot, and every
+    later word of the turn is then dropped as unrecognised. So every word must
+    produce a TTSTextFrame, and the context must receive every sentence in full.
+    """
+
+    SENTENCES = [
+        "Each menu lists food items under categories such as **ENTREE**, **SIDES**, "
+        "and **SELECTIONS**.",
+        "Below is a detailed description of the content across the images:\n\n---\n\n"
+        "### **General Overview**\n"
+        "- **Purpose**: These menus are designed for students, offering meals each day.",
+        "- **Structure**: Each day has a designated **ENTREE** (main course).",
+    ]
+
+    WORDS = [
+        ["Each", "menu", "lists", "food", "items", "under", "categories", "such", "as",
+         "**ENTREE**,", "**SIDES**,", "and", "**SELECTIONS**."],
+        ["Below", "is", "a", "detailed", "description", "of", "the", "content", "across",
+         "the", "images:.", "---.", "###", "**General", "Overview**.", "-", "**Purpose**:",
+         "These", "menus", "are", "designed", "for", "students,", "offering", "meals",
+         "each", "day."],
+        ["-", "**Structure**:", "Each", "day", "has", "a", "designated", "**ENTREE**",
+         "(main", "course)."],
+    ]  # fmt: skip
+
+    async def test_every_word_is_emitted_and_every_sentence_reaches_the_context(self):
+        seq = _seq()
+        for text in self.SENTENCES:
+            await seq.register_spoken(_spoken_frame(text, raw_text=text), "ctx1", text, True)
+
+        context_spans: list[str] = []
+        dropped: list[str] = []
+        pts = 0
+        for words in self.WORDS:
+            for word in words:
+                pts += 10
+                frames = [
+                    f
+                    for f in seq.process_word(word, pts=pts, context_id="ctx1")
+                    if isinstance(f, TTSTextFrame)
+                ]
+                if not frames:
+                    dropped.append(word)
+                context_spans += [f.raw_text for f in frames if f.append_to_context and f.raw_text]
+
+        self.assertEqual(dropped, [])
+        self.assertEqual(
+            " ".join(" ".join(context_spans).split()),
+            " ".join(" ".join(self.SENTENCES).split()),
+        )
+
+
+class TestUnmatchedSymbolDoesNotDesyncTheTurn(unittest.IsolatedAsyncioTestCase):
+    """A swapped symbol followed by more symbol tokens, across two queued sentences.
+
+    ElevenLabs reports ``→`` as ``-``. If the cursor steps past the symbol tokens
+    after it, the next one is rejected, the slot is force-completed, and the
+    following words are dropped as unrecognised.
+    """
+
+    SENTENCES = [
+        "Step one →\n\n### **Step two**\nDone.",
+        "Then we finish.",
+    ]
+
+    WORDS = [
+        ["Step", "one", "-", "###", "**Step", "two**", "Done."],
+        ["Then", "we", "finish."],
+    ]
+
+    async def test_every_word_is_emitted_and_every_sentence_reaches_the_context(self):
+        seq = _seq()
+        for text in self.SENTENCES:
+            await seq.register_spoken(_spoken_frame(text, raw_text=text), "ctx1", text, True)
+
+        context_spans: list[str] = []
+        dropped: list[str] = []
+        pts = 0
+        for words in self.WORDS:
+            for word in words:
+                pts += 10
+                frames = [
+                    f
+                    for f in seq.process_word(word, pts=pts, context_id="ctx1")
+                    if isinstance(f, TTSTextFrame)
+                ]
+                if not frames:
+                    dropped.append(word)
+                context_spans += [f.raw_text for f in frames if f.append_to_context and f.raw_text]
+
+        self.assertEqual(dropped, [])
+        self.assertEqual(
+            " ".join(" ".join(context_spans).split()),
+            " ".join(" ".join(self.SENTENCES).split()),
         )
 
 

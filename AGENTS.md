@@ -31,7 +31,7 @@ uv run towncrier build --draft --version Unreleased
 pipecat eval run scenarios/<name>.yaml --bot-url ws://localhost:7860
 
 # Run the full release-eval suite (spawns bots from a manifest, runs scenarios in parallel)
-pipecat eval suite scripts/release-evals/manifest.yaml -p <bot-pattern> -s <scenario>
+pipecat eval suite evals/release/manifest.yaml -p <bot-pattern> -s <scenario>
 
 # Lint and format check
 uv run ruff check
@@ -39,6 +39,9 @@ uv run ruff format --check
 
 # Update dependencies (after editing pyproject.toml)
 uv lock && uv sync
+
+# Refresh the Pipecat UI component snapshot vendored into the CLI's React client templates
+node scripts/cli/sync-pipecat-ui.mjs
 ```
 
 ## Architecture
@@ -102,11 +105,13 @@ Runnable examples live in `examples/multi-worker/` (local handoff, distributed h
 
 - **Interruptions**: Interruptions are usually triggered by a user turn start strategy (e.g. `VADUserTurnStartStrategy`), but any processor can trigger one by calling `await self.broadcast_interruption()`, which broadcasts an `InterruptionFrame` both upstream and downstream. The old `push_interruption_task_frame_and_wait()` is deprecated and delegates to `broadcast_interruption()`.
 
-- **Uninterruptible Frames**: These are frames that will not be removed from internal queues even if there's an interruption. For example, `EndFrame` and `StopFrame`.
+- **Uninterruptible Frames**: These are frames that will not be removed from internal queues even if there's an interruption. Every frame carries an `interruptible` flag, True by default; a frame class such as `EndFrame` or `StopFrame` declares `interruptible: bool = field(default=False, init=False)` to be uninterruptible by default, and setting the flag on a frame before pushing it decides for that frame alone.
 
 - **Events**: Most classes in Pipecat have `BaseObject` as the very base class. `BaseObject` has support for events. Events can run in the background in an async task (default) or synchronously (`sync=True`) if we want immediate action. Synchronous event handlers need to execute fast.
 
 - **Async Task Management**: Always use `self.create_task(coroutine, name)` instead of raw `asyncio.create_task()`. The `TaskManager` automatically tracks tasks and cleans them up on processor shutdown. Use `await self.cancel_task(task, timeout)` for cancellation.
+
+- **Keep `process_frame` fast**: a processor handles one frame at a time, so whatever `process_frame` is doing, every other frame arriving at that processor waits, and everything behind the processor in the pipeline waits with them. System frames jump the queue (`StartFrame` first, then `SystemFrame`, then the rest) but cannot interrupt a call in progress. Never do slow work inside `process_frame` (model inference, a blocking call, a long await): hand it to a task created with `self.create_task()` and push the result when it is ready. `SegmentedSTTService` transcribes each speech segment in a background task for this reason; transcribing inline held the input audio frames behind it, so a VAD downstream could not analyze them until it finished.
 
 - **Error Handling**: Use `await self.push_error(msg, exception, fatal)` to push errors upstream. Services should use `fatal=False` (the default) so application code can handle errors and take action (e.g. switch to another service).
 
@@ -133,6 +138,7 @@ Runnable examples live in `examples/multi-worker/` (local handoff, distributed h
 | `src/pipecat/cli/`         | `pipecat` CLI (`init`, `eval`)                     |
 | `src/pipecat/evals/`       | Behavioral eval framework (run via `pipecat eval`) |
 | `src/pipecat/metrics/`     | Metrics data models                                |
+| `evals/`                   | Eval suites; `evals/release/` is the release suite |
 
 ## Code Style
 
@@ -213,11 +219,18 @@ When adding a new service:
 
 **Unit tests.** Test utilities live in `src/pipecat/tests/utils.py`. Use `run_test()` to send frames through a pipeline and assert expected output frames in each direction. Use `SleepFrame(sleep=N)` to add delays between frames.
 
-**Behavioral evals.** `pipecat.evals` (`src/pipecat/evals/`) is a behavioral eval framework that drives a *real bot* end-to-end and asserts on its behavior — use it to confirm a feature works (interruptions, function calls, vision, multi-turn, transcription, DTMF) rather than only checking frame plumbing. The harness connects to a bot's **eval transport** as an RTVI client, plays scripted user turns (synthesizing audio in audio mode), and checks each expectation (latency, `text_contains`, an expected `function_call`, or an LLM judge of the bot's reply).
+**Behavioral evals.** `pipecat.evals` (`src/pipecat/evals/`) drives a *real bot* end-to-end and checks its behavior — use it to confirm a feature works (interruptions, function calls, vision, multi-turn, transcription, DTMF) rather than only checking frame plumbing. A **scenario** is one such check: a conversation to hold with the bot and how to decide whether the bot behaved properly. A YAML file lists one or more under `scenarios:`, each with a `name:`, and any scenario key at the file's top level is the default for all of them (a scenario that sets the same key replaces it whole). Each runs on its own, against its own bot, named `<file>/<scenario>`. The harness connects to the bot's **eval transport** as an RTVI client, plays the user's side (synthesizing audio in audio mode), and judges the bot's side.
 
-A scenario is a YAML file of `turns` with `expect:` assertions; scenarios are reusable across bots. To confirm a behavior while developing:
+There are two kinds of scenario, told apart by the scenario's keys:
+
+- A **scripted** scenario (`turns:`) writes the user's turns out, each with `expect:` assertions on the events the bot emits back: latency, `text_contains` and `text_excludes`, an expected `function_call` (with an `eval:` to judge the call by its name and arguments, where `args:` cannot match verbatim), the turn-completion `marker` the LLM produced (`llm_marker` with `marker: complete | short | long | incomplete`, plus `marker_first`, `markers` and `text_after` checks on the response's raw text), or an LLM judge of the reply. Deterministic input, so it pins one behavior; scenarios are reusable across bots. A run's result records each turn's expectations with what they matched, so a passed run keeps the marker it saw.
+- A **simulated** scenario, a simulation for short (`persona:` and `goal:`), lets an LLM play a caller who pursues the goal and hangs up with an `end_call` tool. A judge then reads the whole conversation, the bot's tool calls in place, and decides whether the bot did its job (`success:`, prose) and how each reply scored on the `metrics:`. A judged metric (`criterion`, optionally `min_score`) says what every reply should be and scores the share of turns that satisfied it; a measured one (`measure: turns | duration | words | latency` with `min_value` / `max_value`, or `measure: function_calls` with the `calls` the bot should make, `[]` for none) is computed from the run. A run passes when the goal is met and no metric falls short, and a simulation's `runs` must all pass.
+
+To confirm a behavior while developing:
 
 1. Run the bot with its eval transport: `python bot.py -t eval --port 7860`
-2. Run a scenario against it: `pipecat eval run scenarios/<name>.yaml --bot-url ws://localhost:7860 -v`
+2. Run a scenario of either kind against it: `pipecat eval run scenarios/<name>.yaml --bot-url ws://localhost:7860 -v`
 
-For many bots at once, `pipecat eval suite <manifest.yaml>` spawns each bot and runs its scenarios in parallel. Reusable scenarios and the pre-release validation manifest live in `scripts/release-evals/` — see its `README.md` for the full workflow (prerequisites: a local Ollama judge `gemma4:12b`, plus Kokoro/Moonshine for audio mode) and the `pipecat.evals.scenario` module docstring for the complete scenario file format.
+For many bots at once, `pipecat eval suite <manifest.yaml>` spawns each bot and runs its scenarios in parallel; a manifest lists both kinds under `scenarios:`, and `-k simulation` runs only the simulations. A manifest entry may also carry a `runner_body:` (the `/start` body the bot would normally get, as a `path:` to a file or inline `data:`), a `concurrency:` cap of its own, and a `name:` that labels its runs when several entries share one bot. Reusable scenarios and the pre-release validation manifest live in `evals/release/` — see its `README.md` for the full workflow (prerequisites: `TYPESAFE_API_KEY` exported for the Jev judge, a local Ollama `gemma4:12b` for the judge's explainer and the simulated caller, plus Kokoro/Moonshine for audio mode) and the `pipecat.evals.script` and `pipecat.evals.simulation` module docstrings for the two file formats.
+
+From Python, `EvalScenarioFile.load(path)` (`src/pipecat/evals/scenario.py`) reads a file and holds its scenarios, each of whichever kind it is, and `EvalSession.from_scenario(scenario, bot_url, params=EvalSessionParams(...)).run()` (`src/pipecat/evals/session.py`) runs one, building the scripted or simulation session the scenario needs; `EvalSessionParams` is how the run behaves (timeouts, recording, caching, teardown), the services it uses are keyword arguments, and the result is an `EvalScriptResult` or an `EvalSimulationResult` (`src/pipecat/evals/results.py`).

@@ -128,7 +128,8 @@ class OneShotInputParams(BaseModel):
         api_key: Ultravox API key for authentication.
         system_prompt: System prompt to guide the model's behavior. Defaults to None.
         temperature: Sampling temperature for response generation. Defaults to 0.
-        model: Model identifier to use. Defaults to "fixie-ai/ultravox".
+        model: Model identifier to use, e.g. "ultravox-v0.7". Defaults to None,
+            which lets Ultravox pick its current default model.
         voice: Voice identifier for speech generation. Defaults to None.
         metadata: Metadata to attach to the call. Default to an empty dict.
         output_medium: The initial output medium for the agent. Use "text" for text
@@ -302,7 +303,7 @@ class UltravoxRealtimeLLMService(LLMService):
             self._socket = await websocket_client.connect(join_url)
             self._receive_task = self.create_task(self._receive_messages())
         except Exception as e:
-            await self.push_error("Failed to connect to Ultravox", e, fatal=True)
+            await self.push_error("Failed to connect to Ultravox", e, force_treat_as_permanent=True)
 
     @staticmethod
     def _output_medium_to_api(medium: Literal["text", "voice"] | None) -> str | None:
@@ -506,17 +507,9 @@ class UltravoxRealtimeLLMService(LLMService):
                 if async_payload.kind == "final":
                     if async_payload.tool_call_id in self._completed_tool_calls:
                         continue
-                    # The placeholder client_tool_result has already
-                    # "completed" the tool call from Ultravox's perspective,
-                    # so the actual result is delivered as user-side text
-                    # (see _ASYNC_TOOL_FINAL_RESULT_TEMPLATE).
-                    await self._send_user_text(
-                        _ASYNC_TOOL_FINAL_RESULT_TEMPLATE.format(
-                            tool_call_id=async_payload.tool_call_id,
-                            result=async_payload.result,
-                        )
+                    await self._send_async_tool_result(
+                        async_payload.tool_call_id, async_payload.result or ""
                     )
-                    self._completed_tool_calls.add(async_payload.tool_call_id)
                     continue
                 # Defensive: any async-tool message must not fall through
                 # to the regular tool-result block below, even if it
@@ -533,8 +526,28 @@ class UltravoxRealtimeLLMService(LLMService):
                         if isinstance(content, str)
                         else "".join(t.get("text", "") for t in content or [])
                     )
-                    await self._send_tool_result(tool_call_id, result)
-                    self._completed_tool_calls.add(tool_call_id)
+                    if tool_call_id in self._started_placeholder_sent:
+                        # An async call whose result arrived before the
+                        # conversation moved on settles in the context as an
+                        # ordinary tool result, but Ultravox has already been
+                        # given the placeholder for it and ignores a second
+                        # client_tool_result, so the result still has to go
+                        # in as user-side text.
+                        await self._send_async_tool_result(tool_call_id, result)
+                    else:
+                        await self._send_tool_result(tool_call_id, result)
+                        self._completed_tool_calls.add(tool_call_id)
+
+    async def _send_async_tool_result(self, tool_call_id: str, result: str):
+        """Deliver an async tool's actual result as user-side text.
+
+        The placeholder client_tool_result has already completed the call from
+        Ultravox's perspective (see ``_ASYNC_TOOL_FINAL_RESULT_TEMPLATE``).
+        """
+        await self._send_user_text(
+            _ASYNC_TOOL_FINAL_RESULT_TEMPLATE.format(tool_call_id=tool_call_id, result=result)
+        )
+        self._completed_tool_calls.add(tool_call_id)
 
     async def _send_tool_result(self, tool_call_id: str, result: str):
         """Send a tool call result to Ultravox."""
@@ -614,7 +627,7 @@ class UltravoxRealtimeLLMService(LLMService):
         except Exception as e:
             if self._disconnecting or not self._socket:
                 return
-            await self.push_error("Ultravox websocket send error", e, fatal=True)
+            await self.push_error("Ultravox websocket send error", e, force_treat_as_permanent=True)
 
     #
     # response handling
@@ -679,7 +692,9 @@ class UltravoxRealtimeLLMService(LLMService):
                 except Exception as e:
                     if self._disconnecting or not self._socket:
                         return
-                    await self.push_error("Ultravox websocket receive error", e, fatal=True)
+                    await self.push_error(
+                        "Ultravox websocket receive error", e, force_treat_as_permanent=True
+                    )
         except ConnectionClosed:
             if self._disconnecting or not self._socket:
                 return

@@ -15,6 +15,7 @@ from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
+    Frame,
     FunctionCallCancelFrame,
     FunctionCallFromLLM,
     FunctionCallInProgressFrame,
@@ -69,7 +70,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
     UserTurnMessageAddedMessage,
     UserTurnStoppedMessage,
 )
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.tests.utils import SleepFrame, run_test
 from pipecat.turns.user_mute import (
     FirstSpeechUserMuteStrategy,
@@ -390,6 +391,54 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
         ]
         await run_test(
             Pipeline([user_aggregator]),
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+        )
+
+    async def test_turn_closes_on_the_stop_signal_when_the_transcript_precedes_it(self):
+        """A service that pushes the transcript before proposing the stop closes at once.
+
+        The aggregation timer is set far longer than the test runs, so the turn
+        can only close from the stop signal itself. That path needs the final
+        transcript to have arrived first, which holds only while
+        ``ProposedUserStoppedSpeakingFrame`` stays ordered against it.
+        """
+
+        class TurnDetectingSTT(FrameProcessor):
+            """Stands in for an STT whose provider reports turn boundaries."""
+
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                await super().process_frame(frame, direction)
+                await self.push_frame(frame, direction)
+                if isinstance(frame, InterimTranscriptionFrame):
+                    await self.push_frame(
+                        TranscriptionFrame(text="Hello!", user_id="", timestamp="now")
+                    )
+                    await self.broadcast_frame(ProposedUserStoppedSpeakingFrame)
+
+        context = LLMContext()
+        user_aggregator = LLMUserAggregator(
+            context,
+            params=LLMUserAggregatorParams(
+                user_turn_strategies=ExternalUserTurnStrategies(
+                    stop=[ExternalUserTurnStopStrategy(timeout=30.0)]
+                )
+            ),
+        )
+
+        frames_to_send = [
+            ProposedUserStartedSpeakingFrame(),
+            InterimTranscriptionFrame(text="Hel", user_id="", timestamp="now"),
+            SleepFrame(sleep=0.3),
+        ]
+        expected_down_frames = [
+            UserStartedSpeakingFrame,
+            InterruptionFrame,
+            LLMContextFrame,
+            UserStoppedSpeakingFrame,
+        ]
+        await run_test(
+            Pipeline([TurnDetectingSTT(), user_aggregator]),
             frames_to_send=frames_to_send,
             expected_down_frames=expected_down_frames,
         )
@@ -943,7 +992,7 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
     async def test_multiple_inferences_in_one_turn_preserve_aggregation(self):
         """Two inference triggers before finalization should preserve the full user transcript.
 
-        When the LLM marks the first inference incomplete (○ / ◐) and the
+        When the LLM marks the first inference incomplete (◐ / ○) and the
         user keeps speaking, the deferred upstream strategy fires a
         second inference. Both the public ``on_user_turn_stopped`` event
         and the conversation context should reflect the full user
@@ -985,14 +1034,14 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
             SleepFrame(),
             VADUserStoppedSpeakingFrame(),
             SleepFrame(sleep=TRANSCRIPTION_TIMEOUT + 0.1),
-            # First inference fired here. Imagine the LLM returned ○;
+            # First inference fired here. Imagine the LLM returned ◐;
             # the turn is not yet finalized, so the user keeps talking.
             VADUserStartedSpeakingFrame(),
             TranscriptionFrame(text="about pizza", user_id="", timestamp="now"),
             SleepFrame(),
             VADUserStoppedSpeakingFrame(),
             SleepFrame(sleep=TRANSCRIPTION_TIMEOUT + 0.1),
-            # Second inference fired here. Now the LLM returns ✓ and the
+            # Second inference fired here. Now the LLM returns ● and the
             # turn finalizes via UserTurnInferenceCompletedFrame.
             UserTurnInferenceCompletedFrame(),
             SleepFrame(),
@@ -1393,6 +1442,272 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
         )
         assert context.messages[-1]["content"] == "CANCELLED"
         assert not aggregator.has_function_calls_in_progress
+
+    async def test_fast_async_function_call_settles_in_place(self):
+        """An async call whose result lands before anything else settles like a sync one."""
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        frames_to_send = [
+            FunctionCallInProgressFrame(
+                function_name="book_table",
+                tool_call_id="1",
+                arguments={"size": 2},
+                cancel_on_interruption=False,
+            ),
+            SleepFrame(),
+            FunctionCallResultFrame(
+                function_name="book_table",
+                tool_call_id="1",
+                arguments={"size": 2},
+                result={"status": "booked"},
+                run_llm=False,
+            ),
+        ]
+        await run_test(aggregator, frames_to_send=frames_to_send, expected_down_frames=[])
+        tool_messages = [m for m in context.messages if m.get("role") == "tool"]
+        assert len(tool_messages) == 1
+        assert tool_messages[0]["tool_call_id"] == "1"
+        assert tool_messages[0]["content"] == '{"status": "booked"}'
+        assert all(async_tool_messages.parse_message(m) is None for m in context.messages)
+        assert not aggregator.has_function_calls_in_progress
+
+    async def test_parallel_fast_async_function_calls_settle_in_place(self):
+        """Sibling placeholders and results are protocol bookkeeping, not the conversation moving on."""
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+
+        def start(tool_call_id):
+            return FunctionCallInProgressFrame(
+                function_name="lookup",
+                tool_call_id=tool_call_id,
+                arguments={},
+                cancel_on_interruption=False,
+                group_id="batch",
+            )
+
+        def result(tool_call_id):
+            return FunctionCallResultFrame(
+                function_name="lookup",
+                tool_call_id=tool_call_id,
+                arguments={},
+                result={"answer": tool_call_id},
+                run_llm=False,
+            )
+
+        frames_to_send = [
+            start("1"),
+            start("2"),
+            SleepFrame(),
+            result("1"),
+            SleepFrame(),
+            result("2"),
+        ]
+        await run_test(aggregator, frames_to_send=frames_to_send, expected_down_frames=[])
+        tool_messages = [m for m in context.messages if m.get("role") == "tool"]
+        assert [m["content"] for m in tool_messages] == ['{"answer": "1"}', '{"answer": "2"}']
+        assert all(async_tool_messages.parse_message(m) is None for m in context.messages)
+
+    async def test_result_during_model_response_settles_in_place(self):
+        """A response in flight has left nothing in the context yet, so the context cannot see it."""
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        frames_to_send = [
+            FunctionCallInProgressFrame(
+                function_name="lookup",
+                tool_call_id="1",
+                arguments={},
+                cancel_on_interruption=False,
+            ),
+            SleepFrame(),
+            LLMFullResponseStartFrame(),
+            SleepFrame(),
+            FunctionCallResultFrame(
+                function_name="lookup",
+                tool_call_id="1",
+                arguments={},
+                result={"answer": 42},
+                run_llm=False,
+            ),
+            SleepFrame(),
+            LLMFullResponseEndFrame(),
+        ]
+        await run_test(aggregator, frames_to_send=frames_to_send)
+        tool_messages = [m for m in context.messages if m.get("role") == "tool"]
+        assert tool_messages[0]["content"] == '{"answer": 42}'
+        assert all(async_tool_messages.parse_message(m) is None for m in context.messages)
+
+    async def test_async_function_call_after_spoken_filler_settles_in_place(self):
+        """Filler spoken with a TTSSpeakFrame while the call runs does not defer it."""
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        frames_to_send = [
+            FunctionCallInProgressFrame(
+                function_name="lookup",
+                tool_call_id="1",
+                arguments={},
+                cancel_on_interruption=False,
+            ),
+            SleepFrame(),
+            TTSStartedFrame(append_to_context=True),
+            TTSTextFrame("Let me check on that.", aggregated_by=AggregationType.SENTENCE),
+            LLMAssistantPushAggregationFrame(),
+            SleepFrame(),
+            FunctionCallResultFrame(
+                function_name="lookup",
+                tool_call_id="1",
+                arguments={},
+                result={"answer": 42},
+                run_llm=False,
+            ),
+        ]
+        await run_test(aggregator, frames_to_send=frames_to_send)
+        tool_messages = [m for m in context.messages if m.get("role") == "tool"]
+        assert tool_messages[0]["content"] == '{"answer": 42}'
+        assert all(async_tool_messages.parse_message(m) is None for m in context.messages)
+        assert context.messages[-1] == {"role": "assistant", "content": "Let me check on that."}
+
+    async def test_async_function_call_after_user_message_is_deferred(self):
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        frames_to_send = [
+            FunctionCallInProgressFrame(
+                function_name="lookup",
+                tool_call_id="1",
+                arguments={},
+                cancel_on_interruption=False,
+            ),
+            SleepFrame(),
+            LLMMessagesAppendFrame(messages=[{"role": "user", "content": "Any news?"}]),
+            SleepFrame(),
+            FunctionCallResultFrame(
+                function_name="lookup",
+                tool_call_id="1",
+                arguments={},
+                result={"answer": 42},
+                run_llm=False,
+            ),
+        ]
+        await run_test(aggregator, frames_to_send=frames_to_send, expected_down_frames=[])
+        payload = async_tool_messages.parse_message(context.messages[-1])
+        assert payload is not None and payload.kind == "final"
+        assert payload.tool_call_id == "1"
+
+    async def test_async_function_call_after_model_response_settles_in_place(self):
+        """Assistant text with no user turn since the placeholder does not defer the call."""
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        frames_to_send = [
+            FunctionCallInProgressFrame(
+                function_name="lookup",
+                tool_call_id="1",
+                arguments={},
+                cancel_on_interruption=False,
+            ),
+            SleepFrame(),
+            LLMFullResponseStartFrame(),
+            LLMTextFrame("Still looking."),
+            LLMFullResponseEndFrame(),
+            SleepFrame(),
+            FunctionCallResultFrame(
+                function_name="lookup",
+                tool_call_id="1",
+                arguments={},
+                result={"answer": 42},
+                run_llm=False,
+            ),
+        ]
+        await run_test(aggregator, frames_to_send=frames_to_send)
+        tool_messages = [m for m in context.messages if m.get("role") == "tool"]
+        assert tool_messages[0]["content"] == '{"answer": 42}'
+        assert all(async_tool_messages.parse_message(m) is None for m in context.messages)
+
+    async def test_async_function_call_after_developer_message_is_deferred(self):
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        frames_to_send = [
+            FunctionCallInProgressFrame(
+                function_name="lookup",
+                tool_call_id="1",
+                arguments={},
+                cancel_on_interruption=False,
+            ),
+            SleepFrame(),
+            LLMMessagesAppendFrame(
+                messages=[{"role": "developer", "content": "Now help with billing."}]
+            ),
+            SleepFrame(),
+            FunctionCallResultFrame(
+                function_name="lookup",
+                tool_call_id="1",
+                arguments={},
+                result={"answer": 42},
+                run_llm=False,
+            ),
+        ]
+        await run_test(aggregator, frames_to_send=frames_to_send, expected_down_frames=[])
+        payload = async_tool_messages.parse_message(context.messages[-1])
+        assert payload is not None and payload.kind == "final"
+
+    async def test_async_function_call_after_context_rebuild_is_deferred(self):
+        """A placeholder the context no longer holds cannot take the result in place."""
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        frames_to_send = [
+            FunctionCallInProgressFrame(
+                function_name="lookup",
+                tool_call_id="1",
+                arguments={},
+                cancel_on_interruption=False,
+            ),
+            SleepFrame(),
+            LLMMessagesUpdateFrame(messages=[{"role": "developer", "content": "Fresh start."}]),
+            SleepFrame(),
+            FunctionCallResultFrame(
+                function_name="lookup",
+                tool_call_id="1",
+                arguments={},
+                result={"answer": 42},
+                run_llm=False,
+            ),
+        ]
+        await run_test(aggregator, frames_to_send=frames_to_send, expected_down_frames=[])
+        payload = async_tool_messages.parse_message(context.messages[-1])
+        assert payload is not None and payload.kind == "final"
+        assert payload.tool_call_id == "1"
+
+    async def test_intermediate_update_keeps_the_call_deferred(self):
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        frames_to_send = [
+            FunctionCallInProgressFrame(
+                function_name="lookup",
+                tool_call_id="1",
+                arguments={},
+                cancel_on_interruption=False,
+            ),
+            SleepFrame(),
+            FunctionCallResultFrame(
+                function_name="lookup",
+                tool_call_id="1",
+                arguments={},
+                result={"progress": "halfway"},
+                run_llm=False,
+                properties=FunctionCallResultProperties(is_final=False),
+            ),
+            SleepFrame(),
+            FunctionCallResultFrame(
+                function_name="lookup",
+                tool_call_id="1",
+                arguments={},
+                result={"answer": 42},
+                run_llm=False,
+            ),
+        ]
+        await run_test(aggregator, frames_to_send=frames_to_send, expected_down_frames=[])
+        kinds = [
+            p.kind for p in (async_tool_messages.parse_message(m) for m in context.messages) if p
+        ]
+        assert kinds == ["started", "intermediate", "final"]
 
     async def test_async_function_call_cancel(self):
         """A cancelled async call settles on the same channel its results use."""

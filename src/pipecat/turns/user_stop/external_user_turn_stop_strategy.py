@@ -19,9 +19,9 @@ from pipecat.frames.frames import (
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
+from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.turns.types import ProcessFrameResult
 from pipecat.turns.user_stop.base_user_turn_stop_strategy import BaseUserTurnStopStrategy
-from pipecat.utils.asyncio.task_manager import BaseTaskManager
 
 
 class ExternalUserTurnStopStrategy(BaseUserTurnStopStrategy):
@@ -116,14 +116,14 @@ class ExternalUserTurnStopStrategy(BaseUserTurnStopStrategy):
         self._turn_announced_elsewhere = False
         self._event.clear()
 
-    async def setup(self, task_manager: BaseTaskManager):
-        """Initialize the strategy with the given task manager.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the strategy.
 
         Args:
-            task_manager: The task manager to be associated with this instance.
+            setup: Configuration object containing setup parameters.
         """
-        await super().setup(task_manager)
-        self._task = task_manager.create_task(self._task_handler(), f"{self}::_task_handler")
+        await super().setup(setup)
+        self._task = self.create_task(self._task_handler(), f"{self}::_task_handler")
 
     async def cleanup(self):
         """Cleanup the strategy."""

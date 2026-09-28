@@ -4,11 +4,11 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Google Cloud Speech-to-Text V2 service implementation for Pipecat.
+"""Google speech-to-text service implementations for Pipecat.
 
-This module provides a Google Cloud Speech-to-Text V2 service with streaming
-support, enabling real-time speech recognition with features like automatic
-punctuation, voice activity detection, and multi-language support.
+``GoogleSTTService`` provides Google Cloud Speech-to-Text V2, with features
+like automatic punctuation, voice activity detection, and multi-language
+support.
 """
 
 import asyncio
@@ -34,9 +34,9 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     InterimTranscriptionFrame,
-    StartFrame,
     TranscriptionFrame,
 )
+from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import GOOGLE_TTFS_P99
 from pipecat.services.stt_service import STTService
@@ -468,6 +468,14 @@ class GoogleSTTSettings(STTSettings):
             service. The telephony model rejects adaptation and transcribes
             without it; support otherwise varies by model and language — see
             https://cloud.google.com/speech-to-text/v2/docs/speech-to-text-supported-languages
+
+        denoiser_config: Background-noise removal, as a ``DenoiserConfig``
+            message or an equivalent dict::
+
+                denoiser_config={"denoise_audio": True}
+
+            Only the Chirp 3 models denoise; see
+            https://cloud.google.com/speech-to-text/docs/models/chirp-3
     """
 
     languages: list[Language] | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -482,6 +490,9 @@ class GoogleSTTSettings(STTSettings):
     enable_interim_results: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     enable_voice_activity_events: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     adaptation: dict[str, Any] | cloud_speech.SpeechAdaptation | None | NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
+    denoiser_config: dict[str, Any] | cloud_speech.DenoiserConfig | None | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
 
@@ -624,6 +635,7 @@ class GoogleSTTService(STTService):
             enable_interim_results=True,
             enable_voice_activity_events=False,
             adaptation=None,
+            denoiser_config=None,
         )
 
         # 2. No direct init arg overrides
@@ -766,6 +778,15 @@ class GoogleSTTService(STTService):
         # Already a message: normalizing on the way in leaves nothing to convert.
         return _normalize_speech_adaptation(adaptation)
 
+    def _get_denoiser_config(self) -> cloud_speech.DenoiserConfig | None:
+        """Build the DenoiserConfig message from settings."""
+        denoiser_config = self._settings.denoiser_config
+        if not is_given(denoiser_config) or denoiser_config is None:
+            return None
+        if isinstance(denoiser_config, cloud_speech.DenoiserConfig):
+            return denoiser_config
+        return cloud_speech.DenoiserConfig(denoiser_config)
+
     async def _reconnect_if_needed(self):
         """Reconnect the stream if it's currently active."""
         if self._streaming_task:
@@ -831,14 +852,19 @@ class GoogleSTTService(STTService):
 
         return changed
 
-    async def start(self, frame: StartFrame):
-        """Start the STT service and establish connection.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
 
         Args:
-            frame: The start frame triggering the service start.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         await self._connect()
+
+    async def cleanup(self):
+        """Release streaming resources."""
+        await super().cleanup()
+        await self._disconnect()
 
     async def stop(self, frame: EndFrame):
         """Stop the STT service and clean up resources.
@@ -856,11 +882,6 @@ class GoogleSTTService(STTService):
             frame: The cancel frame triggering the service cancellation.
         """
         await super().cancel(frame)
-        await self._disconnect()
-
-    async def cleanup(self):
-        """Release streaming resources."""
-        await super().cleanup()
         await self._disconnect()
 
     @deprecated(
@@ -964,6 +985,10 @@ class GoogleSTTService(STTService):
                 enable_word_confidence=self._settings.enable_word_confidence,
             ),
         )
+
+        denoiser_config = self._get_denoiser_config()
+        if denoiser_config is not None:
+            recognition_config.denoiser_config = denoiser_config
 
         speech_adaptation = self._get_speech_adaptation()
         if speech_adaptation is not None:

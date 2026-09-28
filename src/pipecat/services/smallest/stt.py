@@ -30,11 +30,10 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     InterimTranscriptionFrame,
-    StartFrame,
     TranscriptionFrame,
     VADUserStoppedSpeakingFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import SMALLEST_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
@@ -225,9 +224,13 @@ class SmallestSTTService(WebsocketSTTService):
         """
         return language_to_smallest_stt_language(language)
 
-    async def start(self, frame: StartFrame):
-        """Start the service and connect to the WebSocket."""
-        await super().start(frame)
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
+
+        Args:
+            setup: Configuration object containing setup parameters.
+        """
+        await super().setup(setup)
         await self._connect()
 
     async def stop(self, frame: EndFrame):

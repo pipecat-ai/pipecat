@@ -15,6 +15,7 @@ import aiohttp
 from loguru import logger
 from pydantic import BaseModel
 
+from pipecat import version as pipecat_version
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
@@ -28,7 +29,7 @@ from pipecat.utils.tracing.service_decorators import traced_tts
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
 try:
-    from speechmatics.rt import __version__
+    import speechmatics.rt  # noqa: F401
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error('In order to use Speechmatics, you need to `uv add "pipecat-ai[speechmatics]"`.')
@@ -300,7 +301,7 @@ def _get_endpoint_url(base_url: str, voice: str, sample_rate: int) -> str:
     """
     query_params = {}
     query_params["output_format"] = f"pcm_{sample_rate}"
-    query_params["sm-app"] = f"pipecat/{__version__}"
+    query_params["sm-app"] = f"pipecat/{pipecat_version()}"
     query = urlencode(query_params)
 
     return f"{base_url}/generate/{voice}?{query}"

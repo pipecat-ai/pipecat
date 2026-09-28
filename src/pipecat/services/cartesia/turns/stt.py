@@ -25,18 +25,27 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
-    StartFrame,
     STTMetadataFrame,
     TranscriptionFrame,
 )
+from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.cartesia.stt import _prepare_keyterms
 from pipecat.services.settings import STTSettings
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language
-from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
+from pipecat.turns.eager_end_of_turn_mixin import EagerEndOfTurnSTTServiceMixin
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
-from pipecat.utils.types import NOT_GIVEN, NotGiven
+from pipecat.utils.types import NOT_GIVEN, NotGiven, is_given
+
+# Connection-bound turn detection query parameters, named as Cartesia documents
+# them. A change to any of them is applied by reconnecting.
+_TURN_DETECTION_FIELDS = (
+    "turn_start_threshold",
+    "turn_eager_end_threshold",
+    "turn_end_threshold",
+    "turn_end_timeout_ms",
+)
 
 
 @dataclass
@@ -46,18 +55,35 @@ class CartesiaTurnsSTTSettings(STTSettings):
     The ink-2 model family is English-only and does not support runtime model
     or language switching.
 
+    The four ``turn_*`` fields tune server-side turn detection. Cartesia binds
+    them to a connection, so updating any of them at runtime triggers a
+    reconnect. See https://docs.cartesia.ai/use-the-api/stt/turns for the
+    Balanced, Responsive and Patient starting profiles.
+
     Parameters:
         keyterm: Key terms or phrases to bias transcription towards, sent as
             repeated ``keyterm`` query parameters on the connection URL.
             Cartesia binds keyterms to a connection, so updating this setting
             at runtime triggers a reconnect. See
             https://docs.cartesia.ai/use-the-api/stt/keyterms.
+        turn_start_threshold: Likelihood above which the server emits
+            ``turn.start``. 0.5–0.9; Cartesia defaults to 0.8.
+        turn_eager_end_threshold: Likelihood below which the server emits
+            ``turn.eager_end``. 0.3–0.6; Cartesia defaults to 0.4.
+        turn_end_threshold: Likelihood below which the server emits
+            ``turn.end``. 0.05–0.5; Cartesia defaults to 0.2.
+        turn_end_timeout_ms: Milliseconds to wait after the user stops speaking
+            before emitting ``turn.end``. 640–11200; Cartesia defaults to 5600.
     """
 
     keyterm: list[str] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    turn_start_threshold: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    turn_eager_end_threshold: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    turn_end_threshold: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    turn_end_timeout_ms: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
-class CartesiaTurnsSTTService(WebsocketSTTService):
+class CartesiaTurnsSTTService(EagerEndOfTurnSTTServiceMixin, WebsocketSTTService):
     """Speech-to-text service using the Cartesia Streaming ASR v2 (Ink-2) API.
 
     Speaks the v2 turn-based wire protocol exposed by
@@ -72,8 +98,11 @@ class CartesiaTurnsSTTService(WebsocketSTTService):
     Each ``turn.start`` pushes a :class:`ProposedUserStartedSpeakingFrame`; each
     ``turn.update`` pushes an :class:`InterimTranscriptionFrame`; ``turn.end``
     pushes a final :class:`TranscriptionFrame` followed by a
-    :class:`ProposedUserStoppedSpeakingFrame`. ``turn.eager_end`` and
-    ``turn.resume`` are surfaced only via their respective event handlers.
+    :class:`ProposedUserStoppedSpeakingFrame`. ``turn.eager_end`` pushes an
+    :class:`EagerTranscriptionFrame` and ``turn.resume`` an
+    :class:`EagerEndOfTurnCancelFrame`, which
+    :class:`~pipecat.turns.user_turn_strategies.EagerUserTurnStrategies` uses to
+    answer a predicted end of turn ahead of the committed one.
 
     Event handlers available (in addition to the base
     ``on_connected`` / ``on_disconnected`` / ``on_connection_error``):
@@ -102,6 +131,7 @@ class CartesiaTurnsSTTService(WebsocketSTTService):
         sample_rate: int | None = None,
         should_interrupt: bool = True,
         watchdog_min_timeout: float = 0.5,
+        enable_eager_end_of_turn: bool = False,
         extra_headers: dict[str, str] | None = None,
         settings: Settings | None = None,
         **kwargs,
@@ -121,6 +151,13 @@ class CartesiaTurnsSTTService(WebsocketSTTService):
             watchdog_min_timeout: Minimum idle timeout before sending silence to
                 prevent dangling turns. The actual threshold is
                 ``max(chunk_duration * 2, watchdog_min_timeout)``. Defaults to 0.5.
+            enable_eager_end_of_turn: Whether to answer the server's predicted
+                end of turn (``turn.eager_end``) ahead of the committed one, so
+                the gap between the two is spent generating a response rather
+                than waiting. The response is discarded if the user resumes
+                speaking or the committed transcript differs from the predicted
+                one. Off by default: it spends an inference on every prediction,
+                including the ones the server withdraws.
             extra_headers: Optional additional HTTP headers to send with the
                 WebSocket handshake.
             settings: Runtime-updatable settings. The ink-2 family does not
@@ -134,6 +171,11 @@ class CartesiaTurnsSTTService(WebsocketSTTService):
             model="ink-2",
             language=None,
             keyterm=None,
+            # Left unset so the server applies its own turn detection defaults.
+            turn_start_threshold=None,
+            turn_eager_end_threshold=None,
+            turn_end_threshold=None,
+            turn_end_timeout_ms=None,
         )
 
         if settings is not None:
@@ -145,6 +187,7 @@ class CartesiaTurnsSTTService(WebsocketSTTService):
         super().__init__(
             sample_rate=sample_rate,
             reconnect_on_error=False,
+            enable_eager_end_of_turn=enable_eager_end_of_turn,
             settings=default_settings,
             **kwargs,
         )
@@ -187,15 +230,17 @@ class CartesiaTurnsSTTService(WebsocketSTTService):
         return False
 
     def service_metadata_frame(self) -> STTMetadataFrame:
-        """Recommend external turn strategies: this service detects turns server-side.
+        """Recommend turn strategies that leave turn detection to the server.
 
         Cartesia's turn-detection STT defines turn boundaries on the server and
         emits ``ProposedUserStarted/StoppedSpeakingFrame``, so the user aggregator
-        resolves those rather than running local VAD/smart-turn. Applied unless
-        the user passed their own ``user_turn_strategies``.
+        resolves those rather than running local VAD/smart-turn. With
+        ``enable_eager_end_of_turn``, the recommendation also answers the
+        server's predicted end of turn. Applied unless the user passed their own
+        ``user_turn_strategies``.
         """
         frame = super().service_metadata_frame()
-        frame.user_turn_strategies = ExternalUserTurnStrategies(
+        frame.user_turn_strategies = self.recommended_user_turn_strategies(
             enable_interruptions=self._should_interrupt,
         )
         return frame
@@ -204,13 +249,13 @@ class CartesiaTurnsSTTService(WebsocketSTTService):
     # Lifecycle
     # ------------------------------------------------------------------
 
-    async def start(self, frame: StartFrame):
-        """Start the STT service and establish the WebSocket connection.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
 
         Args:
-            frame: The start frame containing initialization parameters.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         await self._connect()
 
     async def stop(self, frame: EndFrame):
@@ -234,9 +279,10 @@ class CartesiaTurnsSTTService(WebsocketSTTService):
     async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
         """Apply a settings delta.
 
-        Keyterms are bound to a connection, so a changed ``keyterm`` list is
-        applied by reconnecting. Ink-2 does not support runtime model or
-        language switching, so those changes are reported as unhandled.
+        Keyterms and the turn detection thresholds are bound to a connection,
+        so a change to any of them is applied by reconnecting. Ink-2 does not
+        support runtime model or language switching, so those changes are
+        reported as unhandled.
 
         Args:
             delta: A :class:`STTSettings` (or
@@ -247,9 +293,10 @@ class CartesiaTurnsSTTService(WebsocketSTTService):
         """
         changed = await super()._update_settings(delta)
 
-        self._warn_unhandled_updated_settings(changed.keys() - {"keyterm"})
+        connection_bound = {"keyterm", *_TURN_DETECTION_FIELDS}
+        self._warn_unhandled_updated_settings(changed.keys() - connection_bound)
 
-        if "keyterm" in changed:
+        if changed.keys() & connection_bound:
             await self._request_reconnect()
 
         return changed
@@ -279,6 +326,11 @@ class CartesiaTurnsSTTService(WebsocketSTTService):
             ("encoding", "pcm_s16le"),
             ("sample_rate", str(self.sample_rate)),
         ]
+        params.extend(
+            (name, str(value))
+            for name in _TURN_DETECTION_FIELDS
+            if is_given(value := getattr(self._settings, name)) and value is not None
+        )
         params.extend(("keyterm", term) for term in _prepare_keyterms(self._settings.keyterm))
         # Cartesia expects spaces inside a keyterm as %20, which urlencode only
         # emits with quote_via=quote.
@@ -358,7 +410,7 @@ class CartesiaTurnsSTTService(WebsocketSTTService):
             await self.stop_all_metrics()
 
             if self._websocket:
-                logger.debug("Disconnecting from Cartesia Ink-2 ASR")
+                logger.debug(f"{self}: Disconnecting from Cartesia Ink-2 ASR")
                 await self._websocket.close()
         except Exception as e:
             await self.push_error(error_msg=f"Error closing websocket: {e}", exception=e)
@@ -523,18 +575,31 @@ class CartesiaTurnsSTTService(WebsocketSTTService):
         await self._call_event_handler("on_turn_update", transcript)
 
     async def _handle_turn_eager_end(self, data: dict):
+        """Handle an eagerly predicted end of turn.
+
+        The prediction may be withdrawn by ``turn.resume``, and the transcript
+        committed by ``turn.end`` may differ from this one. Pair the service with
+        :class:`~pipecat.turns.user_turn_strategies.EagerUserTurnStrategies` to
+        have a response generated here and discarded if either happens.
+        """
         transcript = data.get("transcript", "")
-        logger.trace(f"Cartesia Ink-2 ASR turn.eager_end: {transcript}")
+        await self._push_eager_end_of_turn(
+            transcript, user_id=self._user_id, language=self._language, result=data
+        )
         await self._call_event_handler("on_turn_eager_end", transcript)
 
     async def _handle_turn_resume(self, data: dict):
+        """Handle the user resuming a turn that was eagerly predicted to have ended."""
         logger.trace("Cartesia Ink-2 ASR turn.resume")
+        await self._cancel_eager_end_of_turn()
         await self._call_event_handler("on_turn_resume")
 
     async def _handle_turn_end(self, data: dict):
         transcript = data.get("transcript", "")
         logger.debug(f"Cartesia Ink-2 ASR turn.end: {transcript}")
         self._user_is_speaking = False
+        # The turn is committed, so any eager prediction it followed is resolved.
+        self._clear_eager_end_of_turn()
         # The watchdog injects silence to force turn.end when audio stops
         # mid-turn, so a turn that captured only silence/noise can end with
         # an empty transcript. Skip the TranscriptionFrame in that case to

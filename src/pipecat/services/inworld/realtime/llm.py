@@ -14,6 +14,7 @@ import base64
 import json
 import time
 import urllib.parse
+import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from dataclasses import fields as dataclass_fields
@@ -43,7 +44,6 @@ from pipecat.frames.frames import (
     LLMTextFrame,
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
-    StartFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
@@ -55,7 +55,7 @@ from pipecat.frames.frames import (
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators import async_tool_messages
 from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
@@ -210,7 +210,7 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
 
         llm = InworldRealtimeLLMService(
             api_key=os.getenv("INWORLD_API_KEY"),
-            llm_model="openai/gpt-4.1-nano",
+            llm_model="openai/gpt-4.1-mini",
             voice="Sarah",
             tts_model="inworld-tts-2",
         )
@@ -224,7 +224,7 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
             api_key=os.getenv("INWORLD_API_KEY"),
             settings=InworldRealtimeLLMService.Settings(
                 session_properties=SessionProperties(
-                    model="openai/gpt-4.1-nano",
+                    model="openai/gpt-4.1-mini",
                     temperature=0.7,
                     audio=AudioConfiguration(
                         input=AudioInput(
@@ -271,7 +271,7 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
 
         Args:
             api_key: Inworld API key for authentication.
-            llm_model: LLM model to use (e.g. "openai/gpt-4.1-nano").
+            llm_model: LLM model to use (e.g. "openai/gpt-4.1-mini").
                 Shorthand for ``session_properties.model``.
             voice: Voice ID for TTS output (e.g. "Sarah", "Clive").
                 Shorthand for ``session_properties.audio.output.voice``.
@@ -523,11 +523,20 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
         if isinstance(props.audio.output.format, events.PCMAudioFormat):
             props.audio.output.format.rate = cast(events.SUPPORTED_SAMPLE_RATES, output_sample_rate)
 
-    async def start(self, frame: StartFrame):
-        """Start the service and establish WebSocket connection."""
-        await super().start(frame)
-        self._ensure_audio_config(frame.audio_in_sample_rate, frame.audio_out_sample_rate)
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
+
+        Args:
+            setup: Configuration object containing setup parameters.
+        """
+        await super().setup(setup)
+        self._ensure_audio_config(setup.audio_in_sample_rate, setup.audio_out_sample_rate)
         await self._connect()
+
+    async def cleanup(self):
+        """Release resources on teardown."""
+        await super().cleanup()
+        await self._disconnect()
 
     async def stop(self, frame: EndFrame):
         """Stop the service and close WebSocket connection."""
@@ -537,11 +546,6 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
     async def cancel(self, frame: CancelFrame):
         """Cancel the service and close WebSocket connection."""
         await super().cancel(frame)
-        await self._disconnect()
-
-    async def cleanup(self):
-        """Release resources on teardown."""
-        await super().cleanup()
         await self._disconnect()
 
     #
@@ -600,13 +604,20 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
             messages = self._context.get_messages()
             current_count = len(messages)
             if current_count > self._last_context_message_count:
+                new_messages = messages[self._last_context_message_count :]
                 last_msg = messages[-1]
                 self._last_context_message_count = current_count
 
                 # When server-side VAD handled this turn, the server already
-                # has the user's audio and auto-created a response.  Skip
-                # sending a duplicate text item + response.create.
-                if self._server_vad_handled_turn:
+                # has the user's audio and auto-created a response. Skip the
+                # corresponding context message, but do not consume this marker
+                # for assistant/tool updates that can arrive before the deferred
+                # realtime transcript.
+                server_user_message_added = any(
+                    isinstance(message, Mapping) and message.get("role") == "user"
+                    for message in new_messages
+                )
+                if self._server_vad_handled_turn and server_user_message_added:
                     self._server_vad_handled_turn = False
                     return
 
@@ -646,7 +657,10 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
         Args:
             event: The client event to send.
         """
-        await self._ws_send(event.model_dump(exclude_none=True))
+        message = event.model_dump(exclude_none=True, by_alias=True)
+        if isinstance(event, events.SessionUpdateEvent):
+            logger.debug(f"{self} sending session.update: {json.dumps(message)}")
+        await self._ws_send(message)
 
     async def _connect(self):
         """Establish WebSocket connection to Inworld."""
@@ -660,7 +674,7 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
                 auth_header = f"Basic {self.api_key}"
 
             # Inworld requires key and protocol query parameters
-            session_key = f"pipecat-realtime-{int(time.time() * 1000)}"
+            session_key = f"pipecat-realtime-{uuid.uuid4().hex}"
             params = urllib.parse.urlencode({"key": session_key, "protocol": "realtime"})
             separator = "&" if "?" in self.base_url else "?"
             uri = f"{self.base_url}{separator}{params}"
@@ -753,7 +767,14 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
                 list[events.InworldTool], adapter.from_standard_tools(settings.tools)
             )
 
-        settings.provider_data = {"metadata": {"sdk": "pipecat-realtime"}}
+        provider_data = dict(settings.provider_data or {})
+        metadata = dict(provider_data.get("metadata") or {})
+        metadata["sdk"] = "pipecat-realtime"
+        provider_data["metadata"] = metadata
+        provider_data["auto_tool_response"] = (
+            False  # Set to false because Pipecat creates a tool response from client
+        )
+        settings.provider_data = provider_data
 
         await self.send_client_event(events.SessionUpdateEvent(session=settings))
 

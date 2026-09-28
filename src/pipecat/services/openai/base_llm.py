@@ -8,12 +8,12 @@
 
 import asyncio
 import json
+import re
 from collections.abc import Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import Any
 
-import httpx
 from loguru import logger
 from openai import (
     NOT_GIVEN as OPENAI_NOT_GIVEN,
@@ -42,8 +42,9 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.utils.deprecation import deprecated
+from pipecat.utils.http import TIMEOUT_EXCEPTIONS, connection_limits
 from pipecat.utils.tracing.service_decorators import traced_llm
-from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 
 
 @dataclass
@@ -72,6 +73,13 @@ class OpenAILLMSettings(LLMSettings):
     )
 
 
+# OpenAI models that predate strict JSON schema replies: gpt-3.5, gpt-4 and
+# gpt-4-turbo, the first gpt-4o snapshot, chatgpt-4o and the o1 previews.
+OPENAI_MODEL_WITHOUT_RESPONSE_SCHEMA = re.compile(
+    r"^(gpt-3\.5|gpt-4($|-)|gpt-4o-2024-05-13|chatgpt-4o|o1-mini|o1-preview)"
+)
+
+
 class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
     """Base class for all services that use the AsyncOpenAI client.
 
@@ -92,6 +100,10 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
     this to ``False``, which causes the adapter to convert "developer"
     messages to "user" messages before sending them to the API.
     """
+
+    supports_response_schema: bool = True
+    """Whether the API can enforce a response schema. OpenAI-compatible
+    services whose API cannot should set this to ``False``."""
 
     @deprecated(
         "`BaseOpenAILLMService.InputParams` is deprecated since 0.0.105 and will be removed in "
@@ -279,7 +291,7 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
             organization=organization,
             project=project,
             http_client=DefaultAsyncHttpxClient(
-                limits=httpx.Limits(
+                limits=connection_limits(
                     max_keepalive_connections=100, max_connections=1000, keepalive_expiry=None
                 )
             ),
@@ -384,11 +396,45 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
 
         return params
 
+    @staticmethod
+    def _merge_extra_body(params: dict[str, Any], fields: Mapping[str, Any]):
+        """Add provider-specific fields to a request's ``extra_body``.
+
+        The OpenAI client rejects keyword arguments it doesn't know, so fields
+        specific to an OpenAI-compatible provider travel in ``extra_body``,
+        which the client merges into the request JSON as-is.
+
+        Args:
+            params: Request parameters, updated in place. An ``extra_body``
+                already there, supplied through ``Settings.extra``, wins key by
+                key, matching how ``extra`` overrides every other request
+                parameter. It is copied rather than modified.
+            fields: Fields to add. Unset and ``None`` values are omitted.
+        """
+        extra_body = {
+            name: value for name, value in fields.items() if is_given(value) and value is not None
+        }
+        extra_body.update(params.get("extra_body") or {})
+        if extra_body:
+            params["extra_body"] = extra_body
+
+    @staticmethod
+    def model_supports_response_schema(model: str) -> bool:
+        """Whether a model can enforce a response schema.
+
+        OpenAI models before gpt-4o-mini and gpt-4o-2024-08-06 cannot.
+
+        Args:
+            model: The model name.
+        """
+        return not OPENAI_MODEL_WITHOUT_RESPONSE_SCHEMA.match(model)
+
     async def run_inference(
         self,
         context: LLMContext,
         max_tokens: int | None = None,
         system_instruction: str | None = None,
+        response_schema: dict[str, Any] | None = None,
     ) -> str | None:
         """Run a one-shot, out-of-band (i.e. out-of-pipeline) inference with the given LLM context.
 
@@ -398,6 +444,9 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
                 overrides the service's default max_tokens/max_completion_tokens setting.
             system_instruction: Optional system instruction to use for this inference.
                 If provided, overrides any system instruction in the context.
+            response_schema: Optional JSON schema the reply must follow. The
+                service asks the provider to enforce it, so the reply is JSON
+                text matching the schema.
 
         Returns:
             The LLM's response as a string, or None if no response is generated.
@@ -426,6 +475,13 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
                 params["max_completion_tokens"] = max_tokens
             else:
                 params["max_tokens"] = max_tokens
+
+        response_schema = self._check_response_schema(response_schema)
+        if response_schema is not None:
+            params["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {"name": "response", "schema": response_schema, "strict": True},
+            }
 
         # LLM completion
         response = await self._client.chat.completions.create(**params)
@@ -482,6 +538,14 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
                             if chunk.usage.prompt_tokens_details
                             else None
                         )
+                        # Tokens written into the prompt cache, billed above the
+                        # input rate. Providers without prompt caching omit the
+                        # field, which reads as "not reported" rather than zero.
+                        cache_write_tokens = (
+                            getattr(chunk.usage.prompt_tokens_details, "cache_write_tokens", None)
+                            if chunk.usage.prompt_tokens_details
+                            else None
+                        )
                         reasoning_tokens = (
                             chunk.usage.completion_tokens_details.reasoning_tokens
                             if chunk.usage.completion_tokens_details
@@ -492,6 +556,7 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
                             completion_tokens=chunk.usage.completion_tokens,
                             total_tokens=chunk.usage.total_tokens,
                             cache_read_input_tokens=cached_tokens,
+                            cache_creation_input_tokens=cache_write_tokens,
                             reasoning_tokens=reasoning_tokens,
                         )
 
@@ -507,6 +572,11 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
                         continue
 
                     if chunk.choices[0].delta.tool_calls:
+                        # A turn that only calls tools produces no answer text, so
+                        # the call itself is what the caller gets and TTFAT ends
+                        # here rather than going unmeasured.
+                        await self.stop_ttfat_metrics()
+
                         # We're streaming the LLM response to enable the fastest response times.
                         # For text, we just yield each chunk as we receive it and count on consumers
                         # to do whatever coalescing they need (eg. to pass full sentences to TTS)
@@ -598,7 +668,7 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
                 await self.push_frame(LLMFullResponseStartFrame())
                 await self.start_processing_metrics()
                 await self._process_context(frame.context)
-            except httpx.TimeoutException as e:
+            except TIMEOUT_EXCEPTIONS as e:
                 await self._call_event_handler("on_completion_timeout")
                 await self.push_error(error_msg="LLM completion timeout", exception=e)
             except Exception as e:

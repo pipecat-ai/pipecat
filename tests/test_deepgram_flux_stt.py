@@ -5,13 +5,28 @@
 #
 
 import asyncio
+import dataclasses
 import unittest
 
 import pytest
 
-from pipecat.services.deepgram.flux.base import (
+from pipecat.services.deepgram.flux.stt import DeepgramFluxSTTService
+from pipecat.services.deepgram.flux.stt_base import (
     DeepgramFluxSTTBase,
     DeepgramFluxSTTSettings,
+    FluxConnectionNotConfirmedError,
+    FluxFatalError,
+)
+from pipecat.turns.user_turn_strategies import (
+    EagerUserTurnStrategies,
+    ExternalUserTurnStrategies,
+)
+from pipecat.utils.errors import ErrorCategory
+
+pytest.importorskip("aws_sdk_sagemaker_runtime_http2")
+
+from pipecat.services.deepgram.flux.sagemaker.stt import (  # noqa: E402
+    DeepgramFluxSageMakerSTTService,
 )
 
 
@@ -40,6 +55,8 @@ def _make_fake_flux_service():
             self._active = True
             self.sent_messages = []
             self.errors = []
+            self.reconnect_requests = 0
+            self.connection_events = []
 
         async def _transport_send_audio(self, audio: bytes):
             pass
@@ -51,9 +68,15 @@ def _make_fake_flux_service():
             return self._active
 
         async def _connect(self):
-            pass
+            self.connection_events.append("connect")
 
         async def _disconnect(self):
+            self.connection_events.append("disconnect")
+
+        async def _request_reconnect(self):
+            self.reconnect_requests += 1
+
+        async def set_usable(self, usable: bool):
             pass
 
         async def run_stt(self, audio: bytes):
@@ -200,6 +223,200 @@ def test_reset_configure_state_with_nothing_in_flight_is_safe():
 
     assert not service._configure_in_flight
     assert service._configure_pending_fields is None
+
+
+@pytest.mark.asyncio
+async def test_do_reconnect_tears_down_before_re_establishing():
+    """A reconnect drops the current connection before opening a new one."""
+    service = _make_fake_flux_service()
+
+    await service._do_reconnect()
+
+    assert service.connection_events == ["disconnect", "connect"]
+
+
+@pytest.mark.asyncio
+async def test_update_settings_reconnects_for_connection_only_field():
+    """Fields Flux only reads from the connection URL are applied by reconnecting."""
+    service = _make_fake_flux_service()
+
+    await service._update_settings(DeepgramFluxSTTSettings(numerals=True))
+
+    assert service.reconnect_requests == 1
+    assert service.sent_messages == []
+
+
+@pytest.mark.asyncio
+async def test_update_settings_configures_without_reconnecting():
+    """Configure-able fields reach the live connection without dropping it."""
+    service = _make_fake_flux_service()
+
+    await service._update_settings(DeepgramFluxSTTSettings(eot_threshold=0.9))
+
+    assert service.sent_messages == [{"type": "Configure", "thresholds": {"eot_threshold": 0.9}}]
+    assert service.reconnect_requests == 0
+
+
+@pytest.mark.asyncio
+async def test_fatal_error_reports_code_and_description():
+    """A FatalError raises with the code and description Flux sends."""
+    service = _make_fake_flux_service()
+
+    with pytest.raises(Exception) as excinfo:
+        await service._handle_fatal_error(
+            {
+                "code": "UNPARSABLE_CLIENT_MESSAGE",
+                "description": "Could not deserialize last text message",
+            }
+        )
+
+    assert "UNPARSABLE_CLIENT_MESSAGE" in str(excinfo.value)
+    assert "Could not deserialize last text message" in str(excinfo.value)
+
+
+# ---------------------------------------------------------------------------
+# Settings capabilities
+#
+# Every field is classified by how it reaches Flux: sent over the live
+# connection (Configure), applied by reconnecting, applied locally, or
+# reported as unsupported.
+# ---------------------------------------------------------------------------
+
+
+def _settings_fields():
+    """Every declared Flux setting, minus the inherited overflow dict."""
+    return {f.name for f in dataclasses.fields(DeepgramFluxSTTSettings)} - {"extra"}
+
+
+# Flux has no `language` parameter; `language_hints` covers multilingual input.
+_UNSUPPORTED_FIELDS = {"language"}
+
+
+@pytest.mark.parametrize("service", [DeepgramFluxSTTService, DeepgramFluxSageMakerSTTService])
+def test_every_setting_is_classified(service):
+    """No setting on either transport is left unclassified.
+
+    A field added to the settings without being classified would otherwise
+    only show up as a log warning at runtime.
+    """
+    fields = _settings_fields()
+    classified = (
+        service._CONFIGURE_FIELDS
+        | service._CONNECTION_FIELDS
+        | service._LOCAL_FIELDS
+        | _UNSUPPORTED_FIELDS
+    )
+    assert fields - classified == set()
+
+
+def test_no_setting_is_classified_two_ways():
+    """A field belongs to exactly one bucket, on either transport."""
+    for service in (DeepgramFluxSTTService, DeepgramFluxSageMakerSTTService):
+        configure = service._CONFIGURE_FIELDS
+        connection = service._CONNECTION_FIELDS
+        local = service._LOCAL_FIELDS
+        assert configure & connection == set()
+        assert configure & local == set()
+        assert connection & local == set()
+
+
+@pytest.mark.asyncio
+async def test_fatal_error_carries_the_flux_code():
+    """A FatalError raises a typed error the service can classify."""
+    service = _make_fake_flux_service()
+
+    with pytest.raises(FluxFatalError) as excinfo:
+        await service._handle_fatal_error(
+            {"code": "UNPARSABLE_CLIENT_MESSAGE", "description": "Bad message"}
+        )
+
+    assert excinfo.value.code == "UNPARSABLE_CLIENT_MESSAGE"
+
+
+def test_flux_error_codes_are_classified():
+    """Flux codes a retry can't clear are classified so the service stops taking work.
+
+    Flux reports these over the connection rather than as an HTTP status, so
+    without this they'd be UNKNOWN and the service would keep looking healthy.
+    """
+    service = _make_fake_flux_service()
+
+    unparsable = service._classify_error(
+        FluxFatalError("bad message", code="UNPARSABLE_CLIENT_MESSAGE")
+    )
+
+    assert unparsable == ErrorCategory.INVALID_REQUEST
+    # Permanent categories are what cost the processor its usability.
+    assert unparsable.is_permanent
+
+
+def test_unrecognized_flux_error_code_falls_back():
+    """An unmapped code defers to the default classification."""
+    service = _make_fake_flux_service()
+
+    assert service._classify_error(FluxFatalError("boom", code="SOMETHING_NEW")) is None
+
+
+@pytest.mark.asyncio
+async def test_connection_wait_times_out_instead_of_hanging():
+    """An endpoint that never confirms the connection fails instead of hanging."""
+    service = _make_fake_flux_service()
+    service._CONNECTION_TIMEOUT = 0.05
+    service._connection_established_event = asyncio.Event()
+
+    with pytest.raises(FluxConnectionNotConfirmedError) as excinfo:
+        await service._await_connection_established()
+
+    assert "did not confirm the connection" in str(excinfo.value)
+
+
+def test_unconfirmed_connection_is_treated_as_a_rejected_request():
+    """A silent endpoint means the settings were rejected, not that it was slow."""
+    service = _make_fake_flux_service()
+
+    category = service._classify_error(FluxConnectionNotConfirmedError("no confirmation"))
+
+    assert category == ErrorCategory.INVALID_REQUEST
+    assert category.is_permanent
+
+
+@pytest.mark.asyncio
+async def test_connection_wait_returns_once_confirmed():
+    """A confirmed connection returns without waiting out the timeout."""
+    service = _make_fake_flux_service()
+    service._connection_established_event = asyncio.Event()
+    service._connection_established_event.set()
+
+    await service._await_connection_established()
+
+
+def test_flux_recommends_external_strategies_by_default():
+    service = DeepgramFluxSTTService(api_key="test-key")
+    strategies = service.service_metadata_frame().user_turn_strategies
+
+    assert isinstance(strategies, ExternalUserTurnStrategies)
+    assert not isinstance(strategies, EagerUserTurnStrategies)
+    # Flux reports no prediction without a threshold, so none is asked for.
+    assert service._settings.eager_eot_threshold is None
+
+
+def test_flux_recommends_eager_strategies_and_asks_for_predictions():
+    service = DeepgramFluxSTTService(api_key="test-key", enable_eager_end_of_turn=True)
+
+    assert isinstance(
+        service.service_metadata_frame().user_turn_strategies, EagerUserTurnStrategies
+    )
+    assert service._settings.eager_eot_threshold == DeepgramFluxSTTBase._DEFAULT_EAGER_EOT_THRESHOLD
+
+
+def test_flux_keeps_a_configured_eager_threshold():
+    service = DeepgramFluxSTTService(
+        api_key="test-key",
+        enable_eager_end_of_turn=True,
+        settings=DeepgramFluxSTTService.Settings(eager_eot_threshold=0.8),
+    )
+
+    assert service._settings.eager_eot_threshold == 0.8
 
 
 if __name__ == "__main__":

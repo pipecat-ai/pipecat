@@ -24,22 +24,26 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     InterruptionFrame,
-    StartFrame,
     TTSAudioRawFrame,
     TTSStoppedFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TextAggregationMode, TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
-# Identifies the integration to Speechify's platform attribution.
+# Identifies the integration to Speechify's platform attribution. Speechify-Caller
+# and its companion Speechify-Caller-Version are the standard attribution pair
+# Speechify reads uniformly across every integration.
 CALLER_HEADERS = {
     "Speechify-Caller": "pipecat",
-    "X-Pipecat-Version": pipecat_version(),
+    "Speechify-Caller-Version": pipecat_version(),
 }
+
+# Pinned so behavior doesn't depend on the workspace default; `pcm_16000` is 16 kHz from here on.
+SPEECHIFY_API_VERSION = "2026-09-30"
 
 # PCM rates Speechify can synthesize, as the `pcm_<rate>` output formats.
 SPEECHIFY_PCM_SAMPLE_RATES = (8000, 16000, 22050, 24000, 44100, 48000)
@@ -263,10 +267,13 @@ class SpeechifyHttpTTSService(TTSService):
     """Speechify HTTP-based TTS service with word timestamps.
 
     Streams PCM audio and word-level speech marks over Server-Sent Events from
-    Speechify's ``/v1/audio/stream/with-timestamps`` endpoint. Speech marks are only
-    produced by the streaming-native models, ``simba-3.2`` (English) and ``simba-3.0``
-    (multilingual); the legacy ``simba-english`` and ``simba-multilingual`` models are
-    rejected by this endpoint.
+    Speechify's ``/v1/audio/stream/with-timestamps`` endpoint, using the streaming-native
+    models ``simba-3.2`` (English) and ``simba-3.0`` (multilingual).
+
+    Requests pin Speechify's API version to :data:`SPEECHIFY_API_VERSION` rather than
+    letting the workspace default decide it. The legacy ``simba-english`` and
+    ``simba-multilingual`` models are retired at that version and return a
+    ``model_retired`` error.
     """
 
     Settings = SpeechifyTTSSettings
@@ -319,6 +326,7 @@ class SpeechifyHttpTTSService(TTSService):
         self._headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
+            "Speechify-Version": SPEECHIFY_API_VERSION,
             **CALLER_HEADERS,
         }
 
@@ -348,13 +356,13 @@ class SpeechifyHttpTTSService(TTSService):
         """
         return language_to_speechify_language(language)
 
-    async def start(self, frame: StartFrame):
-        """Start the Speechify TTS service.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service.
 
         Args:
-            frame: The start frame containing initialization parameters.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         self._output_format, self._audio_sample_rate = _output_format_from_sample_rate(
             self.sample_rate
         )

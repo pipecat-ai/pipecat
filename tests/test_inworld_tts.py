@@ -18,6 +18,7 @@ from pipecat.frames.frames import (
 from pipecat.services.inworld.tts import InworldHttpTTSService, InworldTTSService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.context.aggregated_frame_sequencer import AggregatedFrameSequencer
+from pipecat.utils.text.simple_text_aggregator import SimpleTextAggregator
 
 
 class _FakeWebSocket:
@@ -77,6 +78,8 @@ class TestInworldUpdateSettingsRotatesContextGracefully(unittest.IsolatedAsyncio
         )
         # Applying a settings delta reports the service usable again.
         service._is_usable = True
+        # A language change is forwarded to the text aggregator.
+        service._text_aggregator = SimpleTextAggregator()
 
         # Real streaming sequencer with a mid-sentence prefix pending on the turn ctx.
         seq = AggregatedFrameSequencer(name=service._name, streaming=True)

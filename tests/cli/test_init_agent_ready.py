@@ -31,6 +31,20 @@ class _StubAsk:
         return self._value
 
 
+def _confirm_matching(*phrases):
+    """Stub ``questionary.confirm`` to say yes only to prompts naming ``phrases``.
+
+    ``init`` asks several questions, and one of them offers to build the Context Hub
+    index — a subprocess that downloads and indexes the corpus. Matching on the prompt
+    text keeps a test from answering a question it did not mean to.
+    """
+
+    def _confirm(message, *args, **kwargs):
+        return _StubAsk(any(phrase in message for phrase in phrases))
+
+    return _confirm
+
+
 class TestInitAgentReady:
     """Behavior of the `pipecat init` file-drop command."""
 
@@ -177,7 +191,7 @@ class TestInitAgentReady:
         monkeypatch.setattr(init_mod, "_is_interactive", lambda: True)
         import questionary
 
-        monkeypatch.setattr(questionary, "confirm", lambda *a, **k: _StubAsk(True))
+        monkeypatch.setattr(questionary, "confirm", _confirm_matching("Refresh the guide files"))
         monkeypatch.setattr(questionary, "select", lambda *a, **k: _StubAsk("agent"))
         result = runner.invoke(app, ["init", str(tmp_path)])
         assert result.exit_code == 0, result.output

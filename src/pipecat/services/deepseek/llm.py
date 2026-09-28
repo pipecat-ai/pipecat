@@ -6,20 +6,50 @@
 
 """DeepSeek LLM service implementation using OpenAI-compatible interface."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Literal
 
 from loguru import logger
+from pydantic import BaseModel
 
+from pipecat.adapters.services.deepseek_adapter import DeepSeekLLMAdapter
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
 from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
+
+
+class DeepSeekThinkingConfig(BaseModel):
+    """Configuration for thinking.
+
+    Parameters:
+        type: Thinking mode. DeepSeek's V4 models think before answering unless
+            "disabled" turns it off, which for real-time voice cuts the time to
+            the first answer token.
+    """
+
+    # `| str` keeps the field usable if DeepSeek adds further modes.
+    type: Literal["enabled", "disabled"] | str
 
 
 @dataclass
 class DeepSeekLLMSettings(BaseOpenAILLMService.Settings):
-    """Settings for DeepSeekLLMService."""
+    """Settings for DeepSeekLLMService.
 
-    pass
+    Parameters:
+        thinking: Thinking mode configuration. The service defaults this to
+            disabled: DeepSeek's V4 models otherwise run a reasoning pass before
+            every answer, which delays the first spoken token. Set
+            ``DeepSeekThinkingConfig(type="enabled")`` to turn it on, or
+            ``None`` to leave the choice to DeepSeek's own default.
+    """
+
+    thinking: DeepSeekThinkingConfig | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+    def __post_init__(self):
+        """Coerce a plain ``thinking`` dict to a :class:`DeepSeekThinkingConfig`."""
+        if isinstance(self.thinking, dict):
+            self.thinking = DeepSeekThinkingConfig(**self.thinking)
 
 
 class DeepSeekLLMService(OpenAILLMService):
@@ -32,8 +62,14 @@ class DeepSeekLLMService(OpenAILLMService):
     # DeepSeek doesn't support the "developer" message role.
     # This value is used by BaseOpenAILLMService when calling the adapter.
     supports_developer_role = False
+    supports_response_schema = False
+
+    # Supplies the `reasoning_content` DeepSeek requires on assistant messages
+    # in thinking mode.
+    adapter_class = DeepSeekLLMAdapter
 
     Settings = DeepSeekLLMSettings
+    ThinkingConfig = DeepSeekThinkingConfig
     _settings: Settings
 
     def __init__(
@@ -50,7 +86,7 @@ class DeepSeekLLMService(OpenAILLMService):
         Args:
             api_key: The API key for accessing DeepSeek's API.
             base_url: The base URL for DeepSeek API. Defaults to "https://api.deepseek.com/v1".
-            model: The model identifier to use. Defaults to "deepseek-v4-flash".
+            model: The model identifier to use. Defaults to "deepseek-flash".
 
                 .. deprecated:: 0.0.105
                     Use ``settings=DeepSeekLLMService.Settings(model=...)`` instead.
@@ -61,7 +97,9 @@ class DeepSeekLLMService(OpenAILLMService):
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = self.Settings(model="deepseek-v4-flash")
+        default_settings = self.Settings(
+            model="deepseek-flash", thinking=DeepSeekThinkingConfig(type="disabled")
+        )
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
@@ -90,7 +128,7 @@ class DeepSeekLLMService(OpenAILLMService):
         logger.debug(f"Creating DeepSeek client with api {base_url}")
         return super().create_client(api_key, base_url, **kwargs)
 
-    def _build_chat_completion_params(self, params_from_context: OpenAILLMInvocationParams) -> dict:
+    def build_chat_completion_params(self, params_from_context: OpenAILLMInvocationParams) -> dict:
         """Build parameters for DeepSeek chat completion request.
 
         DeepSeek doesn't support some OpenAI parameters like seed and max_completion_tokens.
@@ -118,4 +156,9 @@ class DeepSeekLLMService(OpenAILLMService):
         params.update(params_from_context)
 
         params.update(self._settings.extra)
+
+        thinking = assert_given(self._settings.thinking)
+        if thinking is not None:
+            self._merge_extra_body(params, {"thinking": thinking.model_dump(exclude_none=True)})
+
         return params

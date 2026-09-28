@@ -717,9 +717,9 @@ async def create_transport(
         # The eval transport is a plain WebSocket server speaking RTVI. The
         # harness connects as an RTVI client; the bot pipeline must include an
         # RTVIProcessor and pass an RTVIObserver to the task. Default the
-        # serializer to RTVIEvalSerializer so examples only need to opt into
+        # serializer to EvalSerializer so examples only need to opt into
         # audio input.
-        from pipecat.evals.serializer import RTVIEvalSerializer
+        from pipecat.evals.serializer import EvalSerializer
         from pipecat.evals.transport import EvalTransport, EvalTransportParams
 
         params = _get_transport_params("eval", transport_params)
@@ -730,7 +730,7 @@ async def create_transport(
                 "EvalTransportParams(audio_in_enabled=True)."
             )
         if params.serializer is None:
-            params.serializer = RTVIEvalSerializer()
+            params.serializer = EvalSerializer()
 
         # EvalTransport handles the eval-only behavior: the virtual mic, skip-TTS
         # before an on-connect greeting, and audio capture/recording.
@@ -773,6 +773,8 @@ async def create_transport(
         # Convert TransportParams to MOQParams if needed, applying runner args
         if not isinstance(params, MOQParams):
             params = MOQParams(**params.model_dump())
+        if runner_args.relay_url is not None:
+            params.relay_url = runner_args.relay_url
         params.verify_ssl = runner_args.verify_ssl
         params.namespace = runner_args.namespace
         params.participant_id = runner_args.participant_id
@@ -783,12 +785,15 @@ async def create_transport(
         params.serve_tls_cert = runner_args.serve_tls_cert
         params.serve_tls_key = runner_args.serve_tls_key
 
-        transport = MOQTransport(
-            params=params,
-            host=runner_args.host,
-            port=runner_args.port,
-            path=runner_args.path,
-        )
+        # Host and port only matter when the URL is composed from them (and,
+        # in serve mode, for the default bind); when the runner arguments
+        # carry a URL instead, the transport's defaults stay in place.
+        transport_kwargs: dict = {"path": runner_args.path}
+        if runner_args.host is not None:
+            transport_kwargs["host"] = runner_args.host
+        if runner_args.port is not None:
+            transport_kwargs["port"] = runner_args.port
+        transport = MOQTransport(params=params, **transport_kwargs)
 
         # Auto-wire the runner back-channel: when the transport finishes
         # MOQ bring-up, copy out the cert fingerprints (serve mode) and

@@ -20,7 +20,7 @@ from pipecat.frames.frames import (
     StartFrame,
     SystemFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 
 try:
     import gi
@@ -91,6 +91,20 @@ class GStreamerPipelineSource(FrameProcessor):
         bus.add_signal_watch()
         bus.connect("message", self._on_gstreamer_message)
 
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the source.
+
+        Args:
+            setup: Configuration object containing setup parameters.
+        """
+        await super().setup(setup)
+        self._sample_rate = self._out_params.audio_sample_rate or setup.audio_out_sample_rate
+
+    async def cleanup(self):
+        """Release the GStreamer pipeline."""
+        await super().cleanup()
+        self._close()
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process incoming frames and manage GStreamer pipeline lifecycle.
 
@@ -125,7 +139,6 @@ class GStreamerPipelineSource(FrameProcessor):
     async def _start(self, frame: StartFrame):
         """Start the GStreamer pipeline."""
         assert self._player is not None
-        self._sample_rate = self._out_params.audio_sample_rate or frame.audio_out_sample_rate
         self._player.set_state(Gst.State.PLAYING)
 
     async def _stop(self, frame: EndFrame):
@@ -134,11 +147,6 @@ class GStreamerPipelineSource(FrameProcessor):
 
     async def _cancel(self, frame: CancelFrame):
         """Cancel the GStreamer pipeline."""
-        self._close()
-
-    async def cleanup(self):
-        """Release the GStreamer pipeline."""
-        await super().cleanup()
         self._close()
 
     def _close(self):

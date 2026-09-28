@@ -48,7 +48,7 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame, TTSUpdateSettingsFrame
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
@@ -76,7 +76,7 @@ load_dotenv(override=True)
 # Define voice IDs
 VOICE_IDS = {
     "narrator": "c45bc5ec-dc68-4feb-8829-6e6b2748095d",  # Narrator voice
-    "female": "71a7ad14-091c-4e8e-a314-022ece01c121",  # Female character voice
+    "female": "f6ff7c0c-e396-40a9-a70b-f7607edb6937",  # Female character voice
     "male": "7cf0e2b1-8daf-4fe4-89ad-f6039398f359",  # Male character voice
 }
 
@@ -228,6 +228,7 @@ Remember: Use narrator voice for EVERYTHING except the actual quoted dialogue.""
             enable_usage_metrics=True,
         ),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
+        processor_unusable_policy=ProcessorUnusablePolicy.END,
     )
 
     runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)

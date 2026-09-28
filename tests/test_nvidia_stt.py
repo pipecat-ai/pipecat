@@ -5,12 +5,14 @@
 #
 
 import asyncio
+from unittest.mock import AsyncMock
 
 import pytest
 
 pytest.importorskip("riva.client")
 
 from pipecat.services.nvidia.stt import AudioChunkIterator, NvidiaSTTService
+from pipecat.transcriptions.language import Language
 
 
 def _make_service(**kwargs) -> NvidiaSTTService:
@@ -84,3 +86,51 @@ async def test_send_keepalive_noop_without_iterator():
     """Sending keepalive with no active stream does not raise."""
     service = _make_service()
     await service._send_keepalive(b"\x00\x00")
+
+
+@pytest.mark.asyncio
+async def test_update_settings_reconnects_so_the_stream_uses_them(monkeypatch):
+    """A settings change must reach the gRPC stream, not just the local config.
+
+    streaming_response_generator() is handed streaming_config once, when the
+    stream is opened, so rebuilding the config without reconnecting leaves the
+    live stream transcribing with the previous settings and nothing logs.
+    """
+    service = _make_service()
+    service._config = service._create_recognition_config()
+    reconnect = AsyncMock()
+    monkeypatch.setattr(service, "_request_reconnect", reconnect)
+
+    changed = await service._update_settings(NvidiaSTTService.Settings(language=Language.ES))
+
+    assert changed
+    assert service._settings.language == Language.ES
+    reconnect.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_update_settings_rebuilds_the_recognition_config(monkeypatch):
+    """The rebuilt config carries the new language into the next stream."""
+    service = _make_service()
+    service._config = service._create_recognition_config()
+    monkeypatch.setattr(service, "_request_reconnect", AsyncMock())
+
+    assert service._config.config.language_code == Language.EN_US
+
+    await service._update_settings(NvidiaSTTService.Settings(language=Language.ES))
+
+    assert service._config.config.language_code == Language.ES
+
+
+@pytest.mark.asyncio
+async def test_update_settings_without_changes_does_not_reconnect(monkeypatch):
+    """A no-op delta must not tear down a healthy stream."""
+    service = _make_service()
+    service._config = service._create_recognition_config()
+    reconnect = AsyncMock()
+    monkeypatch.setattr(service, "_request_reconnect", reconnect)
+
+    changed = await service._update_settings(NvidiaSTTService.Settings())
+
+    assert not changed
+    reconnect.assert_not_awaited()

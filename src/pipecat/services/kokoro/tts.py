@@ -8,7 +8,7 @@
 
 import os
 from collections.abc import AsyncGenerator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
@@ -26,7 +26,7 @@ from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.tracing.service_decorators import traced_tts
-from pipecat.utils.types import assert_given
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, require_given
 
 try:
     import requests
@@ -106,9 +106,13 @@ def language_to_kokoro_language(language: Language) -> str:
 
 @dataclass
 class KokoroTTSSettings(TTSSettings):
-    """Settings for KokoroTTSService."""
+    """Settings for KokoroTTSService.
 
-    pass
+    Parameters:
+        speed: Speech rate multiplier (0.5-2.0). Defaults to 1.0.
+    """
+
+    speed: float | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class KokoroTTSService(TTSService):
@@ -175,6 +179,7 @@ class KokoroTTSService(TTSService):
             model=None,
             voice=None,
             language=Language.EN,
+            speed=1.0,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -205,6 +210,10 @@ class KokoroTTSService(TTSService):
         _ensure_model_files(model_file, voices)
 
         self._kokoro = Kokoro(str(model_file), str(voices))
+
+        voice = require_given(self._settings.voice, "Kokoro TTS voice")
+        if voice not in self._kokoro.voices:
+            raise ValueError(f"Kokoro TTS voice '{voice}' is not in the voices file")
 
         self._resampler = create_stream_resampler()
 
@@ -237,13 +246,10 @@ class KokoroTTSService(TTSService):
         try:
             await self.start_tts_usage_metrics(text)
 
-            voice = assert_given(self._settings.voice)
-            if voice is None:
-                raise ValueError("Kokoro TTS voice must be specified")
-            lang = assert_given(self._settings.language)
-            if lang is None:
-                raise ValueError("Kokoro TTS language must be specified")
-            stream = self._kokoro.create_stream(text, voice=voice, lang=lang, speed=1.0)
+            voice = require_given(self._settings.voice, "Kokoro TTS voice")
+            lang = require_given(self._settings.language, "Kokoro TTS language")
+            speed = assert_given(self._settings.speed)
+            stream = self._kokoro.create_stream(text, voice=voice, lang=lang, speed=speed)
 
             async for samples, sample_rate in stream:
                 await self.stop_ttfb_metrics()

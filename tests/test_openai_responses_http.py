@@ -9,7 +9,6 @@
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import httpx
 import pytest
 from openai import APITimeoutError
 from openai.types.responses import (
@@ -46,6 +45,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.services.openai.responses.llm import OpenAIResponsesHttpLLMService
 from pipecat.tests.utils import run_test
+from tests.openai_http_helpers import http
 
 
 def _make_service(**kwargs):
@@ -150,7 +150,7 @@ class TestHttpTokenUsageMetrics:
             input_tokens=100,
             output_tokens=50,
             total_tokens=150,
-            input_tokens_details=InputTokensDetails(cached_tokens=20),
+            input_tokens_details=InputTokensDetails(cached_tokens=20, cache_write_tokens=30),
             output_tokens_details=OutputTokensDetails(reasoning_tokens=10),
         )
         await _run(service, _completed_event(usage))
@@ -160,6 +160,8 @@ class TestHttpTokenUsageMetrics:
         assert tokens.completion_tokens == 50
         assert tokens.total_tokens == 150
         assert tokens.cache_read_input_tokens == 20
+        # Both cache buckets sit inside input_tokens, so the totals stay as sent.
+        assert tokens.cache_creation_input_tokens == 30
         assert tokens.reasoning_tokens == 10
 
     @pytest.mark.asyncio
@@ -167,7 +169,7 @@ class TestHttpTokenUsageMetrics:
         """A third-party server may omit input/output token detail sub-objects.
 
         The OpenAI SDK leaves them as None. The handler must not raise and must
-        fall back to 0 for cached/reasoning tokens. Regression test for the
+        fall back to 0 for cache/reasoning tokens. Regression test for the
         'NoneType' object has no attribute 'cached_tokens' crash.
         """
         service = _make_service()
@@ -189,6 +191,7 @@ class TestHttpTokenUsageMetrics:
         assert tokens.completion_tokens == 5
         assert tokens.total_tokens == 15
         assert tokens.cache_read_input_tokens == 0
+        assert tokens.cache_creation_input_tokens == 0
         assert tokens.reasoning_tokens == 0
 
     @pytest.mark.asyncio
@@ -196,8 +199,9 @@ class TestHttpTokenUsageMetrics:
         """A third-party server may send empty detail sub-objects.
 
         The detail object is present but its fields (cached_tokens/
-        reasoning_tokens) come back as None under the SDK's lenient parse. The
-        handler must coalesce those to 0 rather than leak None into metrics.
+        cache_write_tokens/reasoning_tokens) come back as None under the SDK's
+        lenient parse. The handler must coalesce those to 0 rather than leak
+        None into metrics.
         """
         service = _make_service()
 
@@ -213,6 +217,7 @@ class TestHttpTokenUsageMetrics:
         assert service.start_llm_usage_metrics.called
         tokens = service.start_llm_usage_metrics.call_args[0][0]
         assert tokens.cache_read_input_tokens == 0
+        assert tokens.cache_creation_input_tokens == 0
         assert tokens.reasoning_tokens == 0
 
     @pytest.mark.asyncio
@@ -233,6 +238,7 @@ class TestHttpTokenUsageMetrics:
         assert tokens.completion_tokens == 0
         assert tokens.total_tokens == 0
         assert tokens.cache_read_input_tokens == 0
+        assert tokens.cache_creation_input_tokens == 0
         assert tokens.reasoning_tokens == 0
 
 
@@ -601,7 +607,7 @@ class TestHttpRetryOnTimeout:
             nonlocal attempts
             attempts += 1
             if attempts == 1:
-                raise APITimeoutError(request=httpx.Request("POST", "https://api.openai.com"))
+                raise APITimeoutError(request=http.Request("POST", "https://api.openai.com"))
             return stream
 
         service._client.responses.create = AsyncMock(side_effect=create)

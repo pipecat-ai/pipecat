@@ -57,6 +57,10 @@
 {% endif %}
 {{ ")" | indent(indent_level, first=True) }}
 
+{{ "runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)" | indent(indent_level, first=True) }}
+
+{{ "await runner.add_workers(worker)" | indent(indent_level, first=True) }}
+
 {% if ('daily_pstn_dialout' in transports or 'twilio_daily_sip_dialout' in transports) and not has_local_transport %}
 {{ "# Initialize dialout manager" | indent(indent_level, first=True) }}
 {{ "dialout_manager = DialoutManager(transport, dialout_settings)" | indent(indent_level, first=True) }}
@@ -86,7 +90,4 @@
 {{ handlers.recording_handler() | indent(indent_level, first=True) }}
 {% endif %}
 
-{{ "runner = WorkerRunner(handle_sigint=False)" | indent(indent_level, first=True) }}
-
-{{ "await runner.add_workers(worker)" | indent(indent_level, first=True) }}
 {{ "await runner.run()" | indent(indent_level, first=True) }}
