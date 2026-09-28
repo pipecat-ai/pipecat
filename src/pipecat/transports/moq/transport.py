@@ -698,19 +698,19 @@ class MOQTransportClient:
 
     def _publish_audio_track(self, sample_rate: int) -> "moq.AudioProducer":
         """Open the bot's Opus audio track on the current publish broadcast."""
-        return self._publish_broadcast.publish_audio(
+        return self._publish_broadcast.encode_audio(
             self._params.audio_out_track,
             moq.AudioEncoderInput(
-                format=moq.AudioFormat.S16,
+                format=moq.AudioSampleFormat.S16,
                 sample_rate=sample_rate,
                 channels=1,
             ),
             moq.AudioEncoderOutput(
-                codec=moq.AudioCodec.OPUS,
+                codec=moq.AudioCodec.opus(),
                 sample_rate=OPUS_SAMPLE_RATE,
                 channels=None,
                 bitrate=None,
-                frame_duration_ms=self._params.audio_out_frame_ms,
+                frame_duration_us=self._params.audio_out_frame_ms * 1000,
             ),
         )
 
@@ -1506,14 +1506,14 @@ class MOQTransportClient:
 
         try:
             consumer = self._track(
-                await peer_broadcast.subscribe_audio(
+                await peer_broadcast.decode_audio(
                     track_name,
                     audio,
                     moq.AudioDecoderOutput(
-                        format=moq.AudioFormat.S16,
+                        format=moq.AudioSampleFormat.S16,
                         sample_rate=target_rate,
                         channels=source_channels,
-                        latency_max_ms=self._params.audio_in_max_latency_ms,
+                        max_age_us=self._params.audio_in_max_latency_ms * 1000,
                     ),
                 )
             )
