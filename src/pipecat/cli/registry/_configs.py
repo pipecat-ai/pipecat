@@ -15,7 +15,7 @@ SERVICE_CONFIGS = {
     "aws_transcribe_stt": (
         "AWSTranscribeSTTService(\n"
         '        aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),\n'
-        '        aws_session_token=os.getenv("AWS_AWS_SESSION_TOKEN"),\n'
+        '        aws_session_token=os.getenv("AWS_SESSION_TOKEN"),\n'
         '        region=os.getenv("AWS_REGION")\n'
         "    )\n"
     ),
@@ -54,20 +54,17 @@ SERVICE_CONFIGS = {
         "        aiohttp_session=session\n"
         "    )\n"
     ),
+    "gemini_stt": 'GeminiSTTService(api_key=os.getenv("GOOGLE_API_KEY"))',
     "gladia_stt": (
         "GladiaSTTService(\n"
         '        api_key=os.getenv("GLADIA_API_KEY"),\n'
         '        region=os.getenv("GLADIA_REGION")\n'
         "    )\n"
     ),
-    "google_stt": (
-        "GoogleSTTService(\n"
-        '        credentials=os.getenv("GOOGLE_APPLICATION_CREDENTIALS"),\n'
-        '        location=os.getenv("GOOGLE_LOCATION")\n'
-        "    )\n"
-    ),
+    "google_stt": 'GoogleSTTService(credentials=os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))',
     "gradium_stt": 'GradiumSTTService(api_key=os.getenv("GRADIUM_API_KEY"))',
     "groq_stt": 'GroqSTTService(api_key=os.getenv("GROQ_API_KEY"))',
+    "meta_stt": 'MetaSTTService(api_key=os.getenv("META_API_KEY"))',
     "mistral_stt": 'MistralSTTService(api_key=os.getenv("MISTRAL_API_KEY"))',
     "nvidia_stt": 'NvidiaSTTService(api_key=os.getenv("NVIDIA_API_KEY"))',
     "nvidia_sagemaker_stt": (
@@ -78,27 +75,20 @@ SERVICE_CONFIGS = {
     ),
     "openai_stt": 'OpenAISTTService(api_key=os.getenv("OPENAI_API_KEY"))',
     "openai_realtime_stt": 'OpenAIRealtimeSTTService(api_key=os.getenv("OPENAI_API_KEY"))',
-    "sarvam_stt": (
-        "SarvamSTTService(\n"
-        '        api_key=os.getenv("SARVAM_API_KEY"),\n'
-        "        settings=SarvamSTTService.Settings(\n"
-        '            model=os.getenv("SARVAM_MODEL"),\n'
-        "        ),\n"
-        "    )\n"
-    ),
+    "sarvam_stt": 'SarvamSTTService(api_key=os.getenv("SARVAM_API_KEY"))',
     "soniox_stt": 'SonioxSTTService(api_key=os.getenv("SONIOX_API_KEY"))',
     "speechmatics_stt": 'SpeechmaticsSTTService(api_key=os.getenv("SPEECHMATICS_API_KEY"))',
     "moonshine_stt": (
         "MoonshineSTTService(\n"
         "        settings=MoonshineSTTService.Settings(\n"
-        '            model=os.getenv("MOONSHINE_STT_MODEL"),\n'
+        '            model=os.getenv("MOONSHINE_MODEL", "small-streaming"),\n'
         "        ),\n"
         "    )\n"
     ),
     "whisper_stt": (
         "WhisperSTTService(\n"
         "        settings=WhisperSTTService.Settings(\n"
-        '            model=os.getenv("OPENAI_MODEL"),\n'
+        '            model=os.getenv("WHISPER_MODEL", "Systran/faster-distil-whisper-medium.en"),\n'
         "        ),\n"
         "    )\n"
     ),
@@ -124,10 +114,19 @@ SERVICE_CONFIGS = {
     ),
     "azure_llm": (
         "AzureLLMService(\n"
-        '        api_key=os.getenv("AZURE_CHATGPT_API_KEY"),\n'
         '        endpoint=os.getenv("AZURE_CHATGPT_ENDPOINT"),\n'
+        '        api_key=os.getenv("AZURE_CHATGPT_API_KEY"),\n'
         "        settings=AzureLLMService.Settings(\n"
         '            model=os.getenv("AZURE_CHATGPT_MODEL"),\n'
+        '            system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can\'t be spoken. Respond to what the user said in a creative, helpful, and brief way.",\n'
+        "        ),\n"
+        "    )\n"
+    ),
+    "baseten_llm": (
+        "BasetenLLMService(\n"
+        '        api_key=os.getenv("BASETEN_API_KEY"),\n'
+        "        settings=BasetenLLMService.Settings(\n"
+        '            model=os.getenv("BASETEN_MODEL"),\n'
         '            system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can\'t be spoken. Respond to what the user said in a creative, helpful, and brief way.",\n'
         "        ),\n"
         "    )\n"
@@ -137,6 +136,15 @@ SERVICE_CONFIGS = {
         '        api_key=os.getenv("CEREBRAS_API_KEY"),\n'
         "        settings=CerebrasLLMService.Settings(\n"
         '            model=os.getenv("CEREBRAS_MODEL"),\n'
+        '            system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can\'t be spoken. Respond to what the user said in a creative, helpful, and brief way.",\n'
+        "        ),\n"
+        "    )\n"
+    ),
+    "crusoe_llm": (
+        "CrusoeLLMService(\n"
+        '        api_key=os.getenv("CRUSOE_API_KEY"),\n'
+        "        settings=CrusoeLLMService.Settings(\n"
+        '            model=os.getenv("CRUSOE_MODEL"),\n'
         '            system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can\'t be spoken. Respond to what the user said in a creative, helpful, and brief way.",\n'
         "        ),\n"
         "    )\n"
@@ -347,11 +355,19 @@ SERVICE_CONFIGS = {
         "        ),\n"
         "    )\n"
     ),
+    "bland_tts": (
+        "BlandTTSService(\n"
+        '        api_key=os.getenv("BLAND_API_KEY"),\n'
+        "        settings=BlandTTSService.Settings(\n"
+        '            voice=os.getenv("BLAND_VOICE_ID", "2f29fdbb-c55e-4add-9c7c-93437ebf379d"),\n'
+        "        ),\n"
+        "    )\n"
+    ),
     "cartesia_tts": (
         "CartesiaTTSService(\n"
         '        api_key=os.getenv("CARTESIA_API_KEY"),\n'
         "        settings=CartesiaTTSService.Settings(\n"
-        '            voice=os.getenv("CARTESIA_VOICE_ID", "71a7ad14-091c-4e8e-a314-022ece01c121"),\n'
+        '            voice=os.getenv("CARTESIA_VOICE_ID", "86e30c1d-714b-4074-a1f2-1cb6b552fb49"),\n'
         "        ),\n"
         "    )\n"
     ),
@@ -360,6 +376,23 @@ SERVICE_CONFIGS = {
         '        api_key=os.getenv("DEEPGRAM_API_KEY"),\n'
         "        settings=DeepgramTTSService.Settings(\n"
         '            voice=os.getenv("DEEPGRAM_VOICE_ID"),\n'
+        "        ),\n"
+        "    )\n"
+    ),
+    "deepgram_flux_tts": (
+        "DeepgramFluxTTSService(\n"
+        '        api_key=os.getenv("DEEPGRAM_API_KEY"),\n'
+        "        settings=DeepgramFluxTTSService.Settings(\n"
+        '            voice=os.getenv("DEEPGRAM_VOICE_ID"),\n'
+        "        ),\n"
+        "    )\n"
+    ),
+    "deepgram_flux_sagemaker_tts": (
+        "DeepgramFluxSageMakerTTSService(\n"
+        '        endpoint_name=os.getenv("DEEPGRAM_FLUX_SAGEMAKER_TTS_ENDPOINT_NAME"),\n'
+        '        region=os.getenv("DEEPGRAM_FLUX_SAGEMAKER_TTS_REGION"),\n'
+        "        settings=DeepgramFluxSageMakerTTSService.Settings(\n"
+        '            voice=os.getenv("DEEPGRAM_FLUX_SAGEMAKER_TTS_VOICE_ID"),\n'
         "        ),\n"
         "    )\n"
     ),
@@ -376,6 +409,14 @@ SERVICE_CONFIGS = {
         "ElevenLabsTTSService(\n"
         '        api_key=os.getenv("ELEVENLABS_API_KEY"),\n'
         "        settings=ElevenLabsTTSService.Settings(\n"
+        '            voice=os.getenv("ELEVENLABS_VOICE_ID"),\n'
+        "        ),\n"
+        "    )\n"
+    ),
+    "elevenlabs_dialogue_tts": (
+        "ElevenLabsDialogueTTSService(\n"
+        '        api_key=os.getenv("ELEVENLABS_API_KEY"),\n'
+        "        settings=ElevenLabsDialogueTTSService.Settings(\n"
         '            voice=os.getenv("ELEVENLABS_VOICE_ID"),\n'
         "        ),\n"
         "    )\n"
@@ -443,14 +484,6 @@ SERVICE_CONFIGS = {
         "        ),\n"
         "    )\n"
     ),
-    "lmnt_tts": (
-        "LmntTTSService(\n"
-        '        api_key=os.getenv("LMNT_API_KEY"),\n'
-        "        settings=LmntTTSService.Settings(\n"
-        '            voice=os.getenv("LMNT_VOICE_ID"),\n'
-        "        ),\n"
-        "    )\n"
-    ),
     "minimax_tts": (
         "MiniMaxHttpTTSService(\n"
         '        api_key=os.getenv("MINIMAX_API_KEY"),\n'
@@ -509,6 +542,13 @@ SERVICE_CONFIGS = {
         "        ),\n"
         "    )\n"
     ),
+    "pockettts_tts": (
+        "PocketTTSService(\n"
+        "        settings=PocketTTSService.Settings(\n"
+        '            voice=os.getenv("POCKET_TTS_VOICE_ID", "alba"),\n'
+        "        ),\n"
+        "    )\n"
+    ),
     "resemble_tts": (
         "ResembleAITTSService(\n"
         '        api_key=os.getenv("RESEMBLE_API_KEY"),\n'
@@ -529,7 +569,6 @@ SERVICE_CONFIGS = {
         "SarvamTTSService(\n"
         '        api_key=os.getenv("SARVAM_API_KEY"),\n'
         "        settings=SarvamTTSService.Settings(\n"
-        '            model=os.getenv("SARVAM_MODEL"),\n'
         '            voice=os.getenv("SARVAM_VOICE_ID"),\n'
         "        ),\n"
         "    )\n"
@@ -547,6 +586,15 @@ SERVICE_CONFIGS = {
         '        api_key=os.getenv("SONIOX_API_KEY"),\n'
         "        settings=SonioxTTSService.Settings(\n"
         '            voice=os.getenv("SONIOX_VOICE_ID"),\n'
+        "        ),\n"
+        "    )\n"
+    ),
+    "speechify_tts": (
+        "SpeechifyHttpTTSService(\n"
+        '        api_key=os.getenv("SPEECHIFY_API_KEY"),\n'
+        "        aiohttp_session=session,\n"
+        "        settings=SpeechifyHttpTTSService.Settings(\n"
+        '            voice=os.getenv("SPEECHIFY_VOICE_ID"),\n'
         "        ),\n"
         "    )\n"
     ),

@@ -21,24 +21,19 @@ async def save_audio_file(audio: bytes, filename: str, sample_rate: int, num_cha
 {% endmacro %}
 
 {# Context and message setup #}
-{% macro setup_context(external_turn_detection=False) %}
+{% macro setup_context() %}
 context = LLMContext()
 user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
     context,
-    user_params=LLMUserAggregatorParams(
-        vad_analyzer=SileroVADAnalyzer(),
-{%- if external_turn_detection %}
-        user_turn_strategies=ExternalUserTurnStrategies(),
-{%- endif %}
-    ),
+    user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
 )
 {% endmacro %}
 
 {# Feature processors setup #}
 {% macro setup_feature_processors(recording, transcription, bot_type) %}
 {% if recording %}
-# Audio recording
-audio_buffer = AudioBufferProcessor()
+# Audio recording, started automatically when the pipeline starts
+audio_buffer = AudioBufferProcessor(auto_start_recording=True)
 {% endif %}
 
 {% endmacro %}
@@ -173,4 +168,3 @@ class DialoutManager:
         """
         return self._attempt_count < self._max_retries and not self._is_successful
 {% endmacro %}
-

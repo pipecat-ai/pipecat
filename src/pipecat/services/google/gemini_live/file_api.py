@@ -14,6 +14,7 @@ this API can be referenced in Gemini generative model calls.
 import mimetypes
 from typing import Any
 
+import aiofiles
 import aiohttp
 from loguru import logger
 
@@ -62,8 +63,8 @@ class GeminiFileAPI:
                 mime_type = "application/octet-stream"
 
             # Read the file
-            with open(file_path, "rb") as f:
-                file_data = f.read()
+            async with aiofiles.open(file_path, "rb") as f:
+                file_data = await f.read()
 
             # Create the metadata payload
             metadata = {}

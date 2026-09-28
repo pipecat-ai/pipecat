@@ -15,7 +15,7 @@ from loguru import logger
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     AssistantTurnStoppedMessage,
@@ -78,31 +78,21 @@ transport_params = {
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
-    logger.info(f"Starting bot")
+    logger.info("Starting bot")
 
     # Specify initial system instruction.
     system_instruction = (
         "You are a friendly assistant. The user and you will engage in a spoken dialog exchanging "
         "the transcripts of a natural real-time conversation. Keep your responses short, generally "
         "two or three sentences for chatty scenarios."
-        # HACK: if using the older Nova Sonic (pre-2) model, note that you need to inject a special
-        # bit of text into this instruction to allow the first assistant response to be
-        # programmatically triggered (which happens in the on_client_connected handler)
-        # f"{AWSNovaSonicLLMService.AWAIT_TRIGGER_ASSISTANT_RESPONSE_INSTRUCTION}"
     )
 
     # Create the AWS Nova Sonic LLM service
     llm = AWSNovaSonicLLMService(
         secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"],
         access_key_id=os.environ["AWS_ACCESS_KEY_ID"],
-        # as of 2025-12-09, these are the supported regions:
-        # - Nova 2 Sonic (the default model):
-        #   - us-east-1
-        #   - us-west-2
-        #   - ap-northeast-1
-        # - Nova Sonic (the older model):
-        #   - us-east-1
-        #   - ap-northeast-1
+        # as of 2026-09-28, the supported regions are us-east-1, us-west-2, eu-north-1
+        # and ap-northeast-1
         region=os.environ["AWS_REGION"],
         session_token=os.getenv("AWS_SESSION_TOKEN"),
         settings=AWSNovaSonicLLMService.Settings(
@@ -126,12 +116,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # AWS Nova Sonic drives the conversation server-side.
     #
     # It does not, however, emit turn frames (UserStartedSpeakingFrame,
-    # UserStoppedSpeakingFrame). realtime_service_mode ensures that context
-    # aggregation will work without those frames, but you can add supplemental
-    # local turn frames for consumption by other pipeline processors that
-    # expect them (like RTVI), or to trigger on_user_turn_* events. WARNING:
-    # you should consider supplemental local turn frames approximate, as they
-    # may not always align with server turns.
+    # UserStoppedSpeakingFrame). Context aggregation works without those
+    # frames, but you can add supplemental local turn frames for consumption
+    # by other pipeline processors that expect them (like RTVI), or to trigger
+    # on_user_turn_* events. WARNING: you should consider supplemental local
+    # turn frames approximate, as they may not always align with server turns.
     #
     # To enable supplemental local turn frames, uncomment the SileroVADAnalyzer
     # and related imports below and the `user_params=` argument further down.
@@ -148,7 +137,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     context = LLMContext(tools=[get_current_weather])
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
-        realtime_service_mode=True,
         # user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
     )
 
@@ -171,27 +159,28 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             enable_usage_metrics=True,
         ),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
+        processor_unusable_policy=ProcessorUnusablePolicy.END,
     )
+
+    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
+
+    await runner.add_workers(worker)
 
     # Handle client connection event
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
-        logger.info(f"Client connected")
+        logger.info("Client connected")
         # Kick off the conversation.
         context.add_message(
             {"role": "developer", "content": "Please introduce yourself to the user."}
         )
         await worker.queue_frames([LLMRunFrame()])
-        # HACK: if using the older Nova Sonic (pre-2) model, you need this special way of
-        # triggering the first assistant response. Note that this trigger requires a special
-        # corresponding bit of text in the system instruction.
-        # await llm.trigger_assistant_response()
 
     # Handle client disconnection events
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
-        logger.info(f"Client disconnected")
-        await worker.cancel()
+        logger.info("Client disconnected")
+        await runner.cancel()
 
     # See comment above the user_aggregator for details on why this is
     # commented out and instructions for enabling it.
@@ -215,9 +204,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         line = f"{timestamp}assistant: {message.content}"
         logger.info(f"Transcript: {line}")
 
-    # Run the pipeline
-    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
-    await runner.add_workers(worker)
     await runner.run()
 
 

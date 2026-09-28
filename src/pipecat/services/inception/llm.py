@@ -14,8 +14,7 @@ from loguru import logger
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
 from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.services.settings import NOT_GIVEN as _NOT_GIVEN
-from pipecat.services.settings import _NotGiven, is_given
+from pipecat.utils.types import NOT_GIVEN, NotGiven, is_given
 
 
 @dataclass
@@ -30,10 +29,10 @@ class InceptionLLMSettings(BaseOpenAILLMService.Settings):
             Defaults to True.
     """
 
-    reasoning_effort: Literal["instant", "low", "medium", "high"] | None | _NotGiven = field(
-        default_factory=lambda: _NOT_GIVEN
+    reasoning_effort: Literal["instant", "low", "medium", "high"] | None | NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
     )
-    realtime: bool | None | _NotGiven = field(default_factory=lambda: _NOT_GIVEN)
+    realtime: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class InceptionLLMService(OpenAILLMService):
@@ -113,13 +112,6 @@ class InceptionLLMService(OpenAILLMService):
         ):
             params["reasoning_effort"] = self._settings.reasoning_effort
 
-        # realtime is Inception-specific and unknown to the OpenAI SDK,
-        # so it must be passed via extra_body to avoid validation errors.
-        extra_body = {}
-        if is_given(self._settings.realtime) and self._settings.realtime is not None:
-            extra_body["realtime"] = self._settings.realtime
-
-        if extra_body:
-            params["extra_body"] = extra_body
+        self._merge_extra_body(params, {"realtime": self._settings.realtime})
 
         return params

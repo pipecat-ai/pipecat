@@ -112,6 +112,7 @@ class LLMSwitcher(ServiceSwitcher[StrategyType]):
         *,
         cancel_on_interruption: bool | None = None,
         timeout_secs: float | None = None,
+        cancellable_by_llm: bool | None = None,
     ):
         """Register a function handler for LLM function calls, on all LLMs, active or not.
 
@@ -124,6 +125,10 @@ class LLMSwitcher(ServiceSwitcher[StrategyType]):
                 interruption occurs. Defaults to ``None`` (fall back to the
                 ``@tool_options`` decorator value on the handler, then to True).
             timeout_secs: Optional timeout in seconds for the function call.
+            cancellable_by_llm: Whether the LLM may cancel this call while it runs,
+                through the ``cancel_<name>`` tool advertised alongside it. Pair it
+                with ``cancel_on_interruption=False``. Defaults to ``None`` (fall
+                back to the ``@tool_options`` decorator value, then to False).
         """
         for llm in self.llms:
             llm.register_function(
@@ -131,6 +136,7 @@ class LLMSwitcher(ServiceSwitcher[StrategyType]):
                 handler=handler,
                 cancel_on_interruption=cancel_on_interruption,
                 timeout_secs=timeout_secs,
+                cancellable_by_llm=cancellable_by_llm,
             )
 
     @deprecated(

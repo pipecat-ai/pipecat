@@ -41,8 +41,8 @@ from pipecat.frames.frames import (
     InterruptionFrame,
     OutputTransportMessageFrame,
     OutputTransportMessageUrgentFrame,
-    StartFrame,
 )
+from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.serializers.base_serializer import FrameSerializer
 
 
@@ -174,10 +174,12 @@ class GenesysAudioHookSerializer(FrameSerializer):
         self._sample_rate = 0  # Pipeline input rate, set in setup()
         self._session_id = str(uuid.uuid4())
 
-        # Use Pipecat's official resampler if needed (SOXR)
-        # Only used for TTS output (16kHz → 8kHz), input goes without resampling
-        self._input_resampler = SOXRStreamAudioResampler()
-        self._output_resampler = SOXRStreamAudioResampler()
+        self._input_resampler = SOXRStreamAudioResampler(
+            clear_after_secs=self._params.resampler_clear_after_secs
+        )
+        self._output_resampler = SOXRStreamAudioResampler(
+            clear_after_secs=self._params.resampler_clear_after_secs
+        )
 
         # Protocol state
         self._client_seq = 0
@@ -260,13 +262,13 @@ class GenesysAudioHookSerializer(FrameSerializer):
         self._output_variables = variables
         logger.debug(f"Output variables set: {variables}")
 
-    async def setup(self, frame: StartFrame):
+    async def setup(self, setup: FrameProcessorSetup):
         """Sets up the serializer with pipeline configuration.
 
         Args:
-            frame: The StartFrame containing pipeline configuration.
+            setup: Configuration object containing setup parameters.
         """
-        self._sample_rate = self._params.sample_rate or frame.audio_in_sample_rate
+        self._sample_rate = self._params.sample_rate or setup.audio_in_sample_rate
         logger.debug(f"GenesysAudioHookSerializer setup with sample_rate={self._sample_rate}")
 
     def _format_position(self, position: timedelta) -> str:
@@ -838,7 +840,7 @@ class GenesysAudioHookSerializer(FrameSerializer):
 
         self._is_open = False
 
-        logger.info(f"Sending closed response to Genesys...")
+        logger.info("Sending closed response to Genesys...")
 
         await self._call_event_handler("on_close", message)
 
@@ -859,7 +861,7 @@ class GenesysAudioHookSerializer(FrameSerializer):
         Returns:
             OutputTransportMessageUrgentFrame with pong response.
         """
-        logger.info(f"Sending pong response to Genesys...")
+        logger.info("Sending pong response to Genesys...")
 
         await self._call_event_handler("on_ping", message)
 

@@ -7,27 +7,37 @@
 """Grok LLM service implementation using OpenAI-compatible interface.
 
 This module provides a service for interacting with Grok's API through an
-OpenAI-compatible interface, including specialized token usage tracking
-and context aggregation functionality.
+OpenAI-compatible interface.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any, Literal
 
 from loguru import logger
 
-from pipecat.metrics.metrics import LLMTokenUsage
-from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
 from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.openai.llm import (
     OpenAILLMService,
 )
+from pipecat.utils.types import NOT_GIVEN, NotGiven, is_given
 
 
 @dataclass
 class GrokLLMSettings(BaseOpenAILLMService.Settings):
-    """Settings for GrokLLMService."""
+    """Settings for GrokLLMService.
 
-    pass
+    Parameters:
+        reasoning_effort: How much the model thinks before answering. One of
+            "none", "low", "medium", "high", or "xhigh"; which values a model
+            accepts varies (``grok-4.6`` rejects "none", ``xhigh`` needs
+            ``grok-4.6`` or later, and the non-reasoning models reject the
+            parameter altogether). When unset, xAI's per-model default applies.
+    """
+
+    reasoning_effort: Literal["none", "low", "medium", "high", "xhigh"] | None | NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
 
 
 class GrokLLMService(OpenAILLMService):
@@ -35,8 +45,6 @@ class GrokLLMService(OpenAILLMService):
 
     This service extends OpenAILLMService to connect to Grok's API endpoint while
     maintaining full compatibility with OpenAI's interface and functionality.
-    Includes specialized token usage tracking that accumulates metrics during
-    processing and reports final totals.
     """
 
     Settings = GrokLLMSettings
@@ -69,6 +77,7 @@ class GrokLLMService(OpenAILLMService):
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
             model="grok-4.20-non-reasoning",
+            reasoning_effort=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -83,12 +92,6 @@ class GrokLLMService(OpenAILLMService):
             default_settings.apply_update(settings)
 
         super().__init__(api_key=api_key, base_url=base_url, settings=default_settings, **kwargs)
-        # Initialize counters for token usage metrics
-        self._prompt_tokens = 0
-        self._completion_tokens = 0
-        self._total_tokens = 0
-        self._has_reported_prompt_tokens = False
-        self._is_processing = False
 
     def create_client(self, api_key=None, base_url=None, **kwargs):
         """Create OpenAI-compatible client for Grok API endpoint.
@@ -104,69 +107,25 @@ class GrokLLMService(OpenAILLMService):
         logger.debug(f"Creating Grok client with api {base_url}")
         return super().create_client(api_key, base_url, **kwargs)
 
-    async def _process_context(self, context: LLMContext):
-        """Process a context through the LLM and accumulate token usage metrics.
+    def build_chat_completion_params(
+        self, params_from_context: OpenAILLMInvocationParams
+    ) -> dict[str, Any]:
+        """Build parameters for Grok chat completion request.
 
-        This method overrides the parent class implementation to handle Grok's
-        incremental token reporting style, accumulating the counts and reporting
-        them once at the end of processing.
-
-        Args:
-            context: The context to process, containing messages and other
-                information needed for the LLM interaction.
-        """
-        # Reset all counters and flags at the start of processing
-        self._prompt_tokens = 0
-        self._completion_tokens = 0
-        self._total_tokens = 0
-        self._cache_read_input_tokens = None
-        self._reasoning_tokens = None
-        self._has_reported_prompt_tokens = False
-        self._is_processing = True
-
-        try:
-            await super()._process_context(context)
-        finally:
-            self._is_processing = False
-            # Report final accumulated token usage at the end of processing
-            if self._prompt_tokens > 0 or self._completion_tokens > 0:
-                self._total_tokens = self._prompt_tokens + self._completion_tokens
-                tokens = LLMTokenUsage(
-                    prompt_tokens=self._prompt_tokens,
-                    completion_tokens=self._completion_tokens,
-                    total_tokens=self._total_tokens,
-                    cache_read_input_tokens=self._cache_read_input_tokens,
-                    reasoning_tokens=self._reasoning_tokens,
-                )
-                await super().start_llm_usage_metrics(tokens)
-
-    async def start_llm_usage_metrics(self, tokens: LLMTokenUsage):
-        """Accumulate token usage metrics during processing.
-
-        This method intercepts the incremental token updates from Grok's API
-        and accumulates them instead of passing each update to the metrics system.
-        The final accumulated totals are reported at the end of processing.
+        Extends the base OpenAI parameters with Grok's reasoning effort control.
 
         Args:
-            tokens: The token usage metrics for the current chunk of processing,
-                containing prompt_tokens, completion_tokens, and optional cached/reasoning tokens.
+            params_from_context: Parameters, derived from the LLM context, to
+                use for the chat completion. Contains messages, tools, and tool
+                choice.
+
+        Returns:
+            Dictionary of parameters for the chat completion request.
         """
-        # Only accumulate metrics during active processing
-        if not self._is_processing:
-            return
+        params = super().build_chat_completion_params(params_from_context)
 
-        # Record prompt tokens the first time we see them
-        if not self._has_reported_prompt_tokens and tokens.prompt_tokens > 0:
-            self._prompt_tokens = tokens.prompt_tokens
-            self._has_reported_prompt_tokens = True
+        reasoning_effort = self._settings.reasoning_effort
+        if is_given(reasoning_effort) and reasoning_effort is not None:
+            params.setdefault("reasoning_effort", reasoning_effort)
 
-        # Update completion tokens count if it has increased
-        if tokens.completion_tokens > self._completion_tokens:
-            self._completion_tokens = tokens.completion_tokens
-
-        # Capture cached & reasoning tokens (these typically only appear once per request)
-        if tokens.cache_read_input_tokens is not None:
-            self._cache_read_input_tokens = tokens.cache_read_input_tokens
-
-        if tokens.reasoning_tokens is not None:
-            self._reasoning_tokens = tokens.reasoning_tokens
+        return params

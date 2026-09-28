@@ -7,7 +7,7 @@ Create changelog files for the important commits in this PR. The PR number is pr
 
 ## Instructions
 
-1. Skip changelog for: documentation-only, internal refactoring, test-only, CI changes.
+1. Skip changelog for: documentation-only, internal refactoring, test-only, CI changes, and fixes to changes that have not shipped yet (the unreleased change's entry covers them — update that entry instead if the fix alters what it should say).
 
 2. First, check what commits are on the current branch compared to main:
    ```
@@ -45,6 +45,8 @@ Create changelog files for the important commits in this PR. The PR number is pr
    ```
 
    Ask yourself: "If I'm a developer building on Pipecat, what would I notice changed?" Start there.
+
+8. Once the entries are written, run `/prose-review changelog/` and fix anything it flags.
 
 ## Example
 

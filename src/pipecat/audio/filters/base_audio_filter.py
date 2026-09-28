@@ -26,11 +26,11 @@ class BaseAudioFilter(ABC):
 
     @abstractmethod
     async def start(self, sample_rate: int):
-        """Initialize the filter when the input transport starts.
+        """Initialize the filter when the input transport is set up.
 
-        This will be called from the input transport when the transport is
-        started. It can be used to initialize the filter. The input transport
-        sample rate is provided so the filter can adjust to that sample rate.
+        Called once, from the input transport's setup, and paired with
+        :meth:`stop`. The input transport sample rate is provided so the filter
+        can adjust to that sample rate.
 
         Args:
             sample_rate: The sample rate of the input transport in Hz.
@@ -39,10 +39,10 @@ class BaseAudioFilter(ABC):
 
     @abstractmethod
     async def stop(self):
-        """Clean up the filter when the input transport stops.
+        """Clean up the filter when the input transport is cleaned up.
 
-        This will be called from the input transport when the transport is
-        stopping.
+        Called once, from the input transport's cleanup, and paired with
+        :meth:`start`.
         """
         pass
 

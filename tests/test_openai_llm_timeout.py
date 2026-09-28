@@ -8,7 +8,7 @@
 
 from unittest.mock import AsyncMock, patch
 
-import httpx
+import openai
 import pytest
 
 from pipecat.frames.frames import (
@@ -19,14 +19,18 @@ from pipecat.frames.frames import (
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.utils.http import TIMEOUT_EXCEPTIONS
+from tests.openai_http_helpers import http
 
 
 @pytest.mark.asyncio
-async def test_openai_llm_emits_error_frame_on_timeout():
+@pytest.mark.parametrize("timeout_exception", TIMEOUT_EXCEPTIONS, ids=lambda e: e.__module__)
+async def test_openai_llm_emits_error_frame_on_timeout(timeout_exception):
     """Test that OpenAI LLM service emits ErrorFrame when a timeout occurs.
 
     This enables LLMSwitcher to trigger failover to backup LLMs when the
-    primary LLM times out.
+    primary LLM times out. Runs against every installed HTTP client family,
+    since a timeout mid-stream surfaces as that family's own exception.
     """
     with patch.object(OpenAILLMService, "create_client"):
         service = OpenAILLMService(settings=OpenAILLMService.Settings(model="gpt-4"))
@@ -46,7 +50,7 @@ async def test_openai_llm_emits_error_frame_on_timeout():
         async def mock_push_error(error_msg, exception=None):
             pushed_errors.append({"error_msg": error_msg, "exception": exception})
 
-        async def mock_timeout_handler(event_name):
+        async def mock_timeout_handler(event_name, *args):
             nonlocal timeout_handler_called
             if event_name == "on_completion_timeout":
                 timeout_handler_called = True
@@ -56,9 +60,7 @@ async def test_openai_llm_emits_error_frame_on_timeout():
         service._call_event_handler = AsyncMock(side_effect=mock_timeout_handler)
 
         # Mock _process_context to raise TimeoutException
-        service._process_context = AsyncMock(
-            side_effect=httpx.TimeoutException("Connection timed out")
-        )
+        service._process_context = AsyncMock(side_effect=timeout_exception("Connection timed out"))
 
         # Mock metrics methods
         service.start_processing_metrics = AsyncMock()
@@ -75,13 +77,13 @@ async def test_openai_llm_emits_error_frame_on_timeout():
         await service.process_frame(frame, FrameDirection.DOWNSTREAM)
 
         # Verify timeout handler was called
-        service._call_event_handler.assert_called_once_with("on_completion_timeout")
+        service._call_event_handler.assert_any_call("on_completion_timeout")
         assert timeout_handler_called
 
         # Verify push_error was called with correct message
         assert len(pushed_errors) == 1
         assert pushed_errors[0]["error_msg"] == "LLM completion timeout"
-        assert isinstance(pushed_errors[0]["exception"], httpx.TimeoutException)
+        assert isinstance(pushed_errors[0]["exception"], timeout_exception)
 
         # Verify LLMFullResponseStartFrame and LLMFullResponseEndFrame were pushed
         frame_types = [type(f) for f in pushed_frames]
@@ -107,7 +109,7 @@ async def test_openai_llm_timeout_still_pushes_end_frame():
         service.push_frame = mock_push_frame
         service.push_error = AsyncMock()
         service._call_event_handler = AsyncMock()
-        service._process_context = AsyncMock(side_effect=httpx.TimeoutException("Timeout"))
+        service._process_context = AsyncMock(side_effect=http.TimeoutException("Timeout"))
         service.start_processing_metrics = AsyncMock()
         service.stop_processing_metrics = AsyncMock()
 
@@ -295,3 +297,72 @@ async def test_openai_llm_async_iterator_closed_on_stream_end():
         assert iterator_aclosed, "Async iterator should be explicitly closed"
         # Verify the stream was also closed (releases HTTP resources)
         assert stream_closed, "Stream should be closed to release HTTP resources"
+
+
+@pytest.mark.asyncio
+async def test_openai_llm_rejected_api_key_misconfigures_the_service():
+    """Test that a rejected API key marks the service as misconfigured."""
+    with patch.object(OpenAILLMService, "create_client"):
+        service = OpenAILLMService(settings=OpenAILLMService.Settings(model="gpt-4"))
+        service._client = AsyncMock()
+
+        request = http.Request("POST", "https://api.openai.com/v1/chat/completions")
+        service._process_context = AsyncMock(
+            side_effect=openai.AuthenticationError(
+                "Incorrect API key provided",
+                response=http.Response(401, request=request),
+                body=None,
+            )
+        )
+
+        await service.process_frame(LLMContextFrame(LLMContext()), FrameDirection.DOWNSTREAM)
+
+        assert not service.is_usable
+
+
+@pytest.mark.asyncio
+async def test_openai_llm_server_error_leaves_the_service_usable():
+    """Test that a provider-side failure leaves the service retryable."""
+    with patch.object(OpenAILLMService, "create_client"):
+        service = OpenAILLMService(settings=OpenAILLMService.Settings(model="gpt-4"))
+        service._client = AsyncMock()
+
+        request = http.Request("POST", "https://api.openai.com/v1/chat/completions")
+        service._process_context = AsyncMock(
+            side_effect=openai.InternalServerError(
+                "server had an error",
+                response=http.Response(500, request=request),
+                body=None,
+            )
+        )
+
+        await service.process_frame(LLMContextFrame(LLMContext()), FrameDirection.DOWNSTREAM)
+
+        assert service.is_usable
+
+
+@pytest.mark.asyncio
+async def test_openai_llm_starts_usable():
+    """Test that a service is usable until something proves otherwise.
+
+    The client is constructed without contacting the provider, so an invalid
+    API key builds just as happily as a valid one; only a rejected request
+    tells us anything.
+    """
+    with patch.object(OpenAILLMService, "create_client"):
+        service = OpenAILLMService(settings=OpenAILLMService.Settings(model="gpt-4"))
+
+        assert service.is_usable
+
+
+@pytest.mark.asyncio
+async def test_openai_llm_unexpected_failure_leaves_the_service_usable():
+    """Test that a failure of unattributable cause is not held against the service."""
+    with patch.object(OpenAILLMService, "create_client"):
+        service = OpenAILLMService(settings=OpenAILLMService.Settings(model="gpt-4"))
+        service._client = AsyncMock()
+        service._process_context = AsyncMock(side_effect=RuntimeError("boom"))
+
+        await service.process_frame(LLMContextFrame(LLMContext()), FrameDirection.DOWNSTREAM)
+
+        assert service.is_usable

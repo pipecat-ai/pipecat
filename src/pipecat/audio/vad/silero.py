@@ -13,6 +13,7 @@ Supports 8kHz and 16kHz sample rates.
 
 import threading
 import time
+from typing import cast
 
 import numpy as np
 from loguru import logger
@@ -128,7 +129,7 @@ class SileroOnnxModel:
         if np.ndim(x) == 1:
             x = np.expand_dims(x, 0)
         if np.ndim(x) > 2:
-            raise ValueError(f"Too many dimensions for input audio chunk {x.dim()}")
+            raise ValueError(f"Too many dimensions for input audio chunk {x.ndim}")
 
         if sr not in self.sample_rates:
             raise ValueError(
@@ -150,7 +151,7 @@ class SileroOnnxModel:
         self._last_sr = 0
         self._last_batch_size = 0
 
-    def __call__(self, x, sr: int):
+    def __call__(self, x, sr: int) -> np.ndarray:
         """Process audio input through the VAD model."""
         x, sr = self._validate_input(x, sr)
         num_samples = 512 if sr == 16000 else 256
@@ -178,8 +179,8 @@ class SileroOnnxModel:
         if sr in [8000, 16000]:
             ort_inputs = {"input": x, "state": self._state, "sr": np.array(sr, dtype="int64")}
             ort_outs = self.session.run(None, ort_inputs)
-            out, state = ort_outs
-            self._state = state
+            out = cast(np.ndarray, ort_outs[0])
+            self._state = cast(np.ndarray, ort_outs[1])
         else:
             raise ValueError()
 
@@ -255,7 +256,7 @@ class SileroVADAnalyzer(VADAnalyzer):
         try:
             audio_int16 = np.frombuffer(buffer, np.int16)
             # Divide by 32768 because we have signed 16-bit data.
-            audio_float32 = np.frombuffer(audio_int16, dtype=np.int16).astype(np.float32) / 32768.0
+            audio_float32 = audio_int16.astype(np.float32) / 32768.0
             new_confidence = self._model(audio_float32, self.sample_rate)[0]
 
             # We need to reset the model from time to time because it doesn't

@@ -20,6 +20,7 @@ from typing import Any
 from loguru import logger
 from pydantic import BaseModel
 
+from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
     AudioRawFrame,
@@ -29,10 +30,13 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     ImageRawFrame,
+    InputDTMFFrame,
+    InputTransportMessageFrame,
     InterruptionFrame,
     OutputAudioRawFrame,
     OutputDTMFFrame,
     OutputDTMFUrgentFrame,
+    OutputImageRawFrame,
     OutputTransportMessageFrame,
     OutputTransportMessageUrgentFrame,
     StartFrame,
@@ -70,6 +74,27 @@ DTMF_CODE_MAP = {
     "#": 11,
 }
 
+# Maps Pipecat's PIL-style color format strings (``OutputImageRawFrame.format``,
+# configured via ``TransportParams.video_out_color_format``) to LiveKit's
+# ``VideoBufferType`` enum used by ``rtc.VideoFrame`` and its bytes per pixel.
+LIVEKIT_VIDEO_BUFFER_TYPES = {
+    "RGB": (proto_video_frame.VideoBufferType.RGB24, 3),
+    "RGBA": (proto_video_frame.VideoBufferType.RGBA, 4),
+    "BGRA": (proto_video_frame.VideoBufferType.BGRA, 4),
+    "ARGB": (proto_video_frame.VideoBufferType.ARGB, 4),
+}
+
+
+@dataclass
+class LiveKitInputTransportMessageFrame(InputTransportMessageFrame):
+    """Frame for incoming transport messages from LiveKit rooms.
+
+    Parameters:
+        participant_id: ID of the participant this message is from.
+    """
+
+    participant_id: str | None = None
+
 
 @dataclass
 class LiveKitOutputTransportMessageFrame(OutputTransportMessageFrame):
@@ -96,10 +121,29 @@ class LiveKitOutputTransportMessageUrgentFrame(OutputTransportMessageUrgentFrame
 class LiveKitParams(TransportParams):
     """Configuration parameters for LiveKit transport.
 
-    Inherits all parameters from TransportParams without additional configuration.
+    Video output publishes a single ``"pipecat-video"`` camera track (mirroring how
+    audio output always publishes one ``"pipecat-audio"`` microphone track) when
+    ``video_out_enabled`` is set. The track is sized using
+    ``video_out_width``/``video_out_height`` and encodes frames according to
+    ``video_out_color_format`` (default ``"RGB"``); ``video_out_framerate``
+    governs how often ``BaseOutputTransport`` draws frames. Per-destination
+    video routing (multiple named output tracks, as supported by Daily's
+    ``camera_out_enabled``/``register_video_destination``) is not yet
+    implemented for LiveKit.
+
+    ``video_out_codec`` selects the published video codec (``"VP8"``, ``"H264"``,
+    ``"VP9"``, ``"AV1"`` or ``"H265"``); LiveKit picks one when it is unset.
+
+    Parameters:
+        audio_out_queue_size_ms: Buffer size of the outgoing audio source, in milliseconds
+            (LiveKit's default is 1000).
+        video_out_max_bitrate: Maximum bitrate of the published video track, in bits
+            per second, capped at ``video_out_framerate``. LiveKit chooses the encoding
+            from the track resolution when unset.
     """
 
-    pass
+    audio_out_queue_size_ms: int = 1000
+    video_out_max_bitrate: int | None = None
 
 
 class LiveKitCallbacks(BaseModel):
@@ -112,8 +156,10 @@ class LiveKitCallbacks(BaseModel):
         on_participant_disconnected: Called when a participant leaves the room.
         on_audio_track_subscribed: Called when an audio track is subscribed.
         on_audio_track_unsubscribed: Called when an audio track is unsubscribed.
-        on_data_received: Called when data is received from a participant.
+        on_data_received: Called when data is received. The sender is None for
+            packets sent by a server SDK, which LiveKit delivers unattributed.
         on_first_participant_joined: Called when the first participant joins.
+        on_dtmf_event: Called when a SIP DTMF tone is received.
     """
 
     on_connected: Callable[[], Awaitable[None]]
@@ -125,8 +171,9 @@ class LiveKitCallbacks(BaseModel):
     on_audio_track_unsubscribed: Callable[[str], Awaitable[None]]
     on_video_track_subscribed: Callable[[str], Awaitable[None]]
     on_video_track_unsubscribed: Callable[[str], Awaitable[None]]
-    on_data_received: Callable[[bytes, str], Awaitable[None]]
+    on_data_received: Callable[[bytes, str | None], Awaitable[None]]
     on_first_participant_joined: Callable[[str], Awaitable[None]]
+    on_dtmf_event: Callable[[Any], Awaitable[None]]
 
 
 class LiveKitTransportClient:
@@ -173,6 +220,8 @@ class LiveKitTransportClient:
         # the owned native stream and cancel its producer task instead of
         # leaking both on every track republish.
         self._audio_streams: dict[str, tuple[rtc.AudioStream, asyncio.Task]] = {}
+        self._video_source: rtc.VideoSource | None = None
+        self._video_track: rtc.LocalVideoTrack | None = None
         self._video_tracks = {}
         self._video_queue = asyncio.Queue()
         # Symmetric registry for video streams.
@@ -216,6 +265,8 @@ class LiveKitTransportClient:
         self._task_manager = setup.task_manager
         self._room = rtc.Room(loop=self._task_manager.get_event_loop())
 
+        self._out_sample_rate = self._params.audio_out_sample_rate or setup.audio_out_sample_rate
+
         # Set up room event handlers
         self.room.on("participant_connected")(self._on_participant_connected_wrapper)
         self.room.on("participant_disconnected")(self._on_participant_disconnected_wrapper)
@@ -224,18 +275,11 @@ class LiveKitTransportClient:
         self.room.on("data_received")(self._on_data_received_wrapper)
         self.room.on("connected")(self._on_connected_wrapper)
         self.room.on("disconnected")(self._on_disconnected_wrapper)
+        self.room.on("sip_dtmf_received")(self._on_sip_dtmf_received_wrapper)
 
     async def cleanup(self):
         """Cleanup client resources."""
         await self.disconnect()
-
-    async def start(self, frame: StartFrame):
-        """Start the client and initialize audio components.
-
-        Args:
-            frame: The start frame containing initialization parameters.
-        """
-        self._out_sample_rate = self._params.audio_out_sample_rate or frame.audio_out_sample_rate
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
     async def connect(self):
@@ -254,16 +298,14 @@ class LiveKitTransportClient:
                     self._token,
                     options=rtc.RoomOptions(auto_subscribe=True),
                 )
-                self._connected = True
-                # Increment disconnect counter if we successfully connected.
-                self._disconnect_counter += 1
-
-                self._participant_id = self.room.local_participant.sid
-                logger.info(f"Connected to {self._room_name}")
+                self._participant_id = self.room.local_participant.identity
+                logger.info(f"Connected to {self._room_name} as {self._participant_id}")
 
                 # Set up audio source and track
                 self._audio_source = rtc.AudioSource(
-                    self._out_sample_rate, self._params.audio_out_channels
+                    self._out_sample_rate,
+                    self._params.audio_out_channels,
+                    queue_size_ms=self._params.audio_out_queue_size_ms,
                 )
                 self._audio_track = rtc.LocalAudioTrack.create_audio_track(
                     "pipecat-audio", self._audio_source
@@ -271,6 +313,27 @@ class LiveKitTransportClient:
                 options = rtc.TrackPublishOptions()
                 options.source = rtc.TrackSource.SOURCE_MICROPHONE
                 await self.room.local_participant.publish_track(self._audio_track, options)
+
+                # Set up video source and track (only if video output is
+                # enabled; unlike audio, which is always published).
+                if self._params.video_out_enabled:
+                    self._video_source = rtc.VideoSource(
+                        self._params.video_out_width, self._params.video_out_height
+                    )
+                    self._video_track = rtc.LocalVideoTrack.create_video_track(
+                        "pipecat-video", self._video_source
+                    )
+                    video_options = self._video_publish_options()
+                    await self.room.local_participant.publish_track(
+                        self._video_track, video_options
+                    )
+
+                # Only mark the client connected once its tracks are
+                # published, so a retry after a failed publish starts over
+                # instead of returning early without tracks.
+                self._connected = True
+                # Increment disconnect counter if we successfully connected.
+                self._disconnect_counter += 1
 
                 await self._callbacks.on_connected()
 
@@ -281,7 +344,40 @@ class LiveKitTransportClient:
                     await self._callbacks.on_first_participant_joined(participants[0])
             except Exception as e:
                 logger.error(f"Error connecting to {self._room_name}: {e}")
+                if not self._connected:
+                    await self._rollback_partial_connect()
                 raise
+
+    def _video_publish_options(self) -> rtc.TrackPublishOptions:
+        """Build the publish options for the video track from the params."""
+        options = rtc.TrackPublishOptions()
+        options.source = rtc.TrackSource.SOURCE_CAMERA
+
+        # LiveKit requires both fields of a video encoding, so the framerate
+        # is only sent along with a bitrate.
+        if self._params.video_out_max_bitrate is not None:
+            options.video_encoding.max_bitrate = self._params.video_out_max_bitrate
+            options.video_encoding.max_framerate = self._params.video_out_framerate
+
+        codec = self._params.video_out_codec
+        if codec:
+            try:
+                options.video_codec = rtc.VideoCodec.Value(codec.upper())
+            except ValueError:
+                logger.warning(
+                    f"{self} unsupported video codec for LiveKit output: {codec!r}, "
+                    f"expected one of {list(rtc.VideoCodec.keys())}"
+                )
+
+        return options
+
+    async def _rollback_partial_connect(self):
+        """Undo a connection attempt that failed before it completed."""
+        await self._close_output_sources()
+        try:
+            await self.room.disconnect()
+        except Exception as e:
+            logger.warning(f"{self} error disconnecting after failed connect: {e}")
 
     async def disconnect(self):
         """Disconnect from the LiveKit room."""
@@ -294,10 +390,32 @@ class LiveKitTransportClient:
 
             logger.info(f"Disconnecting from {self._room_name}")
             await self._callbacks.on_before_disconnect()
-            await self.room.disconnect()
+            # Mark the client disconnected before the room disconnects, so the
+            # room's own "disconnected" event does not report it a second time.
             self._connected = False
+            await self.room.disconnect()
+            await self._close_output_sources()
+            # Close any remaining per-participant streams and cancel their
+            # producer tasks so they do not outlive the connection.
+            await self._close_all_streams()
             logger.info(f"Disconnected from {self._room_name}")
             await self._callbacks.on_disconnected()
+
+    async def _close_output_sources(self):
+        """Close the published audio and video sources.
+
+        ``room.disconnect()`` does not release the native source handles, so
+        each connection would otherwise leave them behind.
+        """
+        audio_source, self._audio_source, self._audio_track = self._audio_source, None, None
+        video_source, self._video_source, self._video_track = self._video_source, None, None
+        for source in (audio_source, video_source):
+            if source is None:
+                continue
+            try:
+                await source.aclose()
+            except Exception as e:
+                logger.warning(f"{self} error closing output source: {e}")
 
     async def send_data(self, data: bytes, participant_id: str | None = None):
         """Send data to participants in the room.
@@ -364,19 +482,40 @@ class LiveKitTransportClient:
                 logger.error(f"Error publishing audio: {e}")
             return False
 
+    async def publish_video(self, video_frame: rtc.VideoFrame) -> bool:
+        """Publish a video frame to the room.
+
+        Args:
+            video_frame: The LiveKit video frame to publish.
+
+        Returns:
+            True if the video frame was published successfully, False otherwise.
+        """
+        if not self._connected or not self._video_source:
+            return False
+
+        try:
+            # Unlike ``AudioSource.capture_frame``, ``VideoSource.capture_frame``
+            # is synchronous in livekit-rtc.
+            self._video_source.capture_frame(video_frame)
+            return True
+        except Exception as e:
+            logger.error(f"Error publishing video: {e}")
+            return False
+
     def get_participants(self) -> list[str]:
         """Get list of participant IDs in the room.
 
         Returns:
-            List of participant IDs.
+            List of participant LiveKit identities.
         """
-        return [p.sid for p in self.room.remote_participants.values()]
+        return [p.identity for p in self.room.remote_participants.values()]
 
     async def get_participant_metadata(self, participant_id: str) -> dict:
         """Get metadata for a specific participant.
 
         Args:
-            participant_id: ID of the participant to get metadata for.
+            participant_id: LiveKit identity of the participant to get metadata for.
 
         Returns:
             Dictionary containing participant metadata.
@@ -384,10 +523,9 @@ class LiveKitTransportClient:
         participant = self.room.remote_participants.get(participant_id)
         if participant:
             return {
-                "id": participant.sid,
+                "id": participant.identity,
                 "name": participant.name,
                 "metadata": participant.metadata,
-                "is_speaking": participant.is_speaking,
             }
         return {}
 
@@ -400,32 +538,39 @@ class LiveKitTransportClient:
         await self.room.local_participant.set_metadata(metadata)
 
     async def mute_participant(self, participant_id: str):
-        """Mute a specific participant's audio tracks.
+        """Stop receiving a specific participant's audio.
+
+        LiveKit doesn't let one participant force-mute another's microphone;
+        this unsubscribes the bot from their audio track instead.
 
         Args:
-            participant_id: ID of the participant to mute.
+            participant_id: LiveKit identity of the participant to stop
+                receiving audio from.
         """
         participant = self.room.remote_participants.get(participant_id)
         if participant:
-            for track in participant.tracks.values():
-                if track.kind == "audio":
-                    await track.set_enabled(False)
+            for publication in participant.track_publications.values():
+                if publication.kind == rtc.TrackKind.KIND_AUDIO:
+                    publication.set_subscribed(False)
 
     async def unmute_participant(self, participant_id: str):
-        """Unmute a specific participant's audio tracks.
+        """Resume receiving a specific participant's audio.
 
         Args:
-            participant_id: ID of the participant to unmute.
+            participant_id: LiveKit identity of the participant to resume
+                receiving audio from.
         """
         participant = self.room.remote_participants.get(participant_id)
         if participant:
-            for track in participant.tracks.values():
-                if track.kind == "audio":
-                    await track.set_enabled(True)
+            for publication in participant.track_publications.values():
+                if publication.kind == rtc.TrackKind.KIND_AUDIO:
+                    publication.set_subscribed(True)
 
     # Wrapper methods for event handlers
     def _on_participant_connected_wrapper(self, participant: rtc.RemoteParticipant):
         """Wrapper for participant connected events."""
+        assert self._task_manager is not None
+
         self._task_manager.create_task(
             self._async_on_participant_connected(participant),
             f"{self}::_async_on_participant_connected",
@@ -433,6 +578,8 @@ class LiveKitTransportClient:
 
     def _on_participant_disconnected_wrapper(self, participant: rtc.RemoteParticipant):
         """Wrapper for participant disconnected events."""
+        assert self._task_manager is not None
+
         self._task_manager.create_task(
             self._async_on_participant_disconnected(participant),
             f"{self}::_async_on_participant_disconnected",
@@ -445,6 +592,8 @@ class LiveKitTransportClient:
         participant: rtc.RemoteParticipant,
     ):
         """Wrapper for track subscribed events."""
+        assert self._task_manager is not None
+
         self._task_manager.create_task(
             self._async_on_track_subscribed(track, publication, participant),
             f"{self}::_async_on_track_subscribed",
@@ -457,6 +606,8 @@ class LiveKitTransportClient:
         participant: rtc.RemoteParticipant,
     ):
         """Wrapper for track unsubscribed events."""
+        assert self._task_manager is not None
+
         self._task_manager.create_task(
             self._async_on_track_unsubscribed(track, publication, participant),
             f"{self}::_async_on_track_unsubscribed",
@@ -464,6 +615,8 @@ class LiveKitTransportClient:
 
     def _on_data_received_wrapper(self, data: rtc.DataPacket):
         """Wrapper for data received events."""
+        assert self._task_manager is not None
+
         self._task_manager.create_task(
             self._async_on_data_received(data),
             f"{self}::_async_on_data_received",
@@ -471,27 +624,40 @@ class LiveKitTransportClient:
 
     def _on_connected_wrapper(self):
         """Wrapper for connected events."""
+        assert self._task_manager is not None
+
         self._task_manager.create_task(self._async_on_connected(), f"{self}::_async_on_connected")
 
     def _on_disconnected_wrapper(self):
         """Wrapper for disconnected events."""
+        assert self._task_manager is not None
+
         self._task_manager.create_task(
             self._async_on_disconnected(), f"{self}::_async_on_disconnected"
+        )
+
+    def _on_sip_dtmf_received_wrapper(self, dtmf: rtc.SipDTMF):
+        """Wrapper for inbound SIP DTMF events."""
+        assert self._task_manager is not None
+
+        self._task_manager.create_task(
+            self._async_on_sip_dtmf_received(dtmf),
+            f"{self}::_async_on_sip_dtmf_received",
         )
 
     # Async methods for event handling
     async def _async_on_participant_connected(self, participant: rtc.RemoteParticipant):
         """Handle participant connected events."""
         logger.info(f"Participant connected: {participant.identity}")
-        await self._callbacks.on_participant_connected(participant.sid)
+        await self._callbacks.on_participant_connected(participant.identity)
         if not self._other_participant_has_joined:
             self._other_participant_has_joined = True
-            await self._callbacks.on_first_participant_joined(participant.sid)
+            await self._callbacks.on_first_participant_joined(participant.identity)
 
     async def _async_on_participant_disconnected(self, participant: rtc.RemoteParticipant):
         """Handle participant disconnected events."""
         logger.info(f"Participant disconnected: {participant.identity}")
-        await self._callbacks.on_participant_disconnected(participant.sid)
+        await self._callbacks.on_participant_disconnected(participant.identity)
         if len(self.get_participants()) == 0:
             self._other_participant_has_joined = False
 
@@ -502,37 +668,43 @@ class LiveKitTransportClient:
         participant: rtc.RemoteParticipant,
     ):
         """Handle track subscribed events."""
+        assert self._task_manager is not None
+
         if track.kind == rtc.TrackKind.KIND_AUDIO:
-            logger.info(f"Audio track subscribed: {track.sid} from participant {participant.sid}")
+            logger.info(
+                f"Audio track subscribed: {track.sid} from participant {participant.identity}"
+            )
             # If the participant is re-publishing (e.g. mute/unmute cycle),
             # close + cancel the previous stream/task before replacing the
             # registry entry, so two producers never feed ``_audio_queue``
             # for the same participant.
-            await self._close_audio_stream(participant.sid)
-            self._audio_tracks[participant.sid] = track
+            await self._close_audio_stream(participant.identity)
+            self._audio_tracks[participant.identity] = track
             audio_stream = rtc.AudioStream(track)
             task = self._task_manager.create_task(
-                self._process_audio_stream(audio_stream, participant.sid),
+                self._process_audio_stream(audio_stream, participant.identity),
                 f"{self}::_process_audio_stream",
             )
-            self._audio_streams[participant.sid] = (audio_stream, task)
-            await self._callbacks.on_audio_track_subscribed(participant.sid)
+            self._audio_streams[participant.identity] = (audio_stream, task)
+            await self._callbacks.on_audio_track_subscribed(participant.identity)
         elif track.kind == rtc.TrackKind.KIND_VIDEO:
-            logger.info(f"Video track subscribed: {track.sid} from participant {participant.sid}")
+            logger.info(
+                f"Video track subscribed: {track.sid} from participant {participant.identity}"
+            )
             # Symmetric: clean up any prior video stream/task for the same
             # participant before replacing.
-            await self._close_video_stream(participant.sid)
-            self._video_tracks[participant.sid] = track
+            await self._close_video_stream(participant.identity)
+            self._video_tracks[participant.identity] = track
             # Only process video stream if video input is enabled to prevent
             # unbounded queue growth when there is no consumer for video frames.
             if self._params.video_in_enabled:
                 video_stream = rtc.VideoStream(track)
                 task = self._task_manager.create_task(
-                    self._process_video_stream(video_stream, participant.sid),
+                    self._process_video_stream(video_stream, participant.identity),
                     f"{self}::_process_video_stream",
                 )
-                self._video_streams[participant.sid] = (video_stream, task)
-            await self._callbacks.on_video_track_subscribed(participant.sid)
+                self._video_streams[participant.identity] = (video_stream, task)
+            await self._callbacks.on_video_track_subscribed(participant.identity)
 
     async def _async_on_track_unsubscribed(
         self,
@@ -543,11 +715,11 @@ class LiveKitTransportClient:
         """Handle track unsubscribed events."""
         logger.info(f"Track unsubscribed: {publication.sid} from {participant.identity}")
         if track.kind == rtc.TrackKind.KIND_AUDIO:
-            await self._close_audio_stream(participant.sid)
-            await self._callbacks.on_audio_track_unsubscribed(participant.sid)
+            await self._close_audio_stream(participant.identity)
+            await self._callbacks.on_audio_track_unsubscribed(participant.identity)
         elif track.kind == rtc.TrackKind.KIND_VIDEO:
-            await self._close_video_stream(participant.sid)
-            await self._callbacks.on_video_track_unsubscribed(participant.sid)
+            await self._close_video_stream(participant.identity)
+            await self._callbacks.on_video_track_unsubscribed(participant.identity)
 
     async def _close_audio_stream(self, participant_id: str) -> None:
         """Close a participant's owned audio stream and cancel its producer task.
@@ -583,19 +755,51 @@ class LiveKitTransportClient:
         if task is not None and not task.done():
             task.cancel()
 
+    async def _close_all_streams(self) -> None:
+        """Close every per-participant audio/video stream and cancel its task.
+
+        Idempotent: no-op when no streams are registered.
+        """
+        for participant_id in list(self._audio_streams.keys()):
+            await self._close_audio_stream(participant_id)
+        for participant_id in list(self._video_streams.keys()):
+            await self._close_video_stream(participant_id)
+
     async def _async_on_data_received(self, data: rtc.DataPacket):
         """Handle data received events."""
-        await self._callbacks.on_data_received(data.data, data.participant.sid)
+        # LiveKit delivers packets sent by a server SDK with no participant.
+        sender = data.participant.identity if data.participant else None
+        await self._callbacks.on_data_received(data.data, sender)
 
     async def _async_on_connected(self):
         """Handle connected events."""
         await self._callbacks.on_connected()
 
     async def _async_on_disconnected(self, reason=None):
-        """Handle disconnected events."""
+        """Handle disconnected events.
+
+        Only a disconnect of a connected client is reported. ``disconnect()``
+        and a failed ``connect()`` clear the connected flag before disconnecting
+        the room, so the room's event for those is ignored.
+        """
+        if not self._connected:
+            return
         self._connected = False
         logger.info(f"Disconnected from {self._room_name}. Reason: {reason}")
         await self._callbacks.on_disconnected()
+
+    async def _async_on_sip_dtmf_received(self, dtmf: rtc.SipDTMF):
+        """Handle inbound SIP DTMF events from LiveKit telephony."""
+        participant = getattr(dtmf, "participant", None)
+        participant_id = getattr(participant, "identity", None) if participant else None
+        data = {
+            "tone": dtmf.digit,
+            "digit": dtmf.digit,
+            "code": dtmf.code,
+            "participant_id": participant_id,
+        }
+        logger.debug(f"{self} SIP DTMF event: {data}")
+        await self._callbacks.on_dtmf_event(data)
 
     async def _process_audio_stream(self, audio_stream: rtc.AudioStream, participant_id: str):
         """Process incoming audio stream from a participant."""
@@ -662,30 +866,40 @@ class LiveKitInputTransport(BaseInputTransport):
         self._video_in_task = None
         self._resampler = create_stream_resampler()
 
-        # Whether we have seen a StartFrame already.
-        self._initialized = False
+    async def setup(self, setup: FrameProcessorSetup):
+        """Setup the input transport with shared client setup.
+
+        Args:
+            setup: The frame processor setup configuration.
+        """
+        await super().setup(setup)
+
+        await self._client.setup(setup)
+
+        await self._client.connect()
+
+        logger.info("LiveKitInputTransport connected")
+
+    async def cleanup(self):
+        """Release input transport resources at teardown."""
+        await super().cleanup()
+        await self._teardown()
+        await self._transport.cleanup()
 
     async def start(self, frame: StartFrame):
-        """Start the input transport and connect to LiveKit room.
+        """Start receiving media from the LiveKit room.
 
         Args:
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
 
-        if self._initialized:
-            return
-
-        self._initialized = True
-
-        await self._client.start(frame)
-        await self._client.connect()
         if not self._audio_in_task and self._params.audio_in_enabled:
             self._audio_in_task = self.create_task(self._audio_in_task_handler())
         if not self._video_in_task and self._params.video_in_enabled:
             self._video_in_task = self.create_task(self._video_in_task_handler())
+
         await self.set_transport_ready(frame)
-        logger.info("LiveKitInputTransport started")
 
     async def stop(self, frame: EndFrame):
         """Stop the input transport and disconnect from LiveKit room.
@@ -694,11 +908,7 @@ class LiveKitInputTransport(BaseInputTransport):
             frame: The end frame signaling transport shutdown.
         """
         await super().stop(frame)
-        await self._client.disconnect()
-        if self._audio_in_task:
-            await self.cancel_task(self._audio_in_task)
-        if self._video_in_task:
-            await self.cancel_task(self._video_in_task)
+        await self._teardown()
         logger.info("LiveKitInputTransport stopped")
 
     async def cancel(self, frame: CancelFrame):
@@ -708,35 +918,36 @@ class LiveKitInputTransport(BaseInputTransport):
             frame: The cancel frame signaling immediate cancellation.
         """
         await super().cancel(frame)
-        await self._client.disconnect()
-        if self._audio_in_task and self._params.audio_in_enabled:
-            await self.cancel_task(self._audio_in_task)
-        if self._video_in_task and self._params.video_in_enabled:
-            await self.cancel_task(self._video_in_task)
+        await self._teardown()
 
-    async def setup(self, setup: FrameProcessorSetup):
-        """Setup the input transport with shared client setup.
+    async def _teardown(self):
+        """Disconnect the client and cancel the media input tasks.
 
-        Args:
-            setup: The frame processor setup configuration.
+        Single idempotent teardown body shared by ``stop``, ``cancel`` and
+        ``cleanup``.
         """
-        await super().setup(setup)
-        await self._client.setup(setup)
+        await self._client.disconnect()
+        if self._audio_in_task:
+            await self.cancel_task(self._audio_in_task)
+            self._audio_in_task = None
+        if self._video_in_task:
+            await self.cancel_task(self._video_in_task)
+            self._video_in_task = None
 
-    async def cleanup(self):
-        """Cleanup input transport and shared resources."""
-        await super().cleanup()
-        await self._transport.cleanup()
-
-    async def push_app_message(self, message: Any, sender: str):
+    async def push_app_message(self, message: Any, sender: str | None):
         """Push an application message as an urgent transport frame.
+
+        Broadcast both upstream and downstream so it reaches ``RTVIProcessor``
+        regardless of where it sits relative to the transport in the pipeline.
 
         Args:
             message: The message data to send.
-            sender: ID of the message sender.
+            sender: ID of the message sender, or None if it was sent
+                unattributed by a server SDK.
         """
-        frame = LiveKitOutputTransportMessageUrgentFrame(message=message, participant_id=sender)
-        await self.push_frame(frame)
+        await self.broadcast_frame(
+            LiveKitInputTransportMessageFrame, message=message, participant_id=sender
+        )
 
     async def _audio_in_task_handler(self):
         """Handle incoming audio frames from participants."""
@@ -807,7 +1018,7 @@ class LiveKitInputTransport(BaseInputTransport):
         """Convert LiveKit video frame to Pipecat video frame."""
         rgb_frame = video_frame_event.frame.convert(proto_video_frame.VideoBufferType.RGB24)
         image_frame = ImageRawFrame(
-            image=rgb_frame.data,
+            image=bytes(rgb_frame.data),
             size=(rgb_frame.width, rgb_frame.height),
             format="RGB",
         )
@@ -817,8 +1028,10 @@ class LiveKitInputTransport(BaseInputTransport):
 class LiveKitOutputTransport(BaseOutputTransport):
     """Handles outgoing media streams and events to LiveKit rooms.
 
-    Manages sending audio frames and data messages to LiveKit room participants,
-    including audio format conversion for LiveKit compatibility.
+    Manages sending audio and video frames and data messages to LiveKit room
+    participants, including audio/video format conversion for LiveKit
+    compatibility. Video output publishes to a single default camera track
+    when ``LiveKitParams.video_out_enabled`` is set.
     """
 
     def __init__(
@@ -839,27 +1052,39 @@ class LiveKitOutputTransport(BaseOutputTransport):
         super().__init__(params, **kwargs)
         self._transport = transport
         self._client = client
+        # Formats already reported as unsupported, so the error is logged once
+        # per format instead of once per frame.
+        self._unsupported_video_formats: set[str | None] = set()
 
-        # Whether we have seen a StartFrame already.
-        self._initialized = False
+    async def setup(self, setup: FrameProcessorSetup):
+        """Setup the output transport with shared client setup.
+
+        Args:
+            setup: The frame processor setup configuration.
+        """
+        await super().setup(setup)
+
+        await self._client.setup(setup)
+
+        await self._client.connect()
+
+        logger.info("LiveKitOutputTransport connected")
+
+    async def cleanup(self):
+        """Release output transport resources at teardown."""
+        await super().cleanup()
+        await self._client.disconnect()
+        await self._transport.cleanup()
 
     async def start(self, frame: StartFrame):
-        """Start the output transport and connect to LiveKit room.
+        """Start the output transport.
 
         Args:
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
 
-        if self._initialized:
-            return
-
-        self._initialized = True
-
-        await self._client.start(frame)
-        await self._client.connect()
         await self.set_transport_ready(frame)
-        logger.info("LiveKitOutputTransport started")
 
     async def stop(self, frame: EndFrame):
         """Stop the output transport and disconnect from LiveKit room.
@@ -895,20 +1120,6 @@ class LiveKitOutputTransport(BaseOutputTransport):
         if isinstance(frame, InterruptionFrame) and self._client._audio_source is not None:
             self._client._audio_source.clear_queue()
 
-    async def setup(self, setup: FrameProcessorSetup):
-        """Setup the output transport with shared client setup.
-
-        Args:
-            setup: The frame processor setup configuration.
-        """
-        await super().setup(setup)
-        await self._client.setup(setup)
-
-    async def cleanup(self):
-        """Cleanup output transport and shared resources."""
-        await super().cleanup()
-        await self._transport.cleanup()
-
     async def send_message(
         self, frame: OutputTransportMessageFrame | OutputTransportMessageUrgentFrame
     ):
@@ -939,6 +1150,26 @@ class LiveKitOutputTransport(BaseOutputTransport):
         """
         livekit_audio = self._convert_pipecat_audio_to_livekit(frame.audio)
         return await self._client.publish_audio(livekit_audio)
+
+    async def write_video_frame(self, frame: OutputImageRawFrame) -> bool:
+        """Write a video frame to the LiveKit room's published camera track.
+
+        Publishes to the single default video track set up in
+        ``LiveKitTransportClient.connect`` (mirroring how audio always
+        publishes to one microphone track). Per-destination routing to
+        multiple named video tracks is not supported yet, so
+        ``frame.transport_destination`` is ignored.
+
+        Args:
+            frame: The video frame to write.
+
+        Returns:
+            True if the video frame was written successfully, False otherwise.
+        """
+        livekit_video = self._convert_pipecat_video_to_livekit(frame)
+        if livekit_video is None:
+            return False
+        return await self._client.publish_video(livekit_video)
 
     def _supports_native_dtmf(self) -> bool:
         """LiveKit supports native DTMF via telephone events.
@@ -975,6 +1206,40 @@ class LiveKitOutputTransport(BaseOutputTransport):
             samples_per_channel=samples_per_channel,
         )
 
+    def _convert_pipecat_video_to_livekit(
+        self, frame: OutputImageRawFrame
+    ) -> rtc.VideoFrame | None:
+        """Convert a Pipecat output video frame to a LiveKit video frame.
+
+        Returns:
+            The converted ``rtc.VideoFrame``, or None if ``frame.format`` has
+            no known LiveKit ``VideoBufferType`` mapping or the image length
+            does not match its size.
+        """
+        buffer_info = LIVEKIT_VIDEO_BUFFER_TYPES.get(frame.format) if frame.format else None
+        if buffer_info is None:
+            if frame.format not in self._unsupported_video_formats:
+                self._unsupported_video_formats.add(frame.format)
+                logger.error(
+                    f"{self} unsupported video color format for LiveKit output: {frame.format!r}"
+                )
+            return None
+
+        buffer_type, bytes_per_pixel = buffer_info
+        width, height = frame.size
+        # LiveKit reads ``width * height * bytes_per_pixel`` bytes from the
+        # buffer without checking its length, so a short buffer crashes the
+        # process.
+        expected_length = width * height * bytes_per_pixel
+        if len(frame.image) != expected_length:
+            logger.error(
+                f"{self} video frame of size {width}x{height} and format {frame.format!r} "
+                f"has {len(frame.image)} bytes, expected {expected_length}"
+            )
+            return None
+
+        return rtc.VideoFrame(width, height, buffer_type, frame.image)
+
 
 class LiveKitTransport(BaseTransport):
     """Transport implementation for LiveKit real-time communication.
@@ -982,6 +1247,15 @@ class LiveKitTransport(BaseTransport):
     Provides comprehensive LiveKit integration including audio streaming, data
     messaging, participant management, and room event handling for conversational
     AI applications.
+
+    Every ``participant_id`` surfaced by this transport (event args, frame
+    fields, ``get_participants()``, and the ``get_participant_metadata``/
+    ``mute_participant``/``unmute_participant`` methods) is the participant's
+    LiveKit *identity* (``rtc.Participant.identity``) — the value set when
+    minting its access token, and what LiveKit itself keys
+    ``room.remote_participants`` by and expects in ``destination_identities``.
+    It is not the participant's *SID* (``rtc.Participant.sid``), a
+    per-connection session id that changes on every reconnect.
 
     Event handlers available:
 
@@ -997,6 +1271,10 @@ class LiveKitTransport(BaseTransport):
       Args: (participant_id: str)
     - on_participant_left: Called when a participant leaves.
       Args: (participant_id: str, reason: str)
+    - on_client_connected: Called when a participant connects (alias for
+      on_participant_connected). Args: (participant: dict)
+    - on_client_disconnected: Called when a participant disconnects (alias for
+      on_participant_disconnected). Args: (participant: dict)
     - on_audio_track_subscribed: Called when an audio track is subscribed.
       Args: (participant_id: str)
     - on_audio_track_unsubscribed: Called when an audio track is unsubscribed.
@@ -1005,8 +1283,15 @@ class LiveKitTransport(BaseTransport):
       Args: (participant_id: str)
     - on_video_track_unsubscribed: Called when a video track is unsubscribed.
       Args: (participant_id: str)
-    - on_data_received: Called when data is received from a participant.
-      Args: (data: bytes, participant_id: str)
+    - on_app_message: Called when data is received from a participant. RTVI-compatible version of on_data_received.
+      Args: (message: Any, sender: str)
+    - on_data_received: Called when data is received. The participant ID is None
+      for packets sent by a server SDK, which LiveKit delivers unattributed.
+      Args: (data: bytes, participant_id: str | None)
+    - on_dtmf_event: Called when a SIP DTMF tone is received from a participant.
+      Args: (data: dict) with keys ``tone``/``digit``, ``code``, and
+      ``participant_id``. Also pushes an ``InputDTMFFrame`` so
+      ``DTMFAggregator`` works on LiveKit SIP calls.
 
     Example::
 
@@ -1052,6 +1337,7 @@ class LiveKitTransport(BaseTransport):
             on_video_track_unsubscribed=self._on_video_track_unsubscribed,
             on_data_received=self._on_data_received,
             on_first_participant_joined=self._on_first_participant_joined,
+            on_dtmf_event=self._on_dtmf_event,
         )
         self._params = params or LiveKitParams()
 
@@ -1065,15 +1351,19 @@ class LiveKitTransport(BaseTransport):
         self._register_event_handler("on_disconnected")
         self._register_event_handler("on_participant_connected")
         self._register_event_handler("on_participant_disconnected")
+        self._register_event_handler("on_client_connected")
+        self._register_event_handler("on_client_disconnected")
         self._register_event_handler("on_audio_track_subscribed")
         self._register_event_handler("on_audio_track_unsubscribed")
         self._register_event_handler("on_video_track_subscribed")
         self._register_event_handler("on_video_track_unsubscribed")
+        self._register_event_handler("on_app_message")
         self._register_event_handler("on_data_received")
         self._register_event_handler("on_first_participant_joined")
         self._register_event_handler("on_participant_left")
         self._register_event_handler("on_call_state_updated")
         self._register_event_handler("on_before_disconnect", sync=True)
+        self._register_event_handler("on_dtmf_event")
 
     def input(self) -> LiveKitInputTransport:
         """Get the input transport for receiving media and events.
@@ -1121,7 +1411,7 @@ class LiveKitTransport(BaseTransport):
         """Get list of participant IDs in the room.
 
         Returns:
-            List of participant IDs.
+            List of participant LiveKit identities.
         """
         return self._client.get_participants()
 
@@ -1129,7 +1419,7 @@ class LiveKitTransport(BaseTransport):
         """Get metadata for a specific participant.
 
         Args:
-            participant_id: ID of the participant to get metadata for.
+            participant_id: LiveKit identity of the participant to get metadata for.
 
         Returns:
             Dictionary containing participant metadata.
@@ -1145,18 +1435,20 @@ class LiveKitTransport(BaseTransport):
         await self._client.set_participant_metadata(metadata)
 
     async def mute_participant(self, participant_id: str):
-        """Mute a specific participant's audio tracks.
+        """Stop receiving a specific participant's audio.
 
         Args:
-            participant_id: ID of the participant to mute.
+            participant_id: LiveKit identity of the participant to stop
+                receiving audio from.
         """
         await self._client.mute_participant(participant_id)
 
     async def unmute_participant(self, participant_id: str):
-        """Unmute a specific participant's audio tracks.
+        """Resume receiving a specific participant's audio.
 
         Args:
-            participant_id: ID of the participant to unmute.
+            participant_id: LiveKit identity of the participant to resume
+                receiving audio from.
         """
         await self._client.unmute_participant(participant_id)
 
@@ -1177,6 +1469,10 @@ class LiveKitTransport(BaseTransport):
     async def _on_participant_connected(self, participant_id: str):
         """Handle participant connected events."""
         await self._call_event_handler("on_participant_connected", participant_id)
+        # Also call on_client_connected for compatibility with other transports.
+        # Wrapped as a dict (matching Daily's Mapping[str, Any] shape) so
+        # drop-in bot templates reading client["id"] work across transports.
+        await self._call_event_handler("on_client_connected", {"id": participant_id})
         if self._input:
             await self._input.push_frame(ClientConnectedFrame())
 
@@ -1184,16 +1480,12 @@ class LiveKitTransport(BaseTransport):
         """Handle participant disconnected events."""
         await self._call_event_handler("on_participant_disconnected", participant_id)
         await self._call_event_handler("on_participant_left", participant_id, "disconnected")
+        # Also call on_client_disconnected for compatibility with other transports
+        await self._call_event_handler("on_client_disconnected", {"id": participant_id})
 
     async def _on_audio_track_subscribed(self, participant_id: str):
         """Handle audio track subscribed events."""
         await self._call_event_handler("on_audio_track_subscribed", participant_id)
-        participant = self._client.room.remote_participants.get(participant_id)
-        if participant:
-            for publication in participant.audio_tracks.values():
-                self._client._on_track_subscribed_wrapper(
-                    publication.track, publication, participant
-                )
 
     async def _on_audio_track_unsubscribed(self, participant_id: str):
         """Handle audio track unsubscribed events."""
@@ -1202,22 +1494,50 @@ class LiveKitTransport(BaseTransport):
     async def _on_video_track_subscribed(self, participant_id: str):
         """Handle video track subscribed events."""
         await self._call_event_handler("on_video_track_subscribed", participant_id)
-        participant = self._client.room.remote_participants.get(participant_id)
-        if participant:
-            for publication in participant.video_tracks.values():
-                self._client._on_track_subscribed_wrapper(
-                    publication.track, publication, participant
-                )
 
     async def _on_video_track_unsubscribed(self, participant_id: str):
         """Handle video track unsubscribed events."""
         await self._call_event_handler("on_video_track_unsubscribed", participant_id)
 
-    async def _on_data_received(self, data: bytes, participant_id: str):
+    async def _on_data_received(self, data: bytes, participant_id: str | None):
         """Handle data received events."""
-        if self._input:
-            await self._input.push_app_message(data.decode(), participant_id)
+        try:
+            message = json.loads(data.decode())
+            if not isinstance(message, dict):
+                logger.debug(f"{self} Ignoring non-object JSON data: {message!r}")
+                message = None
+        except (UnicodeDecodeError, json.JSONDecodeError) as e:
+            logger.debug(f"{self} Ignoring non-JSON data from {participant_id}: {e}")
+            message = None
+
+        if message is not None:
+            if self._input:
+                await self._input.push_app_message(message, participant_id)
+            # RTVI compatibility:
+            await self._call_event_handler("on_app_message", message, participant_id)
+        # Backwards compatibility with older transports that used on_data_received for app messages
         await self._call_event_handler("on_data_received", data, participant_id)
+
+    async def _on_dtmf_event(self, data: Any):
+        """Handle inbound SIP DTMF events.
+
+        Mirrors Daily transport behavior: expose ``on_dtmf_event`` to user code
+        and push ``InputDTMFFrame`` so ``DTMFAggregator`` can consume digits.
+        """
+        logger.debug(f"{self} DTMF event: {data}")
+        await self._call_event_handler("on_dtmf_event", data)
+
+        tone = data.get("tone") if isinstance(data, dict) else None
+        if tone is None or self._input is None:
+            return
+
+        try:
+            button = KeypadEntry(tone)
+        except ValueError:
+            logger.warning(f"{self} Ignoring unsupported DTMF tone: {tone!r}")
+            return
+
+        await self._input.push_frame(InputDTMFFrame(button=button))
 
     async def send_message(self, message: str, participant_id: str | None = None):
         """Send a message to participants in the room.

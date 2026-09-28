@@ -1,0 +1,1968 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Three Texts, One Cursor</title>
+<style>
+/* Minimal reset — a local file gets no host stylesheet. */
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+button { font: inherit; color: inherit; }
+table { border-spacing: 0; }
+/* ============================================================
+   TOKENS — dark is the default (a deck is a projection surface).
+   Every colour is painted explicitly; [data-theme="light"] swaps
+   the same token set so nothing is defined only inside a block.
+   ============================================================ */
+:root {
+  --ground:      #0F1319;
+  --surface:     #161B23;
+  --surface-2:   #1E2530;
+  --line:        #2A3340;
+  --line-soft:   #212936;
+
+  --ink:         #E4E8EE;
+  --ink-dim:     #99A3B2;
+  --ink-faint:   #5F6B7C;
+
+  /* The three channels. Learned once, read for the whole deck. */
+  --tts:         #E8A33D;
+  --seg:         #4FC3B0;
+  --llm:         #B08BE8;
+
+  --tts-soft:    rgba(232,163,61,.13);
+  --seg-soft:    rgba(79,195,176,.13);
+  --llm-soft:    rgba(176,139,232,.13);
+
+  --warn:        #E8735A;
+  --warn-soft:   rgba(232,115,90,.13);
+
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+
+  --pad: clamp(2rem, 5vw, 5.5rem);
+}
+
+[data-theme="light"] {
+  --ground:      #F7F8FA;
+  --surface:     #FFFFFF;
+  --surface-2:   #EFF2F6;
+  --line:        #DDE2E9;
+  --line-soft:   #E7EBF0;
+
+  --ink:         #14181F;
+  --ink-dim:     #4E5866;
+  --ink-faint:   #8A94A3;
+
+  --tts:         #B87410;
+  --seg:         #14806F;
+  --llm:         #6E42B8;
+
+  --tts-soft:    rgba(184,116,16,.10);
+  --seg-soft:    rgba(20,128,111,.10);
+  --llm-soft:    rgba(110,66,184,.10);
+
+  --warn:        #C4432A;
+  --warn-soft:   rgba(196,67,42,.10);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+/* ============================================================
+   DECK FRAME
+   ============================================================ */
+.deck { position: relative; width: 100vw; height: 100vh; }
+
+.slide {
+  position: absolute;
+  inset: 0;
+  display: none;
+  flex-direction: column;
+  justify-content: center;
+  padding: clamp(2.2rem, 4vh, 3.4rem) var(--pad) 5.2rem;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.slide.is-active { display: flex; }
+
+.slide > * { max-width: 1180px; width: 100%; margin-inline: auto; flex-shrink: 0; }
+
+/* ============================================================
+   TYPE
+   ============================================================ */
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: .72rem;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  margin: 0 0 1.1rem;
+  display: flex;
+  align-items: center;
+  gap: .7rem;
+}
+.eyebrow .num { color: var(--tts); }
+.eyebrow .rule { flex: 1; height: 1px; background: var(--line); }
+
+h1.title {
+  font-size: clamp(2.6rem, 6.4vw, 5rem);
+  line-height: 1.02;
+  letter-spacing: -.035em;
+  font-weight: 800;
+  margin: 0 0 1.4rem;
+  text-wrap: balance;
+}
+h2.headline {
+  font-size: clamp(1.6rem, 3.4vw, 2.6rem);
+  line-height: 1.1;
+  letter-spacing: -.025em;
+  font-weight: 750;
+  margin: 0 0 1.1rem;
+  text-wrap: balance;
+}
+h3.sub {
+  font-family: var(--font-mono);
+  font-size: .78rem;
+  letter-spacing: .13em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  font-weight: 600;
+  margin: 0 0 .7rem;
+}
+
+.lede {
+  font-size: clamp(1rem, 1.45vw, 1.22rem);
+  line-height: 1.55;
+  color: var(--ink-dim);
+  max-width: 62ch;
+  margin: 0 0 1.6rem;
+  text-wrap: pretty;
+}
+.lede strong { color: var(--ink); font-weight: 650; }
+.lede.tight { margin-bottom: 1rem; }
+
+p.note {
+  font-size: .92rem;
+  color: var(--ink-faint);
+  max-width: 68ch;
+  margin: 1.1rem 0 0;
+  line-height: 1.55;
+}
+p.note strong { color: var(--ink-dim); font-weight: 650; }
+
+/* ============================================================
+   CHANNEL CODE — the deck's one structural device
+   ============================================================ */
+.ch { font-family: var(--font-mono); font-weight: 600; }
+.ch-tts { color: var(--tts); }
+.ch-seg { color: var(--seg); }
+.ch-llm { color: var(--llm); }
+.ch-warn { color: var(--warn); }
+
+.legend { display: flex; flex-wrap: wrap; gap: .55rem; margin: 0 0 1.5rem; }
+.tag {
+  font-family: var(--font-mono);
+  font-size: .74rem;
+  letter-spacing: .06em;
+  padding: .3rem .6rem;
+  border-radius: 3px;
+  border: 1px solid var(--line);
+  color: var(--ink-dim);
+  background: var(--surface);
+  white-space: nowrap;
+}
+.tag.t-tts  { color: var(--tts); border-color: color-mix(in srgb, var(--tts) 38%, transparent); background: var(--tts-soft); }
+.tag.t-seg  { color: var(--seg); border-color: color-mix(in srgb, var(--seg) 38%, transparent); background: var(--seg-soft); }
+.tag.t-llm  { color: var(--llm); border-color: color-mix(in srgb, var(--llm) 38%, transparent); background: var(--llm-soft); }
+.tag.t-warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 38%, transparent); background: var(--warn-soft); }
+
+/* ============================================================
+   PANELS & GRIDS
+   ============================================================ */
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 1.15rem 1.3rem;
+}
+.panel.accent-tts  { border-left: 3px solid var(--tts); }
+.panel.accent-seg  { border-left: 3px solid var(--seg); }
+.panel.accent-llm  { border-left: 3px solid var(--llm); }
+.panel.accent-warn { border-left: 3px solid var(--warn); }
+
+.grid { display: grid; gap: 1rem; }
+.g2 { grid-template-columns: repeat(2, minmax(0,1fr)); }
+.g3 { grid-template-columns: repeat(3, minmax(0,1fr)); }
+.g2-wide { grid-template-columns: minmax(0,1.25fr) minmax(0,1fr); }
+@media (max-width: 900px) {
+  .g2, .g3, .g2-wide { grid-template-columns: minmax(0,1fr); }
+}
+
+.stack { display: flex; flex-direction: column; gap: 1rem; }
+.stack-sm { display: flex; flex-direction: column; gap: .6rem; }
+
+/* ============================================================
+   TABLES
+   ============================================================ */
+.scroll { overflow-x: auto; }
+
+table.tbl {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: .88rem;
+  font-variant-numeric: tabular-nums;
+}
+table.tbl th {
+  text-align: left;
+  font-family: var(--font-mono);
+  font-size: .7rem;
+  letter-spacing: .11em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  font-weight: 600;
+  padding: .5rem .8rem;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+table.tbl td {
+  padding: .58rem .8rem;
+  border-bottom: 1px solid var(--line-soft);
+  color: var(--ink-dim);
+  vertical-align: top;
+}
+table.tbl tr:last-child td { border-bottom: none; }
+table.tbl td.k { color: var(--ink); font-weight: 600; white-space: nowrap; }
+table.tbl td.m, table.tbl th.m { font-family: var(--font-mono); font-size: .82rem; }
+table.tbl td.num { text-align: right; font-family: var(--font-mono); }
+table.tbl.compact td { padding: .42rem .7rem; }
+table.tbl th.c-tts { color: var(--tts); }
+table.tbl th.c-seg { color: var(--seg); }
+table.tbl th.c-llm { color: var(--llm); }
+table.tbl tr.hi td { background: var(--tts-soft); color: var(--ink); }
+table.tbl tr.dim td { color: var(--ink-faint); }
+
+/* ============================================================
+   CODE
+   ============================================================ */
+pre.code {
+  font-family: var(--font-mono);
+  font-size: .82rem;
+  line-height: 1.6;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: .95rem 1.1rem;
+  margin: 0;
+  overflow-x: auto;
+  color: var(--ink-dim);
+  tab-size: 2;
+}
+pre.code .c { color: var(--ink-faint); font-style: italic; }
+pre.code .kw { color: var(--llm); }
+pre.code .s { color: var(--seg); }
+pre.code .fn { color: var(--tts); }
+pre.code b { color: var(--ink); font-weight: 650; }
+
+code.inl {
+  font-family: var(--font-mono);
+  font-size: .87em;
+  background: var(--surface-2);
+  border: 1px solid var(--line-soft);
+  border-radius: 3px;
+  padding: .08em .34em;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+/* ============================================================
+   THE SENTENCE — recurring hero specimen
+   ============================================================ */
+.specimen {
+  font-family: var(--font-mono);
+  font-size: clamp(.86rem, 1.55vw, 1.18rem);
+  line-height: 1.75;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 1.1rem 1.25rem;
+  overflow-x: auto;
+  color: var(--ink);
+}
+.specimen .tagmark { color: var(--llm); }
+.specimen .redact { color: var(--tts); }
+
+/* ============================================================
+   FLOW DIAGRAM — the two split points
+   ============================================================ */
+.flow { display: flex; flex-direction: column; gap: .5rem; align-items: stretch; }
+.flow-node {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  border-radius: 6px;
+  padding: .8rem 1rem;
+}
+.flow-node .t {
+  font-family: var(--font-mono);
+  font-size: .72rem;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  margin-bottom: .28rem;
+}
+.flow-node .b { font-size: .9rem; color: var(--ink); font-weight: 600; }
+.flow-node .d { font-size: .82rem; color: var(--ink-dim); margin-top: .25rem; }
+.flow-node.split { border-style: dashed; border-color: var(--tts); }
+.flow-arrow {
+  font-family: var(--font-mono);
+  color: var(--ink-faint);
+  font-size: .9rem;
+  padding-left: 1.1rem;
+}
+.flow-out {
+  display: flex;
+  gap: .7rem;
+  align-items: baseline;
+  font-family: var(--font-mono);
+  font-size: .84rem;
+  padding: .5rem .9rem;
+  border-radius: 5px;
+  border: 1px solid var(--line);
+}
+.flow-out.o-llm { background: var(--llm-soft); border-color: color-mix(in srgb, var(--llm) 34%, transparent); }
+.flow-out.o-seg { background: var(--seg-soft); border-color: color-mix(in srgb, var(--seg) 34%, transparent); }
+.flow-out.o-tts { background: var(--tts-soft); border-color: color-mix(in srgb, var(--tts) 34%, transparent); }
+.flow-out .who { font-weight: 700; min-width: 13ch; }
+.flow-out .dest { color: var(--ink-dim); }
+
+/* ============================================================
+   SLOT QUEUE DIAGRAM
+   ============================================================ */
+.queue { display: flex; gap: .6rem; align-items: stretch; flex-wrap: wrap; }
+.slot {
+  flex: 1 1 200px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  padding: .8rem .9rem;
+  position: relative;
+}
+.slot .kind {
+  font-family: var(--font-mono);
+  font-size: .68rem;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  margin-bottom: .35rem;
+}
+.slot.spoken  { border-color: color-mix(in srgb, var(--tts) 40%, transparent); }
+.slot.spoken .kind { color: var(--tts); }
+.slot.skipped { border-color: color-mix(in srgb, var(--seg) 40%, transparent); background: var(--seg-soft); }
+.slot.skipped .kind { color: var(--seg); }
+.slot .txt { font-family: var(--font-mono); font-size: .82rem; color: var(--ink); }
+.slot .meta { font-family: var(--font-mono); font-size: .72rem; color: var(--ink-faint); margin-top: .4rem; }
+.slot .meta .no { color: var(--warn); }
+.slot .meta .yes { color: var(--seg); }
+
+/* ============================================================
+   THE CURSOR INSTRUMENT
+   ============================================================ */
+.walk { display: flex; flex-direction: column; gap: .85rem; }
+
+.walk-head { display: flex; align-items: center; gap: .8rem; flex-wrap: wrap; }
+.walk-tabs { display: flex; gap: .35rem; }
+.wtab {
+  font-family: var(--font-mono);
+  font-size: .74rem;
+  letter-spacing: .05em;
+  padding: .35rem .75rem;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink-dim);
+  cursor: pointer;
+}
+.wtab[aria-selected="true"] {
+  border-color: color-mix(in srgb, var(--tts) 55%, transparent);
+  background: var(--tts-soft);
+  color: var(--tts);
+}
+.wtab:focus-visible { outline: 2px solid var(--tts); outline-offset: 2px; }
+
+.walk-note { font-size: .85rem; color: var(--ink-faint); font-family: var(--font-mono); }
+
+.tracks { display: flex; flex-direction: column; gap: .5rem; }
+.track {
+  display: grid;
+  grid-template-columns: 15ch minmax(0,1fr) 9ch;
+  align-items: center;
+  gap: .9rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: .7rem .95rem;
+  background: var(--surface);
+}
+.track .lbl {
+  font-family: var(--font-mono);
+  font-size: .7rem;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  font-weight: 700;
+}
+.track .body {
+  font-family: var(--font-mono);
+  font-size: clamp(.8rem, 1.35vw, 1.05rem);
+  white-space: pre;
+  overflow-x: auto;
+  line-height: 1.7;
+}
+.track .body .done { font-weight: 700; }
+.track .body .todo { color: var(--ink-faint); }
+.track .body .caret {
+  display: inline-block;
+  width: 2px;
+  height: 1.15em;
+  vertical-align: text-bottom;
+  margin: 0 -1px;
+  animation: blink 1.1s steps(2, start) infinite;
+}
+@keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: .25; } }
+@media (prefers-reduced-motion: reduce) { .track .body .caret { animation: none; } }
+
+.track .pos {
+  font-family: var(--font-mono);
+  font-size: .78rem;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-faint);
+}
+.track .pos b { font-weight: 700; }
+
+.track.t-tts { border-left: 3px solid var(--tts); }
+.track.t-tts .lbl, .track.t-tts .body .done, .track.t-tts .pos b { color: var(--tts); }
+.track.t-tts .caret { background: var(--tts); }
+.track.t-seg { border-left: 3px solid var(--seg); }
+.track.t-seg .lbl, .track.t-seg .body .done, .track.t-seg .pos b { color: var(--seg); }
+.track.t-seg .caret { background: var(--seg); }
+.track.t-llm { border-left: 3px solid var(--llm); }
+.track.t-llm .lbl, .track.t-llm .body .done, .track.t-llm .pos b { color: var(--llm); }
+.track.t-llm .caret { background: var(--llm); }
+.track.held { background: var(--surface-2); }
+/* Text the tracker claimed without a word event ever naming it. */
+.track .body .swept { font-weight: 700; opacity: .7; text-decoration: underline dotted; text-underline-offset: 3px; }
+.track.claiming { background: color-mix(in srgb, var(--llm) 7%, transparent); }
+
+.walk-bar { display: flex; align-items: center; gap: .8rem; flex-wrap: wrap; }
+.wbtn {
+  font-family: var(--font-mono);
+  font-size: .78rem;
+  padding: .42rem .9rem;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+}
+.wbtn:hover { border-color: var(--tts); color: var(--tts); }
+.wbtn:focus-visible { outline: 2px solid var(--tts); outline-offset: 2px; }
+.wbtn[disabled] { opacity: .35; cursor: default; }
+.wbtn[disabled]:hover { border-color: var(--line); color: var(--ink); }
+
+.wfeed {
+  font-family: var(--font-mono);
+  font-size: .84rem;
+  color: var(--ink-dim);
+}
+.wfeed b { color: var(--tts); font-weight: 700; }
+.wstate {
+  font-family: var(--font-mono);
+  font-size: .74rem;
+  padding: .28rem .6rem;
+  border-radius: 3px;
+  border: 1px solid var(--line);
+  color: var(--ink-faint);
+  background: var(--surface);
+}
+.wstate.on {
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 45%, transparent);
+  background: var(--warn-soft);
+}
+.wguarantee {
+  font-family: var(--font-mono);
+  font-size: .8rem;
+  color: var(--ink-faint);
+  border-top: 1px solid var(--line-soft);
+  padding-top: .7rem;
+}
+.wguarantee b { color: var(--seg); }
+
+/* Names the frame text a worked example is walking. */
+.fcap {
+  font-family: var(--font-mono);
+  font-size: .76rem;
+  line-height: 1.5;
+  color: var(--ink-faint);
+  margin: 0 0 .55rem;
+}
+.fcap b { color: var(--ink); font-weight: 700; }
+
+/* ---- the call-trace instrument ---- */
+.callstack {
+  font-family: var(--font-mono);
+  font-size: .72rem;
+  line-height: 1.55;
+  max-height: 46vh;
+  overflow: auto;
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  background: var(--surface);
+  padding: .5rem .35rem;
+}
+.crow { padding: .05rem .5rem; border-radius: 3px; white-space: pre; color: var(--ink-faint); opacity: .45; }
+.crow.seen { opacity: 1; color: var(--ink-dim); }
+.crow.on { background: var(--tts-soft); opacity: 1; color: var(--ink); }
+.crow .ret { color: var(--ink-faint); }
+.crow.on .ret { color: var(--tts); }
+.framelog { display: flex; flex-direction: column; gap: .3rem; min-height: 6.5rem; }
+.frow {
+  font-family: var(--font-mono);
+  font-size: .73rem;
+  padding: .3rem .55rem;
+  border-radius: 4px;
+  border: 1px solid var(--line-soft);
+  background: var(--surface);
+  color: var(--ink-dim);
+}
+.frow.tts { border-left: 3px solid var(--llm); }
+.frow.prog { border-left: 3px solid var(--seg); }
+.frow b { color: var(--ink); font-weight: 700; }
+.frow .tag-raw { color: var(--llm); }
+.framelog .empty { font-family: var(--font-mono); font-size: .73rem; color: var(--ink-faint); }
+
+/* ============================================================
+   MISC BLOCKS
+   ============================================================ */
+.beforeafter { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 1rem; }
+@media (max-width: 780px) { .beforeafter { grid-template-columns: minmax(0,1fr); } }
+.ba {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: .95rem 1.1rem;
+  background: var(--surface);
+}
+.ba .h {
+  font-family: var(--font-mono);
+  font-size: .7rem;
+  letter-spacing: .13em;
+  text-transform: uppercase;
+  margin-bottom: .55rem;
+}
+.ba.bad { border-left: 3px solid var(--warn); }
+.ba.bad .h { color: var(--warn); }
+.ba.good { border-left: 3px solid var(--seg); }
+.ba.good .h { color: var(--seg); }
+.ba .m { font-family: var(--font-mono); font-size: .84rem; color: var(--ink); line-height: 1.65; word-break: break-word; }
+.ba .d { font-size: .85rem; color: var(--ink-dim); margin-top: .5rem; }
+
+ul.pts { margin: 0; padding-left: 1.15rem; color: var(--ink-dim); font-size: .95rem; line-height: 1.65; }
+ul.pts li { margin-bottom: .45rem; }
+ul.pts li::marker { color: var(--tts); }
+ul.pts strong { color: var(--ink); font-weight: 650; }
+
+.big-q {
+  font-family: var(--font-mono);
+  font-size: .82rem;
+  color: var(--ink-faint);
+  letter-spacing: .04em;
+}
+
+/* Two-halves thesis — the numbering is a real sequence (produce, then align) */
+.half-n {
+  font-family: var(--font-mono);
+  font-size: .72rem;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  font-weight: 700;
+  margin-bottom: .55rem;
+  color: var(--ink-faint);
+}
+.panel.accent-seg .half-n { color: var(--seg); }
+.panel.accent-tts .half-n { color: var(--tts); }
+.half-h {
+  font-size: clamp(1.1rem, 2.1vw, 1.55rem);
+  font-weight: 700;
+  letter-spacing: -.02em;
+  color: var(--ink);
+  margin: 0 0 .6rem;
+}
+.half-p {
+  margin: 0 0 1rem;
+  font-size: clamp(.94rem, 1.25vw, 1.06rem);
+  line-height: 1.55;
+  color: var(--ink-dim);
+}
+.half-p strong { color: var(--ink); font-weight: 650; }
+.half-map {
+  font-family: var(--font-mono);
+  font-size: .74rem;
+  letter-spacing: .04em;
+  color: var(--ink-faint);
+  border-top: 1px solid var(--line-soft);
+  padding-top: .65rem;
+}
+
+.divider-slide { justify-content: center; }
+.divider-slide .kicker {
+  font-family: var(--font-mono);
+  font-size: clamp(3rem, 11vw, 8rem);
+  font-weight: 700;
+  line-height: 1;
+  color: var(--line);
+  letter-spacing: -.04em;
+  margin: 0 0 .4rem;
+}
+
+/* ============================================================
+   FOOT RAIL
+   ============================================================ */
+.rail {
+  position: fixed;
+  left: 0; right: 0; bottom: 0;
+  height: 3.1rem;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0 var(--pad);
+  border-top: 1px solid var(--line-soft);
+  background: var(--ground);
+  font-family: var(--font-mono);
+  font-size: .7rem;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  z-index: 20;
+}
+.rail .sec { color: var(--ink-dim); }
+.rail .spacer { flex: 1; }
+.rail .count { font-variant-numeric: tabular-nums; }
+.rail .count b { color: var(--tts); }
+.rail .keys { color: var(--ink-faint); opacity: .72; }
+.progress {
+  position: fixed;
+  left: 0; bottom: 0;
+  height: 2px;
+  background: var(--tts);
+  z-index: 21;
+  transition: width .22s ease;
+}
+@media (prefers-reduced-motion: reduce) { .progress { transition: none; } }
+</style>
+</head>
+<body>
+
+<div class="deck" id="deck">
+
+<!-- ══════════════════════════ 1 · TITLE ══════════════════════════ -->
+<section class="slide" data-sec="TTS word tracking">
+  <div>
+    <p class="eyebrow"><span class="num">Pipecat</span> <span class="rule"></span> <span>src/pipecat/utils/context/</span></p>
+    <h1 class="title">Three texts,<br>one cursor.</h1>
+    <p class="lede">How Pipecat keeps what the LLM wrote, what the screen renders, and what the TTS speaks in sync — word by word, while the audio is still playing.</p>
+    <div class="legend">
+      <span class="tag t-llm">① LLM TEXT — the conversation context</span>
+      <span class="tag t-seg">② SEGMENT TEXT — downstream consumers</span>
+      <span class="tag t-tts">③ TTS TEXT — the provider</span>
+    </div>
+    <p class="note">Learn these three colours now. They label every table, diagram and cursor for the rest of the deck.</p>
+  </div>
+</section>
+
+<!-- ══════════════════════════ 2 · THE GOAL ══════════════════════════ -->
+<section class="slide" data-sec="I · The end goal">
+  <div>
+    <p class="eyebrow"><span class="num">1.1</span> <span class="rule"></span> <span>One response, three consumers</span></p>
+    <h2 class="headline">The same sentence has to be three different strings.</h2>
+    <p class="lede tight">A bot prompted to wrap cards in <code class="inl">&lt;card&gt;</code> and code in <code class="inl">&lt;code&gt;</code> produces exactly one thing:</p>
+    <div class="specimen">Your card is <span class="tagmark">&lt;card&gt;</span>1234-5678-9012-3456<span class="tagmark">&lt;/card&gt;</span>. Run <span class="tagmark">&lt;code&gt;</span>npm install<span class="tagmark">&lt;/code&gt;</span> to start.</div>
+    <div class="scroll" style="margin-top:1.1rem">
+      <table class="tbl">
+        <tr><th>Consumer</th><th>Wants</th><th>Why</th></tr>
+        <tr>
+          <td class="k ch-llm">① Conversation context</td>
+          <td class="m">Your card is &lt;card&gt;1234-…-3456&lt;/card&gt;. Run &lt;code&gt;npm install&lt;/code&gt; to start.</td>
+          <td>The LLM must see its own tags next turn, or it stops producing them</td>
+        </tr>
+        <tr>
+          <td class="k ch-seg">② The user's screen</td>
+          <td class="m">Your card is XXXX-XXXX-XXXX-3456. <span style="color:var(--ink-faint)">+ a highlighted code block</span></td>
+          <td>The UI renders and redacts; raw tags are noise</td>
+        </tr>
+        <tr>
+          <td class="k ch-tts">③ The TTS provider</td>
+          <td class="m">Your card is &lt;spell&gt;1234-…-3456&lt;/spell&gt;. <span style="color:var(--ink-faint)">— and nothing for the code</span></td>
+          <td>Digits must be spelled out; code must not be read aloud</td>
+        </tr>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════ 3 · THE ONLY SIGNAL ══════════════════════════ -->
+<section class="slide" data-sec="I · The end goal">
+  <div>
+    <p class="eyebrow"><span class="num">1.2</span> <span class="rule"></span> <span>What you get back</span></p>
+    <h2 class="headline">The provider reports only the words it actually spoke.</h2>
+    <p class="lede">No offsets. No segment ids. No tags. Just tokens, in order, with timestamps — and they are the <strong>only</strong> signal available. Everything in this deck exists to answer three questions for each one.</p>
+    <div class="grid g3">
+      <div class="panel accent-seg">
+        <h3 class="sub">Question one</h3>
+        <div style="font-size:1.05rem;font-weight:650;color:var(--ink);margin-bottom:.45rem">Where are we?</div>
+        <p style="margin:0;font-size:.88rem;color:var(--ink-dim)">Which position in the displayed text, so a UI can move a highlight.</p>
+      </div>
+      <div class="panel accent-llm">
+        <h3 class="sub">Question two</h3>
+        <div style="font-size:1.05rem;font-weight:650;color:var(--ink);margin-bottom:.45rem">What goes in the context?</div>
+        <p style="margin:0;font-size:.88rem;color:var(--ink-dim)">Which span of the LLM's own text, so the tags survive the round trip.</p>
+      </div>
+      <div class="panel accent-tts">
+        <h3 class="sub">Question three</h3>
+        <div style="font-size:1.05rem;font-weight:650;color:var(--ink);margin-bottom:.45rem">Can this frame go now?</div>
+        <p style="margin:0;font-size:.88rem;color:var(--ink-dim)">In what order, relative to everything else in the turn.</p>
+      </div>
+    </div>
+    <p class="note">Three questions, three layers — <code class="inl">TextSegmentMap</code>, <code class="inl">WordCompletionTracker</code>, <code class="inl">AggregatedFrameSequencer</code>. But first, what happened when they didn't exist.</p>
+  </div>
+</section>
+
+<!-- ══════════════════════════ 4 · DIVIDER: PROBLEMS ══════════════════════════ -->
+<section class="slide divider-slide" data-sec="II · What was broken">
+  <div>
+    <p class="kicker">II</p>
+    <h1 class="title" style="font-size:clamp(2rem,5vw,3.6rem)">What was broken</h1>
+    <p class="lede">Four failures, four provider quirks — and one capability that only works once they are solved.</p>
+    <div class="legend">
+      <span class="tag t-warn">2.1 Context drift</span>
+      <span class="tag t-warn">2.2 Out-of-order frames</span>
+      <span class="tag t-warn">2.3 No word ↔ sentence link</span>
+      <span class="tag t-warn">2.4 Useless RTVI transforms</span>
+      <span class="tag">2.5 Provider reality</span>
+      <span class="tag t-seg">2.6 Text transformations — the feature</span>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════ 5 · 2.1 ══════════════════════════ -->
+<section class="slide" data-sec="II · What was broken">
+  <div>
+    <p class="eyebrow"><span class="num">2.1</span> <span class="rule"></span> <span>The context drifted from what the LLM wrote</span></p>
+    <h2 class="headline">The bot slowly forgets its own conventions.</h2>
+    <p class="lede tight">The text appended to the context was the text that came <strong>back from the TTS</strong> — so everything that made the output speakable was lost on the round trip.</p>
+    <div class="beforeafter">
+      <div class="ba bad">
+        <div class="h">Before — context receives</div>
+        <div class="m">Your card is 1234 5678 9012 3456</div>
+        <div class="d">Next turn: the LLM sees no tags and stops emitting them. The feature quietly decays over a handful of turns.</div>
+      </div>
+      <div class="ba good">
+        <div class="h">Now — context receives</div>
+        <div class="m">Your card is <span class="ch-llm">&lt;card&gt;</span>1234-5678-9012-3456<span class="ch-llm">&lt;/card&gt;</span></div>
+        <div class="d">The LLM sees its own convention and keeps it.</div>
+      </div>
+    </div>
+    <p class="note"><strong>Why this one is the worst:</strong> it fails silently and slowly. Nothing errors, nothing logs, and the regression shows up as "the model got lazy" several turns later.</p>
+  </div>
+</section>
+
+<!-- ══════════════════════════ 6 · 2.2 ══════════════════════════ -->
+<section class="slide" data-sec="II · What was broken">
+  <div>
+    <p class="eyebrow"><span class="num">2.2</span> <span class="rule"></span> <span>Skipped frames arrived out of order</span></p>
+    <h2 class="headline">A frame with no audio has nothing to wait for.</h2>
+    <p class="lede tight">Configure <code class="inl">skip_aggregator_types=["code"]</code> and that frame is never synthesized — no audio, no word events. So it was pushed the moment it appeared, landing <em>before</em> the sentence that precedes it.</p>
+    <pre class="code">LLM:      <b>"Run this:"</b>  →  <b>&lt;code&gt;npm install&lt;/code&gt;</b>  →  <b>"Then reload."</b>
+
+Context:  &lt;code&gt;npm install&lt;/code&gt;      <span class="c">← arrived first, nothing to wait for</span>
+          "Run this:"                   <span class="c">← spoken later</span>
+          "Then reload."</pre>
+    <p class="note">The transcript reads out of order — and on interruption it is worse: <strong>text that was never spoken could still be recorded as if it had been.</strong></p>
+  </div>
+</section>
+
+<!-- ══════════════════════════ 7 · 2.3 ══════════════════════════ -->
+<section class="slide" data-sec="II · What was broken">
+  <div>
+    <p class="eyebrow"><span class="num">2.3</span> <span class="rule"></span> <span>Highlighting spoken words was not possible</span></p>
+    <h2 class="headline">Two streams, no correspondence between them.</h2>
+    <div class="grid g2">
+      <div class="panel accent-seg">
+        <h3 class="sub">What the client renders</h3>
+        <div style="font-family:var(--font-mono);font-size:.86rem;color:var(--ink)">AggregationType.SENTENCE</div>
+        <p style="margin:.5rem 0 0;font-size:.88rem;color:var(--ink-dim)">Whole sentence frames, arriving before synthesis.</p>
+      </div>
+      <div class="panel accent-tts">
+        <h3 class="sub">What arrives as speech progresses</h3>
+        <div style="font-family:var(--font-mono);font-size:.86rem;color:var(--ink)">AggregationType.WORD</div>
+        <p style="margin:.5rem 0 0;font-size:.88rem;color:var(--ink-dim)">Word frames — carrying no indication of which sentence they belong to, or where inside it.</p>
+      </div>
+    </div>
+    <p class="lede" style="margin-top:1.3rem"><strong>The client could not turn a stream of words into a highlight moving through a rendered sentence.</strong> There was simply no key linking the two.</p>
+  </div>
+</section>
+
+<!-- ══════════════════════════ 8 · 2.4 ══════════════════════════ -->
+<section class="slide" data-sec="II · What was broken">
+  <div>
+    <p class="eyebrow"><span class="num">2.4</span> <span class="rule"></span> <span>RTVI bot_output_transforms were useless word-by-word</span></p>
+    <h2 class="headline">You cannot redact a card number that arrives in four pieces.</h2>
+    <p class="lede tight">Client-side transforms operate on a <strong>segment</strong>. Receiving text word by word — with no segment identity, and no notion of "spoken so far" versus "remaining" — left nothing coherent to transform.</p>
+    <div class="scroll">
+      <table class="tbl compact">
+        <tr><th>Event</th><th class="m">1</th><th class="m">2</th><th class="m">3</th><th class="m">4</th></tr>
+        <tr><td class="k">Arrives as</td><td class="m">1234</td><td class="m">5678</td><td class="m">9012</td><td class="m">3456</td></tr>
+        <tr class="dim"><td class="k">Transform sees</td><td class="m">"1234"</td><td class="m">"5678"</td><td class="m">"9012"</td><td class="m">"3456"</td></tr>
+        <tr><td class="k ch-warn">Can it redact?</td><td class="m ch-warn">no</td><td class="m ch-warn">no</td><td class="m ch-warn">no</td><td class="m ch-warn">no</td></tr>
+      </table>
+    </div>
+    <p class="note">Four disconnected events, no segment, no split. To produce <code class="inl">XXXX-XXXX-XXXX-3456</code> a transform needs the <strong>whole segment plus the current spoken split</strong> — which is exactly what did not exist.</p>
+  </div>
+</section>
+
+<!-- ══════════════════════════ 9 · 2.5 ══════════════════════════ -->
+<section class="slide" data-sec="II · What was broken">
+  <div>
+    <p class="eyebrow"><span class="num">2.5</span> <span class="rule"></span> <span>Problems found along the way</span></p>
+    <h2 class="headline">Then reality: providers, streaming, concurrency.</h2>
+    <div class="scroll">
+      <table class="tbl">
+        <tr><th>Problem</th><th>What happens</th></tr>
+        <tr>
+          <td class="k">Streamed tokens</td>
+          <td>In <code class="inl">TOKEN</code> mode the service dispatches word-sized chunks, but tracking and progress need whole sentences — which are not known until a boundary is confirmed</td>
+        </tr>
+        <tr>
+          <td class="k">Concurrent contexts</td>
+          <td>Two back-to-back <code class="inl">TTSSpeakFrame</code>s on a websocket service can be in flight at once; their word streams interleave and must not consume each other's slots</td>
+        </tr>
+        <tr>
+          <td class="k">Straddling tokens</td>
+          <td>One provider token completes one frame and starts the next (<code class="inl">1111And</code>), so a single event must produce output for two slots, in the right order</td>
+        </tr>
+        <tr>
+          <td class="k">Dropped events</td>
+          <td>The provider silently never reports a word it spoke, leaving a frame — and everything queued behind it — waiting forever</td>
+        </tr>
+      </table>
+    </div>
+    <p class="note">These four are why <code class="inl">tests/test_word_completion_tracker.py</code> is 203 tests, most of them a regression corpus of real provider behaviour.</p>
+  </div>
+</section>
+
+<!-- ══════════════════════════ 10 · 2.6 ══════════════════════════ -->
+<section class="slide" data-sec="II · What was broken">
+  <div>
+    <p class="eyebrow"><span class="num">2.6</span> <span class="rule"></span> <span>And a feature: text transformations</span></p>
+    <h2 class="headline">Rewritten for the provider. For nobody else.</h2>
+    <p class="lede tight">TTS engines read what you give them, and written text is often not what you want spoken. <code class="inl">$42.50</code> can come out "dollar forty two point five zero"; <code class="inl">1994</code> as "one thousand nine hundred ninety four" when the sentence means a year. So Pipecat ships a bundle of transforms that <strong>rewrite the text on its way to the provider</strong> — and nowhere else.</p>
+    <div class="grid g2-wide">
+      <div class="scroll">
+        <table class="tbl compact">
+          <tr><th>Transform</th><th>Input</th><th class="c-tts">Sent to TTS</th></tr>
+          <tr><td class="m">expand_currency</td><td class="m">It costs $42.50</td><td class="m">forty-two dollars and fifty cents</td></tr>
+          <tr><td class="m">expand_percentages</td><td class="m">Up 12.5%</td><td class="m">twelve point five percent</td></tr>
+          <tr><td class="m">expand_units</td><td class="m">5 km away</td><td class="m">5 kilometers away</td></tr>
+          <tr><td class="m">normalize_dates</td><td class="m">on 2024-01-15</td><td class="m">on January 15th, two thousand…</td></tr>
+          <tr><td class="m">email_to_speech</td><td class="m">a@b.com</td><td class="m">a at b dot com</td></tr>
+          <tr><td class="m">expand_phone_numbers</td><td class="m">555-123-4567</td><td class="m">5 5 5 1 2 3 4 5 6 7</td></tr>
+          <tr><td class="m">expand_numbers</td><td class="m">room 1994</td><td class="m">room 1 9 9 4</td></tr>
+          <tr><td class="m">normalize_acronyms</td><td class="m">I work at IBM</td><td class="m">I work at I B M</td></tr>
+          <tr><td class="m">strip_markdown</td><td class="m">**bold** text</td><td class="m">bold text</td></tr>
+        </table>
+      </div>
+      <div class="stack">
+        <div class="panel accent-tts">
+          <h3 class="sub">Which ones you need depends on the provider</h3>
+          <p style="margin:0 0 .55rem;font-size:.89rem;color:var(--ink-dim)">This is <strong style="color:var(--ink)">not a fix for a bug</strong> — it's a way to make sure all TTS providers are going to work the same way.</p>
+        </div>
+        <div class="panel accent-seg">
+          <h3 class="sub">So it's opt-in, transform by transform</h3>
+          <p style="margin:0;font-size:.89rem;color:var(--ink-dim)"><code class="inl">expand_numbers</code> ships <strong style="color:var(--ink)">off</strong> — digits are often better read as digits. You enable what <em>your</em> provider gets wrong, per segment type if needed: <code class="inl">tts.add_text_transformer(fn, "credit_card")</code>.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════ 11 · DIVIDER: SOLUTION ══════════════════════════ -->
+<section class="slide" data-sec="III · How they're solved">
+  <div>
+    <p class="kicker">III</p>
+    <h1 class="title" style="font-size:clamp(2rem,5vw,3.6rem)">How they're solved</h1>
+    <p class="lede" style="font-size:clamp(1.05rem,1.7vw,1.4rem);color:var(--ink);max-width:70ch">The solution has <strong>two halves</strong> — and the first one is what makes the second possible.</p>
+    <div class="grid g2" style="margin-top:.5rem">
+      <div class="panel accent-seg">
+        <div class="half-n">Half one · at production time</div>
+        <div class="half-h">Kept distinct, never reconstructed</div>
+        <p class="half-p">The three texts are kept distinct <strong>as they are produced</strong>, so nothing has to be reconstructed later.</p>
+        <div class="half-map">3.1 split points · 3.2 six frames · 3.3 the guarantee</div>
+      </div>
+      <div class="panel accent-tts">
+        <div class="half-n">Half two · during playback</div>
+        <div class="half-h">Kept aligned, word by word</div>
+        <p class="half-p">Three layers keep them <strong>aligned word by word</strong> while the TTS speaks.</p>
+        <div class="half-map">3.4 the layers · the cursor · tracker · sequencer</div>
+      </div>
+    </div>
+    <p class="note"><strong>Rebuilding the context from what the TTS spoke is exactly what caused 2.1.</strong> Once the three texts exist separately from the moment they are created, there is nothing to reverse-engineer — the alignment problem becomes "where are we in each", not "what did this used to say".</p>
+  </div>
+</section>
+
+<!-- ══════════════════════════ 12 · PROBLEM → SOLUTION MAP ══════════════════════════ -->
+<section class="slide" data-sec="III · How they're solved">
+  <div>
+    <p class="eyebrow"><span class="num">3.0</span> <span class="rule"></span> <span>Every problem, and what answers it</span></p>
+    <h2 class="headline">The map for the rest of the deck.</h2>
+    <div class="scroll">
+      <table class="tbl">
+        <tr><th>Problem</th><th>Solved by</th></tr>
+        <tr><td class="k">2.1 Context drift</td><td><code class="inl">TextSegmentMap</code>'s <span class="ch-llm">llm_pos</span> cursor + <code class="inl">WordCompletionTracker</code>'s span attribution</td></tr>
+        <tr><td class="k">2.2 Out-of-order skipped frames</td><td><code class="inl">AggregatedFrameSequencer</code>'s slot queue</td></tr>
+        <tr><td class="k">2.3 Word ↔ sentence correspondence</td><td><code class="inl">AggregatedTextProgressFrame</code>, built from the tracker's cursors</td></tr>
+        <tr><td class="k">2.4 Useless RTVI transforms</td><td><code class="inl">segment_id</code> + <code class="inl">accumulated_text</code> / <code class="inl">remaining_text</code> on every progress frame</td></tr>
+        <tr><td class="k">2.5 Streaming / concurrency / quirks</td><td>Sequencer (streaming, contexts) + tracker (straddle, drops)</td></tr>
+        <tr><td class="k ch-seg">2.6 Text transformations <span style="color:var(--ink-faint);font-weight:400">— the feature</span></td><td><strong>Made safe by</strong> <code class="inl">TextSegmentMap</code>'s transformed-segment handling</td></tr>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════ 13 · 3.1 SPLIT POINTS ══════════════════════════ -->
+<section class="slide" data-sec="III · How they're solved">
+  <div>
+    <p class="eyebrow"><span class="num">3.1</span> <span class="rule"></span> <span>Three texts, produced at two split points</span></p>
+    <h2 class="headline">Nobody authors three strings. Two split points create them.</h2>
+    <div class="flow">
+      <div class="flow-node">
+        <div class="t">LLM tokens</div>
+      </div>
+      <div class="flow-arrow">▼</div>
+      <div class="flow-node split">
+        <div class="t">Split 1 — the aggregator</div>
+        <div class="b">LLMTextProcessor · BaseTextAggregator</div>
+        <div class="d">PatternPairAggregator / SimpleTextAggregator decide where segments end and what counts as a delimiter.</div>
+      </div>
+      <div class="flow-arrow">├─▶</div>
+      <div class="flow-out o-llm"><span class="who">① raw_text</span><span class="dest">LLM TEXT (&lt;card&gt;1234-5678-9012-3456&lt;/card&gt;) → conversation context</span></div>
+      <div class="flow-arrow">└─▶</div>
+      <div class="flow-out o-seg"><span class="who">② text</span><span class="dest">SEGMENT TEXT (1234-5678-9012-3456) → downstream consumers (the AggregatedTextFrame)</span></div>
+      <div class="flow-arrow" style="padding-left:3rem">▼</div>
+      <div class="flow-node split" style="margin-left:2rem">
+        <div class="t">Split 2 — the TTS service</div>
+        <div class="b">text filters · per-type transformers</div>
+        <div class="d">Rewrite for speech only — operating on a <em>copy</em> on its way out.</div>
+      </div>
+      <div class="flow-arrow" style="padding-left:3rem">▼</div>
+      <div class="flow-out o-tts" style="margin-left:2rem"><span class="who">③ tts text</span><span class="dest">TTS TEXT (&lt;spell&gt;1234-5678-9012-3456&lt;/spell&gt;) → the provider</span></div>
+    </div>
+    <p class="note"><strong>The middle channel is the <code class="inl">AggregatedTextFrame</code> itself</strong> — and it is never rewritten. With a <code class="inl">SimpleTextAggregator</code> and no transformers, all three are the same string; they diverge only where something acted.</p>
+  </div>
+</section>
+
+<!-- ══════════════════════════ 14 · 3.2 SIX FRAMES ══════════════════════════ -->
+<section class="slide" data-sec="III · How they're solved">
+  <div>
+    <p class="eyebrow"><span class="num">3.2</span> <span class="rule"></span> <span>What that looks like for one response</span></p>
+    <h2 class="headline">One sentence in. Six frames out.</h2>
+    <div class="scroll">
+      <table class="tbl compact">
+        <tr>
+          <th>#</th><th>aggregated_by</th>
+          <th class="c-llm">① raw_text</th>
+          <th class="c-seg">② text</th>
+          <th class="c-tts">③ tts text</th>
+        </tr>
+        <tr><td class="num">1</td><td class="m">sentence</td><td class="m">Your card is </td><td class="m">Your card is</td><td class="m">Your card is</td></tr>
+        <tr class="hi"><td class="num">2</td><td class="m"><strong>credit_card</strong></td><td class="m">&lt;card&gt;1234-5678-9012-3456&lt;/card&gt;</td><td class="m">1234-5678-9012-3456</td><td class="m">&lt;spell&gt;1234-5678-9012-3456&lt;/spell&gt;</td></tr>
+        <tr><td class="num">3</td><td class="m">sentence</td><td class="m">.</td><td class="m">.</td><td class="m">.</td></tr>
+        <tr><td class="num">4</td><td class="m">sentence</td><td class="m">Run</td><td class="m">Run</td><td class="m">Run</td></tr>
+        <tr class="hi"><td class="num">5</td><td class="m"><strong>code</strong></td><td class="m">&lt;code&gt;npm install&lt;/code&gt;</td><td class="m">npm install</td><td class="m" style="color:var(--warn)">never sent — skipped</td></tr>
+        <tr><td class="num">6</td><td class="m">sentence</td><td class="m">to start.</td><td class="m">to start.</td><td class="m">to start.</td></tr>
+      </table>
+    </div>
+    <p class="note"><strong>Only the two tagged frames do anything interesting.</strong> Frame 2's delimiters moved into <code class="inl">raw_text</code>; its transformer wrapped the digits in <code class="inl">&lt;spell&gt;</code>. Frame 5 is never spoken — which is what creates the ordering problem in 2.2. <code class="inl">aggregated_by</code> is the routing key throughout: it picks the transformer, decides whether the frame is spoken at all, and selects the RTVI redaction.</p>
+  </div>
+</section>
+
+<!-- ══════════════════════════ 15 · 3.3 THE GUARANTEE ══════════════════════════ -->
+<section class="slide" data-sec="III · How they're solved">
+  <div>
+    <p class="eyebrow"><span class="num">3.3</span> <span class="rule"></span> <span>The guarantee that makes it useful</span></p>
+    <h2 class="headline">One rule holds after every single word.</h2>
+    <div class="panel accent-seg" style="margin-bottom:1.3rem">
+      <div style="font-family:var(--font-mono);font-size:clamp(.85rem,1.8vw,1.3rem);color:var(--ink);text-align:center;padding:.5rem 0">
+        <span class="ch-seg">progress.accumulated_text</span> + <span class="ch-seg">progress.remaining_text</span> &nbsp;==&nbsp; <span class="ch-seg">AggregatedTextFrame.text</span>
+      </div>
+    </div>
+    <p class="lede">Exactly — <strong>character for character</strong>. Never a paraphrase, never a normalised copy, never off by a space. The two halves are always a clean split of the string the segment frame is already carrying.</p>
+    <ul class="pts">
+      <li>Highlight the first half, leave the second plain → <strong>word highlighting</strong></li>
+      <li>Redact both halves → <strong>redaction that keeps advancing</strong></li>
+      <li>Concatenate them → <strong>the original back, exactly</strong></li>
+    </ul>
+    <p class="note">That is what makes progress frames usable by <strong>anything, without coordination</strong>. A consumer holding the segment frame never has to guess how the text was transformed on its way to the TTS.</p>
+  </div>
+</section>
+
+<!-- ══════════════════════════ 16 · 3.4 THREE LAYERS ══════════════════════════ -->
+<section class="slide" data-sec="III · How they're solved">
+  <div>
+    <p class="eyebrow"><span class="num">3.4</span> <span class="rule"></span> <span>The three layers</span></p>
+    <h2 class="headline">Each owns one concern. None knows about the layer above.</h2>
+    <div class="scroll">
+      <table class="tbl">
+        <tr><th>Layer</th><th>Scope</th><th>Question it answers</th></tr>
+        <tr>
+          <td class="k ch-seg">TextSegmentMap</td>
+          <td>One frame, segment by segment</td>
+          <td>Where in the other two texts are we, given this spoken word?</td>
+        </tr>
+        <tr>
+          <td class="k ch-llm">WordCompletionTracker</td>
+          <td>One frame</td>
+          <td>How much of this word is this frame's, which original text does it stand for, and is the frame finished?</td>
+        </tr>
+        <tr>
+          <td class="k ch-tts">AggregatedFrameSequencer</td>
+          <td>The whole turn</td>
+          <td>In what order do frames leave the TTS service?</td>
+        </tr>
+      </table>
+    </div>
+    <pre class="code" style="margin-top:1.1rem">  TTS provider ── word-timestamp events ──┐
+                                          ▼
+ ┌────────────────────────────────────────────────────────────────┐
+ │  <b>AggregatedFrameSequencer</b>            one per TTS service       │
+ │   ordered slot queue:  [ spoken ][ skipped ][ spoken ] …       │
+ │                    ┌────────────────┐   ┌────────────────┐     │
+ │                    │ <b>WordCompletion</b> │   │ <b>WordCompletion</b> │     │
+ │                    │ <b>Tracker</b>        │   │ <b>Tracker</b>        │     │
+ │                    │  ┌───────────┐ │   │  ┌───────────┐ │     │
+ │                    │  │ <b>TextSeg</b>   │ │   │  │ <b>TextSeg</b>   │ │     │
+ │                    │  │ <b>mentMap</b>   │ │   │  │ <b>mentMap</b>   │ │     │
+ │                    │  └───────────┘ │   │  └───────────┘ │     │
+ │                    └────────────────┘   └────────────────┘     │
+ └────────────────────────────────────────────────────────────────┘
+             │                                    │
+             ▼                                    ▼
+      <span class="s">TTSTextFrame</span>                   <span class="fn">AggregatedTextProgressFrame</span>
+   → conversation context                → RTVI → the client</pre>
+  </div>
+</section>
+
+<!-- ══════════════════════════ 17 · DIVIDER: THE CURSOR ══════════════════════════ -->
+<section class="slide divider-slide" data-sec="IV · The moving cursor">
+  <div>
+    <p class="kicker">IV</p>
+    <h1 class="title" style="font-size:clamp(2rem,5vw,3.6rem)">The moving cursor</h1>
+    <p class="lede">The bottom layer, and the only one that touches the texts. One spoken word arrives — <strong>TextSegmentMap</strong> says where that leaves all three.</p>
+    <div class="legend">
+      <span class="tag t-seg">★ The walk</span>
+      <span class="tag t-seg">4.1 Building the map</span>
+      <span class="tag t-seg">4.2 Transformed spans</span>
+      <span class="tag t-seg">4.3 Counting alnums</span>
+      <span class="tag t-seg">4.4 Matching a token</span>
+      <span class="tag t-seg">4.5 The four outcomes</span>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════ 18 · ★ THE CURSOR ══════════════════════════ -->
+<section class="slide" data-sec="IV · The moving cursor" id="slide-walk">
+  <div>
+    <p class="eyebrow"><span class="num">★</span> <span class="rule"></span> <span>TextSegmentMap · one real cursor drives three</span></p>
+    <h2 class="headline" style="margin-bottom:.7rem">Watch the followers hold, then jump.</h2>
+    <div class="walk">
+      <div class="walk-head">
+        <div class="walk-tabs" role="tablist" aria-label="Example">
+          <button class="wtab" role="tab" data-walk="currency" aria-selected="true">currency expansion</button>
+          <button class="wtab" role="tab" data-walk="tags" aria-selected="false">pattern delimiters</button>
+        </div>
+        <div class="walk-note" id="walkNote"></div>
+      </div>
+
+      <div class="tracks">
+        <div class="track t-tts" id="trk-tts">
+          <div class="lbl">③ tts text</div>
+          <div class="body" id="body-tts"></div>
+          <div class="pos">raw_pos <b id="pos-tts">0</b></div>
+        </div>
+        <div class="track t-seg" id="trk-seg">
+          <div class="lbl">② segment text</div>
+          <div class="body" id="body-seg"></div>
+          <div class="pos">user_facing <b id="pos-seg">0</b></div>
+        </div>
+        <div class="track t-llm" id="trk-llm">
+          <div class="lbl">① llm text</div>
+          <div class="body" id="body-llm"></div>
+          <div class="pos"><span id="lbl-llm">llm_pos</span> <b id="pos-llm">0</b></div>
+        </div>
+      </div>
+
+      <div class="walk-bar">
+        <button class="wbtn" id="wPrev">◀ prev</button>
+        <button class="wbtn" id="wNext">next word ▶</button>
+        <button class="wbtn" id="wReset">reset</button>
+        <div class="wfeed" id="wFeed">advance_word(<b id="wWord">—</b>)</div>
+        <div class="wstate" id="wTrans">in_transformed_segment: false</div>
+        <div class="wstate" id="wStep">0 / 0</div>
+      </div>
+
+      <div class="wguarantee" id="wGuarantee"></div>
+    </div>
+    <p class="note">Only <span class="ch-tts">raw_pos</span> is a real cursor. Through an <strong>unchanged</strong> segment the other two move by a <em>count</em> — however many letters and digits the word spent. Through a <strong>rewritten</strong> one they are held, then jump to the end of the original span in one step, because no position halfway through <code class="inl">$42.50</code> means anything. Nothing ever speaks a <code class="inl">&lt;/card&gt;</code>, so the walk ends on a beat that is not a word at all: once the frame is done, the <strong>tracker</strong> claims whatever <span class="ch-llm">llm text</span> has left — which is how a closing tag reaches the conversation context. <em>(↑ / ↓ also step.)</em></p>
+  </div>
+</section>
+
+<!-- ══════════════════════════ 19 · OPCODES ══════════════════════════ -->
+<section class="slide" data-sec="IV · The moving cursor">
+  <div>
+    <p class="eyebrow"><span class="num">4.1</span> <span class="rule"></span> <span>Building the map</span></p>
+    <h2 class="headline">Diff the two texts once, at word level.</h2>
+    <p class="lede tight"><code class="inl">difflib.SequenceMatcher</code> compares TTS text against segment text, tokenized on whitespace <em>keeping the whitespace as tokens</em> so offsets stay exact. Each opcode becomes one <code class="inl">TextSegment</code>.</p>
+    <div class="grid g2-wide">
+      <div class="scroll">
+        <table class="tbl compact">
+          <tr><th>Opcode</th><th>Meaning</th></tr>
+          <tr><td class="m ch-seg">equal</td><td>Identical on both sides — the common case</td></tr>
+          <tr><td class="m ch-tts">replace</td><td>Rewritten — every value transform and added tag</td></tr>
+          <tr><td class="m ch-llm">delete</td><td>In the original, not in the TTS text</td></tr>
+          <tr><td class="m ch-llm">insert</td><td>In the TTS text, not in the original</td></tr>
+        </table>
+        <p class="note" style="margin-top:.8rem">All four occur and the code treats them the same way — none is a special case.</p>
+      </div>
+      <pre class="code">original = <span class="s">'Your balance is $42.50'</span>
+tts      = <span class="s">'Your balance is forty-two
+            dollars and fifty cents'</span>
+
+<span class="ch-seg">equal</span>    <span class="c">'Your balance is '</span>
+<span class="ch-tts">replace</span>  <span class="c">'$42.50'</span>
+         → <span class="c">'forty-two dollars…'</span>
+
+<span class="fn">TextSegment</span>(
+  original=<span class="s">'$42.50'</span>,
+  tts=<span class="s">'forty-two dollars…'</span>,
+  original_start=<b>16</b>,
+  original_end=<b>22</b>)</pre>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════ 20 · TRANSFORMED ══════════════════════════ -->
+<section class="slide" data-sec="IV · The moving cursor">
+  <div>
+    <p class="eyebrow"><span class="num">4.2</span> <span class="rule"></span> <span>is_transformed · split_markup_runs</span></p>
+    <h2 class="headline">All-or-nothing, and how that cost is contained.</h2>
+    <div class="grid g2">
+      <div class="stack">
+        <div class="panel accent-warn">
+          <h3 class="sub">A segment is transformed when…</h3>
+          <ul class="pts" style="margin-top:.3rem">
+            <li>the letters and digits differ — <code class="inl">$42.50</code> vs <code class="inl">forty-two…</code></li>
+            <li>the number of words differs</li>
+            <li><strong>the TTS side contains a tag</strong> — even if the spoken words are identical</li>
+          </ul>
+        </div>
+        <p class="note" style="margin:0">Rule three is why <code class="inl">&lt;phoneme…&gt;Siobhan&lt;/phoneme&gt;</code> counts: the raw cursor must cross tag characters the other texts do not have.</p>
+      </div>
+      <div class="stack">
+        <div class="panel accent-seg">
+          <h3 class="sub">So cut the tag out into its own segment</h3>
+          <pre class="code" style="border:none;background:transparent;padding:.4rem 0"><span class="fn">split_markup_runs</span>(<span class="s">"I love to count &lt;spell&gt;1234&lt;/spell&gt;."</span>)
+<span class="c"># → ["I love to count ",
+#    "&lt;spell&gt;1234&lt;/spell&gt;."]</span></pre>
+          <table class="tbl compact" style="margin-top:.4rem">
+            <tr><td class="m">"I love to count "</td><td>plain — cursors move word by word</td></tr>
+            <tr><td class="m">"&lt;spell&gt;1234&lt;/spell&gt;."</td><td>all-or-nothing — lands as one</td></tr>
+          </table>
+        </div>
+        <p class="note" style="margin:0"><strong>Only <code class="inl">equal</code> opcodes can be split this way</strong> — both sides hold the same text, so a single offset cuts both. Where the sides differ there is no shared offset.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════ 21 · COUNTING ══════════════════════════ -->
+<section class="slide" data-sec="IV · The moving cursor">
+  <div>
+    <p class="eyebrow"><span class="num">4.3</span> <span class="rule"></span> <span>advance_by_alnums</span></p>
+    <h2 class="headline">Counting is what attaches tags to words.</h2>
+    <p class="lede tight">Nothing decides which words own which tags. <strong>One loop counts letters and digits and steps over everything else</strong> — where the tags land simply follows from that.</p>
+    <div class="grid g2">
+      <div class="panel accent-llm">
+        <h3 class="sub">Rule one</h3>
+        <p style="margin:0 0 .5rem;font-size:.92rem;color:var(--ink-dim)">A <code class="inl">&lt;...&gt;</code> tag is <strong>crossed for free</strong>, without using up any of the count — so an opening tag travels with the word that follows it.</p>
+        <pre class="code" style="border:none;background:transparent;padding:.2rem 0">llm: Your card is <span class="ch-llm">&lt;card&gt;</span>4111<span class="ch-llm">&lt;/card&gt;</span>
+                  <span class="c">↑ costs 0    ↑ 4 digits = 4</span>
+llm_pos = <b>23</b>, not 17</pre>
+      </div>
+      <div class="panel accent-llm">
+        <h3 class="sub">Rule two</h3>
+        <p style="margin:0 0 .5rem;font-size:.92rem;color:var(--ink-dim)">Punctuation right after the count runs out is <strong>taken too</strong> — so a trailing comma travels with the word before it.</p>
+        <pre class="code" style="border:none;background:transparent;padding:.2rem 0">provider reports:  <span class="s">"Yeah"</span>
+context records:   <span class="s">"Yeah,"</span></pre>
+      </div>
+    </div>
+    <p class="note">The closing tag is the one thing the loop deliberately stops short of — it is swept up by <code class="inl">WordCompletionTracker</code> when the frame completes. <strong>Why no diff for <code class="inl">llm_text</code>?</strong> It holds the same letters and digits as the segment text, in the same order, differing only in what wraps them. So the map never finds positions in it — it only counts.</p>
+  </div>
+</section>
+
+<!-- ══════════════════════════ 22 · MATCHING ══════════════════════════ -->
+<section class="slide" data-sec="IV · The moving cursor">
+  <div>
+    <p class="eyebrow"><span class="num">4.4</span> <span class="rule"></span> <span>_classify_hop</span></p>
+    <h2 class="headline">Challenge: Provider tokens are messy.</h2>
+    <h3 class="headline">Three strategies, first hit wins.</h3>
+    <div class="grid g2-wide">
+      <div class="scroll">
+        <table class="tbl compact">
+          <tr><th>Provider behaviour</th><th>Remaining</th><th>Token</th><th>Strategy</th></tr>
+          <tr><td>Plain word</td><td class="m">hello world</td><td class="m">hello</td><td class="m ch-seg">1 literal</td></tr>
+          <tr><td>Carries its own space <span style="color:var(--ink-faint)">(Inworld)</span></td><td class="m">" world"</td><td class="m">" world"</td><td class="m ch-seg">1 literal</td></tr>
+          <tr><td>Skipped punctuation it didn't speak</td><td class="m">", I can help"</td><td class="m">I</td><td class="m ch-seg">1 <span style="color:var(--ink-faint)">skip offset</span></td></tr>
+          <tr><td>Added a terminal period</td><td class="m">account and more</td><td class="m">account.</td><td class="m ch-seg">1 <span style="color:var(--ink-faint)">trim</span></td></tr>
+          <tr><td>Lowercased the word</td><td class="m">SQL is great</td><td class="m">sql</td><td class="m ch-tts">2 folded</td></tr>
+          <tr><td>Stripped a diacritic</td><td class="m">café open</td><td class="m">cafe</td><td class="m ch-tts">2 folded</td></tr>
+          <tr><td>Normalized an apostrophe</td><td class="m">don’t worry</td><td class="m">don't</td><td class="m ch-tts">2 folded</td></tr>
+          <tr><td>Reported without its tags</td><td class="m">&lt;spell&gt;1234&lt;/spell&gt;</td><td class="m">1234</td><td class="m ch-llm">3 markup</td></tr>
+          <tr><td>Straddles the frame boundary</td><td class="m">1111</td><td class="m">1111And</td><td class="m ch-seg">1 → CROSSES</td></tr>
+          <tr class="dim"><td>Foreign token (dropped event)</td><td class="m">hello world</td><td class="m">goodbye</td><td class="m ch-warn">none</td></tr>
+        </table>
+      </div>
+      <div class="stack">
+        <div class="panel accent-seg"><h3 class="sub">1 · literal</h3><p style="margin:0;font-size:.87rem;color:var(--ink-dim)">Character for character, at three skip offsets: as-is, past whitespace, past all punctuation.</p></div>
+        <div class="panel accent-tts"><h3 class="sub">2 · variation folded</h3><p style="margin:0;font-size:.87rem;color:var(--ink-dim)">Case, accents, typography. Folding is 1:1 on length, so an offset found in the folded copy is valid in the original. Requires a word boundary — otherwise <code class="inl">account</code> matches <code class="inl">Accountant</code>.</p></div>
+        <div class="panel accent-llm"><h3 class="sub">3 · markup stripped</h3><p style="margin:0;font-size:.87rem;color:var(--ink-dim)">Tags removed from both sides, then the offset translated back.</p></div>
+        <p class="note" style="margin:0"><strong>The whole thing is stateless</strong> — worked out fresh on every call, with no tag parsing and nothing remembered between words.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════ 23 · OUTCOMES ══════════════════════════ -->
+<section class="slide" data-sec="IV · The moving cursor">
+  <div>
+    <p class="eyebrow"><span class="num">4.5</span> <span class="rule"></span> <span>The four outcomes</span></p>
+    <h2 class="headline">Two end the walk. Two carry the token onward.</h2>
+    <div class="scroll">
+      <table class="tbl">
+        <tr><th>Outcome</th><th>Meaning</th><th>Effect</th></tr>
+        <tr><td class="k m ch-seg">PLACED</td><td>Token fits inside this segment</td><td>Move to the end of the match, stop</td></tr>
+        <tr><td class="k m ch-tts">CROSSES</td><td>This segment holds only the start of the token</td><td>Finish the segment, carry <strong>the rest of the token</strong> onward</td></tr>
+        <tr><td class="k m ch-tts">EXHAUSTED</td><td>Nothing here can be spoken</td><td>Finish the segment, carry <strong>the whole token</strong> onward</td></tr>
+        <tr><td class="k m ch-warn">NO_MATCH</td><td>Token does not belong here</td><td>Step past leading punctuation, stop</td></tr>
+      </table>
+    </div>
+    <div class="grid g2" style="margin-top:1.1rem">
+      <pre class="code">tts=<span class="s">'Hello five'</span>  original=<span class="s">'Hello 5'</span>
+
+token <span class="s">'Hello five'</span>
+  ├─ seg0: <span class="ch-tts">CROSSES</span>, 6 chars → completes
+  └─ seg1: <span class="ch-seg">PLACED</span> → user_facing_pos <b>7</b>
+
+<span class="c"># one token completed two segments and
+# crossed a transform, in one call</span></pre>
+      <div class="panel accent-warn">
+        <h3 class="sub">The symbol case</h3>
+        <p style="margin:0 0 .5rem;font-size:.88rem;color:var(--ink-dim)">A token with no letters or digits — an emoji, or a symbol the provider swapped (ElevenLabs reports <code class="inl">→</code> as <code class="inl">-</code>) — cannot be matched by any strategy.</p>
+        <p style="margin:0;font-size:.88rem;color:var(--ink-dim)">It passes the dry run via <code class="inl">_symbol_belongs_here</code> so the slot is <strong>not force-completed</strong> over it, then classifies <code class="inl">NO_MATCH</code>: the raw cursor nudges past <code class="inl">' → '</code> so the next token isn't blocked, while the segment cursor holds. Accepted without being placed.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════ 24 · DIVIDER: POLICY AND ORDER ══════════════════════════ -->
+<section class="slide divider-slide" data-sec="V · Policy and order">
+  <div>
+    <p class="kicker">V</p>
+    <h1 class="title" style="font-size:clamp(2rem,5vw,3.6rem)">Policy and order</h1>
+    <p class="lede">A position is not a decision. <strong>WordCompletionTracker</strong> decides what text should be emitted; <strong>AggregatedFrameSequencer</strong> decides what means for the turn.</p>
+    <div class="legend">
+      <span class="tag t-llm">5.1 The tracker</span>
+      <span class="tag t-llm">5.2 Span attribution</span>
+      <span class="tag t-llm">5.3 Misbehaving providers</span>
+      <span class="tag t-tts">5.4 The slot queue</span>
+      <span class="tag t-tts">5.5 Concurrent contexts</span>
+      <span class="tag t-tts">5.6 Token mode</span>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════ 25 · TRACKER ══════════════════════════ -->
+<section class="slide" data-sec="V · Policy and order">
+  <div>
+    <p class="eyebrow"><span class="num">5.1</span> <span class="rule"></span> <span>WordCompletionTracker</span></p>
+    <h2 class="headline">The map says where. The tracker decides what that means.</h2>
+    <p class="lede tight">One call in, several answers out — each read back by the sequencer to build the frames it pushes.</p>
+    <div class="scroll">
+      <table class="tbl compact">
+        <tr><th>Accessor</th><th>Used for</th><th class="c-seg">On the map</th></tr>
+        <tr><td class="m">word_belongs_here()</td><td>Decide whether the provider dropped an event, and this slot must be force-completed</td><td class="m ch-seg">word_belongs_current_segment()</td></tr>
+        <tr><td class="m">add_word_and_check_complete()</td><td>Advance, and learn whether the slot is now done</td><td class="m ch-seg"><strong>advance_word()</strong></td></tr>
+        <tr><td class="m ch-seg">get_word_for_frame()</td><td>The <strong>text</strong> of the emitted <code class="inl">TTSTextFrame</code></td><td class="m ch-seg">last_leading_duplicate · last_overflow</td></tr>
+        <tr><td class="m ch-llm">get_llm_consumed()</td><td>The <strong>raw_text</strong> of that frame — what the conversation context records</td><td class="m ch-seg">llm_pos · last_completed_segment</td></tr>
+        <tr><td class="m">suppress_in_context()</td><td>Sets <code class="inl">append_to_context=False</code> and skips the progress frame</td><td class="m ch-seg">in_transformed_segment</td></tr>
+        <tr><td class="m">get_overflow_word()</td><td>Re-entered as a new word against the <em>next</em> slot</td><td class="m ch-seg">last_overflow</td></tr>
+        <tr><td class="m ch-seg">get_accumulated_user_facing_text()</td><td><code class="inl">accumulated_text</code> → the spoken part of the segment</td><td class="m ch-seg">user_facing_pos</td></tr>
+        <tr><td class="m ch-seg">get_remaining_user_facing_text(strip=False)</td><td><code class="inl">remaining_text</code> → the unspoken part</td><td class="m ch-seg">user_facing_pos</td></tr>
+        <tr><td class="m">get_remaining_tts_text()</td><td>Text of the catch-up frame when a provider goes silent</td><td class="m ch-seg">raw_pos</td></tr>
+      </table>
+    </div>
+    <p class="note">A single <code class="inl">process_word</code> call reads six of these to build one <code class="inl">TTSTextFrame</code> plus one <code class="inl">AggregatedTextProgressFrame</code>. Note the right-hand column: only <code class="inl">add_word_and_check_complete()</code> ever calls <code class="inl">advance_word()</code> — <strong>one entry point moves the map</strong>, and every other accessor just reads the state that call left behind. And <code class="inl">is_complete</code> is <strong>delegated, not tracked</strong> — forwarded to the segment map, except on a force-completed slot where the map was deliberately never advanced.</p>
+  </div>
+</section>
+
+<!-- ══════════════════════════ 26 · ATTRIBUTION ══════════════════════════ -->
+<section class="slide" data-sec="V · Policy and order">
+  <div>
+    <p class="eyebrow"><span class="num">5.2</span> <span class="rule"></span> <span>Span attribution</span></p>
+    <h2 class="headline">Recovering structure the TTS never saw.</h2>
+    <div class="grid g2">
+      <div>
+        <h3 class="sub">Tags the provider never reported</h3>
+        <div class="scroll">
+          <table class="tbl compact">
+            <tr><th>word</th><th>complete</th><th class="c-seg">for frame</th><th class="c-llm">llm consumed</th></tr>
+            <tr><td class="m">Your</td><td class="m">False</td><td class="m">Your</td><td class="m">Your</td></tr>
+            <tr><td class="m">card</td><td class="m">False</td><td class="m">card</td><td class="m">card</td></tr>
+            <tr><td class="m">is</td><td class="m">False</td><td class="m">is</td><td class="m">is</td></tr>
+            <tr class="hi"><td class="m">4111</td><td class="m">False</td><td class="m">4111</td><td class="m"><strong>&lt;card&gt;4111</strong></td></tr>
+            <tr><td class="m">1111</td><td class="m">False</td><td class="m">1111</td><td class="m">1111</td></tr>
+            <tr class="hi"><td class="m">thanks</td><td class="m"><strong>True</strong></td><td class="m">thanks</td><td class="m"><strong>&lt;/card&gt; thanks</strong></td></tr>
+          </table>
+        </div>
+        <p class="note">The context is rebuilt from the right-hand column, so it stores <code class="inl">&lt;card&gt;4111 1111&lt;/card&gt;</code> — not the bare digits.</p>
+      </div>
+      <div>
+        <h3 class="sub">Suppressing mid-transform words</h3>
+        <div class="scroll">
+          <table class="tbl compact">
+            <tr><th>word</th><th class="c-seg">for frame</th><th class="c-llm">llm consumed</th><th>suppress</th></tr>
+            <tr><td class="m">is</td><td class="m">is</td><td class="m">is</td><td class="m">False</td></tr>
+            <tr class="dim"><td class="m">forty-two</td><td class="m">forty-two</td><td class="m">None</td><td class="m ch-warn">True</td></tr>
+            <tr class="dim"><td class="m">dollars</td><td class="m">dollars</td><td class="m">None</td><td class="m ch-warn">True</td></tr>
+            <tr class="dim"><td class="m">and</td><td class="m">and</td><td class="m">None</td><td class="m ch-warn">True</td></tr>
+            <tr class="dim"><td class="m">fifty</td><td class="m">fifty</td><td class="m">None</td><td class="m ch-warn">True</td></tr>
+            <tr class="hi"><td class="m">cents</td><td class="m">cents</td><td class="m"><strong>$42.50</strong></td><td class="m">False</td></tr>
+          </table>
+        </div>
+        <p class="note">The words are still emitted — the UI needs them to highlight — but <strong>only the last one writes to the context, and it writes <code class="inl">$42.50</code></strong>.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════ 27 · RECOVERY ══════════════════════════ -->
+<section class="slide" data-sec="V · Policy and order">
+  <div>
+    <p class="eyebrow"><span class="num">5.3</span> <span class="rule"></span> <span>When providers misbehave</span></p>
+    <h2 class="headline">Never stall. Emit the remainder and move on.</h2>
+    <div class="grid g2">
+      <div class="stack">
+        <div>
+          <h3 class="sub">Dropped event → force-complete</h3>
+          <p class="fcap">frame <b>"Hello there world", next frame "Goodbye"</b><br>the provider reports <b>"Hello"</b>, never reports <b>"there world"</b>, and the next thing to arrive is the following frame's first word</p>
+          <div class="scroll">
+            <table class="tbl compact">
+              <tr><th>word</th><th>belongs</th><th>complete</th><th class="c-seg">for frame</th><th>overflow</th></tr>
+              <tr><td class="m">Hello</td><td class="m">True</td><td class="m">False</td><td class="m">Hello</td><td class="m">None</td></tr>
+              <tr class="hi"><td class="m">Goodbye</td><td class="m ch-warn">False</td><td class="m"><strong>True</strong></td><td class="m"><strong>there world</strong></td><td class="m"><strong>Goodbye</strong></td></tr>
+            </table>
+          </div>
+          <p class="note"><strong>The unspoken remainder is still emitted</strong>, so the context keeps the full sentence; the foreign word is handed back for the next slot.</p>
+        </div>
+      </div>
+      <div class="stack">
+        <div>
+          <h3 class="sub">Straddling token → split at both ends</h3>
+          <p class="fcap">frame <b>"Your card is 1111"</b>, next frame <b>"And that's it."</b><br>the provider merges across the boundary into one token</p>
+          <div class="scroll">
+            <table class="tbl compact">
+              <tr><th>word</th><th>complete</th><th class="c-seg">for frame</th><th>overflow</th></tr>
+              <tr><td class="m">Your … card</td><td class="m">False</td><td class="m">…</td><td class="m">None</td></tr>
+              <tr><td class="m">is</td><td class="m">False</td><td class="m">is</td><td class="m">None</td></tr>
+              <tr class="hi"><td class="m">1111And</td><td class="m"><strong>True</strong></td><td class="m"><strong>1111</strong></td><td class="m"><strong>And</strong></td></tr>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════ 28 · SLOT QUEUE ══════════════════════════ -->
+<section class="slide" data-sec="V · Policy and order">
+  <div>
+    <p class="eyebrow"><span class="num">5.4</span> <span class="rule"></span> <span>AggregatedFrameSequencer</span></p>
+    <h2 class="headline">Every frame takes a slot — spoken or not.</h2>
+    <div class="queue">
+      <div class="slot spoken"><div class="kind">slot 1 · spoken</div><div class="txt">"Here is the code:"</div><div class="meta">tracker ● &nbsp; complete: <span class="no">✗</span></div></div>
+      <div class="slot skipped"><div class="kind">slot 2 · skipped</div><div class="txt">npm install</div><div class="meta">no tracker</div></div>
+      <div class="slot spoken"><div class="kind">slot 3 · spoken</div><div class="txt">"Then reload."</div><div class="meta">tracker ● &nbsp; complete: <span class="no">✗</span></div></div>
+    </div>
+    <div class="grid g2-wide" style="margin-top:1.2rem">
+      <div class="scroll">
+        <table class="tbl">
+          <tr><th>Slot at head</th><th>Action</th></tr>
+          <tr><td class="k">Spoken <strong>and</strong> complete</td><td>Pop it, keep walking</td></tr>
+          <tr><td class="k">Skipped</td><td>Emit it, pop it, keep walking</td></tr>
+          <tr><td class="k">Spoken <strong>and not</strong> complete</td><td class="ch-warn">Stop</td></tr>
+        </table>
+        <p class="note"><strong>That single rule is the whole ordering guarantee.</strong> On interruption <code class="inl">clear()</code> drops the queue, so a skipped frame whose preceding sentence was never finished is never recorded either.</p>
+      </div>
+      <div class="scroll">
+        <table class="tbl compact">
+          <tr><th>call</th><th>frames returned</th></tr>
+          <tr><td class="m">process_word("Here")</td><td class="m">TTSText, Progress</td></tr>
+          <tr><td class="m">process_word("is")</td><td class="m">TTSText, Progress</td></tr>
+          <tr><td class="m">process_word("the")</td><td class="m">TTSText, Progress</td></tr>
+          <tr class="hi"><td class="m">process_word("code")</td><td class="m">TTSText, Progress, <strong>AggregatedTextFrame("npm install")</strong></td></tr>
+        </table>
+        <p class="note">The code block is released by <strong>the very word that completes the sentence in front of it</strong> — same call, correct position.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════ 29 · CONCURRENCY ══════════════════════════ -->
+<section class="slide" data-sec="V · Policy and order">
+  <div>
+    <p class="eyebrow"><span class="num">5.5</span> <span class="rule"></span> <span>Concurrent contexts</span></p>
+    <h2 class="headline">Two utterances in flight, one timeline.</h2>
+    <p class="lede tight">Two back-to-back <code class="inl">TTSSpeakFrame</code>s may overlap <code class="inl">run_tts</code> returns before synthesis finishes. Ordering still has to hold across both.</p>
+    <div class="scroll">
+      <table class="tbl">
+        <tr><th>Field</th><th>Scope</th><th>Lifetime</th></tr>
+        <tr><td class="m ch-tts">_slots</td><td><strong>Global</strong></td><td>The one ordered timeline across all contexts — ordering is the point, so this stays a single list</td></tr>
+        <tr><td class="m ch-seg">_context_append_to_context</td><td><strong>Per context</strong></td><td>Created at registration, removed by <code class="inl">force_complete</code>. Its <em>presence</em> marks the context live</td></tr>
+        <tr><td class="m ch-llm">_streaming_contexts</td><td><strong>Per context</strong></td><td>Only while a sentence accumulates from tokens; released by <code class="inl">finalize</code></td></tr>
+      </table>
+    </div>
+    <pre class="code" style="margin-top:1rem">seq.<span class="fn">process_word</span>(<span class="s">"beta"</span>,  pts=1000, context_id=<span class="s">"ctxB"</span>)   <span class="c"># → TTSTextFrame('beta')</span>
+seq.<span class="fn">process_word</span>(<span class="s">"alpha"</span>, pts=1000, context_id=<span class="s">"ctxA"</span>)   <span class="c"># → TTSTextFrame('alpha')</span></pre>
+    <p class="note">ctxB's word reaches ctxB's slot even though ctxA's slot sits earlier and is still incomplete. A word for a context with <strong>no live entry is dropped as stale</strong> — that is what stops timestamps delivered seconds after an interruption from bleeding into the next turn. A <code class="inl">None</code> context id matches any slot (legacy providers, where concurrency cannot occur).</p>
+  </div>
+</section>
+
+<!-- ══════════════════════════ 30 · TOKEN MODE ══════════════════════════ -->
+<section class="slide" data-sec="V · Policy and order">
+  <div>
+    <p class="eyebrow"><span class="num">5.6</span> <span class="rule"></span> <span>Token mode (streaming)</span></p>
+    <h2 class="headline">The sentence is always known one token late.</h2>
+    <p class="lede tight">In <code class="inl">TextAggregationMode.TOKEN</code> the service dispatches word-sized chunks — but tracking and progress need a sentence, and a boundary is only confirmed by <strong>lookahead</strong>: the first non-whitespace character of the <em>next</em> sentence.</p>
+    <div class="grid g2">
+      <div class="scroll">
+        <table class="tbl compact">
+          <tr><th>call</th><th>frames returned</th></tr>
+          <tr class="dim"><td class="m">register_spoken("Hi")</td><td class="m">— nothing</td></tr>
+          <tr class="dim"><td class="m">register_spoken(" there!")</td><td class="m">— boundary not yet confirmed</td></tr>
+          <tr class="hi"><td class="m">register_spoken(" Bye")</td><td class="m"><strong>AggregatedTextFrame('Hi there!')</strong></td></tr>
+          <tr><td class="m">process_word("Hi")</td><td class="m">TTSText, Progress</td></tr>
+          <tr class="hi"><td class="m">finalize("ctx1")</td><td class="m"><strong>AggregatedTextFrame(' Bye')</strong></td></tr>
+        </table>
+        <p class="note"><code class="inl">finalize</code> is what rescues a response that ends without terminal punctuation.</p>
+      </div>
+      <div class="stack">
+        <div class="panel accent-tts">
+          <h3 class="sub">Buffered words</h3>
+          <p style="margin:0;font-size:.88rem;color:var(--ink-dim)">Because promotion lags, <strong>a word can arrive before its slot exists</strong>. It is parked in <code class="inl">_buffered_words</code>, then replayed on the next promotion. <code class="inl">_drain_buffered_words</code> snapshots and clears before replaying, so a word that still matches nothing is re-buffered rather than looping.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════ 31 · DIVIDER: IN PRACTICE ══════════════════════════ -->
+<section class="slide divider-slide" data-sec="VI · In practice">
+  <div>
+    <p class="kicker">VI</p>
+    <h1 class="title" style="font-size:clamp(2rem,5vw,3.6rem)">In practice</h1>
+    <p class="lede">Where the three layers are wired together, what a client builds on top of them, and where to look in the code.</p>
+    <div class="legend">
+      <span class="tag">6.1 Where they're wired up</span>
+      <span class="tag">6.2 One sentence, end to end</span>
+      <span class="tag">6.3 code-helper</span>
+      <span class="tag">6.4 Where to look</span>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════ 32 · WIRING ══════════════════════════ -->
+<section class="slide" data-sec="VI · In practice">
+  <div>
+    <p class="eyebrow"><span class="num">6.1</span> <span class="rule"></span> <span>Where they're wired up</span></p>
+    <h2 class="headline">All three are driven from TTSService.</h2>
+    <p class="lede tight">The service owns one sequencer; the sequencer builds a tracker per slot; each tracker builds one segment map. <code class="inl">src/pipecat/services/tts_service.py</code></p>
+    <div class="scroll">
+      <table class="tbl">
+        <tr><th>TTSService</th><th>Sequencer method</th><th>When</th></tr>
+        <tr><td class="m">_push_tts_frames</td><td class="m ch-tts">register_spoken</td><td>A frame is dispatched to the TTS</td></tr>
+        <tr><td class="m">_push_tts_frames</td><td class="m ch-tts">register_skipped</td><td>A frame bypasses TTS (e.g. a code block)</td></tr>
+        <tr><td class="m">_add_word_timestamps</td><td class="m ch-tts">process_word</td><td>A word-timestamp event arrives</td></tr>
+        <tr><td class="m">_apply_force_complete</td><td class="m ch-tts">force_complete</td><td>An audio context ends</td></tr>
+        <tr><td class="m">end of text input</td><td class="m ch-tts">finalize</td><td>No more tokens for this context</td></tr>
+        <tr><td class="m">interruption</td><td class="m ch-tts">clear</td><td>The turn is cancelled</td></tr>
+      </table>
+    </div>
+    <p class="note" style="margin-top:1.1rem"><strong>Two ordering problems stay with the service</strong>, because both concern queues the sequencer cannot see: <code class="inl">push_frame</code> stamps the <code class="inl">will_be_spoken</code> anchor with <code class="inl">max(_word_last_pts, clock.now())</code> so it rides the clock queue alongside its progress frames; and <code class="inl">_push_sequencer_frames</code> routes sequencer output through the audio-context queue when streaming, so a single consumer emits anchors, words and audio in order.</p>
+  </div>
+</section>
+
+<!-- ══════════════════════════ 33 · TRACE ══════════════════════════ -->
+<section class="slide" data-sec="VI · In practice" id="slide-trace">
+  <div>
+    <p class="eyebrow"><span class="num">6.2</span> <span class="rule"></span> <span>One sentence, end to end</span></p>
+    <h2 class="headline" style="margin-bottom:.6rem">Step through every call the three layers make.</h2>
+    <p class="fcap">the LLM wrote <b>"Your card is &lt;card&gt;4111&lt;/card&gt;"</b> · the aggregator split the delimiters into <code class="inl">raw_text</code>, so <b>"Your card is 4111"</b> is what reaches the TTS</p>
+    <div class="grid g2-wide">
+      <div class="callstack" id="callStack"></div>
+      <div class="stack">
+        <div class="tracks">
+          <div class="track t-tts">
+            <div class="lbl">③ tts text</div>
+            <div class="body" id="body-xtts"></div>
+            <div class="pos">raw_pos <b id="pos-xtts">0</b></div>
+          </div>
+          <div class="track t-seg">
+            <div class="lbl">② segment text</div>
+            <div class="body" id="body-xseg"></div>
+            <div class="pos">user_facing <b id="pos-xseg">0</b></div>
+          </div>
+          <div class="track t-llm">
+            <div class="lbl">① llm text</div>
+            <div class="body" id="body-xllm"></div>
+            <div class="pos">llm_pos <b id="pos-xllm">0</b></div>
+          </div>
+        </div>
+        <div class="framelog" id="frameLog"></div>
+      </div>
+    </div>
+    <div class="walk-bar" style="margin-top:.9rem">
+      <button class="wbtn" id="tPrev">◀ prev</button>
+      <button class="wbtn" id="tNext">next call ▶</button>
+      <button class="wbtn" id="tWord">next word ⏭</button>
+      <button class="wbtn" id="tReset">reset</button>
+      <div class="wfeed" id="tFeed">—</div>
+      <div class="wstate" id="tStep">0 / 0</div>
+    </div>
+    <p class="note" style="margin-top:.7rem">Captured from a real run. Note <code class="inl">word_belongs_here</code> runs <strong>twice</strong> per word — once for the sequencer to pick the slot, once inside <code class="inl">add_word_and_check_complete</code> to decide force-completion — and that <code class="inl">advance_word</code> is the <strong>only</strong> call that moves a cursor. Everything after it reads back what it left. <em>(↑ / ↓ also step.)</em></p>
+  </div>
+</section>
+
+<!-- ══════════════════════════ 34 · PAYOFF ══════════════════════════ -->
+<section class="slide" data-sec="VI · In practice">
+  <div>
+    <p class="eyebrow"><span class="num">6.3</span> <span class="rule"></span> <span>code-helper</span></p>
+    <h2 class="headline">Four settings. Four independent channels.</h2>
+    <div class="grid g2-wide">
+      <pre class="code"><span class="c"># 1. Aggregate tagged segments separately</span>
+llm_text_aggregator.<span class="fn">add_pattern</span>(
+    type=<span class="s">"credit_card"</span>,
+    start_pattern=<span class="s">"&lt;card&gt;"</span>, end_pattern=<span class="s">"&lt;/card&gt;"</span>,
+    action=MatchAction.AGGREGATE)
+
+<span class="c"># 2. Never speak code blocks</span>
+tts = <span class="fn">CartesiaTTSService</span>(..., skip_aggregator_types=[<span class="s">"code"</span>])
+
+<span class="c"># 3. Rewrite what the TTS receives, per segment type</span>
+tts.<span class="fn">add_text_transformer</span>(spell_out_text, <span class="s">"credit_card"</span>)
+tts.<span class="fn">add_text_transformer</span>(strip_url_protocol, <span class="s">"link"</span>)
+
+<span class="c"># 4. Redact what the client renders, per segment type</span>
+rtvi_observer_params=<span class="fn">RTVIObserverParams</span>(
+    bot_output_transforms=[(<span class="s">"credit_card"</span>, obfuscate_credit_card)])</pre>
+      <div class="stack">
+        <div class="scroll">
+          <table class="tbl compact">
+            <tr><th>Channel</th><th>Text</th></tr>
+            <tr><td class="k ch-llm">LLM produced</td><td class="m">Your card is &lt;card&gt;1234-…-3456&lt;/card&gt;</td></tr>
+            <tr><td class="k ch-tts">TTS received</td><td class="m">Your card is &lt;spell&gt;1234-…-3456&lt;/spell&gt;</td></tr>
+            <tr><td class="k ch-llm">Context stored</td><td class="m">Your card is &lt;card&gt;1234-…-3456&lt;/card&gt;</td></tr>
+            <tr><td class="k ch-seg">User saw</td><td class="m">Your card is XXXX-XXXX-XXXX-3456<br><span style="color:var(--ink-faint)">bolded word by word</span></td></tr>
+          </table>
+        </div>
+        <div class="panel accent-seg">
+          <h3 class="sub">The client</h3>
+          <pre class="code" style="border:none;background:transparent;padding:.2rem 0;font-size:.76rem">const cur = this.botSpans[data.<b>segment_id</b>];
+cur.innerHTML =
+  <span class="s">`&lt;strong&gt;${acc}&lt;/strong&gt;${rem}`</span>;</pre>
+          <p style="margin:.4rem 0 0;font-size:.86rem;color:var(--ink-dim)"><strong style="color:var(--ink)">~10 lines of rendering logic</strong>, because the hard part is already done server-side.</p>
+        </div>
+      </div>
+    </div>
+    <p class="note">And the code block, never spoken, still lands in the transcript <strong>after</strong> the sentence that precedes it — because it waited its turn in the slot queue.</p>
+  </div>
+</section>
+
+<!-- ══════════════════════════ 35 · TESTS ══════════════════════════ -->
+<section class="slide" data-sec="VI · In practice">
+  <div>
+    <p class="eyebrow"><span class="num">6.4</span> <span class="rule"></span> <span>Where to look</span></p>
+    <h2 class="headline">Code coverage.</h2>
+    <div class="grid g2">
+      <div class="scroll">
+        <h3 class="sub">Source</h3>
+        <table class="tbl compact">
+          <tr><td class="m ch-seg">utils/context/text_segment_map.py</td><td class="num">881</td></tr>
+          <tr><td class="m ch-llm">utils/context/word_completion_tracker.py</td><td class="num">376</td></tr>
+          <tr><td class="m ch-tts">utils/context/aggregated_frame_sequencer.py</td><td class="num">882</td></tr>
+          <tr><td class="m">utils/text/markup_utils.py</td><td class="num">145</td></tr>
+          <tr><td class="m">utils/text/alnum_utils.py</td><td class="num">—</td></tr>
+          <tr><td class="m">services/tts_service.py</td><td class="num">2076</td></tr>
+        </table>
+      </div>
+      <div class="scroll">
+        <h3 class="sub">Tests</h3>
+        <table class="tbl compact">
+          <tr><td class="m">test_word_completion_tracker.py</td><td class="num">203</td><td>Completion, attribution, provider quirks</td></tr>
+          <tr><td class="m">test_aggregated_frame_sequencer.py</td><td class="num">134</td><td>Slot ordering, streaming, contexts</td></tr>
+          <tr><td class="m">test_text_segment_map.py</td><td class="num">54</td><td>Alignment, markup, hop classification</td></tr>
+          <tr><td class="m">test_tts_frame_ordering.py</td><td class="num">43</td><td>End-to-end through real services</td></tr>
+          <tr><td class="m">test_markup_utils.py</td><td class="num">20</td><td>The shared helpers</td></tr>
+          <tr><td class="m">test_cartesia_tts.py</td><td class="num">13</td><td>Cartesia timestamp shapes</td></tr>
+          <tr><td class="m">test_soniox_tts.py</td><td class="num">11</td><td>Soniox timestamp shapes</td></tr>
+        </table>
+      </div>
+    </div>
+    <pre class="code" style="margin-top:1rem">uv run pytest tests/test_text_segment_map.py tests/test_word_completion_tracker.py \
+  tests/test_aggregated_frame_sequencer.py tests/test_tts_frame_ordering.py \
+  tests/test_cartesia_tts.py tests/test_soniox_tts.py</pre>
+    <p class="note">Full write-ups in <code class="inl">docs/architecture/</code> — one document per layer, plus RTVI integration and known rough edges.</p>
+  </div>
+</section>
+
+</div>
+
+<div class="progress" id="progress"></div>
+<div class="rail">
+  <span class="sec" id="railSec">TTS word tracking</span>
+  <span class="spacer"></span>
+  <span class="keys">← → slides · ↑ ↓ step · T theme · F full</span>
+  <span class="count"><b id="railNum">1</b> / <span id="railTot">35</span></span>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  /* ---------------- deck navigation ---------------- */
+  var slides = Array.prototype.slice.call(document.querySelectorAll('.slide'));
+  var railSec = document.getElementById('railSec');
+  var railNum = document.getElementById('railNum');
+  var railTot = document.getElementById('railTot');
+  var progress = document.getElementById('progress');
+  var idx = 0;
+
+  railTot.textContent = slides.length;
+
+  function show(n) {
+    idx = Math.max(0, Math.min(slides.length - 1, n));
+    slides.forEach(function (s, i) { s.classList.toggle('is-active', i === idx); });
+    var cur = slides[idx];
+    railSec.textContent = cur.getAttribute('data-sec') || '';
+    railNum.textContent = idx + 1;
+    progress.style.width = ((idx + 1) / slides.length * 100) + 'vw';
+    cur.scrollTop = 0;
+    if (location.hash !== '#' + (idx + 1)) {
+      history.replaceState(null, '', '#' + (idx + 1));
+    }
+  }
+
+  /* ---------------- the cursor instrument ---------------- */
+  var WALKS = {
+    currency: {
+      note: 'expand_currency rewrote $42.50 for the synthesizer',
+      tts: 'Your balance is forty-two dollars and fifty cents',
+      seg: 'Your balance is $42.50',
+      llm: 'Your balance is $42.50',
+      steps: [
+        { w: 'Your',      raw: 4,  seg: 4,  llm: 4,  t: false },
+        { w: 'balance',   raw: 12, seg: 12, llm: 12, t: false },
+        { w: 'is',        raw: 15, seg: 15, llm: 15, t: false },
+        { w: 'forty-two', raw: 25, seg: 15, llm: 15, t: true  },
+        { w: 'dollars',   raw: 33, seg: 15, llm: 15, t: true  },
+        { w: 'and',       raw: 37, seg: 15, llm: 15, t: true  },
+        { w: 'fifty',     raw: 43, seg: 15, llm: 15, t: true  },
+        { w: 'cents',     raw: 49, seg: 22, llm: 22, t: false }
+      ]
+    },
+    tags: {
+      note: 'PatternPairAggregator split <card> delimiters into raw_text',
+      tts: 'Your card is 4111',
+      seg: 'Your card is 4111',
+      llm: 'Your card is <card>4111</card>',
+      steps: [
+        { w: 'Your', raw: 4,  seg: 4,  llm: 4,  t: false },
+        { w: 'card', raw: 9,  seg: 9,  llm: 9,  t: false },
+        { w: 'is',   raw: 12, seg: 12, llm: 12, t: false },
+        { w: '4111', raw: 17, seg: 17, llm: 23, t: false },
+        { w: null, raw: 17, seg: 17, llm: 30, t: false, sweep: 23 }
+      ]
+    }
+  };
+
+  var walkKey = 'currency';
+  var step = 0;
+
+  var el = {
+    note: document.getElementById('walkNote'),
+    feed: document.getElementById('wFeed'),
+    lblLlm: document.getElementById('lbl-llm'),
+    trans: document.getElementById('wTrans'),
+    stepN: document.getElementById('wStep'),
+    guarantee: document.getElementById('wGuarantee'),
+    prev: document.getElementById('wPrev'),
+    next: document.getElementById('wNext'),
+    reset: document.getElementById('wReset')
+  };
+
+  function esc(s) {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  function paint(id, text, pos, sweptFrom) {
+    var node = document.getElementById('body-' + id);
+    var spoken = sweptFrom == null ? pos : sweptFrom;
+    node.innerHTML =
+      '<span class="done">' + esc(text.slice(0, spoken)) + '</span>' +
+      (sweptFrom == null ? '' :
+        '<span class="swept">' + esc(text.slice(spoken, pos)) + '</span>') +
+      '<span class="caret"></span>' +
+      '<span class="todo">' + esc(text.slice(pos)) + '</span>';
+    document.getElementById('pos-' + id).textContent = pos;
+  }
+
+  function render() {
+    var walk = WALKS[walkKey];
+    var s = step > 0 ? walk.steps[step - 1] : { w: null, raw: 0, seg: 0, llm: 0, t: false };
+
+    el.note.textContent = walk.note;
+    paint('tts', walk.tts, s.raw);
+    paint('seg', walk.seg, s.seg);
+    paint('llm', walk.llm, s.llm, s.sweep);
+
+    document.getElementById('trk-seg').classList.toggle('held', s.t);
+    document.getElementById('trk-llm').classList.toggle('held', s.t);
+    document.getElementById('trk-llm').classList.toggle('claiming', s.sweep != null);
+
+    // The sweep is not a word event: nothing was spoken, so the map never moved.
+    // It is the tracker taking the text left over once the frame is done.
+    if (s.sweep != null) {
+      el.feed.innerHTML = 'frame complete \u2192 tracker claims <b>' +
+        esc(walk.llm.slice(s.sweep, s.llm)) + '</b>';
+      el.lblLlm.textContent = 'llm consumed';
+    } else {
+      el.feed.innerHTML = 'advance_word(<b id="wWord">' +
+        (s.w ? '"' + esc(s.w) + '"' : '\u2014') + '</b>)';
+      el.lblLlm.textContent = 'llm_pos';
+    }
+    el.trans.textContent = 'in_transformed_segment: ' + s.t;
+    el.trans.classList.toggle('on', s.t);
+    el.stepN.textContent = step + ' / ' + walk.steps.length;
+
+    var acc = walk.seg.slice(0, s.seg);
+    var rem = walk.seg.slice(s.seg);
+    el.guarantee.innerHTML =
+      'accumulated <b>"' + esc(acc) + '"</b> + remaining <b>"' + esc(rem) +
+      '"</b> === frame.text &nbsp;<span style="color:var(--seg)">✓</span>';
+
+    el.prev.disabled = step === 0;
+    el.next.disabled = step === walk.steps.length;
+  }
+
+  function stepWalk(d) {
+    var max = WALKS[walkKey].steps.length;
+    step = Math.max(0, Math.min(max, step + d));
+    render();
+  }
+
+  document.querySelectorAll('.wtab').forEach(function (tab) {
+    tab.addEventListener('click', function () {
+      document.querySelectorAll('.wtab').forEach(function (t) {
+        t.setAttribute('aria-selected', String(t === tab));
+      });
+      walkKey = tab.getAttribute('data-walk');
+      step = 0;
+      render();
+    });
+  });
+
+  el.prev.addEventListener('click', function () { stepWalk(-1); });
+  el.next.addEventListener('click', function () { stepWalk(1); });
+  el.reset.addEventListener('click', function () { step = 0; render(); });
+
+  function onWalkSlide() {
+    return slides[idx].id === 'slide-walk';
+  }
+
+  /* ---------------- the call-trace instrument ---------------- */
+  /* Captured from a real run: one entry per call, with the cursor state as the
+     call was entered and any frames that had been emitted by the time it ended. */
+  var TRACE_STEPS = [{"d":0,"l":"seq","n":"register_spoken","a":"frame, 'ctx1', 'Your card is 4111', True","s":[0,0,0,0,0],"r":"","f":[],"after":[0,0,0,0,0]},{"d":0,"l":"seq","n":"process_word","a":"'Your', pts=1000, context_id='ctx1'","s":[0,0,0,0,0],"r":"","f":[]},{"d":1,"l":"trk","n":"word_belongs_here","a":"'Your'","s":[0,0,0,0,0],"r":"True","f":[]},{"d":2,"l":"map","n":"word_belongs_current_segment","a":"'Your'","s":[0,0,0,0,0],"r":"True","f":[]},{"d":1,"l":"trk","n":"add_word_and_check_complete","a":"'Your'","s":[0,0,0,0,0],"r":"False","f":[]},{"d":2,"l":"trk","n":"word_belongs_here","a":"'Your'","s":[0,0,0,0,0],"r":"True","f":[]},{"d":3,"l":"map","n":"word_belongs_current_segment","a":"'Your'","s":[0,0,0,0,0],"r":"True","f":[]},{"d":2,"l":"map","n":"advance_word","a":"'Your'","s":[0,0,0,0,0],"r":"None","f":[]},{"d":1,"l":"trk","n":"get_overflow_word","a":"","s":[4,4,4,0,0],"r":"None","f":[]},{"d":1,"l":"trk","n":"get_word_for_frame","a":"","s":[4,4,4,0,0],"r":"'Your'","f":[]},{"d":1,"l":"trk","n":"get_llm_consumed","a":"","s":[4,4,4,0,0],"r":"'Your'","f":[]},{"d":1,"l":"trk","n":"suppress_in_context","a":"","s":[4,4,4,0,0],"r":"False","f":[]},{"d":1,"l":"trk","n":"get_accumulated_user_facing_text","a":"","s":[4,4,4,0,0],"r":"'Your'","f":[]},{"d":1,"l":"trk","n":"get_remaining_user_facing_text","a":"strip=False","s":[4,4,4,0,0],"r":"' card is 4111'","f":[],"emit":[["tts","Your","Your",1],["prog","Your"," card is 4111",0]],"after":[4,4,4,0,0]},{"d":0,"l":"seq","n":"process_word","a":"'card', pts=2000, context_id='ctx1'","s":[4,4,4,0,0],"r":"","f":[]},{"d":1,"l":"trk","n":"word_belongs_here","a":"'card'","s":[4,4,4,0,0],"r":"True","f":[]},{"d":2,"l":"map","n":"word_belongs_current_segment","a":"'card'","s":[4,4,4,0,0],"r":"True","f":[]},{"d":1,"l":"trk","n":"add_word_and_check_complete","a":"'card'","s":[4,4,4,0,0],"r":"False","f":[]},{"d":2,"l":"trk","n":"word_belongs_here","a":"'card'","s":[4,4,4,0,0],"r":"True","f":[]},{"d":3,"l":"map","n":"word_belongs_current_segment","a":"'card'","s":[4,4,4,0,0],"r":"True","f":[]},{"d":2,"l":"map","n":"advance_word","a":"'card'","s":[4,4,4,0,0],"r":"None","f":[]},{"d":1,"l":"trk","n":"get_overflow_word","a":"","s":[9,9,9,0,0],"r":"None","f":[]},{"d":1,"l":"trk","n":"get_word_for_frame","a":"","s":[9,9,9,0,0],"r":"'card'","f":[]},{"d":1,"l":"trk","n":"get_llm_consumed","a":"","s":[9,9,9,0,0],"r":"'card'","f":[]},{"d":1,"l":"trk","n":"suppress_in_context","a":"","s":[9,9,9,0,0],"r":"False","f":[]},{"d":1,"l":"trk","n":"get_accumulated_user_facing_text","a":"","s":[9,9,9,0,0],"r":"'Your card'","f":[]},{"d":1,"l":"trk","n":"get_remaining_user_facing_text","a":"strip=False","s":[9,9,9,0,0],"r":"' is 4111'","f":[],"emit":[["tts","card","card",1],["prog","Your card"," is 4111",0]],"after":[9,9,9,0,0]},{"d":0,"l":"seq","n":"process_word","a":"'is', pts=3000, context_id='ctx1'","s":[9,9,9,0,0],"r":"","f":[]},{"d":1,"l":"trk","n":"word_belongs_here","a":"'is'","s":[9,9,9,0,0],"r":"True","f":[]},{"d":2,"l":"map","n":"word_belongs_current_segment","a":"'is'","s":[9,9,9,0,0],"r":"True","f":[]},{"d":1,"l":"trk","n":"add_word_and_check_complete","a":"'is'","s":[9,9,9,0,0],"r":"False","f":[]},{"d":2,"l":"trk","n":"word_belongs_here","a":"'is'","s":[9,9,9,0,0],"r":"True","f":[]},{"d":3,"l":"map","n":"word_belongs_current_segment","a":"'is'","s":[9,9,9,0,0],"r":"True","f":[]},{"d":2,"l":"map","n":"advance_word","a":"'is'","s":[9,9,9,0,0],"r":"None","f":[]},{"d":1,"l":"trk","n":"get_overflow_word","a":"","s":[12,12,12,0,0],"r":"None","f":[]},{"d":1,"l":"trk","n":"get_word_for_frame","a":"","s":[12,12,12,0,0],"r":"'is'","f":[]},{"d":1,"l":"trk","n":"get_llm_consumed","a":"","s":[12,12,12,0,0],"r":"'is'","f":[]},{"d":1,"l":"trk","n":"suppress_in_context","a":"","s":[12,12,12,0,0],"r":"False","f":[]},{"d":1,"l":"trk","n":"get_accumulated_user_facing_text","a":"","s":[12,12,12,0,0],"r":"'Your card is'","f":[]},{"d":1,"l":"trk","n":"get_remaining_user_facing_text","a":"strip=False","s":[12,12,12,0,0],"r":"' 4111'","f":[],"emit":[["tts","is","is",1],["prog","Your card is"," 4111",0]],"after":[12,12,12,0,0]},{"d":0,"l":"seq","n":"process_word","a":"'4111', pts=4000, context_id='ctx1'","s":[12,12,12,0,0],"r":"","f":[]},{"d":1,"l":"trk","n":"word_belongs_here","a":"'4111'","s":[12,12,12,0,0],"r":"True","f":[]},{"d":2,"l":"map","n":"word_belongs_current_segment","a":"'4111'","s":[12,12,12,0,0],"r":"True","f":[]},{"d":1,"l":"trk","n":"add_word_and_check_complete","a":"'4111'","s":[12,12,12,0,0],"r":"True","f":[]},{"d":2,"l":"trk","n":"word_belongs_here","a":"'4111'","s":[12,12,12,0,0],"r":"True","f":[]},{"d":3,"l":"map","n":"word_belongs_current_segment","a":"'4111'","s":[12,12,12,0,0],"r":"True","f":[]},{"d":2,"l":"map","n":"advance_word","a":"'4111'","s":[12,12,12,0,0],"r":"None","f":[]},{"d":1,"l":"trk","n":"get_overflow_word","a":"","s":[17,17,23,0,1],"r":"None","f":[]},{"d":1,"l":"trk","n":"get_word_for_frame","a":"","s":[17,17,23,0,1],"r":"'4111'","f":[]},{"d":1,"l":"trk","n":"get_llm_consumed","a":"","s":[17,17,23,0,1],"r":"'<card>4111</card>'","f":[]},{"d":1,"l":"trk","n":"suppress_in_context","a":"","s":[17,17,23,0,1],"r":"False","f":[]},{"d":1,"l":"trk","n":"get_accumulated_user_facing_text","a":"","s":[17,17,23,0,1],"r":"'Your card is 4111'","f":[]},{"d":1,"l":"trk","n":"get_remaining_user_facing_text","a":"strip=False","s":[17,17,23,0,1],"r":"''","f":[]},{"d":1,"l":"seq","n":"flush","a":"last_word_pts=4000","s":[17,17,23,0,1],"r":"","f":[],"emit":[["tts","4111","<card>4111</card>",1],["prog","Your card is 4111","",0]],"after":[17,17,23,0,1]}];
+
+  var TRACE_TEXT = {
+    xtts: 'Your card is 4111',
+    xseg: 'Your card is 4111',
+    xllm: 'Your card is <card>4111</card>'
+  };
+  var LAYER_CLASS = { seq: 'ch-tts', trk: 'ch-llm', map: 'ch-seg' };
+  var tStep = 0;
+
+  var tEl = {
+    stack: document.getElementById('callStack'),
+    log: document.getElementById('frameLog'),
+    feed: document.getElementById('tFeed'),
+    stepN: document.getElementById('tStep'),
+    prev: document.getElementById('tPrev'),
+    next: document.getElementById('tNext'),
+    word: document.getElementById('tWord'),
+    reset: document.getElementById('tReset')
+  };
+
+  function buildTraceStack() {
+    tEl.stack.innerHTML = TRACE_STEPS.map(function (st, i) {
+      var pad = new Array(st.d + 1).join('  ');
+      var ret = st.r ? ' <span class="ret">→ ' + esc(st.r) + '</span>' : '';
+      return '<div class="crow" data-i="' + i + '">' + pad +
+        '<span class="' + LAYER_CLASS[st.l] + '">' + esc(st.n) + '</span>(' +
+        esc(st.a) + ')' + ret + '</div>';
+    }).join('');
+  }
+
+  function renderTrace() {
+    var st = tStep > 0 ? TRACE_STEPS[tStep - 1] : null;
+    // Cursors are shown as the highlighted call was *entered*, so a step lands on
+    // the state that call is about to act on rather than the one it produced.
+    var pos = st ? st.s : [0, 0, 0, 0, 0];
+
+    paint('xtts', TRACE_TEXT.xtts, pos[0]);
+    paint('xseg', TRACE_TEXT.xseg, pos[1]);
+    paint('xllm', TRACE_TEXT.xllm, pos[2]);
+
+    var rows = tEl.stack.querySelectorAll('.crow');
+    for (var i = 0; i < rows.length; i++) {
+      rows[i].classList.toggle('seen', i < tStep);
+      rows[i].classList.toggle('on', i === tStep - 1);
+    }
+    if (st) {
+      var on = tEl.stack.querySelector('.crow.on');
+      if (on && on.scrollIntoView) on.scrollIntoView({ block: 'nearest' });
+    } else {
+      tEl.stack.scrollTop = 0;
+    }
+
+    var emitted = [];
+    for (var j = 0; j < tStep; j++) {
+      if (TRACE_STEPS[j].emit) emitted = emitted.concat(TRACE_STEPS[j].emit);
+    }
+    tEl.log.innerHTML = emitted.length
+      ? emitted.map(function (f) {
+          if (f[0] === 'tts') {
+            var raw = f[2] !== f[1]
+              ? ' <span class="tag-raw">raw_text=<b>"' + esc(f[2]) + '"</b></span>'
+              : ' raw_text="' + esc(f[2]) + '"';
+            return '<div class="frow tts">TTSTextFrame <b>"' + esc(f[1]) + '"</b>' + raw + '</div>';
+          }
+          return '<div class="frow prog">Progress acc=<b>"' + esc(f[1]) +
+            '"</b> rem="' + esc(f[2]) + '"</div>';
+        }).join('')
+      : '<div class="empty">no frames emitted yet</div>';
+
+    tEl.feed.innerHTML = st
+      ? '<span class="' + LAYER_CLASS[st.l] + '">' + esc(st.n) + '</span>' +
+        (st.r ? ' → <b>' + esc(st.r) + '</b>' : '')
+      : '—';
+    tEl.stepN.textContent = tStep + ' / ' + TRACE_STEPS.length;
+    tEl.prev.disabled = tStep === 0;
+    tEl.next.disabled = tStep === TRACE_STEPS.length;
+    tEl.word.disabled = tStep === TRACE_STEPS.length;
+  }
+
+  function stepTrace(d) {
+    tStep = Math.max(0, Math.min(TRACE_STEPS.length, tStep + d));
+    renderTrace();
+  }
+
+  function traceNextWord() {
+    for (var i = tStep; i < TRACE_STEPS.length; i++) {
+      if (TRACE_STEPS[i].n === 'process_word') { tStep = i + 1; renderTrace(); return; }
+    }
+    tStep = TRACE_STEPS.length;
+    renderTrace();
+  }
+
+  tEl.prev.addEventListener('click', function () { stepTrace(-1); });
+  tEl.next.addEventListener('click', function () { stepTrace(1); });
+  tEl.word.addEventListener('click', traceNextWord);
+  tEl.reset.addEventListener('click', function () { tStep = 0; renderTrace(); });
+
+  function onTraceSlide() {
+    return slides[idx].id === 'slide-trace';
+  }
+
+  /* ---------------- keyboard ---------------- */
+  document.addEventListener('keydown', function (e) {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    switch (e.key) {
+      case 'ArrowRight': case 'PageDown': show(idx + 1); e.preventDefault(); break;
+      case 'ArrowLeft':  case 'PageUp':   show(idx - 1); e.preventDefault(); break;
+      case ' ':          show(idx + 1); e.preventDefault(); break;
+      case 'Home':       show(0); e.preventDefault(); break;
+      case 'End':        show(slides.length - 1); e.preventDefault(); break;
+      case 'ArrowDown':
+        if (onWalkSlide()) { stepWalk(1); e.preventDefault(); }
+        else if (onTraceSlide()) { stepTrace(1); e.preventDefault(); }
+        break;
+      case 'ArrowUp':
+        if (onWalkSlide()) { stepWalk(-1); e.preventDefault(); }
+        else if (onTraceSlide()) { stepTrace(-1); e.preventDefault(); }
+        break;
+      case 't': case 'T':
+        document.documentElement.setAttribute(
+          'data-theme',
+          document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light'
+        );
+        break;
+      case 'f': case 'F':
+        if (document.fullscreenElement) { document.exitFullscreen(); }
+        else { document.documentElement.requestFullscreen(); }
+        break;
+    }
+  });
+
+  /* ---------------- click-to-advance (ignore controls) ---------------- */
+  document.addEventListener('click', function (e) {
+    if (e.target.closest('button, a, .scroll, pre, .track, .callstack, .framelog')) return;
+    if (e.clientX > window.innerWidth * 0.75) show(idx + 1);
+    else if (e.clientX < window.innerWidth * 0.25) show(idx - 1);
+  });
+
+  /* ---------------- boot ---------------- */
+  var start = parseInt((location.hash || '').slice(1), 10);
+  render();
+  buildTraceStack();
+  renderTrace();
+  show(isNaN(start) ? 0 : start - 1);
+})();
+</script>
+</body>
+</html>

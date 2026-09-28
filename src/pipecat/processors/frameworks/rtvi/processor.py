@@ -24,6 +24,7 @@ from pipecat.frames.frames import (
     Frame,
     FunctionCallResultFrame,
     InputAudioRawFrame,
+    InputDTMFFrame,
     InputTransportMessageFrame,
     InputTransportStartAudioStreamingFrame,
     LLMConfigureOutputFrame,
@@ -126,6 +127,7 @@ class RTVIProcessor(FrameProcessor):
 
     async def set_client_ready(self):
         """Mark the client as ready and trigger the ready event."""
+        logger.debug(f"{self}: client is ready")
         self._client_ready = True
         await self._call_event_handler("on_client_ready")
 
@@ -250,6 +252,11 @@ class RTVIProcessor(FrameProcessor):
         else:
             await self.push_frame(frame, direction)
 
+    async def cleanup(self):
+        """Release resources held by the processor."""
+        await super().cleanup()
+        await self._cancel_tasks()
+
     async def _start(self, frame: StartFrame):
         """Start the RTVI processor tasks."""
         if not self._message_task:
@@ -359,6 +366,9 @@ class RTVIProcessor(FrameProcessor):
                     await self._handle_send_text(data)
                 case "raw-audio" | "raw-audio-batch":
                     await self._handle_audio_buffer(message.data)
+                case "dtmf":
+                    data = RTVI.DTMFInputData.model_validate(message.data)
+                    await self._handle_dtmf(data)
 
                 case _:
                     await self._send_error_response(message.id, f"Unsupported type {message.type}")
@@ -443,6 +453,18 @@ class RTVIProcessor(FrameProcessor):
             # Handle missing keys, decoding errors, and invalid types
             logger.error(f"Error processing audio buffer: {e}")
 
+    async def _handle_dtmf(self, data: RTVI.DTMFInputData):
+        """Handle DTMF keypresses from the client.
+
+        Like ``_handle_audio_buffer``, the RTVIProcessor sits at the top of the
+        pipeline, so pushing ``InputDTMFFrame`` downstream reaches the input
+        transport and the bot's DTMF handling exactly as a telephony transport's
+        keypresses would. A multi-key sequence is pushed as one frame per key,
+        in order.
+        """
+        for button in data.buttons:
+            await self.push_frame(InputDTMFFrame(button=button))
+
     async def _handle_send_text(self, data: RTVI.SendTextData):
         """Handle a send-text message from the client."""
         opts = data.options if data.options is not None else RTVI.SendTextOptions()
@@ -504,9 +526,20 @@ class RTVIProcessor(FrameProcessor):
         """
         if not about:
             about = {"library": "pipecat-ai", "library_version": f"{pipecat_version()}"}
+        # Negotiate the protocol version we advertise back to the client.
+        # The server observer serves v1-formatted bot-output events to
+        # 1.x clients (see `_is_legacy_client`), so advertising the
+        # server's own 2.0.0 PROTOCOL_VERSION here would push the client's
+        # aggregator onto its v2 path (server-side speech progress) while
+        # the wire actually carries v1 events, and the two would collide.
+        # For legacy clients, echo their declared version back.
+        if self._client_version[0] == RTVI.LEGACY_SUPPORTED_MAJOR:
+            version = ".".join(str(v) for v in self._client_version)
+        else:
+            version = RTVI.PROTOCOL_VERSION
         message = RTVI.BotReady(
             id=self._client_ready_id,
-            data=RTVI.BotReadyData(version=RTVI.PROTOCOL_VERSION, about=about),
+            data=RTVI.BotReadyData(version=version, about=about),
         )
         await self.push_transport_message(message)
 

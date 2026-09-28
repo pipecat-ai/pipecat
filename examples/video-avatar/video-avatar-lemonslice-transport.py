@@ -15,7 +15,7 @@ from loguru import logger
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
@@ -95,7 +95,12 @@ async def main():
                 enable_metrics=True,
                 enable_usage_metrics=True,
             ),
+            processor_unusable_policy=ProcessorUnusablePolicy.END,
         )
+
+        runner = WorkerRunner()
+
+        await runner.add_workers(worker)
 
         @transport.event_handler("on_client_connected")
         async def on_client_connected(transport, participant):
@@ -112,7 +117,7 @@ async def main():
         @transport.event_handler("on_client_disconnected")
         async def on_client_disconnected(transport, participant):
             logger.info("Client disconnected")
-            await worker.cancel()
+            await runner.cancel()
 
         @transport.event_handler("on_avatar_connected")
         async def on_avatar_connected(transport, participant):
@@ -122,9 +127,6 @@ async def main():
         async def on_avatar_disconnected(transport, participant, reason):
             logger.info(f"Avatar disconnected. Reason: {reason}")
 
-        runner = WorkerRunner()
-
-        await runner.add_workers(worker)
         await runner.run()
 
 

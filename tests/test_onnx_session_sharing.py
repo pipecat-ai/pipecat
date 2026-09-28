@@ -90,7 +90,7 @@ def test_smart_turn_shares_session_isolates_state():
     b = LocalSmartTurnAnalyzerV3()
     assert a._session is b._session
     assert a._audio_buffer is not b._audio_buffer
-    assert a._executor is not b._executor
+    assert a._model_executor is not b._model_executor
 
 
 def test_silero_shares_session_isolates_state():

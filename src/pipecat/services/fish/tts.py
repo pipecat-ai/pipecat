@@ -22,19 +22,19 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
-    StartFrame,
     TTSAudioRawFrame,
     TTSStoppedFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, assert_given
+from pipecat.processors.frame_processor import FrameProcessorSetup
+from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import InterruptibleTTSService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.tracing.service_decorators import traced_tts
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
 try:
     import ormsgpack
-    from websockets.asyncio.client import connect as websocket_connect
     from websockets.protocol import State
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
@@ -58,12 +58,12 @@ class FishAudioTTSSettings(TTSSettings):
         prosody_volume: Volume adjustment in dB (-20 to 20). Defaults to 0.
     """
 
-    latency: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    normalize: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    temperature: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    top_p: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    prosody_speed: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    prosody_volume: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    latency: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    normalize: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    temperature: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    top_p: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    prosody_speed: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    prosody_volume: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
     @classmethod
     def from_mapping(cls, settings: Mapping[str, Any]) -> Self:
@@ -134,7 +134,7 @@ class FishAudioTTSService(InterruptibleTTSService):
                     Use ``settings=FishAudioTTSService.Settings(voice=...)`` instead.
                     Will be removed in 2.0.0.
 
-            model_id: Specify which Fish Audio TTS model to use (e.g. "s1").
+            model_id: Specify which Fish Audio TTS model to use (e.g. "s2.1-pro").
 
                 .. deprecated:: 0.0.105
                     Use ``settings=FishAudioTTSService.Settings(model=...)`` instead.
@@ -154,7 +154,7 @@ class FishAudioTTSService(InterruptibleTTSService):
         """
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
-            model="s2-pro",
+            model="s2.1-pro",
             voice=None,
             language=None,
             latency="balanced",
@@ -235,13 +235,13 @@ class FishAudioTTSService(InterruptibleTTSService):
 
         return changed
 
-    async def start(self, frame: StartFrame):
-        """Start the Fish Audio TTS service.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
 
         Args:
-            frame: The start frame containing initialization parameters.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         self._fish_sample_rate = self.sample_rate
         await self._connect()
 
@@ -290,7 +290,7 @@ class FishAudioTTSService(InterruptibleTTSService):
             model = assert_given(self._settings.model)
             if model is not None:
                 headers["model"] = model
-            websocket = await websocket_connect(self._base_url, additional_headers=headers)
+            websocket = await self._websocket_connect(self._base_url, additional_headers=headers)
             self._websocket = websocket
 
             # Send initial start message with ormsgpack

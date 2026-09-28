@@ -104,25 +104,6 @@ class ServiceLoader:
         return ServiceRegistry.IMPORTS.get(service_value, [])
 
     @staticmethod
-    def uses_external_turn_detection(stt_value: str | None) -> bool:
-        """Check whether an STT service performs its own end-of-turn detection.
-
-        Such services (e.g. Deepgram Flux, Cartesia Turns) drive turn taking
-        themselves, so the generated bot uses ExternalUserTurnStrategies() instead
-        of VAD-based turn taking.
-
-        Args:
-            stt_value: STT service identifier (e.g., "cartesia_turns_stt")
-
-        Returns:
-            True if the service uses external turn detection
-        """
-        if not stt_value:
-            return False
-        service = ServiceLoader.get_service_by_value(ServiceRegistry.STT_SERVICES, stt_value)
-        return bool(service and service.external_turn_detection)
-
-    @staticmethod
     def extract_extras_for_services(services: dict[str, str | list[str]]) -> set[str]:
         """Extract all package extras needed for selected services.
 
@@ -287,11 +268,6 @@ class ServiceLoader:
         _dialout_transports = {"daily_pstn_dialout", "twilio_daily_sip_dialout"}
         if not (transport_values & _dialout_transports):
             imports.update(ServiceRegistry.FEATURE_IMPORTS["llm_run_frame"])
-
-        # Some STT services perform their own end-of-turn detection ("stt" is a single value)
-        stt_value = services.get("stt", "")
-        if isinstance(stt_value, str) and ServiceLoader.uses_external_turn_detection(stt_value):
-            imports.update(ServiceRegistry.FEATURE_IMPORTS["external_turn_strategies"])
 
         return list(imports)
 

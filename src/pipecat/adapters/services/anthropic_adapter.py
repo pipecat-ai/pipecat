@@ -9,14 +9,17 @@
 import copy
 import json
 from dataclasses import dataclass
-from typing import Any, TypedDict, TypeGuard, TypeVar, cast
+from typing import Any, Literal, TypedDict, TypeGuard, TypeVar, cast
 
-from anthropic import NOT_GIVEN, NotGiven
+from anthropic import NOT_GIVEN as ANTHROPIC_NOT_GIVEN
+from anthropic import NotGiven as AnthropicNotGiven
+from anthropic.types.cache_control_ephemeral_param import CacheControlEphemeralParam
 from anthropic.types.message_param import MessageParam
+from anthropic.types.text_block_param import TextBlockParam
 from anthropic.types.tool_union_param import ToolUnionParam
 from loguru import logger
 
-from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
+from pipecat.adapters.base_llm_adapter import BaseLLMAdapter, LLMContextConversionError
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.processors.aggregators.llm_context import (
@@ -28,32 +31,35 @@ from pipecat.processors.aggregators.llm_context import (
 
 _T = TypeVar("_T")
 
+AnthropicCacheTTL = Literal["5m", "1h"]
+"""Lifetime of an Anthropic prompt cache entry after it was last written or read."""
 
-def is_given(value: _T | NotGiven) -> TypeGuard[_T]:
-    """Check whether a value was explicitly provided.
 
-    Typically used when checking whether a parameter or field typed with
-    Anthropic's ``NotGiven`` was set::
+def anthropic_is_given(value: _T | AnthropicNotGiven) -> TypeGuard[_T]:
+    """Check whether a value was explicitly provided to the Anthropic SDK.
 
-        if is_given(system):
+    Asks about the SDK's sentinel, not Pipecat's — use
+    :func:`pipecat.utils.types.is_given` for values that are still Pipecat's::
+
+        if anthropic_is_given(system):
             ...
 
     Also acts as a type guard: inside a true branch, the value is narrowed
-    to exclude ``NotGiven`` (e.g. ``str | NotGiven`` becomes ``str``).
+    to exclude ``AnthropicNotGiven`` (e.g. ``str | AnthropicNotGiven`` becomes ``str``).
 
     Args:
         value: The value to check.
 
     Returns:
-        ``True`` if *value* is anything other than ``NOT_GIVEN``.
+        ``True`` if *value* is anything other than the SDK's ``NOT_GIVEN``.
     """
-    return not isinstance(value, NotGiven)
+    return not isinstance(value, AnthropicNotGiven)
 
 
 class AnthropicLLMInvocationParams(TypedDict):
     """Context-based parameters for invoking Anthropic's LLM API."""
 
-    system: str | NotGiven
+    system: str | list[TextBlockParam] | AnthropicNotGiven
     messages: list[MessageParam]
     tools: list[ToolUnionParam]
 
@@ -75,6 +81,8 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
         context: LLMContext,
         enable_prompt_caching: bool,
         system_instruction: str | None = None,
+        ensure_last_message_is_user: bool = False,
+        system_prompt_cache_ttl: AnthropicCacheTTL | None = None,
     ) -> AnthropicLLMInvocationParams:
         """Get Anthropic-specific LLM invocation parameters from a universal LLM context.
 
@@ -83,6 +91,13 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
             enable_prompt_caching: Whether prompt caching should be enabled.
             system_instruction: Optional system instruction from service settings
                 or ``run_inference``.
+            ensure_last_message_is_user: Whether to append a minimal user message
+                when the converted message list ends with an assistant message.
+                Required by models without assistant-prefill support, which
+                reject requests ending with an assistant message.
+            system_prompt_cache_ttl: Lifetime of the system prompt's cache
+                entry when prompt caching is enabled. ``None`` uses Anthropic's
+                default of 5 minutes.
 
         Returns:
             Dictionary of parameters for invoking Anthropic's LLM API.
@@ -90,13 +105,22 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
         converted = self._from_universal_context_messages(
             self.get_messages(context), system_instruction=system_instruction
         )
+        if ensure_last_message_is_user:
+            self._ensure_last_message_is_user(converted.messages)
         system = self._resolve_system_instruction(
-            converted.system if is_given(converted.system) else None,
+            converted.system if anthropic_is_given(converted.system) else None,
             system_instruction,
             discard_context_system=True,
         )
+        system_param: str | list[TextBlockParam] | AnthropicNotGiven = ANTHROPIC_NOT_GIVEN
+        if system is not None:
+            system_param = (
+                self._system_with_cache_control(system, system_prompt_cache_ttl)
+                if enable_prompt_caching
+                else system
+            )
         return {
-            "system": system if system is not None else NOT_GIVEN,
+            "system": system_param,
             "messages": (
                 self._with_cache_control_markers(converted.messages)
                 if enable_prompt_caching
@@ -143,7 +167,7 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
         """Container for Anthropic-formatted messages converted from universal context."""
 
         messages: list[MessageParam]
-        system: str | NotGiven
+        system: str | AnthropicNotGiven
 
     def _from_universal_context_messages(
         self,
@@ -151,7 +175,7 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
         *,
         system_instruction: str | None = None,
     ) -> ConvertedMessages:
-        system = NOT_GIVEN
+        system = ANTHROPIC_NOT_GIVEN
 
         # Extract initial system message from universal messages BEFORE conversion,
         # so the helper works with standard message format (not provider-specific).
@@ -163,12 +187,17 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
             if extracted is not None:
                 system = extracted
 
-        # Convert remaining messages to Anthropic format
-        messages = []
+        # Convert remaining messages to Anthropic format, skipping messages that
+        # have no Anthropic representation. A conversion failure (e.g. a
+        # malformed message) is wrapped so it surfaces with its underlying cause.
         try:
-            messages = [self._from_universal_context_message(m) for m in remaining]
+            messages = [
+                converted
+                for m in remaining
+                if (converted := self._from_universal_context_message(m)) is not None
+            ]
         except Exception as e:
-            logger.error(f"Error mapping messages: {e}")
+            raise LLMContextConversionError(e) from e
 
         # Convert any subsequent "system"/"developer"-role messages to "user"-role
         # messages, as Anthropic doesn't support system or developer input messages.
@@ -210,12 +239,31 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
 
         return self.ConvertedMessages(messages=messages, system=system)
 
-    def _from_universal_context_message(self, message: LLMContextMessage) -> MessageParam:
+    @staticmethod
+    def _ensure_last_message_is_user(messages: list[MessageParam]) -> list[MessageParam]:
+        """Ensure the message list does not end with an assistant message.
+
+        Models without assistant-prefill support reject requests ending with
+        an assistant message. When the last message has ``role="assistant"``,
+        a minimal user message is appended so that the API request is
+        accepted. "." represents a language-neutral no-op user turn.
+
+        Args:
+            messages: The converted message list (may be mutated in-place).
+
+        Returns:
+            The same list, possibly with an appended user message.
+        """
+        if messages and messages[-1]["role"] == "assistant":
+            messages.append({"role": "user", "content": [{"type": "text", "text": "."}]})
+        return messages
+
+    def _from_universal_context_message(self, message: LLMContextMessage) -> MessageParam | None:
         if isinstance(message, LLMSpecificMessage):
             return self._from_anthropic_specific_message(message)
         return self._from_standard_message(message)
 
-    def _from_anthropic_specific_message(self, message: LLMSpecificMessage) -> MessageParam:
+    def _from_anthropic_specific_message(self, message: LLMSpecificMessage) -> MessageParam | None:
         """Convert LLMSpecificMessage to Anthropic format.
 
         Anthropic-specific messages may either be special thought messages that
@@ -224,24 +272,32 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
 
         Args:
             message: Anthropic-specific message.
+
+        Returns:
+            The message in Anthropic format, or None for a thought that can't be
+            represented as a thinking block.
         """
         # Handle special case of thought messages.
         # These can be converted to standalone "assistant" messages; later
         # these thinking messages will be properly merged into the assistant
         # response messages before the context is sent to Anthropic for the
         # next turn.
-        if (
-            isinstance(message.message, dict)
-            and message.message.get("type") == "thought"
-            and (text := message.message.get("text"))
-            and (signature := message.message.get("signature"))
-        ):
+        if isinstance(message.message, dict) and message.message.get("type") == "thought":
+            # A thinking block is valid to Anthropic only with a signature: it
+            # carries the encrypted reasoning the API decrypts when the block is
+            # passed back, and a block without one can't be round-tripped.
+            # Thought text can legitimately be empty, since models that default
+            # to `display: "omitted"` return thinking blocks with no text.
+            # https://platform.claude.com/docs/en/build-with-claude/thinking#controlling-thinking-display
+            signature = message.message.get("signature")
+            if not signature:
+                return None
             return {
                 "role": "assistant",
                 "content": [
                     {
                         "type": "thinking",
-                        "thinking": text,
+                        "thinking": message.message.get("text") or "",
                         "signature": signature,
                     }
                 ],
@@ -426,6 +482,33 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
         except Exception as e:
             logger.error(f"Error adding cache control marker: {e}")
             return messages_with_markers
+
+    @staticmethod
+    def _system_with_cache_control(
+        system: str, ttl: AnthropicCacheTTL | None = None
+    ) -> list[TextBlockParam]:
+        """Add a cache breakpoint to the end of a system prompt.
+
+        Anthropic accepts system prompts as either a string or a list of content
+        blocks. Converting a string to one text block lets the shared system
+        prompt be cached independently of the conversation messages.
+
+        A TTL longer than the message breakpoints' keeps the shared prefix
+        cached across gaps between conversations. Anthropic requires longer-TTL
+        breakpoints to come before shorter ones, which the system prompt always
+        does.
+
+        Args:
+            system: The system prompt to mark for caching.
+            ttl: Lifetime of the cache entry. ``None`` uses Anthropic's default.
+
+        Returns:
+            The system prompt as one cacheable text block.
+        """
+        cache_control: CacheControlEphemeralParam = {"type": "ephemeral"}
+        if ttl is not None:
+            cache_control["ttl"] = ttl
+        return [{"type": "text", "text": system, "cache_control": cache_control}]
 
     @staticmethod
     def _to_anthropic_function_format(function: FunctionSchema) -> dict[str, Any]:

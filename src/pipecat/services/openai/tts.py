@@ -25,10 +25,12 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
 )
 from pipecat.services.openai._constants import OPENAI_SAMPLE_RATE
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, assert_given
+from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TTSService
 from pipecat.utils.deprecation import deprecated
+from pipecat.utils.http import AsyncHTTPClient
 from pipecat.utils.tracing.service_decorators import traced_tts
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
 ValidVoice = Literal[
     "alloy",
@@ -72,8 +74,8 @@ class OpenAITTSSettings(TTSSettings):
         speed: Voice speed control (0.25 to 4.0, default 1.0).
     """
 
-    instructions: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    speed: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    instructions: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speed: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class OpenAITTSService(TTSService):
@@ -111,6 +113,7 @@ class OpenAITTSService(TTSService):
         *,
         api_key: str | None = None,
         base_url: str | None = None,
+        http_client: AsyncHTTPClient | None = None,
         voice: str | None = None,
         model: str | None = None,
         sample_rate: int | None = None,
@@ -125,6 +128,13 @@ class OpenAITTSService(TTSService):
         Args:
             api_key: OpenAI API key for authentication. If None, uses environment variable.
             base_url: Custom base URL for OpenAI API. If None, uses default.
+            http_client: Custom async HTTP client for API requests, e.g. one with a
+                longer request timeout. Prefer ``openai.DefaultAsyncHttpxClient``, which
+                keeps the SDK's connection limits and redirect handling; a bare client
+                uses its own defaults instead. The SDK's HTTP client family follows the
+                installed ``openai`` version, so build any ``Timeout`` you pass it from
+                that same family. Defaults to None, which lets the SDK build its own
+                client.
             voice: Voice ID to use for synthesis. Defaults to "alloy".
 
                 .. deprecated:: 0.0.105
@@ -210,7 +220,7 @@ class OpenAITTSService(TTSService):
             **kwargs,
         )
 
-        self._client = AsyncOpenAI(api_key=api_key, base_url=base_url)
+        self._client = AsyncOpenAI(api_key=api_key, base_url=base_url, http_client=http_client)
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -244,7 +254,6 @@ class OpenAITTSService(TTSService):
         Yields:
             Frame: Audio frames containing the synthesized speech data.
         """
-        logger.debug(f"{self}: Generating TTS [{text}]")
         voice = assert_given(self._settings.voice)
         if voice is None:
             yield ErrorFrame(error="OpenAI TTS voice must be specified")

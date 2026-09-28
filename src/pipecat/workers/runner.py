@@ -63,7 +63,10 @@ from pipecat.bus.subscriber import BusSubscriber
 from pipecat.pipeline.worker import PipelineWorker
 from pipecat.registry import WorkerRegistry
 from pipecat.registry.types import WorkerReadyData, WorkerRegistryEntry
-from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
+from pipecat.utils.asyncio.task_manager import (
+    BaseTaskManager,
+    TaskManager,
+)
 from pipecat.utils.base_object import BaseObject
 from pipecat.utils.startup import run_setup_hook
 from pipecat.workers.base_worker import BaseWorker, WorkerParams
@@ -111,7 +114,9 @@ class WorkerRunner(BaseObject, BusSubscriber):
         handle_sigint: bool = True,
         handle_sigterm: bool = False,
         force_gc: bool = False,
+        check_dangling_tasks: bool = True,
         loop: asyncio.AbstractEventLoop | None = None,
+        task_manager: BaseTaskManager | None = None,
     ):
         """Initialize the worker runner.
 
@@ -123,26 +128,45 @@ class WorkerRunner(BaseObject, BusSubscriber):
                 in-process :class:`AsyncQueueBus`.
             handle_sigint: Whether to automatically handle SIGINT signals.
             handle_sigterm: Whether to automatically handle SIGTERM signals.
-            force_gc: Whether to force garbage collection after the main
-                worker completes.
+            force_gc: Whether to force garbage collection once every worker
+                has been torn down.
+            check_dangling_tasks: Whether to warn about tasks left running on
+                the shared task manager once every worker has finished.
+            task_manager: Optional task manager for handling asyncio tasks.
             loop: Event loop to use. If None, uses the current running loop.
+
+                .. deprecated:: 1.5.0
+                    Use ``task_manager`` (which owns its own loop) instead.
+                    ``loop`` will be removed in 2.0.0.
         """
-        super().__init__(name=name or f"runner-{uuid.uuid4().hex[:8]}")
+        task_manager = task_manager or TaskManager(loop=loop or asyncio.get_running_loop())
+        super().__init__(name=name or f"runner-{uuid.uuid4().hex[:8]}", task_manager=task_manager)
 
         self._bus: WorkerBus = bus or AsyncQueueBus()
         self._registry = WorkerRegistry(runner_name=self.name)
+        self._check_dangling_tasks = check_dangling_tasks
+
+        if loop is not None:
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn(
+                    "`loop` is deprecated since 1.5.0 and will be removed in 2.0.0. "
+                    "Use `task_manager` instead.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
 
         self._entries: dict[str, _WorkerEntry] = {}
         self._known_runners: set[str] = set()
         self._running: bool = False
         self._auto_end: bool = True
+        self._cancel_reason: str | None = None
         self._shutdown_event = asyncio.Event()
         self._sig_task: asyncio.Task | None = None
 
         self._handle_sigint = handle_sigint
         self._handle_sigterm = handle_sigterm
         self._force_gc = force_gc
-        self._loop = loop or asyncio.get_running_loop()
 
         self._register_event_handler("on_ready")
         self._register_event_handler("on_error")
@@ -157,6 +181,22 @@ class WorkerRunner(BaseObject, BusSubscriber):
         """The worker registry this runner owns."""
         return self._registry
 
+    def get_worker(self, name: str) -> BaseWorker | None:
+        """Look up a worker running on this runner by name.
+
+        Only workers added to this runner have a local instance to return.
+        A worker on another runner is addressable over the bus by name but
+        has no object here, so it looks the same as an unknown name.
+
+        Args:
+            name: The name the worker was created with.
+
+        Returns:
+            The worker, or None if this runner has no worker by that name.
+        """
+        entry = self._entries.get(name)
+        return entry.worker if entry else None
+
     async def add_workers(self, *workers: BaseWorker) -> None:
         """Add one or more workers to the runner.
 
@@ -166,9 +206,12 @@ class WorkerRunner(BaseObject, BusSubscriber):
         queued and started during run setup; if the runner is already
         running, each worker starts immediately.
 
-        Added workers run alongside the main worker and are cancelled
-        when the main worker finishes (or when :meth:`end` /
-        :meth:`cancel` is called).
+        Every added worker is a peer: the runner privileges none of them.
+        They run concurrently, and whichever are still running when the
+        runner ends are cancelled. With ``auto_end=True`` the runner ends
+        once every root worker has finished, so a worker that never
+        finishes on its own, such as a bus-only one waiting for messages,
+        keeps it up until :meth:`end` or :meth:`cancel` is called.
 
         Args:
             *workers: One or more workers to add.
@@ -183,7 +226,7 @@ class WorkerRunner(BaseObject, BusSubscriber):
             # to the bus — eager subscription is required so workers
             # added later are listening before earlier workers emit
             # their first messages.
-            await worker.attach(registry=self._registry, bus=self._bus)
+            await worker.attach(registry=self._registry, bus=self._bus, worker_runner=self)
             await self._registry.watch(worker.name, self._on_local_worker_ready)
             entry = _WorkerEntry(worker=worker)
             self._entries[worker.name] = entry
@@ -235,9 +278,9 @@ class WorkerRunner(BaseObject, BusSubscriber):
         self._auto_end = auto_end
         self._shutdown_event.clear()
 
-        # Treat the main worker as any other added worker: ``add_workers`` attaches
-        # it to the bus and registry, and ``_setup_session`` then starts every
-        # entry (main and pre-added) through the same code path.
+        # A worker passed here is added like any other: ``add_workers``
+        # attaches it to the bus and registry, and ``_setup_session`` then
+        # starts every entry through the same code path.
         if worker is not None:
             await self.add_workers(worker)
 
@@ -245,15 +288,15 @@ class WorkerRunner(BaseObject, BusSubscriber):
         await self._call_event_handler("on_ready")
 
         # Wait for shutdown. With ``auto_end=True``, ``_run_worker`` sets
-        # ``_shutdown_event`` as soon as any root worker finishes.
+        # ``_shutdown_event`` once the last root worker finishes.
         try:
             await self._shutdown_event.wait()
         except asyncio.CancelledError:
             pass
 
         try:
-            # Cancel any remaining launched workers and wait for them to finish.
-            await self._cancel_spawned_tasks()
+            # Cancel any worker still going and wait for it to finish.
+            await self._cancel_spawned_workers()
 
             # Cleanup base object.
             await self.cleanup()
@@ -268,6 +311,11 @@ class WorkerRunner(BaseObject, BusSubscriber):
 
         if self._force_gc:
             await self._gc_collect()
+
+        # Report dangling tasks on the shared task manager after everything has
+        # been torn down. Workers sharing this task manager leave the report to
+        # us; only workers with their own task manager report themselves.
+        self._print_dangling_tasks()
 
         logger.debug(f"WorkerRunner '{self}': finished running")
 
@@ -294,29 +342,24 @@ class WorkerRunner(BaseObject, BusSubscriber):
             return
         logger.debug(f"WorkerRunner '{self}': ending gracefully (reason={reason})")
         self._shutdown_event.set()
-        for name, entry in self._entries.items():
-            if entry.worker.parent is None:
-                await self._bus.send(
-                    BusEndWorkerMessage(source=self.name, target=name, reason=reason)
-                )
+        await self._finish_running_workers(BusEndWorkerMessage, reason)
 
     async def cancel(self, reason: str | None = None) -> None:
         """Immediately cancel all running workers.
 
-        Idempotent; subsequent calls are ignored.
+        Signals shutdown, which :meth:`run` answers by cancelling every
+        worker still going and waiting for it. Idempotent; subsequent
+        calls are ignored.
 
         Args:
-            reason: Optional human-readable reason for cancelling.
+            reason: Optional human-readable reason for cancelling. Reaches
+                each worker on the cancel message sent as the runner exits.
         """
         if self._shutdown_event.is_set():
             return
         logger.debug(f"WorkerRunner '{self}': cancelling (reason={reason})")
+        self._cancel_reason = reason
         self._shutdown_event.set()
-        for name, entry in self._entries.items():
-            if entry.worker.parent is None:
-                await self._bus.send(
-                    BusCancelWorkerMessage(source=self.name, target=name, reason=reason)
-                )
 
     async def on_bus_message(self, message: BusMessage) -> None:
         """Process incoming bus messages for runner-level concerns."""
@@ -335,10 +378,7 @@ class WorkerRunner(BaseObject, BusSubscriber):
         """One-time per-run setup: worker manager, bus, signal handlers, launched workers."""
         if self._running:
             return
-        task_manager = TaskManager()
-        task_manager.setup(TaskManagerParams(loop=self._loop))
-        await super().setup(task_manager)
-        await self._bus.setup(task_manager)
+        await self._bus.setup(self.task_manager)
 
         if self._handle_sigint:
             self._setup_sigint()
@@ -350,28 +390,63 @@ class WorkerRunner(BaseObject, BusSubscriber):
 
         await self._load_setup_files()
 
-        for entry in self._entries.values():
-            await self._start_worker(entry)
-
+        # Running from here on, so a worker that adds another one while it
+        # starts gets it started right away through add_workers().
         self._running = True
 
-    async def _cancel_spawned_tasks(self) -> None:
-        """Wait for added workers' runner tasks to finish (or cancel them)."""
-        remaining = [
-            e.runner_task
-            for e in self._entries.values()
-            if e.runner_task and not e.runner_task.done()
+        for entry in list(self._entries.values()):
+            await self._start_worker(entry)
+
+    async def _cancel_spawned_workers(self) -> None:
+        """Cancel every worker still going and wait for it to finish.
+
+        The one place the runner cancels its workers, reached on every
+        way out: an ended session, a cancelled one, or the last root
+        worker finishing. A worker whose task has already finished is
+        left alone.
+        """
+        running = await self._finish_running_workers(
+            BusCancelWorkerMessage, self._cancel_reason or "runner exiting"
+        )
+        await asyncio.gather(
+            *(entry.runner_task for entry in running if entry.runner_task),
+            return_exceptions=True,
+        )
+
+    async def _finish_running_workers(
+        self,
+        message_class: type[BusEndWorkerMessage] | type[BusCancelWorkerMessage],
+        reason: str | None,
+    ) -> list[_WorkerEntry]:
+        """Ask each root worker that has not finished to wind down.
+
+        Both messages this takes end a worker, gracefully or not. A worker
+        whose task has already finished is skipped; one that has not
+        started yet has not finished either, so it is still told.
+
+        Sending is all this does. The worker finishes in its own time, which
+        is what the returned entries are for.
+
+        Args:
+            message_class: The per-worker message to send.
+            reason: Optional human-readable reason, carried on each message.
+
+        Returns:
+            The entries that were messaged, root or otherwise.
+        """
+        # A worker with no task has not started rather than finished, so it
+        # is still owed the message.
+        running = [
+            entry
+            for entry in self._entries.values()
+            if not (entry.runner_task and entry.runner_task.done())
         ]
-        if not remaining:
-            return
-        for entry in self._entries.values():
+        for entry in running:
             if entry.worker.parent is None:
                 await self._bus.send(
-                    BusCancelWorkerMessage(
-                        source=self.name, target=entry.worker.name, reason="runner exiting"
-                    )
+                    message_class(source=self.name, target=entry.worker.name, reason=reason)
                 )
-        await asyncio.gather(*remaining, return_exceptions=True)
+        return running
 
     async def _load_setup_files(self) -> None:
         """Run ``setup_worker_runner`` from each file in ``PIPECAT_SETUP_FILES``.
@@ -397,7 +472,7 @@ class WorkerRunner(BaseObject, BusSubscriber):
     async def _run_worker(self, worker: BaseWorker) -> None:
         """Drive a registered worker to completion."""
         try:
-            params = WorkerParams(loop=self._loop)
+            params = WorkerParams(task_manager=self.task_manager)
             await worker.run(params)
         except asyncio.CancelledError:
             pass
@@ -497,3 +572,10 @@ class WorkerRunner(BaseObject, BusSubscriber):
         collected = await asyncio.to_thread(gc.collect)
         logger.debug(f"Garbage collector: collected {collected} objects.")
         logger.debug(f"Garbage collector: uncollectable objects {gc.garbage}")
+
+    def _print_dangling_tasks(self) -> None:
+        """Warn about tasks left running on the task manager this runner owns."""
+        if self._check_dangling_tasks:
+            tasks = [t.get_name() for t in self.task_manager.current_tasks()]
+            if tasks:
+                logger.warning(f"{self} dangling tasks detected: {tasks}")

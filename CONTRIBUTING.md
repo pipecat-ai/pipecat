@@ -36,9 +36,40 @@ git push origin your-branch-name
 
 Our maintainers will review your PR, and once everything is good, your contributions will be merged!
 
+## Filing Bug Reports
+
+A good bug report is one a maintainer can act on. The single most useful thing you can include is a **minimal runnable reproduction**: a small single-file bot, or a test using `run_test()` from `pipecat.tests.utils`, that shows the bug.
+
+### What we require
+
+- A minimal reproducible example (runnable code, not just prose). If the bug truly can't be captured in code (for example, it only shows up on rare live calls), say so and include everything you have: logs, timestamps, session IDs, and your pipeline setup.
+- Confirmation that you reproduced the issue yourself on the latest Pipecat release (or `main`).
+
+### What gets your report looked at faster
+
+- A failing [behavioral eval](src/pipecat/evals/) scenario that demonstrates the bug.
+- An audio recording, when the bug is audible (interruptions, latency, garbled audio, wrong turn-taking).
+
+### AI-assisted reports
+
+Using AI tools to help write a report is fine. Submitting AI output you haven't verified is not. If you file a report:
+
+- You must have observed the behavior yourself.
+- You must be able to personally answer follow-up questions about it.
+
+Reports that appear machine-generated and unverified may be closed with a single request for justification. Repeat submissions of unverified reports may lead to being blocked from the repository.
+
+### Triage of incomplete reports
+
+Reports without a runnable reproduction get the `needs-repro` label and one comment asking for it. If no reproduction (or a clear explanation of why one isn't possible) is added within 30 days, the issue is closed automatically. Closed issues can always be reopened once a reproduction is available.
+
+If you respond on a `needs-repro` issue, any comment resets the 30-day clock. When a maintainer reviews your response and confirms it includes a runnable reproduction, they relabel the issue `repro-provided`, which takes it out of the auto-close pool and into the review queue. If what you added still isn't a runnable reproduction, the `needs-repro` label stays and the clock keeps running.
+
 ## Changelog Entries
 
 Every pull request that makes a user-facing change should include a changelog entry. We use a changelog fragment system to avoid merge conflicts.
+
+A fix or follow-up to a change that has not shipped yet needs no entry of its own: the unreleased change's entry covers it — update that entry instead if the follow-up alters what it should say.
 
 ### Creating a Changelog Fragment
 
@@ -250,14 +281,18 @@ For the *runtime* warning, the mechanism depends on what is being deprecated:
 - **Parameters, module moves, behavior/value changes** → the decorator can't
   mark these, so call `warnings.warn(..., DeprecationWarning)` by hand. These
   don't get static-checker detection; the directive documents them.
+- **Fields whose reads are intercepted by `__getattribute__`** → call
+  `warn_deprecated_read()` (`from pipecat.utils.deprecation import
+  warn_deprecated_read`). Such a field is read wherever its object travels, so a
+  hand-rolled `warnings.warn` repeats itself on every read; the helper warns once
+  per call site, and reports the line that performed the read.
 
 ```python
 from pipecat.utils.deprecation import deprecated
 
 
 @deprecated(
-    "`OldService` is deprecated since 1.3.0 and will be removed in 2.0.0. "
-    "Use `NewService` instead."
+    "`OldService` is deprecated since 1.3.0 and will be removed in 2.0.0. Use `NewService` instead."
 )
 class OldService(NewService):
     """Deprecated alias for :class:`NewService`.
@@ -299,6 +334,7 @@ class MyService(BaseService):
         """
         if old_param is not None:
             import warnings
+
             warnings.warn(
                 "`old_param` is deprecated since 1.2.0 and will be removed in 2.0.0. "
                 "No replacement.",
@@ -326,6 +362,7 @@ class MyService(BaseService):
         """
         pass
 
+
 # Dataclass with code examples
 @dataclass
 class MessageFrame:
@@ -345,6 +382,7 @@ class MessageFrame:
     """
 
     messages: List[dict]
+
 
 # Enum class
 class Status(Enum):

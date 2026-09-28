@@ -260,7 +260,7 @@ class TestKrispVivaIPUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         finally:
             await strategy.cleanup()
 
-    async def test_reset_method_clears_state(self):
+    async def test_handle_user_turn_started_clears_state(self):
         self.mock_ip_session.process = MagicMock(return_value=0.1)
 
         strategy = self._make_strategy(threshold=0.5)
@@ -270,7 +270,7 @@ class TestKrispVivaIPUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(strategy._speech_active)
             self.assertGreater(len(strategy._audio_buffer), 0)
 
-            await strategy.reset()
+            await strategy.handle_user_turn_started()
 
             self.assertFalse(strategy._speech_active)
             self.assertEqual(len(strategy._audio_buffer), 0)
@@ -288,8 +288,11 @@ class TestKrispVivaIPUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(strategy._sdk_acquired)
 
     def test_init_raises_if_no_model_path(self):
-        with self.assertRaises(ValueError):
-            KrispVivaIPUserTurnStartStrategy(api_key="test-key")
+        # Cleared, since the constructor falls back to KRISP_VIVA_IP_MODEL_PATH
+        # and an ambient value would satisfy it.
+        with patch.dict(os.environ, {}, clear=True):
+            with self.assertRaises(ValueError):
+                KrispVivaIPUserTurnStartStrategy(api_key="test-key")
 
     def test_init_raises_if_wrong_extension(self):
         with self.assertRaises(ValueError):

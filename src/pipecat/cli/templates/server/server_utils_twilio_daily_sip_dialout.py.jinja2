@@ -24,7 +24,7 @@ from pydantic import BaseModel
 class DialoutSettings(BaseModel):
     """Settings for outbound call.
 
-    Attributes:
+    Parameters:
         sip_uri: The SIP URI to dial
     """
 
@@ -38,7 +38,7 @@ class DialoutRequest(BaseModel):
     Add any custom data here needed for the call. For example,
     you may add customer information, campaign data, or call context.
 
-    Attributes:
+    Parameters:
         dialout_settings: Settings for the outbound call
     """
 
@@ -48,7 +48,7 @@ class DialoutRequest(BaseModel):
 class AgentRequest(BaseModel):
     """Request data sent to bot start endpoint.
 
-    Attributes:
+    Parameters:
         room_url: Daily room URL for the bot to join
         token: Authentication token for the Daily room
         dialout_settings: Settings for the outbound call

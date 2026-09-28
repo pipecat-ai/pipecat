@@ -39,107 +39,22 @@ from __future__ import annotations
 import copy
 from collections.abc import Mapping
 from dataclasses import dataclass, field, fields
-from typing import TYPE_CHECKING, Any, ClassVar, TypeGuard, TypeVar
+from typing import TYPE_CHECKING, Any, ClassVar, TypeVar
 
 from loguru import logger
 
 from pipecat.transcriptions.language import Language
+from pipecat.utils.types import NOT_GIVEN, NotGiven, is_given
 
 if TYPE_CHECKING:
     from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionConfig
 
 
-# ---------------------------------------------------------------------------
-# NOT_GIVEN sentinel
-# ---------------------------------------------------------------------------
-
-
-class _NotGiven:
-    """Sentinel meaning "this field was not included in the delta".
-
-    ``NOT_GIVEN`` is distinct from ``None`` (which is a valid stored value,
-    typically meaning "this service doesn't support this field").  Every
-    settings field defaults to ``NOT_GIVEN`` so that delta-mode objects are
-    sparse by default and ``apply_update`` can skip untouched fields.
-
-    ``NOT_GIVEN`` must never appear in a store-mode object — see
-    ``validate_complete()``.
-    """
-
-    _instance: _NotGiven | None = None
-
-    def __new__(cls) -> _NotGiven:
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-        return cls._instance
-
-    def __repr__(self) -> str:
-        return "NOT_GIVEN"
-
-    def __bool__(self) -> bool:
-        return False
-
-
-NOT_GIVEN: _NotGiven = _NotGiven()
-"""Singleton sentinel meaning "this field was not included in the delta".
-
-Valid only in delta-mode settings objects.  Must never appear in a service's
-``self._settings`` (store mode) — use ``None`` instead for unsupported fields.
-"""
-
-
-_T = TypeVar("_T")
-
-
-def is_given(value: _T | _NotGiven) -> TypeGuard[_T]:
-    """Check whether a delta field was explicitly provided.
-
-    Typically used when processing a delta to decide whether a field
-    should be applied::
-
-        if is_given(delta.voice):
-            # caller wants to change the voice
-            ...
-
-    Also acts as a type guard: inside a true branch, the value is narrowed
-    to exclude ``_NotGiven`` (e.g. ``str | None | _NotGiven`` becomes
-    ``str | None``).
-
-    For store-mode objects this always returns ``True`` (since
-    ``validate_complete`` ensures no ``NOT_GIVEN`` fields remain).
-
-    Args:
-        value: The value to check.
-
-    Returns:
-        ``True`` if *value* is anything other than ``NOT_GIVEN``.
-    """
-    return not isinstance(value, _NotGiven)
-
-
-def assert_given(value: _T | _NotGiven) -> _T:
-    """Extract a store-mode settings field, asserting it isn't ``NOT_GIVEN``.
-
-    Intended for reads from a store-mode settings object, where
-    ``_NotGiven`` should never appear (see ``validate_complete``).  Narrows
-    away ``_NotGiven`` at the type level and raises at runtime if the
-    invariant is violated::
-
-        resolved_model = assert_given(self._settings.model)  # narrowed str | None
-
-    Args:
-        value: The store-mode field value to extract.
-
-    Returns:
-        The value, narrowed to exclude ``_NotGiven``.
-
-    Raises:
-        RuntimeError: If *value* is ``NOT_GIVEN`` (a store-mode invariant
-            violation).
-    """
-    if not is_given(value):
-        raise RuntimeError("Store-mode settings field is NOT_GIVEN (invariant violated)")
-    return value
+# In a settings object ``NOT_GIVEN`` means "this field was not included in the
+# delta": distinct from ``None``, which is a valid stored value typically meaning
+# "this service doesn't support this field". Every delta field defaults to it so
+# deltas stay sparse and ``apply_update`` can skip untouched fields. It must
+# never appear in a store-mode object — see ``validate_complete()``.
 
 
 # ---------------------------------------------------------------------------
@@ -179,8 +94,8 @@ class ServiceSettings:
 
     # -- common fields -------------------------------------------------------
 
-    model: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    """AI model identifier (e.g. ``"gpt-4o"``, ``"eleven_turbo_v2_5"``).
+    model: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    """AI model identifier (e.g. ``"gpt-4o"``, ``"eleven_flash_v2_5"``).
 
     Defaults to ``NOT_GIVEN`` for delta mode.  In store mode, set to a
     model string or ``None`` if the service has no model concept.
@@ -329,7 +244,7 @@ class ServiceSettings:
         missing = [
             f.name
             for f in fields(self)
-            if f.name != "extra" and isinstance(getattr(self, f.name), _NotGiven)
+            if f.name != "extra" and not is_given(getattr(self, f.name))
         ]
         if missing:
             names = ", ".join(missing)
@@ -398,23 +313,36 @@ class LLMSettings(ServiceSettings):
         seed: Random seed for reproducibility.
         filter_incomplete_user_turns: Enable LLM-based turn completion detection
             to suppress bot responses when the user was cut off mid-thought.
-            See ``examples/22-filter-incomplete-turns.py`` and
-            ``UserTurnCompletionLLMServiceMixin``.
+            Set by
+            :class:`~pipecat.turns.user_stop.LLMTurnCompletionUserTurnStopStrategy`,
+            which is also what waits on the resulting verdict.
+
+            .. deprecated:: 1.7.0
+                Use
+                ``user_turn_strategies=FilterIncompleteUserTurnStrategies()`` on
+                :class:`~pipecat.processors.aggregators.llm_response_universal.LLMUserAggregatorParams`
+                instead. Will be removed in 2.0.0.
+
         user_turn_completion_config: Configuration for turn completion behavior
             when ``filter_incomplete_user_turns`` is enabled. Controls timeouts
             and prompts for incomplete turns.
+
+            .. deprecated:: 1.7.0
+                Pass the config to
+                ``FilterIncompleteUserTurnStrategies(config=...)`` instead. Will
+                be removed in 2.0.0.
     """
 
-    system_instruction: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    temperature: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    max_tokens: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    top_p: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    top_k: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    frequency_penalty: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    presence_penalty: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    seed: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    filter_incomplete_user_turns: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    user_turn_completion_config: UserTurnCompletionConfig | None | _NotGiven = field(
+    system_instruction: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    temperature: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    max_tokens: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    top_p: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    top_k: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    frequency_penalty: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    presence_penalty: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    seed: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    filter_incomplete_user_turns: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    user_turn_completion_config: UserTurnCompletionConfig | None | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
 
@@ -440,8 +368,8 @@ class TTSSettings(ServiceSettings):
             ``__init__`` methods do the same at construction time.
     """
 
-    voice: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    language: Language | str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    voice: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    language: Language | str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
     _aliases: ClassVar[dict[str, str]] = {"voice_id": "voice"}
 
@@ -466,4 +394,4 @@ class STTSettings(ServiceSettings):
             ``__init__`` methods do the same at construction time.
     """
 
-    language: Language | str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    language: Language | str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)

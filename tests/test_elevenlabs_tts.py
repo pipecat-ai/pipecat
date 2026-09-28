@@ -11,14 +11,24 @@ import unittest
 from typing import Any
 
 import pytest
+from websockets.exceptions import ConnectionClosedOK
+from websockets.frames import Close
 from websockets.protocol import State
 
 from pipecat.services.elevenlabs.tts import (
+    ElevenLabsHttpTTSService,
     ElevenLabsTTSService,
     _select_alignment,
     _strip_utterance_leading_spaces,
     _word_timestamps_include_inter_frame_spaces,
     calculate_word_times,
+)
+from pipecat.services.elevenlabs.tts_base import (
+    ELEVENLABS_MODEL_LANGUAGES,
+    ELEVENLABS_V2_5_LANGUAGES,
+    ELEVENLABS_V3_LANGUAGES,
+    elevenlabs_language_code,
+    language_to_elevenlabs_language,
 )
 from pipecat.utils.string import TextPartForConcatenation, concatenate_aggregated_text
 
@@ -346,5 +356,138 @@ async def test_keepalive_without_active_context_sends_empty():
     assert ws.sent == [{"text": ""}]
 
 
+class _FakeHttpResponse:
+    """Minimal aiohttp response stand-in; the 400 makes run_tts bail after posting."""
+
+    status = 400
+
+    async def text(self):
+        return "rejected"
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+
+class _FakeHttpSession:
+    """Records the JSON payload of each POST."""
+
+    def __init__(self):
+        self.payloads: list[dict] = []
+
+    def post(self, url, json=None, headers=None, params=None):
+        self.payloads.append(json)
+        return _FakeHttpResponse()
+
+
+async def _http_payload_for_model(model: str) -> dict:
+    session = _FakeHttpSession()
+    service = ElevenLabsHttpTTSService(
+        api_key="test-key",
+        aiohttp_session=session,
+        settings=ElevenLabsHttpTTSService.Settings(voice="test-voice", model=model),
+    )
+    service._previous_text = "Hello!"
+    async for _ in service.run_tts("How can I assist you today?", "ctx-1"):
+        pass
+    return session.payloads[0]
+
+
+@pytest.mark.asyncio
+async def test_http_payload_includes_previous_text_when_supported():
+    payload = await _http_payload_for_model("eleven_flash_v2_5")
+    assert payload["previous_text"] == "Hello!"
+
+
+@pytest.mark.parametrize("model", ["eleven_v3", "eleven_v3_conversational"])
+@pytest.mark.asyncio
+async def test_http_payload_omits_previous_text_for_eleven_v3_models(model: str):
+    payload = await _http_payload_for_model(model)
+    assert "previous_text" not in payload
+
+
+# ---------------------------------------------------------------------------
+# Disconnect vs server-initiated close race
+#
+# When the server closes the websocket first (normal during teardown), the
+# close-handshake send in _disconnect_websocket raises ConnectionClosed. That
+# must not be reported as a pipeline error: a non-fatal ErrorFrame here can
+# e.g. trigger a spurious ServiceSwitcherStrategyFailover switch on shutdown.
+# ---------------------------------------------------------------------------
+
+
+class _ClosedWebSocket:
+    """Websocket stand-in whose sends fail with a normal close."""
+
+    state = State.OPEN
+
+    async def send(self, data: str):
+        raise ConnectionClosedOK(Close(1001, "going away"), Close(1001, "going away"), True)
+
+    async def close(self):
+        pass
+
+
+@pytest.mark.asyncio
+async def test_disconnect_does_not_push_error_when_server_closed_first():
+    """A ConnectionClosed during the disconnect handshake is not a pipeline error."""
+    service = _make_service()
+    service._websocket = _ClosedWebSocket()
+
+    errors = []
+
+    async def push_error(error_msg=None, exception=None):
+        errors.append(error_msg)
+
+    service.push_error = push_error
+
+    await service._disconnect_websocket()
+
+    assert errors == []
+    assert service._websocket is None
+
+
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_v3_language_set_extends_the_v2_5_set():
+    """Eleven v3 adds languages; it never drops one Flash and Turbo support."""
+    assert ELEVENLABS_V2_5_LANGUAGES < ELEVENLABS_V3_LANGUAGES
+    assert len(ELEVENLABS_V2_5_LANGUAGES) == 32
+    assert len(ELEVENLABS_V3_LANGUAGES) == 74
+
+
+def test_language_code_is_gated_by_model():
+    """A language the model doesn't cover is dropped rather than sent."""
+    # Welsh is v3-only.
+    assert elevenlabs_language_code("eleven_v3_conversational", "cy") == "cy"
+    assert elevenlabs_language_code("eleven_flash_v2_5", "cy") is None
+    # German is common to both.
+    assert elevenlabs_language_code("eleven_flash_v2_5", "de") == "de"
+    assert elevenlabs_language_code("eleven_v3", "de") == "de"
+
+
+def test_models_without_language_support_send_no_code():
+    """Models absent from the mapping take no language code at all."""
+    assert "eleven_multilingual_v2" not in ELEVENLABS_MODEL_LANGUAGES
+    assert elevenlabs_language_code("eleven_multilingual_v2", "de") is None
+    assert elevenlabs_language_code(None, "de") is None
+
+
+def test_no_language_requested_is_not_a_warning_case():
+    """Omitting a language is normal, not a mismatch."""
+    assert elevenlabs_language_code("eleven_v3", None) is None
+    assert elevenlabs_language_code("eleven_v3", "") is None
+
+
+def test_every_mapped_language_is_accepted_by_some_model():
+    """The enum map and the per-model sets can't drift apart."""
+    from pipecat.transcriptions.language import Language
+
+    for language in Language:
+        code = language_to_elevenlabs_language(language)
+        if code in ELEVENLABS_V3_LANGUAGES:
+            assert elevenlabs_language_code("eleven_v3", code) == code

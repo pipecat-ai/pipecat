@@ -3,6 +3,7 @@
 import ast
 import shutil
 import subprocess
+import tomllib
 
 import pytest
 
@@ -39,8 +40,6 @@ def validate_python_syntax(file_path):
 
 def validate_pyproject_toml(file_path):
     """Validate that pyproject.toml is valid TOML and has required fields."""
-    import tomllib
-
     with open(file_path, "rb") as f:
         data = tomllib.load(f)
 
@@ -554,20 +553,31 @@ def test_project_generation(config_data, temp_output_dir):
 
     # Verify video service dependencies and imports
     if config.video_service:
+        with open(pyproject_file, "rb") as f:
+            dependencies = tomllib.load(f)["project"]["dependencies"]
+        pipecat_dependency = next(
+            dependency for dependency in dependencies if dependency.startswith("pipecat-ai[")
+        )
+        pipecat_extras = set(pipecat_dependency.split("[", 1)[1].split("]", 1)[0].split(","))
+        video_extras = {
+            "tavus_video": "tavus",
+            "heygen_video": "heygen",
+            "simli_video": "simli",
+        }
+
         # Video services should be in bot.py
         if config.video_service == "tavus_video":
             assert "TavusVideoService" in bot_content, "TavusVideoService should be imported"
-            assert "tavus" in pyproject_content, "tavus extra should be in dependencies"
         elif config.video_service == "heygen_video":
             assert "HeyGenVideoService" in bot_content, "HeyGenVideoService should be imported"
-            assert "heygen" in pyproject_content, "heygen extra should be in dependencies"
             assert "LiveAvatarNewSessionRequest" in bot_content, (
                 "LiveAvatarNewSessionRequest should be imported for HeyGen"
             )
             assert "ServiceType" in bot_content, "ServiceType should be imported for HeyGen"
         elif config.video_service == "simli_video":
             assert "SimliVideoService" in bot_content, "SimliVideoService should be imported"
-            assert "simli" in pyproject_content, "simli extra should be in dependencies"
+
+        assert video_extras[config.video_service] in pipecat_extras
 
         # Video service should be initialized in bot.py
         assert "video" in bot_content.lower(), "video service variable should be present"
@@ -671,7 +681,7 @@ def test_generation_uses_utf8_on_windows_locale(monkeypatch, temp_output_dir):
     monkeypatch.setattr(Path, "write_text", patched_write)
     monkeypatch.setattr(Path, "read_text", patched_read)
 
-    # Mirror the quickstart_command config from commands/create.py.
+    # Mirror the scaffold_quickstart config from cli/scaffold.py.
     config = ProjectConfig(
         project_name="pipecat-quickstart",
         bot_type="web",
@@ -821,7 +831,7 @@ def test_eval_transport_opt_in(temp_output_dir):
 
 def test_eval_starter_scenarios(temp_output_dir):
     """``enable_eval`` scaffolds runnable starter scenarios plus the deps to run them."""
-    from pipecat.evals.scenario import EvalScenario
+    from pipecat.evals.scenario import EvalScenarioFile
 
     def gen(name, *, enable_eval, mode="cascade", **kwargs):
         path = temp_output_dir / name
@@ -852,13 +862,14 @@ def test_eval_starter_scenarios(temp_output_dir):
     assert "kokoro" not in pyproject and "moonshine" not in pyproject
 
     # Cascade: both starters are generated and parse against the real scenario
-    # schema (EvalScenario.load is the validator the harness itself uses).
+    # schema (EvalScenarioFile.load is the loader the harness itself uses).
     server = gen("starters-cascade", enable_eval=True, **cascade_services)
     text_path = server / "evals" / "starter_text.yaml"
     audio_path = server / "evals" / "starter_audio.yaml"
-    assert EvalScenario.load(text_path).name == "starter_text"
-    audio = EvalScenario.load(audio_path)
-    assert audio.name == "starter_audio"
+    (text,) = EvalScenarioFile.load(text_path)
+    assert text.name == "starter_text/starter_text"
+    (audio,) = EvalScenarioFile.load(audio_path)
+    assert audio.name == "starter_audio/starter_audio"
     assert audio.user_audio is not None  # audio starter drives real speech in
 
     # The project env carries what the harness needs via the `evals` extra: the
@@ -878,7 +889,8 @@ def test_eval_starter_scenarios(temp_output_dir):
         realtime_service="openai_realtime",
     )
     assert not (server / "evals" / "starter_text.yaml").exists()
-    assert EvalScenario.load(server / "evals" / "starter_audio.yaml").name == "starter_audio"
+    (audio,) = EvalScenarioFile.load(server / "evals" / "starter_audio.yaml")
+    assert audio.name == "starter_audio/starter_audio"
 
 
 def _gen_bot(temp_output_dir, name, *, mode="cascade", **kwargs):

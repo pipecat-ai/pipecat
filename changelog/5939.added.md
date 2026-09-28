@@ -1,0 +1,1 @@
+- Added `reasoning` to `TogetherLLMService.Settings`, which passes Together's reasoning toggle through to the request for the models that support one: `reasoning={"enabled": False}` stops a reasoning model such as GLM from running a reasoning pass before every answer, which shortens the wait for the first spoken token.

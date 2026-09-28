@@ -35,7 +35,7 @@
 {{ ("video = " ~ service_configs[video_service]) | indent(indent_level, first=True) }}
 {% endif %}
 
-{{ helpers.setup_context(external_turn_detection) | indent(indent_level, first=True) }}
+{{ helpers.setup_context() | indent(indent_level, first=True) }}
 
 {{ helpers.setup_feature_processors(recording, transcription, bot_type) | indent(indent_level, first=True) }}
 
@@ -57,6 +57,10 @@
 {% endif %}
 {{ ")" | indent(indent_level, first=True) }}
 
+{{ "runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)" | indent(indent_level, first=True) }}
+
+{{ "await runner.add_workers(worker)" | indent(indent_level, first=True) }}
+
 {% if ('daily_pstn_dialout' in transports or 'twilio_daily_sip_dialout' in transports) and not has_local_transport %}
 {{ "# Initialize dialout manager" | indent(indent_level, first=True) }}
 {{ "dialout_manager = DialoutManager(transport, dialout_settings)" | indent(indent_level, first=True) }}
@@ -66,15 +70,15 @@
    with a local transport (webrtc/eval), guarded=True wraps the call-specific
    handlers so a local run skips the telephony machinery. #}
 {% if 'daily_pstn_dialin' in transports %}
-{{ handlers.daily_pstn_dialin_handlers(recording) | indent(indent_level, first=True) }}
+{{ handlers.daily_pstn_dialin_handlers() | indent(indent_level, first=True) }}
 {% elif 'daily_pstn_dialout' in transports %}
-{{ handlers.daily_pstn_dialout_handlers(recording, guarded=has_local_transport) | indent(indent_level, first=True) }}
+{{ handlers.daily_pstn_dialout_handlers(guarded=has_local_transport) | indent(indent_level, first=True) }}
 {% elif 'twilio_daily_sip_dialin' in transports %}
-{{ handlers.twilio_daily_sip_dialin_handlers(recording, guarded=has_local_transport) | indent(indent_level, first=True) }}
+{{ handlers.twilio_daily_sip_dialin_handlers(guarded=has_local_transport) | indent(indent_level, first=True) }}
 {% elif 'twilio_daily_sip_dialout' in transports %}
-{{ handlers.twilio_daily_sip_dialout_handlers(recording, guarded=has_local_transport) | indent(indent_level, first=True) }}
+{{ handlers.twilio_daily_sip_dialout_handlers(guarded=has_local_transport) | indent(indent_level, first=True) }}
 {% else %}
-{{ handlers.standard_handlers(recording, bot_type) | indent(indent_level, first=True) }}
+{{ handlers.standard_handlers(bot_type) | indent(indent_level, first=True) }}
 {% endif %}
 
 {# Feature-specific event handlers #}
@@ -86,7 +90,4 @@
 {{ handlers.recording_handler() | indent(indent_level, first=True) }}
 {% endif %}
 
-{{ "runner = WorkerRunner(handle_sigint=False)" | indent(indent_level, first=True) }}
-
-{{ "await runner.add_workers(worker)" | indent(indent_level, first=True) }}
 {{ "await runner.run()" | indent(indent_level, first=True) }}

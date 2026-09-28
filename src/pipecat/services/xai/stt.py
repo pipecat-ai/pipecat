@@ -18,7 +18,6 @@ from typing import Any
 from urllib.parse import urlencode
 
 from loguru import logger
-from websockets.asyncio.client import connect as websocket_connect
 from websockets.protocol import State
 
 from pipecat import version as pipecat_version
@@ -27,15 +26,16 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     InterimTranscriptionFrame,
-    StartFrame,
     TranscriptionFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
+from pipecat.processors.frame_processor import FrameProcessorSetup
+from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import XAI_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
+from pipecat.utils.types import NOT_GIVEN, NotGiven
 
 
 def language_to_xai_stt_language(language: Language) -> str:
@@ -82,8 +82,10 @@ class XAISTTSettings(STTSettings):
     Parameters:
         interim_results: When True, partial transcripts are emitted
             approximately every 500ms.
-        endpointing: Silence duration in milliseconds that triggers a
-            speech-final event. Range 0-5000. Server default is 10ms.
+        endpointing: Silence duration in milliseconds that triggers the
+            speech-final event carrying the utterance's
+            :class:`~pipecat.frames.frames.TranscriptionFrame`. Range 0-5000.
+            Server default is 400ms.
         multichannel: When True, transcribes each interleaved channel
             independently. Requires ``channels`` >= 2.
         channels: Number of interleaved channels (2-8). Required when
@@ -92,11 +94,11 @@ class XAISTTSettings(STTSettings):
             word identifying the detected speaker.
     """
 
-    interim_results: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    endpointing: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    multichannel: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    channels: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    diarize: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    interim_results: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    endpointing: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    multichannel: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    channels: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    diarize: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class XAISTTService(WebsocketSTTService):
@@ -108,8 +110,13 @@ class XAISTTService(WebsocketSTTService):
 
     The connection is persistent: audio is streamed continuously and the
     server emits ``transcript.partial`` events with ``is_final`` and
-    ``speech_final`` flags to mark utterance boundaries. If the connection
-    drops mid-session, the base class reconnects automatically.
+    ``speech_final`` flags. Interim results (``is_final=false``) and chunk
+    finals (``is_final=true, speech_final=false``) are pushed as
+    :class:`~pipecat.frames.frames.InterimTranscriptionFrame`. Only the
+    utterance final (``speech_final=true``) is pushed as a
+    :class:`~pipecat.frames.frames.TranscriptionFrame`, because it restates
+    the entire utterance, including the text of every earlier chunk final. If
+    the connection drops mid-session, the base class reconnects automatically.
     """
 
     Settings = XAISTTSettings
@@ -120,7 +127,7 @@ class XAISTTService(WebsocketSTTService):
         *,
         api_key: str,
         ws_url: str = "wss://api.x.ai/v1/stt",
-        sample_rate: int = 16000,
+        sample_rate: int | None = None,
         encoding: str = "pcm",
         settings: Settings | None = None,
         ttfs_p99_latency: float | None = XAI_TTFS_P99,
@@ -132,7 +139,8 @@ class XAISTTService(WebsocketSTTService):
             api_key: xAI API key (used as Bearer for the WebSocket handshake).
             ws_url: WebSocket endpoint URL. Defaults to ``wss://api.x.ai/v1/stt``.
             sample_rate: Audio sample rate in Hz. Supported values: 8000,
-                16000, 22050, 24000, 44100, 48000. Defaults to 16000.
+                16000, 22050, 24000, 44100, 48000. If None, uses the input
+                sample rate from the start frame.
             encoding: Audio encoding. One of ``"pcm"`` (signed 16-bit LE),
                 ``"mulaw"``, or ``"alaw"``. Defaults to ``"pcm"``.
             settings: Runtime-updatable settings overriding defaults.
@@ -141,7 +149,7 @@ class XAISTTService(WebsocketSTTService):
             **kwargs: Additional arguments passed to WebsocketSTTService.
         """
         default_settings = self.Settings(
-            model=None,
+            model="grok-voice-transcribe-2.0",
             language=Language.EN,
             interim_results=True,
             endpointing=None,
@@ -191,9 +199,13 @@ class XAISTTService(WebsocketSTTService):
         await self._connect()
         return changed
 
-    async def start(self, frame: StartFrame):
-        """Start the speech-to-text service."""
-        await super().start(frame)
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
+
+        Args:
+            setup: Configuration object containing setup parameters.
+        """
+        await super().setup(setup)
         await self._connect()
 
     async def stop(self, frame: EndFrame):
@@ -231,6 +243,7 @@ class XAISTTService(WebsocketSTTService):
             params["language"] = s.language
 
         optional_fields = {
+            "model": s.model,
             "interim_results": s.interim_results,
             "endpointing": s.endpointing,
             "multichannel": s.multichannel,
@@ -283,7 +296,7 @@ class XAISTTService(WebsocketSTTService):
                 "Authorization": f"Bearer {self._api_key}",
                 "User-Agent": f"xAI/1.0 (integration=Pipecat/{pipecat_version()})",
             }
-            self._websocket = await websocket_connect(ws_url, additional_headers=headers)
+            self._websocket = await self._websocket_connect(ws_url, additional_headers=headers)
             await self._call_event_handler("on_connected")
             logger.debug(f"{self} connected to xAI STT WebSocket")
         except Exception as e:
@@ -327,7 +340,7 @@ class XAISTTService(WebsocketSTTService):
             await self._handle_transcript(message)
         elif msg_type == "transcript.done":
             if message.get("text"):
-                await self._push_final_transcript(message, speech_final=True)
+                await self._push_final_transcript(message)
         elif msg_type == "error":
             await self.push_error(
                 error_msg=f"xAI STT error: {message.get('message', message)}",
@@ -345,10 +358,8 @@ class XAISTTService(WebsocketSTTService):
         speech_final = bool(message.get("speech_final"))
         language = self._language_for_frame()
 
-        if is_final:
-            await self._push_final_transcript(
-                message, speech_final=speech_final, language=language, text=text
-            )
+        if is_final and speech_final:
+            await self._push_final_transcript(message, language=language, text=text)
         else:
             await self.push_frame(
                 InterimTranscriptionFrame(
@@ -364,7 +375,6 @@ class XAISTTService(WebsocketSTTService):
         self,
         message: dict[str, Any],
         *,
-        speech_final: bool,
         language: Language | None = None,
         text: str | None = None,
     ):
@@ -373,6 +383,9 @@ class XAISTTService(WebsocketSTTService):
             return
         language = language if language is not None else self._language_for_frame()
 
+        # Report usage before the transcription frame so tracing can attach
+        # it to the STT span the frame closes.
+        await self.emit_stt_usage_metrics()
         await self.push_frame(
             TranscriptionFrame(
                 text,
@@ -380,12 +393,10 @@ class XAISTTService(WebsocketSTTService):
                 time_now_iso8601(),
                 language,
                 result=message,
-                finalized=speech_final,
+                finalized=True,
             )
         )
         await self._trace_transcription(text, True, language)
-        if speech_final:
-            await self.stop_processing_metrics()
 
     def _language_for_frame(self) -> Language:
         """Return a Language enum suitable for transcription frames.

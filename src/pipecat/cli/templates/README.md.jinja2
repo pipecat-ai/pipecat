@@ -118,7 +118,7 @@ uv run pipecat eval run evals/starter_audio.yaml -v   # full audio round trip (l
 {% endif %}
 ```
 
-`eval:` criteria are scored by a judge LLM — a local Ollama by default (`ollama pull gemma2:9b`). The comments in the scenario files cover the schema and how to use an OpenAI judge instead.
+`eval:` criteria are scored by a judge LLM — a local Ollama by default (`ollama pull gemma4:12b`). The comments in the scenario files cover the schema and how to use an OpenAI judge instead.
 {% endif %}
 {% if generate_client %}
 
@@ -145,7 +145,52 @@ uv run pipecat eval run evals/starter_audio.yaml -v   # full audio round trip (l
 
    {% if client_server == "vite" %}
    > **Note:** Environment variables in Vite are bundled into the client and exposed in the browser. For production applications that require secret protection, consider implementing a backend proxy server to handle API requests and manage sensitive credentials securely.
+
    {% endif %}
+{% if client_framework == "react" %}
+   The client renders the [Pipecat UI](https://ui.pipecat.ai) console: the connect flow, transcript, metrics, device and session info, and a live event stream. Pipecat UI is a shadcn registry, so its components are installed as source under `src/components/pipecat`, `src/hooks` and `src/lib`, and they are yours to edit and style.
+
+   The console is built from those same components. To build your own UI, replace it with a composition of your own; this is the minimal one:
+
+   ```tsx
+   import { PipecatClientProvider } from '@pipecat-ai/client-react';
+
+   import { BotAudioOutput } from '@/components/pipecat/bot-audio';
+   import { ConnectButton } from '@/components/pipecat/connect-button';
+   import { Conversation } from '@/components/pipecat/conversation';
+   import { UserAudioControl } from '@/components/pipecat/user-audio-control';
+   import {
+     DEFAULT_TRANSPORT,
+     TRANSPORT_FACTORIES,
+     TRANSPORT_PROPS,
+   } from '@/config';
+   import { usePipecatApp } from '@/hooks/use-pipecat-app';
+
+   export const VoiceApp = () => {
+     const { client, connect, disconnect } = usePipecatApp({
+       transportType: DEFAULT_TRANSPORT,
+       transportFactory: TRANSPORT_FACTORIES[DEFAULT_TRANSPORT],
+       ...TRANSPORT_PROPS[DEFAULT_TRANSPORT],
+     });
+     if (!client) return null;
+     return (
+       <PipecatClientProvider client={client}>
+         <Conversation />
+         <UserAudioControl />
+         <ConnectButton onConnect={connect} onDisconnect={disconnect} />
+         <BotAudioOutput />
+       </PipecatClientProvider>
+     );
+   };
+   ```
+
+   To add more components or pull in upstream changes, use the shadcn CLI; the `@pipecat` registry is already configured in `components.json`:
+
+   ```bash
+   npx shadcn@latest add @pipecat/audio-visualizer-wave
+   npx shadcn@latest add @pipecat/conversation --diff
+   ```
+{% endif %}
 
 4. **Run development server**:
 
@@ -242,11 +287,23 @@ With Whisker you can:
 
 3. Once your bot is running, press connect
 {% endif %}
+## Building with an AI coding agent
+
+Extending this bot with Claude Code, Codex, or another AI coding assistant? Give it live, accurate Pipecat context instead of stale training data with the **Pipecat Context Hub** — a local index of Pipecat docs, examples, and API source your agent queries over MCP:
+
+```bash
+# The Context Hub ships with the CLI
+uv tool install "pipecat-ai[cli]"
+pipecat context-hub install
+```
+
+`install` registers the MCP server with each coding agent it finds and builds the index — a few minutes and about 900 MB the first time. MCP servers load at session start, so do this before opening your coding session, and note the server won't start against an empty index. See the [Pipecat Context Hub docs](https://docs.pipecat.ai/api-reference/context-hub) for the full setup.
+
 ## Learn More
 
 - [Pipecat Documentation](https://docs.pipecat.ai/)
 {% if generate_client and client_framework == "react" %}
-- [Voice UI Kit Documentation](https://voiceuikit.pipecat.ai/)
+- [Pipecat UI Documentation](https://ui.pipecat.ai)
 {% endif %}
 - [Pipecat GitHub](https://github.com/pipecat-ai/pipecat)
 - [Pipecat Examples](https://github.com/pipecat-ai/pipecat-examples)

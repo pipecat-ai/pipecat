@@ -4,7 +4,6 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import asyncio
 import unittest
 from dataclasses import dataclass, field
 from types import SimpleNamespace
@@ -25,7 +24,8 @@ from pipecat.services.llm_service import (
     LLMService,
 )
 from pipecat.services.settings import LLMSettings
-from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
+from pipecat.utils.asyncio.task_manager import TaskManager
+from tests.frame_processor_helpers import frame_processor_setup
 
 
 @dataclass
@@ -101,12 +101,50 @@ class TestFunctionCallParamsAppResources(unittest.TestCase):
         self.assertIs(value, resources)
 
 
+class TestLLMServiceFunctionCallReadsWorkerRunner(unittest.IsolatedAsyncioTestCase):
+    async def test_function_call_params_receives_worker_runner(self):
+        """A tool handler reaches the runner without the app wiring it through."""
+        service = _MockLLMService()
+        runner = SimpleNamespace(name="stub-runner")
+        service._setup = frame_processor_setup(
+            TaskManager(),
+            pipeline_worker=SimpleNamespace(app_resources=None, worker_runner=runner),
+        )
+
+        captured: dict[str, Any] = {}
+
+        async def handler(params: FunctionCallParams):
+            captured["worker_runner"] = params.worker_runner
+            await params.result_callback({"ok": True})
+
+        service._functions["lookup"] = FunctionCallRegistryItem(
+            function_name="lookup",
+            handler=handler,
+            cancel_on_interruption=True,
+        )
+        service.broadcast_frame = AsyncMock()  # type: ignore[method-assign]
+
+        runner_item = FunctionCallRunnerItem(
+            registry_item=service._functions["lookup"],
+            function_name="lookup",
+            tool_call_id="call-1",
+            arguments={},
+            context=LLMContext(),
+        )
+        await service._run_function_call(runner_item)
+
+        self.assertIs(captured["worker_runner"], runner)
+
+
 class TestLLMServiceFunctionCallReadsAppResources(unittest.IsolatedAsyncioTestCase):
     async def test_function_call_params_receives_app_resources(self):
         service = _MockLLMService()
         resources = _Resources(user_name="John")
         # Stub the pipeline worker with just the bit LLMService reads.
-        service._pipeline_worker = SimpleNamespace(app_resources=resources)  # type: ignore[assignment]
+        service._setup = frame_processor_setup(
+            TaskManager(),
+            pipeline_worker=SimpleNamespace(app_resources=resources, worker_runner=None),
+        )
 
         captured: dict[str, Any] = {}
 
@@ -137,7 +175,10 @@ class TestLLMServiceFunctionCallReadsAppResources(unittest.IsolatedAsyncioTestCa
     async def test_direct_function_params_receives_app_resources(self):
         service = _MockLLMService()
         resources = _Resources(user_name="John")
-        service._pipeline_worker = SimpleNamespace(app_resources=resources)  # type: ignore[assignment]
+        service._setup = frame_processor_setup(
+            TaskManager(),
+            pipeline_worker=SimpleNamespace(app_resources=resources, worker_runner=None),
+        )
         captured: dict[str, Any] = {}
 
         async def lookup(params: FunctionCallParams):
@@ -167,7 +208,6 @@ class TestLLMServiceFunctionCallReadsAppResources(unittest.IsolatedAsyncioTestCa
         # compatibility with custom FrameProcessors whose ``setup()`` overrides
         # still read it. The field is populated, but reading it warns.
         task_manager = TaskManager()
-        task_manager.setup(TaskManagerParams(loop=asyncio.get_running_loop()))
         resources = _Resources(user_name="John")
 
         # Construction itself does not warn — only reads do.
@@ -183,7 +223,7 @@ class TestLLMServiceFunctionCallReadsAppResources(unittest.IsolatedAsyncioTestCa
         self.assertIs(value, resources)
 
 
-class TestPipelineTaskAppResources(unittest.TestCase):
+class TestPipelineWorkerAppResources(unittest.TestCase):
     def test_getter_returns_constructor_value(self):
         resources = _Resources(user_name="John")
         worker = PipelineWorker(Pipeline([]), app_resources=resources)
@@ -258,7 +298,7 @@ class TestFrameProcessorSetupToolResourcesBackwardsCompat(unittest.IsolatedAsync
 
         await worker.queue_frame(EndFrame())
         with self.assertWarns(DeprecationWarning):
-            await worker.run(WorkerParams(loop=asyncio.get_event_loop()))
+            await worker.run(WorkerParams(task_manager=TaskManager()))
 
         self.assertIs(legacy.captured_tool_resources, resources)
 
@@ -276,7 +316,7 @@ class TestFrameProcessorSetupToolResourcesBackwardsCompat(unittest.IsolatedAsync
 
         await worker.queue_frame(EndFrame())
         with self.assertWarns(DeprecationWarning):
-            await worker.run(WorkerParams(loop=asyncio.get_event_loop()))
+            await worker.run(WorkerParams(task_manager=TaskManager()))
 
         self.assertIs(legacy.captured_tool_resources, resources)
 
@@ -289,14 +329,14 @@ class TestFrameProcessorPipelineTaskAccess(unittest.IsolatedAsyncioTestCase):
         worker = PipelineWorker(pipeline, app_resources=resources)
 
         await worker.queue_frame(EndFrame())
-        await worker.run(WorkerParams(loop=asyncio.get_event_loop()))
+        await worker.run(WorkerParams(task_manager=TaskManager()))
 
         self.assertIs(recorder.observed_task, worker)
         self.assertIs(recorder.observed_app_resources, resources)
 
     def test_pipeline_task_raises_when_not_set_up(self):
         recorder = _RecordingProcessor()
-        with self.assertRaises(Exception):
+        with self.assertRaisesRegex(Exception, "is still not set up"):
             _ = recorder.pipeline_worker
 
 

@@ -29,7 +29,7 @@ def _get_provider_name_from_service_name(service_name: str) -> str:
     """Extract the standardized gen_ai.provider.name value from a service class name.
 
     Source:
-    https://opentelemetry.io/docs/specs/semconv/attributes-registry/gen-ai/
+    https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/registry/attributes/gen-ai.md
 
     Uses standard OTel names where possible, with special case mappings for
     service names that don't follow the pattern.
@@ -44,12 +44,13 @@ def _get_provider_name_from_service_name(service_name: str) -> str:
         # AWS
         "AWSBedrockLLMService": "aws.bedrock",
         # Azure
-        "AzureLLMService": "az.ai.openai",
+        "AzureLLMService": "azure.ai.openai",
         # Google
         "GoogleLLMService": "gcp.gemini",
         "GoogleVertexLLMService": "gcp.vertex_ai",
         # Others
-        "GrokLLMService": "xai",
+        "GrokLLMService": "x_ai",
+        "MistralLLMService": "mistral_ai",
     }
 
     if service_name in SPECIAL_CASE_MAPPINGS:
@@ -440,7 +441,7 @@ def add_openai_realtime_span_attributes(
             if isinstance(tool, dict) and "name" in tool:
                 tool_names.append(tool["name"])
             elif hasattr(tool, "name"):
-                tool_names.append(getattr(tool, "name"))
+                tool_names.append(getattr(tool, "name"))  # noqa: B009
             elif isinstance(tool, dict) and "function" in tool and "name" in tool["function"]:
                 tool_names.append(tool["function"]["name"])
 
@@ -455,7 +456,10 @@ def add_openai_realtime_span_attributes(
         if function_calls:
             call = function_calls[0]
             if hasattr(call, "name"):
-                span.set_attribute("function_calls.first_name", getattr(call, "name"))
+                span.set_attribute(
+                    "function_calls.first_name",
+                    getattr(call, "name"),  # noqa: B009
+                )
             elif isinstance(call, dict) and "name" in call:
                 span.set_attribute("function_calls.first_name", call["name"])
 

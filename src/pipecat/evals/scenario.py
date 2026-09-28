@@ -4,578 +4,364 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Scenario file format for Pipecat behavioral evaluations.
+"""Scenario files for Pipecat behavioral evaluations, of either kind.
 
-A scenario is a YAML file describing a scripted conversation and the semantic
-events expected to flow back from the bot. Simple example::
+A scenario describes one conversation to hold with a bot and how to judge it.
+A file holds one or more of them under ``scenarios:``, each with a ``name:``,
+and a scenario's keys say which kind it is:
 
-    name: simple_user_input
+``turns:``
+    a *scripted* scenario: the user's turns are written out, each with the
+    events expected back from the bot (:mod:`pipecat.evals.script`).
+
+``persona:``
+    a *simulated* scenario, a simulation for short: an LLM plays a caller with a
+    goal, and a judge reads the whole conversation
+    (:mod:`pipecat.evals.simulation`).
+
+Both carry the same ``user:`` and ``judge:`` blocks
+(:mod:`pipecat.evals.scenario_config`). A file is read by a ``SafeLoader`` that
+resolves only plain-decimal integers, so a DTMF ``012`` keeps its digits, with
+an ``!include <path>`` tag that splices in another YAML file relative to the
+including one, so files can share their ``user:`` and ``judge:`` blocks.
+
+Any key a scenario can have may also sit at the top of the file. There it is
+the default for every scenario in the file. A scenario that sets the same key
+replaces the whole value; nothing is merged, so a ``context:`` is written out in
+full, never added to. A scenario is named ``<file name>/<scenario name>``.
+
+Most files hold one scenario. A file holds several when they test one behavior
+through many short conversations::
+
+    name: turn_completion
+    judge: !include ../judge_text.yaml
+    context:
+      - role: system
+        content: "You are a travel assistant."
+
+    scenarios:
+      - name: short_answer
+        turns:
+          - user: "Japan."
+            expect:
+              - event: response
+      - name: with_history
+        context:                      # replaces the file's context
+          - role: system
+            content: "You are a travel assistant."
+          - role: assistant
+            content: "Where would you go?"
+        turns:
+          - user: "Japan."
+            expect:
+              - event: response
+
+``turns:`` and ``persona:`` may sit at the top too. That is for a file whose
+scenarios hold the same conversation and differ in one thing only. Two common
+shapes:
+
+The same turns, judged differently. The turns are written once, and each
+scenario names its own judge or modality, so every judge sees exactly the same
+conversation::
+
+    name: interruption
     turns:
-      - user: "hello world"
+      - user: "Tell me a long story about Paris."
         expect:
-          - event: user_started_speaking
-          - event: user_transcription
-            text_contains: "hello world"
+          - event: llm_started
+      - user: "Actually, what's the capital of Japan?"
+        send_after: {event: llm_started, delay_ms: 2000}
+        expect:
+          - event: bot_interrupted
+          - event: response
+            eval: "says Tokyo instead of continuing the story"
 
-The runner (see :mod:`pipecat.evals.harness`) loads the scenario, connects to
-the bot's eval transport over RTVI, drives each turn, collects the RTVI events
-the bot emits, and asserts on them in order.
+    scenarios:
+      - name: text
+        judge: !include ../judge_text.yaml
+      - name: audio
+        user: !include ../user_audio.yaml
+        judge: !include ../judge_audio.yaml
 
-Event names are the friendly names the harness maps RTVI server messages onto:
-``user_started_speaking``, ``user_stopped_speaking``, ``vad_user_started_speaking``,
-``vad_user_stopped_speaking``, ``user_transcription``, ``llm_started``, ``response``,
-``llm_response``, ``tts_response``, ``function_call``. The ``vad_*`` events are the raw
-VAD signal, useful as a timing anchor when a turn-detection strategy gates or defers the
-turn-level ``user_stopped_speaking`` (e.g. filtering incomplete turns).
+The same caller, with different goals. The persona and what counts as success
+are written once, and each scenario gives the caller a different errand::
 
-The bot's reply can be asserted three ways:
-    response       the transcription of the bot's *actual synthesized audio* (a
-                   local STT — Moonshine or Whisper — run by the harness) in
-                   audio modality, or the LLM text in text modality. The real
-                   end-to-end check — prefer this.
-    llm_response   the LLM's text output (``bot-llm-text``). Available in both
-                   modalities.
-    tts_response   the text the TTS reports speaking (``bot-tts-text``, with
-                   word timing). Audio modality only.
+    name: diner
+    persona: "Jamie, calling a restaurant. Friendly and to the point."
+    success: "the bot did what the caller asked and confirmed it"
 
-Supported expectation fields (per event):
-    event: <name>              required — event type name
-    within_ms: <int>           latency budget from the most recent anchor
-                               (optional; defaults to 60s when omitted)
-    text_contains: <str>       substring check on the event's text content
-    calls:                     for ``function_call`` — the set of calls the turn
-                               should make, matched by name in any order; the
-                               expectation passes only when all are found::
+    scenarios:
+      - name: book
+        goal: "Book a table for two at 6 PM tonight, then end the call."
+      - name: cancel
+        goal: "Cancel tonight's booking under the name Jamie, then end the call."
 
-                                   - event: function_call
-                                     calls:
-                                       - name: get_current_weather
-                                         args: { location: San Francisco }
-                                       - name: get_restaurant_recommendation
+The scenarios of a file are independent: each runs on its own, against its
+own bot.
 
-    eval: <str>                natural-language criterion the event's text content
-                               must satisfy, evaluated by a judge LLM (see
-                               :mod:`pipecat.evals.judge`).
+.. deprecated:: 1.11.0
+    Use a ``scenarios:`` list instead of a scenario's own keys (``turns:`` or
+    ``persona:``) at a file's top level. Such a file still loads, as that one
+    scenario under the file's ``name:``, with a ``DeprecationWarning``. Will be
+    removed in 2.0.0.
 
-A turn may also include ``send_after:`` to schedule its user send relative to a
-prior event (used for interruption / barge-in tests), or ``image:`` (a path,
-relative to the scenario file) to register an image for the turn — when a
-function-calling-video bot requests a user image, the eval transport serves it.
-
-Top-level optional fields:
-    context: LLM messages the bot's context should start from. When given, the
-            harness sends them before driving turns (replacing the bot's
-            context); omit to leave the bot's own context untouched.
-    user:   how user turns are delivered::
-
-                user:
-                  modality: audio          # audio | text (default text)
-                  speech:                  # required when modality is audio
-                    service: kokoro        # local TTS that synthesizes the user turns
-                    voice: af_heart
-                    sample_rate: 16000     # optional
-
-            ``audio`` streams synthesized user audio to the bot (exercising its
-            STT for real); ``text`` (the default) sends RTVI ``send-text``.
-    judge:  what the judge evaluates, and with which LLM::
-
-                judge:
-                  modality: audio          # audio | text (default text)
-                  eval:                    # the judge LLM (default ollama)
-                    service: openai
-                    model: gpt-4o-mini
-                  transcription:           # required when modality is audio
-                    service: moonshine     # STT for the bot's audio (or whisper)
-                    model: small-streaming # optional
-                    padding_secs: 0        # optional; silence padded around the
-                                           # segment (default: 2)
-
-            ``audio`` makes the bot speak and judges the transcription of its
-            actual audio (``tts_response``); ``text`` (the default) skips TTS and
-            judges the LLM text (``llm_response``), which is faster and silent.
-
-Any value can be pulled from a separate file with ``!include``, resolved
-relative to the scenario file's directory. This is handy for sharing the
-``judge:`` and ``user:`` blocks across scenarios::
-
-    user: !include user_audio.yaml
-    judge: !include judge_audio.yaml
+This module gathers the public names of both kinds, :class:`EvalScenarioFile`
+loads a file as the scenarios it holds, and :func:`is_scenario_file` tells a
+scenario from a fragment it includes.
 """
 
-from dataclasses import dataclass, field
+import re
+import warnings
+from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
-from typing import Any
 
 import yaml
-from loguru import logger
-from yamlinclude import YamlIncludeConstructor
 
-# Events whose payloads carry bot-generated text the judge can sensibly
-# evaluate. Asserting ``eval:`` on anything else (user transcripts, tool
-# calls, interruption signals) produces a parser warning — the test controls
-# user input deterministically, so judging it adds cost without signal.
-# ``response`` is the modality-agnostic alias, resolved to one of the others
-# after parsing (see _resolve_response_events).
-JUDGEABLE_EVENTS = frozenset({"response", "llm_response", "tts_response"})
+from pipecat.evals.scenario_config import EvalConfigured, describe_config
+from pipecat.evals.script import (
+    FUNCTION_CALL_EVENTS,
+    JUDGEABLE_EVENTS,
+    EvalExpectation,
+    EvalFunctionCall,
+    EvalScenario,
+    EvalScriptScenario,
+    EvalScriptTurn,
+    EvalSendAfter,
+    EvalTurn,
+    _parse_script,
+)
+from pipecat.evals.simulation import (
+    EvalSimulationMetric,
+    EvalSimulationScenario,
+    _parse_simulation,
+    describe_simulation,
+)
+from pipecat.utils.deprecation import deprecated
+from pipecat.utils.yaml import include_loader
+
+__all__ = [
+    "FUNCTION_CALL_EVENTS",
+    "JUDGEABLE_EVENTS",
+    "EvalConfigured",
+    "EvalKind",
+    "EvalExpectation",
+    "EvalFunctionCall",
+    "EvalScenario",
+    "EvalScenarioFile",
+    "EvalScriptScenario",
+    "EvalScriptTurn",
+    "EvalSendAfter",
+    "EvalSimulationMetric",
+    "EvalSimulationScenario",
+    "EvalTurn",
+    "describe_config",
+    "describe_simulation",
+    "is_scenario_file",
+    "load_scenario_file",
+]
 
 
-@dataclass
-class EvalFunctionCall:
-    """One expected function call within a ``function_call`` expectation.
+class _ScenarioLoader(yaml.SafeLoader):
+    """A SafeLoader that reads only plain decimal numbers as ints.
 
-    Parameters:
-        name: The function name to match. ``None`` matches any call (used by a
-            bare ``function_call`` expectation that just asserts a call happened).
-        args: Optional subset check on the call's arguments (every listed
-            key/value must be present; extra arguments are ignored).
+    YAML 1.1 would read ``010`` as octal and ``0x10`` as hex, which rewrites a
+    DTMF sequence before the scenario sees it. With those resolvers dropped,
+    ``dtmf: 123`` still loads as an int and ``dtmf: 012`` stays a string.
     """
 
-    name: str | None = None
-    args: dict | None = None
+
+# Strip the inherited int resolvers (which match octal/hex/binary/sexagesimal)
+# and register a decimal-only replacement. Underscores stay allowed to match
+# YAML's grouping syntax (e.g. ``1_000``); a leading zero (``012``) no longer
+# matches, so such tokens load as strings.
+_ScenarioLoader.yaml_implicit_resolvers = {
+    ch: [(tag, rx) for tag, rx in resolvers if tag != "tag:yaml.org,2002:int"]
+    for ch, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()
+}
+yaml.add_implicit_resolver(
+    "tag:yaml.org,2002:int",
+    re.compile(r"^[-+]?(?:0|[1-9][0-9_]*)$"),
+    list("-+0123456789"),
+    Loader=_ScenarioLoader,
+)
+
+
+class EvalKind(StrEnum):
+    """The two kinds of scenario, as a run, a session, and a results record name them."""
+
+    SCRIPT = "script"
+    SIMULATION = "simulation"
+
+
+EvalLoadedScenario = EvalScriptScenario | EvalSimulationScenario
 
 
 @dataclass
-class EvalExpectation:
-    """A single expected event in a scenario turn.
+class EvalScenarioFile:
+    """A scenario file: what it is called, where it is, and the scenarios it holds.
+
+    Manifests and ``pipecat eval run`` load files through :meth:`load`, so the
+    two kinds of scenario mix in one list. ``file[name]`` picks a scenario by
+    its ``<file name>/<scenario name>``.
 
     Parameters:
-        event: Required — the semantic event name (e.g. ``user_stopped_speaking``).
-        within_ms: Optional latency budget, measured from the turn's user send —
-            all of a turn's expectations share that one anchor, so a stalled turn
-            fails within a single budget rather than one per expectation. For audio
-            turns the anchor is when the utterance was *sent*, not when it finishes
-            playing out of the transport's virtual mic. Defaults to 60s when
-            omitted, so timing isn't asserted unless set explicitly.
-        text_contains: Optional substring check on the event's text content
-            (``llm_response.text`` or ``user_transcription.transcript``).
-        calls: For a ``function_call`` event, the set of calls expected in the
-            turn. They are matched by name in any order and the expectation passes
-            only when all of them are found. Built from ``calls:`` in the YAML, or
-            from the single ``name:``/``args:`` shorthand.
-        eval: Optional natural-language criterion the event's text content
-            must satisfy. Evaluated by a judge LLM. Only meaningful on the
-            bot-generated text events: ``response``, ``llm_response``, and
-            ``tts_response``.
-    """
-
-    event: str
-    within_ms: int | None = None
-    text_contains: str | None = None
-    calls: list[EvalFunctionCall] | None = None
-    eval: str | None = None
-
-
-@dataclass
-class EvalSendAfter:
-    """Event-driven scheduling for a turn's user send.
-
-    When set on a :class:`EvalTurn`, the harness waits for ``event`` to have been
-    seen (either earlier in the run or arriving now), then waits an additional
-    ``delay_ms`` before sending the turn's ``user`` text. Used for barge-in
-    tests: ``send_after: {event: llm_started, delay_ms: 500}`` means
-    "interrupt 500ms after the bot started responding."
-
-    Parameters:
-        event: Name of the event to schedule from.
-        delay_ms: Additional delay in milliseconds after the event was received.
-    """
-
-    event: str
-    delay_ms: int
-
-
-@dataclass
-class EvalTurn:
-    """One turn in a scenario.
-
-    A turn is either driven by the harness sending a ``user`` utterance, or it
-    is observation-only (no ``user`` field — useful for bot-first scenarios
-    like opening greetings).
-
-    Parameters:
-        user: Optional text the harness sends as the user's turn — an RTVI
-            ``send-text`` in text modality, or synthesized speech (``raw-audio``)
-            in audio modality. If absent, the turn just waits for and asserts on
-            expected events.
-        expect: Expected events, in the order they should arrive.
-        send_after: Optional event-driven schedule for when the ``user`` send
-            should fire. Only meaningful when ``user`` is set.
-        image: Optional path to an image to register for this turn (resolved
-            relative to the scenario file). When a function-calling-video bot
-            requests a user image during the turn, the eval transport serves this
-            one. Stays registered until a later turn provides a different image.
-    """
-
-    user: str | None
-    expect: list[EvalExpectation]
-    send_after: EvalSendAfter | None = None
-    image: str | None = None
-
-
-@dataclass
-class EvalScenario:
-    """A parsed scenario file.
-
-    Parameters:
-        name: The eval name (from ``name:``).
-        turns: Ordered list of turns.
-        context: LLM messages the bot's context should start from for this eval.
-            When non-empty, the harness sends them as an ``eval-context`` client
-            message right after the bot-ready handshake (the eval serializer
-            turns it into an ``LLMMessagesUpdateFrame``, which replaces the
-            context); bots without an LLM context aggregator ignore the frame.
-            Omitted or empty (the default): the harness sends nothing and the
-            bot keeps the context it set up itself.
-        judge: Judge LLM configuration dict with keys ``service``, ``model``,
-            and optional ``endpoint``. Defaults to
-            ``{"service": "ollama", "model": "gemma2:9b"}``.
-        bot_audio: Whether the bot produces speech, derived from
-            ``judge.modality``. False (text, the default): the bot skips TTS —
-            the harness configures skip-TTS at connect, so even an on-connect
-            greeting is silent. True (audio): the bot speaks, and the judge
-            evaluates the transcription of its actual audio.
-        transcriber: Parsed from the ``judge.transcription:`` block; the STT
-            config (``service`` defaults to ``moonshine``, plus ``model``) used to
-            transcribe the bot's audio for the ``response`` event (``None`` in
-            text modality).
-        user_audio: TTS config the harness uses to generate user audio. When
-            present, the harness streams RTVI ``raw-audio`` (not ``send-text``)
-            to the bot, exercising its STT for real. Mapping with ``service``,
-            ``voice``, and optional ``model`` / ``sample_rate`` /
-            ``api_key``. Omit for text-only evals (default).
-        trigger_disconnect: Whether the harness fires the bot's
-            ``on_client_disconnected`` handler when this scenario's connection
-            ends. Bots often cancel their pipeline there, so this is False by
-            default to avoid that between scenarios; set True to exercise the
-            bot's disconnect path. Independent of ``--stop-bot``, which tears the
-            bot down via ``eval-cancel`` regardless of the handler.
-        source_path: Path the scenario was loaded from, for error messages.
+        name: The file's ``name:``.
+        path: The file it was read from.
+        scenarios: The scenarios it holds, in file order.
     """
 
     name: str
-    turns: list[EvalTurn]
-    context: list[dict] = field(default_factory=list)
-    judge: dict = field(default_factory=lambda: {"service": "ollama", "model": "gemma2:9b"})
-    bot_audio: bool = False
-    transcriber: dict | None = None
-    user_audio: dict | None = None
-    trigger_disconnect: bool = False
-    source_path: Path | None = None
+    path: Path
+    scenarios: list[EvalLoadedScenario]
 
     @classmethod
-    def load(cls, path: str | Path) -> "EvalScenario":
-        """Parse a scenario YAML file into an :class:`EvalScenario`.
+    def load(cls, path: str | Path) -> "EvalScenarioFile":
+        """Read a scenario file, parsing each scenario as whichever kind it is.
+
+        A file in the deprecated shape, a scenario's own keys at the top level
+        and no ``scenarios:``, loads as that one scenario under the file's
+        ``name:`` and warns.
 
         Args:
-            path: Path to a YAML file with the scenario schema.
+            path: Path to a scenario YAML file.
 
         Returns:
-            The parsed scenario.
+            The loaded file.
 
         Raises:
-            ValueError: If the file structure is invalid.
+            ValueError: If the file is malformed, or a scenario is neither kind,
+                claims to be both, or is invalid for its kind.
             FileNotFoundError: If the path doesn't exist.
         """
         path = Path(path)
-
-        # Support `judge: !include judge_audio.yaml` (and `user:`, etc.) so
-        # scenarios can share judge/user config. Includes resolve relative to the
-        # scenario file's directory. Register the constructor on a private loader
-        # subclass (not the global SafeLoader) so it has no global side effects.
-        class _Loader(yaml.SafeLoader):
-            pass
-
-        YamlIncludeConstructor.add_to_loader_class(loader_class=_Loader, base_dir=str(path.parent))
-
-        with path.open() as f:
-            data = yaml.load(f, _Loader)
-
-        if not isinstance(data, dict):
-            raise ValueError(f"{path}: top level must be a mapping")
-
+        data = _load_mapping(path)
         name = data.get("name")
         if not name or not isinstance(name, str):
             raise ValueError(f"{path}: missing or invalid 'name:' field")
 
-        raw_turns = data.get("turns")
-        if not isinstance(raw_turns, list):
-            raise ValueError(f"{path}: 'turns:' must be a list")
+        entries = data.get("scenarios")
+        if entries is None:
+            warnings.warn(
+                f"{path}: a scenario file's top level holding 'turns:' or 'persona:' is "
+                "deprecated since 1.11.0 and will be removed in 2.0.0. Put the scenario under a "
+                "'scenarios:' list instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            return cls(name=name, path=path, scenarios=[_scenario_from_mapping(data, path)])
 
-        turns = [_parse_turn(t, path, idx) for idx, t in enumerate(raw_turns)]
+        if not isinstance(entries, list) or not entries:
+            raise ValueError(f"{path}: 'scenarios:' must be a non-empty list")
+        defaults = {key: value for key, value in data.items() if key != "scenarios"}
 
-        raw_context = data.get("context")
-        if raw_context is None:
-            context: list[dict] = []
-        elif isinstance(raw_context, list):
-            context = raw_context
-        else:
-            raise ValueError(f"{path}: 'context:' must be a list of message dicts")
-
-        # user: { modality: audio|text, speech: {...} }. Audio synthesizes each user
-        # turn via TTS (exercising the bot's STT); text sends it as text. Stored
-        # internally as user_audio (the speech config when audio, else None).
-        user_audio = _parse_user_block(data.get("user"), path)
-
-        # judge: { modality: audio|text, eval: {...}, transcription: {...} }. Audio
-        # means the bot speaks and the judge evaluates the transcription of its
-        # actual audio (tts_response); text means the bot's LLM text directly
-        # (llm_response, bot skips TTS). Stored as bot_audio/transcriber/judge.
-        bot_audio, transcriber, judge = _parse_judge_block(data.get("judge"), path)
-
-        # Resolve the modality-agnostic `response` event and check event/modality
-        # consistency now that the judge modality is known.
-        _resolve_response_events(turns, bot_audio, path)
-
-        return cls(
-            name=name,
-            turns=turns,
-            context=context,
-            judge=judge,
-            bot_audio=bot_audio,
-            transcriber=transcriber,
-            user_audio=user_audio,
-            trigger_disconnect=bool(data.get("trigger_disconnect", False)),
-            source_path=path,
-        )
-
-
-_DEFAULT_JUDGE = {"service": "ollama", "model": "gemma2:9b"}
-
-
-def _parse_user_block(user: Any, path: Path) -> dict | None:
-    """Parse the ``user:`` block into the internal user_audio (speech config or None)."""
-    if user is None:
-        return None  # default: text modality
-    if not isinstance(user, dict):
-        raise ValueError(f"{path}: 'user:' must be a mapping")
-    modality = user.get("modality", "text")
-    if modality not in ("audio", "text"):
-        raise ValueError(f"{path}: 'user.modality:' must be 'audio' or 'text', got {modality!r}")
-    if modality == "text":
-        return None
-    speech = user.get("speech")
-    if not isinstance(speech, dict):
-        raise ValueError(
-            f"{path}: 'user.modality: audio' requires a 'user.speech:' block "
-            "(TTS service + voice to synthesize the user's turns)"
-        )
-    return speech
-
-
-def _parse_judge_block(judge: Any, path: Path) -> tuple[bool, dict | None, dict]:
-    """Parse the ``judge:`` block into (bot_audio, transcriber, eval-config)."""
-    if judge is None:
-        judge = {}
-    if not isinstance(judge, dict):
-        raise ValueError(f"{path}: 'judge:' must be a mapping")
-    modality = judge.get("modality", "text")
-    if modality not in ("audio", "text"):
-        raise ValueError(f"{path}: 'judge.modality:' must be 'audio' or 'text', got {modality!r}")
-    eval_cfg = judge.get("eval") or dict(_DEFAULT_JUDGE)
-    if not isinstance(eval_cfg, dict):
-        raise ValueError(f"{path}: 'judge.eval:' must be a mapping (the judge LLM service)")
-    if modality == "text":
-        return False, None, eval_cfg
-    transcription = judge.get("transcription")
-    if not isinstance(transcription, dict):
-        raise ValueError(
-            f"{path}: 'judge.modality: audio' requires a 'judge.transcription:' block "
-            "(STT service to transcribe the bot's audio)"
-        )
-    return True, transcription, eval_cfg
-
-
-def _resolve_response_events(turns: list[EvalTurn], bot_audio: bool, path: Path) -> None:
-    """Resolve the modality-agnostic ``response`` event and validate consistency.
-
-    In audio modality ``response`` is the transcription of the bot's actual
-    audio, so it stays as ``response``. In text modality there is no audio, so it
-    falls back to ``llm_response``. ``tts_response`` (the TTS's spoken text) needs
-    the bot to speak, so asserting it in text modality is an error.
-    """
-    for ti, turn in enumerate(turns):
-        for exp in turn.expect:
-            if exp.event == "response" and not bot_audio:
-                exp.event = "llm_response"
-            elif exp.event == "tts_response" and not bot_audio:
+        scenarios: list[EvalLoadedScenario] = []
+        for idx, entry in enumerate(entries):
+            if not isinstance(entry, dict):
+                raise ValueError(f"{path}: scenario #{idx} must be a mapping")
+            if "scenarios" in entry:
                 raise ValueError(
-                    f"{path}: turn #{ti} asserts 'tts_response' but 'judge.modality' is text "
-                    "(the bot doesn't speak). Use 'response'/'llm_response', or set "
-                    "'judge.modality: audio'."
+                    f"{path}: scenario #{idx} cannot hold a 'scenarios:' list of its own"
                 )
+            entry_name = entry.get("name")
+            if not entry_name or not isinstance(entry_name, str):
+                raise ValueError(f"{path}: scenario #{idx} needs a 'name:'")
+            merged = {**defaults, **entry, "name": f"{name}/{entry_name}"}
+            scenarios.append(_scenario_from_mapping(merged, path))
+
+        names = [scenario.name for scenario in scenarios]
+        duplicates = sorted({n for n in names if names.count(n) > 1})
+        if duplicates:
+            raise ValueError(f"{path}: duplicate scenario names: {', '.join(duplicates)}")
+        return cls(name=name, path=path, scenarios=scenarios)
+
+    def __getitem__(self, name: str) -> EvalLoadedScenario:
+        """The scenario called ``name``.
+
+        Raises:
+            KeyError: If the file holds no scenario of that name.
+        """
+        for scenario in self.scenarios:
+            if scenario.name == name:
+                return scenario
+        names = ", ".join(scenario.name for scenario in self.scenarios)
+        raise KeyError(f"{self.path}: no scenario called {name!r} (has {names})")
+
+    def __iter__(self):
+        """Iterate over the scenarios, in file order."""
+        return iter(self.scenarios)
+
+    def __len__(self) -> int:
+        """How many scenarios the file holds."""
+        return len(self.scenarios)
 
 
-# ANSI codes for the colored config summary (applied only when color=True). The
-# section labels are bold, the separators dim, and each segment's keyword gets one
-# hue per category so modality / service / judge LLM are easy to tell apart; the
-# values are left uncolored.
-_CFG_LABEL = "1"  # bold — the "user" / "judge" section labels
-_CFG_SEP = "2"  # dim — the "->" arrow and "|" separators
-_CFG_MODALITY = "33"  # yellow — modality keyword
-_CFG_SERVICE = "32"  # green — speech (TTS) / transcription (STT) keywords
-_CFG_EVAL = "35"  # magenta — eval keyword (judge LLM)
+@deprecated(
+    "`load_scenario_file` is deprecated since 1.11.0 and will be removed in 2.0.0. "
+    "Use `EvalScenarioFile.load` instead."
+)
+def load_scenario_file(path: str | Path) -> EvalLoadedScenario:
+    """Load a file holding one scenario, as whichever kind it is.
 
-
-def describe_config(scenario: EvalScenario, *, color: bool = False) -> str:
-    """Two-line summary of a scenario's user + judge config, for pre-run logs.
+    .. deprecated:: 1.11.0
+        Use :meth:`EvalScenarioFile.load` instead, which returns every scenario
+        a file holds. Will be removed in 2.0.0.
 
     Args:
-        scenario: The parsed scenario to summarize.
-        color: When True, ANSI-color each segment's keyword by category (modality,
-            service, judge LLM) so they're easy to tell apart.
+        path: Path to a scenario or simulation YAML file.
 
     Returns:
-        A ``user`` line and a ``judge`` line, each a set of ``key: value`` segments
-        separated by ``|``, e.g.::
+        The parsed scenario.
 
-            user  -> modality: audio | speech: kokoro/af_heart
-            judge -> modality: audio | transcription: moonshine/small-streaming | eval: ollama/gemma2:9b
+    Raises:
+        ValueError: If the file holds several scenarios, or is invalid.
     """
-
-    def paint(text: str, code: str) -> str:
-        return f"\033[{code}m{text}\033[0m" if color else text
-
-    def seg(key: str, value: str, code: str) -> str:
-        return f"{paint(key + ':', code)} {value}"
-
-    arrow = paint(" -> ", _CFG_SEP)
-    sep = paint(" | ", _CFG_SEP)
-
-    def svc_model(cfg: dict, default_service: str, model_key: str) -> str:
-        service = cfg.get("service", default_service)
-        model = cfg.get(model_key)
-        return f"{service}/{model}" if model else str(service)
-
-    user_segs = [seg("modality", "audio" if scenario.user_audio else "text", _CFG_MODALITY)]
-    if scenario.user_audio:
-        # The TTS "voice" is the speech config's model-equivalent.
-        user_segs.append(seg("speech", svc_model(scenario.user_audio, "?", "voice"), _CFG_SERVICE))
-
-    eval_svc = f"{scenario.judge.get('service', '?')}/{scenario.judge.get('model', '?')}"
-    judge_segs = [seg("modality", "audio" if scenario.bot_audio else "text", _CFG_MODALITY)]
-    if scenario.bot_audio:
-        judge_segs.append(
-            seg(
-                "transcription",
-                svc_model(scenario.transcriber or {}, "whisper", "model"),
-                _CFG_SERVICE,
-            )
-        )
-    judge_segs.append(seg("eval", eval_svc, _CFG_EVAL))
-
-    return (
-        f"{paint('user'.ljust(5), _CFG_LABEL)}{arrow}{sep.join(user_segs)}\n"
-        f"{paint('judge'.ljust(5), _CFG_LABEL)}{arrow}{sep.join(judge_segs)}"
-    )
+    scenarios = EvalScenarioFile.load(path).scenarios
+    if len(scenarios) != 1:
+        raise ValueError(f"{path}: holds {len(scenarios)} scenarios; use EvalScenarioFile.load()")
+    return scenarios[0]
 
 
-def _parse_turn(t: Any, path: Path, idx: int) -> EvalTurn:
-    """Parse one entry from the ``turns:`` list."""
-    if not isinstance(t, dict):
-        raise ValueError(f"{path}: turn #{idx} must be a mapping")
+def _load_mapping(path: Path) -> dict:
+    """Load a scenario file's top-level mapping, resolving ``!include`` tags relative to the file.
 
-    user = t.get("user")
-    if user is not None and not isinstance(user, str):
-        raise ValueError(f"{path}: turn #{idx} 'user:' must be a string if present")
-
-    raw_expect = t.get("expect")
-    if not isinstance(raw_expect, list):
-        raise ValueError(f"{path}: turn #{idx} missing or invalid 'expect:' list")
-
-    expect = [_parse_expectation(e, path, idx, ei) for ei, e in enumerate(raw_expect)]
-
-    send_after = _parse_send_after(t.get("send_after"), path, idx) if "send_after" in t else None
-    if send_after is not None and user is None:
-        raise ValueError(
-            f"{path}: turn #{idx} has 'send_after:' but no 'user:' — "
-            "send_after only schedules when the user message gets sent"
-        )
-
-    # Image paths resolve relative to the scenario file, so a scenario is portable.
-    image = t.get("image")
-    if image is not None:
-        if not isinstance(image, str):
-            raise ValueError(f"{path}: turn #{idx} 'image:' must be a path string")
-        image = str((path.parent / image).resolve())
-
-    return EvalTurn(user=user, expect=expect, send_after=send_after, image=image)
-
-
-def _parse_send_after(s: Any, path: Path, turn_idx: int) -> EvalSendAfter:
-    """Parse a ``send_after:`` block."""
-    if not isinstance(s, dict):
-        raise ValueError(f"{path}: turn #{turn_idx} 'send_after:' must be a mapping")
-
-    event = s.get("event")
-    if not event or not isinstance(event, str):
-        raise ValueError(f"{path}: turn #{turn_idx} 'send_after:' missing or invalid 'event:'")
-
-    delay_ms = s.get("delay_ms", 0)
-    if not isinstance(delay_ms, int) or delay_ms < 0:
-        raise ValueError(
-            f"{path}: turn #{turn_idx} 'send_after.delay_ms' must be a non-negative int"
-        )
-
-    return EvalSendAfter(event=event, delay_ms=delay_ms)
-
-
-def _parse_expectation(e: Any, path: Path, turn_idx: int, exp_idx: int) -> EvalExpectation:
-    """Parse one entry from a turn's ``expect:`` list."""
-    if not isinstance(e, dict):
-        raise ValueError(f"{path}: turn #{turn_idx} expectation #{exp_idx} must be a mapping")
-
-    event = e.get("event")
-    if not event or not isinstance(event, str):
-        raise ValueError(
-            f"{path}: turn #{turn_idx} expectation #{exp_idx} missing or invalid 'event:'"
-        )
-
-    criterion = e.get("eval")
-    if criterion is not None and event not in JUDGEABLE_EVENTS:
-        logger.warning(
-            f"{path}: turn #{turn_idx} expectation #{exp_idx}: 'eval:' on "
-            f"event {event!r} — judge only makes sense on bot-generated text "
-            f"events ({', '.join(sorted(JUDGEABLE_EVENTS))}). Will run but is "
-            "unlikely to be meaningful."
-        )
-
-    calls = _parse_function_calls(e, event, path, turn_idx, exp_idx)
-
-    return EvalExpectation(
-        event=event,
-        within_ms=e.get("within_ms"),
-        text_contains=e.get("text_contains"),
-        calls=calls,
-        eval=criterion,
-    )
-
-
-def _parse_function_calls(
-    e: dict, event: str, path: Path, turn_idx: int, exp_idx: int
-) -> list[EvalFunctionCall] | None:
-    """Normalize a ``function_call`` expectation's expected calls into a list.
-
-    Accepts a ``calls:`` list (each entry a bare name string or a ``{name, args}``
-    mapping) for the multi-call case, or the single ``name:``/``args:`` shorthand.
-    A bare ``function_call`` (neither) becomes one ``EvalFunctionCall(name=None)``
-    that matches any single call. Returns None for non-function_call events.
+    Raises:
+        ValueError: If the top level is not a mapping.
     """
-    if event != "function_call":
-        return None
+    with path.open() as f:
+        data = yaml.load(f, include_loader(path.parent, base=_ScenarioLoader))
+    if not isinstance(data, dict):
+        raise ValueError(f"{path}: top level must be a mapping")
+    return data
 
-    where = f"{path}: turn #{turn_idx} expectation #{exp_idx}"
-    raw_calls = e.get("calls")
-    if raw_calls is None:
-        return [EvalFunctionCall(name=e.get("name"), args=e.get("args"))]
 
-    if not isinstance(raw_calls, list) or not raw_calls:
-        raise ValueError(f"{where}: 'calls:' must be a non-empty list")
-    out: list[EvalFunctionCall] = []
-    for c in raw_calls:
-        if isinstance(c, str):
-            out.append(EvalFunctionCall(name=c))
-        elif isinstance(c, dict):
-            out.append(EvalFunctionCall(name=c.get("name"), args=c.get("args")))
-        else:
-            raise ValueError(f"{where}: each 'calls:' entry must be a name or a mapping")
-    return out
+def _scenario_from_mapping(data: dict, path: Path) -> EvalLoadedScenario:
+    """Parse one scenario's mapping as a simulation (``persona:``) or a script (``turns:``)."""
+    if "persona" in data and "turns" in data:
+        raise ValueError(
+            f"{path}: a scenario is scripted ('turns:') or a simulation ('persona:'), not both"
+        )
+    if "persona" in data:
+        return _parse_simulation(data, path)
+    if "turns" in data:
+        return _parse_script(data, path)
+    raise ValueError(f"{path}: a scenario needs 'turns:' (scripted) or 'persona:' (a simulation)")
+
+
+def is_scenario_file(path: str | Path) -> bool:
+    """Whether a YAML file is a scenario of either kind, rather than a fragment one includes.
+
+    Every scenario has a ``name:``; an included fragment has none. A file that
+    does not parse counts as a scenario, so loading it reports the error
+    instead of a directory run skipping it silently.
+
+    Args:
+        path: Path to a YAML file.
+
+    Returns:
+        True unless the file parses to a mapping without a ``name``.
+    """
+    try:
+        return "name" in _load_mapping(Path(path))
+    except (ValueError, OSError, yaml.YAMLError):
+        return True

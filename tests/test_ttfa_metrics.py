@@ -120,8 +120,11 @@ class TestTTFAMetrics:
         assert frame is not None
         data = frame.data[0]
         assert isinstance(data, TTFAMetricsData)
-        # 0.2s TTFB + 0.4s leading silence.
-        assert data.value == pytest.approx(0.6, abs=0.02)
+        # 0.2s TTFB + 0.4s leading silence, carried as a breakdown.
+        assert data.ttfa == pytest.approx(0.6, abs=0.02)
+        assert data.ttfb == pytest.approx(0.2, abs=1e-3)
+        assert data.leading_silence == pytest.approx(0.4, abs=0.02)
+        assert data.ttfa == pytest.approx(data.ttfb + data.leading_silence)
 
     @pytest.mark.asyncio
     async def test_ttfa_reported_once_per_response(self):
@@ -153,10 +156,10 @@ class TestTTFAMetrics:
         await self._measure_ttfb(m, 0.1)
         first = await self._process(m, _tone(0.2))
         assert first is not None
-        assert first.data[0].value == pytest.approx(0.1, abs=0.02)
+        assert first.data[0].ttfa == pytest.approx(0.1, abs=0.02)
 
         # Second response re-arms via a fresh TTFB stop; buffer/silence reset.
         await self._measure_ttfb(m, 0.3)
         second = await self._process(m, _silence(0.2) + _tone(0.2))
         assert second is not None
-        assert second.data[0].value == pytest.approx(0.5, abs=0.02)
+        assert second.data[0].ttfa == pytest.approx(0.5, abs=0.02)

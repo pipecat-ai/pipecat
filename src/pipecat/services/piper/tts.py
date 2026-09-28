@@ -7,6 +7,7 @@
 """Piper TTS service implementation."""
 
 import asyncio
+import os
 from collections.abc import AsyncGenerator, AsyncIterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,9 +21,10 @@ from pipecat.frames.frames import (
     Frame,
     TTSStoppedFrame,
 )
-from pipecat.services.settings import TTSSettings, assert_given
+from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
+from pipecat.utils.types import require_given
 
 try:
     from piper import PiperVoice
@@ -31,6 +33,8 @@ except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error('In order to use Piper, you need to `uv add "pipecat-ai[piper]"`.')
     raise ImportError(f"Missing module: {e}") from e
+
+PIPER_CACHE_DIR = Path(os.path.expanduser("~/.cache/pipecat/piper"))
 
 
 @dataclass
@@ -46,6 +50,14 @@ class PiperTTSService(TTSService):
     Provides local text-to-speech synthesis using Piper voice models. Automatically
     downloads voice models if not already present and resamples audio output to
     match the configured sample rate.
+
+    .. note::
+        This service runs Piper in-process via the ``piper-tts`` package (the
+        ``piper`` extra), which is **GPL-3.0 licensed**. Distributing an
+        application that includes it may subject the application to the GPL's
+        source-disclosure terms. To keep Piper out of your application's
+        license scope, use :class:`PiperHttpTTSService` instead, which talks to
+        a separately installed Piper HTTP server.
     """
 
     Settings = PiperTTSSettings
@@ -71,7 +83,7 @@ class PiperTTSService(TTSService):
                     Will be removed in 2.0.0.
 
             download_dir: Directory for storing voice model files. Defaults to
-                the current working directory.
+                Pipecat's cache directory.
             force_redownload: Re-download the voice model even if it already exists.
             use_cuda: Use CUDA for GPU-accelerated inference.
             settings: Runtime-updatable settings. When provided alongside deprecated
@@ -99,13 +111,13 @@ class PiperTTSService(TTSService):
             **kwargs,
         )
 
-        download_dir = download_dir or Path.cwd()
+        download_dir = download_dir or PIPER_CACHE_DIR
+        if not download_dir.exists():
+            download_dir.mkdir(parents=True, exist_ok=True)
 
-        _voice = assert_given(self._settings.voice)
-        if _voice is None:
-            raise ValueError("Piper TTS voice must be specified")
+        _voice = require_given(self._settings.voice, "Piper TTS voice")
         model_file = f"{_voice}.onnx"
-        model_path_resolved = Path(download_dir) / model_file
+        model_path_resolved = download_dir / model_file
 
         if not model_path_resolved.exists():
             logger.debug(f"Downloading Piper '{_voice}' model")
@@ -161,8 +173,6 @@ class PiperTTSService(TTSService):
                 if item is None:
                     return
                 yield item.audio_int16_bytes
-
-        logger.debug(f"{self}: Generating TTS [{text}]")
 
         try:
             await self.start_tts_usage_metrics(text)
@@ -279,7 +289,6 @@ class PiperHttpTTSService(TTSService):
         Yields:
             Frame: Audio frames containing the synthesized speech and status frames.
         """
-        logger.debug(f"{self}: Generating TTS [{text}]")
         headers = {
             "Content-Type": "application/json",
         }

@@ -15,7 +15,7 @@ from loguru import logger
 
 from pipecat.frames.frames import TextFrame
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.worker import PipelineWorker
+from pipecat.pipeline.worker import PipelineWorker, ProcessorUnusablePolicy
 from pipecat.services.fal.image import FalImageGenService
 from pipecat.transports.local.tk import TkLocalTransport, TkTransportParams
 from pipecat.workers.runner import WorkerRunner
@@ -46,10 +46,12 @@ async def main():
 
         pipeline = Pipeline([imagegen, transport.output()])
 
-        worker = PipelineWorker(pipeline)
+        worker = PipelineWorker(pipeline, processor_unusable_policy=ProcessorUnusablePolicy.END)
         await worker.queue_frames([TextFrame("a cat in the style of picasso")])
 
         runner = WorkerRunner()
+
+        await runner.add_workers(worker)
 
         async def run_tk():
             while not worker.has_finished():
@@ -57,7 +59,6 @@ async def main():
                 tk_root.update_idletasks()
                 await asyncio.sleep(0.1)
 
-        await runner.add_workers(worker)
         await asyncio.gather(runner.run(), run_tk())
 
 

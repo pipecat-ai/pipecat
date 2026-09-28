@@ -14,14 +14,24 @@ from dataclasses import dataclass
 
 from loguru import logger
 
+try:
+    from aws_sdk_sagemaker_runtime_http2.models import ResponseStreamEventPayloadPart
+except ModuleNotFoundError as e:
+    logger.error(f"Exception: {e}")
+    logger.error(
+        'In order to use Deepgram Flux on SageMaker, you need to `uv add "pipecat-ai[sagemaker]"`.'
+    )
+    raise ImportError(f"Missing module: {e}") from e
+
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
 )
 from pipecat.services.aws.sagemaker.bidi_client import SageMakerBidiClient
-from pipecat.services.deepgram.flux.base import (
+from pipecat.services.deepgram.flux.stt_base import (
     DeepgramFluxSTTBase,
     DeepgramFluxSTTSettings,
+    FluxConnectionNotConfirmedError,
 )
 
 
@@ -44,8 +54,10 @@ class DeepgramFluxSageMakerSTTService(DeepgramFluxSTTBase):
     EagerEndOfTurn, TurnResumed).
 
     Unlike the Nova-based SageMaker STT service, Flux handles turn detection
-    natively, so no external VAD is needed for turn boundaries. Use
-    ``ExternalUserTurnStrategies`` in your pipeline.
+    natively, so no external VAD is needed for turn boundaries. The service
+    requests ``ExternalUserTurnStrategies`` automatically (at start, via the
+    ``STTMetadataFrame`` it broadcasts); pass your own ``user_turn_strategies`` only to
+    override that.
 
     Requirements:
 
@@ -90,6 +102,7 @@ class DeepgramFluxSageMakerSTTService(DeepgramFluxSTTBase):
         tag: list | None = None,
         should_interrupt: bool = True,
         watchdog_min_timeout: float = 0.5,
+        enable_eager_end_of_turn: bool = False,
         settings: Settings | None = None,
         **kwargs,
     ):
@@ -105,9 +118,21 @@ class DeepgramFluxSageMakerSTTService(DeepgramFluxSTTBase):
             mip_opt_out: Opt out of Deepgram model improvement program.
             tag: Tags to label requests for identification during usage reporting.
             should_interrupt: Whether to interrupt the bot when Flux detects that
-                the user is speaking. Defaults to True.
+                the user is speaking. Passed along to the user turn strategies
+                this service recommends, which own the interruption; a
+                user-supplied ``user_turn_strategies`` overrides the
+                recommendation and this setting with it. Defaults to True.
             watchdog_min_timeout: Minimum silence duration in seconds before the watchdog
                 sends silence to prevent dangling turns. Defaults to 0.5.
+            enable_eager_end_of_turn: Whether to answer Flux's predicted end
+                of turn ahead of the committed one, so the gap between the two
+                is spent generating a response rather than waiting. The response
+                is discarded if the user resumes speaking or the committed
+                transcript differs from the predicted one. Off by default: it
+                spends an inference on every prediction, including the ones Flux
+                withdraws. Turning it on sets ``eager_eot_threshold`` to 0.5
+                when the settings leave it unset, since Flux reports no
+                prediction without it.
             settings: Runtime-updatable settings.
             **kwargs: Additional arguments passed to the parent STTService.
         """
@@ -121,6 +146,9 @@ class DeepgramFluxSageMakerSTTService(DeepgramFluxSTTBase):
             keyterm=[],
             min_confidence=None,
             language_hints=None,
+            numerals=None,
+            profanity_filter=None,
+            redact=None,
         )
 
         # Apply settings delta
@@ -133,6 +161,7 @@ class DeepgramFluxSageMakerSTTService(DeepgramFluxSTTBase):
             tag=tag,
             should_interrupt=should_interrupt,
             watchdog_min_timeout=watchdog_min_timeout,
+            enable_eager_end_of_turn=enable_eager_end_of_turn,
             settings=default_settings,
             sample_rate=sample_rate,
             **kwargs,
@@ -187,18 +216,20 @@ class DeepgramFluxSageMakerSTTService(DeepgramFluxSTTBase):
         )
 
         try:
-            await self._client.start_session()
+            # A rejected connection setting raises a generic 424 from
+            # start_session; the timeout guards against a session that never opens.
+            await self._start_session_within_timeout()
 
             # Start response processor first so we can receive the Connected message
             self._response_task = self.create_task(self._process_responses())
 
             # Wait for Flux to confirm the connection is ready
             logger.debug("SageMaker session started, waiting for Flux connection confirmation...")
-            await self._connection_established_event.wait()
+            await self._await_connection_established()
 
-            # Note: Flux does not support KeepAlive messages (only CloseStream and
-            # Configure are valid). The watchdog task handles keeping the connection
-            # alive by sending silence when needed.
+            # Note: Flux does not support KeepAlive messages (only CloseStream,
+            # ForceEndTurn and Configure are valid). The watchdog task handles
+            # keeping the connection alive by sending silence when needed.
             self._watchdog_task = self.create_task(self._watchdog_task_handler())
 
             logger.debug("Connected to Deepgram Flux on SageMaker")
@@ -208,12 +239,32 @@ class DeepgramFluxSageMakerSTTService(DeepgramFluxSTTBase):
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
             await self._call_event_handler("on_connection_error", str(e))
 
+    async def _start_session_within_timeout(self):
+        """Open the SageMaker session, failing if it does not open in time.
+
+        Raises:
+            FluxConnectionNotConfirmedError: If the session does not open within
+                ``_CONNECTION_TIMEOUT``.
+        """
+        assert self._client is not None
+        try:
+            await asyncio.wait_for(self._client.start_session(), timeout=self._CONNECTION_TIMEOUT)
+        except TimeoutError:
+            raise FluxConnectionNotConfirmedError(
+                f"SageMaker session did not open within {self._CONNECTION_TIMEOUT}s; "
+                "the endpoint may not accept the current connection settings (see "
+                f"CloudWatch log group /aws/sagemaker/Endpoints/{self._endpoint_name})"
+            ) from None
+
     async def _disconnect(self):
         """Disconnect from the SageMaker endpoint."""
         self._connection_established_event.clear()
+        # Discard any in-flight/pending Configure — the connection is going
+        # away, so it can no longer be acked or sent.
+        self._reset_configure_state()
 
         if self._client and self._client.is_active:
-            logger.debug("Disconnecting from Deepgram Flux on SageMaker...")
+            logger.debug(f"{self}: Disconnecting from Deepgram Flux on SageMaker...")
 
             await self._send_close_stream()
 
@@ -264,7 +315,7 @@ class DeepgramFluxSageMakerSTTService(DeepgramFluxSTTBase):
                 if result is None:
                     break
 
-                if hasattr(result, "value") and hasattr(result.value, "bytes_"):
+                if isinstance(result, ResponseStreamEventPayloadPart):
                     if result.value.bytes_:
                         response_data = result.value.bytes_.decode("utf-8")
 

@@ -16,6 +16,8 @@ from pipecat.turns.user_start import (
 )
 from pipecat.turns.user_stop import (
     BaseUserTurnStopStrategy,
+    EagerMatchPolicy,
+    EagerUserTurnStopStrategy,
     ExternalUserTurnStopStrategy,
     LLMTurnCompletionUserTurnStopStrategy,
     TurnAnalyzerUserTurnStopStrategy,
@@ -80,23 +82,32 @@ class UserTurnStrategies:
 
 @dataclass
 class ExternalUserTurnStrategies(UserTurnStrategies):
-    """Default container for external user turn start and stop strategies.
+    """Container for turn strategies driven by another component in the pipeline.
 
-    This class provides a convenience default for configuring external turn
-    control. It preconfigures `UserTurnStrategies` with
-    `ExternalUserTurnStartStrategy` and `ExternalUserTurnStopStrategy`, allowing
-    external processors (such as services) to control when user turn starts and
-    stops.
+    Preconfigures :class:`UserTurnStrategies` with
+    :class:`~pipecat.turns.user_start.ExternalUserTurnStartStrategy` and
+    :class:`~pipecat.turns.user_stop.ExternalUserTurnStopStrategy`, so a service
+    with its own turn detection — or a shared
+    :class:`~pipecat.turns.user_turn_processor.UserTurnProcessor` — controls when
+    user turns start and stop.
 
-    When using this container, the user aggregator does not push
-    `UserStartedSpeakingFrame` or `UserStoppedSpeakingFrame` frames, and does
-    not generate interruptions. These signals are expected to be provided by an
-    external processor.
+    What the aggregator emits depends on which signal drives the turn.
+    ``ProposedUserStarted/StoppedSpeakingFrame`` leaves the decision here, so the
+    aggregator pushes the turn frames and broadcasts interruptions.
+    ``UserStarted/StoppedSpeakingFrame`` means the emitter already announced the
+    turn, so the aggregator emits nothing and the parameter below doesn't apply.
+
+    Parameters:
+        enable_interruptions: Whether to broadcast an interruption when a
+            proposal starts a turn. Services route their ``should_interrupt``
+            setting here.
 
     """
 
+    enable_interruptions: bool = True
+
     def __post_init__(self):
-        self.start = [ExternalUserTurnStartStrategy()]
+        self.start = [ExternalUserTurnStartStrategy(enable_interruptions=self.enable_interruptions)]
         self.stop = [ExternalUserTurnStopStrategy()]
 
 
@@ -105,8 +116,8 @@ class FilterIncompleteUserTurnStrategies(UserTurnStrategies):
     """Stop strategies gated on the LLM's turn-completion verdict.
 
     The LLM is asked to begin every response with one of three markers:
-    ✓ (complete), ○ (incomplete short), or ◐ (incomplete long). Only ✓
-    finalizes the user turn; ○ / ◐ keep the turn open so the user can
+    ● (complete), ◐ (incomplete short), or ○ (incomplete long). Only ●
+    finalizes the user turn; ◐ / ○ keep the turn open so the user can
     continue speaking and the LLM can re-evaluate later.
 
     Configuring strategies this way preserves the existing detector
@@ -152,3 +163,58 @@ class FilterIncompleteUserTurnStrategies(UserTurnStrategies):
         gated: list[BaseUserTurnStopStrategy] = [deferred(s) for s in self.stop or []]
         gated.append(LLMTurnCompletionUserTurnStopStrategy(config=self.config))
         self.stop = gated
+
+
+@dataclass
+class EagerUserTurnStrategies(ExternalUserTurnStrategies):
+    """Strategies for a service that predicts the end of a turn before committing.
+
+    Answers the prediction while the turn is still open, so the gap before the
+    committed end of turn is spent generating a response instead of waiting for
+    one. The response is discarded if the user resumes speaking or the committed
+    transcript differs from the eager one. See
+    :class:`~pipecat.turns.user_stop.EagerUserTurnStopStrategy`.
+
+    The response is held by the LLM service until the turn is confirmed, so no
+    extra processor is needed in the pipeline.
+
+    The service owns turn detection here, so this replaces the detector chain
+    rather than extending it: a local detector running alongside would trigger a
+    second inference for the same turn.
+
+    Parameters:
+        match_policy: Decides whether the committed transcript is close enough to
+            the eager one to keep the speculative response. Defaults to
+            :class:`~pipecat.turns.user_stop.NormalizedMatch`, since services
+            commonly format the transcript they commit (capitalization,
+            punctuation) while leaving the eager one raw. Pass
+            :class:`~pipecat.turns.user_stop.ExactMatch` to require the two to
+            be identical.
+        speculation_timeout: Seconds a prediction may go unresolved before it
+            is withdrawn and the turn falls back to answering the committed
+            transcript. Guards against a service that stops sending turn signals
+            mid-speculation, which would otherwise leave the response held and
+            the bot silent.
+        enable_interruptions: Whether to broadcast an interruption when a
+            proposal starts a turn. Services route their ``should_interrupt``
+            setting here.
+
+    Example::
+
+        user_turn_strategies=EagerUserTurnStrategies()
+
+        # Require the committed transcript to match the eager one exactly:
+        user_turn_strategies=EagerUserTurnStrategies(match_policy=ExactMatch())
+    """
+
+    match_policy: EagerMatchPolicy | None = None
+    speculation_timeout: float = 5.0
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.stop = [
+            EagerUserTurnStopStrategy(
+                match_policy=self.match_policy,
+                speculation_timeout=self.speculation_timeout,
+            )
+        ]

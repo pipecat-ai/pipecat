@@ -10,11 +10,12 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.classifiers.jev.classifier import JevClassifier
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.extensions.voicemail.voicemail_detector import VoicemailDetector
-from pipecat.frames.frames import TTSSpeakFrame
+from pipecat.frames.frames import EndWorkerFrame, TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
@@ -55,14 +56,14 @@ transport_params = {
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
-    logger.info(f"Starting bot")
+    logger.info("Starting bot")
 
     stt = DeepgramSTTService(api_key=os.environ["DEEPGRAM_API_KEY"])
 
     tts = CartesiaTTSService(
         api_key=os.environ["CARTESIA_API_KEY"],
         settings=CartesiaTTSService.Settings(
-            voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+            voice="86e30c1d-714b-4074-a1f2-1cb6b552fb49",
         ),
     )
 
@@ -72,9 +73,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
         ),
     )
-    classifier_llm = OpenAILLMService(api_key=os.environ["OPENAI_API_KEY"])
-
-    voicemail = VoicemailDetector(llm=classifier_llm)
+    voicemail = VoicemailDetector(classifier=JevClassifier(api_key=os.environ["TYPESAFE_API_KEY"]))
 
     context = LLMContext()
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
@@ -86,11 +85,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         [
             transport.input(),
             stt,
-            voicemail.detector(),  # Voicemail detection — between STT and User context aggregator
+            voicemail.detector(),  # Voicemail detection, between STT and the user aggregator
             user_aggregator,
             llm,
             tts,
-            voicemail.gate(),  # TTS gating — Immediately after the TTS service
+            voicemail.gate(),  # TTS gating, right after the TTS service
             transport.output(),
             assistant_aggregator,
         ]
@@ -103,16 +102,21 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             enable_usage_metrics=True,
         ),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
+        processor_unusable_policy=ProcessorUnusablePolicy.END,
     )
+
+    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
+
+    await runner.add_workers(worker)
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
-        logger.info(f"Client connected")
+        logger.info("Client connected")
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
-        logger.info(f"Client disconnected")
-        await worker.cancel()
+        logger.info("Client disconnected")
+        await runner.cancel()
 
     @voicemail.event_handler("on_conversation_detected")
     async def on_conversation_detected(processor):
@@ -122,20 +126,14 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_voicemail_detected(processor):
         logger.info("Voicemail detected! Leaving a message...")
 
-        # Push frames using standard Pipecat pattern
         await processor.push_frame(
             TTSSpeakFrame(
-                "Hello, this is Jamie calling about your appointment. Please call me back at 555-0123 when you get this."
+                "Hello, this is Alex calling about your appointment. Please call me back at 555-0123 when you get this."
             )
         )
+        # The verdict is final and the message is left, so the call is over.
+        await processor.push_frame(EndWorkerFrame())
 
-        # NOTE: A common pattern is to end pipeline after the voicemail is left.
-        # Uncomment the following line to end the pipeline after leaving the voicemail.
-        # await processor.push_frame(EndWorkerFrame())
-
-    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
-
-    await runner.add_workers(worker)
     await runner.run()
 
 

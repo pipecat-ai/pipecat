@@ -8,9 +8,13 @@ import unittest
 import warnings
 from unittest.mock import AsyncMock, Mock
 
+from pydantic import ValidationError
+
 import pipecat.processors.frameworks.rtvi.models as RTVI
+from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.frames.frames import (
     InputAudioRawFrame,
+    InputDTMFFrame,
     InputTransportStartAudioStreamingFrame,
 )
 from pipecat.processors.frameworks.rtvi.processor import RTVIProcessor
@@ -180,6 +184,46 @@ class TestRTVIFrameBasedAudio(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(pushed), 1)
         self.assertIsInstance(pushed[0], InputAudioRawFrame)
         self.assertEqual(pushed[0].sample_rate, 16000)
+
+
+class TestRTVIDTMF(unittest.IsolatedAsyncioTestCase):
+    async def asyncTearDown(self):
+        if hasattr(self, "processor"):
+            await self.processor.cleanup()
+
+    async def test_dtmf_pushes_input_dtmf_frame_downstream(self):
+        self.processor = RTVIProcessor()
+        self.processor.push_frame = AsyncMock()
+        await self.processor._handle_dtmf(RTVI.DTMFInputData(buttons=[KeypadEntry.ONE]))
+        pushed = [c.args[0] for c in self.processor.push_frame.call_args_list]
+        self.assertEqual(len(pushed), 1)
+        self.assertIsInstance(pushed[0], InputDTMFFrame)
+        self.assertEqual(pushed[0].button, KeypadEntry.ONE)
+
+    async def test_dtmf_sequence_pushes_one_frame_per_key_in_order(self):
+        self.processor = RTVIProcessor()
+        self.processor.push_frame = AsyncMock()
+        data = RTVI.DTMFInputData.model_validate({"buttons": ["1", "2", "#"]})
+        await self.processor._handle_dtmf(data)
+        pushed = [c.args[0] for c in self.processor.push_frame.call_args_list]
+        self.assertEqual(len(pushed), 3)
+        for frame in pushed:
+            self.assertIsInstance(frame, InputDTMFFrame)
+        self.assertEqual(
+            [f.button for f in pushed], [KeypadEntry.ONE, KeypadEntry.TWO, KeypadEntry.POUND]
+        )
+
+    def test_dtmf_input_data_rejects_invalid_button(self):
+        with self.assertRaises(ValidationError):
+            RTVI.DTMFInputData.model_validate({"buttons": ["1", "Z"]})
+
+    def test_dtmf_input_data_rejects_empty_list(self):
+        with self.assertRaises(ValidationError):
+            RTVI.DTMFInputData.model_validate({"buttons": []})
+
+    def test_dtmf_input_data_rejects_legacy_button_field(self):
+        with self.assertRaises(ValidationError):
+            RTVI.DTMFInputData.model_validate({"button": "1"})
 
 
 if __name__ == "__main__":

@@ -6,10 +6,11 @@
 
 """Base turn start strategy for determining when the user starts speaking."""
 
+import warnings
 from dataclasses import dataclass
 
 from pipecat.frames.frames import Frame
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.turns.types import ProcessFrameResult
 from pipecat.utils.base_object import BaseObject
 
@@ -23,11 +24,11 @@ class UserTurnStartedParams:
     aggregator.
 
     Parameters:
-        enable_user_speaking_frames: Whether the user aggregator should emit
-            frames indicating user speaking state (e.g., user started speaking)
-            during the bot's turn. This is typically enabled by default, but may
-            be disabled when another component (such as an STT service) is already
-            responsible for generating user speaking frames.
+        enable_user_speaking_frames: Whether to emit
+            :class:`~pipecat.frames.frames.UserStartedSpeakingFrame` for this
+            turn. False when the turn was already announced elsewhere — by a
+            shared :class:`~pipecat.turns.user_turn_processor.UserTurnProcessor`,
+            or by a service that emits turn frames rather than proposing them.
 
     """
 
@@ -53,7 +54,7 @@ class BaseUserTurnStartStrategy(BaseObject):
         self,
         *,
         enable_interruptions: bool = True,
-        enable_user_speaking_frames: bool = True,
+        enable_user_speaking_frames: bool | None = None,
         **kwargs,
     ):
         """Initialize the base user turn start strategy.
@@ -61,27 +62,103 @@ class BaseUserTurnStartStrategy(BaseObject):
         Args:
             enable_interruptions: If True, the user aggregator will emit an
                 interruption frame when the user turn starts.
-            enable_user_speaking_frames: If True, the user aggregator will emit
-                frames indicating when the user starts speaking, as well as
-                interruption frames. This is enabled by default, but you may want
-                to disable it if another component (e.g., an STT service) is
-                already generating these frames.
+            enable_user_speaking_frames: Whether to emit
+                :class:`~pipecat.frames.frames.UserStartedSpeakingFrame` when a
+                turn starts, unless :meth:`trigger_user_turn_started` overrides
+                it for a given turn.
+
+                .. deprecated:: 1.8.0
+                    Use :meth:`trigger_user_turn_started`'s
+                    ``enable_user_speaking_frames`` argument instead. Will be
+                    removed in 2.0.0.
+
             **kwargs: Additional keyword arguments.
         """
         super().__init__(**kwargs)
         self._enable_interruptions = enable_interruptions
-        self._enable_user_speaking_frames = enable_user_speaking_frames
+        if enable_user_speaking_frames is not None:
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn(
+                    "`BaseUserTurnStartStrategy.enable_user_speaking_frames` is deprecated "
+                    "since 1.8.0 and will be removed in 2.0.0. Use "
+                    "`trigger_user_turn_started(enable_user_speaking_frames=...)` instead.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+        self._enable_user_speaking_frames = (
+            True if enable_user_speaking_frames is None else enable_user_speaking_frames
+        )
         self._register_event_handler("on_push_frame", sync=True)
         self._register_event_handler("on_broadcast_frame", sync=True)
         self._register_event_handler("on_user_turn_started", sync=True)
         self._register_event_handler("on_reset_aggregation", sync=True)
+
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        # reset() is deprecated.
+        if cls.reset is not BaseUserTurnStartStrategy.reset:
+            warnings.warn(
+                f"`{cls.__name__}` overrides `reset`, which is deprecated since 1.6.0 "
+                "and will be removed in 2.0.0. Override `handle_user_turn_started` instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
+    @property
+    def resolves_proposed_turn_start_frames(self) -> bool:
+        """Whether this strategy resolves proposals into turn starts.
+
+        A :class:`~pipecat.frames.frames.ProposedUserStartedSpeakingFrame` is a
+        request for a decision, so a strategy that acts on one consumes it: the
+        frame stops travelling, and no resolver further along decides the same
+        turn a second time. Override to True in a strategy that handles that
+        frame.
+        """
+        return False
+
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the strategy.
+
+        Args:
+            setup: Configuration object containing setup parameters.
+        """
+        await super().setup(setup.task_manager)
 
     async def cleanup(self):
         """Cleanup the strategy."""
         pass
 
     async def reset(self):
-        """Reset the strategy to its initial state."""
+        """Reset the strategy to its initial state.
+
+        .. deprecated:: 1.6.0
+            Use :meth:`handle_user_turn_started` instead. Will be removed in
+            2.0.0.
+
+        For a start strategy this only ever ran at turn start, so its work *is*
+        "on turn start" — which is exactly what :meth:`handle_user_turn_started`
+        names. New strategies should override that callback directly.
+        """
+        pass
+
+    async def handle_user_turn_started(self):
+        """Notify the strategy that a user turn has started.
+
+        The controller calls this on every start strategy when a turn begins.
+        Override to run, for example, logic to reset state and prepare for the
+        next detection.
+        """
+        # Backward compatibility: a custom strategy may still override the
+        # deprecated reset(); invoke it here (the base reset() is a no-op).
+        await self.reset()
+
+    async def handle_user_turn_stopped(self):
+        """Notify the strategy that the user turn has stopped.
+
+        The controller calls this on every start strategy when a turn ends.
+        Override if the strategy needs to act on turn end (likely uncommon).
+        """
         pass
 
     async def process_frame(self, frame: Frame) -> ProcessFrameResult | None:
@@ -117,13 +194,36 @@ class BaseUserTurnStartStrategy(BaseObject):
         """
         await self._call_event_handler("on_broadcast_frame", frame_cls, **kwargs)
 
-    async def trigger_user_turn_started(self):
-        """Trigger the `on_user_turn_started` event."""
+    async def trigger_user_turn_started(
+        self,
+        *,
+        enable_interruptions: bool | None = None,
+        enable_user_speaking_frames: bool | None = None,
+    ):
+        """Trigger the `on_user_turn_started` event.
+
+        Args:
+            enable_interruptions: Whether to broadcast an interruption for this
+                turn, overriding the strategy's configured setting. Pass False
+                when something else in the pipeline has already broadcast one.
+            enable_user_speaking_frames: Whether to emit
+                :class:`~pipecat.frames.frames.UserStartedSpeakingFrame` for this
+                turn. Pass False when something else in the pipeline has already
+                emitted it.
+        """
         await self._call_event_handler(
             "on_user_turn_started",
             UserTurnStartedParams(
-                enable_interruptions=self._enable_interruptions,
-                enable_user_speaking_frames=self._enable_user_speaking_frames,
+                enable_interruptions=(
+                    self._enable_interruptions
+                    if enable_interruptions is None
+                    else enable_interruptions
+                ),
+                enable_user_speaking_frames=(
+                    self._enable_user_speaking_frames
+                    if enable_user_speaking_frames is None
+                    else enable_user_speaking_frames
+                ),
             ),
         )
 

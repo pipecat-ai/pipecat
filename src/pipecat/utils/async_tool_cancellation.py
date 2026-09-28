@@ -6,46 +6,85 @@
 
 """Constants for the built-in async tool cancellation feature.
 
-When an ``LLMService`` has functions registered with
-``cancel_on_interruption=False`` (async tools), it automatically injects the
-``cancel_async_tool_call`` tool and the instructions below into every inference
-request so the LLM can cancel stale in-progress calls.
+A function registered with ``cancellable_by_llm=True`` is advertised
+alongside a cancel tool named for it, built here, and the instructions below are
+composed into the system instruction — so the LLM can drop work whose result is
+no longer wanted. A tool that doesn't opt in has no cancel tool at all.
+
+A single running call is stopped without arguments. Telling several calls of one
+tool apart takes the ``tool_call_id`` the conversation already carries, on the
+message that reported each call running.
 """
 
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 
-CANCEL_ASYNC_TOOL_NAME = "cancel_async_tool_call"
-
 ASYNC_TOOL_CANCELLATION_INSTRUCTIONS = """ASYNC TOOL CANCELLATION:
-Some tool calls run asynchronously in the background. When one starts, a tool response \
-is added to the conversation whose content is a JSON object with \
-"type": "async_tool", "status": "running", and a "tool_call_id" field containing the \
-exact ID of that call (e.g. {"type": "async_tool", "status": "running", "tool_call_id": "..."}).
+Some of your tools keep running in the background after you have replied, and some of \
+those can be stopped early.
 
-If the user changes topic, explicitly says they no longer need the result, or the pending \
-result would clearly be stale, call cancel_async_tool_call. \
-To find the correct tool_call_id: locate the most recent tool response in the conversation \
-whose content has "status": "running" and whose call has NOT already been cancelled, \
-then copy the "tool_call_id" value from that content exactly as-is. \
-Never invent or guess a tool_call_id."""
+Work that can be stopped early has its own cancel tool, named for it: a running \
+write_report call is stopped by cancel_write_report. Work with no such tool cannot be \
+stopped and will finish on its own.
 
-CANCEL_ASYNC_TOOL_SCHEMA = FunctionSchema(
-    name=CANCEL_ASYNC_TOOL_NAME,
-    description=(
-        "Cancel a single async tool call whose results are no longer needed. "
-        "Use this when the user changes topic, indicates a pending result is "
-        "no longer relevant, or when processing the result would produce a "
-        "stale or confusing response. "
-        "The tool_call_id must be copied exactly from the 'tool_call_id' field "
-        "in the async tool's 'running' response visible in the conversation history."
-    ),
-    properties={
-        "tool_call_id": {
-            "type": "string",
-            "description": (
-                "The exact tool_call_id from the async tool's 'running' response to cancel."
-            ),
-        }
-    },
-    required=["tool_call_id"],
-)
+When the user no longer wants a result you are still waiting on, call the corresponding \
+cancel tool. Only the call stops the work: saying you cancelled it, or that you'll skip it, \
+leaves it running and its result will still arrive and contradict you. So when the same turn \
+also asks for something else, make the call and answer — don't just answer.
+
+Call the cancel tool with no arguments and it stops the one call that is running. If \
+several calls of that same tool are running, it needs a tool_call_id to say which. Each \
+call's id is already in the conversation: find the tool message that reported it running, \
+which carries "status": "running", its "tool_call_id", and the arguments that call was \
+given. Copy that id exactly as written; never invent or guess one."""
+
+CANCEL_TOOL_PREFIX = "cancel_"
+
+
+def cancel_tool_name(function_name: str) -> str:
+    """Name of the tool that cancels calls of ``function_name``.
+
+    Args:
+        function_name: The cancellable tool.
+
+    Returns:
+        The built-in cancel tool's name, e.g. ``cancel_write_report``.
+    """
+    return f"{CANCEL_TOOL_PREFIX}{function_name}"
+
+
+def build_cancel_tool_schema(function_name: str) -> FunctionSchema:
+    """Build the cancel tool for one cancellable tool.
+
+    Which work to stop is carried by the tool the model picks, so a single
+    running call is stopped without arguments. ``tool_call_id`` only has to be
+    given to choose between several calls of the same tool, and the handler
+    refuses with the ids when it is needed and missing.
+
+    Args:
+        function_name: The tool whose calls this one cancels.
+
+    Returns:
+        The schema to advertise alongside ``function_name``.
+    """
+    return FunctionSchema(
+        name=cancel_tool_name(function_name),
+        description=(
+            f"Stop a running {function_name} call whose result is no longer "
+            "needed — the user says to drop it, asks for something that replaces "
+            "it, or says something that makes the pending result stale. Call it "
+            "with no arguments to stop the one running call; only when several "
+            f"{function_name} calls are running does it need a tool_call_id to "
+            "say which."
+        ),
+        properties={
+            "tool_call_id": {
+                "type": "string",
+                "description": (
+                    f"Which {function_name} call to stop. Needed only when "
+                    "several are running, and carried by the message in the "
+                    "conversation that reported each one running."
+                ),
+            },
+        },
+        required=[],
+    )

@@ -15,7 +15,7 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
@@ -52,18 +52,18 @@ transport_params = {
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
-    logger.info(f"Starting bot")
+    logger.info("Starting bot")
 
     stt = DeepgramSTTService(api_key=os.environ["DEEPGRAM_API_KEY"])
 
     tts = CartesiaTTSService(
         api_key=os.environ["CARTESIA_API_KEY"],
         settings=CartesiaTTSService.Settings(
-            voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+            voice="86e30c1d-714b-4074-a1f2-1cb6b552fb49",
         ),
     )
 
-    system_prompt = f"""
+    system_prompt = """
     You are a helpful LLM in a voice call.
     Your goal is to demonstrate your capabilities in a succinct way.
     You have access to memory tools that let you store and recall information.
@@ -83,60 +83,61 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     )
 
     # https://github.com/modelcontextprotocol/servers/tree/main/src/memory
-    async with MCPClient(
+    mcp = MCPClient(
         server_params=StdioServerParameters(
             command=shutil.which("npx"),
             args=["-y", "@modelcontextprotocol/server-memory"],
             # env={"MEMORY_FILE_PATH": "/tmp/pipecat_memory.jsonl"}, # Optional: specify MEMORY_FILE_PATH
         ),
-    ) as mcp:
-        tools = await mcp.register_tools(llm)
+    )
 
-        context = LLMContext(
-            messages=[{"role": "user", "content": "Please introduce yourself."}],
-            tools=tools,
-        )
-        user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
-            context,
-            user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
-        )
+    context = LLMContext(
+        messages=[{"role": "user", "content": "Please introduce yourself."}],
+        tools=await mcp.tools(),
+    )
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+        context,
+        user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
+    )
 
-        pipeline = Pipeline(
-            [
-                transport.input(),  # Transport user input
-                stt,
-                user_aggregator,  # User spoken responses
-                llm,  # LLM
-                tts,  # TTS
-                transport.output(),  # Transport bot output
-                assistant_aggregator,  # Assistant spoken responses and tool context
-            ]
-        )
+    pipeline = Pipeline(
+        [
+            transport.input(),  # Transport user input
+            stt,
+            user_aggregator,  # User spoken responses
+            llm,  # LLM
+            tts,  # TTS
+            transport.output(),  # Transport bot output
+            assistant_aggregator,  # Assistant spoken responses and tool context
+        ]
+    )
 
-        worker = PipelineWorker(
-            pipeline,
-            params=PipelineParams(
-                enable_metrics=True,
-                enable_usage_metrics=True,
-            ),
-            idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
-        )
+    worker = PipelineWorker(
+        pipeline,
+        params=PipelineParams(
+            enable_metrics=True,
+            enable_usage_metrics=True,
+        ),
+        idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
+        processor_unusable_policy=ProcessorUnusablePolicy.END,
+    )
 
-        @transport.event_handler("on_client_connected")
-        async def on_client_connected(transport, client):
-            logger.info(f"Client connected: {client}")
-            # Kick off the conversation.
-            await worker.queue_frames([LLMRunFrame()])
+    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
 
-        @transport.event_handler("on_client_disconnected")
-        async def on_client_disconnected(transport, client):
-            logger.info(f"Client disconnected")
-            await worker.cancel()
+    await runner.add_workers(worker)
 
-        runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
+    @transport.event_handler("on_client_connected")
+    async def on_client_connected(transport, client):
+        logger.info(f"Client connected: {client}")
+        # Kick off the conversation.
+        await worker.queue_frames([LLMRunFrame()])
 
-        await runner.add_workers(worker)
-        await runner.run()
+    @transport.event_handler("on_client_disconnected")
+    async def on_client_disconnected(transport, client):
+        logger.info("Client disconnected")
+        await runner.cancel()
+
+    await runner.run()
 
 
 async def bot(runner_args: RunnerArguments):

@@ -20,7 +20,7 @@ from pipecat.frames.frames import (
     StartFrame,
     SystemFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 
 try:
     import gi
@@ -91,6 +91,20 @@ class GStreamerPipelineSource(FrameProcessor):
         bus.add_signal_watch()
         bus.connect("message", self._on_gstreamer_message)
 
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the source.
+
+        Args:
+            setup: Configuration object containing setup parameters.
+        """
+        await super().setup(setup)
+        self._sample_rate = self._out_params.audio_sample_rate or setup.audio_out_sample_rate
+
+    async def cleanup(self):
+        """Release the GStreamer pipeline."""
+        await super().cleanup()
+        self._close()
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process incoming frames and manage GStreamer pipeline lifecycle.
 
@@ -124,16 +138,22 @@ class GStreamerPipelineSource(FrameProcessor):
 
     async def _start(self, frame: StartFrame):
         """Start the GStreamer pipeline."""
-        self._sample_rate = self._out_params.audio_sample_rate or frame.audio_out_sample_rate
+        assert self._player is not None
         self._player.set_state(Gst.State.PLAYING)
 
     async def _stop(self, frame: EndFrame):
         """Stop the GStreamer pipeline."""
-        self._player.set_state(Gst.State.NULL)
+        self._close()
 
     async def _cancel(self, frame: CancelFrame):
         """Cancel the GStreamer pipeline."""
-        self._player.set_state(Gst.State.NULL)
+        self._close()
+
+    def _close(self):
+        """Release the GStreamer pipeline. Idempotent."""
+        if self._player is not None:
+            self._player.set_state(Gst.State.NULL)
+            self._player = None
 
     #
     # GStreamer
@@ -157,6 +177,7 @@ class GStreamerPipelineSource(FrameProcessor):
 
     def _decodebin_audio(self, pad: Gst.Pad):
         """Set up audio processing pipeline from decoded audio pad."""
+        assert self._player is not None
         queue_audio = Gst.ElementFactory.make("queue", None)
         audioconvert = Gst.ElementFactory.make("audioconvert", None)
         audioresample = Gst.ElementFactory.make("audioresample", None)
@@ -191,6 +212,7 @@ class GStreamerPipelineSource(FrameProcessor):
 
     def _decodebin_video(self, pad: Gst.Pad):
         """Set up video processing pipeline from decoded video pad."""
+        assert self._player is not None
         queue_video = Gst.ElementFactory.make("queue", None)
         videoconvert = Gst.ElementFactory.make("videoconvert", None)
         videoscale = Gst.ElementFactory.make("videoscale", None)

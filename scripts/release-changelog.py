@@ -6,6 +6,7 @@ Usage::
     python scripts/release-changelog.py VERSION
     python scripts/release-changelog.py 1.1.0
     python scripts/release-changelog.py --file path/to/CHANGELOG.md 1.1.0
+    python scripts/release-changelog.py --no-heading 1.1.0
 
 Extracts the requested ``## [VERSION]`` section (heading and ``### …``
 subheadings included) and prints it to stdout. The only transformation
@@ -13,6 +14,10 @@ applied is collapsing each entry paragraph onto a single line, so it is
 suitable for pasting into release notes that don't need 80-column wrapping.
 ``(PR [...])`` references stay on their own two-space-indented continuation
 line. The input file is never modified.
+
+``--no-heading`` drops the ``## [VERSION]`` line, leaving the body to start
+at the first ``### …`` subheading. GitHub Releases carry the version in the
+release title, so the heading would be redundant there.
 
 Every paragraph is unfilled. Indentation is preserved — each logical line
 (bullets, sub-bullets, and the ``(PR [...])`` continuation) keeps its
@@ -75,6 +80,11 @@ def extract_section(text: str, version: str) -> str:
     return text[m.start() : end]
 
 
+def strip_heading(section: str) -> str:
+    _, _, body = section.partition("\n")
+    return body.lstrip("\n")
+
+
 def main() -> None:
     summary = (__doc__ or "").splitlines()[0]
     parser = argparse.ArgumentParser(description=summary)
@@ -85,10 +95,17 @@ def main() -> None:
         default=DEFAULT_CHANGELOG,
         help=f"Path to the changelog (default: {DEFAULT_CHANGELOG}).",
     )
+    parser.add_argument(
+        "--no-heading",
+        action="store_true",
+        help="Omit the '## [VERSION]' heading line.",
+    )
     args = parser.parse_args()
 
     text = args.file.read_text()
     section = extract_section(text, args.version)
+    if args.no_heading:
+        section = strip_heading(section)
     sys.stdout.write(process(section))
 
 

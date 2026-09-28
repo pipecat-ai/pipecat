@@ -62,6 +62,35 @@ body:
       required: true
 
   - type: textarea
+    id: minimal-repro
+    attributes:
+      label: Minimal reproducible example
+      description: >
+        A small, runnable script that shows the bug: a single-file bot, or a test
+        using `run_test()` from `pipecat.tests.utils`. Reports without runnable code
+        get the `needs-repro` label and are closed after 30 days if none is provided.
+        If you truly can't reproduce it in code (e.g. it only happens on rare live
+        calls), say so here and include everything you have: logs, timestamps,
+        session IDs, and your pipeline setup.
+      render: python
+      placeholder: |
+        # A minimal bot or run_test() snippet that triggers the bug.
+    validations:
+      required: true
+
+  - type: textarea
+    id: extra-evidence
+    attributes:
+      label: Eval scenario or recordings (optional)
+      description: >
+        Optional, but reports with these get looked at first. A failing
+        `pipecat eval` scenario YAML (see `src/pipecat/evals/`), and/or a link to an
+        audio recording that demonstrates the issue when the bug is audible
+        (interruptions, latency, garbled audio, wrong turn-taking).
+    validations:
+      required: false
+
+  - type: textarea
     id: expected
     attributes:
       label: Expected behavior
@@ -85,3 +114,18 @@ body:
       render: shell
     validations:
       required: false
+
+  - type: checkboxes
+    id: accountability
+    attributes:
+      label: Before you submit
+      description: >
+        AI tools are welcome for writing up a report, but a human must stand behind
+        it. See the "Filing Bug Reports" section in CONTRIBUTING.md.
+      options:
+        - label: I have personally reproduced this issue on the latest Pipecat release (or `main`).
+          required: true
+        - label: I have searched existing issues for this bug.
+          required: true
+        - label: If AI tools helped write this report, I have verified the behavior myself and will personally answer follow-up questions.
+          required: true

@@ -12,11 +12,21 @@ the main pipeline execution.
 """
 
 import asyncio
+import weakref
 from typing import Any
 
 from attr import dataclass
 
-from pipecat.observers.base_observer import BaseObserver, FrameProcessed, FramePushed
+from pipecat.frames.frames import Frame
+from pipecat.observers.base_observer import (
+    BaseObserver,
+    FrameProcessed,
+    FramePushed,
+    ProcessorSetUp,
+    StartupWarmup,
+)
+from pipecat.utils.asyncio.task_manager import BaseTaskManager
+from pipecat.utils.deprecation import deprecated
 
 
 @dataclass
@@ -55,6 +65,9 @@ class WorkerObserver(BaseObserver):
     pipeline by creating a queue and a worker for each user observer. When a frame
     is received, it will be put in a queue for efficiency and later processed by
     each worker.
+
+    It also tells a frame's first push from the ones that follow, and only
+    passes the first one to observers that want a frame once.
     """
 
     def __init__(
@@ -74,6 +87,10 @@ class WorkerObserver(BaseObserver):
         self._proxies: dict[BaseObserver, Proxy] | None = (
             None  # Becomes a dict after start() is called
         )
+        # Frames pushed so far, held weakly: an entry goes away with its
+        # frame, so this tracks the frames in flight, not every frame ever
+        # pushed.
+        self._frames_pushed: weakref.WeakValueDictionary[int, Frame] = weakref.WeakValueDictionary()
 
     def add_observer(self, observer: BaseObserver):
         """Add a new observer to the managed list.
@@ -108,17 +125,20 @@ class WorkerObserver(BaseObserver):
         if observer in self._observers:
             self._observers.remove(observer)
 
-    async def start(self):
-        """Start all proxy observer tasks."""
+    async def setup(self, task_manager: BaseTaskManager):
+        """Set up a proxy for every managed observer.
+
+        Processors report their own setup to observers, so the proxies are in
+        place before any of them is set up.
+
+        Args:
+            task_manager: The task manager the proxies run their tasks on.
+        """
+        await super().setup(task_manager)
         self._proxies = self._create_proxies(self._observers)
 
-    async def stop(self):
-        """Stop all proxy observer tasks."""
-        if not self._proxies:
-            return
-
-        for proxy in self._proxies.values():
-            await self.cancel_task(proxy.task)
+        for observer in self._proxies:
+            await observer.setup(task_manager)
 
     async def cleanup(self):
         """Cleanup all proxy observers."""
@@ -126,6 +146,9 @@ class WorkerObserver(BaseObserver):
 
         if not self._proxies:
             return
+
+        for proxy in self._proxies.values():
+            await self.cancel_task(proxy.task)
 
         for observer in self._proxies:
             await observer.cleanup()
@@ -143,10 +166,46 @@ class WorkerObserver(BaseObserver):
         await self._send_to_proxy(data)
 
     async def on_push_frame(self, data: FramePushed):
-        """Queue frame data for all managed observers.
+        """Queue frame data for the managed observers.
+
+        A repeated push only reaches the observers that want every push.
 
         Args:
             data: The frame push event data to distribute to observers.
+        """
+        if not self._proxies:
+            return
+
+        frame = data.frame
+        data.first_push = frame.id not in self._frames_pushed
+        if data.first_push:
+            self._frames_pushed[frame.id] = frame
+
+        for proxy in self._proxies.values():
+            if data.first_push or proxy.observer.observe_every_push:
+                await proxy.queue.put(data)
+
+    async def on_processor_setup(self, data: ProcessorSetUp):
+        """Queue processor setup timing for all managed observers.
+
+        Args:
+            data: The processor setup event data to distribute to observers.
+        """
+        await self._send_to_proxy(data)
+
+    @deprecated(
+        "`WorkerObserver.on_startup_warmup` is deprecated since 1.12.0 and will be removed in "
+        "2.0.0. No replacement."
+    )
+    async def on_startup_warmup(self, data: StartupWarmup):
+        """Queue deferred-import warming timing for all managed observers.
+
+        .. deprecated:: 1.12.0
+            No replacement. Nothing warms deferred imports at startup, so this
+            is never called. Will be removed in 2.0.0.
+
+        Args:
+            data: The startup warmup event data to distribute to observers.
         """
         await self._send_to_proxy(data)
 
@@ -182,5 +241,9 @@ class WorkerObserver(BaseObserver):
                 await observer.on_push_frame(data)
             elif isinstance(data, FrameProcessed):
                 await observer.on_process_frame(data)
+            elif isinstance(data, ProcessorSetUp):
+                await observer.on_processor_setup(data)
+            elif isinstance(data, StartupWarmup):
+                await observer.on_startup_warmup(data)
 
             queue.task_done()

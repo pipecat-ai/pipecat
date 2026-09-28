@@ -11,7 +11,7 @@ local end-of-turn detection without requiring network connectivity.
 """
 
 import threading
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import onnxruntime as ort
@@ -206,7 +206,7 @@ class LocalSmartTurnAnalyzerV3(BaseSmartTurn):
         outputs = self._session.run(None, {"input_features": input_features})
 
         # Extract probability (ONNX model returns sigmoid probabilities)
-        probability = outputs[0][0].item()
+        probability = cast(np.ndarray, outputs[0])[0].item()
 
         # Make prediction (1 for Complete, 0 for Incomplete)
         prediction = 1 if probability > 0.5 else 0

@@ -15,9 +15,12 @@ from loguru import logger
 from pipecat.adapters.schemas.direct_function import tool_options
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.frames.frames import StartFrame
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.services.llm_service import FunctionCallParams, LLMService
-from pipecat.utils.async_tool_cancellation import CANCEL_ASYNC_TOOL_NAME
+from pipecat.utils.async_tool_cancellation import cancel_tool_name
+from pipecat.utils.asyncio.task_manager import TaskManager
+from tests.frame_processor_helpers import frame_processor_setup
 
 
 async def get_current_weather(params: FunctionCallParams, location: str, format: str):
@@ -57,6 +60,15 @@ async def async_task(params: FunctionCallParams, query: str):
         query: The task query.
     """
     await params.result_callback({"status": "done"})
+
+
+@tool_options(cancel_on_interruption=False, cancellable_by_llm=True)
+async def cancellable_task(params: FunctionCallParams, query: str):
+    """A long-running task the LLM may cancel.
+
+    Args:
+        query: What to work on.
+    """
 
 
 @tool_options(cancel_on_interruption=False)
@@ -202,6 +214,40 @@ class TestAutoRegister(unittest.TestCase):
         self.assertEqual(list(service._functions.keys()), ["end_call"])
 
 
+class _ServiceWithOwnTools(LLMService):
+    """A service configured with its own tools, as the realtime services are."""
+
+    def _service_tools(self):
+        return ToolsSchema(standard_tools=[lookup_order_schema()])
+
+
+class TestServiceToolsRegisterOnStart(unittest.IsolatedAsyncioTestCase):
+    """A service's own tools have their handlers registered as soon as it starts.
+
+    A realtime service can run one of its configured tools before the first
+    context frame reaches it, so the handlers cannot wait for that frame.
+    """
+
+    async def _start(self, service: LLMService) -> None:
+        await service.setup(frame_processor_setup(TaskManager()))
+        await service.start(StartFrame())
+
+    async def test_service_tools_registered_on_start(self):
+        service = _ServiceWithOwnTools()
+        self.assertFalse(service.has_function("lookup_order"))
+
+        await self._start(service)
+
+        self.assertTrue(service.has_function("lookup_order"))
+
+    async def test_start_without_service_tools_registers_nothing(self):
+        service = LLMService()
+
+        await self._start(service)
+
+        self.assertEqual(service._functions, {})
+
+
 class TestAutoRegisterSchemaHandlers(unittest.TestCase):
     """A FunctionSchema that carries a handler is auto-registered like a direct function."""
 
@@ -250,17 +296,25 @@ class TestAutoRegisterSchemaHandlers(unittest.TestCase):
         service._sync_registered_tool_handlers([lookup_order_schema()])
         self.assertEqual(list(service._functions.keys()), ["lookup_order"])
 
-    def test_reserved_name_rejected(self):
+    def test_user_tool_keeps_a_colliding_cancel_tool_name(self):
         service = self._service()
         schema = FunctionSchema(
-            name=CANCEL_ASYNC_TOOL_NAME,
+            name=cancel_tool_name("cancellable_task"),
             description="d",
             properties={},
             required=[],
             handler=lookup_order_handler,
         )
-        with self.assertRaises(ValueError):
-            service._sync_registered_tool_handlers([schema])
+        # A user tool of that name keeps it; the cancel tool is not advertised,
+        # which leaves cancellable_task with no way to be stopped.
+        service._sync_registered_tool_handlers([cancellable_task, schema])
+        self.assertIs(
+            service._functions[cancel_tool_name("cancellable_task")].handler,
+            lookup_order_handler,
+        )
+        self.assertNotIn(
+            cancel_tool_name("cancellable_task"), service.get_llm_adapter().builtin_tools
+        )
 
 
 class TestRedundantManualRegistrationWarning(unittest.TestCase):
@@ -577,26 +631,24 @@ class TestReservedToolName(unittest.TestCase):
 
     def test_register_function_rejects_reserved_name(self):
         service = LLMService()
+        service._sync_registered_tool_handlers(LLMContext(tools=[cancellable_task]).tools)
 
         async def handler(params: FunctionCallParams):
             await params.result_callback({})
 
         with self.assertRaises(ValueError):
-            service.register_function(CANCEL_ASYNC_TOOL_NAME, handler)
+            service.register_function(cancel_tool_name("cancellable_task"), handler)
 
     def test_register_direct_function_rejects_reserved_name(self):
         service = LLMService()
+        service._sync_registered_tool_handlers(LLMContext(tools=[cancellable_task]).tools)
 
-        async def cancel_async_tool_call(params: FunctionCallParams, tool_call_id: str):
-            """A direct function whose name collides with the reserved built-in.
-
-            Args:
-                tool_call_id: The call to cancel.
-            """
+        async def cancel_cancellable_task(params: FunctionCallParams):
+            """A direct function whose name collides with an advertised cancel tool."""
             await params.result_callback({})
 
         with self.assertRaises(ValueError):
-            service._register_direct_function(cancel_async_tool_call)
+            service._register_direct_function(cancel_cancellable_task)
 
 
 class TestClassicRegisterFunction(unittest.TestCase):
@@ -628,30 +680,138 @@ class TestClassicRegisterFunction(unittest.TestCase):
 
 
 class TestAsyncToolCancellationPruning(unittest.TestCase):
-    """Pruning interacts correctly with the built-in async-tool-cancellation tool."""
+    """The cancellation tools track the advertised set, in both directions."""
 
-    def test_pruning_last_async_tool_tears_down_cancellation(self):
+    def test_withdrawn_when_the_cancellable_tool_is_pruned(self):
         service = LLMService()
-        service._sync_registered_tool_handlers(LLMContext(tools=[async_task]).tools)
-        service._setup_async_tool_cancellation()
-        self.assertIn(CANCEL_ASYNC_TOOL_NAME, service._functions)
-        # Drop the only async tool from the advertised set.
-        service._sync_registered_tool_handlers([])
-        self.assertNotIn("async_task", service._functions)
-        # No async tools remain, so the built-in cancel tool is torn down.
-        self.assertNotIn(CANCEL_ASYNC_TOOL_NAME, service._functions)
+        service._sync_registered_tool_handlers(LLMContext(tools=[cancellable_task]).tools)
+        self.assertIn(cancel_tool_name("cancellable_task"), service._functions)
 
-    def test_builtin_cancel_tool_survives_while_async_tools_remain(self):
+        # Drop the only cancellable tool from the advertised set.
+        service._sync_registered_tool_handlers([])
+        self.assertNotIn("cancellable_task", service._functions)
+        self.assertNotIn(cancel_tool_name("cancellable_task"), service._functions)
+        self.assertNotIn(
+            cancel_tool_name("cancellable_task"), service.get_llm_adapter().builtin_tools
+        )
+
+    def test_kept_while_a_cancellable_tool_remains(self):
+        service = LLMService()
+        service._sync_registered_tool_handlers(
+            LLMContext(tools=[cancellable_task, async_task]).tools
+        )
+        # Drop the async tool that never opted in; the cancellable one remains.
+        service._sync_registered_tool_handlers([cancellable_task])
+        self.assertNotIn("async_task", service._functions)
+        self.assertIn(cancel_tool_name("cancellable_task"), service._functions)
+
+    def test_absent_for_async_tools_that_did_not_opt_in(self):
         service = LLMService()
         service._sync_registered_tool_handlers(LLMContext(tools=[async_task, async_task_2]).tools)
-        service._setup_async_tool_cancellation()
-        # Drop one async tool; another remains.
-        service._sync_registered_tool_handlers([async_task])
-        self.assertTrue(service.has_function("async_task"))
-        self.assertNotIn("async_task_2", service._functions)
-        # The built-in cancel tool isn't auto_registered, so the prune loop
-        # leaves it alone (and async tools still remain).
-        self.assertIn(CANCEL_ASYNC_TOOL_NAME, service._functions)
+        self.assertNotIn(cancel_tool_name("cancellable_task"), service._functions)
+
+
+class TestRebindChangedAdvertisedHandler(unittest.TestCase):
+    """Re-advertising a name with a different handler rebinds the auto-registered entry.
+
+    Regression test for the case where two consecutive advertised tool sets carry
+    the same tool name but different handlers (e.g. a fresh per-node closure after
+    a Flows transition). The new handler must take effect, not be silently dropped.
+    """
+
+    def _service(self) -> LLMService:
+        return LLMService()
+
+    def _capture_debug(self):
+        sink = io.StringIO()
+        handler_id = logger.add(sink, level="DEBUG", format="{message}")
+        return sink, handler_id
+
+    @staticmethod
+    def _named_direct_function(name: str, marker: str):
+        """Build a distinct direct function advertised under ``name``."""
+
+        async def fn(params: FunctionCallParams, value: str):
+            """Do a thing.
+
+            Args:
+                value: A value.
+            """
+            await params.result_callback({"marker": marker})
+
+        fn.__name__ = name
+        return fn
+
+    def test_rebinds_changed_handler_for_still_advertised_direct_function(self):
+        service = self._service()
+        first = self._named_direct_function("switch", "A")
+        second = self._named_direct_function("switch", "B")
+        service._sync_registered_tool_handlers([first])
+        self.assertIs(service._functions["switch"].handler.function, first)
+        # Re-advertise the same name with a different handler — it must rebind.
+        service._sync_registered_tool_handlers([second])
+        self.assertIs(service._functions["switch"].handler.function, second)
+        # Still managed by the advertised set, so it stays prunable.
+        self.assertTrue(service._functions["switch"].auto_registered)
+
+    def test_rebinds_changed_schema_handler_for_still_advertised_name(self):
+        service = self._service()
+
+        async def handler_a(params: FunctionCallParams):
+            await params.result_callback({"marker": "A"})
+
+        async def handler_b(params: FunctionCallParams):
+            await params.result_callback({"marker": "B"})
+
+        def schema(handler):
+            return FunctionSchema(
+                name="x", description="d", properties={}, required=[], handler=handler
+            )
+
+        service._sync_registered_tool_handlers([schema(handler_a)])
+        self.assertIs(service._functions["x"].handler, handler_a)
+        # The issue's exact repro: same name, new handler on the next advertised set.
+        service._sync_registered_tool_handlers([schema(handler_b)])
+        self.assertIs(service._functions["x"].handler, handler_b)
+        self.assertTrue(service._functions["x"].auto_registered)
+
+    def test_repeated_identical_schema_handler_does_not_churn(self):
+        service = self._service()
+        service._sync_registered_tool_handlers([lookup_order_schema()])
+        sink, handler_id = self._capture_debug()
+        try:
+            # The handler object is unchanged across frames, so no rebind should happen.
+            service._sync_registered_tool_handlers([lookup_order_schema()])
+        finally:
+            logger.remove(handler_id)
+        self.assertIs(service._functions["lookup_order"].handler, lookup_order_handler)
+        self.assertNotIn("rebound", sink.getvalue())
+
+    def test_explicit_registration_not_rebound_by_advertised_handler(self):
+        service = self._service()
+
+        async def explicit_handler(params: FunctionCallParams):
+            await params.result_callback({})
+
+        async def advertised_handler(params: FunctionCallParams):
+            await params.result_callback({})
+
+        def schema(handler):
+            return FunctionSchema(
+                name="lookup_order", description="d", properties={}, required=[], handler=handler
+            )
+
+        service.register_function("lookup_order", explicit_handler)
+        sink = io.StringIO()
+        handler_id = logger.add(sink, level="WARNING", format="{message}")
+        try:
+            service._sync_registered_tool_handlers([schema(advertised_handler)])
+        finally:
+            logger.remove(handler_id)
+        # Explicit registration wins; the advertised handler does not rebind it.
+        self.assertIs(service._functions["lookup_order"].handler, explicit_handler)
+        self.assertFalse(service._functions["lookup_order"].auto_registered)
+        self.assertIn("unnecessary", sink.getvalue())
 
 
 if __name__ == "__main__":

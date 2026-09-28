@@ -14,7 +14,7 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import Frame, InputImageRawFrame, LLMRunFrame, OutputImageRawFrame
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
@@ -88,7 +88,7 @@ class EdgeDetectionProcessor(FrameProcessor):
             await self.push_frame(frame, direction)
 
 
-SYSTEM_INSTRUCTION = f"""
+SYSTEM_INSTRUCTION = """
 "You are Gemini Chatbot, a friendly, helpful robot.
 
 Your goal is to demonstrate your capabilities in a succinct way.
@@ -133,7 +133,12 @@ async def run_bot(pipecat_transport):
             enable_metrics=True,
             enable_usage_metrics=True,
         ),
+        processor_unusable_policy=ProcessorUnusablePolicy.END,
     )
+
+    runner = WorkerRunner(handle_sigint=False, force_gc=True)
+
+    await runner.add_workers(worker)
 
     @worker.rtvi.event_handler("on_client_ready")
     async def on_client_ready(rtvi):
@@ -158,11 +163,8 @@ async def run_bot(pipecat_transport):
     @pipecat_transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         logger.info("Pipecat Client disconnected")
-        await worker.cancel()
+        await runner.cancel()
 
-    runner = WorkerRunner(handle_sigint=False, force_gc=True)
-
-    await runner.add_workers(worker)
     await runner.run()
 
 

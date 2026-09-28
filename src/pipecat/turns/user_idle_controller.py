@@ -19,6 +19,7 @@ from pipecat.frames.frames import (
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
+from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.utils.base_object import BaseObject
 
 
@@ -34,6 +35,10 @@ class UserIdleController(BaseObject):
     The timer is suppressed while a user turn is in progress to avoid false
     triggers during interruptions (where BotStoppedSpeakingFrame arrives while
     the user is still speaking).
+
+    A UserIdleTimeoutUpdateFrame applies immediately: it restarts a running
+    timer with the new duration and, while waiting for the user to speak, arms
+    the timer even if idle detection was previously disabled.
 
     Event handlers available:
 
@@ -62,16 +67,48 @@ class UserIdleController(BaseObject):
 
         self._user_idle_timeout = user_idle_timeout
 
+        self._waiting_for_user: bool = False
+        self._bot_speaking: bool = False
         self._user_turn_in_progress: bool = False
         self._function_calls_in_progress: int = 0
         self._idle_timer_task: asyncio.Task | None = None
 
         self._register_event_handler("on_user_turn_idle", sync=True)
 
+    @property
+    def waiting_for_user(self) -> bool:
+        """Whether the bot has finished responding and is waiting for the user.
+
+        False while the bot is thinking, speaking or running a function call,
+        and during a user turn.
+        """
+        return self._waiting_for_user
+
+    @property
+    def function_calls_in_progress(self) -> bool:
+        """Whether function calls have started and not finished."""
+        return self._function_calls_in_progress > 0
+
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the controller.
+
+        Args:
+            setup: Configuration object containing setup parameters.
+        """
+        return await super().setup(setup.task_manager)
+
+    async def stop(self):
+        """Stop the idle timer.
+
+        Called at session end so it can't report idleness that only means
+        the session is over.
+        """
+        await self._cancel_idle_timer()
+
     async def cleanup(self):
         """Cleanup the controller."""
         await super().cleanup()
-        await self._cancel_idle_timer()
+        await self.stop()
 
     async def process_frame(self, frame: Frame):
         """Process an incoming frame to track user activity state.
@@ -83,9 +120,15 @@ class UserIdleController(BaseObject):
             self._user_idle_timeout = frame.timeout
             if self._user_idle_timeout <= 0:
                 await self._cancel_idle_timer()
+            elif self._waiting_for_user:
+                # Apply the new timeout now: restart a running timer with the
+                # new duration, or arm one if idle detection was previously
+                # disabled.
+                await self._start_idle_timer()
             return
 
         if isinstance(frame, BotStoppedSpeakingFrame):
+            self._bot_speaking = False
             # Only start the timer if the user isn't mid-turn and no function
             # calls are pending.
             #
@@ -101,19 +144,43 @@ class UserIdleController(BaseObject):
             # on_function_calls_started event handler, so the counter guard
             # prevents the timer from starting while a function call is in progress.
             if not self._user_turn_in_progress and self._function_calls_in_progress == 0:
+                # Track the waiting-for-user window even when the timeout is
+                # currently <= 0 (no timer), so a later timeout update can arm
+                # the timer without waiting for the next bot turn.
+                self._waiting_for_user = True
                 await self._start_idle_timer()
         elif isinstance(frame, BotStartedSpeakingFrame):
+            self._bot_speaking = True
+            self._waiting_for_user = False
             await self._cancel_idle_timer()
         elif isinstance(frame, UserStartedSpeakingFrame):
+            self._waiting_for_user = False
             self._user_turn_in_progress = True
             await self._cancel_idle_timer()
         elif isinstance(frame, UserStoppedSpeakingFrame):
             self._user_turn_in_progress = False
         elif isinstance(frame, FunctionCallsStartedFrame):
+            self._waiting_for_user = False
             self._function_calls_in_progress += len(frame.function_calls)
             await self._cancel_idle_timer()
         elif isinstance(frame, (FunctionCallResultFrame, FunctionCallCancelFrame)):
             self._function_calls_in_progress = max(0, self._function_calls_in_progress - 1)
+
+    async def wait_for_user(self):
+        """Start waiting for the user after a turn the bot will not answer.
+
+        The timer normally starts when the bot stops speaking. A user turn that
+        ends with nothing for the bot to answer (e.g. no transcript) cancels
+        the timer without the bot speaking again afterwards, so the caller
+        re-arms it here. Does nothing while the bot is speaking, a user turn
+        is in progress, or function calls are pending.
+        """
+        if self._bot_speaking or self._user_turn_in_progress:
+            return
+        if self._function_calls_in_progress > 0:
+            return
+        self._waiting_for_user = True
+        await self._start_idle_timer()
 
     async def _start_idle_timer(self):
         """Start (or restart) the idle timer."""

@@ -14,6 +14,8 @@ from unittest.mock import AsyncMock, PropertyMock
 from loguru import logger
 from starlette.websockets import WebSocketState
 
+from pipecat.frames.frames import Frame, OutputAudioRawFrame
+from pipecat.serializers.base_serializer import FrameSerializer
 from pipecat.transports.websocket.fastapi import (
     FastAPIWebsocketCallbacks,
     FastAPIWebsocketClient,
@@ -324,6 +326,72 @@ class TestDisconnectCloseTimeout(unittest.IsolatedAsyncioTestCase):
         transport = FastAPIWebsocketTransport(mock_ws, params)
 
         self.assertEqual(transport._client._ws_close_timeout, 1.25)
+
+
+class _CoalescingSerializer(FrameSerializer):
+    """Emits one coalesced payload every third frame, buffering the two before it."""
+
+    def __init__(self):
+        super().__init__()
+        self._seen = 0
+
+    async def serialize(self, frame: Frame) -> str | bytes | None:
+        """Emit the accumulated block on every third frame."""
+        self._seen += 1
+        if self._seen % 3:
+            return None
+        return b"\x00" * 960
+
+    async def deserialize(self, data: str | bytes) -> Frame | None:
+        """Unused; only the output transport is exercised here."""
+        return None
+
+
+class TestWriteAudioFramePacesWrittenFrames(unittest.IsolatedAsyncioTestCase):
+    """Tests for issue #5592.
+
+    The telephony serializers resample through a stream resampler, which buffers
+    audio across calls: most calls emit no payload and a later one emits a larger
+    block. Those frames have still been written, so pacing follows the frames
+    taken rather than the payloads that go out, and the frames have to keep
+    reaching downstream consumers.
+    """
+
+    def _make_output(self, serializer):
+        mock_ws = AsyncMock()
+        type(mock_ws).client_state = PropertyMock(return_value=WebSocketState.CONNECTED)
+        type(mock_ws).application_state = PropertyMock(return_value=WebSocketState.CONNECTED)
+
+        params = FastAPIWebsocketParams(audio_out_enabled=True, serializer=serializer)
+        output = FastAPIWebsocketTransport(mock_ws, params).output()
+        output._sample_rate = 8000
+        output._write_audio_sleep = AsyncMock()
+        return output, mock_ws
+
+    @staticmethod
+    def _audio_frame():
+        return OutputAudioRawFrame(audio=b"\x00" * 320, sample_rate=8000, num_channels=1)
+
+    async def test_every_frame_is_paced_when_payloads_are_coalesced(self):
+        """Pacing follows the frames taken, not the payloads that go out."""
+        output, mock_ws = self._make_output(_CoalescingSerializer())
+
+        written = [await output.write_audio_frame(self._audio_frame()) for _ in range(9)]
+
+        self.assertEqual(written, [True] * 9)
+        self.assertEqual(output._write_audio_sleep.await_count, 9)
+        self.assertEqual(mock_ws.send_bytes.await_count, 3)
+
+    async def test_frame_is_not_written_when_serializing_fails(self):
+        """A serializer that raises leaves the frame unwritten, and unpaced."""
+        serializer = _CoalescingSerializer()
+        serializer.serialize = AsyncMock(side_effect=RuntimeError("cannot serialize"))
+        output, _ = self._make_output(serializer)
+
+        written = await output.write_audio_frame(self._audio_frame())
+
+        self.assertFalse(written)
+        output._write_audio_sleep.assert_not_awaited()
 
 
 if __name__ == "__main__":

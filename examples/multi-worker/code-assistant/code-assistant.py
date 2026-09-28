@@ -35,8 +35,9 @@ from pipecat.adapters.schemas.direct_function import tool_options
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMMessagesAppendFrame, LLMRunFrame
+from pipecat.pipeline.job_context import JobParams
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
@@ -83,7 +84,9 @@ async def ask_code(params: FunctionCallParams, question: str):
             dependencies, or anything in the project.
     """
     logger.info(f"Asking code worker: '{question}'")
-    async with params.pipeline_worker.job("code-worker", payload={"question": question}) as job:
+    async with params.pipeline_worker.job(
+        "code-worker", params=JobParams(payload={"question": question})
+    ) as job:
         await params.llm.queue_frame(
             LLMMessagesAppendFrame(
                 messages=[{"role": "developer", "content": "Give me a moment."}],
@@ -96,8 +99,6 @@ async def ask_code(params: FunctionCallParams, question: str):
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info("Starting code assistant")
-
-    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
 
     stt = DeepgramSTTService(api_key=os.environ["DEEPGRAM_API_KEY"])
     tts = CartesiaTTSService(
@@ -148,7 +149,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             enable_usage_metrics=True,
         ),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
+        processor_unusable_policy=ProcessorUnusablePolicy.END,
     )
+
+    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
+
+    await runner.add_workers(CodeWorker("code-worker", project_path=PROJECT_PATH), worker)
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
@@ -165,8 +171,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_disconnected(transport, client):
         logger.info("Client disconnected")
         await runner.cancel()
-
-    await runner.add_workers(CodeWorker("code-worker", project_path=PROJECT_PATH), worker)
 
     await runner.run()
 

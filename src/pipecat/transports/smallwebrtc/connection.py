@@ -16,7 +16,7 @@ import json
 import os
 import time
 import uuid
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from loguru import logger
 from pydantic import BaseModel, TypeAdapter
@@ -143,6 +143,7 @@ class SmallWebRTCTrack:
         self._enabled = True
         self._last_recv_time: float = 0.0
         self._idle_task: asyncio.Task | None = None
+        self._renegotiation_task: asyncio.Task | None = None
         self._idle_timeout: float = 2.0  # seconds before discarding old frames
 
     def set_enabled(self, enabled: bool) -> None:
@@ -259,9 +260,9 @@ class SmallWebRTCConnection(BaseObject):
         if not ice_servers:
             self.ice_servers: list[IceServer] = []
         elif all(isinstance(s, IceServer) for s in ice_servers):
-            self.ice_servers = ice_servers
+            self.ice_servers = cast(list[IceServer], ice_servers)
         elif all(isinstance(s, str) for s in ice_servers):
-            self.ice_servers = [IceServer(urls=s) for s in ice_servers]
+            self.ice_servers = [IceServer(urls=s) for s in cast(list[str], ice_servers)]
         else:
             raise TypeError("ice_servers must be either List[str] or List[RTCIceServer]")
         self._connect_invoked = False
@@ -331,6 +332,12 @@ class SmallWebRTCConnection(BaseObject):
         def on_datachannel(channel):
             self._data_channel = channel
 
+            # A channel created by the remote peer is already open when aiortc
+            # emits "datachannel" (readyState is set before the event), so no
+            # "open" event will follow — flush immediately in that case.
+            if channel.readyState == "open":
+                self._flush_message_queue()
+
             # Flush queued messages once the data channel is open
             @channel.on("open")
             async def on_open():
@@ -395,10 +402,10 @@ class SmallWebRTCConnection(BaseObject):
         self.force_transceivers_to_send_recv()
 
         # this answer does not contain the ice candidates, which will be gathered later, after the setLocalDescription
-        logger.debug(f"Creating answer")
+        logger.debug("Creating answer")
         local_answer = await self._pc.createAnswer()
         await self._pc.setLocalDescription(local_answer)
-        logger.debug(f"Setting the answer after the local description is created")
+        logger.debug("Setting the answer after the local description is created")
         self._answer = self._pc.localDescription
 
     async def initialize(self, sdp: str, type: str):
@@ -423,10 +430,10 @@ class SmallWebRTCConnection(BaseObject):
             # and aiortc does not handle that pretty well.
             video_input_track = self.video_input_track()
             if video_input_track:
-                await self.video_input_track().discard_old_frames()
+                await video_input_track.discard_old_frames()
             screen_video_input_track = self.screen_video_input_track()
             if screen_video_input_track:
-                await self.screen_video_input_track().discard_old_frames()
+                await screen_video_input_track.discard_old_frames()
             if video_input_track or screen_video_input_track:
                 # This prevents an issue where sometimes the WebRTC connection can be established
                 # before the bot is ready to receive video. When that happens, we can lose a couple
@@ -460,8 +467,13 @@ class SmallWebRTCConnection(BaseObject):
         async def delayed_task():
             await asyncio.sleep(2)
             self._renegotiation_in_progress = False
+            # A renegotiation arriving inside the two seconds replaces this task.
+            if self._renegotiation_task is asyncio.current_task():
+                self._renegotiation_task = None
 
-        asyncio.create_task(delayed_task())
+        # Held on self so the task cannot be collected before it clears the flag,
+        # which would leave renegotiation blocked for the rest of the session.
+        self._renegotiation_task = asyncio.create_task(delayed_task())
 
     def force_transceivers_to_send_recv(self):
         """Force all transceivers to bidirectional send/receive mode."""
@@ -777,6 +789,8 @@ class SmallWebRTCConnection(BaseObject):
         message that was buffered while the channel was unavailable.
         """
         self._cancel_data_channel_timeout()
+        if not self._data_channel:
+            return
         logger.debug("Data channel is open, flushing queued messages")
         while self._outgoing_messages_queue:
             message = self._outgoing_messages_queue.pop(0)

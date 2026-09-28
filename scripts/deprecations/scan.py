@@ -51,6 +51,11 @@ FIRST_REFERENCE_RE = re.compile(
 NO_REPLACEMENT_RE = re.compile(
     r"no replacement|no longer|always|discontinued|unmaintained", re.IGNORECASE
 )
+# An explicit, leading "No replacement" — the convention's authoritative signal
+# that nothing replaces the deprecated thing (from CONTRIBUTING.md: "lead with
+# `No replacement.`"). No trailing period required, so "No replacement — ..." or
+# "No replacement; ..." also match.
+NO_REPLACEMENT_LEAD_RE = re.compile(r"^\s*no replacement\b", re.IGNORECASE)
 # The removal version stated in a directive body ("... will be removed in 2.0.0.").
 REMOVAL_RE = re.compile(r"removed in (\d+\.\d+\.\d+)", re.IGNORECASE)
 _DIRECTIVE_VERSION_RE = re.compile(r"v?\d+\.\d+\.\d+")
@@ -191,7 +196,13 @@ def directive_removal(body: str) -> str | None:
 
 
 def first_reference(body: str) -> str | None:
-    """The first role/backtick reference in a directive body — the replacement."""
+    """The first role/backtick reference in a directive body — the replacement.
+
+    Returns ``None`` when the body leads with an explicit "No replacement.", so
+    contextual role/backtick references after it aren't mistaken for a replacement.
+    """
+    if NO_REPLACEMENT_LEAD_RE.match(body):
+        return None
     match = FIRST_REFERENCE_RE.search(body)
     if not match:
         return None
@@ -203,6 +214,10 @@ _FIRST_REF_IS_MODULE_RE = re.compile(r"^[^`]*:mod:`")
 
 def relation_for(body: str, replacement: str | None) -> str:
     """Classify the migration relation from the directive's leading verb/target."""
+    if NO_REPLACEMENT_LEAD_RE.match(body):
+        # An explicit leading "No replacement." overrides any relation verb that
+        # appears later in contextual prose (e.g. "... merged into X years ago").
+        return "none"
     low = body.lower()
     if re.search(r"\brenamed to\b", low):
         return "rename"
@@ -285,12 +300,16 @@ def scan_source(src_root: Path, *, exclude: frozenset[str] = DEFAULT_EXCLUDE) ->
         relpath = str(py_file.relative_to(src_root.parent))
         if relpath in exclude:
             continue
+        # An editor may leave a lock symlink such as ``.#module.py`` pointing
+        # at nothing readable. It matches the glob but is not source.
+        if not py_file.is_file():
+            continue
         tree = ast.parse(py_file.read_text(encoding="utf-8"), filename=str(py_file))
 
         for version, body, param in iter_directives(ast.get_docstring(tree) or ""):
             scan.directives.append(Directive(relpath, "<module>", param, version, body))
 
-        def visit(node, prefix: str, parent_is_class: bool) -> None:
+        def visit(node, prefix: str, parent_is_class: bool, relpath: str = relpath) -> None:
             for child in ast.iter_child_nodes(node):
                 if isinstance(child, ast.Assign):
                     for target in child.targets:

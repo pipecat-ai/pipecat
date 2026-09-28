@@ -15,17 +15,19 @@ import platform
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from enum import StrEnum
+from typing import Any, cast
 
 import numpy as np
 from loguru import logger
 from typing_extensions import override
 
 from pipecat.frames.frames import ErrorFrame, Frame, TranscriptionFrame
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, assert_given
+from pipecat.services.settings import STTSettings
 from pipecat.services.stt_service import SegmentedSTTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given, require_given
 
 try:
     from faster_whisper import WhisperModel
@@ -60,7 +62,7 @@ class Model(StrEnum):
         MEDIUM: Medium-sized multilingual model, better quality.
         LARGE: Best quality multilingual model, slower inference.
         LARGE_V3_TURBO: Fast multilingual model, slightly lower quality than LARGE.
-        DISTIL_LARGE_V2: Fast multilingual distilled model.
+        DISTIL_LARGE_V2: Fast English-only distilled model.
         DISTIL_MEDIUM_EN: Fast English-only distilled model.
     """
 
@@ -71,9 +73,11 @@ class Model(StrEnum):
     MEDIUM = "medium"
     LARGE = "large-v3"
     LARGE_V3_TURBO = "deepdml/faster-whisper-large-v3-turbo-ct2"
-    DISTIL_LARGE_V2 = "Systran/faster-distil-whisper-large-v2"
 
-    # English-only models
+    # English-only models. The distilled models keep the multilingual tokenizer
+    # of their teacher, so the loaded model reports itself as multilingual and
+    # the language check can't reject a non-English language for them.
+    DISTIL_LARGE_V2 = "Systran/faster-distil-whisper-large-v2"
     DISTIL_MEDIUM_EN = "Systran/faster-distil-whisper-medium.en"
 
 
@@ -88,8 +92,8 @@ class MLXModel(StrEnum):
         MEDIUM: Medium-sized multilingual model for MLX.
         LARGE_V3: Best quality multilingual model for MLX.
         LARGE_V3_TURBO: Finetuned, pruned Whisper large-v3, much faster with slightly lower quality.
-        DISTIL_LARGE_V3: Fast multilingual distilled model for MLX.
         LARGE_V3_TURBO_Q4: LARGE_V3_TURBO quantized to Q4 for reduced memory usage.
+        DISTIL_LARGE_V3: Fast English-only distilled model for MLX.
     """
 
     # Multilingual models
@@ -97,8 +101,10 @@ class MLXModel(StrEnum):
     MEDIUM = "mlx-community/whisper-medium-mlx"
     LARGE_V3 = "mlx-community/whisper-large-v3-mlx"
     LARGE_V3_TURBO = "mlx-community/whisper-large-v3-turbo"
-    DISTIL_LARGE_V3 = "mlx-community/distil-whisper-large-v3"
     LARGE_V3_TURBO_Q4 = "mlx-community/whisper-large-v3-turbo-q4"
+
+    # English-only models
+    DISTIL_LARGE_V3 = "mlx-community/distil-whisper-large-v3"
 
 
 def language_to_whisper_language(language: Language) -> str:
@@ -188,9 +194,16 @@ class WhisperSTTSettings(STTSettings):
 
     Parameters:
         no_speech_prob: Probability threshold for filtering non-speech segments.
+        hotwords: Words or phrases to bias the transcription towards, as a single
+            space-separated string (e.g. product names or jargon).
+        initial_prompt: Text prepended to the decoder prompt as preceding context,
+            steering style, punctuation and spelling (e.g. a sample sentence in the
+            wording the transcript should use).
     """
 
-    no_speech_prob: float | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    no_speech_prob: float | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    hotwords: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    initial_prompt: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 @dataclass
@@ -203,9 +216,9 @@ class WhisperMLXSTTSettings(STTSettings):
         engine: Whisper engine identifier.
     """
 
-    no_speech_prob: float | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    temperature: float | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    engine: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    no_speech_prob: float | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    temperature: float | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    engine: str | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class WhisperSTTService(SegmentedSTTService):
@@ -217,6 +230,11 @@ class WhisperSTTService(SegmentedSTTService):
 
     Settings = WhisperSTTSettings
     _settings: Settings
+
+    @property
+    def wants_wav_segments(self) -> bool:
+        """Receive segments as raw 16-bit PCM, which the model reads directly."""
+        return False
 
     def __init__(
         self,
@@ -263,6 +281,8 @@ class WhisperSTTService(SegmentedSTTService):
             model=Model.DISTIL_MEDIUM_EN.value,
             language=Language.EN,
             no_speech_prob=0.4,
+            hotwords=None,
+            initial_prompt=None,
         )
 
         # --- 2. Deprecated direct-arg overrides ---
@@ -320,13 +340,61 @@ class WhisperSTTService(SegmentedSTTService):
         Note:
             If this is the first time this model is being run,
             it will take time to download from the Hugging Face model hub.
+
+        Raises:
+            ValueError: If the model can't transcribe the configured language.
         """
         logger.debug("Loading Whisper model...")
-        model_name = assert_given(self._settings.model)
-        if model_name is None:
-            raise ValueError("Whisper model must be specified")
+        model_name = require_given(self._settings.model, "Whisper model")
         self._model = WhisperModel(model_name, device=self._device, compute_type=self._compute_type)
         logger.debug("Loaded Whisper model")
+        unsupported = self._unsupported_language()
+        if unsupported:
+            raise ValueError(unsupported)
+
+    def _unsupported_language(self) -> str | None:
+        """Describe why the loaded model can't transcribe the current language.
+
+        The English-only models (every ``.en`` one, including the default) accept
+        any language and transcribe as English regardless, so a mismatch would
+        otherwise surface as fluent-looking output in the wrong language rather
+        than as an error. A language of ``None`` asks Whisper to detect the
+        language itself, which every model supports.
+
+        Returns:
+            An explanatory message, or ``None`` when the pairing is usable.
+        """
+        supported = getattr(self._model, "supported_languages", None)
+        language = self._settings.language
+        if not supported or not is_given(language) or language is None:
+            return None
+        if language in supported:
+            return None
+        return (
+            f"Whisper model '{assert_given(self._settings.model)}' cannot transcribe "
+            f"'{language}' — it supports only {sorted(supported)}. Use a multilingual "
+            "model (e.g. 'large-v3-turbo')."
+        )
+
+    async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
+        """Apply a settings delta, reporting a language the model can't handle.
+
+        A mid-call switch to an unsupported language is reported rather than
+        raised, so a settings change can't tear down a live pipeline; the model
+        stays loaded and keeps transcribing as English.
+
+        Args:
+            delta: An STT settings delta.
+
+        Returns:
+            Dict mapping changed field names to their previous values.
+        """
+        changed = await super()._update_settings(delta)
+        if "language" in changed:
+            unsupported = self._unsupported_language()
+            if unsupported:
+                await self.push_error(unsupported)
+        return changed
 
     @traced_stt
     async def _handle_transcription(
@@ -358,10 +426,25 @@ class WhisperSTTService(SegmentedSTTService):
         # Divide by 32768 because we have signed 16-bit data.
         audio_float = np.frombuffer(audio, dtype=np.int16).astype(np.float32) / 32768.0
 
-        language = assert_given(self._settings.language)
-        segments, _ = await asyncio.to_thread(
-            self._model.transcribe, audio_float, language=language
-        )
+        # The stored language is a Whisper code rather than a Language, but
+        # Language is a StrEnum so downstream handles either.
+        language = cast("Language | None", assert_given(self._settings.language))
+        model = self._model
+        hotwords = assert_given(self._settings.hotwords)
+        initial_prompt = assert_given(self._settings.initial_prompt)
+
+        def transcribe():
+            # `transcribe` returns a lazy generator that decodes as it is consumed,
+            # so consume it here, in the worker thread, not on the event loop.
+            segments, _ = model.transcribe(
+                audio_float,
+                language=language,
+                hotwords=hotwords,
+                initial_prompt=initial_prompt,
+            )
+            return list(segments)
+
+        segments = await asyncio.to_thread(transcribe)
         text: str = ""
         no_speech_prob_threshold = assert_given(self._settings.no_speech_prob)
         for segment in segments:
@@ -471,7 +554,8 @@ class WhisperSTTServiceMLX(WhisperSTTService):
             **kwargs,
         )
 
-        # No need to call _load() as MLX Whisper loads models on demand
+        # MLX Whisper loads the model on demand, so only the name is checked here.
+        require_given(self._settings.model, "Whisper model")
 
     @override
     def _load(self):
@@ -509,11 +593,9 @@ class WhisperSTTServiceMLX(WhisperSTTService):
             # Divide by 32768 because we have signed 16-bit data.
             audio_float = np.frombuffer(audio, dtype=np.int16).astype(np.float32) / 32768.0
 
-            model_path = assert_given(self._settings.model)
-            if model_path is None:
-                raise ValueError("Whisper model must be specified")
+            model_path = require_given(self._settings.model, "Whisper model")
             temperature = assert_given(self._settings.temperature)
-            language = assert_given(self._settings.language)
+            language = cast("Language | None", assert_given(self._settings.language))
             chunk = await asyncio.to_thread(
                 mlx_whisper.transcribe,
                 audio_float,
@@ -521,9 +603,9 @@ class WhisperSTTServiceMLX(WhisperSTTService):
                 temperature=temperature,
                 language=language,
             )
-            text: str = ""
+            text: str | None = ""
             no_speech_prob_threshold = assert_given(self._settings.no_speech_prob)
-            for segment in chunk.get("segments", []):
+            for segment in cast("list[dict[str, Any]]", chunk.get("segments", [])):
                 # Drop likely hallucinations
                 if segment.get("compression_ratio", None) == 0.5555555555555556:
                     continue

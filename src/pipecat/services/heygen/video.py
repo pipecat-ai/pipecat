@@ -119,7 +119,7 @@ class HeyGenVideoService(AIService):
         self._session_request = session_request
         self._service_type = service_type
         self._other_participant_has_joined = False
-        self._event_id = None
+        self._event_id: str | None = None
         self._audio_chunk_size = 0
 
     async def setup(self, setup: FrameProcessorSetup):
@@ -133,6 +133,12 @@ class HeyGenVideoService(AIService):
             setup: Configuration parameters for the frame processor.
         """
         await super().setup(setup)
+
+        # First chunk: 400ms for faster initial response
+        self._first_chunk_size = int(HEY_GEN_SAMPLE_RATE * 2 * 0.4)  # 19200 bytes
+        # Subsequent chunks: 1000ms for efficient streaming
+        self._chunk_size = int(HEY_GEN_SAMPLE_RATE * 2 * 1.0)  # 48000 bytes
+
         self._client = HeyGenClient(
             api_key=self._api_key,
             session=self._session,
@@ -155,13 +161,12 @@ class HeyGenVideoService(AIService):
         await self._client.setup(setup)
 
     async def cleanup(self):
-        """Clean up the service and release resources.
-
-        Terminates the HeyGen client session and cleans up associated resources.
-        """
+        """Clean up the service and release resources."""
         await super().cleanup()
-        await self._client.cleanup()
-        self._client = None
+        await self._teardown()
+        if self._client:
+            await self._client.cleanup()
+            self._client = None
 
     async def _on_connected(self):
         """Handle bot connected to LiveKit room."""
@@ -170,6 +175,9 @@ class HeyGenVideoService(AIService):
     async def _on_participant_connected(self, participant_id: str):
         """Handle participant connected events."""
         logger.info(f"Participant connected {participant_id}")
+        if not self._client:
+            return
+
         if not self._other_participant_has_joined:
             self._other_participant_has_joined = True
             await self._client.capture_participant_video(
@@ -211,11 +219,9 @@ class HeyGenVideoService(AIService):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-        # First chunk: 400ms for faster initial response
-        self._first_chunk_size = int(HEY_GEN_SAMPLE_RATE * 2 * 0.4)  # 19200 bytes
-        # Subsequent chunks: 1000ms for efficient streaming
-        self._chunk_size = int(HEY_GEN_SAMPLE_RATE * 2 * 1.0)  # 48000 bytes
-        await self._client.start(frame)
+        if not self._client:
+            return
+
         await self._create_send_task()
 
     async def stop(self, frame: EndFrame):
@@ -228,8 +234,7 @@ class HeyGenVideoService(AIService):
             frame: The end frame.
         """
         await super().stop(frame)
-        await self._end_conversation()
-        await self._cancel_send_task()
+        await self._teardown()
 
     async def cancel(self, frame: CancelFrame):
         """Cancel the HeyGen video service.
@@ -241,8 +246,7 @@ class HeyGenVideoService(AIService):
             frame: The cancel frame.
         """
         await super().cancel(frame)
-        await self._end_conversation()
-        await self._cancel_send_task()
+        await self._teardown()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process incoming frames and coordinate avatar behavior.
@@ -263,10 +267,12 @@ class HeyGenVideoService(AIService):
             await self._handle_user_started_speaking()
             await self.push_frame(frame, direction)
         elif isinstance(frame, UserStoppedSpeakingFrame):
-            await self._client.stop_agent_listening()
+            if self._client:
+                await self._client.stop_agent_listening()
             await self.push_frame(frame, direction)
         elif isinstance(frame, OutputTransportReadyFrame):
-            self._client.transport_ready()
+            if self._client:
+                self._client.transport_ready()
             await self.push_frame(frame, direction)
         elif isinstance(frame, TTSAudioRawFrame):
             await self._handle_audio_frame(frame)
@@ -299,6 +305,9 @@ class HeyGenVideoService(AIService):
         4. Creating a new send task
         5. Activating the avatar's listening animation
         """
+        if not self._client:
+            return
+
         self._is_interrupting = True
         await self._client.interrupt(self._event_id)
         await self._cancel_send_task()
@@ -306,13 +315,23 @@ class HeyGenVideoService(AIService):
         await self._create_send_task()
         await self._client.start_agent_listening()
 
+    async def _teardown(self):
+        """Idempotent teardown shared by stop(), cancel(), and cleanup().
+
+        Ends the conversation (stopping the client's websocket/LiveKit producer
+        loops) and cancels the send task.
+        """
+        await self._end_conversation()
+        await self._cancel_send_task()
+
     async def _end_conversation(self):
         """End the current conversation and reset state.
 
         Stops the HeyGen client and cleans up conversation-specific resources.
         """
         self._other_participant_has_joined = False
-        await self._client.stop()
+        if self._client:
+            await self._client.stop()
 
     async def _create_send_task(self):
         """Create the audio sending task if it doesn't exist."""
@@ -345,6 +364,9 @@ class HeyGenVideoService(AIService):
         initial response, then 1000ms chunks for efficient streaming. Handles
         timeouts and silence detection for proper audio streaming management.
         """
+        if not self._client:
+            return
+
         sample_rate = self._client.out_sample_rate
         audio_buffer = bytearray()
         self._event_id = None

@@ -139,7 +139,7 @@ def update_services_imports_file():
         / "_imports.py"
     )
 
-    print(f"📝 Generating imports...")
+    print("📝 Generating imports...")
 
     # Find pipecat installation
     pipecat_path = find_pipecat_install_path()

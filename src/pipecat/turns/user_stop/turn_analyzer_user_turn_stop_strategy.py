@@ -7,6 +7,7 @@
 """User turn stop strategy based on turn detection analyzers."""
 
 import asyncio
+import time
 
 from loguru import logger
 
@@ -15,6 +16,7 @@ from pipecat.audio.vad.vad_analyzer import VAD_STOP_SECS
 from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
+    InterimTranscriptionFrame,
     MetricsFrame,
     SpeechControlParamsFrame,
     StartFrame,
@@ -24,9 +26,9 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.metrics.metrics import MetricsData
+from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.turns.types import ProcessFrameResult
 from pipecat.turns.user_stop.base_user_turn_stop_strategy import BaseUserTurnStopStrategy
-from pipecat.utils.asyncio.task_manager import BaseTaskManager
 
 
 class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
@@ -40,8 +42,9 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
 
     For services that support finalization (TranscriptionFrame.finalized=True),
     the turn can be triggered immediately once the finalized transcript is
-    received. Otherwise, an STT timeout (adjusted by VAD stop_secs) is used
-    as a fallback.
+    received. Otherwise, an STT timeout is used as a fallback: the turn is
+    released once ``ttfs_p99_latency`` has elapsed since the end of the user's
+    speech (as reported by VAD, discounting its ``stop_secs`` silence window).
     """
 
     def __init__(
@@ -80,7 +83,7 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
         self._text = ""
         self._turn_complete = False
         self._vad_user_speaking = False
-        self._vad_stopped_time: float | None = None  # Track when VAD stopped was received
+        self._vad_stopped: bool = False  # Whether VAD reported a stop this turn
         self._transcript_finalized = False
         self._timeout_task: asyncio.Task | None = None
         self._timeout_expired: bool = False
@@ -94,26 +97,57 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
     def wait_for_transcript(self, value: bool) -> None:
         self._wait_for_transcript = value
 
-    async def reset(self):
-        """Reset the strategy to its initial state."""
-        await super().reset()
+    async def handle_user_turn_started(self):
+        """Ready the strategy to detect the end of the turn now starting."""
+        await self._reset()
+
+    async def handle_user_turn_stopped(self):
+        """Clear the analyzer's buffered speech when the turn ends.
+
+        Beyond the usual per-turn reset, drop the analyzer's buffered speech
+        state so a stale silence timer can't fire a phantom end-of-turn after
+        an externally-ended turn (for example a forced stop while a mute
+        strategy held audio back). The analyzer already clears itself on its
+        own COMPLETE, so the clear is a no-op on the normal path; the
+        pre-speech buffer refills continuously before the next turn starts.
+        """
+        await self._reset()
+        self._turn_analyzer.clear()
+
+    async def _reset(self):
+        """Clear turn-scoped state. Runs at both turn boundaries.
+
+        ``_vad_user_speaking`` is deliberately left alone: whether the user is
+        speaking belongs to the user rather than to the turn, and VAD reports it
+        only on transitions. Clearing it at a turn start VAD didn't drive — a
+        turn begun from a transcript, mid-utterance — would leave it wrong until
+        the user next stops.
+        """
         self._text = ""
+        await self._discard_pending_end_of_turn()
+
+    async def _discard_pending_end_of_turn(self):
+        """Drop any end-of-turn conclusion reached so far.
+
+        Runs at a turn boundary, and whenever VAD reports the user speaking
+        again — which makes an earlier conclusion stale mid-turn.
+        """
         self._turn_complete = False
-        self._vad_user_speaking = False
-        self._vad_stopped_time = None
         self._transcript_finalized = False
         self._timeout_expired = False
+        self._vad_stopped = False
         if self._timeout_task:
             await self.task_manager.cancel_task(self._timeout_task)
             self._timeout_task = None
 
-    async def setup(self, task_manager: BaseTaskManager):
-        """Initialize the strategy with the given task manager.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the strategy.
 
         Args:
-            task_manager: The task manager to be associated with this instance.
+            setup: Configuration object containing setup parameters.
         """
-        await super().setup(task_manager)
+        await super().setup(setup)
+        self._turn_analyzer.set_sample_rate(setup.audio_in_sample_rate)
 
     async def cleanup(self):
         """Cleanup the strategy."""
@@ -147,12 +181,23 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
             await self._handle_input_audio(frame)
         elif isinstance(frame, TranscriptionFrame):
             await self._handle_transcription(frame)
+        elif isinstance(frame, InterimTranscriptionFrame):
+            # An interim means more transcription is still on the way, so an
+            # earlier finalized transcript no longer covers all of the user's
+            # speech.
+            # Without this, a transcript finalized during a pause too short for
+            # VAD to report a stop (and thus a new start, which is what normally
+            # clears the flag) would leave the flag stale and trigger the turn
+            # immediately at the next VAD stop while the tail of the utterance
+            # is still in flight. This can happen when the STT endpointer
+            # finalizes on silences shorter than the VAD stop_secs — e.g. an
+            # aggressive STT endpoint or a manually raised stop_secs.
+            self._transcript_finalized = False
 
         return ProcessFrameResult.CONTINUE
 
     async def _start(self, frame: StartFrame):
         """Process the start frame to configure the turn analyzer."""
-        self._turn_analyzer.set_sample_rate(frame.audio_in_sample_rate)
         await self.broadcast_frame(SpeechControlParamsFrame, turn_params=self._turn_analyzer.params)
 
     async def _handle_input_audio(self, frame: InputAudioRawFrame):
@@ -174,21 +219,21 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
         """Handle when the VAD indicates the user is speaking."""
         # Sync Smart Turn pre-speech buffering with VAD start delay
         self._turn_analyzer.update_vad_start_secs(frame.start_secs)
-        self._turn_complete = False
         self._vad_user_speaking = True
-        self._vad_stopped_time = None
-        self._transcript_finalized = False
-        self._timeout_expired = False
-        # Cancel any pending timeout
-        if self._timeout_task:
-            await self.task_manager.cancel_task(self._timeout_task)
-            self._timeout_task = None
+        await self._discard_pending_end_of_turn()
 
     async def _handle_vad_user_stopped_speaking(self, frame: VADUserStoppedSpeakingFrame):
         """Handle when the VAD indicates the user has stopped speaking."""
         self._vad_user_speaking = False
         self._stop_secs = frame.stop_secs
-        self._vad_stopped_time = frame.timestamp
+        self._vad_stopped = True
+
+        # The STT p99 budget is measured from when the user actually stopped
+        # speaking, which VAD only reports stop_secs later. Anchoring the
+        # safety net to that absolute deadline keeps the wait fixed no matter
+        # how long end-of-turn analysis (e.g. ML inference) takes before the
+        # timer is armed.
+        stt_deadline = frame.timestamp - frame.stop_secs + self._stt_timeout
 
         state, prediction = await self._turn_analyzer.analyze_end_of_turn()
         await self._handle_prediction_result(prediction)
@@ -197,8 +242,7 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
         # wait for transcriptions.
         self._turn_complete = state == EndOfTurnState.COMPLETE
 
-        # Start the STT timeout (adjusted by VAD stop_secs since that time already elapsed)
-        timeout = max(0, self._stt_timeout - self._stop_secs)
+        timeout = max(0, stt_deadline - time.time())
 
         if not self._stop_secs_warned:
             if self._stop_secs != VAD_STOP_SECS:
@@ -224,6 +268,12 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
             self._timeout_handler(timeout), f"{self}::_timeout_handler"
         )
 
+        # A finalized transcript (or COMPLETE itself, when wait_for_transcript
+        # is False) may already have satisfied the trigger conditions while the
+        # analyzer was running. The analyzer's verdict is only known now, so
+        # re-check here rather than wait out the safety-net timer.
+        await self._maybe_trigger_user_turn_stopped()
+
     async def _handle_transcription(self, frame: TranscriptionFrame):
         """Handle user transcription."""
         # We don't really care about the content.
@@ -242,9 +292,8 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
 
         # Fallback: handle transcripts when no VAD stop was received.
         # This handles edge cases where transcripts arrive without VAD firing.
-        # _vad_stopped_time is None means VAD stopped hasn't been received yet.
         # In fallback mode, reset timeout on each transcript to wait for inactivity.
-        if not self._vad_user_speaking and self._vad_stopped_time is None:
+        if not self._vad_user_speaking and not self._vad_stopped:
             # Cancel existing fallback timeout if any
             if self._timeout_task:
                 await self.task_manager.cancel_task(self._timeout_task)

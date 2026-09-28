@@ -1,14 +1,21 @@
 repos:
   - repo: local
     hooks:
+      # F401 (unused imports) is selected here rather than in pyproject.toml so
+      # imports are only stripped at commit time, not mid-development.
       - id: ruff
         name: ruff
-        entry: uv run ruff check --fix
+        entry: uv run ruff check --fix --extend-select F401
         language: system
         types: [python]
       - id: ruff-format
         name: ruff-format
         entry: uv run ruff format
+        language: system
+        types: [python]
+      - id: pyright
+        name: pyright
+        entry: uv run pyright
         language: system
         types: [python]
       # Keep the CLI's service registry in sync with the source. The imports hook

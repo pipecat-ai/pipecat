@@ -57,7 +57,7 @@ def _collect_job_handlers(obj) -> dict[str, Callable]:
                 continue
             seen.add(attr_name)
             if callable(val) and getattr(val, "is_job_handler", False):
-                job_name: str = getattr(val, "job_name")
+                job_name: str = val.job_name
                 if job_name in handlers:
                     existing = handlers[job_name].__name__
                     raise ValueError(

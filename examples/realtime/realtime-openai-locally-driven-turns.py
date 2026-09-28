@@ -36,7 +36,7 @@ from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame, LLMSetToolsFrame
 from pipecat.observers.loggers.transcription_log_observer import TranscriptionLogObserver
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     AssistantTurnStoppedMessage,
@@ -126,7 +126,7 @@ transport_params = {
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
-    logger.info(f"Starting bot")
+    logger.info("Starting bot")
 
     llm = OpenAIRealtimeLLMService(
         api_key=os.environ["OPENAI_API_KEY"],
@@ -169,10 +169,9 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         # Drive turn detection locally via SileroVAD wired into the user
-        # aggregator. realtime_service_mode keeps context-write semantics
-        # correct and (by default) drops the transcript wait on turn-end so
-        # local VAD can drive turn boundaries on the latency critical path.
-        realtime_service_mode=True,
+        # aggregator. Realtime-service mode is auto-detected and (by default)
+        # drops the transcript wait on turn-end, so local VAD can drive turn
+        # boundaries on the latency critical path.
         user_params=LLMUserAggregatorParams(
             # stop_secs is intentionally longer than Pipecat's 0.2s default:
             # manual-VAD mode seems to do a bit better when end-of-speech is
@@ -199,11 +198,16 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
         ),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
         observers=[TranscriptionLogObserver()],
+        processor_unusable_policy=ProcessorUnusablePolicy.END,
     )
+
+    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
+
+    await runner.add_workers(worker)
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
-        logger.info(f"Client connected")
+        logger.info("Client connected")
         await worker.queue_frames([LLMRunFrame()])
 
         await asyncio.sleep(15)
@@ -213,8 +217,8 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
-        logger.info(f"Client disconnected")
-        await worker.cancel()
+        logger.info("Client disconnected")
+        await runner.cancel()
 
     # In realtime mode the user transcript isn't finalized at turn-stop
     # time, so on_user_turn_stopped carries no content; subscribe to
@@ -241,9 +245,6 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
         line = f"{timestamp}assistant: {message.content}"
         logger.info(f"Transcript: {line}")
 
-    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
-
-    await runner.add_workers(worker)
     await runner.run()
 
 

@@ -17,12 +17,20 @@ Submit the current changes as a GitHub pull request.
    - Create a new branch based on the current branch
    - Commit the changes using multiple commits if the changes are unrelated
 
-3. Push the branch and create the PR:
+3. Run `/prose-review branch` and fix anything it flags. Do this before pushing,
+   while corrections are still cheap.
+
+4. Push the branch and create the PR:
    - Push with `-u` flag to set upstream tracking
    - Create the PR using `gh pr create`
 
-4. After the PR is created:
+5. After the PR is created:
    - Run `/changelog <pr_number>` to generate changelog files, then commit and push them
    - Run `/pr-description <pr_number>` to update the PR description
 
-5. Return the PR URL to the user.
+   Both skills review their own prose — no separate pass is needed here.
+
+6. Return the PR URL to the user.
+
+Commit messages are prose too — `/prose-review` reads diffs and so won't see them.
+Read the messages in `git log main..HEAD` against the same standard before pushing.

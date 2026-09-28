@@ -9,15 +9,76 @@
 import asyncio
 import time
 from abc import ABC, abstractmethod
-from collections.abc import Awaitable, Callable
+from typing import Protocol
 
 import websockets
 from loguru import logger
+from websockets.asyncio.client import ClientConnection
+from websockets.asyncio.client import connect as websocket_connect
 from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK
 from websockets.protocol import State
 
 from pipecat.frames.frames import ErrorFrame
-from pipecat.utils.network import exponential_backoff_time
+from pipecat.utils.network import QuickFailureTracker, exponential_backoff_time
+
+
+class ReportErrorCallback(Protocol):
+    """Reports an error a websocket service ran into.
+
+    Implemented by the owning service, which usually pairs pushing the error
+    frame with a connection-error event of its own.
+    """
+
+    async def __call__(self, error: ErrorFrame, force_treat_as_permanent: bool = False) -> None:
+        """Report the error.
+
+        Args:
+            error: The error frame to report.
+            force_treat_as_permanent: Whether to treat the error as one that will
+                keep recurring, leaving the service unable to do any more
+                work. Leaving it False doesn't keep the service usable, since
+                the error's own category may cost it its usability.
+        """
+        ...
+
+
+# Default ceiling, in seconds, on the websocket closing handshake. Disconnect
+# runs while a service handles the EndFrame, before the frame continues
+# downstream, so an unacknowledged close delays pipeline shutdown by this much.
+# The websockets default of 10s is long enough to be noticeable once several
+# websocket services tear down in sequence.
+WS_CLOSE_TIMEOUT = 2.0
+
+
+class _BoundedCloseConnection(ClientConnection):
+    """Websocket connection that reports an unacknowledged closing handshake.
+
+    ``websockets`` enforces ``close_timeout`` internally and absorbs the outcome:
+    :meth:`close` returns normally whether the peer acknowledged the handshake or
+    the deadline expired and the connection was dropped. Timing the call is the
+    only way to tell those apart, which keeps a teardown that silently cost
+    ``close_timeout`` from going unnoticed.
+    """
+
+    async def close(self, code: int = 1000, reason: str = "") -> None:
+        """Close the connection, logging if the peer never acknowledged it.
+
+        Args:
+            code: WebSocket close code.
+            reason: WebSocket close reason.
+        """
+        start = time.monotonic()
+        try:
+            await super().close(code, reason)
+        finally:
+            elapsed = time.monotonic() - start
+            if self.close_timeout is not None and elapsed >= self.close_timeout:
+                # Immediately follows the owning service's "Disconnecting from
+                # ..." log, so the connection needs no further identification.
+                logger.debug(
+                    f"Peer did not acknowledge the websocket close within "
+                    f"{self.close_timeout}s; connection dropped"
+                )
 
 
 class WebsocketService(ABC):
@@ -26,28 +87,83 @@ class WebsocketService(ABC):
     Provides websocket connection management, automatic reconnection with
     exponential backoff, connection verification, and error handling.
     Subclasses implement service-specific connection and message handling logic.
+
+    Reconnection gives up in two ways, both leaving the service unusable: the
+    provider rejects the configuration, which no amount of retrying will fix,
+    or the attempts are exhausted. Errors are reported through a
+    ``report_error`` callback, which takes the same optional
+    ``force_treat_as_permanent`` flag as
+    :meth:`~pipecat.processors.frame_processor.FrameProcessor.push_error_frame`,
+    so that giving up and saying so are the same act.
     """
 
-    # Rapid failure detection: when a server accepts the WebSocket handshake but
-    # immediately closes the connection (e.g. invalid API key, policy rejection),
-    # exponential backoff won't help because the handshake keeps succeeding. We
-    # detect this by tracking how long the connection survives after being established.
-    _MIN_STABLE_CONNECTION_DURATION = 5.0  # seconds
-    _MAX_CONSECUTIVE_QUICK_FAILURES = 3
-
-    def __init__(self, *, reconnect_on_error: bool = True, **kwargs):
+    def __init__(
+        self,
+        *,
+        reconnect_backoff_min_wait: float = 4.0,
+        reconnect_backoff_max_wait: float = 10.0,
+        reconnect_on_error: bool = True,
+        ws_close_timeout: float = WS_CLOSE_TIMEOUT,
+        **kwargs,
+    ):
         """Initialize the websocket service.
 
         Args:
+            reconnect_backoff_min_wait: Minimum time, in seconds, to wait between
+                reconnection attempts.
+            reconnect_backoff_max_wait: Maximum time, in seconds, to wait between
+                reconnection attempts.
             reconnect_on_error: Whether to automatically reconnect on connection errors.
+            ws_close_timeout: Maximum time, in seconds, to wait for the peer to
+                acknowledge the websocket closing handshake before dropping the
+                connection. Applied to connections opened through
+                :meth:`_websocket_connect`. Increase it for peers that need
+                longer to complete a graceful close.
             **kwargs: Additional arguments (unused, for compatibility).
         """
         self._websocket: websockets.WebSocketClientProtocol | None = None  # pyright: ignore[reportAttributeAccessIssue]
+        self._reconnect_backoff_min_wait = reconnect_backoff_min_wait
+        self._reconnect_backoff_max_wait = reconnect_backoff_max_wait
         self._reconnect_on_error = reconnect_on_error
+        self._ws_close_timeout = ws_close_timeout
         self._reconnect_in_progress: bool = False
         self._disconnecting: bool = False
-        self._quick_failure_count: int = 0
+        # Rapid failure detection: when a server accepts the WebSocket handshake
+        # but immediately closes the connection (e.g. invalid API key, policy
+        # rejection), exponential backoff won't help because the handshake keeps
+        # succeeding. We detect this by tracking how long the connection
+        # survives after being established.
+        self._quick_failure_tracker = QuickFailureTracker()
         self._last_connect_time: float = 0.0
+
+    @property
+    def _is_service_usable(self) -> bool:
+        """Whether the service this is mixed into can still be given work.
+
+        Always a
+        :class:`~pipecat.processors.frame_processor.FrameProcessor` in practice,
+        but this is a mixin and can't require it.
+        """
+        return getattr(self, "is_usable", True)
+
+    async def _websocket_connect(self, uri: str, **kwargs):
+        """Open a websocket connection with the service's close timeout applied.
+
+        Wraps :func:`websockets.asyncio.client.connect`, defaulting
+        ``close_timeout`` to ``ws_close_timeout``. Pass ``close_timeout``
+        explicitly to override it for a service whose peer needs different
+        closing behavior.
+
+        Args:
+            uri: The websocket URI to connect to.
+            **kwargs: Additional arguments passed to ``connect()``.
+
+        Returns:
+            The connected websocket.
+        """
+        kwargs.setdefault("close_timeout", self._ws_close_timeout)
+        kwargs.setdefault("create_connection", _BoundedCloseConnection)
+        return await websocket_connect(uri, **kwargs)
 
     async def _verify_connection(self) -> bool:
         """Verify the websocket connection is active and responsive.
@@ -83,11 +199,16 @@ class WebsocketService(ABC):
     async def _try_reconnect(
         self,
         max_retries: int = 3,
-        report_error: Callable[[ErrorFrame], Awaitable[None]] | None = None,
+        report_error: ReportErrorCallback | None = None,
     ) -> bool:
         # Prevent concurrent reconnection attempts
         if self._reconnect_in_progress:
             logger.warning(f"{self} reconnect attempt aborted: already in progress")
+            return False
+
+        # Reconnecting can't fix whatever made the service unusable.
+        if not self._is_service_usable:
+            logger.error(f"{self} not reconnecting: the service is no longer usable")
             return False
 
         self._reconnect_in_progress = True
@@ -105,21 +226,34 @@ class WebsocketService(ABC):
                     logger.error(f"{self} reconnection attempt {attempt} failed: {e}")
                     if report_error:
                         await report_error(
-                            ErrorFrame(f"{self} reconnection attempt {attempt} failed: {e}")
+                            ErrorFrame(
+                                f"{self} reconnection attempt {attempt} failed: {e}", exception=e
+                            )
                         )
-                wait_time = exponential_backoff_time(attempt)
+                # A rejected attempt may have been rejected for a reason
+                # reporting it identified as terminal.
+                if not self._is_service_usable:
+                    logger.error(f"{self} abandoning reconnection: the service is no longer usable")
+                    return False
+                wait_time = exponential_backoff_time(
+                    attempt,
+                    min_wait=self._reconnect_backoff_min_wait,
+                    max_wait=self._reconnect_backoff_max_wait,
+                )
                 await asyncio.sleep(wait_time)
             msg = f"{self} failed to reconnect after {max_retries} attempts"
             if last_exception:
                 msg += f": {last_exception}"
             logger.error(msg)
             if report_error:
-                await report_error(ErrorFrame(msg))
+                await report_error(
+                    ErrorFrame(msg, exception=last_exception), force_treat_as_permanent=True
+                )
             return False
         finally:
             self._reconnect_in_progress = False
 
-    async def send_with_retry(self, message, report_error: Callable[[ErrorFrame], Awaitable[None]]):
+    async def send_with_retry(self, message, report_error: ReportErrorCallback):
         """Attempt to send a message, retrying after reconnect if necessary."""
         try:
             # If websocket isn't connected/present, treat as a send failure —
@@ -142,7 +276,7 @@ class WebsocketService(ABC):
     async def _maybe_try_reconnect(
         self,
         error_message: str,
-        report_error: Callable[[ErrorFrame], Awaitable[None]],
+        report_error: ReportErrorCallback,
         error: Exception | None = None,
     ) -> bool:
         """Check if reconnection should be attempted and try if appropriate.
@@ -169,24 +303,23 @@ class WebsocketService(ABC):
         # because the handshake keeps succeeding — we need to stop the loop.
         if self._last_connect_time > 0:
             connection_duration = time.monotonic() - self._last_connect_time
-            if connection_duration < self._MIN_STABLE_CONNECTION_DURATION:
-                self._quick_failure_count += 1
+            result = self._quick_failure_tracker.record(connection_duration)
+            if result.is_quick_failure:
                 logger.warning(
                     f"{self} connection lasted only {connection_duration:.1f}s "
-                    f"({self._quick_failure_count}/{self._MAX_CONSECUTIVE_QUICK_FAILURES} "
+                    f"({self._quick_failure_tracker.count}/"
+                    f"{self._quick_failure_tracker.max_consecutive_failures} "
                     f"consecutive quick failures)"
                 )
-                if self._quick_failure_count >= self._MAX_CONSECUTIVE_QUICK_FAILURES:
-                    msg = (
-                        f"{self} connection failed {self._MAX_CONSECUTIVE_QUICK_FAILURES} "
-                        f"times immediately after connecting"
-                    )
-                    logger.error(msg)
-                    await report_error(ErrorFrame(msg))
-                    return False
-            else:
-                # Connection was stable — reset the counter.
-                self._quick_failure_count = 0
+            if result.should_give_up:
+                msg = (
+                    f"{self} connection failed "
+                    f"{self._quick_failure_tracker.max_consecutive_failures} "
+                    f"times immediately after connecting"
+                )
+                logger.error(msg)
+                await report_error(ErrorFrame(msg), force_treat_as_permanent=True)
+                return False
 
         # Log the message
         logger.warning(error_message)
@@ -196,11 +329,13 @@ class WebsocketService(ABC):
             success = await self._try_reconnect(report_error=report_error)
             return success
         else:
-            # Reconnection disabled
-            await report_error(ErrorFrame(error_message))
+            # `reconnect_on_error` governs this loop only: services that turn it
+            # off reconnect on demand in `send_with_retry` instead. Reporting
+            # the drop as terminal would close that path too.
+            await report_error(ErrorFrame(error_message, exception=error))
             return False
 
-    async def _receive_task_handler(self, report_error: Callable[[ErrorFrame], Awaitable[None]]):
+    async def _receive_task_handler(self, report_error: ReportErrorCallback):
         """Handle websocket message receiving with automatic retry logic.
 
         Continuously receives messages with automatic reconnection on errors.
@@ -249,7 +384,7 @@ class WebsocketService(ABC):
         additional setup required.
         """
         self._disconnecting = False
-        self._quick_failure_count = 0
+        self._quick_failure_tracker.reset()
 
     async def _disconnect(self):
         """Disconnect from the service and set disconnecting flag.
