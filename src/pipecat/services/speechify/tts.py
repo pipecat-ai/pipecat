@@ -42,6 +42,14 @@ CALLER_HEADERS = {
     "Speechify-Caller-Version": pipecat_version(),
 }
 
+# The API version every request is pinned to. Without it Speechify resolves the
+# version from the workspace's stored default, or from the oldest supported version
+# when the workspace has none, so the same Pipecat release would behave differently
+# for two users. This version is the one on which `pcm_16000` returns 16 kHz audio;
+# earlier versions answer it with 24 kHz audio, which this service would then stamp
+# as 16 kHz.
+SPEECHIFY_API_VERSION = "2026-09-30"
+
 # PCM rates Speechify can synthesize, as the `pcm_<rate>` output formats.
 SPEECHIFY_PCM_SAMPLE_RATES = (8000, 16000, 22050, 24000, 44100, 48000)
 
@@ -268,6 +276,9 @@ class SpeechifyHttpTTSService(TTSService):
     produced by the streaming-native models, ``simba-3.2`` (English) and ``simba-3.0``
     (multilingual); the legacy ``simba-english`` and ``simba-multilingual`` models are
     rejected by this endpoint.
+
+    Requests pin Speechify's API version to :data:`SPEECHIFY_API_VERSION` rather than
+    letting the workspace default decide it.
     """
 
     Settings = SpeechifyTTSSettings
@@ -320,6 +331,7 @@ class SpeechifyHttpTTSService(TTSService):
         self._headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
+            "Speechify-Version": SPEECHIFY_API_VERSION,
             **CALLER_HEADERS,
         }
 
