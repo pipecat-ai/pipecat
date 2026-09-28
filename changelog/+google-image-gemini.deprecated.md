@@ -1,1 +1,0 @@
-- `GoogleImageGenService.Settings.negative_prompt` is deprecated. Gemini image models do not accept a negative prompt, so the value is ignored.
