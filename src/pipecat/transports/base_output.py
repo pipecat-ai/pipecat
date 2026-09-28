@@ -31,6 +31,7 @@ from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
+    FilterControlFrame,
     Frame,
     InterruptionFrame,
     MixerControlFrame,
@@ -136,11 +137,18 @@ class BaseOutputTransport(FrameProcessor):
         audio_bytes_10ms = int(self._sample_rate / 100) * self._params.audio_out_channels * 2
         self._audio_chunk_size = audio_bytes_10ms * self._params.audio_out_10ms_chunks
 
+        # Start audio filter. Paired with the stop in cleanup(), which is the
+        # only other call guaranteed to happen exactly once.
+        if self._params.audio_out_filter:
+            await self._params.audio_out_filter.start(self._sample_rate)
+
     async def cleanup(self):
         """Release output transport resources at teardown."""
         await super().cleanup()
         for _, sender in self._media_senders.items():
             await sender.cleanup()
+        if self._params.audio_out_filter:
+            await self._params.audio_out_filter.stop()
 
     async def start(self, frame: StartFrame):
         """Start the output transport.
@@ -458,6 +466,10 @@ class BaseOutputTransport(FrameProcessor):
             # The user can provide a single mixer, to be used by the default
             # destination, or a destination/mixer mapping.
             self._mixer: BaseAudioMixer | None = None
+
+            # The output filter belongs to the default destination, like a
+            # single mixer.
+            self._filter = None if destination else params.audio_out_filter
 
             # These are the images that we should send at our desired framerate.
             self._video_images = None
@@ -882,8 +894,19 @@ class BaseOutputTransport(FrameProcessor):
                 if self._tts_audio_received:
                     logger.debug("Bot stopped speaking based on TTSStoppedFrame")
                     await self._bot_stopped_speaking()
+            elif isinstance(frame, FilterControlFrame) and self._filter:
+                await self._filter.process_frame(frame)
             else:
                 await self._transport.write_transport_frame(frame)
+
+        async def _filter_audio(self, frame: Frame):
+            """Run the output filter over a frame taken from the audio queue.
+
+            Args:
+                frame: The queued frame. Only audio frames are filtered.
+            """
+            if self._filter and isinstance(frame, OutputAudioRawFrame):
+                frame.audio = await self._filter.filter(frame.audio)
 
         def _next_frame(self) -> AsyncGenerator[Frame, None]:
             """Generate the next frame for audio processing.
@@ -898,6 +921,7 @@ class BaseOutputTransport(FrameProcessor):
                         frame = await asyncio.wait_for(
                             self._audio_queue.get(), timeout=vad_stop_secs
                         )
+                        await self._filter_audio(frame)
                         yield frame
                         self._audio_queue.task_done()
                     except TimeoutError:
@@ -913,6 +937,7 @@ class BaseOutputTransport(FrameProcessor):
                 while True:
                     try:
                         frame = self._audio_queue.get_nowait()
+                        await self._filter_audio(frame)
                         if isinstance(frame, OutputAudioRawFrame):
                             frame.audio = await mixer.mix(frame.audio)
                             last_frame_time = time.time()
@@ -960,6 +985,10 @@ class BaseOutputTransport(FrameProcessor):
                     # Send some final silence so words don't cut out.
                     await self._send_silence(self._params.audio_out_end_silence_secs)
                     break
+
+                # Skip frames with no audio data (e.g. filter is buffering).
+                if isinstance(frame, OutputAudioRawFrame) and not frame.audio:
+                    continue
 
                 # Handle frame.
                 await self._handle_frame(frame)
