@@ -740,10 +740,14 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
                 # the authoritative, billable token usage for the entire response.
                 if chunk.usage_metadata:
                     prompt_tokens = chunk.usage_metadata.prompt_token_count or 0
-                    completion_tokens = chunk.usage_metadata.candidates_token_count or 0
+                    reasoning_tokens = chunk.usage_metadata.thoughts_token_count or 0
+                    # Gemini counts thinking tokens apart from the candidates, but they
+                    # are generated output too.
+                    completion_tokens = (
+                        chunk.usage_metadata.candidates_token_count or 0
+                    ) + reasoning_tokens
                     total_tokens = chunk.usage_metadata.total_token_count or 0
                     cache_read_input_tokens = chunk.usage_metadata.cached_content_token_count or 0
-                    reasoning_tokens = chunk.usage_metadata.thoughts_token_count or 0
 
                 if not chunk.candidates:
                     continue
