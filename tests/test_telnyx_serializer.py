@@ -4,18 +4,12 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Tests for TelnyxFrameSerializer OutputTransportMessageFrame passthrough and
-deserialize() robustness.
+"""Tests for TelnyxFrameSerializer.
 
-Regression test (serialize): serialize() had no case for OutputTransportMessageFrame/
-OutputTransportMessageUrgentFrame, unlike every other telephony serializer
-(Twilio, Plivo, Exotel, Genesys, Vonage), so a custom app message sent over
-a Telnyx-backed pipeline was silently dropped instead of reaching the wire.
-
-Regression tests (deserialize): a malformed or unexpectedly-shaped WebSocket message
-from Telnyx used to raise (JSONDecodeError/KeyError) straight out of deserialize(),
-which the transport's receive loop treats as fatal -- silently ending the
-call. Plivo/Vonage/Genesys already guard this; Telnyx should behave the same.
+serialize() passes OutputTransportMessageFrame/OutputTransportMessageUrgentFrame
+through to the wire, like the other telephony serializers. deserialize() ignores
+malformed JSON and messages missing expected fields rather than raising, since
+the transport's receive loop ends the call on any exception.
 """
 
 import json
