@@ -243,8 +243,6 @@ class RTVIObserver(BaseObserver):
         self._params = params or RTVIObserverParams()
 
         self._ignored_sources: set[FrameProcessor] = set(self._params.ignored_sources)
-        # Calls a DISABLED report level hid, so a child never names one as its parent.
-        self._suppressed_tool_call_ids: set[str] = set()
 
         self._bot_transcription = ""
         self._last_user_audio_level = 0
@@ -454,36 +452,19 @@ class RTVIObserver(BaseObserver):
                     "stopped", frame.function_name, frame.tool_call_id, result=frame.result
                 )
         elif isinstance(frame, ExternalFunctionCallStartedFrame):
-            await self._report_function_call(
-                "started",
-                frame.function_name,
-                frame.tool_call_id,
-                parent_tool_call_id=frame.parent_tool_call_id,
-            )
+            await self._report_function_call("started", frame.function_name, frame.tool_call_id)
         elif isinstance(frame, ExternalFunctionCallInProgressFrame):
             await self._report_function_call(
-                "in_progress",
-                frame.function_name,
-                frame.tool_call_id,
-                arguments=frame.arguments,
-                parent_tool_call_id=frame.parent_tool_call_id,
+                "in_progress", frame.function_name, frame.tool_call_id, arguments=frame.arguments
             )
         elif isinstance(frame, ExternalFunctionCallResultFrame):
             if frame.is_final:
                 await self._report_function_call(
-                    "stopped",
-                    frame.function_name,
-                    frame.tool_call_id,
-                    result=frame.result,
-                    parent_tool_call_id=frame.parent_tool_call_id,
+                    "stopped", frame.function_name, frame.tool_call_id, result=frame.result
                 )
         elif isinstance(frame, ExternalFunctionCallCancelFrame):
             await self._report_function_call(
-                "stopped",
-                frame.function_name,
-                frame.tool_call_id,
-                cancelled=True,
-                parent_tool_call_id=frame.parent_tool_call_id,
+                "stopped", frame.function_name, frame.tool_call_id, cancelled=True
             )
 
     async def _report_function_call(
@@ -495,22 +476,15 @@ class RTVIObserver(BaseObserver):
         arguments: Mapping[str, Any] | None = None,
         result: Any = None,
         cancelled: bool = False,
-        parent_tool_call_id: str | None = None,
     ):
         """Send the function-call message for a phase, as the report level allows.
 
-        The pipeline's own calls and calls reported from elsewhere
-        (the ``ExternalFunctionCall*Frame`` family) go through here alike, so both obey the
-        per-function report level. A parent the level suppressed is left off
-        its children: a hidden call stays hidden.
+        The pipeline's own calls and calls reported from elsewhere (the
+        ``ExternalFunctionCall*Frame`` family) go through here alike, so both
+        obey the per-function report level.
         """
         report_level = self._get_function_call_report_level(function_name)
         if report_level == RTVIFunctionCallReportLevel.DISABLED:
-            # Remembered while the call runs, so its children stay parentless.
-            if phase == "stopped":
-                self._suppressed_tool_call_ids.discard(tool_call_id)
-            else:
-                self._suppressed_tool_call_ids.add(tool_call_id)
             return
         named = report_level in (
             RTVIFunctionCallReportLevel.NAME,
@@ -522,14 +496,11 @@ class RTVIObserver(BaseObserver):
             RTVIFunctionCallReportLevel.FULL,
         )
         full = report_level == RTVIFunctionCallReportLevel.FULL
-        if parent_tool_call_id in self._suppressed_tool_call_ids:
-            parent_tool_call_id = None
         message: BaseModel
         if phase == "started":
             message = RTVI.LLMFunctionCallStartMessage(
                 data=RTVI.LLMFunctionCallStartMessageData(
                     function_name=function_name if named else None,
-                    parent_tool_call_id=parent_tool_call_id,
                 )
             )
         elif phase == "in_progress":
@@ -538,7 +509,6 @@ class RTVIObserver(BaseObserver):
                     tool_call_id=tool_call_id,
                     function_name=function_name if named else None,
                     arguments=arguments if with_arguments else None,
-                    parent_tool_call_id=parent_tool_call_id,
                 )
             )
         else:
@@ -548,7 +518,6 @@ class RTVIObserver(BaseObserver):
                     cancelled=cancelled,
                     function_name=function_name if named else None,
                     result=(result if result else None) if full and not cancelled else None,
-                    parent_tool_call_id=parent_tool_call_id,
                 )
             )
         await self.send_rtvi_message(message)

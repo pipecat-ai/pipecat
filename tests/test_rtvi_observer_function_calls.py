@@ -15,13 +15,9 @@ from pipecat.frames.frames import (
     ExternalFunctionCallInProgressFrame,
     ExternalFunctionCallResultFrame,
     ExternalFunctionCallStartedFrame,
-    FunctionCallFromLLM,
-    FunctionCallInProgressFrame,
     FunctionCallResultFrame,
     FunctionCallResultProperties,
-    FunctionCallsStartedFrame,
 )
-from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frameworks.rtvi.observer import (
     RTVIFunctionCallReportLevel,
     RTVIObserver,
@@ -36,22 +32,14 @@ def _observer(levels: dict[str, RTVIFunctionCallReportLevel]) -> tuple[RTVIObser
     return observer, sent
 
 
-def _external(phase: str, parent: str | None = "call_delegate") -> ExternalFunctionCallFrame:
+def _external(phase: str) -> ExternalFunctionCallFrame:
     arguments = {"location": "Seattle"}
     if phase == "started":
-        return ExternalFunctionCallStartedFrame(
-            "get_weather", "toolu_1", parent_tool_call_id=parent
-        )
+        return ExternalFunctionCallStartedFrame("get_weather", "toolu_1")
     if phase == "in_progress":
-        return ExternalFunctionCallInProgressFrame(
-            "get_weather", "toolu_1", arguments=arguments, parent_tool_call_id=parent
-        )
+        return ExternalFunctionCallInProgressFrame("get_weather", "toolu_1", arguments=arguments)
     return ExternalFunctionCallResultFrame(
-        "get_weather",
-        "toolu_1",
-        arguments=arguments,
-        result={"temp": 62},
-        parent_tool_call_id=parent,
+        "get_weather", "toolu_1", arguments=arguments, result={"temp": 62}
     )
 
 
@@ -73,7 +61,6 @@ class TestExternalFunctionCalls(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sent[0].data.function_name, "get_weather")
         self.assertEqual(sent[1].data.arguments, {"location": "Seattle"})
         self.assertEqual(sent[2].data.result, {"temp": 62})
-        self.assertEqual([m.data.parent_tool_call_id for m in sent], ["call_delegate"] * 3)
 
     async def test_an_intermediate_result_leaves_the_call_running(self):
         """Only a final result stops a call, the pipeline's own or an external one."""
@@ -109,82 +96,6 @@ class TestExternalFunctionCalls(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(sent[0].data.function_name, "get_weather")
         self.assertIsNone(sent[0].data.arguments)
-
-    async def test_a_hidden_parent_is_left_off_its_children(self):
-        """A DISABLED parent stays hidden: its children carry no parent id."""
-        observer, sent = _observer(
-            {
-                "*": RTVIFunctionCallReportLevel.FULL,
-                "delegate": RTVIFunctionCallReportLevel.DISABLED,
-            }
-        )
-        context = LLMContext()
-
-        await observer._report_function_call_frame(
-            FunctionCallsStartedFrame(
-                function_calls=[
-                    FunctionCallFromLLM(
-                        context=context,
-                        function_name="delegate",
-                        tool_call_id="call_delegate",
-                        arguments={},
-                    )
-                ]
-            )
-        )
-        await observer._report_function_call_frame(
-            FunctionCallInProgressFrame(
-                function_name="delegate",
-                tool_call_id="call_delegate",
-                arguments={},
-                cancel_on_interruption=False,
-            )
-        )
-        await observer._report_function_call_frame(_external("in_progress"))
-        await observer._report_function_call_frame(
-            FunctionCallResultFrame(
-                function_name="delegate", tool_call_id="call_delegate", arguments={}, result="ok"
-            )
-        )
-
-        self.assertEqual([m.type for m in sent], ["llm-function-call-in-progress"])
-        self.assertEqual(sent[0].data.function_name, "get_weather")
-        self.assertIsNone(sent[0].data.parent_tool_call_id)
-        # Forgotten once the hidden call stops, so the set does not grow.
-        self.assertEqual(observer._suppressed_tool_call_ids, set())
-
-    async def test_a_shown_parent_stays_on_its_children(self):
-        observer, sent = _observer({"*": RTVIFunctionCallReportLevel.NAME})
-        context = LLMContext()
-
-        await observer._report_function_call_frame(
-            FunctionCallsStartedFrame(
-                function_calls=[
-                    FunctionCallFromLLM(
-                        context=context,
-                        function_name="delegate",
-                        tool_call_id="call_delegate",
-                        arguments={},
-                    )
-                ]
-            )
-        )
-        await observer._report_function_call_frame(_external("in_progress"))
-
-        self.assertIsNone(sent[0].data.parent_tool_call_id)
-        self.assertEqual(sent[1].data.parent_tool_call_id, "call_delegate")
-
-    async def test_the_pipelines_own_calls_carry_no_parent(self):
-        observer, sent = _observer({"*": RTVIFunctionCallReportLevel.FULL})
-
-        await observer._report_function_call_frame(
-            FunctionCallResultFrame(
-                function_name="get_weather", tool_call_id="call_1", arguments={}, result="62"
-            )
-        )
-
-        self.assertEqual(sent[0].data.result, "62")
-        self.assertIsNone(sent[0].data.parent_tool_call_id)
 
 
 if __name__ == "__main__":

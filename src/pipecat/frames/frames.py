@@ -1478,24 +1478,15 @@ class ExternalFunctionCallFrame(SystemFrame):
     backend worker's pipeline on behalf of a tool here, and belongs to that
     pipeline's conversation, not this one. The subclasses mirror the
     pipeline's own function-call frames, one per phase, and observers report
-    them as they report those, under the call the external one ran as part
-    of when it has one.
+    them as they report those.
 
     Parameters:
         function_name: Name of the function called.
         tool_call_id: Unique identifier of the call.
-        parent_tool_call_id: The ``tool_call_id`` of the function call this
-            one ran as part of. A tool's work can involve function calls of
-            its own, made by another model on its behalf, e.g. a backend that
-            a ``delegate`` tool hands work to makes calls while the
-            ``delegate`` call is in progress; each of them names it as its
-            parent. ``None`` for a call that ran as part of nothing this
-            pipeline knows as a call.
     """
 
     function_name: str
     tool_call_id: str
-    parent_tool_call_id: str | None = field(default=None, kw_only=True)
 
 
 @dataclass
