@@ -128,7 +128,7 @@ class DeepSeekLLMService(OpenAILLMService):
         logger.debug(f"Creating DeepSeek client with api {base_url}")
         return super().create_client(api_key, base_url, **kwargs)
 
-    def _build_chat_completion_params(self, params_from_context: OpenAILLMInvocationParams) -> dict:
+    def build_chat_completion_params(self, params_from_context: OpenAILLMInvocationParams) -> dict:
         """Build parameters for DeepSeek chat completion request.
 
         DeepSeek doesn't support some OpenAI parameters like seed and max_completion_tokens.
@@ -152,14 +152,13 @@ class DeepSeekLLMService(OpenAILLMService):
             "max_tokens": self._settings.max_tokens,
         }
 
-        # `thinking` is DeepSeek's own field, so it travels in the OpenAI
-        # client's `extra_body` rather than as a client keyword argument.
-        thinking = assert_given(self._settings.thinking)
-        if thinking:
-            params["extra_body"] = {"thinking": thinking.model_dump(exclude_none=True)}
-
         # Messages, tools, tool_choice
         params.update(params_from_context)
 
         params.update(self._settings.extra)
+
+        thinking = assert_given(self._settings.thinking)
+        if thinking is not None:
+            self._merge_extra_body(params, {"thinking": thinking.model_dump(exclude_none=True)})
+
         return params
