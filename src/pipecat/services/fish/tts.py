@@ -81,9 +81,14 @@ class FishAudioTTSSettings(TTSSettings):
         flat = dict(settings)
         nested = flat.pop("prosody", None)
         if isinstance(nested, dict):
-            flat.setdefault("prosody_speed", nested.get("speed"))
-            flat.setdefault("prosody_volume", nested.get("volume"))
-            flat.setdefault("prosody_normalize_loudness", nested.get("normalize_loudness"))
+            # Keys missing from the nested dict stay unset in the delta.
+            for key, name in (
+                ("speed", "prosody_speed"),
+                ("volume", "prosody_volume"),
+                ("normalize_loudness", "prosody_normalize_loudness"),
+            ):
+                if key in nested:
+                    flat.setdefault(name, nested[key])
         return super().from_mapping(flat)
 
 
