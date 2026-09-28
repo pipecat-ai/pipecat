@@ -6,12 +6,13 @@
 
 """Google AI image generation service implementation.
 
-This module provides integration with Google's Imagen model for generating
-images from text prompts using the Google AI API.
+This module provides integration with Google's Gemini image models for
+generating images from text prompts using the Gemini API.
 """
 
 import io
 import os
+import warnings
 
 # Suppress gRPC fork warnings
 os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "false"
@@ -45,21 +46,28 @@ class GoogleImageGenSettings(ImageGenSettings):
     """Settings for the Google image generation service.
 
     Parameters:
-        model: Google Imagen model identifier.
-        number_of_images: Number of images to generate per request.
+        model: Gemini image model identifier.
+        number_of_images: Number of images to generate per prompt.
+        aspect_ratio: Aspect ratio of generated images, such as ``"1:1"`` or
+            ``"16:9"``. ``None`` leaves the model's own default in place.
         negative_prompt: Text describing what not to include in generated images.
+
+            .. deprecated:: 1.13.0
+                No replacement. Gemini image models do not accept a negative
+                prompt, so the value is ignored. Will be removed in 2.0.0.
     """
 
     number_of_images: int | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    aspect_ratio: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     negative_prompt: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class GoogleImageGenService(ImageGenService):
-    """Google AI image generation service using Imagen models.
+    """Google AI image generation service using Gemini image models.
 
-    Provides text-to-image generation capabilities using Google's Imagen models
-    through the Google AI API. Supports multiple image generation and negative
-    prompting for enhanced control over generated content.
+    Provides text-to-image generation using Google's Gemini image models
+    through the Gemini API. Each image is a separate request, so
+    ``number_of_images`` images are generated one after another.
     """
 
     Settings = GoogleImageGenSettings
@@ -78,12 +86,13 @@ class GoogleImageGenService(ImageGenService):
 
         Parameters:
             number_of_images: Number of images to generate (1-8). Defaults to 1.
-            model: Google Imagen model to use. Defaults to "imagen-4.0-generate-001".
-            negative_prompt: Optional negative prompt to guide what not to include.
+            model: Gemini image model to use. Defaults to "gemini-3.1-flash-image".
+            negative_prompt: Ignored; Gemini image models do not accept a
+                negative prompt.
         """
 
         number_of_images: int = Field(default=1, ge=1, le=8)
-        model: str = Field(default="imagen-4.0-generate-001")
+        model: str = Field(default="gemini-3.1-flash-image")
         negative_prompt: str | None = Field(default=None)
 
     def __init__(
@@ -112,8 +121,9 @@ class GoogleImageGenService(ImageGenService):
         """
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
-            model="imagen-4.0-generate-001",
+            model="gemini-3.1-flash-image",
             number_of_images=1,
+            aspect_ratio="1:1",
             negative_prompt=None,
         )
 
@@ -128,6 +138,15 @@ class GoogleImageGenService(ImageGenService):
         # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
+
+        if default_settings.negative_prompt:
+            warnings.warn(
+                "`negative_prompt` is deprecated since 1.13.0 and will be removed in 2.0.0. "
+                "No replacement. Gemini image models do not accept a negative prompt, "
+                "so the value is ignored.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
         super().__init__(settings=default_settings, **kwargs)
 
@@ -145,7 +164,7 @@ class GoogleImageGenService(ImageGenService):
         return True
 
     async def run_image_gen(self, prompt: str) -> AsyncGenerator[Frame, None]:
-        """Generate images from a text prompt using Google's Imagen model.
+        """Generate images from a text prompt using a Gemini image model.
 
         Args:
             prompt: The text description to generate images from.
@@ -153,9 +172,6 @@ class GoogleImageGenService(ImageGenService):
         Yields:
             Frame: Generated URLImageRawFrame objects containing the generated
                 images, or ErrorFrame objects if generation fails.
-
-        Raises:
-            Exception: If there are issues with the Google AI API or image processing.
         """
         logger.debug(f"Generating image from prompt: {prompt}")
         await self.start_ttfb_metrics()
@@ -165,33 +181,44 @@ class GoogleImageGenService(ImageGenService):
             if model is None:
                 yield ErrorFrame("Google image generation model must be specified")
                 return
-            response = await self._client.aio.models.generate_images(
-                model=model,
-                prompt=prompt,
-                config=types.GenerateImagesConfig(
-                    number_of_images=assert_given(self._settings.number_of_images),
-                    negative_prompt=assert_given(self._settings.negative_prompt),
+
+            config = types.GenerateContentConfig(
+                response_modalities=["IMAGE"],
+                image_config=types.ImageConfig(
+                    aspect_ratio=assert_given(self._settings.aspect_ratio)
                 ),
+                automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
             )
-            await self.stop_ttfb_metrics()
+            for _ in range(assert_given(self._settings.number_of_images)):
+                response = await self._client.aio.models.generate_content(
+                    model=model, contents=prompt, config=config
+                )
+                await self.stop_ttfb_metrics()
 
-            if not response or not response.generated_images:
-                yield ErrorFrame("Image generation failed")
-                return
+                image_bytes = _get_image_bytes(response)
+                if image_bytes is None:
+                    yield ErrorFrame("Image generation failed: no image returned")
+                    return
 
-            for img_response in response.generated_images:
-                # Google returns the image data directly
-                if img_response.image is None or img_response.image.image_bytes is None:
-                    continue
-                image = Image.open(io.BytesIO(img_response.image.image_bytes))
-
-                frame = URLImageRawFrame(
-                    url=None,  # Google doesn't provide URLs, only image data
+                # Output transports render RGB video by default.
+                image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+                yield URLImageRawFrame(
+                    url=None,  # Gemini returns the image inline, not as a URL
                     image=image.tobytes(),
                     size=image.size,
                     format=image.mode,
                 )
-                yield frame
 
         except Exception as e:
             yield ErrorFrame(f"Image generation error: {str(e)}")
+
+
+def _get_image_bytes(response: types.GenerateContentResponse) -> bytes | None:
+    """Return the bytes of the first image part in a response, if any."""
+    for candidate in response.candidates or []:
+        if not candidate.content:
+            continue
+        for part in candidate.content.parts or []:
+            if part.inline_data and part.inline_data.data:
+                return part.inline_data.data
+    return None
