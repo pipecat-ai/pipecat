@@ -10,22 +10,96 @@ This module provides an OpenAI-compatible interface for interacting with OpenRou
 extending the base OpenAI LLM service functionality.
 """
 
-from dataclasses import dataclass
-from typing import Any
+from dataclasses import dataclass, field
+from typing import Any, Literal
 
 from loguru import logger
+from pydantic import BaseModel, ConfigDict
 
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
 from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.utils.types import assert_given
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
+
+
+class OpenRouterProviderPreferences(BaseModel):
+    """OpenRouter's preferences for which upstream provider serves a request.
+
+    Every model on OpenRouter can be served by several providers, and by
+    default OpenRouter picks among them and falls back to another when one
+    fails. These preferences constrain that choice. See
+    https://openrouter.ai/docs/guides/routing/provider-selection for the provider
+    slugs and the full semantics.
+
+    Parameters:
+        order: Provider slugs to try, in order, before any others. Setting it
+            turns off load balancing.
+        allow_fallbacks: Whether to fall back to providers outside ``order``,
+            ``only`` and ``quantizations``. Defaults to true.
+        require_parameters: Whether to route only to providers that support
+            every parameter in the request. Defaults to false.
+        data_collection: "deny" restricts routing to providers that do not
+            collect user data. Defaults to "allow".
+        zdr: Whether to route only to zero-data-retention endpoints.
+        enforce_distillable_text: Whether to route only to models that allow
+            text distillation.
+        only: Provider slugs to route to, to the exclusion of all others.
+        ignore: Provider slugs never to route to.
+        quantizations: Quantization levels to accept, e.g. ``["fp8", "bf16"]``.
+        sort: Attribute to rank providers by — "price", "throughput" or
+            "latency" — or an object of the form ``{"by": ..., "partition":
+            "model" | "none"}``. Setting it turns off load balancing.
+        preferred_min_throughput: Throughput, in tokens per second, below which
+            a provider is deprioritized. Either a number or percentile
+            thresholds keyed "p50", "p75", "p90" and "p99".
+        preferred_max_latency: Latency, in seconds, above which a provider is
+            deprioritized. Either a number or percentile thresholds keyed
+            "p50", "p75", "p90" and "p99".
+        max_price: Ceilings on what a request may cost, in USD: "prompt" and
+            "completion" per million tokens, "request" per request, and
+            "image" per image.
+    """
+
+    # Why `extra="allow"`, and `| str` and `| dict` on the constrained fields?
+    # OpenRouter adds routing options regularly, and one that landed after this
+    # model was written should still reach the request rather than be rejected
+    # or dropped here.
+    model_config = ConfigDict(extra="allow")
+
+    order: list[str] | None = None
+    allow_fallbacks: bool | None = None
+    require_parameters: bool | None = None
+    data_collection: Literal["allow", "deny"] | str | None = None
+    zdr: bool | None = None
+    enforce_distillable_text: bool | None = None
+    only: list[str] | None = None
+    ignore: list[str] | None = None
+    quantizations: list[str] | None = None
+    sort: Literal["price", "throughput", "latency"] | str | dict[str, Any] | None = None
+    preferred_min_throughput: float | dict[str, float] | None = None
+    preferred_max_latency: float | dict[str, float] | None = None
+    max_price: dict[str, float] | None = None
 
 
 @dataclass
 class OpenRouterLLMSettings(BaseOpenAILLMService.Settings):
-    """Settings for OpenRouterLLMService."""
+    """Settings for OpenRouterLLMService.
 
-    pass
+    Parameters:
+        provider: Which upstream providers may serve the request. A plain dict
+            is converted to :class:`OpenRouterProviderPreferences`. Left unset,
+            or set to ``None``, the request omits it and OpenRouter routes by
+            its own default order.
+    """
+
+    provider: OpenRouterProviderPreferences | dict[str, Any] | None | NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
+
+    def __post_init__(self):
+        """Coerce a plain ``provider`` dict to :class:`OpenRouterProviderPreferences`."""
+        if isinstance(self.provider, dict):
+            self.provider = OpenRouterProviderPreferences(**self.provider)
 
 
 class OpenRouterLLMService(OpenAILLMService):
@@ -38,6 +112,8 @@ class OpenRouterLLMService(OpenAILLMService):
     Settings = OpenRouterLLMSettings
     _settings: Settings
     supports_developer_role = False
+
+    ProviderPreferences = OpenRouterProviderPreferences
 
     def __init__(
         self,
@@ -99,6 +175,21 @@ class OpenRouterLLMService(OpenAILLMService):
         logger.debug(f"Creating OpenRouter client with api {base_url}")
         return super().create_client(api_key, base_url, **kwargs)
 
+    def _apply_provider_preferences(self, params: dict[str, Any]):
+        """Put the caller's provider preferences in a request.
+
+        ``provider`` is OpenRouter's own request field rather than an OpenAI
+        one, so it travels in ``extra_body``, which the OpenAI client merges
+        into the JSON body it sends. A ``provider`` already in ``extra_body``,
+        supplied through ``Settings.extra``, wins.
+        """
+        preferences = self._settings.provider
+        if not is_given(preferences) or preferences is None:
+            return
+
+        preferences = OpenRouterProviderPreferences.model_validate(preferences)
+        self._merge_extra_body(params, {"provider": preferences.model_dump(exclude_none=True)})
+
     def build_chat_completion_params(
         self, params_from_context: OpenAILLMInvocationParams
     ) -> dict[str, Any]:
@@ -111,6 +202,7 @@ class OpenRouterLLMService(OpenAILLMService):
             Transformed parameters ready for the API call.
         """
         params = super().build_chat_completion_params(params_from_context)
+        self._apply_provider_preferences(params)
         model = assert_given(self._settings.model)
         if model is not None and "gemini" in model.lower():
             messages = params.get("messages", [])

@@ -8,12 +8,14 @@
 
 from unittest.mock import patch
 
+import pytest
 from openai._types import NOT_GIVEN as OPENAI_NOT_GIVEN
 
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
 from pipecat.services.deepseek.llm import DeepSeekLLMService
 from pipecat.services.inception.llm import InceptionLLMService
 from pipecat.services.openai.base_llm import BaseOpenAILLMService
+from pipecat.services.openrouter.llm import OpenRouterLLMService
 from pipecat.services.sarvam.llm import SarvamLLMService
 from pipecat.services.together.llm import TogetherLLMService
 from pipecat.services.xai.llm import GrokLLMService
@@ -139,3 +141,80 @@ def test_sarvam_user_extra_body_wins():
         ),
     )
     assert params["extra_body"] == {"wiki_grounding": False}
+
+
+def test_openrouter_provider_unset_by_default():
+    params = _build_params(OpenRouterLLMService)
+    assert "extra_body" not in params
+
+
+def test_openrouter_provider_preferences_in_extra_body():
+    params = _build_params(
+        OpenRouterLLMService,
+        OpenRouterLLMService.Settings(
+            provider=OpenRouterLLMService.ProviderPreferences(
+                sort="latency", preferred_max_latency={"p90": 1.5}
+            )
+        ),
+    )
+    assert params["extra_body"] == {
+        "provider": {"sort": "latency", "preferred_max_latency": {"p90": 1.5}}
+    }
+
+
+def test_openrouter_provider_dict_in_extra_body():
+    params = _build_params(
+        OpenRouterLLMService,
+        OpenRouterLLMService.Settings(provider={"only": ["azure"], "allow_fallbacks": False}),
+    )
+    assert params["extra_body"] == {"provider": {"only": ["azure"], "allow_fallbacks": False}}
+
+
+def test_openrouter_provider_preferences_keep_unknown_options():
+    params = _build_params(
+        OpenRouterLLMService,
+        OpenRouterLLMService.Settings(
+            provider=OpenRouterLLMService.ProviderPreferences(sort="price", new_option=True)
+        ),
+    )
+    assert params["extra_body"] == {"provider": {"sort": "price", "new_option": True}}
+
+
+def test_openrouter_user_extra_body_wins():
+    params = _build_params(
+        OpenRouterLLMService,
+        OpenRouterLLMService.Settings(
+            provider={"only": ["azure"]},
+            extra={"extra_body": {"provider": {"only": ["groq"]}, "user_field": 1}},
+        ),
+    )
+    assert params["extra_body"] == {"provider": {"only": ["groq"]}, "user_field": 1}
+
+
+def test_openrouter_provider_dict_coerced_to_preferences():
+    settings = OpenRouterLLMService.Settings(provider={"sort": "latency"})
+    assert settings.provider == OpenRouterLLMService.ProviderPreferences(sort="latency")
+
+
+@pytest.mark.asyncio
+async def test_openrouter_provider_updates_at_runtime():
+    with patch.object(OpenRouterLLMService, "create_client"):
+        service = OpenRouterLLMService(
+            api_key="test-key", settings=OpenRouterLLMService.Settings(provider={"only": ["azure"]})
+        )
+    invocation = OpenAILLMInvocationParams(
+        messages=[{"role": "user", "content": "Hello"}],
+        tools=OPENAI_NOT_GIVEN,
+        tool_choice=OPENAI_NOT_GIVEN,
+    )
+
+    changed = await service._update_settings(
+        OpenRouterLLMService.Settings.from_mapping({"provider": {"sort": "latency"}})
+    )
+    assert "provider" in changed
+    params = service.build_chat_completion_params(invocation)
+    assert params["extra_body"] == {"provider": {"sort": "latency"}}
+
+    await service._update_settings(OpenRouterLLMService.Settings(provider=None))
+    params = service.build_chat_completion_params(invocation)
+    assert "extra_body" not in params
