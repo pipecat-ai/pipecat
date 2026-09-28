@@ -44,7 +44,7 @@ from pipecat.services.settings import LLMSettings
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.http import TIMEOUT_EXCEPTIONS, connection_limits
 from pipecat.utils.tracing.service_decorators import traced_llm
-from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 
 
 @dataclass
@@ -395,6 +395,28 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
         params.update(self._settings.extra)
 
         return params
+
+    @staticmethod
+    def _merge_extra_body(params: dict[str, Any], fields: Mapping[str, Any]):
+        """Add provider-specific fields to a request's ``extra_body``.
+
+        The OpenAI client rejects keyword arguments it doesn't know, so fields
+        specific to an OpenAI-compatible provider travel in ``extra_body``,
+        which the client merges into the request JSON as-is.
+
+        Args:
+            params: Request parameters, updated in place. An ``extra_body``
+                already there, supplied through ``Settings.extra``, wins key by
+                key, matching how ``extra`` overrides every other request
+                parameter. It is copied rather than modified.
+            fields: Fields to add. Unset and ``None`` values are omitted.
+        """
+        extra_body = {
+            name: value for name, value in fields.items() if is_given(value) and value is not None
+        }
+        extra_body.update(params.get("extra_body") or {})
+        if extra_body:
+            params["extra_body"] = extra_body
 
     @staticmethod
     def model_supports_response_schema(model: str) -> bool:

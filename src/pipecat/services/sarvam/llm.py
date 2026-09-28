@@ -215,18 +215,8 @@ class SarvamLLMService(OpenAILLMService):
 
         model = self._settings.model
 
-        # wiki_grounding is Sarvam-specific and unknown to the OpenAI SDK,
-        # so it must be passed via extra_body to avoid TypeError.
-        extra_body = {}
-        if (
-            model in self._WIKI_GROUNDING_MODELS
-            and is_given(self._settings.wiki_grounding)
-            and self._settings.wiki_grounding is not None
-        ):
-            extra_body["wiki_grounding"] = self._settings.wiki_grounding
-
-        if extra_body:
-            params.setdefault("extra_body", {}).update(extra_body)
+        if model in self._WIKI_GROUNDING_MODELS:
+            self._merge_extra_body(params, {"wiki_grounding": self._settings.wiki_grounding})
 
         if (
             model in self._REASONING_MODELS

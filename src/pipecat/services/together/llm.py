@@ -14,7 +14,7 @@ from loguru import logger
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
 from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
+from pipecat.utils.types import NOT_GIVEN, NotGiven
 
 
 @dataclass
@@ -115,11 +115,6 @@ class TogetherLLMService(OpenAILLMService):
         """
         params = super().build_chat_completion_params(params_from_context)
 
-        # `reasoning` is Together's own field, so it travels in the OpenAI
-        # client's `extra_body` rather than as a client keyword argument. An
-        # `extra_body` supplied through `Settings.extra` wins key by key.
-        reasoning = assert_given(self._settings.reasoning)
-        if reasoning is not None:
-            params["extra_body"] = {"reasoning": reasoning, **params.get("extra_body", {})}
+        self._merge_extra_body(params, {"reasoning": self._settings.reasoning})
 
         return params
