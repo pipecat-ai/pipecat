@@ -665,6 +665,7 @@ class BackendLLMWorker(LLMContextWorker):
             return
         reason = str((message.payload or {}).get("reason") or "cancelled by the frontend")
         was_working = self.working
+        logger.debug(f"Worker '{self.name}': cancelling ({reason}); was working={was_working}")
         await self._stop_work(reason)
         await self._await_calls_settled()
         note = LLMMessagesAppendFrame(
@@ -692,9 +693,17 @@ class BackendLLMWorker(LLMContextWorker):
         survives the interruption the cancellation broadcasts.
         """
         self._requests_pending += 1
+        run_llm = not self._model_busy and not self._calls_block_a_run
+        if run_llm:
+            logger.debug(f"Worker '{self.name}': running the model on the request")
+        else:
+            logger.debug(
+                f"Worker '{self.name}': holding the request for the current step "
+                f"(model busy={self._model_busy}, blocking call in flight={self._calls_block_a_run})"
+            )
         frame = LLMMessagesAppendFrame(
             messages=[{"role": "user", "content": request}],
-            run_llm=not self._model_busy and not self._calls_block_a_run,
+            run_llm=run_llm,
         )
         frame.interruptible = False
         await self.queue_frame(frame)
@@ -711,6 +720,7 @@ class BackendLLMWorker(LLMContextWorker):
             and not self._model_busy
             and not self._calls_block_a_run
         ):
+            logger.debug(f"Worker '{self.name}': running the model on the request that was held")
             await self.queue_frame(LLMRunFrame())
 
     async def _await_calls_settled(self, timeout_secs: float = 2.0) -> None:

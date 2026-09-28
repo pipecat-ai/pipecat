@@ -1922,6 +1922,8 @@ class LLMAssistantAggregator(LLMContextAggregator):
             self._context_push_owed = True
         if self._context_push_owed and not self._user_speaking:
             await self._maybe_push_context()
+        elif self._context_push_owed:
+            logger.debug(f"{self}: User is speaking — context frame push owed until the turn ends.")
 
     async def _handle_llm_messages_update(self, frame: LLMMessagesUpdateFrame):
         self.set_messages(frame.messages)
