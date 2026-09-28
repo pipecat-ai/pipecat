@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock
 
 from pipecat.evals.transport import (
     CAPTURE_AUDIO_QUERY_PARAM,
+    CAPTURE_IMAGES_QUERY_PARAM,
     SKIP_TTS_QUERY_PARAM,
     EvalTransport,
     EvalTransportParams,
@@ -44,6 +45,14 @@ class TestQueryFlag(unittest.TestCase):
             _query_flag(_ws(path="/?capture_bot_audio=true"), CAPTURE_AUDIO_QUERY_PARAM)
         )
         self.assertFalse(_query_flag(_ws(path="/?skip_tts=true"), CAPTURE_AUDIO_QUERY_PARAM))
+
+    def test_capture_images_flag(self):
+        self.assertTrue(
+            _query_flag(_ws(path="/?capture_bot_images=true"), CAPTURE_IMAGES_QUERY_PARAM)
+        )
+        self.assertFalse(
+            _query_flag(_ws(path="/?capture_bot_audio=true"), CAPTURE_IMAGES_QUERY_PARAM)
+        )
 
     def test_false_when_absent(self):
         self.assertFalse(_query_flag(_ws(path="/"), SKIP_TTS_QUERY_PARAM))

@@ -1,0 +1,1 @@
+- Added an `image` event to scripted eval scenarios: an image the bot output, with its size and format. The eval transport reports the bot's images only to a scenario that expects one.

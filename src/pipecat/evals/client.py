@@ -386,6 +386,7 @@ class EvalClientParams(BaseModel):
             ``None``; sets the user audio rate.
         capture_bot_audio: Whether the bot forwards its synthesized audio, for
             the ``response`` transcription or a persona that listens.
+        capture_bot_images: Whether the bot reports the images it outputs.
         report_level: Function-call report level to ask of the bot, or ``None``
             for its default.
         vad_events: Whether to ask the bot for its raw VAD events.
@@ -403,6 +404,7 @@ class EvalClientParams(BaseModel):
     user_audio: bool = False
     user_speech: dict | None = None
     capture_bot_audio: bool = False
+    capture_bot_images: bool = False
     report_level: str | None = None
     vad_events: bool = False
     marker_events: bool = False
@@ -734,7 +736,8 @@ class EvalClient:
         """The bot's URL with this connection's eval flags.
 
         ``skip_tts`` in text mode, ``capture_bot_audio`` when the harness needs
-        the bot's audio, ``trigger_disconnect`` when the run asks for it.
+        the bot's audio, ``capture_bot_images`` when it needs the bot's images,
+        ``trigger_disconnect`` when the run asks for it.
         """
         flags = []
         if not self._params.bot_audio:
@@ -743,6 +746,8 @@ class EvalClient:
         # transcription, a persona) or when recording an audio run.
         if self._params.capture_bot_audio or (self._record_path and self._params.bot_audio):
             flags.append("capture_bot_audio=true")
+        if self._params.capture_bot_images:
+            flags.append("capture_bot_images=true")
         if self._session_params.trigger_disconnect or self._params.trigger_disconnect:
             flags.append("trigger_disconnect=true")
         if not flags:

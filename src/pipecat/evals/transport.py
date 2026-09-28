@@ -10,7 +10,8 @@ The harness sets per-connection query flags. ``skip_tts`` silences the
 bot's speech for the session (text mode), applied before
 ``on_client_connected`` so a greeting made there is silent too.
 ``capture_bot_audio`` forwards the bot's synthesized audio to the harness,
-for transcription and the recording. ``trigger_disconnect`` fires the bot's
+for transcription and the recording. ``capture_bot_images`` reports each
+image the bot outputs, by size and format. ``trigger_disconnect`` fires the bot's
 ``on_client_disconnected`` when the connection ends; it is off by default,
 since bots often cancel their pipeline there and the server serves several
 scenarios in a row.
@@ -30,6 +31,7 @@ from PIL import Image
 from pipecat.frames.frames import (
     Frame,
     LLMConfigureOutputFrame,
+    OutputImageRawFrame,
     UserImageRawFrame,
     UserImageRequestFrame,
 )
@@ -43,6 +45,7 @@ from pipecat.transports.websocket.server import (
 
 SKIP_TTS_QUERY_PARAM = "skip_tts"
 CAPTURE_AUDIO_QUERY_PARAM = "capture_bot_audio"
+CAPTURE_IMAGES_QUERY_PARAM = "capture_bot_images"
 TRIGGER_DISCONNECT_QUERY_PARAM = "trigger_disconnect"
 
 
@@ -111,9 +114,18 @@ class EvalInputTransport(SingleClientWebsocketServerInputTransport):
 
 
 class EvalOutputTransport(SingleClientWebsocketServerOutputTransport):
-    """Output transport of the eval transport; adds nothing to the WebSocket server output yet, and exists for symmetry with :class:`EvalInputTransport`."""
+    """Output transport that reports the bot's images to the harness.
 
-    pass
+    The WebSocket server output has no video, so an image the bot outputs is
+    handed to the serializer as it arrives, whether or not the bot enabled
+    video output; the serializer sends it only when the harness asked.
+    """
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Report output images; otherwise behave like the base output transport."""
+        await super().process_frame(frame, direction)
+        if isinstance(frame, OutputImageRawFrame):
+            await self._write_frame(frame)
 
 
 class EvalTransport(SingleClientWebsocketServerTransport):
@@ -138,6 +150,8 @@ class EvalTransport(SingleClientWebsocketServerTransport):
         serializer = getattr(self._params, "serializer", None)
         if serializer is not None and hasattr(serializer, "set_capture_audio"):
             serializer.set_capture_audio(_query_flag(websocket, CAPTURE_AUDIO_QUERY_PARAM))
+        if serializer is not None and hasattr(serializer, "set_capture_images"):
+            serializer.set_capture_images(_query_flag(websocket, CAPTURE_IMAGES_QUERY_PARAM))
 
         if self._input is not None:
             skip_tts = _query_flag(websocket, SKIP_TTS_QUERY_PARAM)

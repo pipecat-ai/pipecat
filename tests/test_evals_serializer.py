@@ -13,6 +13,7 @@ import unittest
 import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.evals.serializer import (
     EVAL_BOT_AUDIO_TYPE,
+    EVAL_BOT_IMAGE_TYPE,
     EVAL_CONFIGURE_MESSAGE_TYPE,
     EVAL_CONTEXT_MESSAGE_TYPE,
     EVAL_IMAGE_MESSAGE_TYPE,
@@ -25,6 +26,7 @@ from pipecat.frames.frames import (
     LLMFullResponseStartFrame,
     LLMMessagesUpdateFrame,
     OutputAudioRawFrame,
+    OutputImageRawFrame,
     OutputTransportMessageUrgentFrame,
     TranscriptionFrame,
 )
@@ -257,3 +259,37 @@ class TestEvalClientSerializer(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestEvalSerializerBotImages(unittest.IsolatedAsyncioTestCase):
+    """The bot reports its output images by size and format, only when asked."""
+
+    def _image(self) -> OutputImageRawFrame:
+        return OutputImageRawFrame(image=b"\x00" * 12, size=(2, 2), format="RGB")
+
+    async def test_image_dropped_by_default(self):
+        self.assertIsNone(await EvalSerializer().serialize(self._image()))
+
+    async def test_image_reported_when_captured(self):
+        serializer = EvalSerializer()
+        serializer.set_capture_images(True)
+        message = json.loads(await serializer.serialize(self._image()))
+        self.assertEqual(message["type"], EVAL_BOT_IMAGE_TYPE)
+        self.assertEqual(message["data"], {"width": 2, "height": 2, "format": "RGB"})
+
+
+class TestEvalClientSerializerBotImages(unittest.IsolatedAsyncioTestCase):
+    """The bot's image reports reach the harness as raw messages."""
+
+    async def test_bot_image_stays_a_raw_message(self):
+        frame = await EvalClientSerializer().deserialize(
+            json.dumps(
+                {
+                    "label": RTVI.MESSAGE_LABEL,
+                    "type": EVAL_BOT_IMAGE_TYPE,
+                    "data": {"width": 2, "height": 2},
+                }
+            )
+        )
+        self.assertIsInstance(frame, InputTransportMessageFrame)
+        self.assertEqual(frame.message["type"], EVAL_BOT_IMAGE_TYPE)
