@@ -154,6 +154,24 @@ ELEVENLABS_V3_LANGUAGES: frozenset[str] = frozenset(
     }
 )
 
+#: Languages Eleven v4 Turbo accepts as a ``language_code``. A superset of
+#: :data:`ELEVENLABS_V3_LANGUAGES`. This is the set the API accepts, which
+#: differs from the list ElevenLabs publishes for the model.
+ELEVENLABS_V4_LANGUAGES: frozenset[str] = ELEVENLABS_V3_LANGUAGES | frozenset(
+    {
+        "ast",
+        "mi",
+        "mn",
+        "mt",
+        "my",
+        "oc",
+        "or",
+        "tg",
+        "uz",
+        "yue",
+    }
+)
+
 #: Models that accept a ``language_code``, and the languages each one takes.
 #: Sending a language a model doesn't cover is rejected with a 400, so the
 #: language is checked against this mapping rather than only the model id.
@@ -167,6 +185,7 @@ ELEVENLABS_MODEL_LANGUAGES: dict[str, frozenset[str]] = {
     "eleven_turbo_v2_5": ELEVENLABS_V2_5_LANGUAGES,
     "eleven_v3": ELEVENLABS_V3_LANGUAGES,
     "eleven_v3_conversational": ELEVENLABS_V3_LANGUAGES,
+    "eleven_v4_turbo": ELEVENLABS_V4_LANGUAGES,
 }
 
 
@@ -220,6 +239,7 @@ def language_to_elevenlabs_language(language: Language) -> str:
         Language.AF: "af",
         Language.AR: "ar",
         Language.AS: "as",
+        Language.AST: "ast",
         Language.AZ: "az",
         Language.BE: "be",
         Language.BG: "bg",
@@ -262,14 +282,20 @@ def language_to_elevenlabs_language(language: Language) -> str:
         Language.LN: "ln",
         Language.LT: "lt",
         Language.LV: "lv",
+        Language.MI: "mi",
         Language.MK: "mk",
         Language.ML: "ml",
+        Language.MN: "mn",
         Language.MR: "mr",
         Language.MS: "ms",
+        Language.MT: "mt",
+        Language.MY: "my",
         Language.NE: "ne",
         Language.NL: "nl",
         Language.NO: "no",
         Language.NY: "ny",
+        Language.OC: "oc",
+        Language.OR: "or",
         Language.PA: "pa",
         Language.PL: "pl",
         Language.PS: "ps",
@@ -285,11 +311,14 @@ def language_to_elevenlabs_language(language: Language) -> str:
         Language.SW: "sw",
         Language.TA: "ta",
         Language.TE: "te",
+        Language.TG: "tg",
         Language.TH: "th",
         Language.TR: "tr",
         Language.UK: "uk",
         Language.UR: "ur",
+        Language.UZ: "uz",
         Language.VI: "vi",
+        Language.YUE: "yue",
         Language.ZH: "zh",
     }
 
@@ -327,9 +356,9 @@ def output_format_from_sample_rate(sample_rate: int) -> str:
 
 
 def _is_chinese_or_japanese_language(language: str) -> bool:
-    """Check if the given language is Chinese or Japanese."""
+    """Check if the given language is Chinese (including Cantonese) or Japanese."""
     base_lang = language.split("-")[0].lower()
-    return base_lang in {"zh", "ja"}
+    return base_lang in {"zh", "yue", "ja"}
 
 
 def _word_timestamps_include_inter_frame_spaces(language: str | None) -> bool:
