@@ -256,26 +256,17 @@ class BackendToolCall:
             is_final=bool(payload.get("is_final", True)),
         )
 
-    def to_frame(self, *, parent_tool_call_id: str | None = None) -> ExternalFunctionCallFrame:
+    def to_frame(self) -> ExternalFunctionCallFrame:
         """Build the frame that reports this phase in the frontend's pipeline.
-
-        Args:
-            parent_tool_call_id: The frontend's call this one ran as part of,
-                if any.
 
         Returns:
             The frame for the phase.
         """
         if self.phase == "started":
-            return ExternalFunctionCallStartedFrame(
-                self.function_name, self.tool_call_id, parent_tool_call_id=parent_tool_call_id
-            )
+            return ExternalFunctionCallStartedFrame(self.function_name, self.tool_call_id)
         if self.phase == "in_progress":
             return ExternalFunctionCallInProgressFrame(
-                self.function_name,
-                self.tool_call_id,
-                arguments=self.arguments,
-                parent_tool_call_id=parent_tool_call_id,
+                self.function_name, self.tool_call_id, arguments=self.arguments
             )
         if self.phase == "result":
             return ExternalFunctionCallResultFrame(
@@ -284,11 +275,8 @@ class BackendToolCall:
                 arguments=self.arguments,
                 result=self.result,
                 is_final=self.is_final,
-                parent_tool_call_id=parent_tool_call_id,
             )
-        return ExternalFunctionCallCancelFrame(
-            self.function_name, self.tool_call_id, parent_tool_call_id=parent_tool_call_id
-        )
+        return ExternalFunctionCallCancelFrame(self.function_name, self.tool_call_id)
 
 
 @dataclass

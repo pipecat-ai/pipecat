@@ -379,7 +379,6 @@ async def test_the_backends_calls_are_reported_and_nothing_else_happens_to_them(
     (pushed,) = [c.args[0] for c in frontend.push_frame.await_args_list]
     assert isinstance(pushed, ExternalFunctionCallInProgressFrame)
     assert (pushed.function_name, pushed.tool_call_id) == ("get_weather", "toolu_1")
-    assert pushed.parent_tool_call_id is None
     # The call is also recorded in the conversation, silently, so the frontend
     # can say what the backend is doing.
     (appended,) = [c.args[0] for c in frontend.queue_frame.await_args_list]
@@ -560,4 +559,3 @@ async def test_a_local_backend_is_heard_through_the_frontends_conversation():
         (ExternalFunctionCallInProgressFrame, "get_weather"),
         (ExternalFunctionCallResultFrame, "get_weather"),
     ]
-    assert {f.parent_tool_call_id for f in reported} == {None}

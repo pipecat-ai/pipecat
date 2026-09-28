@@ -1347,11 +1347,7 @@ async def test_the_backends_calls_are_reported_without_a_parent(monkeypatch):
 
     (pushed,) = [c.args[0] for c in service.push_frame.await_args_list]
     assert isinstance(pushed, ExternalFunctionCallFrame)
-    assert (pushed.function_name, pushed.tool_call_id, pushed.parent_tool_call_id) == (
-        "get_weather",
-        "toolu_1",
-        None,
-    )
+    assert (pushed.function_name, pushed.tool_call_id) == ("get_weather", "toolu_1")
 
 
 @pytest.mark.asyncio
