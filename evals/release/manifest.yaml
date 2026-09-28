@@ -346,6 +346,17 @@ suite:
     scenarios: [scripted/vision_describe]
 
   #
+  # Image generation: the bot generates an image from a fixed prompt when the
+  # harness connects; the scenario waits for the image.
+  #
+  - bot: image-generation/image-generation-fal.py
+    scenarios: [scripted/generate_image]
+  - bot: image-generation/image-generation-google.py
+    scenarios: [scripted/generate_image]
+  - bot: image-generation/image-generation-openai.py
+    scenarios: [scripted/generate_image]
+
+  #
   # Turn management: the user trails off mid-thought, then completes it after a
   # pause. The bot's incomplete-turn detection must hold the turn open and
   # respond only to the finished thought (anchored on the raw VAD stop signal).
