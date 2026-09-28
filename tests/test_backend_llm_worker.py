@@ -43,7 +43,7 @@ from pipecat.services.settings import LLMSettings
 from pipecat.workers.base_worker import BaseWorker
 from pipecat.workers.llm import BackendLLMWorker
 from pipecat.workers.llm.backend_llm_worker import (
-    CANCELLED_NOTE,
+    NO_REPORT_TOOL_NAME,
     REPORT_TOOL_NAME,
     BackendError,
     BackendIdle,
@@ -162,7 +162,7 @@ def test_render_transcript_request_points_the_backend_at_the_conversation():
         "Voice conversation so far:\n"
         "USER: what's the weather\n"
         "\n"
-        "Act on the user's most recent request in the conversation above, and report its result as soon as you have it, before going on with other work."
+        "Act on the user's most recent request in the conversation above. If it asks for something, report the result as soon as you have it, before going on with other work. If it only stops or changes work already under way, call nothing_to_report instead of reporting: the assistant has already told the user."
     )
 
 
@@ -213,7 +213,7 @@ def test_render_transcript_request_flattens_what_a_transcript_can_hold():
         "USER: what is this\n"
         "ASSISTANT: Let me look.\n"
         "\n"
-        "Act on the user's most recent request in the conversation above, and report its result as soon as you have it, before going on with other work."
+        "Act on the user's most recent request in the conversation above. If it asks for something, report the result as soon as you have it, before going on with other work. If it only stops or changes work already under way, call nothing_to_report instead of reporting: the assistant has already told the user."
     )
 
 
@@ -278,11 +278,7 @@ async def test_an_attached_frontend_hears_the_backend_work_a_request_through():
         async with _BackendSession(requester, "backend") as session:
             statuses.append(await session.send("what's the weather in seattle"))
             events.extend(await _until_idle(session))
-            assert session.capabilities == {
-                "steering": True,
-                "cancellation": True,
-                "progress": True,
-            }
+            assert session.capabilities == {"steering": True, "progress": True}
 
     await _drive(runner, requester, backend, body)
 
@@ -435,89 +431,6 @@ async def test_a_message_sent_while_only_an_asynchronous_tool_is_in_flight_runs_
     ]
     assert len(llm.contexts_seen) == 3
     assert "Second" in [m.get("content") for m in llm.contexts_seen[1]]
-
-
-@pytest.mark.asyncio
-async def test_a_request_held_for_a_call_runs_once_a_cancellation_clears_the_call():
-    """The request lands after the cancellation has cleared what it was waiting for."""
-    lookup_started = asyncio.Event()
-
-    async def slow_lookup(params: FunctionCallParams):
-        """Look something up, slowly."""
-        lookup_started.set()
-        await asyncio.sleep(30)
-        await params.result_callback({"found": True})
-
-    llm = _ScriptedLLM(
-        [
-            [("call", "slow_lookup", "call_1", {})],
-            [("text", "On the second thing now.")],
-        ]
-    )
-    backend, requester, runner = _attached_backend(llm, tools=[slow_lookup])
-    events: list = []
-
-    async def body():
-        async with _BackendSession(requester, "backend") as session:
-            await session.send("First")
-            await asyncio.wait_for(lookup_started.wait(), 5)
-            assert (await session.send("Second")) == "working"
-            assert await session.cancel("never mind the first")
-            events.extend(await _until_idle(session))
-
-    await _drive(runner, requester, backend, body)
-
-    assert [e.text for e in events if isinstance(e, BackendOutput)] == ["On the second thing now."]
-    contents = [m.get("content") for m in llm.contexts_seen[-1]]
-    assert "Second" in contents and CANCELLED_NOTE in contents
-
-
-@pytest.mark.asyncio
-async def test_cancel_stops_the_calls_in_flight_and_notes_the_cancellation():
-    cancelled: list[str] = []
-    started = asyncio.Event()
-
-    async def slow_lookup(params: FunctionCallParams):
-        """Look something up, slowly."""
-        started.set()
-        try:
-            await asyncio.sleep(30)
-        except asyncio.CancelledError:
-            cancelled.append("sync")
-            raise
-
-    @tool_options(cancel_on_interruption=False)
-    async def slow_async_lookup(params: FunctionCallParams):
-        """Look something up, slowly, surviving interruptions."""
-        try:
-            await asyncio.sleep(30)
-        except asyncio.CancelledError:
-            cancelled.append("async")
-            raise
-
-    llm = _ScriptedLLM(
-        [[("call", "slow_lookup", "call_1", {}), ("call", "slow_async_lookup", "call_2", {})]]
-    )
-    backend, requester, runner = _attached_backend(llm, tools=[slow_lookup, slow_async_lookup])
-    results: list[bool] = []
-
-    async def body():
-        async with _BackendSession(requester, "backend") as session:
-            await session.send("Look it up")
-            await asyncio.wait_for(started.wait(), 5)
-            results.append(await session.cancel("never mind"))
-            for _ in range(50):
-                if not backend.working:
-                    break
-                await asyncio.sleep(0.1)
-            results.append(await session.cancel("nothing left"))
-
-    await _drive(runner, requester, backend, body)
-
-    assert results == [True, False]
-    assert sorted(cancelled) == ["async", "sync"]
-    assert not backend.working
-    assert backend.context.get_messages()[-1] == {"role": "user", "content": CANCELLED_NOTE}
 
 
 @pytest.mark.asyncio
@@ -768,6 +681,53 @@ async def test_the_report_tool_speaks_for_the_model_while_it_goes_on_working():
     # The tool is the model's on every inference, never in the context's tool set.
     assert REPORT_TOOL_NAME in llm.get_llm_adapter().builtin_tools
     assert REPORT_TOOL_NAME not in {t.name for t in backend.context.tools.standard_tools}
+
+
+@pytest.mark.asyncio
+async def test_the_no_report_tool_silences_a_turn_and_runs_nothing():
+    """A message that stops the work gets no reply: the cancel, then the no-op call on its result."""
+    lookup_started = asyncio.Event()
+
+    @tool_options(cancel_on_interruption=False, cancellable_by_llm=True)
+    async def slow_lookup(params: FunctionCallParams):
+        """Look something up, slowly."""
+        lookup_started.set()
+        await asyncio.sleep(30)
+        await params.result_callback({"found": True})
+
+    llm = _ScriptedLLM(
+        [
+            [("call", "slow_lookup", "call_1", {})],
+            [("text", "Stopping the lookup."), ("call", "cancel_slow_lookup", "call_c", {})],
+            # The cancellation's result brings one more run, with nothing to say.
+            [("call", NO_REPORT_TOOL_NAME, "call_n", {})],
+        ]
+    )
+    backend, requester, runner = _attached_backend(llm, tools=[slow_lookup])
+    events: list = []
+
+    async def body():
+        async with _BackendSession(requester, "backend") as session:
+            await session.send("Look it up")
+            await asyncio.wait_for(lookup_started.wait(), 5)
+            assert (await session.send("Never mind")) == "working"
+            events.extend(await _until_idle(session))
+
+    await _drive(runner, requester, backend, body)
+
+    # The note beside the cancel is silent, the lookup is cancelled, and the
+    # no-op call brings no run of its own: the model ran three times in all.
+    assert [(e.text, e.prefers_spoken) for e in events if isinstance(e, BackendOutput)] == [
+        ("Stopping the lookup.", False)
+    ]
+    phases = [(e.function_name, e.phase) for e in events if isinstance(e, BackendToolCall)]
+    assert ("slow_lookup", "cancelled") in phases
+    assert NO_REPORT_TOOL_NAME not in {
+        e.function_name for e in events if isinstance(e, BackendToolCall)
+    }
+    assert isinstance(events[-1], BackendIdle)
+    assert len(llm.contexts_seen) == 3
+    assert NO_REPORT_TOOL_NAME in llm.get_llm_adapter().builtin_tools
 
 
 @pytest.mark.asyncio

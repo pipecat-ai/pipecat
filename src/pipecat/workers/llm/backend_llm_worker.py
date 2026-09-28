@@ -93,9 +93,6 @@ ATTACH_JOB_NAME = "attach"
 #: Name of the job that puts a message to an attached :class:`BackendLLMWorker`.
 MESSAGE_JOB_NAME = "message"
 
-#: Name of the job that stops what an attached :class:`BackendLLMWorker` is doing.
-CANCEL_JOB_NAME = "cancel"
-
 #: The ``type`` of a job update that carries a :class:`BackendOutput`.
 OUTPUT_UPDATE_TYPE = "output"
 
@@ -115,6 +112,9 @@ ERROR_UPDATE_TYPE = "error"
 #: while it goes on working.
 REPORT_TOOL_NAME = "report_result"
 
+#: Name of the built-in tool the backend's model calls instead of replying when there is nothing to tell the user.
+NO_REPORT_TOOL_NAME = "nothing_to_report"
+
 #: Appended to the backend LLM's system instruction: where its input comes
 #: from and its output goes, whatever the app's prompt says the backend does.
 BACKEND_OUTPUT_INSTRUCTIONS = (
@@ -124,23 +124,21 @@ BACKEND_OUTPUT_INSTRUCTIONS = (
     "rest of the conversation, such as small talk, jokes and stories, so leave those to "
     "it. What reaches the user depends on how you write it. A message with no tool calls is told to "
     "the user: write one to report a result, or to ask a question you cannot proceed "
-    "without. When a message needs nothing from you, reply with nothing at all, no text and "
-    "no tool calls; never write that there is nothing to do, since that too would be told "
-    "to the user. Text beside tool calls is not told to the user; it is notes on what you are "
+    f"without. When there is nothing to tell the user, call {NO_REPORT_TOOL_NAME} instead of "
+    "replying: when a message needs nothing from you, and when a message stops or changes "
+    "your work, once you have cancelled the tools whose results are no longer wanted. "
+    "Nothing is then told to the user. Never write that there is nothing to do, that you have "
+    "stopped, or what you will not do: the assistant has already told the user, and a reply "
+    "with no tool calls would be told to them again. Text beside tool calls is not told to "
+    "the user; it is notes on what you are "
     "doing, and may be left out. To tell the user something while you go on working, call "
     f"{REPORT_TOOL_NAME} with it, in the same message as the tool calls that go on, and do "
     "not repeat it afterwards. Report the result of each request as soon as you have it, and "
     "never let it wait until other work is done. Write plain text the assistant can speak "
     "from: no Markdown, no raw JSON. When you have several requests, do the newest first "
     "unless it depends on an earlier one. A new message may arrive while you are working. It "
-    "may add work, change it, or cancel some or all of it: follow the latest instructions, "
-    "cancel tools whose results are no longer wanted, and do not repeat work already done. "
-    "If your work is cancelled, do not announce it; the assistant already has."
-)
-
-#: Appended to the backend's conversation when the frontend cancels its work.
-CANCELLED_NOTE = (
-    "The user cancelled the work in progress. Do nothing further on it unless asked again."
+    "may add work, change it, or stop some or all of it: follow the latest instructions, "
+    "and do not repeat work already done."
 )
 
 
@@ -309,14 +307,18 @@ class BackendOutputTransform(Protocol):
 
 #: What :func:`_render_transcript_request` tells the backend to do with a transcript.
 _DEFAULT_TRANSCRIPT_INSTRUCTION = (
-    "Act on the user's most recent request in the conversation above, and report its result "
-    "as soon as you have it, before going on with other work."
+    "Act on the user's most recent request in the conversation above. If it asks for "
+    "something, report the result as soon as you have it, before going on with other work. "
+    f"If it only stops or changes work already under way, call {NO_REPORT_TOOL_NAME} "
+    "instead of reporting: the assistant has already told the user."
 )
 
 #: Appended to a request the frontend worded itself, so the backend reports it
 #: on its own rather than with whatever else it is doing.
 _REPORT_INSTRUCTION = (
-    "Report the result of this request as soon as you have it, before going on with other work."
+    "If this request asks for something, report the result as soon as you have it, before "
+    "going on with other work. If it only stops or changes work already under way, call "
+    f"{NO_REPORT_TOOL_NAME} instead of reporting: the assistant has already told the user."
 )
 
 
@@ -406,17 +408,15 @@ class BackendLLMWorker(LLMContextWorker):
       once with ``{"backend": "idle" | "working"}``, what the backend was doing
       when the message arrived. A message that arrives mid-run is taken up after
       the current step, with everything that came before it in view.
-    - ``cancel``: ``{"reason": str}``. Interrupts the backend's pipeline, cancels
-      every function call in flight, async ones included, and appends
-      :data:`CANCELLED_NOTE`; responds with ``{"cancelled": bool}``, whether
-      there was anything to stop.
 
     What the model writes in a turn with no tool calls asks to be spoken: a
     result, or a question it cannot proceed without. What it writes beside
     tool calls does not, since that is notes on the work in progress; nor
     does a reasoning summary. To tell the user something while it goes on
     working, the model calls the built-in ``report_result`` tool, whose text
-    asks to be spoken. The instruction appended to its prompt says all this.
+    asks to be spoken; when a message leaves it nothing to tell the user, it
+    calls the built-in ``nothing_to_report`` tool instead of replying, so
+    nothing is spoken. The instruction appended to its prompt says all this.
     ``transform_output`` can change the flag, or the text, or drop the output.
 
     Example::
@@ -492,9 +492,21 @@ class BackendLLMWorker(LLMContextWorker):
             properties={"text": {"type": "string", "description": "What to tell the user."}},
             required=["text"],
         )
+        self.llm.register_function(NO_REPORT_TOOL_NAME, self._nothing_to_report)
+        self.llm.get_llm_adapter().builtin_tools[NO_REPORT_TOOL_NAME] = FunctionSchema(
+            name=NO_REPORT_TOOL_NAME,
+            description=(
+                "Call this instead of replying when there is nothing to tell the user: a "
+                "message needs nothing from you, or it stopped or changed your work and the "
+                "tools whose results are no longer wanted are cancelled. Nothing is told to "
+                "the user."
+            ),
+            properties={},
+            required=[],
+        )
         # Whether the model's current turn made function calls, which decides
         # whether the text it wrote is a report or notes on the work. The
-        # calls are announced before the turn ends, so the flag is read and
+        # calls are requested before the turn ends, so the flag is read and
         # cleared as the turn stops. A turn whose only calls are reports has
         # nothing else to bring the next run, so the report's result does.
         self._turn_made_calls = False
@@ -511,6 +523,9 @@ class BackendLLMWorker(LLMContextWorker):
         self._requests_pending = 0
         self._runs_requested = 0
         self._runs_completed = 0
+        # Whether the current lull has been announced, so a call settling
+        # after the last turn does not announce it twice.
+        self._idle_announced = False
         # The index in the context of a request appended while the model was
         # busy, which asked for no run of its own: the run that follows the
         # current step takes it up, and the model sees the request beside
@@ -536,7 +551,7 @@ class BackendLLMWorker(LLMContextWorker):
                 if not frame.run_llm:
                     self._request_awaiting_run = len(self.context.messages)
                     # What the request was held for may be gone by the time it
-                    # lands, as when a cancellation cleared the calls in flight.
+                    # lands, as when the model cancelled the call meanwhile.
                     await self._run_awaiting_request()
 
         # The backend's function calls are relayed as they pass the assistant
@@ -546,12 +561,17 @@ class BackendLLMWorker(LLMContextWorker):
             if isinstance(frame, InterruptionFrame):
                 self._runs_requested = self._runs_completed = 0
                 self._turn_made_calls = False
-            elif isinstance(frame, FunctionCallsStartedFrame):
-                self._turn_made_calls = True
-                self._turn_only_reports = all(
-                    call.function_name == REPORT_TOOL_NAME for call in frame.function_calls
-                )
             await self._on_function_call_frame(frame)
+
+        # Every call the turn made, the cancel tools included, which the
+        # started frame leaves out: a turn that only cancels is a tool-call
+        # turn all the same. Synchronous, so it lands before the turn stops.
+        @self.llm.event_handler("on_function_calls_requested")
+        async def on_function_calls_requested(llm, function_calls):
+            self._turn_made_calls = True
+            self._turn_only_reports = all(
+                call.function_name == REPORT_TOOL_NAME for call in function_calls
+            )
 
         @self.assistant_aggregator.event_handler("on_after_process_frame")
         async def on_after_assistant_aggregator_frame(aggregator, frame: Frame):
@@ -562,8 +582,11 @@ class BackendLLMWorker(LLMContextWorker):
                 isinstance(frame, FunctionCallResultFrame)
                 and frame.properties is not None
                 and frame.properties.run_llm is False
-            ):
+            ) or isinstance(frame, FunctionCallCancelFrame):
                 await self._run_awaiting_request()
+                # A call settling after the last turn may be the last thing
+                # the backend had in flight.
+                await self._announce_idle_if_done()
 
         @self.assistant_aggregator.event_handler("on_assistant_turn_stopped")
         async def on_assistant_turn_stopped(aggregator, message: AssistantTurnStoppedMessage):
@@ -596,7 +619,7 @@ class BackendLLMWorker(LLMContextWorker):
     @property
     def capabilities(self) -> dict[str, bool]:
         """What an attached frontend can count on; all of it, for a backend that is an LLM."""
-        return {"steering": True, "cancellation": True, "progress": True}
+        return {"steering": True, "progress": True}
 
     # -----------------------------------------------------------------------
     # The attached contract
@@ -641,30 +664,6 @@ class BackendLLMWorker(LLMContextWorker):
         await self._queue_request(request)
         await self.send_job_response(message.job_id, {"backend": status})
 
-    @job(name=CANCEL_JOB_NAME)
-    async def handle_cancel(self, message: BusJobRequestMessage):
-        """Stop the backend's work, and say whether there was any.
-
-        Args:
-            message: The job request; see the class docstring for the payload.
-        """
-        if self._attached is None:
-            await self._refuse(message.job_id, "no frontend is attached")
-            return
-        reason = str((message.payload or {}).get("reason") or "cancelled by the frontend")
-        was_working = self.working
-        logger.debug(f"Worker '{self.name}': cancelling ({reason}); was working={was_working}")
-        await self._stop_work(reason)
-        await self._await_calls_settled()
-        note = LLMMessagesAppendFrame(
-            messages=[{"role": "user", "content": CANCELLED_NOTE}], run_llm=False
-        )
-        note.interruptible = False
-        await self.queue_frame(note)
-        # A request held for a call just cancelled runs now, with the note in view.
-        await self._run_awaiting_request()
-        await self.send_job_response(message.job_id, {"cancelled": was_working})
-
     async def _refuse(self, job_id: str, reason: str) -> None:
         logger.warning(f"Worker '{self.name}': refusing job {job_id}: {reason}")
         await self.send_job_response(job_id, {"error": reason}, status=JobStatus.ERROR)
@@ -676,11 +675,10 @@ class BackendLLMWorker(LLMContextWorker):
         flight, the request asks for no run of its own: the run that follows
         the current step takes it up (see ``_request_awaiting_run``). A run
         while a synchronous call is in flight would see the call without its
-        result, which the adapter cannot send as it is. The frame is
-        uninterruptible, so a request queued just ahead of a cancellation
-        survives the interruption the cancellation broadcasts.
+        result, which the adapter cannot send as it is.
         """
         self._requests_pending += 1
+        self._idle_announced = False
         run_llm = not self._model_busy and not self._calls_block_a_run
         if run_llm:
             logger.debug(f"Worker '{self.name}': running the model on the request")
@@ -693,7 +691,6 @@ class BackendLLMWorker(LLMContextWorker):
             messages=[{"role": "user", "content": request}],
             run_llm=run_llm,
         )
-        frame.interruptible = False
         await self.queue_frame(frame)
 
     @property
@@ -710,13 +707,6 @@ class BackendLLMWorker(LLMContextWorker):
         ):
             logger.debug(f"Worker '{self.name}': running the model on the request that was held")
             await self.queue_frame(LLMRunFrame())
-
-    async def _await_calls_settled(self, timeout_secs: float = 2.0) -> None:
-        """Wait for the cancellations of the calls in flight to be recorded downstream."""
-        loop = asyncio.get_running_loop()
-        deadline = loop.time() + timeout_secs
-        while self.assistant_aggregator.has_function_calls_in_progress and loop.time() < deadline:
-            await asyncio.sleep(0.01)
 
     async def _stop_work(self, reason: str) -> None:
         """Interrupt the pipeline and cancel every function call in flight.
@@ -773,8 +763,14 @@ class BackendLLMWorker(LLMContextWorker):
             logger.error(f"Worker '{self.name}': transform_output failed: {e}")
             await self._send_update({"type": ERROR_UPDATE_TYPE, "error": str(e)})
         await self._run_awaiting_request()
-        if not self.working:
-            await self._send_update({"type": IDLE_UPDATE_TYPE})
+        await self._announce_idle_if_done()
+
+    async def _announce_idle_if_done(self) -> None:
+        """Send the idle update once the backend has nothing left to do, once per lull."""
+        if self._attached is None or self.working or self._idle_announced:
+            return
+        self._idle_announced = True
+        await self._send_update({"type": IDLE_UPDATE_TYPE})
 
     async def _report_result(self, params: FunctionCallParams):
         """Send what the model wants the user told, as a spoken output."""
@@ -787,6 +783,12 @@ class BackendLLMWorker(LLMContextWorker):
         await params.result_callback(
             {"status": "reported", "next": "Go on with the remaining work; do not repeat this."},
             properties=FunctionCallResultProperties(run_llm=self._turn_only_reports),
+        )
+
+    async def _nothing_to_report(self, params: FunctionCallParams):
+        """Settle the no-op call without running the model again: there is nothing to say."""
+        await params.result_callback(
+            {"status": "noted"}, properties=FunctionCallResultProperties(run_llm=False)
         )
 
     async def _on_function_call_frame(self, frame: Frame):
@@ -820,8 +822,8 @@ class BackendLLMWorker(LLMContextWorker):
         elif isinstance(frame, FunctionCallCancelFrame):
             calls = [BackendToolCall("cancelled", frame.function_name, frame.tool_call_id)]
         for call in calls:
-            # The report tool is the stream's own; its output is already sent.
-            if call.function_name != REPORT_TOOL_NAME:
+            # The report tools are the stream's own, not the backend's work.
+            if call.function_name not in (REPORT_TOOL_NAME, NO_REPORT_TOOL_NAME):
                 await self._send_update(call.to_payload())
 
     async def on_job_cancelled(self, message: BusJobCancelMessage) -> None:
@@ -889,8 +891,8 @@ class _BackendSession:
 
     Opening the session sends the ``attach`` job; closing it cancels the job,
     which stops the backend's work. In between, the session is an async
-    iterator over what the backend produces, and :meth:`send` and
-    :meth:`cancel` put messages to it. The iteration ends when the backend
+    iterator over what the backend produces, and :meth:`send` puts messages
+    to it. The iteration ends when the backend
     goes away, with a :class:`JobError` if it failed.
 
     Example::
@@ -908,9 +910,9 @@ class _BackendSession:
             worker: The worker attaching (for a pipeline processor,
                 ``self.pipeline_worker``).
             backend_name: Name of the backend worker.
-            timeout_secs: How long a message or cancellation may take to be
-                acknowledged, including the wait for the backend to become
-                ready. The attachment itself has no timeout.
+            timeout_secs: How long a message may take to be acknowledged,
+                including the wait for the backend to become ready. The
+                attachment itself has no timeout.
         """
         self._worker = worker
         self._backend_name = backend_name
@@ -996,24 +998,6 @@ class _BackendSession:
         )
         response = await self._ask(params)
         return str(response.get("backend") or "idle")
-
-    async def cancel(self, reason: str) -> bool:
-        """Stop the backend's work.
-
-        Args:
-            reason: Why, for the backend's logs.
-
-        Returns:
-            Whether there was work to stop.
-
-        Raises:
-            JobError: If the backend refused or did not answer in time.
-        """
-        params = JobParams(
-            name=CANCEL_JOB_NAME, payload={"reason": reason}, timeout=self._timeout_secs
-        )
-        response = await self._ask(params)
-        return bool(response.get("cancelled"))
 
     async def _ask(self, params: JobParams) -> dict:
         """Run one short job on the backend and return its response.

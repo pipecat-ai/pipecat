@@ -1152,8 +1152,10 @@ def _client_delegation(delegation_id: str) -> events.DelegationMetadata:
 
 
 _REPORT_LINE = (
-    "Act on the user's most recent request in the conversation above, and report its result "
-    "as soon as you have it, before going on with other work."
+    "Act on the user's most recent request in the conversation above. If it asks for "
+    "something, report the result as soon as you have it, before going on with other work. "
+    "If it only stops or changes work already under way, call nothing_to_report instead of "
+    "reporting: the assistant has already told the user."
 )
 
 
@@ -1274,17 +1276,25 @@ async def test_a_reset_starts_the_next_delegation_transcript_afresh(monkeypatch)
     await _drive(service, [_transcript_delta("user", "and in boston", start_ms=2000)])
     await service._handle_client_delegation(_client_delegation("item_d2"))
 
-    # The reset drops the delegation in progress: the backend is told to stop.
+    # The reset drops the delegation in progress: the backend is detached,
+    # which stops its work; connecting again (mocked here) attaches again.
     await service.reset_conversation()
-    assert session.cancels == ["session ended"]
     assert service._current_delegation is None
+    assert service._backend_session_task is None
+    service._connect.assert_awaited()
+    # What the real _connect does next.
+    await service._attach_backend()
+    for _ in range(5):
+        await asyncio.sleep(0)
+    new_session = service._backend_session
+    assert new_session is not None and new_session is not session
 
     await _drive(service, [_transcript_delta("user", "let's start over", start_ms=4000)])
     await service._handle_client_delegation(_client_delegation("item_d3"))
 
     assert session.requests[0].startswith("Voice conversation so far:")
     assert session.requests[1].startswith("Voice conversation since the previous delegation:")
-    assert session.requests[2].startswith("Voice conversation so far:")
+    assert new_session.requests[0].startswith("Voice conversation so far:")
 
 
 @pytest.mark.asyncio
@@ -1328,7 +1338,6 @@ async def test_a_delegation_the_backend_takes_too_long_on_is_abandoned(monkeypat
     await service._handle_client_delegation(_client_delegation("item_d1"))
     await asyncio.sleep(0.2)
 
-    assert session.cancels == ["delegation timed out"]
     (append,) = recorder.of_type("session.commentary.append")
     assert append["delegation_id"] == "item_d1"
     assert "could not be completed" in append["content"]

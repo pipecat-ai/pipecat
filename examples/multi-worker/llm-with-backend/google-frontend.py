@@ -9,8 +9,8 @@
 The frontend keeps the conversation moving with a fast Gemini model and no tools of its own. Anything that needs tools or careful
 reasoning it hands to a backend running Claude, and relays what comes back
 as it comes. ``LLMWithBackend`` wires the two together: it installs the
-``delegate`` and ``cancel_delegated_work`` tools on the frontend and runs the
-backend as a worker of its own.
+``delegate`` tool on the frontend and runs the backend as a worker of its
+own.
 
 The backend, its tools and both prompts are in ``backend.py``, shared with
 the other frontends in this directory. Try: "fix the flaky retry test
@@ -19,7 +19,7 @@ in the HTTP client", then ask for something else while it works.
 Architecture::
 
     Main worker (transport + STT + LLMWithBackend + TTS)
-      ├── frontend: fast LLM, ``delegate`` and ``cancel_delegated_work`` tools
+      ├── frontend: fast LLM, ``delegate`` tool
       └── backend: BackendLLMWorker (Claude + tools), attached for the session
 
 Requirements:
@@ -97,8 +97,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         backend=build_backend(),
         # To watch every exchange with the backend in a client's event log,
         # such as the prebuilt UI's Events panel, pass a connector with
-        # client tracing on: each request, output, tool-call phase and
-        # cancellation is then sent to the client as an RTVI server message.
+        # client tracing on: each request, output, tool-call phase, error
+        # and idle is then sent to the client as an RTVI server message.
         # from pipecat.pipeline.llm_with_backend import BackendConnector
         # connector=BackendConnector(client_trace=True),
     )

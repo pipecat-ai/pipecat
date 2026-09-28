@@ -17,10 +17,13 @@ each taking as long as the real thing plausibly would:
   done. A minute or so end to end, most of it the model's own steps.
 - **Research**: ``search_docs`` then ``read_doc``, a few seconds each.
 - **Quick lookups**: ``check_ci_status`` and ``list_open_prs``, a second each.
+- **Long runs**: ``run_integration_tests``, twenty seconds, long enough for
+  the user to change their mind while it runs.
 
-The slow tools are async (``cancel_on_interruption=False``), so the backend's
-model keeps taking new messages while they run and can cancel them when a
-message makes their results unwanted.
+The slow tools are async (``cancel_on_interruption=False``) and cancellable
+(``cancellable_by_llm=True``), so the backend's model keeps taking new
+messages while they run and cancels them when a message makes their results
+unwanted.
 
 Each frontend example builds its backend with :func:`build_backend` and gives
 its own model :data:`FRONTEND_INSTRUCTIONS`, so the three differ only in the
@@ -202,7 +205,7 @@ async def apply_patch(params: FunctionCallParams, path: str, content: str):
     await params.result_callback({"path": path, "applied": True, "lines": content.count("\n")})
 
 
-@tool_options(cancel_on_interruption=False)
+@tool_options(cancel_on_interruption=False, cancellable_by_llm=True)
 async def run_tests(params: FunctionCallParams, path: str | None = None):
     """Run the test suite, or one test file. Takes a while.
 
@@ -240,7 +243,29 @@ async def run_tests(params: FunctionCallParams, path: str | None = None):
     )
 
 
-@tool_options(cancel_on_interruption=False)
+@tool_options(cancel_on_interruption=False, cancellable_by_llm=True)
+async def run_integration_tests(params: FunctionCallParams, path: str | None = None):
+    """Run the integration test suite, or one of its files, against a live stack. Takes a while.
+
+    Args:
+        path: An integration test file to run alone; the whole suite when omitted.
+    """
+    await _work(20)
+    await params.result_callback(
+        {
+            "passed": 17,
+            "failed": 1,
+            "failures": [
+                {
+                    "test": "tests/integration/test_http_client_live.py::test_retry_on_timeout",
+                    "message": "TimeoutError: the third retry exceeded the 2s deadline",
+                }
+            ],
+        }
+    )
+
+
+@tool_options(cancel_on_interruption=False, cancellable_by_llm=True)
 async def search_docs(params: FunctionCallParams, query: str):
     """Search the team's internal docs. Takes a few seconds.
 
@@ -330,6 +355,7 @@ def build_backend() -> BackendLLMWorker:
                 read_file,
                 apply_patch,
                 run_tests,
+                run_integration_tests,
                 search_docs,
                 read_doc,
                 check_ci_status,

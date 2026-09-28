@@ -426,18 +426,13 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
             if isinstance(self._delegation.backend, BackendLLMWorker):
                 # A child of the pipeline worker: ended and cancelled with it.
                 await self.pipeline_worker.add_workers(self._delegation.backend)
-            self._backend_session_task = self.create_task(
-                self._run_backend_session(), f"{self}::backend_session"
-            )
         await self._connect()
 
     async def cleanup(self):
         """Release resources at teardown."""
         await super().cleanup()
         await self._disconnect()
-        if self._backend_session_task is not None:
-            await self.cancel_task(self._backend_session_task)
-            self._backend_session_task = None
+        await self._detach_backend()
 
     async def stop(self, frame: EndFrame):
         """Close the session gracefully and disconnect.
@@ -657,6 +652,7 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
         await self._ws_send(event.to_payload())
 
     async def _connect(self):
+        await self._attach_backend()
         try:
             if self._websocket:
                 return
@@ -1097,31 +1093,37 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
             return
         logger.warning(f"{self}: delegation {current.id} timed out; abandoning it")
         current.timeout_task = None
-        if self._backend_session is not None:
-            try:
-                await self._backend_session.cancel("delegation timed out")
-            except Exception as e:
-                logger.warning(f"{self}: could not stop the backend: {e}")
         await self._send_context_append(
             current.id, "The delegated work could not be completed.", spoken=True
         )
         await self._finish_delegation()
 
     async def _abandon_delegations(self):
-        """Drop the delegation in progress and the ones waiting: the session they belong to is over."""
+        """Drop the delegation in progress and the ones waiting: the session they belong to is over.
+
+        The backend is detached, which stops its work; the next connection
+        attaches again.
+        """
         self._queued_delegations.clear()
         current = self._current_delegation
         self._current_delegation = None
-        if current is None:
-            return
-        if current.timeout_task is not None:
+        if current is not None and current.timeout_task is not None:
             await self.cancel_task(current.timeout_task)
             current.timeout_task = None
-        if self._backend_session is not None:
-            try:
-                await self._backend_session.cancel("session ended")
-            except Exception as e:
-                logger.warning(f"{self}: could not stop the backend: {e}")
+        await self._detach_backend()
+
+    async def _attach_backend(self):
+        """Open the session with the backend, when client delegation is configured and none is open."""
+        if isinstance(self._delegation, ClientDelegation) and self._backend_session_task is None:
+            self._backend_session_task = self.create_task(
+                self._run_backend_session(), f"{self}::backend_session"
+            )
+
+    async def _detach_backend(self):
+        """Close the session with the backend, which stops its work."""
+        if self._backend_session_task is not None:
+            await self.cancel_task(self._backend_session_task)
+            self._backend_session_task = None
 
     async def _send_context_append(self, delegation_id: str | None, text: str, *, spoken: bool):
         """Append text to the live session, for it to speak or to keep to itself.

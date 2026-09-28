@@ -411,6 +411,39 @@ class TestLLMService(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(muted)
 
+    async def test_every_requested_call_is_announced_synchronously_before_it_runs(self):
+        """``on_function_calls_requested`` carries the cancel tool the started frame leaves out."""
+        service = MockLLMService()
+        await self._run_function_calls_inline(service)
+
+        async def async_tool(params: FunctionCallParams):
+            await params.result_callback("done")
+
+        service.register_function(
+            "async_tool", async_tool, cancel_on_interruption=False, cancellable_by_llm=True
+        )
+        service._sync_registered_tool_handlers(NOT_GIVEN)
+        service.broadcast_frame = AsyncMock()
+        requested: list[list[str]] = []
+
+        @service.event_handler("on_function_calls_requested")
+        async def on_requested(llm, function_calls):
+            requested.append([fc.function_name for fc in function_calls])
+
+        await service.run_function_calls(
+            [
+                FunctionCallFromLLM(
+                    function_name=cancel_tool_name("async_tool"),
+                    tool_call_id="cancel_1",
+                    arguments={"tool_call_id": "call_1"},
+                    context=LLMContext(),
+                )
+            ]
+        )
+
+        # Announced inline, so it is recorded by the time run_function_calls returns.
+        self.assertEqual(requested, [[cancel_tool_name("async_tool")]])
+
     async def test_builtin_cancel_tool_allows_user_mute_cleanup(self):
         """The built-in cancel tool is excluded from FunctionCallsStartedFrame,
         so the mute strategy sees a result frame for a tool call id it is not

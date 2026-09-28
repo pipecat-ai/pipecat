@@ -9,9 +9,9 @@
 The frontend is OpenAI Realtime, holding the spoken conversation with no tools
 of its own. Anything that needs tools or careful reasoning it hands to a
 backend running Claude, and relays what comes back as it comes.
-``LLMWithBackend`` wires the two together: it installs the ``delegate`` and
-``cancel_delegated_work`` tools on the frontend and runs the backend as a
-worker of its own. With a speech-to-speech frontend the model words the
+``LLMWithBackend`` wires the two together: it installs the ``delegate``
+tool on the frontend and runs the backend as a worker of its own. With a
+speech-to-speech frontend the model words the
 request itself, since its context can lag the audio.
 
 The backend, its tools and both prompts are in ``backend.py``, shared with
@@ -22,7 +22,7 @@ ask for something else while it works.
 Architecture::
 
     Main worker (transport + LLMWithBackend)
-      ├── frontend: speech-to-speech model, ``delegate`` and ``cancel_delegated_work`` tools
+      ├── frontend: speech-to-speech model, ``delegate`` tool
       └── backend: BackendLLMWorker (Claude + tools), attached for the session
 
 Requirements:
@@ -101,8 +101,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         backend=build_backend(),
         # To watch every exchange with the backend in a client's event log,
         # such as the prebuilt UI's Events panel, pass a connector with
-        # client tracing on: each request, output, tool-call phase and
-        # cancellation is then sent to the client as an RTVI server message.
+        # client tracing on: each request, output, tool-call phase, error
+        # and idle is then sent to the client as an RTVI server message.
         # from pipecat.pipeline.llm_with_backend import BackendConnector
         # connector=BackendConnector(client_trace=True),
     )

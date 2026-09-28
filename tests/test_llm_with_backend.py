@@ -142,10 +142,6 @@ class _FakeSession:
         self.requests.append(request)
         return self._status
 
-    async def cancel(self, reason: str) -> bool:
-        self.reasons.append(reason)
-        return self._cancelled
-
 
 def _bound(
     connector: BackendConnector | None = None,
@@ -169,7 +165,7 @@ def _bound(
 def test_a_text_frontend_hands_over_the_transcript():
     connector = _bound()
     assert isinstance(connector.request_strategy, TranscriptBackendRequestStrategy)
-    assert [t.name for t in connector.tools] == ["delegate", "cancel_delegated_work"]
+    assert [t.name for t in connector.tools] == ["delegate"]
     assert connector.tool.properties == {}
     assert all(t.handler is not None for t in connector.tools)
 
@@ -180,10 +176,9 @@ def test_a_realtime_frontend_words_the_request():
     assert connector.tool.required == ["request"]
 
 
-def test_the_tool_descriptions_frame_a_handoff_and_a_stop():
+def test_the_tool_description_frames_a_handoff():
     connector = _bound()
     assert "One handoff per reply" in connector.tool.description
-    assert "Stop all the work" in connector.tools[1].description
 
 
 def test_the_frontend_guidance_covers_delegation_and_the_backends_messages():
@@ -191,7 +186,7 @@ def test_the_frontend_guidance_covers_delegation_and_the_backends_messages():
     assert "delegate tool" in guidance
     assert 'marked "Backend:"' in guidance
     assert '"Backend (working):"' in guidance
-    assert "cancel_delegated_work" in guidance
+    assert "calling it off, in any words" in guidance
 
 
 # ---------------------------------------------------------------------------
@@ -219,7 +214,7 @@ async def test_the_transcript_request_skips_messages_in_a_services_own_format():
         "USER: weather in seattle?\n"
         "ASSISTANT: Let me check.\n"
         "\n"
-        "Act on the user's most recent request in the conversation above, and report its result as soon as you have it, before going on with other work."
+        "Act on the user's most recent request in the conversation above. If it asks for something, report the result as soon as you have it, before going on with other work. If it only stops or changes work already under way, call nothing_to_report instead of reporting: the assistant has already told the user."
     ]
 
 
@@ -242,7 +237,7 @@ async def test_the_transcript_request_sends_only_what_the_backend_has_not_seen()
         "ASSISTANT: It's raining.\n"
         "USER: and boston?\n"
         "\n"
-        "Act on the user's most recent request in the conversation above, and report its result as soon as you have it, before going on with other work."
+        "Act on the user's most recent request in the conversation above. If it asks for something, report the result as soon as you have it, before going on with other work. If it only stops or changes work already under way, call nothing_to_report instead of reporting: the assistant has already told the user."
     )
 
 
@@ -276,7 +271,7 @@ async def test_the_explicit_request_sends_the_model_words():
 
     assert session.requests == [
         "Weather in Seattle, Fahrenheit.\n\n"
-        "Report the result of this request as soon as you have it, before going on with other work."
+        "If this request asks for something, report the result as soon as you have it, before going on with other work. If it only stops or changes work already under way, call nothing_to_report instead of reporting: the assistant has already told the user."
     ]
 
 
@@ -321,20 +316,6 @@ async def test_delegate_fails_when_the_backend_never_attaches():
         await connector.delegate(params)
 
     params.result_callback.assert_not_awaited()  # type: ignore[attr-defined]
-
-
-@pytest.mark.asyncio
-async def test_cancel_reports_whether_there_was_work_to_stop():
-    for cancelled, status in ((True, "cancelled"), (False, "nothing_running")):
-        session = _FakeSession(cancelled=cancelled)
-        params = _params()
-
-        await _bound(session=session).cancel(params)
-
-        assert session.reasons == ["cancelled by the user"]
-        assert params.result_callback.await_args_list == [  # type: ignore[attr-defined]
-            call({"status": status}, properties=FunctionCallResultProperties(run_llm=True))
-        ]
 
 
 # ---------------------------------------------------------------------------
@@ -466,14 +447,9 @@ async def test_the_tools_are_built_in_beside_the_frontends_own():
     assert _tool_names(adapter.from_standard_tools(context.tools)) == [
         "get_current_time",
         "delegate",
-        "cancel_delegated_work",
     ]
-    assert _tool_names(adapter.from_standard_tools(NOT_GIVEN)) == [
-        "delegate",
-        "cancel_delegated_work",
-    ]
+    assert _tool_names(adapter.from_standard_tools(NOT_GIVEN)) == ["delegate"]
     assert frontend.has_function("delegate")
-    assert frontend.has_function("cancel_delegated_work")
 
 
 @pytest.mark.asyncio

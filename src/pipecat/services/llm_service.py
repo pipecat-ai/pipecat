@@ -263,6 +263,9 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
     The service supports the following event handlers:
 
     - on_completion_timeout: Called when an LLM completion timeout occurs
+    - on_function_calls_requested: Called synchronously with every function
+      call a response made, the built-in ``cancel_<name>`` tools included,
+      before any of them runs.
     - on_function_calls_started: Called when function calls are received and
       execution is about to start. Built-in tools (e.g. a ``cancel_<name>`` tool)
       are excluded from this event.
@@ -422,6 +425,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         # fired (see _warn_if_realtime_service_emits_no_turn_frames).
         self._warned_realtime_service_no_turn_frames: bool = False
 
+        self._register_event_handler("on_function_calls_requested", sync=True)
         self._register_event_handler("on_function_calls_started")
         self._register_event_handler("on_function_calls_cancelled")
         self._register_event_handler("on_completion_timeout")
@@ -1622,6 +1626,8 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             logger.debug(f"{self}: speculative inference wants a tool call, cancelling it")
             await self.broadcast_frame(EagerEndOfTurnCancelFrame)
             return
+
+        await self._call_event_handler("on_function_calls_requested", function_calls)
 
         # Exclude the built-in cancel tool — it's an internal mechanism and
         # should not be surfaced to user-facing event handlers or frames.

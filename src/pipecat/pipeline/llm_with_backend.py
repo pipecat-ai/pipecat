@@ -16,9 +16,8 @@ The two exchange messages. The frontend's ``delegate`` tool puts a message
 to the backend and returns at once; what the backend has to say comes back
 as a stream of outputs, each appended to the frontend's conversation as a
 message marked ``Backend:``, spoken or silent as the backend's flag says. A
-second request joins the first, a correction changes it, and
-``cancel_delegated_work`` stops it. How a request
-is worded is the :class:`BackendRequestStrategy`'s business, and the
+second request joins the first, and a correction changes or stops it. How a
+request is worded is the :class:`BackendRequestStrategy`'s business, and the
 :class:`BackendConnector` owns the tools, the session with the backend, and
 how each output is rendered into the conversation.
 """
@@ -53,8 +52,6 @@ from pipecat.workers.llm.backend_llm_worker import (
 #: Name of the tool the frontend calls to delegate.
 DELEGATE_TOOL_NAME = "delegate"
 
-#: Name of the tool the frontend calls to stop the backend's work.
-CANCEL_TOOL_NAME = "cancel_delegated_work"
 
 #: How a backend output is marked in the frontend's conversation.
 BACKEND_MESSAGE_PREFIX = "Backend: "
@@ -91,11 +88,16 @@ RELAY_NOTE = (
 #: the backend is for.
 _DELEGATION_POLICY = (
     "Delegate to the backend when any part of what the user asks needs a backend tool or "
-    "careful reasoning, or a correction changes work already requested; a request that "
-    "arrives while the backend is already working is delegated like any other, since the "
-    "backend hears nothing you do not hand over. Do not delegate "
-    "when you can answer from the conversation or a result you already have, or when you "
-    "need a brief clarification first. Delegate before giving any answer that depends on "
+    "careful reasoning, and whenever the user says anything about work already handed over: "
+    "a change, a narrowing, or calling it off, in any words, even in passing. Whether that "
+    "work goes on is not yours to decide: hand the message over and the backend decides. "
+    "You cannot stop or change that work yourself, and nothing you say reaches the backend: "
+    "only a delegate call does, so saying you will stop without one leaves the work running. A "
+    "request that arrives while the backend is already working is delegated like any "
+    "other. Do not delegate only when the message neither needs backend work nor concerns "
+    "work already handed over: small talk, or a question you can answer from a result you "
+    "already have, or when you need a brief clarification first. Delegate before giving any "
+    "answer that depends on "
     "backend work, and do not guess the result while waiting. To delegate, call the "
     "delegate tool at once, in that same reply, and do the rest of the reply yourself "
     "around it. "
@@ -112,10 +114,14 @@ _MESSAGES_INSTRUCTION = (
     "that work. The backend sees nothing of the conversation but what you delegate, so every "
     "new request that needs it takes a delegate call of its own, even while it is still "
     "working on an earlier one; that includes the user saying yes to something you or the "
-    "backend offered to do. Saying you will check or look into something is not doing it: "
+    "backend offered to do, and the user calling off or changing work already under way, "
+    "which the backend keeps doing until you hand that over. Saying you will check "
+    "or look into something is not doing it: "
     "the backend hears nothing until you call delegate, so a reply that promises backend "
     "work calls delegate in that same reply. When the user asks whether work is under way, "
-    "look at the conversation: if you never delegated it, say so and delegate it then.\n\n"
+    "look at the conversation: if you never delegated it, say so and delegate it then. When "
+    "you hand over a stop or a change, the backend stops or changes the work as told: say "
+    "so plainly, and do not promise results from work the user called off.\n\n"
     "BACKEND MESSAGES: The backend works on its own after you delegate and may be doing "
     "several things at once. What it has to say arrives as messages in the conversation "
     f'marked "{BACKEND_MESSAGE_PREFIX.strip()}": a result, a question for the user, or news '
@@ -135,12 +141,7 @@ _MESSAGES_INSTRUCTION = (
     "latest of them, concretely: name the step, such as which file it is reading or that it "
     "is running the tests, rather than saying only that it is still working. Never state a "
     "result you have not received from the backend, and never say work is done that the "
-    "backend has not said is done.\n\n"
-    f"Whenever the user says to stop or cancel what the backend is doing, call "
-    f"{CANCEL_TOOL_NAME} at once, in that same reply, even if they ask for something else in "
-    "the same breath; then delegate the new request as well. Delegating the stop is not "
-    "enough, because the stop must be immediate. Only when the user wants part of the work "
-    "kept, or wants it changed rather than stopped, delegate that instead."
+    "backend has not said is done."
 )
 
 
@@ -243,9 +244,10 @@ class TranscriptBackendRequestStrategy(BackendRequestStrategy):
             "per reply, however many things the user asked for: two questions, or one "
             "question about two places, is one handoff. The backend sees nothing but what "
             "is handed over, so a request the user makes after your last handoff needs a "
-            "handoff of its own, even while the backend is still working, and so does a "
-            "correction to work already handed over. It takes no arguments. Keep talking "
-            "with the user while it works."
+            "handoff of its own, even while the backend is still working, and so does "
+            "anything the user says about work already handed over: a change, a narrowing, "
+            "or calling it off, in any words. It takes no arguments. Keep talking with the "
+            "user while it works."
         )
 
     async def compose_request(self, params: FunctionCallParams) -> str | None:
@@ -281,9 +283,10 @@ class ExplicitBackendRequestStrategy(BackendRequestStrategy):
             "type": "string",
             "description": (
                 "What the user is asking for now, self-contained: their goal, the details "
-                "they gave (places, dates, names) and their latest correction. Work already "
-                "handed over stays with the backend; a new request joins it, so do not "
-                "restate earlier requests."
+                "they gave (places, dates, names) and their latest correction, or what they "
+                "said about work already under way, such as to stop it or change it. Work "
+                "already handed over stays with the backend; a new request joins it, so do "
+                "not restate earlier requests."
             ),
         }
     }
@@ -293,7 +296,8 @@ class ExplicitBackendRequestStrategy(BackendRequestStrategy):
         "they gave and their latest correction, with everything new they asked for in the "
         "one request, so you delegate once per reply however many things that is. Work "
         "already handed over stays with the backend: a new request joins it, so do not "
-        "restate earlier requests, and a correction names what changes."
+        "restate earlier requests; a correction names what changes, and a stop names what "
+        "to stop."
     )
 
     def tool_description(self) -> str:
@@ -304,8 +308,9 @@ class ExplicitBackendRequestStrategy(BackendRequestStrategy):
             "user asks needs that, with the request worded to stand on its own, and do the "
             "rest yourself. One call per reply, however many things the user asked for: two "
             "questions, or one question about two places, go in one request. Work already "
-            "handed over stays with the backend, so send only what is new. Keep talking "
-            "with the user while it works."
+            "handed over stays with the backend, so send only what is new, including "
+            "anything the user says about that work, such as to stop or change it. Keep "
+            "talking with the user while it works."
         )
 
     async def compose_request(self, params: FunctionCallParams) -> str | None:
@@ -368,12 +373,11 @@ class BackendConnector:
                 from: a text model's tool-call turn carries no prose. Off for
                 a frontend that announces a handoff itself.
             timeout_secs: How long the backend may take to acknowledge a
-                message or a cancellation, including the wait for it to become
-                ready.
+                message, including the wait for it to become ready.
             client_trace: Whether to send every exchange with the backend to
                 the client as an RTVI server message (``type``
                 ``"llm-with-backend"``): each request, output, tool-call phase,
-                cancellation, error and idle. For debugging; a client's event
+                error and idle. For debugging; a client's event
                 log shows them.
         """
         self._request_strategy = request_strategy
@@ -429,7 +433,7 @@ class BackendConnector:
         self._tools = self.build_tools()
 
     def build_tools(self) -> list[FunctionSchema]:
-        """Build the tools to install on the frontend: ``delegate`` first, then ``cancel_delegated_work``.
+        """Build the tools to install on the frontend: ``delegate``.
 
         Override to install tools of another shape entirely; the service reads
         nothing else from the connector but :attr:`frontend_instruction`.
@@ -441,9 +445,6 @@ class BackendConnector:
         async def delegate(params: FunctionCallParams):
             await self.delegate(params)
 
-        async def cancel(params: FunctionCallParams):
-            await self.cancel(params)
-
         return [
             FunctionSchema(
                 name=DELEGATE_TOOL_NAME,
@@ -451,19 +452,6 @@ class BackendConnector:
                 properties=self.request_strategy.tool_parameters,
                 required=self.request_strategy.tool_required,
                 handler=delegate,
-            ),
-            FunctionSchema(
-                name=CANCEL_TOOL_NAME,
-                description=(
-                    "Stop all the work the backend is doing now. Call this whenever the user "
-                    "says to stop, cancel, or never mind, even if they ask for something else "
-                    "in the same breath: call this, and delegate the new request too. Only "
-                    "when the user wants part of the work kept, or wants it changed rather "
-                    "than stopped, delegate that instead. Returns at once."
-                ),
-                properties={},
-                required=[],
-                handler=cancel,
             ),
         ]
 
@@ -526,20 +514,6 @@ class BackendConnector:
         await params.result_callback(
             {"status": "delegated", "backend": status},
             properties=FunctionCallResultProperties(run_llm=self._respond_on_delegate),
-        )
-
-    async def cancel(self, params: FunctionCallParams) -> None:
-        """Stop the backend's work, and settle the call with whether there was any.
-
-        Args:
-            params: The ``cancel_delegated_work`` call.
-        """
-        session = await self._open_session()
-        cancelled = await session.cancel("cancelled by the user")
-        await self._trace(params.llm, event="cancel", cancelled=cancelled)
-        await params.result_callback(
-            {"status": "cancelled" if cancelled else "nothing_running"},
-            properties=FunctionCallResultProperties(run_llm=True),
         )
 
     async def deliver(self, frontend: LLMService[Any], event: BackendEvent) -> None:
@@ -696,7 +670,7 @@ class LLMWithBackend(Pipeline):
     tool is sent on every inference beside whatever tools the frontend has,
     and never enters the context's tool set, so a tool change announced to
     the model never mentions it. The tools are the backend's; the frontend
-    has ``delegate`` and ``cancel_delegated_work`` and no more, though a tool
+    has ``delegate`` and no more, though a tool
     it must keep, in its context or configured on the service, stays.
 
     The guidance says when to delegate in general terms. The frontend's own
