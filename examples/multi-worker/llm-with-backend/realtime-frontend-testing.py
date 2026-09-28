@@ -188,7 +188,6 @@ def _build_frontend(name: str) -> LLMService[Any]:
     if name == "inworld":
         from pipecat.services.inworld.realtime.llm import InworldRealtimeLLMService
 
-        # Takes no intermediate results, so it gets every backend output at once.
         return InworldRealtimeLLMService(
             api_key=os.environ["INWORLD_API_KEY"],
             llm_model="google-ai-studio/gemini-3.1-flash-lite",

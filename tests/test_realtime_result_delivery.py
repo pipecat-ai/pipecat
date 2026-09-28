@@ -4,19 +4,15 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Realtime services deliver a tool's results as they are produced.
-
-A speech-to-speech provider takes one output per function call, so an
-intermediate result — one reported with
-``FunctionCallResultProperties(is_final=False)`` while the call keeps running —
-goes in beside the call rather than through it. Each service maps that onto
-whatever second channel its provider offers, and onto what the provider needs
-to be told about when to speak.
+"""Realtime services deliver a tool's result, and appended messages, as they are produced.
 
 Results are delivered from the ``FunctionCallResultFrame`` the service
-broadcasts, as it is produced. What runs the model is the context frame the
-assistant aggregator pushes upstream afterwards, which already accounts for
-``run_llm``, sibling calls, bot speech and user speech.
+broadcasts. What runs the model is the context frame the assistant aggregator
+pushes upstream afterwards, which already accounts for ``run_llm``, sibling
+calls, bot speech and user speech. A speech-to-speech provider takes one
+output per function call, so an intermediate result — one reported with
+``FunctionCallResultProperties(is_final=False)`` while the call keeps running —
+is dropped with an error.
 """
 
 import json
@@ -43,7 +39,7 @@ def _append(text: str = "Backend: On it.", *, run_llm: bool = True, role: str = 
     return LLMMessagesAppendFrame(messages=[{"role": role, "content": text}], run_llm=run_llm)
 
 
-def _result(call_id: str = "call_1", *, is_final: bool, run_llm: bool = True, result=None):
+def _result(call_id: str = "call_1", *, is_final: bool = True, run_llm: bool = True, result=None):
     return FunctionCallResultFrame(
         function_name="delegate",
         tool_call_id=call_id,
@@ -53,7 +49,7 @@ def _result(call_id: str = "call_1", *, is_final: bool, run_llm: bool = True, re
     )
 
 
-class OpenAIProtocolIntermediateResultsTests:
+class OpenAIProtocolResultDeliveryTests:
     """The checks every service speaking the OpenAI realtime protocol answers.
 
     Each service has its own module and its own event models, so the suite runs
@@ -66,6 +62,7 @@ class OpenAIProtocolIntermediateResultsTests:
     def setUp(self):
         self.service = self._build_service()
         self.service.send_client_event = AsyncMock()
+        self.service.push_error = AsyncMock()
         self.service._api_session_ready = True
         self.service._llm_needs_conversation_setup = False
         self.service._context = LLMContext()
@@ -84,22 +81,16 @@ class OpenAIProtocolIntermediateResultsTests:
     async def _push_context_upstream(self):
         await self.service._handle_context(self.service._context, FrameDirection.UPSTREAM)
 
-    async def test_an_intermediate_result_goes_in_beside_the_call(self):
+    async def test_an_intermediate_result_is_dropped_with_an_error(self):
         await self.service.push_frame(_result(is_final=False))
 
-        (item,) = self._items()
-        self.assertEqual(item.type, "message")
-        payload = async_tool_messages.parse_message(
-            {"role": "developer", "content": item.content[0].text}
-        )
-        assert payload is not None
-        self.assertEqual(payload.kind, "intermediate")
-        self.assertEqual(json.loads(payload.result or ""), WEATHER)
+        self.assertEqual(self._items(), [])
+        self.service.push_error.assert_awaited_once()
         # The call stays open for the result that settles it.
         self.assertIn("call_1", self.service._open_function_calls)
 
     async def test_a_final_result_answers_the_call(self):
-        await self.service.push_frame(_result(is_final=True))
+        await self.service.push_frame(_result())
 
         (item,) = self._items()
         self.assertEqual(item.type, "function_call_output")
@@ -112,7 +103,7 @@ class OpenAIProtocolIntermediateResultsTests:
         # knows the id and would reject an output for it.
         self.service._open_function_calls.clear()
 
-        await self.service.push_frame(_result(is_final=True))
+        await self.service.push_frame(_result())
 
         (item,) = self._items()
         self.assertEqual(item.type, "message")
@@ -123,14 +114,14 @@ class OpenAIProtocolIntermediateResultsTests:
         self.assertEqual(payload.kind, "final")
 
     async def test_nothing_runs_the_model_until_the_aggregator_asks(self):
-        await self.service.push_frame(_result(is_final=False))
+        await self.service.push_frame(_result())
         self.assertEqual(self._responses(), [])
 
         await self._push_context_upstream()
         self.assertEqual(len(self._responses()), 1)
 
     async def test_a_context_frame_from_downstream_records_rather_than_runs(self):
-        await self.service.push_frame(_result(is_final=False))
+        await self.service.push_frame(_result())
 
         await self.service._handle_context(self.service._context, FrameDirection.DOWNSTREAM)
 
@@ -138,7 +129,7 @@ class OpenAIProtocolIntermediateResultsTests:
 
     async def test_a_run_asked_for_during_a_response_waits_for_it_to_finish(self):
         await self._response_created()
-        await self.service.push_frame(_result(is_final=True))
+        await self.service.push_frame(_result())
 
         await self._push_context_upstream()
         self.assertEqual(self._responses(), [])
@@ -147,7 +138,7 @@ class OpenAIProtocolIntermediateResultsTests:
         self.assertEqual(len(self._responses()), 1)
 
     async def test_a_response_takes_in_what_was_delivered_before_it(self):
-        await self.service.push_frame(_result(is_final=True))
+        await self.service.push_frame(_result())
         await self._response_created()
 
         await self._response_done()
@@ -157,7 +148,7 @@ class OpenAIProtocolIntermediateResultsTests:
 
     async def test_an_interruption_drops_a_run_that_was_waiting(self):
         await self._response_created()
-        await self.service.push_frame(_result(is_final=True))
+        await self.service.push_frame(_result())
         await self._push_context_upstream()
 
         await self.service._handle_interruption()
@@ -200,10 +191,10 @@ class OpenAIProtocolIntermediateResultsTests:
         self.assertEqual(self._items(), [])
 
     async def test_the_context_scan_neither_errors_nor_resends(self):
-        self.service.push_error = AsyncMock()
         await self.service.push_frame(_result(is_final=False))
-        await self.service.push_frame(_result(is_final=True))
+        await self.service.push_frame(_result())
         sent = len(self._items())
+        complaints = len(self.service.push_error.call_args_list)
 
         # The same results, as the aggregator records them in the context.
         self.service._context.add_message(
@@ -215,10 +206,8 @@ class OpenAIProtocolIntermediateResultsTests:
         await self._push_context_upstream()
 
         self.assertEqual(len(self._items()), sent)
-        complaints = [
-            str(c.kwargs.get("error_msg", "")) for c in self.service.push_error.call_args_list
-        ]
-        self.assertFalse([c for c in complaints if "intermediate" in c])
+        # The intermediate result was complained about once, when it was produced.
+        self.assertEqual(len(self.service.push_error.call_args_list), complaints)
 
     async def _response_created(self):
         await self.service._handle_evt_response_created(_ResponseCreated())
@@ -228,8 +217,8 @@ class OpenAIProtocolIntermediateResultsTests:
         await self.service._handle_evt_response_done(_ResponseDone())
 
 
-class TestOpenAIRealtimeIntermediateResults(
-    OpenAIProtocolIntermediateResultsTests, unittest.IsolatedAsyncioTestCase
+class TestOpenAIRealtimeResultDelivery(
+    OpenAIProtocolResultDeliveryTests, unittest.IsolatedAsyncioTestCase
 ):
     _append_role = "system"
 
@@ -237,8 +226,8 @@ class TestOpenAIRealtimeIntermediateResults(
         return OpenAIRealtimeLLMService(api_key="test")
 
 
-class TestGrokRealtimeIntermediateResults(
-    OpenAIProtocolIntermediateResultsTests, unittest.IsolatedAsyncioTestCase
+class TestGrokRealtimeResultDelivery(
+    OpenAIProtocolResultDeliveryTests, unittest.IsolatedAsyncioTestCase
 ):
     _append_role = "user"
 
@@ -248,14 +237,13 @@ class TestGrokRealtimeIntermediateResults(
         return GrokRealtimeLLMService(api_key="test")
 
 
-class TestInworldRealtimeIntermediateResults(unittest.IsolatedAsyncioTestCase):
-    """Inworld takes none: its model calls the tool again instead of relaying."""
-
+class TestInworldRealtimeResultDelivery(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         from pipecat.services.inworld.realtime.llm import InworldRealtimeLLMService
 
         self.service = InworldRealtimeLLMService(api_key="test")
         self.service.send_client_event = AsyncMock()
+        self.service.push_error = AsyncMock()
         self.service._api_session_ready = True
         self.service._llm_needs_conversation_setup = False
         self.service._context = LLMContext()
@@ -275,30 +263,27 @@ class TestInworldRealtimeIntermediateResults(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIsNone(self.service.llm_with_backend_role_objection("backend"))
 
-    async def test_it_says_it_takes_no_intermediate_results(self):
-        self.assertFalse(self.service.accepts_intermediate_function_call_results)
-
-    async def test_an_intermediate_result_is_dropped(self):
+    async def test_an_intermediate_result_is_dropped_with_an_error(self):
         await self.service.push_frame(_result(is_final=False))
 
         self.assertEqual(self._items(), [])
+        self.service.push_error.assert_awaited_once()
 
     async def test_a_final_result_answers_the_call(self):
-        await self.service.push_frame(_result(is_final=True))
+        await self.service.push_frame(_result())
 
         (item,) = self._items()
         self.assertEqual(item.type, "function_call_output")
 
 
-class TestGeminiLiveIntermediateResults(unittest.IsolatedAsyncioTestCase):
-    """Gemini takes them on the tool-response channel itself, as a generator."""
-
+class TestGeminiLiveResultDelivery(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         pytest.importorskip("google.genai")
         from pipecat.services.google.gemini_live.llm import GeminiLiveLLMService
 
         self.service = GeminiLiveLLMService(api_key="test")
         self.service._session = AsyncMock()
+        self.service.push_error = AsyncMock()
         self.service._tool_call_id_to_name["call_1"] = "delegate"
         # The tool the results belong to is an async one, which is what the
         # NON_BLOCKING declaration and the scheduling hints follow.
@@ -310,27 +295,24 @@ class TestGeminiLiveIntermediateResults(unittest.IsolatedAsyncioTestCase):
             for c in self.service._session.send_tool_response.call_args_list
         ]
 
-    async def test_an_intermediate_result_keeps_the_call_open(self):
+    async def test_an_intermediate_result_is_dropped_with_an_error(self):
         await self.service.push_frame(_result(is_final=False))
 
-        (response,) = self._responses()
-        self.assertTrue(response.will_continue)
-        self.assertEqual(response.scheduling, "WHEN_IDLE")
+        self.assertEqual(self._responses(), [])
+        self.service.push_error.assert_awaited_once()
 
     async def test_a_silent_result_asks_the_model_not_to_answer(self):
-        await self.service.push_frame(_result(is_final=False, run_llm=False))
+        await self.service.push_frame(_result(run_llm=False))
 
         (response,) = self._responses()
         self.assertEqual(response.scheduling, "SILENT")
         # The guides put scheduling inside the response, the reference beside it.
         self.assertEqual(response.response["scheduling"], "SILENT")
 
-    async def test_a_final_result_settles_the_call(self):
-        await self.service.push_frame(_result(is_final=True))
+    async def test_a_result_settles_the_call(self):
+        await self.service.push_frame(_result())
 
         (response,) = self._responses()
-        # The call stays open for good unless the last response closes it.
-        self.assertFalse(response.will_continue)
         self.assertEqual(response.scheduling, "WHEN_IDLE")
         self.assertIn("call_1", self.service._completed_tool_calls)
 
@@ -371,24 +353,15 @@ class TestGeminiLiveIntermediateResults(unittest.IsolatedAsyncioTestCase):
             self.service._session.send_client_content.await_args.kwargs["turn_complete"]
         )
 
-    async def test_a_model_without_non_blocking_tools_takes_no_intermediate_results(self):
-        self.service._settings.model = "models/gemini-3.1-flash-live-preview"
-        self.assertFalse(self.service.accepts_intermediate_function_call_results)
 
-        await self.service.push_frame(_result(is_final=False))
-
-        self.assertEqual(self._responses(), [])
-
-
-class TestNovaSonicIntermediateResults(unittest.IsolatedAsyncioTestCase):
-    """Nova Sonic takes them as text beside the call."""
-
+class TestNovaSonicResultDelivery(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         pytest.importorskip("aws_sdk_bedrock_runtime")
         from pipecat.services.aws.nova_sonic.llm import AWSNovaSonicLLMService
 
         self.service = AWSNovaSonicLLMService(secret_access_key="k", access_key_id="i", region="r")
         self.service.send_text = AsyncMock()
+        self.service.push_error = AsyncMock()
         self.service._send_tool_result = AsyncMock()
         self.service._stream = object()
         self.service._prompt_name = "prompt"
@@ -397,24 +370,15 @@ class TestNovaSonicIntermediateResults(unittest.IsolatedAsyncioTestCase):
         # send_text(text, role, prompt_name, stream, interactive)
         return [(c.args[0], c.args[4]) for c in self.service.send_text.call_args_list]
 
-    async def test_an_intermediate_result_goes_in_as_interactive_text(self):
+    async def test_an_intermediate_result_is_dropped_with_an_error(self):
         await self.service.push_frame(_result(is_final=False))
 
-        ((text, interactive),) = self._texts()
-        payload = async_tool_messages.parse_message({"role": "developer", "content": text})
-        assert payload is not None
-        self.assertEqual(payload.kind, "intermediate")
-        self.assertTrue(interactive)
+        self.assertEqual(self._texts(), [])
         self.service._send_tool_result.assert_not_awaited()
+        self.service.push_error.assert_awaited_once()
 
-    async def test_a_silent_result_goes_in_without_asking_for_a_reply(self):
-        await self.service.push_frame(_result(is_final=False, run_llm=False))
-
-        ((_, interactive),) = self._texts()
-        self.assertFalse(interactive)
-
-    async def test_a_final_result_settles_the_call(self):
-        await self.service.push_frame(_result(is_final=True))
+    async def test_a_result_settles_the_call(self):
+        await self.service.push_frame(_result())
 
         self.assertEqual(self._texts(), [])
         self.service._send_tool_result.assert_awaited_once()
@@ -431,9 +395,7 @@ class TestNovaSonicIntermediateResults(unittest.IsolatedAsyncioTestCase):
         )
 
 
-class TestUltravoxIntermediateResults(unittest.IsolatedAsyncioTestCase):
-    """Ultravox takes them as user-side text, urgent or not."""
-
+class TestUltravoxResultDelivery(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         from pipecat.services.ultravox.llm import (
             OneShotInputParams,
@@ -445,6 +407,7 @@ class TestUltravoxIntermediateResults(unittest.IsolatedAsyncioTestCase):
         )
         self.service._socket = object()
         self.service._send = AsyncMock()
+        self.service.push_error = AsyncMock()
 
     def _sent(self) -> list[dict]:
         return [c.args[0] for c in self.service._send.call_args_list]
@@ -455,22 +418,14 @@ class TestUltravoxIntermediateResults(unittest.IsolatedAsyncioTestCase):
             self.service.llm_with_backend_role_objection("frontend") or "",
         )
 
-    async def test_an_intermediate_result_goes_in_as_text_to_speak_about(self):
+    async def test_an_intermediate_result_is_dropped_with_an_error(self):
         await self.service.push_frame(_result(is_final=False))
 
-        (message,) = self._sent()
-        self.assertEqual(message["type"], "user_text_message")
-        self.assertIn("still running", message["text"])
-        self.assertEqual(message["urgency"], "soon")
+        self.assertEqual(self._sent(), [])
+        self.service.push_error.assert_awaited_once()
 
-    async def test_a_silent_result_goes_in_as_context(self):
-        await self.service.push_frame(_result(is_final=False, run_llm=False))
-
-        (message,) = self._sent()
-        self.assertEqual(message["urgency"], "later")
-
-    async def test_a_final_result_settles_the_call(self):
-        await self.service.push_frame(_result(is_final=True))
+    async def test_a_result_settles_the_call(self):
+        await self.service.push_frame(_result())
 
         (message,) = self._sent()
         self.assertEqual(message["type"], "client_tool_result")
@@ -480,7 +435,7 @@ class TestUltravoxIntermediateResults(unittest.IsolatedAsyncioTestCase):
         # The placeholder already settled the call, so the result can't.
         self.service._started_placeholder_sent.add("call_1")
 
-        await self.service.push_frame(_result(is_final=True))
+        await self.service.push_frame(_result())
 
         (message,) = self._sent()
         self.assertEqual(message["type"], "user_text_message")

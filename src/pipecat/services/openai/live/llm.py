@@ -382,11 +382,6 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
         """
         return True
 
-    @property
-    def accepts_intermediate_function_call_results(self) -> bool:
-        """The Live API takes one output per function call, so intermediate results are dropped."""
-        return False
-
     def llm_with_backend_role_objection(self, role: LLMWithBackendRole) -> str | None:
         """Decline both roles: this service is a frontend with a backend of its own.
 

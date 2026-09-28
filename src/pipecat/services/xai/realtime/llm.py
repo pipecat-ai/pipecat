@@ -401,15 +401,6 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
             return session_properties.turn_detection.type == "server_vad"
         return False
 
-    @property
-    def accepts_intermediate_function_call_results(self) -> bool:
-        """Intermediate results reach the model as conversation items.
-
-        The API takes one output per function call, so an intermediate result
-        goes in beside the call instead of through it (see :meth:`push_frame`).
-        """
-        return True
-
     def service_metadata_frame(self) -> LLMServiceMetadataFrame:
         """Realtime service; recommends external turn strategies when server-side VAD is active."""
         emits_turn_frames = self._is_turn_detection_enabled()
@@ -633,7 +624,7 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
 
         Function call results and cancellations are broadcast by the base
         service; the downstream copy is observed here and sent to the API as it
-        is produced, intermediate results included. The frames travel on to the
+        is produced. The frames travel on to the
         assistant aggregator, which records them in the context and decides when
         inference should run.
 
@@ -651,21 +642,21 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
     async def _handle_function_call_result(self, frame: FunctionCallResultFrame):
         """Send one function call result to the API as it is produced.
 
-        An intermediate result can't go through the tool-result channel — the
-        API takes one output per call — so it goes in as a message carrying the
-        same envelope a text LLM would read from the context. A final result
-        answers the call, unless a reconnect has left the API without the id to
-        answer, in which case it goes in as a message too.
+        A final result answers the call, unless a reconnect has left the API
+        without the id to answer, in which case it goes in as a message. The
+        API takes one output per call, so an intermediate result is dropped
+        with an error.
         """
         result = json.dumps(frame.result, ensure_ascii=False) if frame.result else "COMPLETED"
         is_final = frame.properties.is_final if frame.properties else True
 
         if not is_final:
-            message = async_tool_messages.build_intermediate_result_message(
-                frame.tool_call_id, result
+            await self.push_error(
+                f"{self}: Grok Realtime takes one output per function call; dropping the "
+                f"intermediate result for {frame.function_name}"
             )
-            await self._send_progress_message(cast(str, message.get("content", "")))
-        elif frame.tool_call_id in self._open_function_calls:
+            return
+        if frame.tool_call_id in self._open_function_calls:
             await self._send_tool_result(frame.tool_call_id, result)
         else:
             message = async_tool_messages.build_final_result_message(frame.tool_call_id, result)
@@ -1289,8 +1280,7 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
                     # awaits a result; nothing to send for the started marker.
                     continue
                 if async_payload.kind == "intermediate":
-                    # Sent as a message when it was produced; the call stays
-                    # open for the final result.
+                    # Dropped with an error when it was produced.
                     continue
                 if async_payload.kind == "final":
                     # Deliver via the formal tool-result channel — same path
