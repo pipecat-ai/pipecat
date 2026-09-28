@@ -11,7 +11,8 @@
 runs in the harness, in :class:`~pipecat.evals.client_transport.EvalClientTransport`.
 Both speak RTVI. The eval adds messages of its own on top: ``eval-configure``,
 ``eval-context``, ``eval-cancel``, and ``eval-image`` from the harness, and
-``eval-bot-audio`` from the bot when the harness asks to hear it.
+``eval-bot-audio`` and ``eval-bot-image`` from the bot when the harness asks for
+them.
 """
 
 import base64
@@ -28,6 +29,7 @@ from pipecat.frames.frames import (
     InputTransportMessageFrame,
     LLMMessagesUpdateFrame,
     OutputAudioRawFrame,
+    OutputImageRawFrame,
     OutputTransportMessageFrame,
     OutputTransportMessageUrgentFrame,
 )
@@ -68,6 +70,10 @@ EVAL_IMAGE_MESSAGE_TYPE = "eval-image"
 # so the harness reader sees it; the harness transcribes the audio locally.
 EVAL_BOT_AUDIO_TYPE = "eval-bot-audio"
 
+# Outbound message describing an image the bot output (its size and color
+# format, not its pixels), used only when a scenario asserts on ``image``.
+EVAL_BOT_IMAGE_TYPE = "eval-bot-image"
+
 # Rate the harness resamples the bot's audio to before its pipeline VAD/STT see
 # it. 16 kHz is what Silero and the local STT models (Whisper/Moonshine) expect;
 # the harness configures its input transport at this rate to match.
@@ -95,6 +101,11 @@ class EvalSerializer(FrameSerializer):
         # the ?capture_bot_audio query param) only for tts_response scenarios, so we
         # don't ship the bot's audio over the wire unless something asserts on it.
         self._capture_audio = False
+        # Off by default like the audio; the eval transport flips it on per
+        # connection (from the ?capture_bot_images query param) for scenarios
+        # that assert on ``image``, so a bot animating its video output doesn't
+        # flood the harness.
+        self._capture_images = False
         # The most recent image the harness registered (still-encoded bytes, MIME
         # type), served back on a UserImageRequestFrame. See EVAL_IMAGE_MESSAGE_TYPE.
         self._user_image: tuple[bytes, str] | None = None
@@ -102,6 +113,10 @@ class EvalSerializer(FrameSerializer):
     def set_capture_audio(self, capture: bool) -> None:
         """Enable/disable forwarding the bot's synthesized audio to the harness."""
         self._capture_audio = capture
+
+    def set_capture_images(self, capture: bool) -> None:
+        """Enable/disable reporting the images the bot outputs to the harness."""
+        self._capture_images = capture
 
     def get_user_image(self) -> tuple[bytes, str] | None:
         """The image registered for the current turn as ``(bytes, mime)``, or None."""
@@ -129,6 +144,15 @@ class EvalSerializer(FrameSerializer):
                         "audio": base64.b64encode(frame.audio).decode("ascii"),
                         "sampleRate": frame.sample_rate,
                     },
+                }
+            )
+        elif self._capture_images and isinstance(frame, OutputImageRawFrame):
+            width, height = frame.size
+            return json.dumps(
+                {
+                    "label": RTVI.MESSAGE_LABEL,
+                    "type": EVAL_BOT_IMAGE_TYPE,
+                    "data": {"width": width, "height": height, "format": frame.format},
                 }
             )
         return None
@@ -275,7 +299,8 @@ class EvalClientSerializer(RTVIClientSerializer):
     can transcribe what the bot actually said. The bot's reports about the
     harness (its transcription, VAD, and speaking messages) stay raw messages
     rather than becoming frames, so they cannot be mistaken for what the
-    harness computes from the bot's audio.
+    harness computes from the bot's audio. So does ``eval-bot-image``, which
+    has no frame on the harness's side to become.
     """
 
     def __init__(self, **kwargs):
@@ -317,7 +342,7 @@ class EvalClientSerializer(RTVIClientSerializer):
                     sample_rate=sample_rate,
                     num_channels=1,
                 )
-            if msg_type in _REPORTED_EVENT_TYPES:
+            if msg_type in _REPORTED_EVENT_TYPES or msg_type == EVAL_BOT_IMAGE_TYPE:
                 # Kept as the raw message so the sink maps it to a scenario event;
                 # see the class docstring for why these aren't frames.
                 return InputTransportMessageFrame(message=message)

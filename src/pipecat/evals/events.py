@@ -37,6 +37,9 @@ scenario ``event:``             RTVI server message(s)
                                 ``tool_call_id`` and ``cancelled``, so a scenario
                                 can tell work that was stopped from work that
                                 finished on its own
+``image``                       ``eval-bot-image``: an image the bot output, with
+                                its ``width``, ``height``, and ``format``; sent
+                                only on request
 ==========================      ==============================================
 """
 
@@ -44,6 +47,7 @@ import asyncio
 import time
 
 from pipecat.evals.results import EvalTrace
+from pipecat.evals.serializer import EVAL_BOT_IMAGE_TYPE
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
@@ -456,6 +460,13 @@ class EvalEventStream:
             if data.get("final", True):
                 return {"type": "user_transcription", "transcript": data.get("text", "")}
             return None
+        elif msg_type == EVAL_BOT_IMAGE_TYPE:
+            return {
+                "type": "image",
+                "width": data.get("width"),
+                "height": data.get("height"),
+                "format": data.get("format"),
+            }
         return None
 
     def _segment_event(self, event_type: str, text: str) -> dict:

@@ -1013,6 +1013,22 @@ class TestNeedsMarkerEvents(unittest.TestCase):
         self.assertTrue(self._needs(EvalExpectation(event="llm_marker", marker="complete")))
 
 
+class TestNeedsBotImages(unittest.TestCase):
+    """The harness asks for the bot's images only when a scenario expects one."""
+
+    def _needs(self, *expects) -> bool:
+        scenario = EvalScriptScenario(
+            name="t", turns=[EvalScriptTurn(user=None, expect=list(expects))]
+        )
+        return scenario.needs_bot_images()
+
+    def test_false_without_image_expectation(self):
+        self.assertFalse(self._needs(EvalExpectation(event="response")))
+
+    def test_true_when_expected(self):
+        self.assertTrue(self._needs(EvalExpectation(event="image")))
+
+
 class TestConnectURL(unittest.TestCase):
     """The harness signals skip-TTS via the connect URL in text mode."""
 
@@ -1041,6 +1057,13 @@ class TestConnectURL(unittest.TestCase):
         url = _client(scenario, bot_url="ws://localhost:7860")._connect_url()
         self.assertIn("capture_bot_audio=true", url)
         self.assertNotIn("skip_tts", url)  # audio mode, so no skip
+
+    def test_image_expectation_adds_capture_images(self):
+        scenario = EvalScriptScenario(
+            name="t", turns=[EvalScriptTurn(user=None, expect=[EvalExpectation(event="image")])]
+        )
+        url = _client(scenario, bot_url="ws://localhost:7860")._connect_url()
+        self.assertIn("capture_bot_images=true", url)
 
     def test_skip_tts_flag_in_text_mode(self):
         # Text-mode scenarios silence the bot (skip_tts before any greeting);
@@ -2655,3 +2678,18 @@ class TestSessionFromScenario(unittest.TestCase):
     def test_other_objects_are_rejected(self):
         with self.assertRaises(TypeError):
             EvalSession.from_scenario({"name": "x"}, "ws://localhost:0")  # type: ignore[arg-type]
+
+
+class TestBotImageEvent(unittest.TestCase):
+    """An image the bot reports becomes an ``image`` event."""
+
+    def test_bot_image_becomes_image(self):
+        message = {
+            "label": RTVI.MESSAGE_LABEL,
+            "type": "eval-bot-image",
+            "data": {"width": 64, "height": 32, "format": "RGB"},
+        }
+        self.assertEqual(
+            _stream().frame_to_event(InputTransportMessageFrame(message=message)),
+            {"type": "image", "width": 64, "height": 32, "format": "RGB"},
+        )

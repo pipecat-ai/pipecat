@@ -31,10 +31,18 @@ Event names are the friendly names the harness maps RTVI server messages onto:
 ``user_started_speaking``, ``user_stopped_speaking``, ``vad_user_started_speaking``,
 ``vad_user_stopped_speaking``, ``user_transcription``, ``bot_started_speaking``,
 ``bot_stopped_speaking``, ``llm_started``, ``response``, ``llm_response``,
-``llm_marker``, ``tts_response``, ``function_call``, ``function_call_stopped``. The
-``vad_*`` events are the raw
+``llm_marker``, ``tts_response``, ``function_call``, ``function_call_stopped``,
+``image``. The ``vad_*`` events are the raw
 VAD signal, useful as a timing anchor when a turn-detection strategy gates or defers the
 turn-level ``user_stopped_speaking`` (e.g. filtering incomplete turns).
+
+``image`` is an image the bot output, such as a generated one; the bot reports
+images only to a scenario that expects one::
+
+    turns:
+      - expect:
+          - event: image
+            within_ms: 60000
 
 ``llm_marker`` is the sideband marker the bot's LLM emitted in a response, such
 as the turn-completion markers of ``filter_incomplete_user_turns``. It arrives
@@ -623,6 +631,10 @@ class EvalScriptScenario:
             if any(exp.event in vad_events for exp in turn.expect):
                 return True
         return False
+
+    def needs_bot_images(self) -> bool:
+        """Whether the scenario asserts on the images the bot outputs, which it reports only on request."""
+        return any(exp.event == "image" for turn in self.turns for exp in turn.expect)
 
     def needs_marker_events(self) -> bool:
         """Whether the scenario asserts on the LLM's markers, which the bot emits only on request."""

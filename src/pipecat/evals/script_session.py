@@ -100,6 +100,7 @@ class EvalScriptSession(EvalSession[EvalScriptResult]):
                 user_audio=scenario.user_audio,
                 user_speech=scenario.user_speech,
                 capture_bot_audio=scenario.wants_response(),
+                capture_bot_images=scenario.needs_bot_images(),
                 report_level=scenario.required_report_level(),
                 vad_events=scenario.needs_vad_events(),
                 marker_events=scenario.needs_marker_events(),
