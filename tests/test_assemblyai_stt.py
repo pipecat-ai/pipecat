@@ -60,14 +60,14 @@ def test_explicit_sample_rate_overrides_setup(monkeypatch):
     assert _query(service)["sample_rate"] == ["16000"]
 
 
-def test_default_model_is_universal_3_5_pro():
-    # universal-3-5-pro is the default model sent to AssemblyAI.
+def test_default_model_is_universal_3_6_pro():
+    # universal-3-6-pro is the default model sent to AssemblyAI.
     service = AssemblyAISTTService(api_key="test-key")
-    assert _query(service)["speech_model"] == ["universal-3-5-pro"]
+    assert _query(service)["speech_model"] == ["universal-3-6-pro"]
 
 
 def test_continuous_partials_defaults_to_true_for_u3_pro():
-    # universal-3-5-pro is the default U3 Pro model; continuous_partials should be on by default.
+    # universal-3-6-pro is the default U3 Pro model; continuous_partials should be on by default.
     service = AssemblyAISTTService(api_key="test-key")
     assert _query(service)["continuous_partials"] == ["true"]
 
