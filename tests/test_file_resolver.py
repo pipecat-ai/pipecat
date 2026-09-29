@@ -28,14 +28,26 @@ def _mock_http_session(response):
     return session
 
 
-def _mock_http_response(*, status=200, body=b"", raise_for_status_error=None):
+def _mock_http_response(
+    *, status=200, body=b"", content_length=None, raise_for_status_error=None, chunk_size=8
+):
+    """Mock aiohttp response whose body streams in several chunks."""
     response = MagicMock()
     response.status = status
+    response.content_length = content_length
     if raise_for_status_error is not None:
         response.raise_for_status = MagicMock(side_effect=raise_for_status_error)
     else:
         response.raise_for_status = MagicMock()
-    response.content.read = AsyncMock(return_value=body)
+
+    def iter_chunked(size):
+        async def chunks():
+            for i in range(0, len(body), chunk_size):
+                yield body[i : i + chunk_size]
+
+        return chunks()
+
+    response.content.iter_chunked = iter_chunked
     response.__aenter__ = AsyncMock(return_value=response)
     response.__aexit__ = AsyncMock(return_value=False)
     return response
@@ -146,8 +158,22 @@ class TestFileResolverFetch(unittest.IsolatedAsyncioTestCase):
                 await resolver.fetch("https://slow.example.com/file.pdf")
         self.assertIn("Timed out", str(ctx.exception))
 
-    async def test_http_oversized_raises(self):
-        session = _mock_http_session(_mock_http_response(body=b"x" * 11))
+    async def test_http_oversized_stream_raises(self):
+        """A body that only reveals its size while streaming is cut off at the cap."""
+        session = _mock_http_session(_mock_http_response(body=b"x" * 11, chunk_size=4))
+        with patch("pipecat.utils.file_resolver.aiohttp.ClientSession", return_value=session):
+            resolver = FileResolver(max_fetch_bytes=10)
+            with self.assertRaises(FileResolverError) as ctx:
+                await resolver.fetch("https://example.com/huge.pdf")
+        self.assertIn("byte limit", str(ctx.exception))
+
+    async def test_http_oversized_content_length_rejected_before_reading(self):
+        """A Content-Length over the cap is rejected without reading the body."""
+        response = _mock_http_response(body=b"irrelevant", content_length=11)
+        response.content.iter_chunked = MagicMock(
+            side_effect=AssertionError("body should not be read")
+        )
+        session = _mock_http_session(response)
         with patch("pipecat.utils.file_resolver.aiohttp.ClientSession", return_value=session):
             resolver = FileResolver(max_fetch_bytes=10)
             with self.assertRaises(FileResolverError) as ctx:
