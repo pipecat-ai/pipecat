@@ -276,7 +276,8 @@ class SIPRunnerArguments(RunnerArguments):
     route; the development runner reads the account from the ``SIP_USER``,
     ``SIP_PASS``, ``SIP_DOMAIN``, ``SIP_TRANSPORT``, ``SIP_AUDIO_CODECS``,
     ``SIP_AUTH_USER``, ``SIP_REG_INTERVAL``, ``SIP_RTP_TIMEOUT``,
-    ``SIP_INSTANCE_ID``, and ``SIP_NET_INTERFACE`` environment variables. Without ``SIP_USER`` and
+    ``SIP_INSTANCE_ID``, ``SIP_NET_INTERFACE``, and ``SIP_JITTER_BUFFER``
+    environment variables. Without ``SIP_USER`` and
     ``SIP_DOMAIN``, the runner provisions a temporary SIP client on the Daily
     domain instead (``DAILY_API_KEY``) and deletes it when the bot exits.
     For debugging, ``SIP_NATIVE_LOG_LEVEL`` and ``SIP_TRACE`` control the
@@ -313,6 +314,12 @@ class SIPRunnerArguments(RunnerArguments):
             address per destination. Set it for a registrar on loopback
             ("127.0.0.1") or one address of a multi-homed host. See
             :class:`~pipecat.transports.sip.connection.SIPConnection`.
+        jitter_buffer_mode: The receive jitter buffer: "off", "fixed", or
+            "adaptive"; None keeps the stack's compiled setting. See
+            :class:`~pipecat.transports.sip.connection.SIPConnection` for
+            what each mode costs.
+        jitter_buffer_ms: ``(min, max)`` in milliseconds for a fixed or
+            adaptive buffer; None keeps the stack default.
     """
 
     user: str
@@ -328,6 +335,8 @@ class SIPRunnerArguments(RunnerArguments):
     native_log_level: str = "warning"
     sip_trace: bool = False
     net_interface: str | None = None
+    jitter_buffer_mode: str | None = None
+    jitter_buffer_ms: tuple | None = None
 
 
 @dataclass

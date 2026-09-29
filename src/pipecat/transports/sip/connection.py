@@ -120,6 +120,28 @@ _STDLIB_LOG_LEVELS = {
 _TRANSFER_CLOSE_REASON = "Call transfered"
 
 
+_JITTER_BUFFER_MODES = ("off", "fixed", "adaptive")
+
+
+def _normalize_jitter_buffer(mode: str | None, ms: tuple | None) -> tuple[str | None, tuple | None]:
+    """Validate the jitter-buffer arguments; a range given alone means a fixed buffer."""
+    if mode is not None and mode not in _JITTER_BUFFER_MODES:
+        raise ValueError(f"jitter_buffer_mode must be one of {_JITTER_BUFFER_MODES}, got {mode!r}")
+    if ms is None:
+        if mode in ("fixed", "adaptive"):
+            raise ValueError(f"jitter_buffer_mode={mode!r} needs jitter_buffer_ms=(min, max)")
+        return mode, None
+    if mode == "off":
+        raise ValueError("jitter_buffer_ms has no effect with jitter_buffer_mode='off'")
+    try:
+        lo, hi = (int(v) for v in ms)
+    except (TypeError, ValueError):
+        raise ValueError(f"jitter_buffer_ms must be a (min, max) pair in ms, got {ms!r}") from None
+    if not 0 < lo <= hi:
+        raise ValueError(f"jitter_buffer_ms needs 0 < min <= max, got {ms!r}")
+    return mode or "fixed", (lo, hi)
+
+
 @dataclass(frozen=True)
 class _RuntimeSettings:
     """Runtime-wide baresip settings, fixed by the first connection.
@@ -139,6 +161,8 @@ class _RuntimeSettings:
     video_bitrate: int = 1_000_000
     native_log_level: str = "warning"
     sip_trace: bool = False
+    jitter_buffer_mode: str | None = None
+    jitter_buffer_ms: tuple | None = None
 
     def to_config(self) -> Config:
         """These settings as the binding's ``Config`` object.
@@ -158,7 +182,23 @@ class _RuntimeSettings:
             video_bitrate=self.video_bitrate,
             native_log_level=self.native_log_level,
             sip_trace=self.sip_trace,
+            extra_config_text=self._jitter_buffer_config(),
         )
+
+    def _jitter_buffer_config(self) -> str:
+        """The receive jitter buffer as the stack's own config lines.
+
+        ``Config`` has no typed field for ``audio_jitter_buffer_*``, so the
+        lines go through its raw-text escape hatch. Nothing is rendered
+        when no mode is set, and the stack's compiled default applies.
+        """
+        if self.jitter_buffer_mode is None:
+            return ""
+        lines = [f"audio_jitter_buffer_type {self.jitter_buffer_mode}"]
+        if self.jitter_buffer_ms is not None:
+            lo, hi = self.jitter_buffer_ms
+            lines.append(f"audio_jitter_buffer_ms {lo}-{hi}")
+        return "".join(f"{line}\n" for line in lines)
 
     @property
     def stdlib_log_level(self) -> int:
@@ -220,7 +260,8 @@ class _SharedRuntime:
                     f"settings ({self._settings!r}); all SIPConnections in a process "
                     "must agree on net_interface, expose_headers, "
                     "max_concurrent_calls, rtp_timeout, instance_id, "
-                    "native_log_level, sip_trace, and the video parameters"
+                    "native_log_level, sip_trace, the jitter buffer, and the "
+                    "video parameters"
                 )
             self._owners += 1
             return self._runtime
@@ -303,10 +344,10 @@ class SIPConnection(BaseObject):
     application signatures.
 
     Runtime-wide arguments (``net_interface``, ``expose_headers``,
-    ``max_concurrent_calls``, the logging parameters, and the video
-    parameters) configure the process-wide SIP stack and are fixed by the
-    first connection to connect; every later connection must pass the
-    same values.
+    ``max_concurrent_calls``, the jitter buffer, the logging parameters,
+    and the video parameters) configure the process-wide SIP stack and are
+    fixed by the first connection to connect; every later connection must
+    pass the same values.
 
     Event handlers available:
 
@@ -373,6 +414,8 @@ class SIPConnection(BaseObject):
         audio_codecs: tuple | None = None,
         dtmf_mode: str = "rtpevent",
         extra_params: tuple | None = None,
+        jitter_buffer_mode: str | None = None,
+        jitter_buffer_ms: tuple | None = None,
         net_interface: str | None = None,
         expose_headers: tuple = (),
         max_concurrent_calls: int | None = 2,
@@ -418,6 +461,23 @@ class SIPConnection(BaseObject):
                 ``medianat=ice`` only when the peer also speaks ICE). Values
                 are passed through unchanged; None (the default) adds
                 nothing.
+            jitter_buffer_mode: The receive jitter buffer: ``"off"``,
+                ``"fixed"``, or ``"adaptive"``; None (the default) keeps
+                the stack's compiled setting, a fixed 100–200 ms. Media
+                waits here before the transport reads it, so the setting
+                is turn latency. A fixed buffer holds exactly its minimum
+                on every packet (the maximum is unused) and returns to it
+                after any disturbance; an adaptive one starts at its
+                minimum, widens once packets miss their deadline, and does
+                not narrow again for the rest of the call. A packet
+                arriving later than the minimum plus one packet time is
+                discarded, so the minimum is the jitter tolerance. This is
+                the only receive buffer in the transport's path: the
+                stack's playout buffer sits downstream of the audio tap.
+                Runtime-wide.
+            jitter_buffer_ms: ``(min, max)`` in milliseconds for a fixed or
+                adaptive buffer; given alone it selects ``"fixed"``. Not
+                accepted with ``"off"``. Runtime-wide.
             net_interface: Restrict the stack to one local interface, by
                 name or address. None (the default) is correct for
                 production: the stack sees every interface and the OS
@@ -493,6 +553,9 @@ class SIPConnection(BaseObject):
             dtmf_mode=dtmf_mode,
             extra_params=extra_params,
         )
+        jitter_buffer_mode, jitter_buffer_ms = _normalize_jitter_buffer(
+            jitter_buffer_mode, jitter_buffer_ms
+        )
         self._settings = _RuntimeSettings(
             net_interface=net_interface,
             rtp_timeout=rtp_timeout,
@@ -504,6 +567,8 @@ class SIPConnection(BaseObject):
             video_bitrate=video_bitrate,
             native_log_level=native_log_level,
             sip_trace=sip_trace,
+            jitter_buffer_mode=jitter_buffer_mode,
+            jitter_buffer_ms=jitter_buffer_ms,
         )
         # Per-connection: a consult/transfer leg opts out of inbound routing so a
         # call never lands on it while it is briefly idle between connect and dial.
