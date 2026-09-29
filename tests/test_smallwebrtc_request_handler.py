@@ -15,7 +15,7 @@ or silently dropping them.
 """
 
 import unittest
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -24,6 +24,7 @@ pytest.importorskip("aiortc")
 from pipecat.transports.smallwebrtc.request_handler import (  # noqa: E402
     IceCandidate,
     SmallWebRTCPatchRequest,
+    SmallWebRTCRequest,
     SmallWebRTCRequestHandler,
 )
 
@@ -80,6 +81,38 @@ class TestHandlePatchRequest(unittest.IsolatedAsyncioTestCase):
         for call in [calls[1], calls[3], calls[4]]:
             (candidate,), _ = call.args, call.kwargs
             self.assertIsNone(candidate)
+
+
+class TestHandleWebRequestRestart(unittest.IsolatedAsyncioTestCase):
+    async def test_restart_pc_replaces_map_entry_for_new_pc_id(self):
+        """A restart_pc renegotiation issues a new pc_id; the old id must not stay mapped."""
+        handler = SmallWebRTCRequestHandler()
+        connection = MagicMock()
+        connection.pc_id = "pc-old"
+        connection.get_answer.return_value = {"sdp": "answer", "type": "answer", "pc_id": "pc-old"}
+        handler._pcs_map["pc-old"] = connection
+
+        async def renegotiate(sdp, type, restart_pc):
+            connection.pc_id = "pc-new"
+            connection.get_answer.return_value = {
+                "sdp": "answer",
+                "type": "answer",
+                "pc_id": "pc-new",
+            }
+
+        connection.renegotiate = AsyncMock(side_effect=renegotiate)
+
+        with patch(
+            "pipecat.transports.smallwebrtc.request_handler.SmallWebRTCConnection"
+        ) as connection_cls:
+            answer = await handler.handle_web_request(
+                SmallWebRTCRequest(sdp="offer", type="offer", pc_id="pc-old", restart_pc=True),
+                AsyncMock(),
+            )
+            connection_cls.assert_not_called()
+
+        self.assertEqual(answer["pc_id"], "pc-new")
+        self.assertEqual(list(handler._pcs_map), ["pc-new"])
 
 
 if __name__ == "__main__":

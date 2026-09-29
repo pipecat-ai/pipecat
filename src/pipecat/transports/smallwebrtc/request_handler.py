@@ -232,6 +232,10 @@ class SmallWebRTCRequestHandler:
 
                 answer["sdp"] = smallwebrtc_sdp_munging(answer["sdp"], self._host)
 
+            # A restart_pc renegotiation gives the connection a new pc_id, so drop the
+            # entry stored under the old one.
+            if pc_id and pc_id != answer["pc_id"]:
+                self._pcs_map.pop(pc_id, None)
             self._pcs_map[answer["pc_id"]] = pipecat_connection
 
             return answer
