@@ -82,6 +82,9 @@ TURN_GAP_SECS = 0.8
 # `session.close` before emitting `session.closed`.
 SESSION_CLOSE_TIMEOUT_SECS = 10.0
 
+#: How long a delegation waits for the session with the backend to open.
+BACKEND_ATTACH_TIMEOUT_SECS = 5.0
+
 # Each context append takes one text part of at most 500 tokens. Chunks are
 # measured against a lower budget, since what counts them is an estimate.
 MAX_CONTEXT_APPEND_TOKENS = 450
@@ -368,6 +371,9 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
         self._delegated_before = False
         self._backend_session: _BackendSession | None = None
         self._backend_session_task: asyncio.Task | None = None
+        # Set while the session with the backend is open, so a delegation
+        # that starts just after attaching waits for it.
+        self._backend_attached = asyncio.Event()
         self._current_delegation: _LiveDelegation | None = None
         self._queued_delegations: deque[tuple[events.DelegationMetadata, str]] = deque()
 
@@ -1012,6 +1018,7 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
                 self.pipeline_worker, backend_name, timeout_secs=config.timeout_secs
             ) as session:
                 self._backend_session = session
+                self._backend_attached.set()
                 async for event in session:
                     await self._on_backend_event(event)
                 if not session.detached:
@@ -1021,6 +1028,7 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
         except Exception as e:
             logger.error(f"{self}: the session with backend '{backend_name}' failed: {e}")
         finally:
+            self._backend_attached.clear()
             self._backend_session = None
 
     async def _on_backend_event(
@@ -1068,6 +1076,8 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
             f"{self}::delegation_timeout:{delegation.id}",
         )
         try:
+            async with asyncio.timeout(BACKEND_ATTACH_TIMEOUT_SECS):
+                await self._backend_attached.wait()
             session = self._backend_session
             if session is None:
                 raise RuntimeError("the backend is not attached")
@@ -1098,6 +1108,10 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
             return
         logger.warning(f"{self}: delegation {current.id} timed out; abandoning it")
         current.timeout_task = None
+        # The backend may still be at work on it. Detaching stops that work, so
+        # none of it is reported under a later delegation.
+        await self._detach_backend()
+        await self._attach_backend()
         await self._send_context_append(
             current.id, "The delegated work could not be completed.", spoken=True
         )

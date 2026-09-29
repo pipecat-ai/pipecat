@@ -858,7 +858,7 @@ class BackendLLMWorker(LLMContextWorker):
 
         The ``attach`` job's handler is already cancelled by the time this
         runs, and has let go of the attachment; the work in flight stops too,
-        so nothing of it reaches the next frontend.
+        so none of it is reported after the frontend has let go of it.
         """
         request = self.active_jobs.get(message.job_id)
         if request is not None and request.job_name == ATTACH_JOB_NAME:

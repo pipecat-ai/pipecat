@@ -1081,14 +1081,15 @@ class _FakeSession:
         self.backend_name = backend_name
         self.timeout_secs = timeout_secs
         self.requests: list[str] = []
-        self.cancels: list[str] = []
         self.send_error: Exception | None = None
+        self.closed = False
         self._events: asyncio.Queue = asyncio.Queue()
 
     async def __aenter__(self):
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
+        self.closed = True
         return False
 
     def __aiter__(self):
@@ -1105,10 +1106,6 @@ class _FakeSession:
             raise self.send_error
         self.requests.append(request)
         return "idle"
-
-    async def cancel(self, reason: str) -> bool:
-        self.cancels.append(reason)
-        return True
 
     async def feed(self, *events):
         """Hand events to the service's consumer and let it process them."""
@@ -1336,12 +1333,23 @@ async def test_a_delegation_the_backend_takes_too_long_on_is_abandoned(monkeypat
     service, recorder, session = await _client_delegation_service(monkeypatch, timeout_secs=0.05)
 
     await service._handle_client_delegation(_client_delegation("item_d1"))
-    await asyncio.sleep(0.2)
+    await service._handle_client_delegation(_client_delegation("item_d2"))
+    for _ in range(100):
+        new_session = service._backend_session
+        if session.closed and new_session is not None and new_session.requests:
+            break
+        await asyncio.sleep(0.005)
 
-    (append,) = recorder.of_type("session.commentary.append")
-    assert append["delegation_id"] == "item_d1"
-    assert "could not be completed" in append["content"]
-    assert service._current_delegation is None
+    # The session the work was sent on is closed, which stops the backend,
+    # and the delegation that was waiting goes out on a new one.
+    assert session.closed
+    assert session.requests == [session.requests[0]]
+    new_session = service._backend_session
+    assert new_session is not None and new_session is not session
+    assert len(new_session.requests) == 1
+    appends = recorder.of_type("session.commentary.append")
+    assert appends[0]["delegation_id"] == "item_d1"
+    assert "could not be completed" in appends[0]["content"]
 
 
 @pytest.mark.asyncio
