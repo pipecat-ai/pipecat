@@ -2162,6 +2162,9 @@ class LLMAssistantAggregator(LLMContextAggregator):
             if frame.request.result_callback:
                 await frame.request.result_callback(None)
         else:
+            # Commit any in-progress assistant aggregation before appending,
+            # so the image message lands after it in the context.
+            await self.push_aggregation()
             image_appended = await self._maybe_append_image_to_context(frame)
 
         if image_appended and frame.run_llm is not False:
@@ -2171,6 +2174,15 @@ class LLMAssistantAggregator(LLMContextAggregator):
         # TODO: Should this have a similar function-call check like _handle_user_image_frame?
         if not frame.append_to_context:
             return
+
+        # Commit any in-progress assistant aggregation before appending, so
+        # the file message lands after it in the context. The order matters
+        # beyond chronology: LLMContext.remove_invalid_file_message() only
+        # considers messages after the last assistant message, so a file
+        # message written before a later-committed assistant message could
+        # never be cleaned up if the provider rejects it. The assistant turn
+        # stays open; any remaining reply text commits at the turn's end.
+        await self.push_aggregation()
 
         logger.debug(f"{self} Appending UserFileRawFrame to LLM context (format: {frame.format})")
         await self._context.add_file_frame_message(
@@ -2182,7 +2194,6 @@ class LLMAssistantAggregator(LLMContextAggregator):
             # TODO: pass custom_options through to adapters via the universal message
         )
 
-        await self.push_aggregation()
         if frame.run_llm is not False:
             await self.push_context_frame(FrameDirection.UPSTREAM)
 
