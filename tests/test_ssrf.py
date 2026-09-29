@@ -132,3 +132,26 @@ class TestClassifyUrlReachability(unittest.IsolatedAsyncioTestCase):
                 ),
                 "public",
             )
+
+
+class TestDefaultAllowedFileUrlNetworks(unittest.TestCase):
+    def test_returns_empty_list_when_unset(self):
+        import os
+
+        from pipecat.utils.security.ssrf import default_allowed_file_url_networks
+
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(default_allowed_file_url_networks(), [])
+
+    def test_parses_comma_separated_cidr_list(self):
+        import os
+
+        from pipecat.utils.security.ssrf import default_allowed_file_url_networks
+
+        env = {"PIPECAT_ALLOWED_FILE_URL_NETWORKS": "10.0.0.0/8, 192.168.0.0/16 ,"}
+        with patch.dict(os.environ, env):
+            self.assertEqual(default_allowed_file_url_networks(), ["10.0.0.0/8", "192.168.0.0/16"])
+
+
+if __name__ == "__main__":
+    unittest.main()
