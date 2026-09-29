@@ -115,28 +115,38 @@ REPORT_TOOL_NAME = "report_result"
 #: Name of the built-in tool the backend's model calls instead of replying when there is nothing to tell the user.
 NO_REPORT_TOOL_NAME = "nothing_to_report"
 
-#: Appended to the backend LLM's system instruction: where its input comes
-#: from and its output goes, whatever the app's prompt says the backend does.
-BACKEND_OUTPUT_INSTRUCTIONS = (
+#: Appended to the backend model's system instruction: who it is and what it is sent.
+BACKEND_ROLE_INSTRUCTIONS = (
     "You are the backend of a voice assistant. The assistant talks with the user and sends "
     "you requests: the conversation it is having, or a request it worded for you. Do the "
     "parts that need your tools or careful reasoning; the assistant handles the rest of the "
-    "conversation itself, such as small talk, jokes and stories, so leave those to it.\n\n"
+    "conversation itself, such as small talk, jokes and stories, so leave those to it."
+)
+
+#: Appended after the role: which of the model's output the user hears. An app
+#: that decides that by a rule of its own passes its own text as
+#: ``BackendLLMWorker(output_instructions=...)``.
+BACKEND_OUTPUT_INSTRUCTIONS = (
     "WHAT THE USER HEARS: The assistant tells the user what you give it to tell, in its own "
     "words, and nothing else you write. How your turn ends decides which it is.\n"
     "- A turn with no tool calls: what you wrote is told to the user. End a turn this way "
     "to give a result, or to ask a question you cannot proceed without.\n"
     "- A turn with tool calls: what you wrote is a note on the work and is not told to the "
-    f"user. To tell the user something in such a turn, call {REPORT_TOOL_NAME} with it "
-    "beside the other calls, and do not repeat it later. That is how you give one request's "
-    "result while you go on with other work.\n"
+    f"user. To tell the user something before you are finished, call {REPORT_TOOL_NAME} "
+    "with it, on its own or beside other calls: you go on with the work afterwards. That is "
+    "how you give news they should have now, or one request's result while other work "
+    "continues. Do not repeat later what you reported.\n"
     f"- Nothing to tell the user: call {NO_REPORT_TOOL_NAME} instead of writing. Do this "
     "when a request needs nothing from you, and when a request only stops or changes your "
     "work. Never write that you have stopped, that there is nothing to do, or what you will "
     "not do: the assistant has already told the user, and a turn with no tool calls would "
     "tell them again.\n"
     "Write what is told to the user as plain text the assistant can speak from: no "
-    "Markdown, no raw JSON.\n\n"
+    "Markdown, no raw JSON."
+)
+
+#: Appended last: how the model takes requests that arrive while it works.
+BACKEND_REQUEST_INSTRUCTIONS = (
     "REQUESTS: A request may arrive while you are working on an earlier one. It may add "
     "work, change it, or stop some or all of it: follow the latest, cancel the tools whose "
     "results are no longer wanted, and do not repeat work already done. With several "
@@ -440,6 +450,7 @@ class BackendLLMWorker(LLMContextWorker):
         context: LLMContext | None = None,
         name: str | None = None,
         transform_output: BackendOutputTransform | None = None,
+        output_instructions: str | None = None,
         user_params: LLMUserAggregatorParams | None = None,
         assistant_params: LLMAssistantAggregatorParams | None = None,
     ):
@@ -457,6 +468,10 @@ class BackendLLMWorker(LLMContextWorker):
                 whether the user may hear it, or to return ``None`` and send
                 nothing. Outputs the app sends itself are not passed through
                 it unless the call asks.
+            output_instructions: What the model is told about which of its
+                output the user hears, in place of
+                :data:`BACKEND_OUTPUT_INSTRUCTIONS`. For an app whose
+                ``transform_output`` decides that by a rule of its own.
             user_params: Optional parameters for the user aggregator. Defaults
                 to external turn strategies: the backend has no audio, so the
                 default VAD and turn-analysis strategies (and the model the
@@ -480,17 +495,26 @@ class BackendLLMWorker(LLMContextWorker):
         )
         self._attached: _AttachedFrontend | None = None
         self._transform_output = transform_output
-        self.llm.append_system_instruction(BACKEND_OUTPUT_INSTRUCTIONS)
+        self.llm.append_system_instruction(
+            "\n\n".join(
+                [
+                    BACKEND_ROLE_INSTRUCTIONS,
+                    output_instructions or BACKEND_OUTPUT_INSTRUCTIONS,
+                    BACKEND_REQUEST_INSTRUCTIONS,
+                ]
+            )
+        )
         # A built-in tool: sent on every inference beside the context's own
         # tools and never part of the context's tool set.
         self.llm.register_function(REPORT_TOOL_NAME, self._report_result)
         self.llm.get_llm_adapter().builtin_tools[REPORT_TOOL_NAME] = FunctionSchema(
             name=REPORT_TOOL_NAME,
             description=(
-                "Tell the user something now, while you go on working: the result of a "
-                "request, or a question. Call it in the same message as the tool calls that "
-                "go on with other work. A message with no tool calls is told to the user "
-                "as it is, so this is not needed there. Never repeat what you reported."
+                "Tell the user something now, before you are finished: news they should "
+                "have, or the result of one request while other work continues. Call it on "
+                "its own or beside other calls; you go on with the work afterwards. A turn "
+                "with no tool calls is told to the user as it is, so this is not needed "
+                "there. Never repeat what you reported."
             ),
             properties={"text": {"type": "string", "description": "What to tell the user."}},
             required=["text"],

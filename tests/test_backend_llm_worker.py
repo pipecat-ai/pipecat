@@ -43,6 +43,9 @@ from pipecat.services.settings import LLMSettings
 from pipecat.workers.base_worker import BaseWorker
 from pipecat.workers.llm import BackendLLMWorker
 from pipecat.workers.llm.backend_llm_worker import (
+    BACKEND_OUTPUT_INSTRUCTIONS,
+    BACKEND_REQUEST_INSTRUCTIONS,
+    BACKEND_ROLE_INSTRUCTIONS,
     NO_REPORT_TOOL_NAME,
     REPORT_TOOL_NAME,
     BackendError,
@@ -728,6 +731,23 @@ async def test_the_no_report_tool_silences_a_turn_and_runs_nothing():
     assert isinstance(events[-1], BackendIdle)
     assert len(llm.contexts_seen) == 3
     assert NO_REPORT_TOOL_NAME in llm.get_llm_adapter().builtin_tools
+
+
+def test_an_app_can_replace_what_the_model_is_told_about_speech():
+    default = _ScriptedLLM([])
+    BackendLLMWorker(llm=default)
+    custom = _ScriptedLLM([])
+    BackendLLMWorker(llm=custom, output_instructions="Mark what the user should hear.")
+
+    told_by_default = default._settings.system_instruction or ""
+    told = custom._settings.system_instruction or ""
+
+    assert BACKEND_OUTPUT_INSTRUCTIONS in told_by_default
+    assert "Mark what the user should hear." in told
+    assert BACKEND_OUTPUT_INSTRUCTIONS not in told
+    # Who the backend is and how it takes requests are told either way.
+    for part in (BACKEND_ROLE_INSTRUCTIONS, BACKEND_REQUEST_INSTRUCTIONS):
+        assert part in told and part in told_by_default
 
 
 @pytest.mark.asyncio
