@@ -68,6 +68,26 @@ _MoqError = cast("type[BaseException]", moq.Error)
 # mid-track without finishing, or the handle was already closed.
 _NORMAL_CLOSE_CODES = frozenset({0, 24, 25})  # Cancel, Dropped, Closed
 
+# Protocol close kinds (``Error.Protocol`` details) that mean the peer or
+# its session ended cleanly.
+_NORMAL_CLOSE_KINDS = frozenset(
+    {
+        moq.ProtocolKind.CANCEL,
+        moq.ProtocolKind.SESSION_CLOSED,
+        moq.ProtocolKind.GOING_AWAY,
+    }
+)
+
+# Peer-gone additionally covers the peer's broadcast no longer being
+# routable: a relay still announcing a path whose route died refuses the
+# subscription with one of these.
+_PEER_GONE_KINDS = _NORMAL_CLOSE_KINDS | frozenset(
+    {
+        moq.ProtocolKind.NOT_FOUND,
+        moq.ProtocolKind.UNROUTABLE,
+    }
+)
+
 # ``Dropped`` is the one normal-close reason with no typed binding: ``Cancel``
 # and ``Closed`` arrive as ``Error.Cancelled``/``Error.Closed`` and are caught
 # by ``moq.is_shutdown``, while a dropped producer only ever shows up as this
@@ -78,30 +98,43 @@ _NORMAL_CLOSE_REASONS = frozenset({"dropped"})
 _REMOTE_CODE_RE = re.compile(r"remote error: code=(\d+)")
 
 
+def _error_message(exc: BaseException) -> str:
+    """Message text of a moq subsystem error.
+
+    UniFFI renders each error field with ``repr``, so a single string
+    field arrives quoted (``Error.Audio("moq: dropped")`` prints as
+    ``'moq: dropped'``); strip the quotes before matching.
+    """
+    msg = str(exc)
+    if len(msg) >= 2 and msg[0] == msg[-1] == "'":
+        msg = msg[1:-1]
+    return msg
+
+
 def _is_normal_close(exc: BaseException) -> bool:
     """Return True for the MoQ errors we see when the peer hangs up.
 
     A hangup surfaces at three levels, and all are the expected end of a
-    session rather than a failure. The session itself reports a normal
-    WebTransport close (code=0) as an ``Error.Protocol`` whose message
-    contains ``"webtransport error: closed"``. A track subscription still
-    in flight is reset by the peer; ``Error::from_transport`` decodes only
-    code 0 into a typed ``Cancelled``, so every other received code stays
-    ``Remote(n)`` and reads as ``"remote error: code=n"``. Finally the
-    error can be raised locally, carrying the moq-net reason as its
-    message tail — a browser that disconnects mid-call drops its
-    microphone producer without finishing, and the bot's audio subscriber
-    sees ``Error.Audio("moq: dropped")``.
+    session rather than a failure. ``Cancelled`` and ``Closed`` are typed
+    bindings caught by ``moq.is_shutdown``. A session or stream close the
+    peer sent arrives as an ``Error.Protocol`` whose details carry a
+    normal-close kind. Finally the error can be raised locally by a
+    subsystem, carrying the moq reason in its message — a browser that
+    disconnects mid-call drops its microphone producer without finishing,
+    and the bot's audio subscriber sees ``Error.Audio("moq: dropped")``;
+    a reset still in flight reads as ``"remote error: code=n"``.
 
     Callers log these at debug and skip the ``on_error`` handler instead
     of reporting ERROR + traceback.
     """
-    if not isinstance(exc, moq.Error):
+    if not isinstance(exc, _MoqError):
         return False
-    # Cancelled and Closed have typed bindings; Dropped does not.
     if moq.is_shutdown(exc):
         return True
-    msg = str(exc)
+    details = moq.protocol_error(exc)
+    if isinstance(details, moq.ProtocolError):
+        return details.kind in _NORMAL_CLOSE_KINDS
+    msg = _error_message(exc)
     if "webtransport error: closed" in msg or "session error" in msg and "closed" in msg:
         return True
     if msg.rsplit(":", 1)[-1].strip() in _NORMAL_CLOSE_REASONS:
@@ -114,34 +147,30 @@ def _is_peer_gone(exc: BaseException) -> bool:
     """Return True when a peer subscription ended because the remote side left.
 
     When the peer closes its session (or the relay tears down its
-    broadcast), moq-rs surfaces the close code the remote sent as
-    ``"remote error: code=N"`` on whatever subscription we were
-    consuming. For the per-peer catalog/audio/transcript subscriptions
-    that's the normal end of every call — treat it like a disconnect,
-    not a transport failure.
+    broadcast), the subscription being consumed fails with a protocol
+    close whose kind says the session ended or the broadcast is no
+    longer routed, or with a subsystem error carrying the remote reset
+    (``"remote error: code=N"``). For the per-peer
+    catalog/audio/transcript subscriptions that's the normal end of
+    every call — treat it like a disconnect, not a transport failure.
     """
-    if not isinstance(exc, moq.Error):
+    if not isinstance(exc, _MoqError):
         return False
-    return "remote error" in str(exc) or _is_normal_close(exc)
-
-
-# The relay accepts the QUIC connection before it checks the token, so a
-# refused token arrives as the session closing with moq-net's
-# ``Unauthorized`` code (``Error::to_code``, pinned by its
-# ``to_code_is_stable`` test), not as the HTTP 401 or 403 that
-# ``moq.is_auth`` recognizes.
-_UNAUTHORIZED_CLOSE_CODE = 6
-_SESSION_CLOSE_CODE_RE = re.compile(r"closed: code=(\d+)")
+    details = moq.protocol_error(exc)
+    if isinstance(details, moq.ProtocolError):
+        return details.kind in _PEER_GONE_KINDS
+    return "remote error" in _error_message(exc) or _is_normal_close(exc)
 
 
 def _is_unauthorized(exc: BaseException) -> bool:
-    """Return True when the relay refused the token, at the dial or by closing the session."""
-    if moq.is_auth(exc):
-        return True
-    if not isinstance(exc, moq.Error):
-        return False
-    match = _SESSION_CLOSE_CODE_RE.search(str(exc))
-    return match is not None and int(match.group(1)) == _UNAUTHORIZED_CLOSE_CODE
+    """Return True when the relay refused the token, at the dial or by closing the session.
+
+    The relay accepts the QUIC connection before it checks the token, so
+    a refused token arrives either as HTTP 401/403 on the dial or as the
+    session closing with an ``Unauthorized`` protocol kind;
+    ``moq.is_auth`` recognizes both.
+    """
+    return moq.is_auth(exc)
 
 
 _moq_task_filter_installed = False
@@ -811,11 +840,7 @@ class MOQTransportClient:
             # jitter, published in the catalog, and sized into the browser
             # player's delay floor (5s user turn = 5s added playback delay,
             # compounding per turn).
-            gap = (
-                None
-                if self._publish_audio_clock is None
-                else now - self._publish_audio_clock
-            )
+            gap = None if self._publish_audio_clock is None else now - self._publish_audio_clock
             if gap is None or gap > self._params.audio_out_frame_ms / 1000.0:
                 self._audio_out.reset_epoch()
                 logger.debug(

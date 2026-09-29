@@ -233,7 +233,18 @@ class TestIsPeerGone(unittest.TestCase):
 
     def test_normal_close_is_peer_gone(self):
         """Session-level normal close counts as the peer leaving too."""
-        self.assertTrue(_is_peer_gone(moq.Error.Protocol("webtransport error: closed")))
+        self.assertTrue(
+            _is_peer_gone(
+                moq.Error.Protocol(
+                    moq.ProtocolError(
+                        scope=moq.ErrorScope.SESSION,
+                        code=0,
+                        kind=moq.ProtocolKind.CANCEL,
+                        message="webtransport error: closed",
+                    )
+                )
+            )
+        )
 
     def test_dropped_producer_is_peer_gone(self):
         """A peer that vanishes mid-call drops its producer without finishing.
@@ -248,8 +259,8 @@ class TestIsPeerGone(unittest.TestCase):
 
     def test_shutdown_variants_are_peer_gone(self):
         """``Cancelled``/``Closed`` are typed, so they need no message match."""
-        self.assertTrue(_is_peer_gone(moq.Error.Cancelled("cancelled")))
-        self.assertTrue(_is_peer_gone(moq.Error.Closed("closed")))
+        self.assertTrue(_is_peer_gone(moq.Error.Cancelled()))
+        self.assertTrue(_is_peer_gone(moq.Error.Closed()))
 
     def test_other_moq_errors_propagate(self):
         self.assertFalse(_is_peer_gone(moq.Error.Mux("json: cancelled")))
@@ -964,7 +975,12 @@ class _FakeSession:
 
 
 # What moq-ffi raises from ``Session.closed()`` when the relay refused the token.
-_UNAUTHORIZED_CLOSE = "transport: webtransport error: closed: code=6 reason=unauthorized"
+_UNAUTHORIZED_CLOSE = moq.ProtocolError(
+    scope=moq.ErrorScope.SESSION,
+    code=2,
+    kind=moq.ProtocolKind.UNAUTHORIZED,
+    message="unauthorized",
+)
 
 
 class _FakeClient:
@@ -1187,7 +1203,7 @@ class TestClientReconnect(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.dials, [self.URL] * 3)
 
     async def test_a_refused_first_dial_is_not_retried(self):
-        self.script[:] = [moq.Error.Forbidden("403 denied")]
+        self.script[:] = [moq.Error.Forbidden()]
         client = self._make_client()
         self._peer_stays(client)
         await asyncio.wait_for(client._run(), timeout=2)
@@ -1208,7 +1224,7 @@ class TestClientReconnect(unittest.IsolatedAsyncioTestCase):
         refuses the redial. The peer it had is reported gone, then the
         refusal."""
         first = _FakeSession()
-        self.script[:] = [first, moq.Error.Unauthorized("401 expired")]
+        self.script[:] = [first, moq.Error.Unauthorized()]
         client = self._make_client()
         self._peer_stays(client)
 
@@ -1358,7 +1374,7 @@ class TestClientReconnect(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([call.args[0]["seq"] for call in new_stream.append.call_args_list], [0, 1])
         self.assertEqual(new_stream.append.call_args_list[1].args[0]["type"], "b")
         self.assertIsNot(client._audio_out, old_audio)
-        client._publish_broadcast.publish_audio.assert_called_once()
+        client._publish_broadcast.encode_audio.assert_called_once()
 
     async def test_peer_tracks_ending_without_goodbye_redial_and_the_peer_comes_back(self):
         """A relay between the peers failing ends the peer's tracks the way a
@@ -1779,22 +1795,29 @@ class TestSubscribeRefusedAsPeerGone(unittest.IsolatedAsyncioTestCase):
     subscription itself. That is the peer's tracks ending, which the session
     loop answers with a retry and then a redial, not a transport failure."""
 
-    DROPPED = moq.Error.Protocol("dropped")
+    DROPPED = moq.Error.Protocol(
+        moq.ProtocolError(
+            scope=moq.ErrorScope.STREAM,
+            code=13,
+            kind=moq.ProtocolKind.NOT_FOUND,
+            message="dropped",
+        )
+    )
 
     async def test_a_refused_catalog_subscribe_ends_the_audio_pump(self):
         client, _stream = _client_with_fake_moq()
         peer_broadcast = MagicMock()
         peer_broadcast.subscribe_catalog = AsyncMock(side_effect=self.DROPPED)
         await client._forward_peer_audio(peer_broadcast)
-        peer_broadcast.subscribe_audio.assert_not_called()
+        peer_broadcast.decode_audio.assert_not_called()
 
     async def test_a_refused_audio_subscribe_ends_the_audio_pump(self):
         client, _stream = _client_with_fake_moq()
         peer_broadcast = MagicMock()
         peer_broadcast.subscribe_catalog = AsyncMock(return_value=_FakeCatalogs([_opus_catalog()]))
-        peer_broadcast.subscribe_audio = AsyncMock(side_effect=self.DROPPED)
+        peer_broadcast.decode_audio = AsyncMock(side_effect=self.DROPPED)
         await client._forward_peer_audio(peer_broadcast)
-        peer_broadcast.subscribe_audio.assert_awaited_once()
+        peer_broadcast.decode_audio.assert_awaited_once()
 
     async def test_a_refused_transcript_subscribe_ends_the_transcript_pump(self):
         client, _stream = _client_with_fake_moq()
@@ -1836,23 +1859,26 @@ class TestIsUnauthorized(unittest.TestCase):
     the session closing with moq-net's ``Unauthorized`` code."""
 
     def test_http_refusals_count(self):
-        self.assertTrue(moq_transport._is_unauthorized(moq.Error.Unauthorized("401")))
-        self.assertTrue(moq_transport._is_unauthorized(moq.Error.Forbidden("403")))
+        self.assertTrue(moq_transport._is_unauthorized(moq.Error.Unauthorized()))
+        self.assertTrue(moq_transport._is_unauthorized(moq.Error.Forbidden()))
 
     def test_unauthorized_session_close_counts(self):
         self.assertTrue(moq_transport._is_unauthorized(moq.Error.Protocol(_UNAUTHORIZED_CLOSE)))
 
     def test_other_closes_do_not(self):
-        for message in (
-            "transport: webtransport error: closed: code=4 reason=transport",
-            "transport: webtransport error: closed: code=0 reason=remote err",
-            "webtransport error: closed",
+        for kind, code, message in (
+            (moq.ProtocolKind.PROTOCOL_VIOLATION, 3, "transport"),
+            (moq.ProtocolKind.CANCEL, 0, "remote err"),
+            (moq.ProtocolKind.SESSION_CLOSED, 9, "closed"),
         ):
-            with self.subTest(message=message):
-                self.assertFalse(moq_transport._is_unauthorized(moq.Error.Protocol(message)))
+            with self.subTest(kind=kind):
+                details = moq.ProtocolError(
+                    scope=moq.ErrorScope.SESSION, code=code, kind=kind, message=message
+                )
+                self.assertFalse(moq_transport._is_unauthorized(moq.Error.Protocol(details)))
 
     def test_non_moq_errors_do_not(self):
-        self.assertFalse(moq_transport._is_unauthorized(ConnectionError(_UNAUTHORIZED_CLOSE)))
+        self.assertFalse(moq_transport._is_unauthorized(ConnectionError("unauthorized")))
 
 
 # ----------------------------------------------------------------------
@@ -1885,7 +1911,7 @@ class TestErrorsReachThePipeline(unittest.IsolatedAsyncioTestCase):
             seen.append((message, exception))
             fired.set()
 
-        exc = moq.Error.Unauthorized("401")
+        exc = moq.Error.Unauthorized()
         await transport._on_error("401", exc, ErrorCategory.AUTHENTICATION, False)
 
         # Event handlers run in a background task.
