@@ -664,12 +664,12 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
             message = async_tool_messages.build_intermediate_result_message(
                 frame.tool_call_id, result
             )
-            await self._send_progress_message(cast(str, message.get("content", "")))
+            await self._send_message_item(cast(str, message.get("content", "")))
         elif frame.tool_call_id in self._open_function_calls:
             await self._send_tool_result(frame.tool_call_id, result)
         else:
             message = async_tool_messages.build_final_result_message(frame.tool_call_id, result)
-            await self._send_progress_message(cast(str, message.get("content", "")))
+            await self._send_message_item(cast(str, message.get("content", "")))
 
         self._completed_tool_calls.add(frame.tool_call_id)
         self._results_awaiting_response = True
@@ -681,7 +681,7 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
         await self._send_tool_result(frame.tool_call_id, "CANCELLED")
         self._completed_tool_calls.add(frame.tool_call_id)
 
-    async def _send_progress_message(self, text: str, role: str = "user"):
+    async def _send_message_item(self, text: str, role: str = "user"):
         """Put text into the conversation for the model to take in, without answering it."""
         item = events.ConversationItem(
             type="message",
@@ -699,11 +699,10 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
         else:
             self._context = context
             await self._process_completed_function_calls(send_new_results=True)
-            # A context frame from downstream is the aggregator recording a
-            # response that already happened. One from upstream asks for
-            # inference — with the tool results, sibling calls, bot speech and
-            # user speech it accounts for — so it is what runs the model over
-            # whatever was delivered since the last response.
+            # A context frame travelling upstream comes from the assistant
+            # aggregator, which is asking the model to respond to what was
+            # delivered since its last response. One travelling downstream
+            # asks for nothing: the API answers the user's turns itself.
             if direction == FrameDirection.UPSTREAM and self._results_awaiting_response:
                 await self._create_response()
 
@@ -724,9 +723,7 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
             if not text:
                 continue
             role = message.get("role") if isinstance(message, dict) else None
-            await self._send_progress_message(
-                text, role="assistant" if role == "assistant" else "user"
-            )
+            await self._send_message_item(text, role="assistant" if role == "assistant" else "user")
         self._results_awaiting_response = True
 
     #
