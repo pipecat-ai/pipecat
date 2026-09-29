@@ -165,12 +165,26 @@ class FileResolver:
                             f"Refusing to follow redirect fetching file from URL: {url!r}"
                         )
                     response.raise_for_status()
-                    data = await response.content.read(self._max_fetch_bytes + 1)
-                    if len(data) > self._max_fetch_bytes:
+                    if (
+                        response.content_length is not None
+                        and response.content_length > self._max_fetch_bytes
+                    ):
                         raise FileResolverError(
                             f"File at URL exceeds {self._max_fetch_bytes} byte limit"
                         )
-                    return data
+                    # StreamReader.read(n) returns whatever is buffered (up to
+                    # n), not the whole body, so accumulate chunks and enforce
+                    # the size cap as they arrive.
+                    chunks: list[bytes] = []
+                    received = 0
+                    async for chunk in response.content.iter_chunked(64 * 1024):
+                        received += len(chunk)
+                        if received > self._max_fetch_bytes:
+                            raise FileResolverError(
+                                f"File at URL exceeds {self._max_fetch_bytes} byte limit"
+                            )
+                        chunks.append(chunk)
+                    return b"".join(chunks)
         except TimeoutError as e:
             raise FileResolverError(f"Timed out fetching file from URL: {url!r}") from e
         except aiohttp.ClientError as e:
