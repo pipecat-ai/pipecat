@@ -2301,6 +2301,42 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
         )
         assert len(context.messages) == 1
 
+    async def test_user_file_frame_lands_after_in_progress_assistant_text(self):
+        """A file arriving mid-reply commits the partial assistant text first.
+
+        The order matters beyond chronology: remove_invalid_file_message()
+        only considers messages after the last assistant message, so a file
+        written before a later-committed assistant message could never be
+        cleaned up if the provider rejects it.
+        """
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+
+        await run_test(
+            aggregator,
+            frames_to_send=[
+                LLMFullResponseStartFrame(),
+                LLMTextFrame("I was saying..."),
+                # The file frame is a SystemFrame and would jump the priority
+                # queue; the sleep lets the text land first, as it would have
+                # in a real mid-reply arrival.
+                SleepFrame(),
+                UserFileRawFrame(
+                    file="data:application/pdf;base64,abc123",
+                    type="bytes",
+                    filename="doc.pdf",
+                    format="application/pdf",
+                    append_to_context=True,
+                    run_llm=False,
+                ),
+            ],
+        )
+
+        roles = [m["role"] for m in context.messages]
+        assert roles == ["assistant", "user"]
+        assert context.messages[0]["content"] == "I was saying..."
+        assert context.messages[1]["content"][0]["type"] == "file_base64"
+
     async def test_user_image_frame_run_llm_false_does_not_run(self):
         context = LLMContext()
         aggregator = LLMAssistantAggregator(context)
