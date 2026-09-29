@@ -13,6 +13,7 @@ from pipecat.runner.sip import (
     SIPClientConfig,
     cleanup,
     configure,
+    parse_jitter_buffer,
     resolve_media_nat_params,
 )
 from pipecat.transports.daily.utils import DailySIPClientObject
@@ -185,6 +186,27 @@ PROVISIONED_CONFIG = SIPClientConfig(
 )
 
 
+class TestParseJitterBuffer(unittest.TestCase):
+    def test_unset_or_empty_keeps_the_stack_default(self):
+        self.assertEqual(parse_jitter_buffer(None), (None, None))
+        self.assertEqual(parse_jitter_buffer("  "), (None, None))
+
+    def test_off(self):
+        self.assertEqual(parse_jitter_buffer("off"), ("off", None))
+
+    def test_mode_with_range(self):
+        self.assertEqual(parse_jitter_buffer("fixed:40-60"), ("fixed", (40, 60)))
+        self.assertEqual(parse_jitter_buffer("Adaptive: 20 - 100"), ("adaptive", (20, 100)))
+
+    def test_bare_range_means_fixed(self):
+        self.assertEqual(parse_jitter_buffer("40-60"), ("fixed", (40, 60)))
+
+    def test_rejects_malformed_values(self):
+        for spec in ("sometimes:20-40", "fixed", "fixed:20", "fixed:60-40", "fixed:0-40", "20"):
+            with self.subTest(spec=spec), self.assertRaises(ValueError):
+                parse_jitter_buffer(spec)
+
+
 class TestRunSip(unittest.IsolatedAsyncioTestCase):
     """_run_sip: env parsing and the cleanup-in-finally contract."""
 
@@ -217,11 +239,29 @@ class TestRunSip(unittest.IsolatedAsyncioTestCase):
         bot.bot.assert_not_awaited()
         cleanup_mock.assert_not_awaited()  # failed before provisioning's try/finally
 
+    async def test_malformed_jitter_buffer_exits(self):
+        bot = MagicMock()
+        bot.bot = AsyncMock()
+        env_patch, session_patch, configure_patch, cleanup_patch, bot_patch = self._patches(
+            {"SIP_JITTER_BUFFER": "fixed:60-40"}, bot
+        )
+        with env_patch, session_patch, configure_patch, cleanup_patch as cleanup_mock, bot_patch:
+            with self.assertRaises(SystemExit):
+                await _run_sip(argparse.Namespace(runner_body=None))
+
+        bot.bot.assert_not_awaited()
+        cleanup_mock.assert_not_awaited()  # failed before provisioning's try/finally
+
     async def test_cleanup_runs_when_bot_raises(self):
         bot = MagicMock()
         bot.bot = AsyncMock(side_effect=RuntimeError("bot boom"))
         env_patch, session_patch, configure_patch, cleanup_patch, bot_patch = self._patches(
-            {"SIP_REG_INTERVAL": "900", "SIP_RTP_TIMEOUT": "45", "SIP_NET_INTERFACE": "127.0.0.1"},
+            {
+                "SIP_REG_INTERVAL": "900",
+                "SIP_RTP_TIMEOUT": "45",
+                "SIP_NET_INTERFACE": "127.0.0.1",
+                "SIP_JITTER_BUFFER": "adaptive:20-100",
+            },
             bot,
         )
         with env_patch, session_patch, configure_patch, cleanup_patch as cleanup_mock, bot_patch:
@@ -233,3 +273,5 @@ class TestRunSip(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(runner_args.reg_interval, 900)
         self.assertEqual(runner_args.rtp_timeout, 45)
         self.assertEqual(runner_args.net_interface, "127.0.0.1")
+        self.assertEqual(runner_args.jitter_buffer_mode, "adaptive")
+        self.assertEqual(runner_args.jitter_buffer_ms, (20, 100))

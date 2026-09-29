@@ -156,6 +156,73 @@ async def test_debug_logging_settings_reach_config(env):
     assert logging.getLogger("baresip").level == logging.DEBUG
 
 
+@pytest.mark.asyncio
+async def test_jitter_buffer_renders_into_config(env):
+    connection = make_connection(jitter_buffer_mode="adaptive", jitter_buffer_ms=(20, 100))
+
+    await connection.connect()
+
+    (config,) = env.runtime.start.await_args.args
+    assert config.extra_config_text == (
+        "audio_jitter_buffer_type adaptive\naudio_jitter_buffer_ms 20-100\n"
+    )
+
+
+@pytest.mark.asyncio
+async def test_jitter_buffer_off_renders_the_type_alone(env):
+    connection = make_connection(jitter_buffer_mode="off")
+
+    await connection.connect()
+
+    (config,) = env.runtime.start.await_args.args
+    assert config.extra_config_text == "audio_jitter_buffer_type off\n"
+
+
+@pytest.mark.asyncio
+async def test_jitter_buffer_unset_renders_nothing(env):
+    # Nothing rendered means the stack's compiled default applies, unchanged.
+    connection = make_connection()
+
+    await connection.connect()
+
+    (config,) = env.runtime.start.await_args.args
+    assert config.extra_config_text == ""
+
+
+def test_jitter_buffer_range_alone_means_fixed():
+    connection = make_connection(jitter_buffer_ms=(40, 60))
+
+    assert connection._settings.jitter_buffer_mode == "fixed"
+    assert connection._settings.jitter_buffer_ms == (40, 60)
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"jitter_buffer_mode": "fixed"},  # a range is required
+        {"jitter_buffer_mode": "off", "jitter_buffer_ms": (20, 40)},
+        {"jitter_buffer_mode": "sometimes", "jitter_buffer_ms": (20, 40)},
+        {"jitter_buffer_ms": (60, 40)},  # min must not exceed max
+        {"jitter_buffer_ms": (0, 40)},
+        {"jitter_buffer_ms": (20,)},
+    ],
+)
+def test_jitter_buffer_rejects_inconsistent_arguments(kwargs):
+    with pytest.raises(ValueError):
+        make_connection(**kwargs)
+
+
+@pytest.mark.asyncio
+async def test_conflicting_jitter_buffers_raise(env):
+    # The buffer belongs to the process-wide stack, like net_interface.
+    first = make_connection(jitter_buffer_ms=(40, 60))
+    second = make_connection(user="1002", jitter_buffer_ms=(20, 40))
+
+    await first.connect()
+    with pytest.raises(ValueError):
+        await second.connect()
+
+
 def test_extra_params_render_into_the_account_aor():
     connection = make_connection(
         extra_params=("medianat=ice", "stunserver=stun:stun.example.com:3478")
