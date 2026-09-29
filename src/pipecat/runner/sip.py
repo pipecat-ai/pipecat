@@ -18,6 +18,8 @@ Functions:
 - cleanup(): Delete a SIP client that configure() created.
 - resolve_media_nat_params(): Resolve the baresip account ``extra_params``,
   enabling ``medianat=stun`` by default for NAT traversal.
+- parse_jitter_buffer(): Parse ``SIP_JITTER_BUFFER`` into the receive
+  jitter-buffer arguments.
 
 Environment variables:
 
@@ -34,6 +36,9 @@ Environment variables:
 - SIP_NET_INTERFACE (optional) - Restrict the stack to one local interface, by
   name or address: "127.0.0.1" for a registrar on loopback, or one address of
   a multi-homed host. Unset lets the OS pick the source address.
+- SIP_JITTER_BUFFER (optional) - The receive jitter buffer: "off",
+  "fixed:MIN-MAX" or "adaptive:MIN-MAX" in milliseconds (a bare "MIN-MAX"
+  means fixed). Unset keeps the stack's compiled default.
 
 Example::
 
@@ -197,6 +202,40 @@ async def cleanup(
         # The client expires on its own; a failed delete must not turn a
         # clean shutdown into an error.
         logger.warning(f"Failed to delete Daily SIP client {config.user}: {e}")
+
+
+def parse_jitter_buffer(spec: str | None) -> tuple[str | None, tuple[int, int] | None]:
+    """Parse ``SIP_JITTER_BUFFER`` into ``SIPConnection``'s jitter-buffer arguments.
+
+    Accepted forms: ``off``; ``fixed:MIN-MAX`` or ``adaptive:MIN-MAX`` with
+    the range in milliseconds; a bare ``MIN-MAX``, which means fixed. Unset
+    or empty keeps the stack's compiled default.
+
+    Args:
+        spec: The raw ``SIP_JITTER_BUFFER`` value, or None.
+
+    Returns:
+        ``(mode, (min, max))``, either or both None when not specified.
+
+    Raises:
+        ValueError: The value is not one of the accepted forms.
+    """
+    if spec is None or not spec.strip():
+        return None, None
+    text = spec.strip().lower()
+    if text == "off":
+        return "off", None
+    mode, sep, span = text.partition(":")
+    if not sep:
+        mode, span = "fixed", text
+    if mode not in ("fixed", "adaptive"):
+        raise ValueError(f"expected off, fixed:MIN-MAX or adaptive:MIN-MAX, got {spec!r}")
+    lo, sep, hi = (part.strip() for part in span.partition("-"))
+    if not (sep and lo.isdigit() and hi.isdigit()):
+        raise ValueError(f"expected a MIN-MAX range in milliseconds, got {spec!r}")
+    if not 0 < int(lo) <= int(hi):
+        raise ValueError(f"MIN must be greater than 0 and no more than MAX, got {spec!r}")
+    return mode, (int(lo), int(hi))
 
 
 def resolve_media_nat_params(explicit: str | None) -> tuple[str, ...] | None:
