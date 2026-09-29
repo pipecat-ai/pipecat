@@ -806,6 +806,22 @@ class MOQTransportClient:
 
         now = time.monotonic()
         if self._publish_audio_clock is None or self._publish_audio_clock < now:
+            # Writes resumed after idle (turn gap, interruption re-anchor).
+            # Re-anchor encoder timeline: an un-anchored gap is measured as
+            # jitter, published in the catalog, and sized into the browser
+            # player's delay floor (5s user turn = 5s added playback delay,
+            # compounding per turn).
+            gap = (
+                None
+                if self._publish_audio_clock is None
+                else now - self._publish_audio_clock
+            )
+            if gap is None or gap > self._params.audio_out_frame_ms / 1000.0:
+                self._audio_out.reset_epoch()
+                logger.debug(
+                    f"MOQ: audio epoch re-anchored after "
+                    f"{'first write' if gap is None else f'{gap:.3f}s gap'}"
+                )
             self._publish_audio_clock = now
 
         # Sleep so we're never more than `audio_out_max_buffer_ms` ahead
