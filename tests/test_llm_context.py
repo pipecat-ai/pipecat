@@ -6,7 +6,11 @@
 
 """Unit tests for LLMContext core functionality."""
 
+import base64
+import io
 import unittest
+
+from PIL import Image
 
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter
 from pipecat.processors.aggregators.llm_context import (
@@ -340,6 +344,38 @@ class TestGetMessagesTruncateLargeValues(unittest.TestCase):
         _ = context.get_messages(truncate_large_values=True)
 
         self.assertEqual(specific_msg.message["signature"], long_sig)
+
+
+class TestCreateImageMessage(unittest.IsolatedAsyncioTestCase):
+    """Tests for LLMContext.create_image_message with raw image formats."""
+
+    async def _encode(self, format: str, pixel: bytes):
+        message = await LLMContext.create_image_message(
+            format=format, size=(8, 8), image=pixel * 64, text="look"
+        )
+        url = message["content"][1]["image_url"]["url"]
+        self.assertTrue(url.startswith("data:image/jpeg;base64,"))
+        data = base64.b64decode(url.split(",", 1)[1])
+        return Image.open(io.BytesIO(data)).convert("RGB").getpixel((4, 4))
+
+    async def test_rgb(self):
+        r, g, b = await self._encode("RGB", bytes([255, 0, 0]))
+        self.assertGreater(r, 200)
+        self.assertLess(g, 60)
+        self.assertLess(b, 60)
+
+    async def test_rgba(self):
+        r, g, b = await self._encode("RGBA", bytes([255, 0, 0, 255]))
+        self.assertGreater(r, 200)
+        self.assertLess(g, 60)
+        self.assertLess(b, 60)
+
+    async def test_bgra(self):
+        # Blue-green-red-alpha byte order: this pixel is pure red.
+        r, g, b = await self._encode("BGRA", bytes([0, 0, 255, 255]))
+        self.assertGreater(r, 200)
+        self.assertLess(g, 60)
+        self.assertLess(b, 60)
 
 
 if __name__ == "__main__":

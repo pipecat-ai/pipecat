@@ -159,9 +159,16 @@ class LLMContext:
             if image_already_encoded:
                 bytes = image
             else:
-                # Encode to JPEG
+                # Encode to JPEG. JPEG has no alpha channel and Pillow has no
+                # "BGRA" mode, so decode BGRA as RGBA and drop the alpha.
+                if format == "BGRA":
+                    pil_image = Image.frombytes("RGBA", size, image, "raw", "BGRA")
+                else:
+                    pil_image = Image.frombytes(format, size, image)
+                if pil_image.mode in ("RGBA", "LA", "P"):
+                    pil_image = pil_image.convert("RGB")
                 buffer = io.BytesIO()
-                Image.frombytes(format, size, image).save(buffer, format="JPEG")
+                pil_image.save(buffer, format="JPEG")
                 bytes = buffer.getvalue()
             encoded_image = base64.b64encode(bytes).decode("utf-8")
             return encoded_image
