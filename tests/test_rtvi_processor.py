@@ -354,6 +354,22 @@ class TestRTVISendFile(unittest.IsolatedAsyncioTestCase):
         )
         await processor.cleanup()
 
+    async def test_allowed_file_url_networks_defaults_from_env_var(self):
+        import os
+
+        with patch.dict(os.environ, {"PIPECAT_ALLOWED_FILE_URL_NETWORKS": "10.0.0.0/8"}):
+            processor = RTVIProcessor()
+        self.assertEqual(processor._allowed_file_url_networks, [ipaddress.ip_network("10.0.0.0/8")])
+        await processor.cleanup()
+
+    async def test_allowed_file_url_networks_argument_overrides_env_var(self):
+        import os
+
+        with patch.dict(os.environ, {"PIPECAT_ALLOWED_FILE_URL_NETWORKS": "10.0.0.0/8"}):
+            processor = RTVIProcessor(allowed_file_url_networks=[])
+        self.assertEqual(processor._allowed_file_url_networks, [])
+        await processor.cleanup()
+
     async def test_file_url_allowed_passes_allowed_networks_to_classify(self):
         raw = b"%PDF-1.4 fetched content"
         mock_response = MagicMock()
