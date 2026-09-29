@@ -170,3 +170,14 @@ async def test_mist_text_settings_are_included_in_http_payload():
     assert session.payload["pauseBetweenBrackets"] is True
     assert session.payload["phonemizeBetweenBrackets"] is True
     assert session.payload["noTextNormalization"] is True
+
+
+def test_inline_speed_builds_comma_separated_list_without_leading_empty_entry():
+    service = _service()
+    service._extra_msg_fields = {}
+    assert service.INLINE_SPEED("hello", 1.2) == "[hello]"
+    assert service._build_msg("[hello]", "ctx")["inlineSpeedAlpha"] == "1.2"
+
+    service.INLINE_SPEED("hello", 1.2)
+    service.INLINE_SPEED("world", 0.8)
+    assert service._build_msg("x", "ctx")["inlineSpeedAlpha"] == "1.2,0.8"
