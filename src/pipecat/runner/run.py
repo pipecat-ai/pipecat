@@ -1561,7 +1561,9 @@ async def _run_sip(args: argparse.Namespace):
     ``SIP_RTP_TIMEOUT`` (dead-call detection, seconds; 0 disables),
     ``SIP_INSTANCE_ID`` (a stable UUID for RFC 5626 ``+sip.instance``),
     ``SIP_NET_INTERFACE`` (restrict the stack to one local interface, e.g.
-    ``127.0.0.1`` for a registrar on loopback), ``SIP_NATIVE_LOG_LEVEL``
+    ``127.0.0.1`` for a registrar on loopback), ``SIP_JITTER_BUFFER`` (the
+    receive jitter buffer: ``off``, ``fixed:MIN-MAX`` or ``adaptive:MIN-MAX``
+    in milliseconds; unset keeps the stack default), ``SIP_NATIVE_LOG_LEVEL``
     (native stack log capture), and ``SIP_TRACE`` (verbatim SIP message
     trace) — and the bot function is invoked directly. Without a configured
     account, a temporary SIP client is provisioned on the Daily domain
@@ -1569,7 +1571,12 @@ async def _run_sip(args: argparse.Namespace):
     """
     logger.info("Running with SIP transport...")
 
-    from pipecat.runner.sip import cleanup, configure, resolve_media_nat_params
+    from pipecat.runner.sip import (
+        cleanup,
+        configure,
+        parse_jitter_buffer,
+        resolve_media_nat_params,
+    )
 
     async with aiohttp.ClientSession() as session:
         try:
@@ -1583,6 +1590,13 @@ async def _run_sip(args: argparse.Namespace):
             rtp_timeout = int(os.getenv("SIP_RTP_TIMEOUT", "0"))
         except ValueError:
             logger.error("SIP_REG_INTERVAL and SIP_RTP_TIMEOUT must be integers (seconds).")
+            raise SystemExit(1)
+        try:
+            jitter_buffer_mode, jitter_buffer_ms = parse_jitter_buffer(
+                os.getenv("SIP_JITTER_BUFFER")
+            )
+        except ValueError as e:
+            logger.error(f"SIP_JITTER_BUFFER: {e}")
             raise SystemExit(1)
 
         codecs = os.getenv("SIP_AUDIO_CODECS")
@@ -1605,6 +1619,8 @@ async def _run_sip(args: argparse.Namespace):
             native_log_level=os.getenv("SIP_NATIVE_LOG_LEVEL", "warning"),
             sip_trace=os.getenv("SIP_TRACE", "").lower() in ("1", "true", "yes"),
             net_interface=os.getenv("SIP_NET_INTERFACE") or None,
+            jitter_buffer_mode=jitter_buffer_mode,
+            jitter_buffer_ms=jitter_buffer_ms,
             session_id=str(uuid.uuid4()),
         )
         runner_args.handle_sigint = True
