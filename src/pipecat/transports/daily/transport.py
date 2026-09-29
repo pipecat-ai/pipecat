@@ -2044,9 +2044,15 @@ class DailyInputTransport(BaseInputTransport):
         Args:
             frame: The user image request frame.
         """
-        if frame.user_id in self._video_renderers:
-            video_source = frame.video_source if frame.video_source else "camera"
-            self._video_renderers[frame.user_id][video_source]["render_next_frame"].append(frame)
+        video_source = frame.video_source if frame.video_source else "camera"
+        renderer = self._video_renderers.get(frame.user_id, {}).get(video_source)
+        if renderer is None:
+            logger.warning(
+                f"{self}: ignoring image request for {frame.user_id} ({video_source}): "
+                "video is not being captured"
+            )
+            return
+        renderer["render_next_frame"].append(frame)
 
     async def _on_participant_video_frame(
         self, participant_id: str, video_frame: VideoFrame, video_source: str

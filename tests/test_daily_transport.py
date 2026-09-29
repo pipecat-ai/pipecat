@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from pipecat.frames.frames import BotConnectedFrame, STTMetadataFrame
+from pipecat.frames.frames import BotConnectedFrame, STTMetadataFrame, UserImageRequestFrame
 from pipecat.services.stt_latency import DEEPGRAM_TTFS_P99
 from pipecat.transports.daily.transport import DailyParams, DailyTransport
 
@@ -165,3 +165,36 @@ async def test_on_dialin_ready_does_not_report_success_as_error():
         await transport._handle_dialin_ready("sip:test@example.com")
 
     transport._on_error.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_image_request_for_uncaptured_video_source_is_ignored():
+    transport = _make_transport()
+    input_transport = transport.input()
+    input_transport._client.capture_participant_video = AsyncMock()
+    await input_transport.capture_participant_video("participant-1", video_source="camera")
+
+    # Only the camera is captured, so a screen share request has no renderer.
+    await input_transport.request_participant_image(
+        UserImageRequestFrame(user_id="participant-1", video_source="screenVideo")
+    )
+    # A participant that is not captured at all is ignored too.
+    await input_transport.request_participant_image(UserImageRequestFrame(user_id="unknown"))
+
+    renderers = input_transport._video_renderers["participant-1"]
+    assert renderers["camera"]["render_next_frame"] == []
+
+
+@pytest.mark.asyncio
+async def test_image_request_for_captured_video_source_is_queued():
+    transport = _make_transport()
+    input_transport = transport.input()
+    input_transport._client.capture_participant_video = AsyncMock()
+    await input_transport.capture_participant_video("participant-1", video_source="screenVideo")
+
+    request = UserImageRequestFrame(user_id="participant-1", video_source="screenVideo")
+    await input_transport.request_participant_image(request)
+
+    assert input_transport._video_renderers["participant-1"]["screenVideo"][
+        "render_next_frame"
+    ] == [request]
