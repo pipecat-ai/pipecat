@@ -8,13 +8,37 @@
 
 import asyncio
 import ipaddress
+import os
 from collections.abc import Sequence
-from typing import Literal
+from enum import StrEnum
 from urllib.parse import urlsplit
 
 IPNetwork = ipaddress.IPv4Network | ipaddress.IPv6Network
 
-UrlReachability = Literal["public", "allowed", "blocked"]
+
+class UrlReachability(StrEnum):
+    """Who can safely reach a URL's host."""
+
+    PUBLIC = "public"
+    """Publicly routable — safe to hand to a third party to fetch itself."""
+
+    ALLOWED = "allowed"
+    """Within a trusted private network — safe for this server to fetch
+    directly, but not to hand off to a third party that can't reach it."""
+
+    BLOCKED = "blocked"
+    """Nobody should fetch it."""
+
+
+def default_allowed_file_url_networks() -> list[str]:
+    """Return trusted networks from the ``PIPECAT_ALLOWED_FILE_URL_NETWORKS`` env var.
+
+    Parses a comma-separated list of CIDR ranges (e.g.
+    ``10.0.0.0/8,192.168.0.0/16``). Returns an empty list (trust only the
+    public internet) when the variable is unset or empty.
+    """
+    val = os.getenv("PIPECAT_ALLOWED_FILE_URL_NETWORKS", "")
+    return [n.strip() for n in val.split(",") if n.strip()]
 
 
 async def classify_url_reachability(
@@ -33,29 +57,29 @@ async def classify_url_reachability(
             beyond the public internet.
 
     Returns:
-        "public" if every resolved address is publicly routable — safe to
+        ``PUBLIC`` if every resolved address is publicly routable — safe to
             hand to a third party (e.g. an LLM provider) to fetch itself.
-        "allowed" if not publicly routable, but every address falls within
+        ``ALLOWED`` if not publicly routable, but every address falls within
             `allowed_networks` — safe for this server to fetch directly, but
             not to hand off to a third party that can't reach it.
-        "blocked" otherwise: loopback, link-local (including the cloud
+        ``BLOCKED`` otherwise: loopback, link-local (including the cloud
             metadata range ``169.254.0.0/16``), private (RFC 1918), or
             unique-local (IPv6 ULA) addresses outside `allowed_networks`, or
             a host that fails to resolve.
     """
     hostname = urlsplit(url).hostname
     if not hostname:
-        return "blocked"
+        return UrlReachability.BLOCKED
     try:
         addr_infos = await asyncio.get_event_loop().getaddrinfo(hostname, None)
     except OSError:
-        return "blocked"
+        return UrlReachability.BLOCKED
     if not addr_infos:
-        return "blocked"
+        return UrlReachability.BLOCKED
 
     ips = [ipaddress.ip_address(info[4][0]) for info in addr_infos]
     if all(ip.is_global for ip in ips):
-        return "public"
+        return UrlReachability.PUBLIC
     if all(ip.is_global or any(ip in network for network in allowed_networks) for ip in ips):
-        return "allowed"
-    return "blocked"
+        return UrlReachability.ALLOWED
+    return UrlReachability.BLOCKED

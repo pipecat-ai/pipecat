@@ -49,7 +49,12 @@ from pipecat.services.llm_service import (
     FunctionCallParams,  # TODO(aleix): we shouldn't import `services` from `processors`
 )
 from pipecat.transports.base_transport import BaseTransport
-from pipecat.utils.security.ssrf import IPNetwork, classify_url_reachability
+from pipecat.utils.security.ssrf import (
+    IPNetwork,
+    UrlReachability,
+    classify_url_reachability,
+    default_allowed_file_url_networks,
+)
 
 
 class RTVIProcessor(FrameProcessor):
@@ -87,12 +92,15 @@ class RTVIProcessor(FrameProcessor):
                 arbitrary non-public addresses on the client's behalf. Pass
                 the private network(s) this deployment's file server(s) live
                 on to let this server fetch from them directly and forward
-                the bytes to the LLM instead.
+                the bytes to the LLM instead. Defaults to the
+                ``PIPECAT_ALLOWED_FILE_URL_NETWORKS`` env var (comma-separated).
             **kwargs: Additional arguments passed to parent class.
         """
         super().__init__(**kwargs)
+        if allowed_file_url_networks is None:
+            allowed_file_url_networks = default_allowed_file_url_networks()
         self._allowed_file_url_networks: list[IPNetwork] = [
-            ipaddress.ip_network(net) for net in (allowed_file_url_networks or [])
+            ipaddress.ip_network(net) for net in allowed_file_url_networks
         ]
 
         self._bot_ready = False
@@ -547,11 +555,11 @@ class RTVIProcessor(FrameProcessor):
                     reachability = await classify_url_reachability(
                         fs.url, self._allowed_file_url_networks
                     )
-                    if reachability == "blocked":
+                    if reachability == UrlReachability.BLOCKED:
                         logger.warning(f"Refusing to fetch unreachable URL: {fs.url!r}")
                         await self._send_error_response(message_id, "Unsupported URL")
                         return
-                    elif reachability == "public":
+                    elif reachability == UrlReachability.PUBLIC:
                         # Publicly routable: hand the URL to the LLM provider to fetch itself.
                         source = fs.url
                     else:
