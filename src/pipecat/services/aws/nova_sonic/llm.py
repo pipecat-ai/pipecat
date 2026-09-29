@@ -1476,23 +1476,19 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
         tool_call_id = tool_use["toolUseId"]
         arguments = json.loads(tool_use["content"])
 
-        # Call tool function
-        if self.has_function(function_name):
-            if function_name in self._functions.keys() or None in self._functions.keys():
-                function_calls_llm = [
-                    FunctionCallFromLLM(
-                        context=self._context,
-                        tool_call_id=tool_call_id,
-                        function_name=function_name,
-                        arguments=arguments,
-                    )
-                ]
-
-                await self.run_function_calls(function_calls_llm)
-        else:
-            raise AWSNovaSonicUnhandledFunctionException(
-                f"The LLM tried to call a function named '{function_name}', but there isn't a callback registered for that function."
+        # Call tool function. A call to a function with no registered handler
+        # (for example, a name the model made up) is answered with a terminal
+        # tool result by ``run_function_calls``.
+        function_calls_llm = [
+            FunctionCallFromLLM(
+                context=self._context,
+                tool_call_id=tool_call_id,
+                function_name=function_name,
+                arguments=arguments,
             )
+        ]
+
+        await self.run_function_calls(function_calls_llm)
 
     async def _handle_content_end_event(self, event_json):
         if not self._content_being_received:  # should never happen
