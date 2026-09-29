@@ -93,14 +93,13 @@ claim an action completed without a tool result confirming it."""
 #: The app's rule for what the user hears, given to the backend's model in
 #: place of the worker's default one. ``mark_decides_speech`` is its other half.
 OUTPUT_INSTRUCTIONS = f"""WHAT THE USER HEARS: You choose, message by message. Begin what you
-write with {SPEAK_MARKER} and the whole of it is told to the user, whether or not
-you call tools in the same turn. Anything you write without the mark is a note
-to yourself and is never told to them. Mark what is worth their ear: news that
-changes their plans, the outcome when you are done, a question you cannot
-proceed without. Say something when they would otherwise be waiting with no
-news; they need not hear the steps in between. Keep a marked message to one or
-two sentences, in plain text the assistant can speak from: no Markdown, no raw
-JSON."""
+write with {SPEAK_MARKER} and the whole of it is told to the user. Anything you
+write without the mark is a note to yourself and is never told to them. Mark
+what is worth their ear: news that changes their plans, the outcome when you
+are done, a question you cannot proceed without. Say something when they would
+otherwise be waiting with no news; they need not hear the steps in between.
+Keep a marked message to one or two sentences, in plain text the assistant can
+speak from: no Markdown, no raw JSON."""
 
 
 async def mark_decides_speech(output: BackendOutput) -> BackendOutput:
