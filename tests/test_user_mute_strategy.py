@@ -13,6 +13,7 @@ from pipecat.frames.frames import (
     FunctionCallCancelFrame,
     FunctionCallFromLLM,
     FunctionCallResultFrame,
+    FunctionCallResultProperties,
     FunctionCallsStartedFrame,
     InterruptionFrame,
 )
@@ -73,6 +74,40 @@ class TestMuteUntilFirstBotCompleteUserMuteStrategy(unittest.IsolatedAsyncioTest
 
 
 class TestFunctionCallUserMuteStrategy(unittest.IsolatedAsyncioTestCase):
+    async def test_intermediate_result_keeps_muted(self):
+        strategy = FunctionCallUserMuteStrategy()
+
+        self.assertTrue(
+            await strategy.process_frame(
+                FunctionCallsStartedFrame(
+                    function_calls=[
+                        FunctionCallFromLLM(
+                            function_name="fn", tool_call_id="1", arguments={}, context=None
+                        )
+                    ]
+                )
+            )
+        )
+        # An intermediate update from an async function call: still running.
+        self.assertTrue(
+            await strategy.process_frame(
+                FunctionCallResultFrame(
+                    function_name="fn",
+                    tool_call_id="1",
+                    arguments={},
+                    result="working",
+                    properties=FunctionCallResultProperties(is_final=False),
+                )
+            )
+        )
+        self.assertFalse(
+            await strategy.process_frame(
+                FunctionCallResultFrame(
+                    function_name="fn", tool_call_id="1", arguments={}, result={}
+                )
+            )
+        )
+
     async def test_user_mute_strategy(self):
         strategy = FunctionCallUserMuteStrategy()
 

@@ -12,6 +12,7 @@ from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     FunctionCallResultFrame,
+    FunctionCallResultProperties,
     FunctionCallsStartedFrame,
     UserIdleTimeoutUpdateFrame,
     UserStartedSpeakingFrame,
@@ -246,6 +247,39 @@ class TestUserIdleController(unittest.IsolatedAsyncioTestCase):
         # Now the timer should start and fire
         await asyncio.sleep(USER_IDLE_TIMEOUT + 0.1)
         self.assertTrue(idle_triggered)
+
+        await controller.cleanup()
+
+    async def test_intermediate_function_call_result_keeps_timer_suppressed(self):
+        """Test that a non-final result from an async function call does not end the call."""
+        controller = UserIdleController(user_idle_timeout=USER_IDLE_TIMEOUT)
+        await controller.setup(frame_processor_setup(self.task_manager))
+
+        idle_triggered = False
+
+        @controller.event_handler("on_user_turn_idle")
+        async def on_user_turn_idle(controller):
+            nonlocal idle_triggered
+            idle_triggered = True
+
+        await controller.process_frame(
+            FunctionCallsStartedFrame(function_calls=[unittest.mock.Mock()])
+        )
+        await controller.process_frame(
+            FunctionCallResultFrame(
+                function_name="test",
+                tool_call_id="123",
+                arguments={},
+                result="working",
+                properties=FunctionCallResultProperties(is_final=False),
+            )
+        )
+        await controller.process_frame(BotStartedSpeakingFrame())
+        await controller.process_frame(BotStoppedSpeakingFrame())
+
+        # The async call is still running, so the timer must not start.
+        await asyncio.sleep(USER_IDLE_TIMEOUT + 0.1)
+        self.assertFalse(idle_triggered)
 
         await controller.cleanup()
 
