@@ -699,8 +699,7 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
             await self._process_completed_function_calls(send_new_results=True)
             # A context frame travelling upstream comes from the assistant
             # aggregator, which is asking the model to respond to what was
-            # delivered since its last response. One travelling downstream
-            # asks for nothing: the API answers the user's turns itself.
+            # delivered since its last response.
             if direction == FrameDirection.UPSTREAM and self._results_awaiting_response:
                 await self._create_response()
 
