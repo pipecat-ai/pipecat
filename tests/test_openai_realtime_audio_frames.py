@@ -350,3 +350,31 @@ async def test_interrupt_during_second_item_truncates_against_second_item():
     assert len(truncates) == 1
     assert truncates[0].item_id == item_b, "must truncate the active (latest) item"
     assert truncates[0].content_index == 0
+
+
+# ---------------------------------------------------------------------------
+# Unrecognized server events
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_unrecognized_server_event_does_not_end_receive_loop():
+    """An event type without a model is skipped and later events still get handled."""
+    service = _make_service()
+    recorder = _FrameRecorder()
+    service.push_frame = recorder
+
+    response_id = "resp_unknown"
+    scripted = [
+        {"type": "input_audio_buffer.timeout_triggered", "event_id": "evt_unknown"},
+        _audio_delta(response_id=response_id, item_id="item_A", output_index=0),
+        _response_done(response_id=response_id),
+    ]
+    await _drive(service, scripted)
+
+    assert len(recorder.of_types(TTSAudioRawFrame)) == 1
+    assert len(recorder.of_types(TTSStoppedFrame)) == 1
+
+
+def test_parse_server_event_returns_none_for_unrecognized_type():
+    assert events.parse_server_event(json.dumps({"type": "brand.new", "x": 1})) is None

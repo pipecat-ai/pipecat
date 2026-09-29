@@ -835,6 +835,12 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
 
         async for message in self._websocket:
             evt = events.parse_server_event(message)
+            if evt is None:
+                # An event type without a model (for example, one added to the
+                # API after this service was written). Skip it rather than end
+                # the receive loop, which would leave the session deaf.
+                logger.debug(f"{self} ignoring unhandled server event")
+                continue
             if evt.type == "session.created":
                 await self._handle_evt_session_created(evt)
             elif evt.type == "session.updated":

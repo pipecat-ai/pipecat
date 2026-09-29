@@ -1145,16 +1145,18 @@ def parse_server_event(str):
         str: JSON string containing the server event.
 
     Returns:
-        Parsed server event object of the appropriate type.
+        Parsed server event object of the appropriate type, or ``None`` if the
+        event type is not recognized (for example, an event added to the API
+        after this module was written).
 
     Raises:
-        Exception: If the event type is unimplemented or parsing fails.
+        Exception: If parsing fails or a recognized event is malformed.
     """
     try:
         event = json.loads(str)
         event_type = event["type"]
         if event_type not in _server_event_types:
-            raise Exception(f"Unimplemented server event type: {event_type}")
+            return None
         return _server_event_types[event_type].model_validate(event)
     except Exception as e:
         raise Exception(f"{e} \n\n{str}")
