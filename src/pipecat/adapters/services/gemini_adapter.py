@@ -488,6 +488,13 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
         tool_call_id_to_name_mapping = {}
 
         if msg.get("tool_calls"):
+            # Keep any assistant text that accompanies the tool calls.
+            if isinstance(content, str) and content:
+                parts.append(Part(text=content))
+            elif isinstance(content, list):
+                for c in content:
+                    if c.get("type") == "text" and c.get("text"):
+                        parts.append(Part(text=c["text"]))
             for tc in msg["tool_calls"]:
                 id = tc["id"]
                 name = tc["function"]["name"]

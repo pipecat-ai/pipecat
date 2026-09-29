@@ -276,6 +276,14 @@ class AWSBedrockLLMAdapter(BaseLLMAdapter[AWSBedrockLLMInvocationParams]):
         if msg.get("tool_calls"):
             tc = msg["tool_calls"]
             ret: dict[str, Any] = {"role": "assistant", "content": []}
+            # Keep any assistant text that accompanies the tool calls.
+            content = msg.get("content")
+            if isinstance(content, str) and content:
+                ret["content"].append({"text": content})
+            elif isinstance(content, list):
+                for item in content:
+                    if item.get("type") == "text" and item.get("text"):
+                        ret["content"].append({"text": item["text"]})
             for tool_call in tc:
                 function = tool_call["function"]
                 arguments = json.loads(function["arguments"])
