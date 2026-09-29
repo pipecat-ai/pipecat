@@ -1,0 +1,1 @@
+- Fixed Japanese sentence aggregation splitting Latin abbreviations such as `Dr.` and `U.S.`.
