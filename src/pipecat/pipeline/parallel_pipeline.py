@@ -163,15 +163,26 @@ class ParallelPipeline(BasePipeline):
         for p in self._pipelines:
             await p.queue_frame(frame, direction)
 
+    def _seen_key(self, frame: Frame, direction: FrameDirection) -> tuple:
+        """Key used to drop duplicate frames leaving this parallel pipeline.
+
+        The same frame can legitimately leave more than once: a flush probe
+        travels downstream, back upstream, then downstream again with
+        ``returning`` set. Deduping on ``frame.id`` alone drops those later
+        legs and stall ``PipelineWorker.flush_pipeline``.
+        """
+        return (frame.id, direction, getattr(frame, "returning", False))
+
     async def _parallel_push_frame(self, frame: Frame, direction: FrameDirection):
-        """Push frames while avoiding duplicates using frame ID tracking.
+        """Push frames while avoiding duplicates from parallel branches.
 
         During lifecycle frame synchronization, non-lifecycle frames are buffered
         to prevent them from escaping the parallel pipeline before all branches
         have finished processing the lifecycle frame.
         """
-        if frame.id not in self._seen_ids:
-            self._seen_ids.add(frame.id)
+        key = self._seen_key(frame, direction)
+        if key not in self._seen_ids:
+            self._seen_ids.add(key)
             if self._synchronizing:
                 self._buffered_frames.append((frame, direction))
             else:

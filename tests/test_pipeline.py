@@ -43,6 +43,7 @@ from pipecat.processors.frame_processor import (
 from pipecat.services.tts_service import TTSService
 from pipecat.tests.utils import HeartbeatsObserver, run_test
 from pipecat.utils.asyncio.task_manager import TaskManager
+from pipecat.workers.runner import WorkerRunner
 
 
 class TestPipeline(unittest.IsolatedAsyncioTestCase):
@@ -221,6 +222,34 @@ class TestParallelPipeline(unittest.IsolatedAsyncioTestCase):
             expected_down_frames=expected_down_frames,
             ignore_start=False,
         )
+
+    async def test_flush_probe_completes_through_parallel_pipeline(self):
+        """A flush probe must finish its round-trip through ParallelPipeline.
+
+        ParallelPipeline used to drop frames that left it a second time with
+        the same id, so the probe never returned upstream and
+        ``flush_pipeline`` timed out. LLMSwitcher wraps its services in a
+        ParallelPipeline, which is how this showed up on every user turn.
+        """
+        worker = PipelineWorker(
+            Pipeline([ParallelPipeline([IdentityFilter()])]),
+            enable_rtvi=False,
+            cancel_on_idle_timeout=False,
+        )
+        runner = WorkerRunner(handle_sigint=False)
+        await runner.add_workers(worker)
+        result = {}
+
+        @worker.event_handler("on_pipeline_started")
+        async def on_started(_worker, _frame):
+            async def flush():
+                result["drained"] = await worker.flush_pipeline(timeout=2.0)
+                await worker.queue_frame(EndFrame())
+
+            asyncio.create_task(flush())
+
+        await asyncio.wait_for(runner.run(), timeout=10.0)
+        self.assertTrue(result.get("drained"))
 
 
 class TestPipelineWorker(unittest.IsolatedAsyncioTestCase):
