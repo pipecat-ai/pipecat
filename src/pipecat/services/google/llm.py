@@ -787,12 +787,15 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
                                 )
                             elif part.inline_data and part.inline_data.data:
                                 # Here we assume that inline_data is an image.
+                                # Output transports render RGB, and the decoded image can
+                                # be RGBA or palette-based.
                                 image = Image.open(io.BytesIO(part.inline_data.data))
+                                image = image.convert("RGB")
                                 await self.push_frame(
                                     AssistantImageRawFrame(
                                         image=image.tobytes(),
                                         size=image.size,
-                                        format="RGB",
+                                        format=image.mode,
                                         original_data=part.inline_data.data,
                                         original_mime_type=part.inline_data.mime_type,
                                     )
