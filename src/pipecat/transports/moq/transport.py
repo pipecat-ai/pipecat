@@ -99,12 +99,14 @@ _PEER_GONE_KINDS = _NORMAL_CLOSE_KINDS | frozenset(
     }
 )
 
-# ``Dropped`` is the one normal-close reason with no typed binding: ``Cancel``
-# and ``Closed`` arrive as ``Error.Cancelled``/``Error.Closed`` and are caught
-# by ``moq.is_shutdown``, while a dropped producer only ever shows up as this
-# reason on a subsystem error like ``Error.Audio``. Matching just this one
-# keeps errors that merely mention cancellation propagating.
-_NORMAL_CLOSE_REASONS = frozenset({"dropped"})
+# ``Cancel`` and ``Dropped`` as moq-net's reason rather than a kind: moq-ffi
+# renders an ``Error.Audio`` to a string, so what ended the audio track
+# survives only as its message tail (``"moq: cancelled"``, ``"moq: dropped"``).
+# A relay cancels a subscription when the session publishing the broadcast
+# ends, which includes a reconnecting peer replacing it with a fresh one. Only
+# the whole reason is matched, so an error that merely mentions cancellation
+# still propagates.
+_NORMAL_CLOSE_REASONS = frozenset({"dropped", "cancelled"})
 
 # Remote reset codes inside a subsystem error message. A 0.14 peer's
 # reset reaches moq-ffi 0.4 as an unregistered code, rendered "unknown
@@ -136,9 +138,10 @@ def _is_normal_close(exc: BaseException) -> bool:
     subsystem, carrying the moq reason in its message — a browser that
     disconnects mid-call drops its microphone producer without finishing,
     and the bot's audio subscriber sees ``Error.Audio("moq: dropped")``;
-    a reset still in flight reads as ``"unknown code=n"`` (0.14's
-    numbering is unregistered in 0.15's decode tables) or as
-    ``"remote error: code=n"``.
+    a relay that cancels the subscription when the peer's publishing
+    session ends reads ``Error.Audio("moq: cancelled")``; a reset still
+    in flight reads as ``"unknown code=n"`` (0.14's numbering is
+    unregistered in 0.15's decode tables) or as ``"remote error: code=n"``.
 
     Callers log these at debug and skip the ``on_error`` handler instead
     of reporting ERROR + traceback.
