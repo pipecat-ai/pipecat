@@ -1563,7 +1563,8 @@ async def _run_sip(args: argparse.Namespace):
     ``SIP_NET_INTERFACE`` (restrict the stack to one local interface, e.g.
     ``127.0.0.1`` for a registrar on loopback), ``SIP_JITTER_BUFFER`` (the
     receive jitter buffer: ``off``, ``fixed:MIN-MAX`` or ``adaptive:MIN-MAX``
-    in milliseconds; unset keeps the stack default), ``SIP_NATIVE_LOG_LEVEL``
+    in milliseconds; unset selects the transport's default, a fixed
+    40–60 ms), ``SIP_NATIVE_LOG_LEVEL``
     (native stack log capture), and ``SIP_TRACE`` (verbatim SIP message
     trace) — and the bot function is invoked directly. Without a configured
     account, a temporary SIP client is provisioned on the Daily domain

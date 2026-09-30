@@ -315,11 +315,12 @@ class SIPRunnerArguments(RunnerArguments):
             ("127.0.0.1") or one address of a multi-homed host. See
             :class:`~pipecat.transports.sip.connection.SIPConnection`.
         jitter_buffer_mode: The receive jitter buffer: "off", "fixed", or
-            "adaptive"; None keeps the stack's compiled setting. See
+            "adaptive"; None selects the transport's default, a fixed
+            40–60 ms buffer. See
             :class:`~pipecat.transports.sip.connection.SIPConnection` for
             what each mode costs.
         jitter_buffer_ms: ``(min, max)`` in milliseconds for a fixed or
-            adaptive buffer; None keeps the stack default.
+            adaptive buffer; None with no mode selects the default.
     """
 
     user: str
