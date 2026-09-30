@@ -218,6 +218,17 @@ def _self_signed_pem(tmp_path):
     return str(pem_path), expected
 
 
+# A relay's stream Cancel as the transcript and catalog readers report it.
+_RELAY_CANCEL = moq.Error.Protocol(
+    moq.ProtocolError(
+        scope=moq.ErrorScope.STREAM,
+        code=1,
+        kind=moq.ProtocolKind.CANCEL,
+        message="cancelled",
+    )
+)
+
+
 # The runner module pulls in FastAPI/uvicorn (the `runner` extra). Skip
 # the cert-hash helper tests when that's not installed; the helpers are
 # defined in run.py, so import = require runner extra.
@@ -262,8 +273,29 @@ class TestIsPeerGone(unittest.TestCase):
         self.assertTrue(_is_peer_gone(moq.Error.Cancelled()))
         self.assertTrue(_is_peer_gone(moq.Error.Closed()))
 
+    def test_cancelled_track_is_peer_gone(self):
+        """A relay cancels the subscription when the peer's publishing session
+        ends. The transcript and catalog readers report a ``CANCEL`` kind; the
+        audio reader renders the error to a string, so only its reason says
+        so, bare or behind moq-mux's prefix."""
+        for error in (
+            _RELAY_CANCEL,
+            moq.Error.Audio("cancelled"),
+            moq.Error.Audio("moq: cancelled"),
+        ):
+            with self.subTest(error=error):
+                self.assertTrue(_is_peer_gone(error))
+
     def test_other_moq_errors_propagate(self):
-        self.assertFalse(_is_peer_gone(moq.Error.Mux("json: cancelled")))
+        """Only a whole reason counts; an error that merely mentions
+        cancellation is a failure."""
+        for error in (
+            moq.Error.Mux("json: expected value at line 1 column 1"),
+            moq.Error.Audio("moq: request cancelled early"),
+            moq.Error.JsonTrack("cancelled by application: bad record"),
+        ):
+            with self.subTest(error=error):
+                self.assertFalse(_is_peer_gone(error))
 
     def test_non_moq_errors_propagate(self):
         self.assertFalse(_is_peer_gone(RuntimeError("remote error: code=4")))
@@ -817,6 +849,10 @@ class TestIsNormalClose(unittest.TestCase):
     def test_peer_dropped_producer_is_normal(self):
         """A browser leaving mid-call drops its mic producer without finishing."""
         self.assertTrue(_is_normal_close(self._audio_error("moq: remote error: code=24")))
+
+    def test_cancelled_reason_is_normal(self):
+        """The reason form of ``Cancel``, as the audio reader reports it."""
+        self.assertTrue(_is_normal_close(self._audio_error("moq: cancelled")))
 
     def test_cancel_and_closed_are_normal(self):
         for code in (0, 25):
@@ -1963,6 +1999,87 @@ class TestSubscribeRefusedAsPeerGone(unittest.IsolatedAsyncioTestCase):
             gone = await asyncio.wait_for(client._consume_peer(origin), timeout=2)
         self.assertFalse(gone)
         peer_broadcast.subscribe_json_stream.assert_awaited_once()
+        client._callbacks.on_error.assert_not_awaited()
+
+
+class _FakeTrackEndingWith:
+    """Stands in for a track consumer: yields scripted items, then raises ``error``."""
+
+    def __init__(self, items, error):
+        self._items = list(items)
+        self._error = error
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        if not self._items:
+            raise self._error
+        return self._items.pop(0)
+
+    def cancel(self):
+        pass
+
+
+class TestTrackCancelledAsPeerGone(unittest.IsolatedAsyncioTestCase):
+    """A relay cancels a live subscription when the session publishing the
+    broadcast ends, including when a reconnecting peer replaces its broadcast
+    with a fresh one. That is the peer's tracks ending: the session loop
+    subscribes again rather than failing the transport."""
+
+    async def test_cancelled_audio_ends_the_audio_pump(self):
+        client, _stream = _client_with_fake_moq()
+        peer_broadcast = MagicMock()
+        peer_broadcast.subscribe_catalog = AsyncMock(return_value=_FakeCatalogs([_opus_catalog()]))
+        peer_broadcast.decode_audio = AsyncMock(
+            return_value=_FakeTrackEndingWith(
+                [MagicMock(data=b"\x00\x01" * 160)], moq.Error.Audio("moq: cancelled")
+            )
+        )
+        await client._forward_peer_audio(peer_broadcast)
+        client._callbacks.on_audio_received.assert_awaited_once()
+
+    async def test_the_peer_is_followed_to_its_fresh_broadcast(self):
+        """Through the real pumps: the first broadcast's audio and transcript
+        are cancelled mid-call, and the transport subscribes to the peer's
+        fresh broadcast and carries on until the peer says goodbye."""
+        client, _stream = _client_with_fake_moq()
+        client._task_manager = TaskManager()
+        client._peer_connected = True
+        first = MagicMock(name="first_broadcast")
+        first.subscribe_catalog = AsyncMock(return_value=_FakeCatalogs([_opus_catalog()]))
+        first.decode_audio = AsyncMock(
+            return_value=_FakeTrackEndingWith(
+                [MagicMock(data=b"\x00\x01" * 160)], moq.Error.Audio("moq: cancelled")
+            )
+        )
+        first.subscribe_json_stream = AsyncMock(
+            return_value=_FakeTrackEndingWith(
+                [{"label": "rtvi-ai", "type": "client-ready", "seq": 0, "epoch": "e1"}],
+                _RELAY_CANCEL,
+            )
+        )
+        fresh = MagicMock(name="fresh_broadcast")
+        fresh.subscribe_catalog = AsyncMock(return_value=_FakeCatalogs([]))
+        fresh.subscribe_json_stream = AsyncMock(
+            return_value=_FakeJsonStream(
+                [
+                    {"label": "rtvi-ai", "type": "client-message", "seq": 0, "epoch": "e2"},
+                    {"label": "moq-transport", "type": "session-ending", "seq": 1, "epoch": "e2"},
+                ]
+            )
+        )
+        broadcasts = iter([first, fresh])
+        origin = MagicMock(name="subscribe_origin")
+        origin.consume.return_value.announced_broadcast.side_effect = lambda _path: _FakeAnnounced(
+            next(broadcasts)
+        )
+        gone = await asyncio.wait_for(client._consume_peer(origin), timeout=2)
+        self.assertTrue(gone)
+        self.assertTrue(client._peer_goodbye)
+        fresh.subscribe_json_stream.assert_awaited_once()
+        client._callbacks.on_audio_received.assert_awaited_once()
+        self.assertEqual(client._callbacks.on_message_received.await_count, 2)
         client._callbacks.on_error.assert_not_awaited()
 
 
