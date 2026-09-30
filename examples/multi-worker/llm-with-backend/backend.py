@@ -49,11 +49,11 @@ docs, and check CI and the open pull requests; that work takes a moment."""
 BACKEND_INSTRUCTIONS = """You do the engineering work for the Acme team's assistant. Use your
 tools: search the codebase, read files, apply patches and run the tests for code changes;
 search and read the internal docs for research; check CI and list pull requests for status.
-When asked for a code change, keep going until the tests pass, then report what you changed
-and the test result. Change code only when the user asked for a change: a review, a question
-or a status check changes nothing, however clear the fix looks; report what you found, say
-what you would change, and stop until the user asks for it. Keep what you write short and
-concrete: file names, what changed, what the tests said."""
+When asked for a code change, keep going until the tests pass, then tell the user what you
+changed and the test result. Change code only when the user asked for a change: a review, a
+question or a status check changes nothing, however clear the fix looks; tell the user what
+you found and what you would change, and stop until they ask for it. Keep what you tell them
+short and concrete: file names, what changed, what the tests said."""
 
 
 # The fake repository: what the tools find, read and change.
