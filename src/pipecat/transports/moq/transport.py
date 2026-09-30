@@ -291,6 +291,13 @@ _SESSION_STALL_S = 15.0
 # keeps announcing a path whose route died and serves nothing on it, so an
 # announcement alone is not a sign of life; data is.
 _PEER_DATA_GRACE_S = 5.0
+# Idle gap in outbound audio writes past which the encoder epoch is
+# re-anchored. Re-anchoring drops the encoder's pending samples and
+# lookahead and publishes a discontinuity, so the threshold sits well
+# above event-loop/TTS delivery jitter — a sub-threshold stall is
+# absorbed as that much measured jitter in the player's delay floor —
+# and well below any real turn gap.
+_EPOCH_REANCHOR_MIN_GAP_S = 0.25
 
 # Pin the Opus wire rate to its highest supported internal rate (Opus
 # supports {8, 12, 16, 24, 48} kHz). Chrome's WebCodecs Opus decoder
@@ -881,7 +888,7 @@ class MOQTransportClient:
             # player's delay floor (5s user turn = 5s added playback delay,
             # compounding per turn).
             gap = None if self._publish_audio_clock is None else now - self._publish_audio_clock
-            if gap is None or gap > self._params.audio_out_frame_ms / 1000.0:
+            if gap is None or gap > _EPOCH_REANCHOR_MIN_GAP_S:
                 self._audio_out.reset_epoch()
                 logger.debug(
                     f"MOQ: audio epoch re-anchored after "

@@ -979,6 +979,40 @@ class TestTranscriptRecords(unittest.TestCase):
 
 
 # ----------------------------------------------------------------------
+# Encoder epoch re-anchoring
+# ----------------------------------------------------------------------
+
+
+class TestEpochReanchor(unittest.IsolatedAsyncioTestCase):
+    """``reset_epoch`` drops the encoder's pending samples and lookahead
+    and publishes a discontinuity, so a mid-utterance delivery stall must
+    not trip it; only the first write and a real idle gap re-anchor."""
+
+    def _client_with_audio(self):
+        client, _stream = _client_with_fake_moq()
+        client._audio_out = MagicMock(name="audio_out")
+        client._audio_out_sample_rate = 24000
+        return client
+
+    async def test_first_write_re_anchors(self):
+        client = self._client_with_audio()
+        await client.publish_audio(b"\x00" * 480)
+        client._audio_out.reset_epoch.assert_called_once()
+
+    async def test_a_delivery_stall_does_not_re_anchor(self):
+        client = self._client_with_audio()
+        client._publish_audio_clock = time.monotonic() - 0.1
+        await client.publish_audio(b"\x00" * 480)
+        client._audio_out.reset_epoch.assert_not_called()
+
+    async def test_an_idle_gap_re_anchors(self):
+        client = self._client_with_audio()
+        client._publish_audio_clock = time.monotonic() - 1.0
+        await client.publish_audio(b"\x00" * 480)
+        client._audio_out.reset_epoch.assert_called_once()
+
+
+# ----------------------------------------------------------------------
 # Runner arguments: relay_url
 # ----------------------------------------------------------------------
 
