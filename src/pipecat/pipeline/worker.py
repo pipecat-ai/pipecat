@@ -887,7 +887,7 @@ class PipelineWorker(BaseWorker):
                 # Wait for pipeline to finish.
                 await self._wait_for_pipeline_finished()
             except asyncio.CancelledError:
-                logger.debug(f"Pipeline worker {self} got cancelled from outside...")
+                logger.info(f"Pipeline worker {self} got cancelled from outside...")
                 # We have been cancelled from outside, let's just cancel everything.
                 await self._cancel()
                 # Wait again for pipeline to finish. This time we have really

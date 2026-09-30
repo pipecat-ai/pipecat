@@ -1289,7 +1289,7 @@ class LLMUserAggregator(LLMContextAggregator):
         if not self._user_turn_controller.has_active_user_turn:
             return
 
-        logger.debug(f"{self}: Function call started while user turn is active, forcing stop.")
+        logger.info(f"{self}: Function call started while user turn is active, forcing stop.")
 
         segment = self.aggregation_string()
         if segment:

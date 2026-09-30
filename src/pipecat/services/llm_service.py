@@ -2138,7 +2138,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             name = runner_item.function_name
             tool_call_id = runner_item.tool_call_id
 
-            logger.debug(f"{self} Cancelling function call [{name}:{tool_call_id}] ({reason})...")
+            logger.info(f"{self} Cancelling function call [{name}:{tool_call_id}] ({reason})...")
 
             # Settle before cancelling: a handler that catches its
             # CancelledError and reports a result while unwinding must not be
