@@ -25,6 +25,47 @@ This directory contains examples showing how to build voice and multimodal agent
 
 4. Open the web interface at http://localhost:7860/client/ and click "Connect"
 
+## OpenAI-compatible backends
+
+[`voice/voice-openai-compatible.py`](voice/voice-openai-compatible.py) uses the
+standard OpenAI services with independently configurable endpoints, models, and
+credentials. No provider-specific Pipecat service or SDK is needed.
+
+The backends must implement these protocols, not just chat completions:
+
+| Stage | Configuration | Required protocol |
+| --- | --- | --- |
+| STT | `STT_BASE_URL`, `STT_MODEL` | Full `ws://` or `wss://` URL to `/v1/realtime`; transcription sessions with 24 kHz mono PCM16, transcript delta/completed events, and explicit audio-buffer commits |
+| LLM | `LLM_BASE_URL`, `LLM_MODEL` | HTTP base URL ending in `/v1`; streaming `/chat/completions` |
+| TTS | `TTS_BASE_URL`, `TTS_MODEL`, `TTS_VOICE` | HTTP base URL ending in `/v1`; `/audio/speech` with `response_format="pcm"`, returning raw 24 kHz mono PCM16 chunks |
+
+Set `STT_API_KEY`, `LLM_API_KEY`, and `TTS_API_KEY` when authentication is required.
+Each defaults to `not-needed` for unauthenticated local servers. The example uses
+local Silero VAD and disables server-side turn detection. It does not use the
+multipart `/audio/transcriptions` endpoint or a speech-to-speech realtime model.
+
+For example, after deploying the [Dynamo Nemotron speech pipeline](https://github.com/ai-dynamo/dynamo/pull/12567)
+(currently proposed), forward its frontend to port 8000 and configure:
+
+```bash
+export STT_BASE_URL=ws://localhost:8000/v1/realtime
+export STT_MODEL=nemotron-asr-streaming
+export LLM_BASE_URL=http://localhost:8000/v1
+export LLM_MODEL=nvidia/nemotron-3-nano
+export TTS_BASE_URL=http://localhost:8000/v1
+export TTS_MODEL=nvidia/magpie-tts-multilingual
+export TTS_VOICE=Magpie-Multilingual.EN-US.Aria
+
+# From the Pipecat repository root:
+uv sync --extra runner --extra webrtc
+uv run --no-sync python examples/voice/voice-openai-compatible.py -t webrtc
+```
+
+Open http://localhost:7860/client/ and connect. The service URLs are accessed
+by the Pipecat server, not the browser. They may point to one frontend or separate
+providers. To carry browser audio through an SSH TCP tunnel, use `-t websocket`
+instead and select the WebSocket transport in the client.
+
 ## Running examples with other transports
 
 Most examples support running with other transports, like Twilio or Daily.
