@@ -38,7 +38,8 @@ Environment variables:
   a multi-homed host. Unset lets the OS pick the source address.
 - SIP_JITTER_BUFFER (optional) - The receive jitter buffer: "off",
   "fixed:MIN-MAX" or "adaptive:MIN-MAX" in milliseconds (a bare "MIN-MAX"
-  means fixed). Unset keeps the stack's compiled default.
+  means fixed). Unset selects the transport's default, a fixed 40–60 ms;
+  the stack's own setting is "fixed:100-200".
 
 Example::
 
@@ -209,7 +210,8 @@ def parse_jitter_buffer(spec: str | None) -> tuple[str | None, tuple[int, int] |
 
     Accepted forms: ``off``; ``fixed:MIN-MAX`` or ``adaptive:MIN-MAX`` with
     the range in milliseconds; a bare ``MIN-MAX``, which means fixed. Unset
-    or empty keeps the stack's compiled default.
+    or empty selects the transport's default (see
+    :data:`pipecat.transports.sip.connection.DEFAULT_JITTER_BUFFER`).
 
     Args:
         spec: The raw ``SIP_JITTER_BUFFER`` value, or None.

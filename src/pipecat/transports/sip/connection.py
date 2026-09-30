@@ -122,9 +122,22 @@ _TRANSFER_CLOSE_REASON = "Call transfered"
 
 _JITTER_BUFFER_MODES = ("off", "fixed", "adaptive")
 
+#: The receive jitter buffer a connection runs unless told otherwise: fixed,
+#: 40 ms. A fixed buffer holds every packet for its minimum and returns to it
+#: after any disturbance, and its minimum is the arrival excursion it absorbs
+#: before discarding frames — 40 ms is over ten times the jitter measured on
+#: a datacentre SIP path, at 60 ms less turn latency than the stack's own
+#: 100–200 ms. The stack's setting remains available as ("fixed", (100, 200)).
+DEFAULT_JITTER_BUFFER: tuple[str, tuple[int, int]] = ("fixed", (40, 60))
+
 
 def _normalize_jitter_buffer(mode: str | None, ms: tuple | None) -> tuple[str | None, tuple | None]:
-    """Validate the jitter-buffer arguments; a range given alone means a fixed buffer."""
+    """Validate the jitter-buffer arguments; a range given alone means a fixed buffer.
+
+    Neither given selects :data:`DEFAULT_JITTER_BUFFER`.
+    """
+    if mode is None and ms is None:
+        return DEFAULT_JITTER_BUFFER
     if mode is not None and mode not in _JITTER_BUFFER_MODES:
         raise ValueError(f"jitter_buffer_mode must be one of {_JITTER_BUFFER_MODES}, got {mode!r}")
     if ms is None:
@@ -189,8 +202,10 @@ class _RuntimeSettings:
         """The receive jitter buffer as the stack's own config lines.
 
         ``Config`` has no typed field for ``audio_jitter_buffer_*``, so the
-        lines go through its raw-text escape hatch. Nothing is rendered
-        when no mode is set, and the stack's compiled default applies.
+        lines go through its raw-text escape hatch. A connection always
+        carries a mode (the constructor resolves ``None`` to the default);
+        settings built without one render nothing and leave the stack's
+        compiled setting in place.
         """
         if self.jitter_buffer_mode is None:
             return ""
@@ -462,10 +477,12 @@ class SIPConnection(BaseObject):
                 are passed through unchanged; None (the default) adds
                 nothing.
             jitter_buffer_mode: The receive jitter buffer: ``"off"``,
-                ``"fixed"``, or ``"adaptive"``; None (the default) keeps
-                the stack's compiled setting, a fixed 100–200 ms. Media
-                waits here before the transport reads it, so the setting
-                is turn latency. A fixed buffer holds exactly its minimum
+                ``"fixed"``, or ``"adaptive"``; None (the default), with
+                no range, selects :data:`DEFAULT_JITTER_BUFFER` — a fixed
+                40–60 ms buffer. The stack's own compiled setting, a fixed
+                100–200 ms, is ``("fixed", (100, 200))``. Media waits here
+                before the transport reads it, so the setting is turn
+                latency. A fixed buffer holds exactly its minimum
                 on every packet (the maximum is unused) and returns to it
                 after any disturbance; an adaptive one starts at its
                 minimum, widens once packets miss their deadline, and does

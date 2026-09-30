@@ -179,14 +179,31 @@ async def test_jitter_buffer_off_renders_the_type_alone(env):
 
 
 @pytest.mark.asyncio
-async def test_jitter_buffer_unset_renders_nothing(env):
-    # Nothing rendered means the stack's compiled default applies, unchanged.
+async def test_jitter_buffer_unset_renders_the_transport_default(env):
+    # Unset means the transport's own default, rendered explicitly — not the
+    # stack's compiled setting, which is 60 ms deeper.
     connection = make_connection()
 
     await connection.connect()
 
     (config,) = env.runtime.start.await_args.args
-    assert config.extra_config_text == ""
+    assert connection._settings.jitter_buffer_mode == "fixed"
+    assert connection._settings.jitter_buffer_ms == (40, 60)
+    assert config.extra_config_text == (
+        "audio_jitter_buffer_type fixed\naudio_jitter_buffer_ms 40-60\n"
+    )
+
+
+@pytest.mark.asyncio
+async def test_stack_default_is_reachable_explicitly(env):
+    connection = make_connection(jitter_buffer_ms=(100, 200))
+
+    await connection.connect()
+
+    (config,) = env.runtime.start.await_args.args
+    assert config.extra_config_text == (
+        "audio_jitter_buffer_type fixed\naudio_jitter_buffer_ms 100-200\n"
+    )
 
 
 def test_jitter_buffer_range_alone_means_fixed():
