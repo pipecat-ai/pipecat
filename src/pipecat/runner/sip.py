@@ -31,6 +31,9 @@ Environment variables:
 - SIP_STUN_SERVER (optional) - STUN server for the default media-NAT traversal
   (medianat=stun, default stun.l.google.com); set to "off" to disable. Ignored
   when SIP_EXTRA_PARAMS is set.
+- SIP_NET_INTERFACE (optional) - Restrict the stack to one local interface, by
+  name or address: "127.0.0.1" for a registrar on loopback, or one address of
+  a multi-homed host. Unset lets the OS pick the source address.
 
 Example::
 

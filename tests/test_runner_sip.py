@@ -221,7 +221,8 @@ class TestRunSip(unittest.IsolatedAsyncioTestCase):
         bot = MagicMock()
         bot.bot = AsyncMock(side_effect=RuntimeError("bot boom"))
         env_patch, session_patch, configure_patch, cleanup_patch, bot_patch = self._patches(
-            {"SIP_REG_INTERVAL": "900", "SIP_RTP_TIMEOUT": "45"}, bot
+            {"SIP_REG_INTERVAL": "900", "SIP_RTP_TIMEOUT": "45", "SIP_NET_INTERFACE": "127.0.0.1"},
+            bot,
         )
         with env_patch, session_patch, configure_patch, cleanup_patch as cleanup_mock, bot_patch:
             with self.assertRaises(RuntimeError):
@@ -231,3 +232,4 @@ class TestRunSip(unittest.IsolatedAsyncioTestCase):
         runner_args = bot.bot.await_args.args[0]
         self.assertEqual(runner_args.reg_interval, 900)
         self.assertEqual(runner_args.rtp_timeout, 45)
+        self.assertEqual(runner_args.net_interface, "127.0.0.1")
