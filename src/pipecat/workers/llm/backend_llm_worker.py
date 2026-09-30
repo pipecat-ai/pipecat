@@ -107,10 +107,12 @@ IDLE_UPDATE_TYPE = "idle"
 #: The ``type`` of the update that says the backend could not go on.
 ERROR_UPDATE_TYPE = "error"
 
-#: The mark the backend's model puts at the start of what it wants the user
-#: told. From a line that begins with it to the end of the message is sent
-#: with ``prefers_spoken=True``, mark stripped; what comes before that line,
-#: or a message with no such line, is a note (``prefers_spoken=False``).
+#: The mark the backend's model puts at the start of a message it wants the
+#: user told. The message is sent with ``prefers_spoken=True``, mark stripped;
+#: a message without it is a note (``prefers_spoken=False``). The model is
+#: told to put the mark first, but sometimes writes a note paragraph and then
+#: a marked one, so a mark at the start of a later line splits the message:
+#: a note before it, a spoken message from it on.
 SPOKEN_MARK = ">>"
 
 #: Where a message's spoken part starts: the first line that begins with the mark.
@@ -125,11 +127,10 @@ BACKEND_OUTPUT_INSTRUCTIONS = (
     "you requests: the conversation it is having, or a request it worded for you. Do the "
     "parts that need your tools or careful reasoning; the assistant handles the rest of the "
     "conversation itself, such as small talk, jokes and stories, so leave those to it.\n\n"
-    f"WHAT THE USER HEARS: From a line that begins with {SPOKEN_MARK} to the end of the "
-    "message, what you write is told to the user, whole, in the assistant's own words, tool "
-    "calls or not; usually the mark is the first thing in the message. Anything before that "
-    "line, and a message without one, is not told to the user: the assistant keeps it as "
-    "notes on your work, and draws on them only if the user asks how the work is going. "
+    f"WHAT THE USER HEARS: Begin a message with {SPOKEN_MARK} and the whole of it is told to "
+    "the user, in the assistant's own words, tool calls or not. Anything you write without "
+    "the mark is not told to the user: the assistant keeps it as notes on your work, and "
+    "draws on them only if the user asks how the work is going. "
     "Mark a message to give a result, to ask a question you cannot proceed without, or for "
     "news the user should have now. A result you do not mark is "
     f"lost: the message that gives it begins with {SPOKEN_MARK}. Never say again what you "
@@ -430,11 +431,12 @@ class BackendLLMWorker(LLMContextWorker):
       when the message arrived. A message that arrives mid-run is taken up after
       the current step, with everything that came before it in view.
 
-    The model decides what the user hears: from a line it begins with
-    :data:`SPOKEN_MARK` to the end of the message asks to be spoken, whether
-    or not the turn also calls tools, and the mark is stripped; anything else
-    it writes, what precedes that line and reasoning summaries included, is a
-    note that the frontend keeps but does not speak.
+    The model decides what the user hears: a message it begins with
+    :data:`SPOKEN_MARK` asks to be spoken, whether or not the turn also calls
+    tools, and the mark is stripped; anything else it writes, reasoning
+    summaries included, is a note that the frontend keeps but does not speak.
+    A mark at the start of a later line splits the message into a note and
+    a spoken part, since the model sometimes writes it that way.
     The backend's own system instruction says what it does and, in plain
     words, what the user should be told; the instruction the worker appends
     (:data:`BACKEND_OUTPUT_INSTRUCTIONS`) is the only place the mark is named.
