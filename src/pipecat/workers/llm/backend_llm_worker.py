@@ -504,8 +504,9 @@ class BackendLLMWorker(LLMContextWorker):
                 ]
             )
         )
-        # A built-in tool: sent on every inference beside the context's own
-        # tools and never part of the context's tool set.
+        # A built-in tool: sent on every inference alongside the context's own
+        # tools, through the adapter's builtin_tools, and never part of
+        # LLMContext.tools.
         self.llm.register_function(REPORT_TOOL_NAME, self._report_result)
         self.llm.get_llm_adapter().builtin_tools[REPORT_TOOL_NAME] = FunctionSchema(
             name=REPORT_TOOL_NAME,
@@ -532,9 +533,10 @@ class BackendLLMWorker(LLMContextWorker):
             required=[],
         )
         # Whether the model's current turn made function calls, which decides
-        # whether the text it wrote is a report or notes on the work. The
-        # calls are requested before the turn ends, so the flag is read and
-        # cleared as the turn stops. A turn whose only calls are reports has
+        # whether the text it wrote is a report (prefers_spoken=True) or just
+        # notes on the work (prefers_spoken=False). The calls are requested
+        # before the turn ends, so the flag is read and cleared as the turn
+        # stops. A turn whose only calls are report calls (report_result) has
         # nothing else to bring the next run, so the report's result does.
         self._turn_made_calls = False
         self._turn_only_reports = False
@@ -550,15 +552,16 @@ class BackendLLMWorker(LLMContextWorker):
         self._requests_pending = 0
         self._runs_requested = 0
         self._runs_completed = 0
-        # Whether the current lull has been announced, so a call settling
-        # after the last turn does not announce it twice.
+        # Whether the idle update has been sent for the current lull, so a
+        # call that settles after the last turn stopped does not send it twice.
         self._idle_announced = False
         # The index in the context of a request appended while the model was
-        # busy, which asked for no run of its own: the run that follows the
-        # current step takes it up, and the model sees the request beside
-        # whatever that step produced. Running it separately would run the
-        # model twice on the same context, the second time with nothing new
-        # to react to. Cleared once a run has it in view.
+        # busy, as an LLMMessagesAppendFrame with run_llm=False: the run that
+        # follows the current step takes it up, and the model sees the request
+        # alongside whatever that step produced. Running it separately would
+        # run the model twice on the same context, the second time with
+        # nothing new to react to. Cleared once an LLMContextFrame that holds
+        # the request reaches the LLM.
         self._request_awaiting_run: int | None = None
 
         @self.llm.event_handler("on_before_process_frame")
@@ -577,8 +580,10 @@ class BackendLLMWorker(LLMContextWorker):
                 self._requests_pending -= 1
                 if not frame.run_llm:
                     self._request_awaiting_run = len(self.context.messages)
-                    # What the request was held for may be gone by the time it
-                    # lands, as when the model cancelled the call meanwhile.
+                    # The synchronous call the request was held for may have
+                    # settled by the time the request lands in the context, as
+                    # when the model cancelled it with its cancel_<tool> tool
+                    # meanwhile, so check again whether the request can run now.
                     await self._run_awaiting_request()
 
         # The backend's function calls are relayed as they pass the assistant
@@ -590,9 +595,12 @@ class BackendLLMWorker(LLMContextWorker):
                 self._turn_made_calls = False
             await self._on_function_call_frame(frame)
 
-        # Every call the turn made, the cancel tools included, which the
-        # started frame leaves out: a turn that only cancels is a tool-call
-        # turn all the same. Synchronous, so it lands before the turn stops.
+        # Every call the turn made, the cancel_<tool> calls included, which
+        # FunctionCallsStartedFrame leaves out: a turn that only cancels is a
+        # tool-call turn all the same, so its text is a note
+        # (prefers_spoken=False). The event is synchronous, so the flag is set
+        # before the turn's end frame reaches the assistant aggregator and the
+        # turn stops.
         @self.llm.event_handler("on_function_calls_requested")
         async def on_function_calls_requested(llm, function_calls):
             self._turn_made_calls = True
@@ -602,17 +610,19 @@ class BackendLLMWorker(LLMContextWorker):
 
         @self.assistant_aggregator.event_handler("on_after_process_frame")
         async def on_after_assistant_aggregator_frame(aggregator, frame: Frame):
-            # A result that asks for no run may have settled the last call a
-            # waiting request was held for; one that asks for a run brings
-            # the run itself.
+            # A FunctionCallResultFrame with run_llm=False may have settled the
+            # last synchronous call a waiting request was held for, so the
+            # request runs now; one with run_llm=True brings the run itself.
             if (
                 isinstance(frame, FunctionCallResultFrame)
                 and frame.properties is not None
                 and frame.properties.run_llm is False
             ) or isinstance(frame, FunctionCallCancelFrame):
                 await self._run_awaiting_request()
-                # A call settling after the last turn may be the last thing
-                # the backend had in flight.
+                # A call that settles (its result or cancellation arrives)
+                # after the last turn stopped may have been the last thing the
+                # backend had in flight, so the idle update is sent from here
+                # as well as from the end of a turn.
                 await self._announce_idle_if_done()
 
         @self.assistant_aggregator.event_handler("on_assistant_turn_stopped")
@@ -667,7 +677,8 @@ class BackendLLMWorker(LLMContextWorker):
             message.job_id, {"type": ATTACHED_UPDATE_TYPE, "capabilities": self.capabilities}
         )
         try:
-            # Ends only by cancellation, which is how the frontend detaches.
+            # The attach job ends only when the frontend cancels it, which is
+            # how the frontend detaches.
             await attached.detached.wait()
         finally:
             if self._attached is attached:
@@ -767,16 +778,17 @@ class BackendLLMWorker(LLMContextWorker):
         if self._attached is None:
             logger.warning(f"Worker '{self.name}': no frontend to send output to")
             return
-        # Past the transform by default, so an app can silence the model's
-        # progress with a transform_output that drops it and still send
-        # progress of its own, such as from a tool the model calls to talk to
+        # Not passed through transform_output by default
+        # (apply_transform_output=False), so an app can silence the model's
+        # outputs with a transform_output that drops them and still send
+        # outputs of its own, such as from a tool the model calls to talk to
         # the user.
         await self._emit(output, apply_transform_output=apply_transform_output)
 
     async def _on_assistant_turn_stopped(self, message: AssistantTurnStoppedMessage):
         if message.interrupted:
-            # What an interrupted turn produced is moot, and the interruption
-            # already zeroed the runs outstanding.
+            # Text from an interrupted turn is not sent, and the
+            # InterruptionFrame handler above already reset the run counters.
             return
         self._runs_completed += 1
         text = (message.content or "").strip()
@@ -804,9 +816,10 @@ class BackendLLMWorker(LLMContextWorker):
         text = str(params.arguments.get("text") or "").strip()
         if text:
             await self._emit(BackendOutput(text=text, prefers_spoken=True))
-        # The results of the calls made beside this one bring the next run;
-        # a report made on its own has to bring it itself, or the work it
-        # was made in the middle of stops there.
+        # The results of the tool calls made alongside this report_result call
+        # bring the next LLM run; a report_result call made on its own has to
+        # bring it itself (run_llm=True), or the work it was made in the
+        # middle of stops there.
         await params.result_callback(
             {"status": "reported", "next": "Go on with the remaining work; do not repeat this."},
             properties=FunctionCallResultProperties(run_llm=self._turn_only_reports),
@@ -849,7 +862,9 @@ class BackendLLMWorker(LLMContextWorker):
         elif isinstance(frame, FunctionCallCancelFrame):
             calls = [BackendToolCall("cancelled", frame.function_name, frame.tool_call_id)]
         for call in calls:
-            # The report tools are the stream's own, not the backend's work.
+            # report_result and nothing_to_report are the worker's own tools,
+            # not the backend's work, so they are not reported to the frontend
+            # as tool calls.
             if call.function_name not in (REPORT_TOOL_NAME, NO_REPORT_TOOL_NAME):
                 await self._send_update(call.to_payload())
 

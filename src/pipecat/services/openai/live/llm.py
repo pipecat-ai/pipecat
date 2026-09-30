@@ -1036,8 +1036,8 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
     ):
         current = self._current_delegation
         if isinstance(event, BackendToolCall):
-            # Reported for clients, as the Responses-delegation backend's calls
-            # are; the delegation itself is not a call, so no parent.
+            # Reported to clients as ExternalFunctionCall frames, as the
+            # Responses-delegation backend's calls are.
             await self.push_frame(event.to_frame())
         elif isinstance(event, BackendOutput):
             if not event.text:

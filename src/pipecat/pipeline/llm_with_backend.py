@@ -103,7 +103,8 @@ _DELEGATION_POLICY = (
     "around it. "
 )
 
-#: What the frontend does with the backend's messages and the stop tool.
+#: What the frontend does with the backend's messages, and that anything the
+#: user says about work already handed over is handed over too.
 _MESSAGES_INSTRUCTION = (
     "To the user there is one assistant, you: never mention the backend, delegation, a "
     'handoff or tools. Say what is being done as your own doing, such as "I\'m checking" or '
@@ -254,9 +255,11 @@ class TranscriptBackendRequestStrategy(BackendRequestStrategy):
         """Render the turns since the previous delegation as the request."""
         messages = params.context.get_messages()
         if self._delegated_through > len(messages):
-            # The context was reset since the previous delegation.
+            # The context holds fewer messages than the previous delegation
+            # read: it was reset since, so the transcript starts from the top.
             self._delegated_through = 0
-        # A message in a service's own format carries no turn for the transcript.
+        # An LLMSpecificMessage, in a service's own format, is not a user or
+        # assistant turn, so the transcript leaves it out.
         conversation = [
             m
             for m in messages[self._delegated_through :]
@@ -500,7 +503,8 @@ class BackendConnector:
         assert self._context is not None, "connector not bound"
         request = await self.request_strategy.compose_request(params)
         if request is None:
-            # Nothing new since the previous delegation: the backend has it all.
+            # No turns since the previous delegation: the backend already has
+            # everything the transcript would carry, so nothing is sent.
             logger.debug(f"Delegate call {params.tool_call_id} carries nothing new; not sent")
             await params.result_callback(
                 {"status": "already_delegated"},
