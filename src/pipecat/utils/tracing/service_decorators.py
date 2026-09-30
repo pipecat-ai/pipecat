@@ -1318,13 +1318,13 @@ def traced_gemini_live(operation: str) -> Callable:
                                 )
                                 operation_attrs["gen_ai.usage.output_tokens"] = (
                                     usage.response_token_count or 0
-                                )
+                                ) + (usage.thoughts_token_count or 0)
                                 if usage.cached_content_token_count is not None:
                                     operation_attrs["gen_ai.usage.cache_read.input_tokens"] = (
                                         usage.cached_content_token_count
                                     )
                                 if usage.thoughts_token_count is not None:
-                                    operation_attrs["gen_ai.usage.reasoning_tokens"] = (
+                                    operation_attrs["gen_ai.usage.reasoning.output_tokens"] = (
                                         usage.thoughts_token_count
                                     )
                                 input_audio_tokens = _gemini_audio_modality_tokens(

@@ -11,8 +11,13 @@ spent on reasoning in ``reasoning_tokens``, whichever way a provider reports
 them.
 """
 
+from unittest.mock import AsyncMock
+
+import pytest
+from google.genai.types import LiveServerMessage, UsageMetadata
 from openai.types import CompletionUsage
 
+from pipecat.services.google.gemini_live.llm import GeminiLiveLLMService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.xai.llm import GrokLLMService
 
@@ -64,3 +69,28 @@ def test_grok_keeps_reasoning_already_in_completion_tokens():
         )
     )
     assert tokens.completion_tokens == 103
+
+
+# -- Gemini Live ------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_gemini_live_adds_thoughts_to_completion_tokens():
+    service = GeminiLiveLLMService(api_key="test-key")
+    service.start_llm_usage_metrics = AsyncMock()
+
+    await service._handle_msg_usage_metadata(
+        LiveServerMessage(
+            usage_metadata=UsageMetadata(
+                prompt_token_count=40,
+                response_token_count=10,
+                thoughts_token_count=120,
+                total_token_count=170,
+            )
+        )
+    )
+
+    tokens = service.start_llm_usage_metrics.call_args.args[0]
+    assert tokens.completion_tokens == 130
+    assert tokens.reasoning_tokens == 120
+    assert tokens.total_tokens == 170

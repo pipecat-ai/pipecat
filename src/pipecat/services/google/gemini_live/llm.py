@@ -2400,7 +2400,9 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
 
         # Ensure we have valid integers for all token counts
         prompt_tokens = usage.prompt_token_count or 0
-        completion_tokens = usage.response_token_count or 0
+        # Gemini counts thinking tokens apart from the response, but they are
+        # generated output too.
+        completion_tokens = (usage.response_token_count or 0) + (usage.thoughts_token_count or 0)
         total_tokens = usage.total_token_count or (prompt_tokens + completion_tokens)
 
         tokens = LLMTokenUsage(
