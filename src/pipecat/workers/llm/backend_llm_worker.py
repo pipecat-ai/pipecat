@@ -119,7 +119,7 @@ _SPOKEN_MARK_LINE = re.compile(rf"(?m)^[ \t]*{re.escape(SPOKEN_MARK)}")
 #: Appended to the backend model's system instruction: who it is, which of what
 #: it writes the user hears, and how it takes requests. The backend's own
 #: system instruction says what it does; this says how what it writes reaches
-#: the user.
+#: the user. ``BackendLLMWorker(instructions=...)`` replaces it.
 BACKEND_OUTPUT_INSTRUCTIONS = (
     "You are the backend of a voice assistant. The assistant talks with the user and sends "
     "you requests: the conversation it is having, or a request it worded for you. Do the "
@@ -458,6 +458,7 @@ class BackendLLMWorker(LLMContextWorker):
         context: LLMContext | None = None,
         name: str | None = None,
         transform_output: BackendOutputTransform | None = None,
+        instructions: str = BACKEND_OUTPUT_INSTRUCTIONS,
         user_params: LLMUserAggregatorParams | None = None,
         assistant_params: LLMAssistantAggregatorParams | None = None,
     ):
@@ -475,6 +476,13 @@ class BackendLLMWorker(LLMContextWorker):
                 whether the user may hear it, or to return ``None`` and send
                 nothing. Outputs the app sends itself are not passed through
                 it unless the call asks.
+            instructions: What is appended to the LLM's system instruction:
+                :data:`BACKEND_OUTPUT_INSTRUCTIONS` unless given. An app that
+                gives its own takes on telling the model what the assistant
+                sends it, that the user hears what it marks with
+                :data:`SPOKEN_MARK` and nothing else, and how to take
+                requests that arrive while it works; the instruction the
+                worker adds to each request names the mark as well.
             user_params: Optional parameters for the user aggregator. Defaults
                 to external turn strategies: the backend has no audio, so the
                 default VAD and turn-analysis strategies (and the model the
@@ -498,7 +506,7 @@ class BackendLLMWorker(LLMContextWorker):
         )
         self._attached: _AttachedFrontend | None = None
         self._transform_output = transform_output
-        self.llm.append_system_instruction(BACKEND_OUTPUT_INSTRUCTIONS)
+        self.llm.append_system_instruction(instructions)
 
         # Whether the backend is working is read off its pipeline: requests
         # queued but not yet taken up, LLM runs picked up but not yet ended,

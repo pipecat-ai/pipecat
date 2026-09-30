@@ -744,6 +744,15 @@ def test_the_model_is_told_how_what_it_writes_reaches_the_user():
     assert SPOKEN_MARK in BACKEND_OUTPUT_INSTRUCTIONS
 
 
+def test_an_app_can_replace_the_instruction_the_worker_appends():
+    llm = _ScriptedLLM([])
+    BackendLLMWorker(llm=llm, instructions="Begin what the user should hear with >>.")
+
+    told = llm._settings.system_instruction or ""
+    assert "Begin what the user should hear with >>." in told
+    assert BACKEND_OUTPUT_INSTRUCTIONS not in told
+
+
 @pytest.mark.asyncio
 async def test_a_tool_handler_that_raises_leaves_the_backend_working():
     llm = _ScriptedLLM(
