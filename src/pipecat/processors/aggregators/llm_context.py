@@ -93,7 +93,6 @@ class LLMContext:
         messages: list[LLMContextMessage] | None = None,
         tools: ToolsSchema | list[FunctionSchema | DirectFunction] | NotGiven = NOT_GIVEN,
         tool_choice: LLMContextToolChoice | NotGiven = NOT_GIVEN,
-        skip_set_tools_frame: bool = False,
     ):
         """Initialize the LLM context.
 
@@ -107,9 +106,6 @@ class LLMContext:
                 the LLM service automatically, so no separate
                 ``register_function`` call is needed.
             tool_choice: Tool selection strategy for the LLM.
-            skip_set_tools_frame: If True, LLMSetToolsFrame will not update
-                tools on this context. Useful for classifier contexts (e.g.
-                voicemail detector) that should not inherit pipeline tools.
         """
         self._messages: list[LLMContextMessage] = messages if messages else []
         self._tools: ToolsSchema | NotGiven = LLMContext._normalize_and_validate_tools(tools)
@@ -118,9 +114,6 @@ class LLMContext:
         # Name of the current OTel span. This is useful for downstream tracing
         # where we want to include the span name in the span.
         self._otel_span_name = ""
-
-        # For context instances which should not take tools, like voicemail detector
-        self._skip_set_tools_frame = skip_set_tools_frame
 
     @staticmethod
     def create_image_url_message(
@@ -414,8 +407,6 @@ class LLMContext:
             tools: A ToolsSchema, a plain list of direct functions and/or
                 ``FunctionSchema`` objects, or NOT_GIVEN to disable tools.
         """
-        if self._skip_set_tools_frame:
-            return
         self._tools = LLMContext._normalize_and_validate_tools(tools)
 
     def set_tool_choice(self, tool_choice: LLMContextToolChoice | NotGiven):
