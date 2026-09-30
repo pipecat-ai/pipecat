@@ -4,22 +4,28 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""OpenAI Live (gpt-live-1) with a backend told what is worth the user's ear: here, only the outcome.
+"""OpenAI Live (gpt-live-1) with an app deciding what the user hears from its backend.
 
-A ``BackendLLMWorker``'s model decides which of what it writes the user hears.
-Left to the worker's default, it speaks up for a result, a question it cannot
-proceed without, and news the user should have now, and works through the
-steps in between in silence: rebooking a cancelled flight, it would tell the
-user about the cancellation as soon as it found it, then again once they were
-rebooked. An app that wants a different policy says so in the backend's own
-prompt, in plain words, and nothing else changes: here, the last paragraph of
-``BACKEND_INSTRUCTIONS`` has the user hear one thing, where they stand once the
-job is done. The model weighs that against its own sense of what the user
-should know, so it follows the policy most of the time, not always.
+A ``BackendLLMWorker``'s model decides which of what it writes the user hears:
+it speaks up for a result, a question it cannot proceed without, and news the
+user should have now, and works through the steps in between in silence. An
+app has two levers over that.
 
-When the app must be certain, ``transform_output`` is the lever: it sees every
-output after the worker has read the model's choice, and can drop it, rewrite
-it, or change whether it is spoken. Here it only logs each one with its flag.
+What must be said, a tool says itself, with ``send_output``. ``rebook_flight``
+tells the user the new flight, seat and confirmation code as the booking
+system gave them: spoken whatever the model would have chosen, and in no one's
+paraphrase. Its result says the user has been told.
+
+The backend's prompt shapes the model's judgment, in plain words. The last
+paragraph of ``BACKEND_INSTRUCTIONS`` says the booking system announces a
+booking itself, so the model never repeats it and adds only what the user
+still needs to know, in a sentence or nothing. The model still speaks up on
+its own for news, as when it finds the flight cancelled: the prompt steers
+its judgment rather than replacing it.
+
+``transform_output`` is the third lever, for code that should see every
+output the model produces: it can drop one, rewrite it, or change whether it
+is spoken. Here it only logs each one with its flag.
 
 To hear it, ask for something that takes the backend several steps, like "my
 flight UA482 this morning — can you check it, and get me on something else if
@@ -72,9 +78,9 @@ user's flights or bookings — checking one, changing one, finding another. The
 backend reads the conversation, so hand off as soon as you know the request is
 for it.
 
-The backend speaks up once, when the job is done; relay that. Everything else
-it does reaches you as context: keep it to yourself, and draw on it only if
-the user asks what is happening.
+The backend speaks up when it has something for the user; relay that.
+Everything else it does reaches you as context: keep it to yourself, and draw
+on it only if the user asks what is happening.
 
 ## Interruptions
 Stop speaking when the user interrupts and listen to the new request."""
@@ -88,9 +94,10 @@ the flight, find what else flies the route, book a seat on the earliest flight
 that has them), carry on to the end rather than coming back with a menu. Never
 claim an action completed without a tool result confirming it.
 
-The user wants the outcome, not a play-by-play: tell them nothing while you
-work, whatever you find along the way, and when the job is done tell them once
-what happened and where they stand."""
+The booking system tells the user itself when a booking goes through, with
+the flight, seat and confirmation code, so never repeat those; once it has,
+add only what they still need to know, in a sentence, or nothing. If a job
+ends without a booking, tell them once where they stand."""
 
 
 async def log_output(output: BackendOutput) -> BackendOutput:
@@ -148,9 +155,17 @@ async def rebook_flight(params: FunctionCallParams, flight_number: str):
         flight_number: The flight to move the booking to, e.g. "UA716".
     """
     await asyncio.sleep(3)
-    await params.result_callback(
-        {"flight": flight_number, "status": "confirmed", "seat": "14C", "confirmation": "X7K2QP"}
+    booking = {"flight": flight_number, "departs": "16:15", "seat": "14C", "confirmation": "X7K2QP"}
+    # The confirmation is told to the user by the tool itself, as the booking
+    # system gave it, whatever the model would have chosen to say.
+    told = (
+        f"You're booked on {booking['flight']}, departing at {booking['departs']}, "
+        f"seat {booking['seat']}. Your confirmation code is {booking['confirmation']}."
     )
+    backend = params.pipeline_worker
+    assert isinstance(backend, BackendLLMWorker)
+    await backend.send_output(BackendOutput(text=told))
+    await params.result_callback({**booking, "status": "confirmed", "user_told": told})
 
 
 # We use lambdas to defer transport parameter creation until the transport
