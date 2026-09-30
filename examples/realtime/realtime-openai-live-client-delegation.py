@@ -201,7 +201,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     @backend.assistant_aggregator.event_handler("on_assistant_turn_stopped")
     async def on_backend_turn_stopped(aggregator, message: AssistantTurnStoppedMessage):
-        logger.info(f"Backend said: {message.content}")
+        logger.info(f"Backend wrote: {message.content}")
 
     @user_aggregator.event_handler("on_user_turn_message_added")
     async def on_user_turn_message_added(aggregator, message: UserTurnMessageAddedMessage):

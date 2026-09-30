@@ -1150,9 +1150,9 @@ def _client_delegation(delegation_id: str) -> events.DelegationMetadata:
 
 _REPORT_LINE = (
     "Act on the user's most recent request in the conversation above. If it asks for "
-    "something, report the result as soon as you have it, before going on with other work. "
-    "If it only stops or changes work already under way, call nothing_to_report instead of "
-    "reporting: the assistant has already told the user."
+    "something, tell the user the result as soon as you have it, before going on with other "
+    "work, in a message that begins with >>. If it only stops or changes work already under "
+    "way, tell them nothing: the assistant already has."
 )
 
 

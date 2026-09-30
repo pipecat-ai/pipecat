@@ -44,10 +44,7 @@ from pipecat.workers.base_worker import BaseWorker
 from pipecat.workers.llm import BackendLLMWorker
 from pipecat.workers.llm.backend_llm_worker import (
     BACKEND_OUTPUT_INSTRUCTIONS,
-    BACKEND_REQUEST_INSTRUCTIONS,
-    BACKEND_ROLE_INSTRUCTIONS,
-    NO_REPORT_TOOL_NAME,
-    REPORT_TOOL_NAME,
+    SPOKEN_MARK,
     BackendError,
     BackendIdle,
     BackendOutput,
@@ -165,7 +162,7 @@ def test_render_transcript_request_points_the_backend_at_the_conversation():
         "Voice conversation so far:\n"
         "USER: what's the weather\n"
         "\n"
-        "Act on the user's most recent request in the conversation above. If it asks for something, report the result as soon as you have it, before going on with other work. If it only stops or changes work already under way, call nothing_to_report instead of reporting: the assistant has already told the user."
+        "Act on the user's most recent request in the conversation above. If it asks for something, tell the user the result as soon as you have it, before going on with other work, in a message that begins with >>. If it only stops or changes work already under way, tell them nothing: the assistant already has."
     )
 
 
@@ -216,7 +213,7 @@ def test_render_transcript_request_flattens_what_a_transcript_can_hold():
         "USER: what is this\n"
         "ASSISTANT: Let me look.\n"
         "\n"
-        "Act on the user's most recent request in the conversation above. If it asks for something, report the result as soon as you have it, before going on with other work. If it only stops or changes work already under way, call nothing_to_report instead of reporting: the assistant has already told the user."
+        "Act on the user's most recent request in the conversation above. If it asks for something, tell the user the result as soon as you have it, before going on with other work, in a message that begins with >>. If it only stops or changes work already under way, tell them nothing: the assistant already has."
     )
 
 
@@ -270,7 +267,7 @@ async def test_an_attached_frontend_hears_the_backend_work_a_request_through():
     llm = _ScriptedLLM(
         [
             [("text", "Let me check."), ("call", "get_weather", "call_1", {"location": "Seattle"})],
-            [("text", "It's 62 and raining in Seattle.")],
+            [("text", ">> It's 62 and raining in Seattle.")],
         ]
     )
     backend, requester, runner = _attached_backend(llm)
@@ -286,8 +283,8 @@ async def test_an_attached_frontend_hears_the_backend_work_a_request_through():
     await _drive(runner, requester, backend, body)
 
     assert statuses == ["idle"]
-    # What the model writes beside tool calls is notes on the work; what it
-    # writes in a turn with none is for the user.
+    # A message the model begins with the mark is for the user, and arrives
+    # without it; anything else it writes is notes on the work.
     outputs = [e for e in events if isinstance(e, BackendOutput)]
     assert outputs == [
         BackendOutput(text="Let me check.", prefers_spoken=False),
@@ -321,7 +318,7 @@ async def test_a_message_sent_while_the_model_runs_is_taken_up_by_the_next_run()
     llm = _ScriptedLLM(
         [
             [("call", "slow_lookup", "call_1", {})],
-            [("text", "Done with both.")],
+            [("text", ">> Done with both.")],
         ],
         settle_secs=1.0,
     )
@@ -361,7 +358,7 @@ async def test_a_message_sent_while_a_synchronous_tool_is_in_flight_waits_for_it
     llm = _ScriptedLLM(
         [
             [("call", "slow_lookup", "call_1", {})],
-            [("text", "The lookup is done, and on to the second thing.")],
+            [("text", ">> The lookup is done, and on to the second thing.")],
         ]
     )
     backend, requester, runner = _attached_backend(llm, tools=[slow_lookup])
@@ -405,8 +402,8 @@ async def test_a_message_sent_while_only_an_asynchronous_tool_is_in_flight_runs_
     llm = _ScriptedLLM(
         [
             [("call", "slow_lookup", "call_1", {})],
-            [("text", "On the second thing now.")],
-            [("text", "And the lookup is done.")],
+            [("text", ">> On the second thing now.")],
+            [("text", ">> And the lookup is done.")],
         ]
     )
     backend, requester, runner = _attached_backend(llm, tools=[slow_lookup])
@@ -446,7 +443,9 @@ async def test_closing_the_session_stops_the_backend_and_the_next_session_starts
         await asyncio.sleep(30)
         await params.result_callback({"never": "reached"})
 
-    llm = _ScriptedLLM([[("call", "slow_lookup", "call_1", {})], [("text", "Second time round.")]])
+    llm = _ScriptedLLM(
+        [[("call", "slow_lookup", "call_1", {})], [("text", ">> Second time round.")]]
+    )
     backend, requester, runner = _attached_backend(llm, tools=[slow_lookup])
     second: list = []
 
@@ -470,7 +469,7 @@ async def test_closing_the_session_stops_the_backend_and_the_next_session_starts
 
 @pytest.mark.asyncio
 async def test_a_second_frontend_cannot_attach_and_a_message_needs_an_attached_frontend():
-    llm = _ScriptedLLM([[("text", "Hello.")]])
+    llm = _ScriptedLLM([[("text", ">> Hello.")]])
     backend, requester, runner = _attached_backend(llm)
     other = BaseWorker("other")
 
@@ -490,7 +489,7 @@ async def test_a_second_frontend_cannot_attach_and_a_message_needs_an_attached_f
 
 @pytest.mark.asyncio
 async def test_a_backend_error_reaches_the_frontend_and_the_stream_goes_on():
-    llm = _ScriptedLLM([[("error", "the provider is down")], [("text", "Back again.")]])
+    llm = _ScriptedLLM([[("error", "the provider is down")], [("text", ">> Back again.")]])
     backend, requester, runner = _attached_backend(llm)
     events: list = []
 
@@ -519,7 +518,7 @@ async def test_an_attached_frontend_hears_thoughts_and_the_apps_own_outputs():
                 ("thought", "Check the weather first."),
                 ("call", "report", "call_1", {"text": "Halfway there."}),
             ],
-            [("text", "Done.")],
+            [("text", ">> Done.")],
         ]
     )
 
@@ -599,9 +598,9 @@ async def test_transform_output_shapes_what_the_model_writes():
     async def transform_output(output: BackendOutput) -> BackendOutput | None:
         if output.is_thought:
             return None
-        if output.text.startswith(">>"):
-            return replace(output, text=output.text[2:].lstrip(), prefers_spoken=True)
-        return replace(output, text="", prefers_spoken=False)
+        if output.prefers_spoken:
+            return replace(output, text=output.text.upper())
+        return replace(output, text="")
 
     backend, requester, runner = _attached_backend(llm, transform_output=transform_output)
     events: list = []
@@ -613,53 +612,24 @@ async def test_transform_output_shapes_what_the_model_writes():
 
     await _drive(runner, requester, backend, body)
 
-    # The thought was dropped, the marker stripped and its note spoken, and an
-    # emptied output still sent.
+    # The transform sees each output after the mark rule (flag set, mark
+    # stripped): the thought was dropped, the spoken output reshaped, and an
+    # emptied note still sent.
     assert [(e.text, e.prefers_spoken) for e in events if isinstance(e, BackendOutput)] == [
-        ("Checking.", True),
+        ("CHECKING.", True),
         ("", False),
     ]
 
 
 @pytest.mark.asyncio
-async def test_a_report_made_on_its_own_brings_the_next_run():
-    """With no other call in the turn, nothing else would run the model again."""
-    llm = _ScriptedLLM(
-        [
-            [("call", "check_flight_status", "call_1", {"flight_number": "AA100"})],
-            [("call", REPORT_TOOL_NAME, "call_r", {"text": "Your flight is delayed."})],
-            [("call", "book_taxi", "call_2", {"time": "12:30"})],
-            [("text", "Taxi booked for 12:30.")],
-        ]
-    )
-    backend, requester, runner = _attached_backend(llm, tools=[check_flight_status, book_taxi])
-    events: list = []
-
-    async def body():
-        async with _BackendSession(requester, "backend") as session:
-            await session.send("Check my flight and book a taxi")
-            events.extend(await _until_idle(session))
-
-    await _drive(runner, requester, backend, body)
-
-    assert len(llm.contexts_seen) == 4
-    assert [(e.text, e.prefers_spoken) for e in events if isinstance(e, BackendOutput)] == [
-        ("Your flight is delayed.", True),
-        ("Taxi booked for 12:30.", True),
-    ]
-    assert isinstance(events[-1], BackendIdle)
-
-
-@pytest.mark.asyncio
-async def test_the_report_tool_speaks_for_the_model_while_it_goes_on_working():
+async def test_a_marked_message_beside_tool_calls_is_spoken_and_the_calls_still_run():
     llm = _ScriptedLLM(
         [
             [
-                ("text", "Reporting the flight, then booking."),
-                ("call", REPORT_TOOL_NAME, "call_r", {"text": "Your flight is delayed."}),
+                ("text", ">> Your flight is delayed, so I'm booking you a taxi."),
                 ("call", "book_taxi", "call_1", {"time": "12:30"}),
             ],
-            [("text", "Taxi booked for 12:30.")],
+            [("text", ">> Taxi booked for 12:30.")],
         ]
     )
     backend, requester, runner = _attached_backend(llm, tools=[book_taxi])
@@ -672,23 +642,56 @@ async def test_the_report_tool_speaks_for_the_model_while_it_goes_on_working():
 
     await _drive(runner, requester, backend, body)
 
-    # The report is spoken, the note beside the calls is not, and the report
-    # tool itself is not reported as one of the backend's calls.
+    # The mark decides, not whether the turn made calls: a result can ride the
+    # turn that starts the next step.
     assert [(e.text, e.prefers_spoken) for e in events if isinstance(e, BackendOutput)] == [
-        ("Your flight is delayed.", True),
-        ("Reporting the flight, then booking.", False),
+        ("Your flight is delayed, so I'm booking you a taxi.", True),
         ("Taxi booked for 12:30.", True),
     ]
     assert {e.function_name for e in events if isinstance(e, BackendToolCall)} == {"book_taxi"}
+    assert len(llm.contexts_seen) == 2
     assert isinstance(events[-1], BackendIdle)
-    # The tool is the model's on every inference, never in the context's tool set.
-    assert REPORT_TOOL_NAME in llm.get_llm_adapter().builtin_tools
-    assert REPORT_TOOL_NAME not in {t.name for t in backend.context.tools.standard_tools}
+    # The model's own context keeps the message as written, mark and all.
+    assistant = [m for m in llm.contexts_seen[1] if m.get("role") == "assistant"]
+    assert any(">> Your flight is delayed" in str(m.get("content")) for m in assistant)
 
 
 @pytest.mark.asyncio
-async def test_the_no_report_tool_silences_a_turn_and_runs_nothing():
-    """A message that stops the work gets no reply: the cancel, then the no-op call on its result."""
+async def test_a_mark_partway_through_a_message_splits_it_into_a_note_and_a_result():
+    llm = _ScriptedLLM(
+        [
+            [
+                (
+                    "text",
+                    "Found the issue: a fixed backoff. Fixing it next.\n\n"
+                    ">> The runbook says to check the status page first.",
+                ),
+                ("call", "book_taxi", "call_1", {"time": "12:30"}),
+            ],
+            [("text", ">> Fixed, and the tests pass.")],
+        ]
+    )
+    backend, requester, runner = _attached_backend(llm, tools=[book_taxi])
+    events: list = []
+
+    async def body():
+        async with _BackendSession(requester, "backend") as session:
+            await session.send("Fix the test and look up the runbook")
+            events.extend(await _until_idle(session))
+
+    await _drive(runner, requester, backend, body)
+
+    # What precedes the marked line is a note; from the mark on is spoken.
+    assert [(e.text, e.prefers_spoken) for e in events if isinstance(e, BackendOutput)] == [
+        ("Found the issue: a fixed backoff. Fixing it next.", False),
+        ("The runbook says to check the status page first.", True),
+        ("Fixed, and the tests pass.", True),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_an_unmarked_message_is_a_note_and_a_thought_is_never_spoken():
+    """A message that stops the work gets no spoken reply: the model writes notes, or nothing."""
     lookup_started = asyncio.Event()
 
     @tool_options(cancel_on_interruption=False, cancellable_by_llm=True)
@@ -700,10 +703,10 @@ async def test_the_no_report_tool_silences_a_turn_and_runs_nothing():
 
     llm = _ScriptedLLM(
         [
-            [("call", "slow_lookup", "call_1", {})],
+            [("thought", ">> Look it up first."), ("call", "slow_lookup", "call_1", {})],
             [("text", "Stopping the lookup."), ("call", "cancel_slow_lookup", "call_c", {})],
-            # The cancellation's result brings one more run, with nothing to say.
-            [("call", NO_REPORT_TOOL_NAME, "call_n", {})],
+            # The cancellation's result brings one more run.
+            [("text", "Nothing left to do.")],
         ]
     )
     backend, requester, runner = _attached_backend(llm, tools=[slow_lookup])
@@ -718,36 +721,27 @@ async def test_the_no_report_tool_silences_a_turn_and_runs_nothing():
 
     await _drive(runner, requester, backend, body)
 
-    # The note beside the cancel is silent, the lookup is cancelled, and the
-    # no-op call brings no run of its own: the model ran three times in all.
-    assert [(e.text, e.prefers_spoken) for e in events if isinstance(e, BackendOutput)] == [
-        ("Stopping the lookup.", False)
+    # A thought stays a note whatever it begins with, and keeps its text as is.
+    assert [
+        (e.text, e.is_thought, e.prefers_spoken) for e in events if isinstance(e, BackendOutput)
+    ] == [
+        (">> Look it up first.", True, False),
+        ("Stopping the lookup.", False, False),
+        ("Nothing left to do.", False, False),
     ]
     phases = [(e.function_name, e.phase) for e in events if isinstance(e, BackendToolCall)]
     assert ("slow_lookup", "cancelled") in phases
-    assert NO_REPORT_TOOL_NAME not in {
-        e.function_name for e in events if isinstance(e, BackendToolCall)
-    }
     assert isinstance(events[-1], BackendIdle)
     assert len(llm.contexts_seen) == 3
-    assert NO_REPORT_TOOL_NAME in llm.get_llm_adapter().builtin_tools
 
 
-def test_an_app_can_replace_what_the_model_is_told_about_speech():
-    default = _ScriptedLLM([])
-    BackendLLMWorker(llm=default)
-    custom = _ScriptedLLM([])
-    BackendLLMWorker(llm=custom, output_instructions="Mark what the user should hear.")
+def test_the_model_is_told_how_what_it_writes_reaches_the_user():
+    llm = _ScriptedLLM([])
+    BackendLLMWorker(llm=llm)
 
-    told_by_default = default._settings.system_instruction or ""
-    told = custom._settings.system_instruction or ""
-
-    assert BACKEND_OUTPUT_INSTRUCTIONS in told_by_default
-    assert "Mark what the user should hear." in told
-    assert BACKEND_OUTPUT_INSTRUCTIONS not in told
-    # Who the backend is and how it takes requests are told either way.
-    for part in (BACKEND_ROLE_INSTRUCTIONS, BACKEND_REQUEST_INSTRUCTIONS):
-        assert part in told and part in told_by_default
+    told = llm._settings.system_instruction or ""
+    assert BACKEND_OUTPUT_INSTRUCTIONS in told
+    assert SPOKEN_MARK in BACKEND_OUTPUT_INSTRUCTIONS
 
 
 @pytest.mark.asyncio
@@ -755,7 +749,7 @@ async def test_a_tool_handler_that_raises_leaves_the_backend_working():
     llm = _ScriptedLLM(
         [
             [("call", "raise_an_error", "call_1", {})],
-            [("text", "That did not work, sorry.")],
+            [("text", ">> That did not work, sorry.")],
         ]
     )
     backend, requester, runner = _attached_backend(llm, tools=[raise_an_error])
@@ -784,7 +778,7 @@ async def test_a_chained_request_reports_at_each_step_and_idles_at_the_end():
                 ("text", "It's delayed, so I'm booking a taxi for 12:30."),
                 ("call", "book_taxi", "call_2", {"time": "12:30"}),
             ],
-            [("text", "Taxi booked for 12:30.")],
+            [("text", ">> Taxi booked for 12:30.")],
         ]
     )
     backend, requester, runner = _attached_backend(llm, tools=[check_flight_status, book_taxi])

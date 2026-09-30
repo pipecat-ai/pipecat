@@ -38,7 +38,7 @@ from pipecat.services.llm_service import FunctionCallParams, LLMService
 from pipecat.workers.base_worker import BaseWorker
 from pipecat.workers.llm.backend_llm_worker import (
     _DEFAULT_TRANSCRIPT_INSTRUCTION,
-    _REPORT_INSTRUCTION,
+    _TELL_INSTRUCTION,
     BackendError,
     BackendEvent,
     BackendIdle,
@@ -59,8 +59,8 @@ BACKEND_MESSAGE_PREFIX = "Backend: "
 #: How a backend reasoning summary is marked in the frontend's conversation.
 BACKEND_THOUGHT_PREFIX = "Backend (thinking): "
 
-#: How a backend note, text it wrote beside its tool calls, is marked in the
-#: frontend's conversation.
+#: How a backend note, text its model wrote without the mark that asks for
+#: the user to be told it, is marked in the frontend's conversation.
 BACKEND_NOTE_PREFIX = "Backend (note): "
 
 #: How a function call the backend is making is marked in the frontend's conversation.
@@ -319,7 +319,7 @@ class ExplicitBackendRequestStrategy(BackendRequestStrategy):
     async def compose_request(self, params: FunctionCallParams) -> str | None:
         """Send the model's request as it stands, with the reporting expectation after it."""
         request = str(params.arguments.get("request") or "").strip()
-        return f"{request}\n\n{_REPORT_INSTRUCTION}" if request else None
+        return f"{request}\n\n{_TELL_INSTRUCTION}" if request else None
 
 
 def _is_backend_message(message: LLMContextMessage) -> bool:

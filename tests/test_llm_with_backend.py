@@ -214,7 +214,7 @@ async def test_the_transcript_request_skips_messages_in_a_services_own_format():
         "USER: weather in seattle?\n"
         "ASSISTANT: Let me check.\n"
         "\n"
-        "Act on the user's most recent request in the conversation above. If it asks for something, report the result as soon as you have it, before going on with other work. If it only stops or changes work already under way, call nothing_to_report instead of reporting: the assistant has already told the user."
+        "Act on the user's most recent request in the conversation above. If it asks for something, tell the user the result as soon as you have it, before going on with other work, in a message that begins with >>. If it only stops or changes work already under way, tell them nothing: the assistant already has."
     ]
 
 
@@ -237,7 +237,7 @@ async def test_the_transcript_request_sends_only_what_the_backend_has_not_seen()
         "ASSISTANT: It's raining.\n"
         "USER: and boston?\n"
         "\n"
-        "Act on the user's most recent request in the conversation above. If it asks for something, report the result as soon as you have it, before going on with other work. If it only stops or changes work already under way, call nothing_to_report instead of reporting: the assistant has already told the user."
+        "Act on the user's most recent request in the conversation above. If it asks for something, tell the user the result as soon as you have it, before going on with other work, in a message that begins with >>. If it only stops or changes work already under way, tell them nothing: the assistant already has."
     )
 
 
@@ -271,7 +271,7 @@ async def test_the_explicit_request_sends_the_model_words():
 
     assert session.requests == [
         "Weather in Seattle, Fahrenheit.\n\n"
-        "If this request asks for something, report the result as soon as you have it, before going on with other work. If it only stops or changes work already under way, call nothing_to_report instead of reporting: the assistant has already told the user."
+        "If this request asks for something, tell the user the result as soon as you have it, before going on with other work, in a message that begins with >>. If it only stops or changes work already under way, tell them nothing: the assistant already has."
     ]
 
 
@@ -459,7 +459,7 @@ async def test_client_tracing_sends_each_exchange_as_a_server_message():
         llm=_ScriptedLLM(
             [
                 [("call", "get_weather", "c1", {"location": "Seattle"})],
-                [("text", "It's 62 and raining.")],
+                [("text", ">> It's 62 and raining.")],
             ]
         ),
         context=LLMContext(tools=[get_weather]),
@@ -500,7 +500,7 @@ async def test_a_local_backend_is_heard_through_the_frontends_conversation():
         llm=_ScriptedLLM(
             [
                 [("text", "Let me check."), ("call", "get_weather", "c1", {"location": "Seattle"})],
-                [("text", "It's 62 and raining.")],
+                [("text", ">> It's 62 and raining.")],
             ]
         ),
         context=LLMContext(tools=[get_weather]),

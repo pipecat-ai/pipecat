@@ -33,13 +33,13 @@ both drive the worker this way.
 """
 
 import asyncio
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
 
 from loguru import logger
 
-from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.bus.messages import BusJobCancelMessage, BusJobRequestMessage
 from pipecat.frames.frames import (
     ErrorFrame,
@@ -52,7 +52,6 @@ from pipecat.frames.frames import (
     FunctionCallCancelFrame,
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
-    FunctionCallResultProperties,
     FunctionCallsStartedFrame,
     InterruptionFrame,
     LLMContextFrame,
@@ -81,7 +80,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMAssistantAggregatorParams,
     LLMUserAggregatorParams,
 )
-from pipecat.services.llm_service import FunctionCallParams, LLMService
+from pipecat.services.llm_service import LLMService
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.errors import ErrorCategory
 from pipecat.workers.base_worker import BaseWorker
@@ -108,45 +107,37 @@ IDLE_UPDATE_TYPE = "idle"
 #: The ``type`` of the update that says the backend could not go on.
 ERROR_UPDATE_TYPE = "error"
 
-#: Name of the built-in tool the backend's model calls to tell the user something
-#: while it goes on working.
-REPORT_TOOL_NAME = "report_result"
+#: The mark the backend's model puts at the start of what it wants the user
+#: told. From a line that begins with it to the end of the message is sent
+#: with ``prefers_spoken=True``, mark stripped; what comes before that line,
+#: or a message with no such line, is a note (``prefers_spoken=False``).
+SPOKEN_MARK = ">>"
 
-#: Name of the built-in tool the backend's model calls instead of replying when there is nothing to tell the user.
-NO_REPORT_TOOL_NAME = "nothing_to_report"
+#: Where a message's spoken part starts: the first line that begins with the mark.
+_SPOKEN_MARK_LINE = re.compile(rf"(?m)^[ \t]*{re.escape(SPOKEN_MARK)}")
 
-#: Appended to the backend model's system instruction: who it is and what it is sent.
-BACKEND_ROLE_INSTRUCTIONS = (
+#: Appended to the backend model's system instruction: who it is, which of what
+#: it writes the user hears, and how it takes requests. The backend's own
+#: system instruction says what it does; this says how what it writes reaches
+#: the user.
+BACKEND_OUTPUT_INSTRUCTIONS = (
     "You are the backend of a voice assistant. The assistant talks with the user and sends "
     "you requests: the conversation it is having, or a request it worded for you. Do the "
     "parts that need your tools or careful reasoning; the assistant handles the rest of the "
-    "conversation itself, such as small talk, jokes and stories, so leave those to it."
-)
-
-#: Appended after the role: which of the model's output the user hears. An app
-#: that decides that by a rule of its own passes its own text as
-#: ``BackendLLMWorker(output_instructions=...)``.
-BACKEND_OUTPUT_INSTRUCTIONS = (
-    "WHAT THE USER HEARS: The assistant tells the user what you give it to tell, in its own "
-    "words, and nothing else you write. How your turn ends decides which it is.\n"
-    "- A turn with no tool calls: what you wrote is told to the user. End a turn this way "
-    "to give a result, or to ask a question you cannot proceed without.\n"
-    "- A turn with tool calls: what you wrote is a note on the work and is not told to the "
-    f"user. To tell the user something before you are finished, call {REPORT_TOOL_NAME} "
-    "with it, on its own or beside other calls: you go on with the work afterwards. That is "
-    "how you give news they should have now, or one request's result while other work "
-    "continues. Do not repeat later what you reported.\n"
-    f"- Nothing to tell the user: call {NO_REPORT_TOOL_NAME} instead of writing. Do this "
-    "when a request needs nothing from you, and when a request only stops or changes your "
-    "work. Never write that you have stopped, that there is nothing to do, or what you will "
-    "not do: the assistant has already told the user, and a turn with no tool calls would "
-    "tell them again.\n"
-    "Write what is told to the user as plain text the assistant can speak from: no "
-    "Markdown, no raw JSON."
-)
-
-#: Appended last: how the model takes requests that arrive while it works.
-BACKEND_REQUEST_INSTRUCTIONS = (
+    "conversation itself, such as small talk, jokes and stories, so leave those to it.\n\n"
+    f"WHAT THE USER HEARS: From a line that begins with {SPOKEN_MARK} to the end of the "
+    "message, what you write is told to the user, whole, in the assistant's own words, tool "
+    "calls or not; usually the mark is the first thing in the message. Anything before that "
+    "line, and a message without one, is not told to the user: the assistant keeps it as "
+    "notes on your work, and draws on them only if the user asks how the work is going. "
+    "Your instructions above say what the user is to be told and when, and they decide; "
+    "where they say nothing, tell the user a result as soon as you have it, a question you "
+    "cannot proceed without, and news they should have now. A result you do not mark is "
+    f"lost: the message that gives it begins with {SPOKEN_MARK}. Never say again what you "
+    "have already marked, and never mark that you have stopped or that there is nothing to "
+    "do: the assistant has already told the user. Write a marked message as plain spoken "
+    "sentences the assistant can say as they are: no headings, lists, Markdown or raw "
+    "JSON.\n\n"
     "REQUESTS: A request may arrive while you are working on an earlier one. It may add "
     "work, change it, or stop some or all of it: follow the latest, cancel the tools whose "
     "results are no longer wanted, and do not repeat work already done. With several "
@@ -321,18 +312,36 @@ class BackendOutputTransform(Protocol):
 #: What :func:`_render_transcript_request` tells the backend to do with a transcript.
 _DEFAULT_TRANSCRIPT_INSTRUCTION = (
     "Act on the user's most recent request in the conversation above. If it asks for "
-    "something, report the result as soon as you have it, before going on with other work. "
-    f"If it only stops or changes work already under way, call {NO_REPORT_TOOL_NAME} "
-    "instead of reporting: the assistant has already told the user."
+    "something, tell the user the result as soon as you have it, before going on with other "
+    f"work, in a message that begins with {SPOKEN_MARK}. If it only stops or changes work "
+    "already under way, tell them nothing: the assistant already has."
 )
 
-#: Appended to a request the frontend worded itself, so the backend reports it
-#: on its own rather than with whatever else it is doing.
-_REPORT_INSTRUCTION = (
-    "If this request asks for something, report the result as soon as you have it, before "
-    "going on with other work. If it only stops or changes work already under way, call "
-    f"{NO_REPORT_TOOL_NAME} instead of reporting: the assistant has already told the user."
+#: Appended to a request the frontend worded itself, so the backend tells the
+#: user its result on its own rather than with whatever else it is doing.
+_TELL_INSTRUCTION = (
+    "If this request asks for something, tell the user the result as soon as you have it, "
+    f"before going on with other work, in a message that begins with {SPOKEN_MARK}. If it "
+    "only stops or changes work already under way, tell them nothing: the assistant already "
+    "has."
 )
+
+
+def _split_spoken(text: str) -> tuple[str, str]:
+    """Split a message the model wrote into its note and its spoken part, by the mark.
+
+    Args:
+        text: The message, stripped.
+
+    Returns:
+        The note (what precedes the first line that begins with the mark, or
+        the whole message when no line does) and the spoken part (what follows
+        the mark, or empty), each stripped.
+    """
+    match = _SPOKEN_MARK_LINE.search(text)
+    if match is None:
+        return text, ""
+    return text[: match.start()].strip(), text[match.end() :].strip()
 
 
 def _render_transcript_request(
@@ -422,14 +431,14 @@ class BackendLLMWorker(LLMContextWorker):
       when the message arrived. A message that arrives mid-run is taken up after
       the current step, with everything that came before it in view.
 
-    What the model writes in a turn with no tool calls asks to be spoken: a
-    result, or a question it cannot proceed without. What it writes beside
-    tool calls does not, since that is notes on the work in progress; nor
-    does a reasoning summary. To tell the user something while it goes on
-    working, the model calls the built-in ``report_result`` tool, whose text
-    asks to be spoken; when a message leaves it nothing to tell the user, it
-    calls the built-in ``nothing_to_report`` tool instead of replying, so
-    nothing is spoken. The instruction appended to its prompt says all this.
+    The model decides what the user hears: from a line it begins with
+    :data:`SPOKEN_MARK` to the end of the message asks to be spoken, whether
+    or not the turn also calls tools, and the mark is stripped; anything else
+    it writes, what precedes that line and reasoning summaries included, is a
+    note that the frontend keeps but does not speak.
+    The backend's own system instruction says what it does and, in plain
+    words, what the user should be told; the instruction the worker appends
+    (:data:`BACKEND_OUTPUT_INSTRUCTIONS`) is the only place the mark is named.
     ``transform_output`` can change the flag, or the text, or drop the output.
 
     Example::
@@ -450,7 +459,6 @@ class BackendLLMWorker(LLMContextWorker):
         context: LLMContext | None = None,
         name: str | None = None,
         transform_output: BackendOutputTransform | None = None,
-        output_instructions: str | None = None,
         user_params: LLMUserAggregatorParams | None = None,
         assistant_params: LLMAssistantAggregatorParams | None = None,
     ):
@@ -468,10 +476,6 @@ class BackendLLMWorker(LLMContextWorker):
                 whether the user may hear it, or to return ``None`` and send
                 nothing. Outputs the app sends itself are not passed through
                 it unless the call asks.
-            output_instructions: What the model is told about which of its
-                output the user hears, in place of
-                :data:`BACKEND_OUTPUT_INSTRUCTIONS`. For an app whose
-                ``transform_output`` decides that by a rule of its own.
             user_params: Optional parameters for the user aggregator. Defaults
                 to external turn strategies: the backend has no audio, so the
                 default VAD and turn-analysis strategies (and the model the
@@ -495,51 +499,7 @@ class BackendLLMWorker(LLMContextWorker):
         )
         self._attached: _AttachedFrontend | None = None
         self._transform_output = transform_output
-        self.llm.append_system_instruction(
-            "\n\n".join(
-                [
-                    BACKEND_ROLE_INSTRUCTIONS,
-                    output_instructions or BACKEND_OUTPUT_INSTRUCTIONS,
-                    BACKEND_REQUEST_INSTRUCTIONS,
-                ]
-            )
-        )
-        # A built-in tool: sent on every inference alongside the context's own
-        # tools, through the adapter's builtin_tools, and never part of
-        # LLMContext.tools.
-        self.llm.register_function(REPORT_TOOL_NAME, self._report_result)
-        self.llm.get_llm_adapter().builtin_tools[REPORT_TOOL_NAME] = FunctionSchema(
-            name=REPORT_TOOL_NAME,
-            description=(
-                "Tell the user something now, before you are finished: news they should "
-                "have, or the result of one request while other work continues. Call it on "
-                "its own or beside other calls; you go on with the work afterwards. A turn "
-                "with no tool calls is told to the user as it is, so this is not needed "
-                "there. Never repeat what you reported."
-            ),
-            properties={"text": {"type": "string", "description": "What to tell the user."}},
-            required=["text"],
-        )
-        self.llm.register_function(NO_REPORT_TOOL_NAME, self._nothing_to_report)
-        self.llm.get_llm_adapter().builtin_tools[NO_REPORT_TOOL_NAME] = FunctionSchema(
-            name=NO_REPORT_TOOL_NAME,
-            description=(
-                "Call this instead of replying when there is nothing to tell the user: a "
-                "message needs nothing from you, or it stopped or changed your work and the "
-                "tools whose results are no longer wanted are cancelled. Nothing is told to "
-                "the user."
-            ),
-            properties={},
-            required=[],
-        )
-        # Whether the model's current turn made function calls, which decides
-        # whether the text it wrote is a report (prefers_spoken=True) or just
-        # notes on the work (prefers_spoken=False). The calls are requested
-        # before the turn ends, so the flag is read and cleared as the turn
-        # stops. A turn whose only calls are report calls (report_result) has
-        # nothing else to bring the next run, so the report's result does.
-        self._turn_made_calls = False
-        self._turn_only_reports = False
+        self.llm.append_system_instruction(BACKEND_OUTPUT_INSTRUCTIONS)
 
         # Whether the backend is working is read off its pipeline: requests
         # queued but not yet taken up, LLM runs picked up but not yet ended,
@@ -592,21 +552,7 @@ class BackendLLMWorker(LLMContextWorker):
         async def on_before_assistant_aggregator_frame(aggregator, frame: Frame):
             if isinstance(frame, InterruptionFrame):
                 self._runs_requested = self._runs_completed = 0
-                self._turn_made_calls = False
             await self._on_function_call_frame(frame)
-
-        # Every call the turn made, the cancel_<tool> calls included, which
-        # FunctionCallsStartedFrame leaves out: a turn that only cancels is a
-        # tool-call turn all the same, so its text is a note
-        # (prefers_spoken=False). The event is synchronous, so the flag is set
-        # before the turn's end frame reaches the assistant aggregator and the
-        # turn stops.
-        @self.llm.event_handler("on_function_calls_requested")
-        async def on_function_calls_requested(llm, function_calls):
-            self._turn_made_calls = True
-            self._turn_only_reports = all(
-                call.function_name == REPORT_TOOL_NAME for call in function_calls
-            )
 
         @self.assistant_aggregator.event_handler("on_after_process_frame")
         async def on_after_assistant_aggregator_frame(aggregator, frame: Frame):
@@ -792,12 +738,14 @@ class BackendLLMWorker(LLMContextWorker):
             return
         self._runs_completed += 1
         text = (message.content or "").strip()
-        made_calls, self._turn_made_calls = self._turn_made_calls, False
         if self._attached is None:
             return
         try:
-            if text:
-                await self._emit(BackendOutput(text=text, prefers_spoken=not made_calls))
+            note, spoken = _split_spoken(text)
+            if note:
+                await self._emit(BackendOutput(text=note, prefers_spoken=False))
+            if spoken:
+                await self._emit(BackendOutput(text=spoken, prefers_spoken=True))
         except Exception as e:
             logger.error(f"Worker '{self.name}': transform_output failed: {e}")
             await self._send_update({"type": ERROR_UPDATE_TYPE, "error": str(e)})
@@ -810,26 +758,6 @@ class BackendLLMWorker(LLMContextWorker):
             return
         self._idle_announced = True
         await self._send_update({"type": IDLE_UPDATE_TYPE})
-
-    async def _report_result(self, params: FunctionCallParams):
-        """Send what the model wants the user told, as a spoken output."""
-        text = str(params.arguments.get("text") or "").strip()
-        if text:
-            await self._emit(BackendOutput(text=text, prefers_spoken=True))
-        # The results of the tool calls made alongside this report_result call
-        # bring the next LLM run; a report_result call made on its own has to
-        # bring it itself (run_llm=True), or the work it was made in the
-        # middle of stops there.
-        await params.result_callback(
-            {"status": "reported", "next": "Go on with the remaining work; do not repeat this."},
-            properties=FunctionCallResultProperties(run_llm=self._turn_only_reports),
-        )
-
-    async def _nothing_to_report(self, params: FunctionCallParams):
-        """Settle the no-op call without running the model again: there is nothing to say."""
-        await params.result_callback(
-            {"status": "noted"}, properties=FunctionCallResultProperties(run_llm=False)
-        )
 
     async def _on_function_call_frame(self, frame: Frame):
         """Relay a phase of one of the backend's own function calls as a job update."""
@@ -862,11 +790,7 @@ class BackendLLMWorker(LLMContextWorker):
         elif isinstance(frame, FunctionCallCancelFrame):
             calls = [BackendToolCall("cancelled", frame.function_name, frame.tool_call_id)]
         for call in calls:
-            # report_result and nothing_to_report are the worker's own tools,
-            # not the backend's work, so they are not reported to the frontend
-            # as tool calls.
-            if call.function_name not in (REPORT_TOOL_NAME, NO_REPORT_TOOL_NAME):
-                await self._send_update(call.to_payload())
+            await self._send_update(call.to_payload())
 
     async def on_job_cancelled(self, message: BusJobCancelMessage) -> None:
         """Stop the model: the frontend that was attached is gone.
