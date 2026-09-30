@@ -274,8 +274,8 @@ class SIPRunnerArguments(RunnerArguments):
     baresip registers with the SIP server itself, so there is no HTTP signaling
     route; the development runner reads the account from the ``SIP_USER``,
     ``SIP_PASS``, ``SIP_DOMAIN``, ``SIP_TRANSPORT``, ``SIP_AUDIO_CODECS``,
-    ``SIP_AUTH_USER``, ``SIP_REG_INTERVAL``, ``SIP_RTP_TIMEOUT``, and
-    ``SIP_INSTANCE_ID`` environment variables. Without ``SIP_USER`` and
+    ``SIP_AUTH_USER``, ``SIP_REG_INTERVAL``, ``SIP_RTP_TIMEOUT``,
+    ``SIP_INSTANCE_ID``, and ``SIP_NET_INTERFACE`` environment variables. Without ``SIP_USER`` and
     ``SIP_DOMAIN``, the runner provisions a temporary SIP client on the Daily
     domain instead (``DAILY_API_KEY``) and deletes it when the bot exits.
     For debugging, ``SIP_NATIVE_LOG_LEVEL`` and ``SIP_TRACE`` control the
@@ -307,6 +307,11 @@ class SIPRunnerArguments(RunnerArguments):
             stack's own logging ("debug", "info", "warning", or "error").
         sip_trace: Log every SIP message sent and received, verbatim.
             Contains authentication material — keep it off in production.
+        net_interface: Restrict the stack to one local interface, by name
+            or address; None (the default) lets the OS pick the source
+            address per destination. Set it for a registrar on loopback
+            ("127.0.0.1") or one address of a multi-homed host. See
+            :class:`~pipecat.transports.sip.connection.SIPConnection`.
     """
 
     user: str
@@ -321,6 +326,7 @@ class SIPRunnerArguments(RunnerArguments):
     instance_id: str | None = None
     native_log_level: str = "warning"
     sip_trace: bool = False
+    net_interface: str | None = None
 
 
 @dataclass

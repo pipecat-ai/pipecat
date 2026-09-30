@@ -304,6 +304,7 @@ class TestCreateTransportSIP(unittest.IsolatedAsyncioTestCase):
             instance_id="0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0",
             native_log_level="debug",
             sip_trace=True,
+            net_interface="127.0.0.1",
         )
         transport = await create_transport(
             args, {"sip": lambda: SIPParams(audio_in_enabled=True, audio_out_enabled=True)}
@@ -311,6 +312,7 @@ class TestCreateTransportSIP(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsInstance(transport, SIPTransport)
         self.assertEqual(transport._connection.aor, "sip:1001@example.com")
+        self.assertEqual(transport._connection._settings.net_interface, "127.0.0.1")
         self.assertEqual(transport._connection._account.audio_codecs, ("PCMU/8000/1",))
         self.assertEqual(transport._connection._account.auth_user, "trunk-user")
         self.assertEqual(
