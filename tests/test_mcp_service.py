@@ -23,32 +23,26 @@ pytest.importorskip("mcp")
 import anyio  # noqa: E402
 from mcp.client.session import ClientSession  # noqa: E402
 from mcp.client.session_group import StreamableHttpParameters  # noqa: E402
+from mcp.shared.exceptions import MCPError  # noqa: E402
 from mcp.shared.memory import create_client_server_memory_streams  # noqa: E402
 from mcp.types import (  # noqa: E402
     CONNECTION_CLOSED,
     CallToolResult,
     JSONRPCResponse,
     TextContent,
-    Tool,
 )
 
 from pipecat.services import mcp_service  # noqa: E402
 from pipecat.services.llm_service import LLMService  # noqa: E402
-from pipecat.services.mcp_service import MCPClient, MCPError  # noqa: E402
+from pipecat.services.mcp_service import MCPClient  # noqa: E402
 
 
 def _tool(name, properties=None, required=None, description="A tool."):
-    """Decode a tool using the installed SDK's wire-format aliases."""
-    return Tool.model_validate(
-        {
-            "name": name,
-            "description": description,
-            "inputSchema": {
-                "type": "object",
-                "properties": properties or {},
-                "required": required or [],
-            },
-        }
+    """Build a fake MCP server tool as returned by ``session.list_tools()``."""
+    return SimpleNamespace(
+        name=name,
+        description=description,
+        input_schema={"properties": properties or {}, "required": required or []},
     )
 
 
@@ -167,12 +161,7 @@ class _FakeTransport:
 
 def _connection_closed_error():
     """Build the error an SDK raises for a request its transport could not serve."""
-    try:
-        return MCPError(code=CONNECTION_CLOSED, message="Connection closed")
-    except TypeError:
-        from mcp.types import ErrorData
-
-        return MCPError(ErrorData(code=CONNECTION_CLOSED, message="Connection closed"))
+    return MCPError(code=CONNECTION_CLOSED, message="Connection closed")
 
 
 def _connection_lost_errors():

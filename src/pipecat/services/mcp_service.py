@@ -12,7 +12,7 @@ import sys
 from collections.abc import Awaitable, Callable
 from contextlib import AsyncExitStack, asynccontextmanager
 from datetime import timedelta
-from typing import Any, TypeAlias, cast
+from typing import Any, TypeAlias
 
 from loguru import logger
 
@@ -31,11 +31,8 @@ try:
     from mcp.client.sse import sse_client
     from mcp.client.stdio import stdio_client
     from mcp.client.streamable_http import streamable_http_client
-    from mcp.shared import exceptions as mcp_exceptions
+    from mcp.shared.exceptions import MCPError
     from mcp.types import CONNECTION_CLOSED, TextContent
-
-    # The SDK renamed McpError to MCPError in 2.x.
-    MCPError = getattr(mcp_exceptions, "MCPError", None) or cast(Any, mcp_exceptions).McpError
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error('In order to use an MCP client, you need to `uv add "pipecat-ai[mcp]"`.')
@@ -59,7 +56,7 @@ def _is_connection_lost(error: BaseException) -> bool:
     if isinstance(error, BaseExceptionGroup):
         return any(_is_connection_lost(sub) for sub in error.exceptions)
     if isinstance(error, MCPError):
-        return cast(Any, error).error.code == CONNECTION_CLOSED
+        return error.error.code == CONNECTION_CLOSED
     return isinstance(
         error, (anyio.ClosedResourceError, anyio.BrokenResourceError, anyio.EndOfStream)
     )
@@ -343,11 +340,9 @@ class MCPClient(BaseObject):
                     sse_client(**self._server_params.model_dump())
                 )
             else:  # StreamableHttpParameters (validated in __init__)
-                streams = await exit_stack.enter_async_context(
+                read_stream, write_stream = await exit_stack.enter_async_context(
                     _streamable_http_transport(self._server_params)
                 )
-                # SDK 1.x also returns a session-ID callback; SDK 2.x returns two streams.
-                read_stream, write_stream = streams[0], streams[1]
 
             session = await exit_stack.enter_async_context(ClientSession(read_stream, write_stream))
             await session.initialize()
@@ -658,12 +653,9 @@ class MCPClient(BaseObject):
             logger.trace(f"Tool description: {tool.description}")
 
             try:
-                input_schema = (
-                    tool.input_schema if hasattr(tool, "input_schema") else tool.inputSchema
-                )
                 function_schema = self._convert_mcp_schema_to_pipecat(
                     tool_name,
-                    {"description": tool.description, "input_schema": input_schema},
+                    {"description": tool.description, "input_schema": tool.input_schema},
                     handler=self._tool_wrapper_with_cleanup if attach_handlers else None,
                 )
 
