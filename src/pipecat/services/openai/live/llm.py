@@ -133,7 +133,8 @@ class _LiveDelegation:
 
     Parameters:
         id: The delegation's id, which the appends carry.
-        answered: Whether the backend has said anything for it yet.
+        answered: Whether the backend has sent a spoken output for it yet;
+            its notes do not count.
         timeout_task: The task that abandons it if the backend takes too long.
     """
 
@@ -1042,7 +1043,7 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
         elif isinstance(event, BackendOutput):
             if not event.text:
                 return
-            if current is not None:
+            if current is not None and event.prefers_spoken:
                 current.answered = True
             await self._send_context_append(
                 current.id if current else None, event.text, spoken=event.prefers_spoken
@@ -1059,9 +1060,9 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
             if current is not None:
                 if not current.answered:
                     # The live model holds the conversation until the delegation
-                    # says something, so a run that produced no text still gets
-                    # a word back.
-                    logger.warning(f"{self}: delegation {current.id} produced no output")
+                    # says something, so a run that produced nothing spoken
+                    # still gets a word back.
+                    logger.warning(f"{self}: delegation {current.id} produced no spoken output")
                     await self._send_context_append(
                         current.id, "The delegated work finished without an answer.", spoken=True
                     )

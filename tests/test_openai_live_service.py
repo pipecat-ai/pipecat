@@ -1368,15 +1368,19 @@ async def test_the_backends_calls_are_reported_without_a_parent(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_a_delegation_that_produced_nothing_still_answers_the_model(monkeypatch):
+async def test_a_delegation_that_produced_nothing_spoken_still_answers_the_model(monkeypatch):
+    """A note is not an answer: the live model holds the conversation until it hears something."""
     service, recorder, session = await _client_delegation_service(monkeypatch)
 
     await service._handle_client_delegation(_client_delegation("item_d1"))
+    await session.feed(BackendOutput(text="Looking into it.", prefers_spoken=False))
     await session.feed(BackendIdle())
 
-    (append,) = recorder.of_type("session.commentary.append")
-    assert append["delegation_id"] == "item_d1"
-    assert "without an answer" in append["content"]
+    (note,) = recorder.of_type("session.thinking.append")
+    assert note["content"] == "Looking into it."
+    (answer,) = recorder.of_type("session.commentary.append")
+    assert answer["delegation_id"] == "item_d1"
+    assert "without an answer" in answer["content"]
 
 
 @pytest.mark.asyncio
