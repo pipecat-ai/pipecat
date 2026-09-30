@@ -937,7 +937,10 @@ class BaseOutputTransport(FrameProcessor):
                         continue
 
                     consecutive_failures += 1
-                    logger.warning(
+                    # A hangup produces a burst of these; the first one and the
+                    # cancellation below are enough above DEBUG.
+                    log = logger.warning if consecutive_failures == 1 else logger.debug
+                    log(
                         f"Failed to write audio frame (consecutive failures: {consecutive_failures}/{max_consecutive_failures})"
                     )
 

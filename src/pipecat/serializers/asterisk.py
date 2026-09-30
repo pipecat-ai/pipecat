@@ -267,7 +267,10 @@ class AsteriskFrameSerializer(FrameSerializer):
             if event == "MEDIA_START":
                 self._log_media_start(message)
             else:
-                logger.debug(f"Asterisk WebSocket event: {event} - {message}")
+                # The payload can carry caller input (DTMF digits), so only the
+                # event name is logged above DEBUG.
+                logger.info(f"Asterisk WebSocket event: {event}")
+                logger.debug(f"Asterisk WebSocket event payload: {message}")
             return None
 
     def _log_media_start(self, message: dict) -> None:
