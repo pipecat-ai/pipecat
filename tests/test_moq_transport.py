@@ -268,6 +268,23 @@ class TestIsPeerGone(unittest.TestCase):
     def test_non_moq_errors_propagate(self):
         self.assertFalse(_is_peer_gone(RuntimeError("remote error: code=4")))
 
+    def test_unknown_code_text_is_peer_gone(self):
+        """A 0.14 peer's reset renders as ``unknown code=N`` under 0.15's
+        decode tables; the peer-gone codes cover NotFound and Unroutable
+        alongside the normal closes."""
+        for code in (13, 24, 25, 30):
+            with self.subTest(code=code):
+                self.assertTrue(_is_peer_gone(moq.Error.Audio(f"moq: unknown code={code}")))
+
+    def test_unrecognized_unknown_code_text_propagates(self):
+        self.assertFalse(_is_peer_gone(moq.Error.Audio("moq: unknown code=50")))
+
+    def test_legacy_code_on_a_protocol_error_is_peer_gone(self):
+        details = moq.ProtocolError(
+            scope=moq.ErrorScope.STREAM, code=30, kind=moq.ProtocolKind.UNKNOWN, message="reset"
+        )
+        self.assertTrue(_is_peer_gone(moq.Error.Protocol(details)))
+
 
 fastapi = pytest.importorskip("fastapi")
 from pipecat.runner.moq import (  # noqa: E402
@@ -525,11 +542,13 @@ class TestMOQTransportInit(unittest.TestCase):
     These assertions stop a future refactor from re-introducing it.
     """
 
-    def _make_transport(self):
+    def _make_transport(self, **params_kwargs):
         """Construct a MOQTransport with the moq library's origin mocked so we
         don't need a real QUIC stack just to check that the producer methods
         got called."""
-        params = MOQParams(audio_in_enabled=True, audio_out_enabled=True)
+        params_kwargs.setdefault("audio_in_enabled", True)
+        params_kwargs.setdefault("audio_out_enabled", True)
+        params = MOQParams(**params_kwargs)
 
         # A broadcast is created ON an origin, so patch the origin and observe
         # what __init__ asks it for without standing up an actual broadcast.
@@ -574,6 +593,25 @@ class TestMOQTransportInit(unittest.TestCase):
         transport, broadcast, _track, _moq = self._make_transport()
         self.assertIsNone(transport._client._audio_out)
         broadcast.publish_audio.assert_not_called()
+
+    def test_audio_on_defers_the_announce_to_open_audio_track(self):
+        """moq-rs 0.5 routes only announced broadcasts, and the announce
+        belongs after the last track a configuration creates — with audio
+        on, the audio track ``open_audio_track`` adds."""
+        transport, broadcast, _track, _moq = self._make_transport()
+        broadcast.announce.assert_not_called()
+        transport._client.open_audio_track(24000)
+        broadcast.announce.assert_called_once()
+
+    def test_audio_off_announces_after_the_transcript_track(self):
+        """With audio out disabled ``open_audio_track`` opens nothing, so the
+        transcript is the last track and ``__init__`` announces — without
+        this the peer can't route the transcript until a redial announces
+        the rebuilt broadcast."""
+        transport, broadcast, _track, _moq = self._make_transport(audio_out_enabled=False)
+        broadcast.announce.assert_called_once()
+        transport._client.open_audio_track(24000)
+        broadcast.announce.assert_called_once()
 
     def test_broadcast_paths_built_from_params(self):
         """``<namespace>/<participant_id>`` and ``<namespace>/<peer_id>``
@@ -670,6 +708,13 @@ class TestMOQTransportInit(unittest.TestCase):
         kwargs = self._client_kwargs()
         self.assertNotIn("tls_roots", kwargs)
         self.assertNotIn("tls_fingerprints", kwargs)
+
+    def test_library_reconnect_is_off(self):
+        """The transport owns retry (``_run_client``'s redial with backoff,
+        stall watchdog, fresh publisher per dial); the library's reconnect
+        wraps a refused session's close in a retry-timeout error, hiding
+        the code ``_is_unauthorized`` reads."""
+        self.assertIs(self._client_kwargs()["reconnect"], False)
 
     def test_deprecated_serve_bind_still_sets_the_bind(self):
         """Pydantic drops unknown fields, so without the alias a bot that
@@ -790,6 +835,39 @@ class TestIsNormalClose(unittest.TestCase):
 
     def test_non_moq_exception_is_not_normal(self):
         self.assertFalse(_is_normal_close(RuntimeError("moq: remote error: code=24")))
+
+    def test_unknown_code_text_is_normal(self):
+        """moq-ffi 0.4 decodes with 0.15's tables, where 0.14's codes are
+        unregistered; a 0.14 peer's reset renders as ``unknown code=N``."""
+        for code in (24, 25):
+            with self.subTest(code=code):
+                self.assertTrue(_is_normal_close(self._audio_error(f"moq: unknown code={code}")))
+
+    def test_unknown_code_text_real_failures_are_not_normal(self):
+        for code in (5, 26, 240):
+            with self.subTest(code=code):
+                self.assertFalse(_is_normal_close(self._audio_error(f"moq: unknown code={code}")))
+
+    def test_legacy_code_on_a_protocol_error_is_normal(self):
+        """0.15's stream table decodes 0.14's Cancel as Internal and has no
+        entry for Dropped or Closed; the verbatim wire code still
+        identifies the hangup."""
+        for code, kind in (
+            (0, moq.ProtocolKind.INTERNAL),
+            (24, moq.ProtocolKind.UNKNOWN),
+            (25, moq.ProtocolKind.UNKNOWN),
+        ):
+            with self.subTest(code=code):
+                details = moq.ProtocolError(
+                    scope=moq.ErrorScope.STREAM, code=code, kind=kind, message="reset"
+                )
+                self.assertTrue(_is_normal_close(moq.Error.Protocol(details)))
+
+    def test_unrecognized_protocol_code_is_not_normal(self):
+        details = moq.ProtocolError(
+            scope=moq.ErrorScope.STREAM, code=50, kind=moq.ProtocolKind.UNKNOWN, message="reset"
+        )
+        self.assertFalse(_is_normal_close(moq.Error.Protocol(details)))
 
 
 # ----------------------------------------------------------------------
@@ -1876,6 +1954,26 @@ class TestIsUnauthorized(unittest.TestCase):
                     scope=moq.ErrorScope.SESSION, code=code, kind=kind, message=message
                 )
                 self.assertFalse(moq_transport._is_unauthorized(moq.Error.Protocol(details)))
+
+    def test_a_0_14_relay_refusal_counts(self):
+        """A 0.14 relay closes a refused session with the old registry's
+        Unauthorized code, which 0.15's session table decodes as
+        ``KEY_VALUE_FORMATTING``."""
+        details = moq.ProtocolError(
+            scope=moq.ErrorScope.SESSION,
+            code=6,
+            kind=moq.ProtocolKind.KEY_VALUE_FORMATTING,
+            message="key-value formatting error",
+        )
+        self.assertTrue(moq_transport._is_unauthorized(moq.Error.Protocol(details)))
+
+    def test_a_stream_scope_code_6_does_not(self):
+        """Only the session-scope decode (KEY_VALUE_FORMATTING) marks a
+        refusal; stream code 6 is unregistered in 0.15's table."""
+        details = moq.ProtocolError(
+            scope=moq.ErrorScope.STREAM, code=6, kind=moq.ProtocolKind.UNKNOWN, message="reset"
+        )
+        self.assertFalse(moq_transport._is_unauthorized(moq.Error.Protocol(details)))
 
     def test_non_moq_errors_do_not(self):
         self.assertFalse(moq_transport._is_unauthorized(ConnectionError("unauthorized")))

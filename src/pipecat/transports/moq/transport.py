@@ -63,10 +63,21 @@ except ModuleNotFoundError as e:
 _MoqError = cast("type[BaseException]", moq.Error)
 
 
-# Reset codes (moq-net ``Error::to_code``) that mean "the peer is gone",
-# not "something broke": the peer cancelled, its producer went away
-# mid-track without finishing, or the handle was already closed.
-_NORMAL_CLOSE_CODES = frozenset({0, 24, 25})  # Cancel, Dropped, Closed
+# 0.14 reset codes (moq-rs 0.14's shared moq-net registry) that mean "the
+# peer is gone", not "something broke": the peer cancelled, its producer
+# went away mid-track without finishing, or the handle was already closed.
+# moq-rs 0.15 renumbered the registries, so a 0.14 peer's reset decodes to
+# the wrong kind (stream 0 reads as Internal; 24 and 25 as unknown) and
+# only the verbatim wire code identifies it. Stream code 0 is ambiguous
+# with 0.15's own Internal; a 0.14 hangup is the common case, an 0.15
+# internal error the rare one, so 0 reads as a hangup.
+_LEGACY_NORMAL_CLOSE_CODES = frozenset({0, 24, 25})  # Cancel, Dropped, Closed
+# Peer-gone additionally covers 0.14's refused-subscription codes,
+# mirroring ``_PEER_GONE_KINDS``.
+_LEGACY_PEER_GONE_CODES = _LEGACY_NORMAL_CLOSE_CODES | frozenset({13, 30})  # NotFound, Unroutable
+# 0.14's Unauthorized session close. 0.15's session table decodes the same
+# code as KEY_VALUE_FORMATTING, so ``moq.is_auth`` misses it.
+_LEGACY_UNAUTHORIZED_CODE = 6
 
 # Protocol close kinds (``Error.Protocol`` details) that mean the peer or
 # its session ended cleanly.
@@ -95,7 +106,10 @@ _PEER_GONE_KINDS = _NORMAL_CLOSE_KINDS | frozenset(
 # keeps errors that merely mention cancellation propagating.
 _NORMAL_CLOSE_REASONS = frozenset({"dropped"})
 
-_REMOTE_CODE_RE = re.compile(r"remote error: code=(\d+)")
+# Remote reset codes inside a subsystem error message. A 0.14 peer's
+# reset reaches moq-ffi 0.4 as an unregistered code, rendered "unknown
+# code=N"; "remote error: code=N" is moq-ffi 0.2's rendering.
+_REMOTE_CODE_RE = re.compile(r"(?:remote error: code|unknown code)=(\d+)")
 
 
 def _error_message(exc: BaseException) -> str:
@@ -122,7 +136,9 @@ def _is_normal_close(exc: BaseException) -> bool:
     subsystem, carrying the moq reason in its message — a browser that
     disconnects mid-call drops its microphone producer without finishing,
     and the bot's audio subscriber sees ``Error.Audio("moq: dropped")``;
-    a reset still in flight reads as ``"remote error: code=n"``.
+    a reset still in flight reads as ``"unknown code=n"`` (0.14's
+    numbering is unregistered in 0.15's decode tables) or as
+    ``"remote error: code=n"``.
 
     Callers log these at debug and skip the ``on_error`` handler instead
     of reporting ERROR + traceback.
@@ -133,14 +149,17 @@ def _is_normal_close(exc: BaseException) -> bool:
         return True
     details = moq.protocol_error(exc)
     if isinstance(details, moq.ProtocolError):
-        return details.kind in _NORMAL_CLOSE_KINDS
+        # A 0.14 peer's reset carries the old registry's numbering; the
+        # kind is decoded with 0.15's tables, so read the verbatim wire
+        # code too.
+        return details.kind in _NORMAL_CLOSE_KINDS or details.code in _LEGACY_NORMAL_CLOSE_CODES
     msg = _error_message(exc)
     if "webtransport error: closed" in msg or "session error" in msg and "closed" in msg:
         return True
     if msg.rsplit(":", 1)[-1].strip() in _NORMAL_CLOSE_REASONS:
         return True
     match = _REMOTE_CODE_RE.search(msg)
-    return match is not None and int(match.group(1)) in _NORMAL_CLOSE_CODES
+    return match is not None and int(match.group(1)) in _LEGACY_NORMAL_CLOSE_CODES
 
 
 def _is_peer_gone(exc: BaseException) -> bool:
@@ -158,8 +177,14 @@ def _is_peer_gone(exc: BaseException) -> bool:
         return False
     details = moq.protocol_error(exc)
     if isinstance(details, moq.ProtocolError):
-        return details.kind in _PEER_GONE_KINDS
-    return "remote error" in _error_message(exc) or _is_normal_close(exc)
+        return details.kind in _PEER_GONE_KINDS or details.code in _LEGACY_PEER_GONE_CODES
+    msg = _error_message(exc)
+    if "remote error" in msg:
+        return True
+    match = _REMOTE_CODE_RE.search(msg)
+    if match is not None and int(match.group(1)) in _LEGACY_PEER_GONE_CODES:
+        return True
+    return _is_normal_close(exc)
 
 
 def _is_unauthorized(exc: BaseException) -> bool:
@@ -168,9 +193,18 @@ def _is_unauthorized(exc: BaseException) -> bool:
     The relay accepts the QUIC connection before it checks the token, so
     a refused token arrives either as HTTP 401/403 on the dial or as the
     session closing with an ``Unauthorized`` protocol kind;
-    ``moq.is_auth`` recognizes both.
+    ``moq.is_auth`` recognizes both. A 0.14 relay closes with the old
+    registry's Unauthorized code, which 0.15's session table decodes as
+    ``KEY_VALUE_FORMATTING``; the verbatim wire code identifies it.
     """
-    return moq.is_auth(exc)
+    if moq.is_auth(exc):
+        return True
+    details = moq.protocol_error(exc)
+    return (
+        isinstance(details, moq.ProtocolError)
+        and details.code == _LEGACY_UNAUTHORIZED_CODE
+        and details.kind == moq.ProtocolKind.KEY_VALUE_FORMATTING
+    )
 
 
 _moq_task_filter_installed = False
@@ -600,6 +634,12 @@ class MOQTransportClient:
         self._transcript_out: moq.JsonStreamProducer = self._publish_broadcast.publish_json_stream(
             params.transcript_track, compression=True
         )
+        # moq-rs 0.5 routes only announced broadcasts, and the announce
+        # belongs after the last track a configuration creates. Audio off:
+        # transcript is that track, announce now. Audio on:
+        # ``open_audio_track`` announces after adding the audio track.
+        if not params.audio_out_enabled:
+            self._publish_broadcast.announce()
         # Audio track is opened lazily once the pipeline's output sample
         # rate is known (in :meth:`open_audio_track`). We stash the rate
         # because ``publish_audio`` uses it to convert byte length to
@@ -1344,6 +1384,12 @@ class MOQTransportClient:
             self._url,
             tls_verify=self._params.verify_ssl,
             bind=self._bind,
+            # This transport owns retry: ``_run_client`` redials with
+            # backoff, a stall watchdog, and a fresh publisher per dial.
+            # The library's own reconnect wraps a refused session's close
+            # in a retry-timeout error, hiding the code
+            # ``_is_unauthorized`` reads.
+            reconnect=False,
             publish=publish_origin,
             subscribe=subscribe_origin,
             **client_tls,
