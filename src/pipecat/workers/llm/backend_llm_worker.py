@@ -706,13 +706,13 @@ class BackendLLMWorker(LLMContextWorker):
         """
         self._requests_pending += 1
         self._idle_announced = False
-        run_llm = not self._model_busy and not self._calls_block_a_run
+        run_llm = not self._model_busy and not self._synchronous_call_in_flight
         if run_llm:
             logger.debug(f"Worker '{self.name}': running the model on the request")
         else:
             logger.debug(
                 f"Worker '{self.name}': holding the request for the current step "
-                f"(model busy={self._model_busy}, blocking call in flight={self._calls_block_a_run})"
+                f"(model busy={self._model_busy}, synchronous call in flight={self._synchronous_call_in_flight})"
             )
         frame = LLMMessagesAppendFrame(
             messages=[{"role": "user", "content": request}],
@@ -721,16 +721,16 @@ class BackendLLMWorker(LLMContextWorker):
         await self.queue_frame(frame)
 
     @property
-    def _calls_block_a_run(self) -> bool:
+    def _synchronous_call_in_flight(self) -> bool:
         """Whether a synchronous call is in flight, whose result will bring the next run."""
-        return self.assistant_aggregator.has_blocking_function_calls_in_progress
+        return self.assistant_aggregator.has_synchronous_function_calls_in_progress
 
     async def _run_awaiting_request(self) -> None:
         """Run the model on a request that was waiting for the current step, if nothing else will."""
         if (
             self._request_awaiting_run is not None
             and not self._model_busy
-            and not self._calls_block_a_run
+            and not self._synchronous_call_in_flight
         ):
             logger.debug(f"Worker '{self.name}': running the model on the request that was held")
             await self.queue_frame(LLMRunFrame())

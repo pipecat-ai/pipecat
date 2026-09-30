@@ -1694,14 +1694,14 @@ class LLMAssistantAggregator(LLMContextAggregator):
         return bool(self._function_calls_in_progress)
 
     @property
-    def has_blocking_function_calls_in_progress(self) -> bool:
-        """Whether a call is in flight whose result the model waits for.
+    def has_synchronous_function_calls_in_progress(self) -> bool:
+        """Whether a synchronous call is in flight, one whose result the model waits for.
 
         A synchronous call leaves the context without its result until it
         returns, so the model cannot run in the meantime; an asynchronous one
         (``cancel_on_interruption=False``) has a placeholder result in the
         context and the model runs on. A call announced but not yet started
-        counts as blocking.
+        counts as synchronous.
         """
         return any(
             frame is None or frame.cancel_on_interruption
