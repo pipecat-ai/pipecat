@@ -518,6 +518,7 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
         use_completion_tokens_estimate = False
         cache_creation_input_tokens = 0
         cache_read_input_tokens = 0
+        reasoning_tokens = None
 
         try:
             await self.push_frame(LLMFullResponseStartFrame())
@@ -616,44 +617,26 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
                             )
                         )
 
-                # Calculate usage. Do this here in its own if statement, because there may be usage
-                # data embedded in messages that we do other processing for, above.
-                if hasattr(event, "usage"):
-                    prompt_tokens += (
-                        event.usage.input_tokens if hasattr(event.usage, "input_tokens") else 0
-                    )
-                    completion_tokens += (
-                        event.usage.output_tokens if hasattr(event.usage, "output_tokens") else 0
-                    )
-                elif hasattr(event, "message") and hasattr(event.message, "usage"):
-                    prompt_tokens += (
-                        event.message.usage.input_tokens
-                        if hasattr(event.message.usage, "input_tokens")
-                        else 0
-                    )
-                    completion_tokens += (
-                        event.message.usage.output_tokens
-                        if hasattr(event.message.usage, "output_tokens")
-                        else 0
-                    )
-                    cache_creation_input_tokens += (
-                        event.message.usage.cache_creation_input_tokens
-                        if (
-                            hasattr(event.message.usage, "cache_creation_input_tokens")
-                            and event.message.usage.cache_creation_input_tokens is not None
-                        )
-                        else 0
-                    )
-                    logger.debug(f"Cache creation input tokens: {cache_creation_input_tokens}")
-                    cache_read_input_tokens += (
-                        event.message.usage.cache_read_input_tokens
-                        if (
-                            hasattr(event.message.usage, "cache_read_input_tokens")
-                            and event.message.usage.cache_read_input_tokens is not None
-                        )
-                        else 0
-                    )
-                    logger.debug(f"Cache read input tokens: {cache_read_input_tokens}")
+                # Usage counts are cumulative: message_start reports them so far
+                # and message_delta for the whole message, so each replaces the
+                # last. A field a message_delta leaves out keeps its earlier value.
+                usage = None
+                if event.type == "message_start":
+                    usage = event.message.usage
+                elif event.type == "message_delta":
+                    usage = event.usage
+                if usage is not None:
+                    if usage.input_tokens is not None:
+                        prompt_tokens = usage.input_tokens
+                    if usage.output_tokens is not None:
+                        completion_tokens = usage.output_tokens
+                    if usage.cache_creation_input_tokens is not None:
+                        cache_creation_input_tokens = usage.cache_creation_input_tokens
+                    if usage.cache_read_input_tokens is not None:
+                        cache_read_input_tokens = usage.cache_read_input_tokens
+                    # Thinking tokens are part of output_tokens.
+                    if usage.output_tokens_details:
+                        reasoning_tokens = usage.output_tokens_details.thinking_tokens
 
             await self.run_function_calls(function_calls)
 
@@ -682,6 +665,7 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
                 completion_tokens=comp_tokens,
                 cache_creation_input_tokens=cache_creation_input_tokens,
                 cache_read_input_tokens=cache_read_input_tokens,
+                reasoning_tokens=reasoning_tokens if not use_completion_tokens_estimate else None,
             )
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -713,6 +697,7 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
         completion_tokens: int,
         cache_creation_input_tokens: int,
         cache_read_input_tokens: int,
+        reasoning_tokens: int | None = None,
     ):
         if (
             prompt_tokens
@@ -725,6 +710,7 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
                 completion_tokens=completion_tokens,
                 cache_creation_input_tokens=cache_creation_input_tokens,
                 cache_read_input_tokens=cache_read_input_tokens,
+                reasoning_tokens=reasoning_tokens,
                 # Anthropic reports input_tokens net of the cache, so the cached
                 # tokens are added back to keep the total comparable with services
                 # whose provider supplies it already gross.

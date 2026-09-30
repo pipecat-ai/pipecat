@@ -63,3 +63,22 @@ async def test_thinking_tokens_are_counted_as_completion_tokens():
     assert usage.completion_tokens == 130
     assert usage.reasoning_tokens == 120
     assert usage.total_tokens == usage.prompt_tokens + usage.completion_tokens
+
+
+@pytest.mark.asyncio
+async def test_tool_results_are_counted_as_prompt_tokens():
+    """Code execution, URL context and search results fed back to the model are input."""
+    usage = await _reported_usage(
+        GenerateContentResponse(
+            candidates=[Candidate(content=Content(role="model", parts=[Part(text="5117")]))],
+            usage_metadata=GenerateContentResponseUsageMetadata(
+                prompt_token_count=23,
+                candidates_token_count=57,
+                tool_use_prompt_token_count=79,
+                total_token_count=159,
+            ),
+        )
+    )
+    assert usage.prompt_tokens == 102
+    assert usage.completion_tokens == 57
+    assert usage.total_tokens == 159

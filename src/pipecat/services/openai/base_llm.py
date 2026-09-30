@@ -25,6 +25,7 @@ from openai import (
     DefaultAsyncHttpxClient,
 )
 from openai._types import NotGiven as OpenAINotGiven
+from openai.types import CompletionUsage
 from openai.types.chat import ChatCompletionChunk
 from pydantic import BaseModel, Field
 
@@ -488,6 +489,45 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
 
         return response.choices[0].message.content
 
+    def _token_usage(self, usage: CompletionUsage) -> LLMTokenUsage:
+        """Convert a chat completion's usage into Pipecat's token usage.
+
+        Follows OpenAI's convention, where ``completion_tokens`` includes the
+        reasoning tokens reported in ``completion_tokens_details``. Providers
+        that report reasoning elsewhere, or apart from ``completion_tokens``,
+        override this.
+
+        Args:
+            usage: The usage reported with the completion.
+
+        Returns:
+            The token usage to report.
+        """
+        cached_tokens = (
+            usage.prompt_tokens_details.cached_tokens if usage.prompt_tokens_details else None
+        )
+        # Tokens written into the prompt cache, billed above the input rate.
+        # Providers without prompt caching omit the field, which reads as "not
+        # reported" rather than zero.
+        cache_write_tokens = (
+            getattr(usage.prompt_tokens_details, "cache_write_tokens", None)
+            if usage.prompt_tokens_details
+            else None
+        )
+        reasoning_tokens = (
+            usage.completion_tokens_details.reasoning_tokens
+            if usage.completion_tokens_details
+            else None
+        )
+        return LLMTokenUsage(
+            prompt_tokens=usage.prompt_tokens,
+            completion_tokens=usage.completion_tokens,
+            total_tokens=usage.total_tokens,
+            cache_read_input_tokens=cached_tokens,
+            cache_creation_input_tokens=cache_write_tokens,
+            reasoning_tokens=reasoning_tokens,
+        )
+
     @traced_llm
     async def _process_context(self, context: LLMContext):
         functions_list = []
@@ -533,32 +573,7 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
             async with _closing(chunk_stream) as chunk_iter:
                 async for chunk in chunk_iter:
                     if chunk.usage:
-                        cached_tokens = (
-                            chunk.usage.prompt_tokens_details.cached_tokens
-                            if chunk.usage.prompt_tokens_details
-                            else None
-                        )
-                        # Tokens written into the prompt cache, billed above the
-                        # input rate. Providers without prompt caching omit the
-                        # field, which reads as "not reported" rather than zero.
-                        cache_write_tokens = (
-                            getattr(chunk.usage.prompt_tokens_details, "cache_write_tokens", None)
-                            if chunk.usage.prompt_tokens_details
-                            else None
-                        )
-                        reasoning_tokens = (
-                            chunk.usage.completion_tokens_details.reasoning_tokens
-                            if chunk.usage.completion_tokens_details
-                            else None
-                        )
-                        token_usage = LLMTokenUsage(
-                            prompt_tokens=chunk.usage.prompt_tokens,
-                            completion_tokens=chunk.usage.completion_tokens,
-                            total_tokens=chunk.usage.total_tokens,
-                            cache_read_input_tokens=cached_tokens,
-                            cache_creation_input_tokens=cache_write_tokens,
-                            reasoning_tokens=reasoning_tokens,
-                        )
+                        token_usage = self._token_usage(chunk.usage)
 
                     if chunk.model and self.get_full_model_name() != chunk.model:
                         self.set_full_model_name(chunk.model)

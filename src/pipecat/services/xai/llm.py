@@ -14,8 +14,10 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from loguru import logger
+from openai.types import CompletionUsage
 
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
+from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.openai.llm import (
     OpenAILLMService,
@@ -129,3 +131,25 @@ class GrokLLMService(OpenAILLMService):
             params.setdefault("reasoning_effort", reasoning_effort)
 
         return params
+
+    def _token_usage(self, usage: CompletionUsage) -> LLMTokenUsage:
+        """Convert a Grok chat completion's usage into Pipecat's token usage.
+
+        xAI reports reasoning tokens apart from ``completion_tokens``, with
+        ``total_tokens`` covering both, so they are added to the completion
+        count. A total that already matches the prompt and completion counts
+        means reasoning was included, and the counts are kept as reported.
+
+        Args:
+            usage: The usage reported with the completion.
+
+        Returns:
+            The token usage to report.
+        """
+        tokens = super()._token_usage(usage)
+        reasoning = tokens.reasoning_tokens or 0
+        if reasoning and tokens.total_tokens == (
+            tokens.prompt_tokens + tokens.completion_tokens + reasoning
+        ):
+            tokens.completion_tokens += reasoning
+        return tokens

@@ -123,7 +123,7 @@ def _anthropic_patch_stream(service, generator):
 
 def _message_start() -> SimpleNamespace:
     """The event opening an Anthropic stream, which carries no model output."""
-    return SimpleNamespace(type="message_start")
+    return SimpleNamespace(type="message_start", message=SimpleNamespace(usage=None))
 
 
 def _content_block_start(block_type: str) -> SimpleNamespace:
