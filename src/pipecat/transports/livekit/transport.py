@@ -36,6 +36,7 @@ from pipecat.frames.frames import (
     OutputAudioRawFrame,
     OutputDTMFFrame,
     OutputDTMFUrgentFrame,
+    OutputImageRawFrame,
     OutputTransportMessageFrame,
     OutputTransportMessageUrgentFrame,
     StartFrame,
@@ -71,6 +72,16 @@ DTMF_CODE_MAP = {
     "9": 9,
     "*": 10,
     "#": 11,
+}
+
+# Maps Pipecat's PIL-style color format strings (``OutputImageRawFrame.format``,
+# configured via ``TransportParams.video_out_color_format``) to LiveKit's
+# ``VideoBufferType`` enum used by ``rtc.VideoFrame`` and its bytes per pixel.
+LIVEKIT_VIDEO_BUFFER_TYPES = {
+    "RGB": (proto_video_frame.VideoBufferType.RGB24, 3),
+    "RGBA": (proto_video_frame.VideoBufferType.RGBA, 4),
+    "BGRA": (proto_video_frame.VideoBufferType.BGRA, 4),
+    "ARGB": (proto_video_frame.VideoBufferType.ARGB, 4),
 }
 
 
@@ -110,12 +121,29 @@ class LiveKitOutputTransportMessageUrgentFrame(OutputTransportMessageUrgentFrame
 class LiveKitParams(TransportParams):
     """Configuration parameters for LiveKit transport.
 
+    Video output publishes a single ``"pipecat-video"`` camera track (mirroring how
+    audio output always publishes one ``"pipecat-audio"`` microphone track) when
+    ``video_out_enabled`` is set. The track is sized using
+    ``video_out_width``/``video_out_height`` and encodes frames according to
+    ``video_out_color_format`` (default ``"RGB"``); ``video_out_framerate``
+    governs how often ``BaseOutputTransport`` draws frames. Per-destination
+    video routing (multiple named output tracks, as supported by Daily's
+    ``camera_out_enabled``/``register_video_destination``) is not yet
+    implemented for LiveKit.
+
+    ``video_out_codec`` selects the published video codec (``"VP8"``, ``"H264"``,
+    ``"VP9"``, ``"AV1"`` or ``"H265"``); LiveKit picks one when it is unset.
+
     Parameters:
         audio_out_queue_size_ms: Buffer size of the outgoing audio source, in milliseconds
             (LiveKit's default is 1000).
+        video_out_max_bitrate: Maximum bitrate of the published video track, in bits
+            per second, capped at ``video_out_framerate``. LiveKit chooses the encoding
+            from the track resolution when unset.
     """
 
     audio_out_queue_size_ms: int = 1000
+    video_out_max_bitrate: int | None = None
 
 
 class LiveKitCallbacks(BaseModel):
@@ -192,6 +220,8 @@ class LiveKitTransportClient:
         # the owned native stream and cancel its producer task instead of
         # leaking both on every track republish.
         self._audio_streams: dict[str, tuple[rtc.AudioStream, asyncio.Task]] = {}
+        self._video_source: rtc.VideoSource | None = None
+        self._video_track: rtc.LocalVideoTrack | None = None
         self._video_tracks = {}
         self._video_queue = asyncio.Queue()
         # Symmetric registry for video streams.
@@ -268,10 +298,6 @@ class LiveKitTransportClient:
                     self._token,
                     options=rtc.RoomOptions(auto_subscribe=True),
                 )
-                self._connected = True
-                # Increment disconnect counter if we successfully connected.
-                self._disconnect_counter += 1
-
                 self._participant_id = self.room.local_participant.identity
                 logger.info(f"Connected to {self._room_name} as {self._participant_id}")
 
@@ -288,6 +314,27 @@ class LiveKitTransportClient:
                 options.source = rtc.TrackSource.SOURCE_MICROPHONE
                 await self.room.local_participant.publish_track(self._audio_track, options)
 
+                # Set up video source and track (only if video output is
+                # enabled; unlike audio, which is always published).
+                if self._params.video_out_enabled:
+                    self._video_source = rtc.VideoSource(
+                        self._params.video_out_width, self._params.video_out_height
+                    )
+                    self._video_track = rtc.LocalVideoTrack.create_video_track(
+                        "pipecat-video", self._video_source
+                    )
+                    video_options = self._video_publish_options()
+                    await self.room.local_participant.publish_track(
+                        self._video_track, video_options
+                    )
+
+                # Only mark the client connected once its tracks are
+                # published, so a retry after a failed publish starts over
+                # instead of returning early without tracks.
+                self._connected = True
+                # Increment disconnect counter if we successfully connected.
+                self._disconnect_counter += 1
+
                 await self._callbacks.on_connected()
 
                 # Check if there are already participants in the room
@@ -297,7 +344,40 @@ class LiveKitTransportClient:
                     await self._callbacks.on_first_participant_joined(participants[0])
             except Exception as e:
                 logger.error(f"Error connecting to {self._room_name}: {e}")
+                if not self._connected:
+                    await self._rollback_partial_connect()
                 raise
+
+    def _video_publish_options(self) -> rtc.TrackPublishOptions:
+        """Build the publish options for the video track from the params."""
+        options = rtc.TrackPublishOptions()
+        options.source = rtc.TrackSource.SOURCE_CAMERA
+
+        # LiveKit requires both fields of a video encoding, so the framerate
+        # is only sent along with a bitrate.
+        if self._params.video_out_max_bitrate is not None:
+            options.video_encoding.max_bitrate = self._params.video_out_max_bitrate
+            options.video_encoding.max_framerate = self._params.video_out_framerate
+
+        codec = self._params.video_out_codec
+        if codec:
+            try:
+                options.video_codec = rtc.VideoCodec.Value(codec.upper())
+            except ValueError:
+                logger.warning(
+                    f"{self} unsupported video codec for LiveKit output: {codec!r}, "
+                    f"expected one of {list(rtc.VideoCodec.keys())}"
+                )
+
+        return options
+
+    async def _rollback_partial_connect(self):
+        """Undo a connection attempt that failed before it completed."""
+        await self._close_output_sources()
+        try:
+            await self.room.disconnect()
+        except Exception as e:
+            logger.warning(f"{self} error disconnecting after failed connect: {e}")
 
     async def disconnect(self):
         """Disconnect from the LiveKit room."""
@@ -310,13 +390,32 @@ class LiveKitTransportClient:
 
             logger.info(f"Disconnecting from {self._room_name}")
             await self._callbacks.on_before_disconnect()
-            await self.room.disconnect()
+            # Mark the client disconnected before the room disconnects, so the
+            # room's own "disconnected" event does not report it a second time.
             self._connected = False
+            await self.room.disconnect()
+            await self._close_output_sources()
             # Close any remaining per-participant streams and cancel their
             # producer tasks so they do not outlive the connection.
             await self._close_all_streams()
             logger.info(f"Disconnected from {self._room_name}")
             await self._callbacks.on_disconnected()
+
+    async def _close_output_sources(self):
+        """Close the published audio and video sources.
+
+        ``room.disconnect()`` does not release the native source handles, so
+        each connection would otherwise leave them behind.
+        """
+        audio_source, self._audio_source, self._audio_track = self._audio_source, None, None
+        video_source, self._video_source, self._video_track = self._video_source, None, None
+        for source in (audio_source, video_source):
+            if source is None:
+                continue
+            try:
+                await source.aclose()
+            except Exception as e:
+                logger.warning(f"{self} error closing output source: {e}")
 
     async def send_data(self, data: bytes, participant_id: str | None = None):
         """Send data to participants in the room.
@@ -381,6 +480,27 @@ class LiveKitTransportClient:
             # milliseconds, so we silently drop these frames.
             if "InvalidState" not in str(e):
                 logger.error(f"Error publishing audio: {e}")
+            return False
+
+    async def publish_video(self, video_frame: rtc.VideoFrame) -> bool:
+        """Publish a video frame to the room.
+
+        Args:
+            video_frame: The LiveKit video frame to publish.
+
+        Returns:
+            True if the video frame was published successfully, False otherwise.
+        """
+        if not self._connected or not self._video_source:
+            return False
+
+        try:
+            # Unlike ``AudioSource.capture_frame``, ``VideoSource.capture_frame``
+            # is synchronous in livekit-rtc.
+            self._video_source.capture_frame(video_frame)
+            return True
+        except Exception as e:
+            logger.error(f"Error publishing video: {e}")
             return False
 
     def get_participants(self) -> list[str]:
@@ -656,7 +776,14 @@ class LiveKitTransportClient:
         await self._callbacks.on_connected()
 
     async def _async_on_disconnected(self, reason=None):
-        """Handle disconnected events."""
+        """Handle disconnected events.
+
+        Only a disconnect of a connected client is reported. ``disconnect()``
+        and a failed ``connect()`` clear the connected flag before disconnecting
+        the room, so the room's event for those is ignored.
+        """
+        if not self._connected:
+            return
         self._connected = False
         logger.info(f"Disconnected from {self._room_name}. Reason: {reason}")
         await self._callbacks.on_disconnected()
@@ -901,8 +1028,10 @@ class LiveKitInputTransport(BaseInputTransport):
 class LiveKitOutputTransport(BaseOutputTransport):
     """Handles outgoing media streams and events to LiveKit rooms.
 
-    Manages sending audio frames and data messages to LiveKit room participants,
-    including audio format conversion for LiveKit compatibility.
+    Manages sending audio and video frames and data messages to LiveKit room
+    participants, including audio/video format conversion for LiveKit
+    compatibility. Video output publishes to a single default camera track
+    when ``LiveKitParams.video_out_enabled`` is set.
     """
 
     def __init__(
@@ -923,6 +1052,9 @@ class LiveKitOutputTransport(BaseOutputTransport):
         super().__init__(params, **kwargs)
         self._transport = transport
         self._client = client
+        # Formats already reported as unsupported, so the error is logged once
+        # per format instead of once per frame.
+        self._unsupported_video_formats: set[str | None] = set()
 
     async def setup(self, setup: FrameProcessorSetup):
         """Setup the output transport with shared client setup.
@@ -1019,6 +1151,26 @@ class LiveKitOutputTransport(BaseOutputTransport):
         livekit_audio = self._convert_pipecat_audio_to_livekit(frame.audio)
         return await self._client.publish_audio(livekit_audio)
 
+    async def write_video_frame(self, frame: OutputImageRawFrame) -> bool:
+        """Write a video frame to the LiveKit room's published camera track.
+
+        Publishes to the single default video track set up in
+        ``LiveKitTransportClient.connect`` (mirroring how audio always
+        publishes to one microphone track). Per-destination routing to
+        multiple named video tracks is not supported yet, so
+        ``frame.transport_destination`` is ignored.
+
+        Args:
+            frame: The video frame to write.
+
+        Returns:
+            True if the video frame was written successfully, False otherwise.
+        """
+        livekit_video = self._convert_pipecat_video_to_livekit(frame)
+        if livekit_video is None:
+            return False
+        return await self._client.publish_video(livekit_video)
+
     def _supports_native_dtmf(self) -> bool:
         """LiveKit supports native DTMF via telephone events.
 
@@ -1053,6 +1205,40 @@ class LiveKitOutputTransport(BaseOutputTransport):
             num_channels=self._params.audio_out_channels,
             samples_per_channel=samples_per_channel,
         )
+
+    def _convert_pipecat_video_to_livekit(
+        self, frame: OutputImageRawFrame
+    ) -> rtc.VideoFrame | None:
+        """Convert a Pipecat output video frame to a LiveKit video frame.
+
+        Returns:
+            The converted ``rtc.VideoFrame``, or None if ``frame.format`` has
+            no known LiveKit ``VideoBufferType`` mapping or the image length
+            does not match its size.
+        """
+        buffer_info = LIVEKIT_VIDEO_BUFFER_TYPES.get(frame.format) if frame.format else None
+        if buffer_info is None:
+            if frame.format not in self._unsupported_video_formats:
+                self._unsupported_video_formats.add(frame.format)
+                logger.error(
+                    f"{self} unsupported video color format for LiveKit output: {frame.format!r}"
+                )
+            return None
+
+        buffer_type, bytes_per_pixel = buffer_info
+        width, height = frame.size
+        # LiveKit reads ``width * height * bytes_per_pixel`` bytes from the
+        # buffer without checking its length, so a short buffer crashes the
+        # process.
+        expected_length = width * height * bytes_per_pixel
+        if len(frame.image) != expected_length:
+            logger.error(
+                f"{self} video frame of size {width}x{height} and format {frame.format!r} "
+                f"has {len(frame.image)} bytes, expected {expected_length}"
+            )
+            return None
+
+        return rtc.VideoFrame(width, height, buffer_type, frame.image)
 
 
 class LiveKitTransport(BaseTransport):

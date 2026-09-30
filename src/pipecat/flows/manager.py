@@ -911,8 +911,13 @@ class FlowManager:
                 else LLMMessagesAppendFrame
             )
 
-            frames.append(frame_type(messages=messages))
-            frames.append(LLMSetToolsFrame(tools=functions))
+            # A node's context and tools must land even if the user interrupts
+            # while they are queued, or the LLM runs with the previous node's.
+            context_frame = frame_type(messages=messages)
+            context_frame.interruptible = False
+            tools_frame = LLMSetToolsFrame(tools=functions)
+            tools_frame.interruptible = False
+            frames += [context_frame, tools_frame]
 
             await self._worker.queue_frames(frames)
 

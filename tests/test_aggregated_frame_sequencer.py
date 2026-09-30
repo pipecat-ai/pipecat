@@ -2223,5 +2223,152 @@ class TestProcessWordResyncWithMarkup(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(seq._slots, [])
 
 
+class TestForceCompleteWordStream(unittest.IsolatedAsyncioTestCase):
+    """What a context ending has to account for: text no word arrived for, which the
+    progress view has to reach, and a buffered word no slot ever matched, which is
+    dropped where sentence mode would have dropped it on arrival.
+    """
+
+    async def _streamed_slot(self, *tokens: str) -> AggregatedFrameSequencer:
+        seq = _seq(streaming=True)
+        for t in tokens:
+            await seq.register_spoken(_spoken_frame(t, raw_text=t), "ctx1", t, True)
+        return seq
+
+    async def test_buffered_word_is_dropped_at_context_end(self):
+        # "。" is taken by "好" as trailing punctuation, so the slot is already
+        # complete when the provider reports the mark on its own, so it is buffered.
+        seq = await self._streamed_slot("您好", "。", "谢谢")
+        for i, ch in enumerate(["您", "好", "。"]):
+            seq.process_word(ch, pts=(i + 1) * 10, context_id="ctx1")
+        self.assertEqual([w.word for w in seq._buffered_words], ["。"])
+
+        words = [f for f in seq.force_complete("ctx1", 30) if isinstance(f, TTSTextFrame)]
+        self.assertEqual(words, [])
+        self.assertEqual(seq._buffered_words, [])
+
+    async def test_buffered_word_for_another_context_is_left_alone(self):
+        seq = await self._streamed_slot("您好", "。", "谢谢")
+        for i, ch in enumerate(["您", "好", "。"]):
+            seq.process_word(ch, pts=(i + 1) * 10, context_id="ctx1")
+        seq._buffered_words[0].context_id = "ctx2"
+        seq.force_complete("ctx1", 30)
+        self.assertEqual([w.word for w in seq._buffered_words], ["。"])
+
+    async def test_forced_tail_reports_progress_to_the_end(self):
+        seq = _seq()
+        text = "Hello there friend"
+        await seq.register_spoken(_spoken_frame(text, raw_text=text), "ctx1", text, True)
+        seq.process_word("Hello", pts=10, context_id="ctx1")
+
+        frames = seq.force_complete("ctx1", 20)
+        words = [f for f in frames if isinstance(f, TTSTextFrame)]
+        progress = [f for f in frames if isinstance(f, AggregatedTextProgressFrame)]
+        self.assertEqual([f.text for f in words], ["there friend"])
+        self.assertEqual(progress[-1].accumulated_text, text)
+        self.assertEqual(progress[-1].remaining_text, "")
+
+
+class TestMarkdownResponseStaysInSync(unittest.IsolatedAsyncioTestCase):
+    """A markdown-heavy LLM response spoken by Cartesia, several sentences queued.
+
+    Cartesia keeps the markdown on each token and appends a period to the last
+    token of every line. One misplaced token force-completes its slot, and every
+    later word of the turn is then dropped as unrecognised. So every word must
+    produce a TTSTextFrame, and the context must receive every sentence in full.
+    """
+
+    SENTENCES = [
+        "Each menu lists food items under categories such as **ENTREE**, **SIDES**, "
+        "and **SELECTIONS**.",
+        "Below is a detailed description of the content across the images:\n\n---\n\n"
+        "### **General Overview**\n"
+        "- **Purpose**: These menus are designed for students, offering meals each day.",
+        "- **Structure**: Each day has a designated **ENTREE** (main course).",
+    ]
+
+    WORDS = [
+        ["Each", "menu", "lists", "food", "items", "under", "categories", "such", "as",
+         "**ENTREE**,", "**SIDES**,", "and", "**SELECTIONS**."],
+        ["Below", "is", "a", "detailed", "description", "of", "the", "content", "across",
+         "the", "images:.", "---.", "###", "**General", "Overview**.", "-", "**Purpose**:",
+         "These", "menus", "are", "designed", "for", "students,", "offering", "meals",
+         "each", "day."],
+        ["-", "**Structure**:", "Each", "day", "has", "a", "designated", "**ENTREE**",
+         "(main", "course)."],
+    ]  # fmt: skip
+
+    async def test_every_word_is_emitted_and_every_sentence_reaches_the_context(self):
+        seq = _seq()
+        for text in self.SENTENCES:
+            await seq.register_spoken(_spoken_frame(text, raw_text=text), "ctx1", text, True)
+
+        context_spans: list[str] = []
+        dropped: list[str] = []
+        pts = 0
+        for words in self.WORDS:
+            for word in words:
+                pts += 10
+                frames = [
+                    f
+                    for f in seq.process_word(word, pts=pts, context_id="ctx1")
+                    if isinstance(f, TTSTextFrame)
+                ]
+                if not frames:
+                    dropped.append(word)
+                context_spans += [f.raw_text for f in frames if f.append_to_context and f.raw_text]
+
+        self.assertEqual(dropped, [])
+        self.assertEqual(
+            " ".join(" ".join(context_spans).split()),
+            " ".join(" ".join(self.SENTENCES).split()),
+        )
+
+
+class TestUnmatchedSymbolDoesNotDesyncTheTurn(unittest.IsolatedAsyncioTestCase):
+    """A swapped symbol followed by more symbol tokens, across two queued sentences.
+
+    ElevenLabs reports ``→`` as ``-``. If the cursor steps past the symbol tokens
+    after it, the next one is rejected, the slot is force-completed, and the
+    following words are dropped as unrecognised.
+    """
+
+    SENTENCES = [
+        "Step one →\n\n### **Step two**\nDone.",
+        "Then we finish.",
+    ]
+
+    WORDS = [
+        ["Step", "one", "-", "###", "**Step", "two**", "Done."],
+        ["Then", "we", "finish."],
+    ]
+
+    async def test_every_word_is_emitted_and_every_sentence_reaches_the_context(self):
+        seq = _seq()
+        for text in self.SENTENCES:
+            await seq.register_spoken(_spoken_frame(text, raw_text=text), "ctx1", text, True)
+
+        context_spans: list[str] = []
+        dropped: list[str] = []
+        pts = 0
+        for words in self.WORDS:
+            for word in words:
+                pts += 10
+                frames = [
+                    f
+                    for f in seq.process_word(word, pts=pts, context_id="ctx1")
+                    if isinstance(f, TTSTextFrame)
+                ]
+                if not frames:
+                    dropped.append(word)
+                context_spans += [f.raw_text for f in frames if f.append_to_context and f.raw_text]
+
+        self.assertEqual(dropped, [])
+        self.assertEqual(
+            " ".join(" ".join(context_spans).split()),
+            " ".join(" ".join(self.SENTENCES).split()),
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

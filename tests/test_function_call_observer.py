@@ -250,15 +250,6 @@ class TestFunctionCallObserver(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(self.events), 1)
 
-    async def test_a_result_is_reported_once_however_far_it_travels(self):
-        """A result is pushed again by every processor it passes through."""
-        result = self._result()
-
-        await self._push(result)
-        await self._push(result)
-
-        self.assertEqual(len(self.events), 1)
-
     async def test_frames_from_elsewhere_in_the_pipeline_are_ignored(self):
         await self._push(TextFrame("hello"))
 

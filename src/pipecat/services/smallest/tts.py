@@ -106,9 +106,13 @@ class SmallestTTSSettings(TTSSettings):
 
     Parameters:
         speed: Speech speed multiplier (0.5–2.0).
+        math_notation: Read digit-flanked math operators as words (``2 + 2`` as
+            "two plus two") instead of leaving them to the default number reader.
+            If None, the API default (off) applies.
     """
 
     speed: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    math_notation: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class SmallestTTSService(InterruptibleTTSService):
@@ -186,6 +190,7 @@ class SmallestTTSService(InterruptibleTTSService):
             voice=_MODEL_DEFAULT_VOICES[model],
             language=Language.EN,
             speed=None,
+            math_notation=None,
         )
 
         if settings is not None:
@@ -285,6 +290,9 @@ class SmallestTTSService(InterruptibleTTSService):
         if self._settings.speed is not None:
             msg["speed"] = self._settings.speed
 
+        if self._settings.math_notation is not None:
+            msg["math_notation"] = self._settings.math_notation
+
         if self._word_timestamps:
             msg["word_timestamps"] = True
 
@@ -329,8 +337,8 @@ class SmallestTTSService(InterruptibleTTSService):
     async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
         """Apply a settings delta.
 
-        All fields (model, speed, voice, language) take effect on the next
-        ``_build_msg`` call without reconnecting.
+        All fields (model, speed, math_notation, voice, language) take effect on
+        the next ``_build_msg`` call without reconnecting.
         """
         return await super()._update_settings(delta)
 

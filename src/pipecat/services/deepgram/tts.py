@@ -28,6 +28,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TTSService, WebsocketTTSService
+from pipecat.utils.text.phonemes import ipa_phones, normalize_ipa, stress_before_vowels
 from pipecat.utils.tracing.service_decorators import traced_tts
 from pipecat.utils.types import NOT_GIVEN, NotGiven
 
@@ -43,6 +44,42 @@ class DeepgramTTSSettings(TTSSettings):
     """
 
     speed: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+
+# Aura-2 rejects IPA that is far longer than the word it replaces, or longer than
+# 128 characters. Short words get a floor instead of the ratio.
+_MAX_IPA_LENGTH = 128
+_MAX_IPA_WORD_RATIO = 10
+_MIN_IPA_LENGTH = 15
+
+
+def format_deepgram_pronunciation(word: str, ipa: str) -> str | None:
+    r"""Render a pronunciation as a Deepgram inline pronunciation object.
+
+    Aura-2 reads an escaped JSON object anywhere in the text and speaks its
+    ``pronounce`` value in place of its ``word``. The word stays in the text and
+    is what Deepgram bills for; the IPA is not billed. English and Spanish only.
+    Stress marks go directly before the vowel they stress; Aura-2 warns about any
+    other placement and falls back to a best-effort pronunciation.
+
+    Args:
+        word: The word being pronounced, kept as the object's ``word``.
+        ipa: The pronunciation, in IPA.
+
+    Returns:
+        The inline object, e.g.
+        ``\{"word": "dupilumab", "pronounce": "duːpˈɪljuːmæb"\}``, or None for an
+        empty pronunciation or IPA longer than Deepgram accepts for the word.
+    """
+    ipa = " ".join("".join(stress_before_vowels(ipa_phones(w))) for w in normalize_ipa(ipa).split())
+    if not ipa or len(ipa) > _MAX_IPA_LENGTH:
+        return None
+    if len(ipa) > max(_MAX_IPA_WORD_RATIO * len(word), _MIN_IPA_LENGTH):
+        return None
+    return (
+        f'\\{{"word": {json.dumps(word, ensure_ascii=False)}, '
+        f'"pronounce": {json.dumps(ipa, ensure_ascii=False)}\\}}'
+    )
 
 
 class DeepgramTTSService(WebsocketTTSService):
@@ -133,6 +170,21 @@ class DeepgramTTSService(WebsocketTTSService):
         self._mip_opt_out = mip_opt_out
 
         self._receive_task = None
+
+    @classmethod
+    def format_pronunciation(cls, word: str, ipa: str) -> str | None:
+        """Render a pronunciation as a Deepgram inline pronunciation object.
+
+        See :func:`format_deepgram_pronunciation`.
+
+        Args:
+            word: The word being pronounced.
+            ipa: The pronunciation, in IPA.
+
+        Returns:
+            The inline object, or None when the pronunciation cannot be used.
+        """
+        return format_deepgram_pronunciation(word, ipa)
 
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate metrics.
@@ -298,9 +350,8 @@ class DeepgramTTSService(WebsocketTTSService):
                         # Buffer has been cleared after interruption.
                         # The on_audio_context_interrupted handler already cleaned up.
                     elif msg_type == "Warning":
-                        logger.warning(
-                            f"{self} warning: {msg.get('description', 'Unknown warning')}"
-                        )
+                        description = msg.get("warn_msg") or msg.get("description")
+                        logger.warning(f"{self} warning: {description or 'Unknown warning'}")
                     else:
                         logger.debug(f"Received unknown message type: {msg}")
                 except json.JSONDecodeError:
@@ -425,6 +476,21 @@ class DeepgramHttpTTSService(TTSService):
         self._base_url = base_url
         self._encoding = encoding
         self._mip_opt_out = mip_opt_out
+
+    @classmethod
+    def format_pronunciation(cls, word: str, ipa: str) -> str | None:
+        """Render a pronunciation as a Deepgram inline pronunciation object.
+
+        See :func:`format_deepgram_pronunciation`.
+
+        Args:
+            word: The word being pronounced.
+            ipa: The pronunciation, in IPA.
+
+        Returns:
+            The inline object, or None when the pronunciation cannot be used.
+        """
+        return format_deepgram_pronunciation(word, ipa)
 
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate metrics.

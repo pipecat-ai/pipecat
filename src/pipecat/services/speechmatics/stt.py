@@ -171,6 +171,9 @@ class TurnDetectionMode(StrEnum):
     EXTERNAL = AgentTurnDetectionMode.EXTERNAL.value
 
 
+_DEFAULT_TURN_DETECTION_MODE = TurnDetectionMode.EXTERNAL
+
+
 def _handle_turn_detection_mode(mode: TurnDetectionMode) -> AgentTurnDetectionMode:
     """Map the service's turn detection mode onto the SDK's.
 
@@ -291,10 +294,10 @@ class SpeechmaticsSTTService(STTService):
 
             language: Language code for transcription. Defaults to `Language.EN`.
 
-            turn_detection_mode: How turns are closed. `TurnDetectionMode.VAD` lets the
-                STT service run its own VAD and close turns itself; `TurnDetectionMode.EXTERNAL`
-                has the caller drive turns via `finalize()` (e.g. Pipecat's own VAD).
-                Defaults to `TurnDetectionMode.VAD`.
+            turn_detection_mode: How turns are closed. `TurnDetectionMode.EXTERNAL`
+                has the caller drive turns via `finalize()` (e.g. Pipecat's own VAD);
+                `TurnDetectionMode.VAD` lets the STT service run its own VAD and close
+                turns itself. Defaults to `DEFAULT_TURN_DETECTION_MODE`.
 
             speaker_active_format: Formatter for the speaker ID. This formatter is used to format
                 the text output for individual speakers and ensures that the context is clear for
@@ -359,7 +362,7 @@ class SpeechmaticsSTTService(STTService):
         language: Language | str = Language.EN
 
         # Endpointing mode
-        turn_detection_mode: TurnDetectionMode = TurnDetectionMode.VAD
+        turn_detection_mode: TurnDetectionMode = _DEFAULT_TURN_DETECTION_MODE
 
         # Output formatting
         speaker_active_format: str | None = None
@@ -454,7 +457,7 @@ class SpeechmaticsSTTService(STTService):
             model=None,  # Resolved from model / operating_point below
             language=Language.EN,
             domain=None,
-            turn_detection_mode=TurnDetectionMode.VAD,
+            turn_detection_mode=_DEFAULT_TURN_DETECTION_MODE,
             speaker_active_format="{text}",
             known_speakers=[],
             additional_vocab=[],

@@ -19,10 +19,13 @@ import asyncio
 import base64
 import mimetypes
 import time
+from collections import deque
 from collections.abc import Callable
+from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from loguru import logger
 from pydantic import BaseModel, Field
 
 import pipecat.processors.frameworks.rtvi.models as RTVI
@@ -46,6 +49,7 @@ from pipecat.evals.tts import CachingTTSService, tts_sample_rate
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
+    DataFrame,
     EndFrame,
     Frame,
     FunctionCallCancelFrame,
@@ -57,14 +61,18 @@ from pipecat.frames.frames import (
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
+    LLMMarkerResponseFrame,
     LLMTextFrame,
     LLMUpdateSettingsFrame,
     OutputTransportMessageUrgentFrame,
+    TranscriptionFrame,
     TTSAudioRawFrame,
     TTSSpeakFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
     TTSTextFrame,
+    VADUserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
@@ -76,7 +84,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.settings import LLMSettings
-from pipecat.services.stt_service import STTService
+from pipecat.services.stt_service import SegmentedSTTService, STTService
 from pipecat.transports.websocket.client import WebsocketClientParams
 from pipecat.workers.runner import WorkerRunner
 
@@ -90,6 +98,7 @@ BOT_READY_TIMEOUT_S = 10.0
 _BOT_FRAMES = (
     LLMFullResponseStartFrame,
     LLMTextFrame,
+    LLMMarkerResponseFrame,
     LLMFullResponseEndFrame,
     TTSTextFrame,
     BotStartedSpeakingFrame,
@@ -99,6 +108,128 @@ _BOT_FRAMES = (
     FunctionCallCancelFrame,
     InputTransportMessageFrame,
 )
+
+
+@dataclass
+class _BotSegmentTranscriptionFrame(TranscriptionFrame):
+    """A transcription of one segment of the bot's speech, with when that audio began.
+
+    Parameters:
+        segment_started_at: Monotonic time the segment's speech was first heard.
+    """
+
+    segment_started_at: float = 0.0
+
+
+@dataclass
+class _BotSegmentTranscribedFrame(DataFrame):
+    """Closes a segment's transcription run, whatever it yielded.
+
+    Sent after the run's frames, it reaches the sink once the aggregator has
+    taken them in, so the sink reports the segment as accounted for only
+    then: a transcript that opens a turn of its own has opened it by the time
+    this frame passes. Uninterruptible because a transcript that opens a turn
+    also raises an interruption, which flushes the queued frames behind it.
+    """
+
+    interruptible: bool = field(default=False, init=False)
+
+
+def _tag_bot_segments(stt: SegmentedSTTService, starts: "deque[float]") -> None:
+    """Have the STT's transcriptions carry when their segment's audio began.
+
+    A segmented STT transcribes each speech segment on its own, in order, once
+    the segment ends, and its transcript can land seconds after the audio it
+    came from. The gate ahead of it records when each segment began, one entry
+    per segment as it ends, and this pairs each transcription run with the
+    matching entry, so a transcript is attributed by its audio's time and not
+    by its arrival. A run that yields no transcription still takes its entry,
+    which keeps the pairing exact, and every run ends with a
+    :class:`_BotSegmentTranscribedFrame`, so the sink can tell when nothing
+    is left to transcribe.
+
+    Args:
+        stt: The bot-speech STT in the harness pipeline.
+        starts: The gate's record of segment starts, oldest first.
+    """
+    run_stt = stt.run_stt
+
+    async def tagged_run_stt(audio: bytes):
+        started_at = starts.popleft() if starts else time.monotonic()
+        logger.debug(f"bot speech: transcribing a segment ({len(starts)} start(s) left recorded)")
+        try:
+            async for frame in run_stt(audio):
+                if isinstance(frame, TranscriptionFrame):
+                    frame = _BotSegmentTranscriptionFrame(
+                        text=frame.text,
+                        user_id=frame.user_id,
+                        timestamp=frame.timestamp,
+                        language=frame.language,
+                        result=frame.result,
+                        finalized=frame.finalized,
+                        segment_started_at=started_at,
+                    )
+                yield frame
+        finally:
+            yield _BotSegmentTranscribedFrame()
+
+    stt.run_stt = tagged_run_stt  # type: ignore[method-assign]
+
+
+class _BotSpeechGate(FrameProcessor):
+    """Between the bot-speech STT and the turn aggregator: after an interrupting send, only audio from after it gets through.
+
+    The aggregator's VAD reports the bot's speech segments upstream, past this
+    gate, to the STT; the gate notes when each began and, as each ends, hands
+    the start to the STT's tagging (see :func:`_tag_bot_segments`) and tells
+    the stream a segment awaits transcription. An ordinary send waits for the
+    bot's speech to be transcribed first, so nothing of it is in flight. A send
+    that talks over the bot cannot wait: a tagged transcript whose segment began
+    before that send is the bot finishing what it was saying, however late it
+    lands, and is dropped here so it cannot pass for the reply or be folded
+    into it.
+
+    Both need a segmented STT, which transcribes one segment at a time. With
+    any other STT the gate keeps no account of segments and drops nothing, and
+    a send waits only for the bot to stop speaking and its open turn to close.
+    """
+
+    def __init__(self, stream: EvalEventStream, trace: EvalTrace, starts: "deque[float] | None"):
+        """Initialize the gate.
+
+        Args:
+            stream: The event stream, for when the user's input was sent.
+            trace: The run's trace, for what the gate drops.
+            starts: Where the start of each ended segment goes, for the STT's
+                tagging; ``None`` with an STT that is not segmented.
+        """
+        super().__init__()
+        self._stream = stream
+        self._trace = trace
+        self._starts = starts
+        self._segment_started_at: float | None = None
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+        if self._starts is None:
+            pass
+        elif isinstance(frame, VADUserStartedSpeakingFrame):
+            logger.debug(f"bot speech: segment began ({direction.name})")
+            self._segment_started_at = time.monotonic()
+            self._stream.bot_segment_started()
+        elif isinstance(frame, VADUserStoppedSpeakingFrame):
+            logger.debug(f"bot speech: segment ended ({direction.name})")
+            self._starts.append(self._segment_started_at or time.monotonic())
+            self._segment_started_at = None
+            self._stream.bot_segment_ended()
+        elif isinstance(frame, _BotSegmentTranscriptionFrame):
+            interrupted_at = self._stream.interrupting_send_at
+            if interrupted_at is not None and frame.segment_started_at < interrupted_at:
+                self._trace.log(
+                    f"discard: bot speech from before the interrupting send {frame.text!r}"
+                )
+                return
+        await self.push_frame(frame, direction)
 
 
 class _BotFrameSink(FrameProcessor):
@@ -158,6 +289,9 @@ class _BotFrameSink(FrameProcessor):
             await self._stream.append(event)
             if self._persona_hears and self._persona is not None:
                 await self._answer(self._persona.hear(event))
+        if isinstance(frame, _BotSegmentTranscribedFrame):
+            self._stream.bot_segment_transcribed()
+            return
         if isinstance(frame, _BOT_FRAMES):
             return
         elif isinstance(frame, InterruptionFrame) and self._persona is None:
@@ -255,6 +389,8 @@ class EvalClientParams(BaseModel):
         report_level: Function-call report level to ask of the bot, or ``None``
             for its default.
         vad_events: Whether to ask the bot for its raw VAD events.
+        marker_events: Whether to ask the bot for the sideband markers its LLM
+            emits.
         context: Messages the bot's context starts from, sent right after the
             handshake; empty sends nothing.
         trigger_disconnect: Whether the scenario itself asks for the bot's
@@ -269,6 +405,7 @@ class EvalClientParams(BaseModel):
     capture_bot_audio: bool = False
     report_level: str | None = None
     vad_events: bool = False
+    marker_events: bool = False
     context: list[dict] = Field(default_factory=list)
     trigger_disconnect: bool = False
 
@@ -281,11 +418,13 @@ class EvalClient:
     :meth:`send_image`), then :meth:`stop`. The pipeline is the same for both
     modalities and both kinds of eval::
 
-        input -> [STT -> user aggregator] -> sink -> [persona LLM] -> [user TTS]
-              -> [persona relay] -> output -> [assistant aggregator]
+        input -> [STT -> speech gate -> user aggregator] -> sink -> [persona LLM]
+              -> [user TTS] -> [persona relay] -> output -> [assistant aggregator]
 
-    The bracketed stages exist only in audio mode (the STT, the aggregator,
-    the user TTS) or in a simulation (the persona LLM, its relay, the
+    The bracketed stages exist only in audio mode (the STT, the gate that
+    drops transcripts of audio from before a send that talked over the bot,
+    the aggregator, the user TTS) or in a simulation (the persona LLM, its
+    relay, the
     aggregator that records its replies). The bot's output comes in through
     the input and stops at the sink, as events; the user's turns start at the
     sink and leave through the output. A session builds it, with the params
@@ -332,6 +471,10 @@ class EvalClient:
         self._user_tts = user_tts
         self._bot_stt = bot_stt
         self._persona = persona
+        # The aggregator that turns the bot's transcribed speech into turns
+        # (audio mode), kept so a send that talks over the bot can drop what
+        # it holds of the bot's speech from before the send.
+        self._bot_turns: LLMUserAggregator | None = None
 
         # The eval pipeline's worker (built by start()) and the runner task driving it.
         self._worker: PipelineWorker | None = None
@@ -429,13 +572,15 @@ class EvalClient:
         # Ask the bot's RTVIObserver to expose what this scenario needs, for the
         # duration of this eval only (bots keep their defaults; only the eval
         # transport understands this): raise the function-call report level if it
-        # asserts on call name/args, and enable raw VAD speaking events if it uses
-        # them.
+        # asserts on call name/args, and enable raw VAD speaking events and LLM
+        # markers if it uses them.
         config: dict = {}
         if self._params.report_level is not None:
             config["function_call_report_level"] = {"*": self._params.report_level}
         if self._params.vad_events:
             config["vad_user_speaking"] = True
+        if self._params.marker_events:
+            config["llm_markers"] = True
         if config:
             await self._send_eval(EVAL_CONFIGURE_MESSAGE_TYPE, config)
 
@@ -489,6 +634,7 @@ class EvalClient:
         Args:
             text: The user's turn.
         """
+        await self._drop_bot_speech_if_talking_over()
         await self.send(RTVI.Message(**self._text_turn_message(text)))
 
     async def send_dtmf(self, keys: str) -> None:
@@ -499,6 +645,7 @@ class EvalClient:
         Args:
             keys: The keys to press, in order.
         """
+        await self._drop_bot_speech_if_talking_over()
         await self.send(self._message("dtmf", {"buttons": list(keys)}))
 
     async def send_image(self, image_path: str) -> None:
@@ -526,6 +673,7 @@ class EvalClient:
             text: What the user says.
         """
         assert self._sink is not None  # pipeline built before any send
+        await self._drop_bot_speech_if_talking_over()
         await self._sink.inject(TTSSpeakFrame(text))
 
     async def play(self, path: str) -> None:
@@ -538,6 +686,7 @@ class EvalClient:
             path: Path to the audio file.
         """
         assert self._sink is not None  # pipeline built before any send
+        await self._drop_bot_speech_if_talking_over()
         pcm, sample_rate = await load_user_audio(path)
         for frame in (
             TTSStartedFrame(),
@@ -545,6 +694,21 @@ class EvalClient:
             TTSStoppedFrame(),
         ):
             await self._sink.inject(frame)
+
+    async def _drop_bot_speech_if_talking_over(self) -> None:
+        """Before a send that talks over the bot, drop its speech held in an open turn.
+
+        An ordinary send waits for the bot's speech to be transcribed and
+        closed into a turn. A send over a speaking bot cannot, and the bot's
+        turn open at that moment holds transcripts of what it said before the
+        send; left there, they would close into a turn after the bot's LLM has
+        restarted and pass for the reply. The transcripts still with the STT
+        are dropped by the gate as they land (see :class:`_BotSpeechGate`).
+        """
+        if self._bot_turns is None or not self._stream.bot_speaking:
+            return
+        self._trace.log("discard: bot speech held in its open turn before the interrupting send")
+        await self._bot_turns.reset()
 
     async def configure_persona(self, instruction: str) -> None:
         """Give the persona LLM its instruction, and say whether its replies are spoken.
@@ -640,7 +804,12 @@ class EvalClient:
 
         inbound: list = [transport.input()]
         if bot_stt is not None:
-            inbound += [bot_stt, self._bot_turn_aggregator(context)]
+            starts: deque[float] | None = None
+            if isinstance(bot_stt, SegmentedSTTService):
+                starts = deque()
+                _tag_bot_segments(bot_stt, starts)
+            self._bot_turns = self._bot_turn_aggregator(context)
+            inbound += [bot_stt, _BotSpeechGate(self._stream, self._trace, starts), self._bot_turns]
 
         speech = [user_tts] if user_tts is not None else []
         if persona is None:
@@ -671,8 +840,9 @@ class EvalClient:
 
         # The aggregator consumes the STT's TranscriptionFrames to build the
         # bot's turn, so the response comes from the aggregated turn text here
-        # (not from a frame at the sink). The stream decides whether the
-        # finished turn is the bot's reply or an earlier turn finalized late
+        # (not from a frame at the sink). Transcripts of audio from before an
+        # interrupting send never reach it (see _BotSpeechGate); the stream
+        # still holds a turn back until the bot's LLM has answered the send
         # (see EvalEventStream.bot_turn_stopped).
         @aggregator.event_handler("on_user_turn_started")
         async def _on_user_turn_started(_aggregator, _strategy):

@@ -34,6 +34,7 @@ from pipecat.services.elevenlabs.tts_base import (
 )
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TextAggregationMode
+from pipecat.utils.text.phonemes import normalize_ipa
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
 # Text-to-Dialogue rejects a keepalive that doesn't name a registered context,
@@ -222,6 +223,21 @@ class ElevenLabsDialogueTTSService(ElevenLabsTTSBase):
 
         self._contexts: dict[str, _DialogueContext] = {}
 
+    @classmethod
+    def format_pronunciation(cls, word: str, ipa: str) -> str | None:
+        """Render a pronunciation as IPA between slashes, as Eleven v3 reads it.
+
+        Args:
+            word: The word being pronounced (unused: the IPA replaces it).
+            ipa: The pronunciation, in IPA.
+
+        Returns:
+            The IPA wrapped in slashes, e.g. ``/mɛtˈfɔɹmɪn/``, or None for an
+            empty pronunciation.
+        """
+        ipa = normalize_ipa(ipa)
+        return f"/{ipa}/" if ipa else None
+
     def _set_voice_settings(self):
         return build_elevenlabs_ttd_voice_settings(self._settings)
 
@@ -268,6 +284,8 @@ class ElevenLabsDialogueTTSService(ElevenLabsTTSBase):
         return url
 
     async def _on_websocket_connected(self):
+        # run_tts can reconnect in place, bypassing the disconnect that clears this.
+        self._clear_connection_state()
         await self._register_keepalive_context()
 
     def _clear_connection_state(self):
@@ -296,10 +314,6 @@ class ElevenLabsDialogueTTSService(ElevenLabsTTSBase):
             )
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
-
-    def _reset_alignment_state(self, context_id: str):
-        super()._reset_alignment_state(context_id)
-        self._contexts.pop(context_id, None)
 
     async def on_turn_context_completed(self):
         """Close the turn's context, which generates any text still buffered in it."""
@@ -438,8 +452,17 @@ class ElevenLabsDialogueTTSService(ElevenLabsTTSBase):
         """Open a context, registering the voice it speaks with.
 
         Every context must open with a ``voices`` registration; ElevenLabs
-        closes the socket otherwise.
+        closes the socket otherwise. Registration opens a context once: naming
+        one the connection already has is a policy violation, open or closing.
         """
+        context = self._contexts.get(context_id)
+        if context:
+            if not context.registered:
+                logger.warning(
+                    f"{self}: context {context_id} is closing, so text still "
+                    "arriving for it is not spoken"
+                )
+            return
         msg: dict[str, Any] = {
             "context_id": context_id,
             "voices": [assert_given(self._settings.voice)],

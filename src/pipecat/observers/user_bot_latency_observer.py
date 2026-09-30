@@ -14,7 +14,7 @@ name each part of the timeline, including the parts no service measures.
 """
 
 import time
-from collections import deque
+import warnings
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum, StrEnum, auto
@@ -549,19 +549,19 @@ class UserBotLatencyObserver(BaseObserver):
     def __init__(
         self,
         *,
-        max_frames=100,
+        max_frames: int | None = None,
         min_contribution_secs: float = MIN_CONTRIBUTION_SECS,
         time_source: Callable[[], float] = time.time,
         **kwargs,
     ):
         """Initialize the user-bot latency observer.
 
-        Sets up tracking for processed frames and user speech timing
-        to calculate response latencies.
-
         Args:
-            max_frames: Maximum number of frame IDs to keep in history for
-                duplicate detection. Defaults to 100.
+            max_frames: Unused.
+
+                .. deprecated:: 1.12.0
+                    No replacement. The observer receives each frame once.
+                    Will be removed in 2.0.0.
             min_contribution_secs: Contributions shorter than this are rolled
                 into the single pipeline entry rather than listed. Pass 0 to
                 list every one, including individual frame hops.
@@ -570,7 +570,14 @@ class UserBotLatencyObserver(BaseObserver):
                 describes.
             **kwargs: Additional arguments passed to parent class.
         """
-        super().__init__(**kwargs)
+        if max_frames is not None:
+            warnings.warn(
+                "`max_frames` parameter of `UserBotLatencyObserver` is deprecated since 1.12.0 "
+                "and will be removed in 2.0.0. No replacement.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        super().__init__(observe_every_push=False, **kwargs)
         self._min_contribution_secs = min_contribution_secs
         self._now = time_source
         self._user_stopped_time: float | None = None
@@ -581,10 +588,6 @@ class UserBotLatencyObserver(BaseObserver):
         self._client_connected_time: float | None = None
         self._pipeline_started_time: float | None = None
         self._first_bot_speech_measured: bool = False
-
-        # Frame deduplication (bounded deque + set pattern)
-        self._processed_frames: set = set()
-        self._frame_history: deque = deque(maxlen=max_frames)
 
         # The moments of the cycle, in the order they were observed.
         self._moments: list[_Moment] = []
@@ -627,16 +630,6 @@ class UserBotLatencyObserver(BaseObserver):
         # Only process downstream frames
         if data.direction != FrameDirection.DOWNSTREAM:
             return
-
-        # Skip already processed frames (bounded deque + set)
-        if data.frame.id in self._processed_frames:
-            return
-
-        self._processed_frames.add(data.frame.id)
-        self._frame_history.append(data.frame.id)
-
-        if len(self._processed_frames) > len(self._frame_history):
-            self._processed_frames = set(self._frame_history)
 
         # Track client connection (first occurrence only)
         if isinstance(data.frame, ClientConnectedFrame):

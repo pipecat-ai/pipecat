@@ -188,7 +188,7 @@ def create_initial_node() -> NodeConfig:
     """Create the initial node for food type selection."""
     return NodeConfig(
         name="initial",
-        role_message="You are an order-taking assistant. You must ALWAYS use the available functions to progress the conversation. This is a phone conversation and your responses will be converted to audio. Keep the conversation friendly, casual, and polite. Keep every reply to one or two short sentences, the way a person on the phone talks, and don't repeat the order unless the caller asks. Only give a delivery time that came from get_delivery_estimate. Avoid outputting special characters and emojis.",
+        role_message="You are an order-taking assistant. You must ALWAYS use the available functions to progress the conversation. This is a phone conversation and your responses will be converted to audio. Keep the conversation friendly, casual, and polite. Keep every reply to one or two short sentences, the way a person on the phone talks, and don't repeat the order unless the caller asks. Only give a delivery time that came from get_delivery_estimate, and say that time, never just 'soon'. Avoid outputting special characters and emojis.",
         task_messages=[
             {
                 "role": "developer",
@@ -248,8 +248,8 @@ def create_confirmation_node() -> NodeConfig:
         task_messages=[
             {
                 "role": "developer",
-                "content": """Say the order back once with the total and ask if that's right, for example "So that's one large pepperoni, twenty dollars. Sound good?" Nothing is ordered until the caller confirms, so don't say the order is placed or on its way before then. If they ask a question first, answer it in a sentence without repeating the order. Use the available functions:
-- Use complete_order when the user confirms the order is correct
+                "content": """Say the order back once with the total and ask if that's right, for example "So that's one large pepperoni, twenty dollars. Sound good?" Nothing is ordered until the caller confirms, so don't say the order is placed or on its way before then. If they ask a question, answer it in a sentence without repeating the order, and only then complete the order: if they ask how long delivery takes, call get_delivery_estimate and tell them the time it returns, and call complete_order in a later turn, never in the same turn. Use the available functions:
+- Use complete_order when the user confirms the order is correct and has no open question
 - Use revise_order if they want to change something""",
             }
         ],
@@ -264,7 +264,7 @@ def create_end_node() -> NodeConfig:
         task_messages=[
             {
                 "role": "developer",
-                "content": "Thank the caller for the order and say goodbye, in one or two sentences.",
+                "content": "Thank the caller for the order, say when it will arrive if get_delivery_estimate gave a time, and say goodbye, in one or two sentences.",
             }
         ],
         post_actions=[{"type": "end_conversation"}],
@@ -326,7 +326,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         """Provide delivery estimate information."""
         delivery_time = datetime.now() + timedelta(minutes=30)
         return DeliveryEstimateResult(
-            time=f"{delivery_time}",
+            time=f"about 30 minutes, around {delivery_time:%-I:%M %p}",
         ), None
 
     # Initialize flow manager

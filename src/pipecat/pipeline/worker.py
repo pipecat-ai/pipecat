@@ -32,8 +32,8 @@ from pipecat.bus import (
 )
 from pipecat.bus.bridge_processor import _BusEdgeProcessor
 from pipecat.bus.ui.messages import (
-    _UI_CANCEL_JOB_GROUP_BUS_EVENT_NAME,
-    _UI_SNAPSHOT_BUS_EVENT_NAME,
+    UI_CANCEL_JOB_GROUP_EVENT_NAME,
+    UI_SNAPSHOT_EVENT_NAME,
     BusUICommandMessage,
     BusUIDataMessage,
     BusUIEventMessage,
@@ -67,7 +67,7 @@ from pipecat.frames.frames import (
     UserStartedSpeakingFrame,
 )
 from pipecat.metrics.metrics import ProcessingMetricsData, TTFBMetricsData
-from pipecat.observers.base_observer import BaseObserver, FramePushed, StartupWarmup
+from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.observers.turn_tracking_observer import TurnTrackingObserver
 from pipecat.observers.user_bot_latency_observer import UserBotLatencyObserver
 from pipecat.pipeline.base_pipeline import BasePipeline
@@ -87,7 +87,6 @@ from pipecat.processors.frameworks.rtvi.models import (
 )
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
 from pipecat.utils.deprecation import deprecated
-from pipecat.utils.prewarm import warm_deferred_imports
 from pipecat.utils.startup import run_setup_hook
 from pipecat.utils.tracing.setup import is_tracing_available
 from pipecat.utils.tracing.tracing_context import TracingContext
@@ -128,10 +127,9 @@ class IdleFrameObserver(BaseObserver):
             idle_event: The event to set if the idle timeout frames are being pushed.
             idle_timeout_frames: A tuple with the frames that should set the event when received
         """
-        super().__init__()
+        super().__init__(observe_every_push=False)
         self._idle_event = idle_event
         self._idle_timeout_frames = idle_timeout_frames
-        self._processed_frames = set()
 
     async def on_push_frame(self, data: FramePushed):
         """Callback executed when a frame is pushed in the pipeline.
@@ -139,12 +137,6 @@ class IdleFrameObserver(BaseObserver):
         Args:
             data: The frame push event data.
         """
-        # Skip already processed frames
-        if data.frame.id in self._processed_frames:
-            return
-
-        self._processed_frames.add(data.frame.id)
-
         if isinstance(data.frame, StartFrame) or isinstance(data.frame, self._idle_timeout_frames):
             self._idle_event.set()
 
@@ -298,7 +290,7 @@ class PipelineWorker(BaseWorker):
         enable_tracing: bool = False,
         enable_turn_tracking: bool = True,
         handle_flush_frame: bool | None = None,
-        enable_rtvi: bool = True,
+        enable_rtvi: bool | None = None,
         exclude_frames: tuple[type[Frame], ...] | None = None,
         idle_timeout_frames: tuple[type[Frame], ...] = (
             BotSpeakingFrame,
@@ -378,7 +370,11 @@ class PipelineWorker(BaseWorker):
                 so multiple pipelines can export into a single shared trace.
             conversation_type: Value for the ``conversation.type`` span attribute
                 (e.g. ``"voice"`` or ``"text"``).
-            enable_rtvi: Whether to automatically add RTVI support to the pipeline.
+            enable_rtvi: Whether to automatically add RTVI support to the
+                pipeline. ``None``, the default, adds it unless the pipeline
+                is bridged: a bridged worker has no client of its own, and
+                its RTVI would report every frame a second time as it
+                crosses the bridge.
             enable_tracing: Whether to enable tracing.
             enable_turn_tracking: Whether to enable turn tracking.
             exclude_frames: When ``bridged`` is set, extra frame types
@@ -505,6 +501,8 @@ class PipelineWorker(BaseWorker):
         self._heartbeat_monitor_task: asyncio.Task | None = None
 
         # RTVI support
+        if enable_rtvi is None:
+            enable_rtvi = bridged is None
         self._rtvi = None
         prepend_rtvi = False
         external_rtvi = self._find_processor(pipeline, RTVIProcessor)
@@ -1126,10 +1124,10 @@ class PipelineWorker(BaseWorker):
             event_name = message.data.event
             payload = message.data.payload
         elif isinstance(message, UISnapshotMessage):
-            event_name = _UI_SNAPSHOT_BUS_EVENT_NAME
+            event_name = UI_SNAPSHOT_EVENT_NAME
             payload = message.data.tree.model_dump(exclude_none=True)
         elif isinstance(message, UICancelJobGroupMessage):
-            event_name = _UI_CANCEL_JOB_GROUP_BUS_EVENT_NAME
+            event_name = UI_CANCEL_JOB_GROUP_EVENT_NAME
             payload = {
                 "job_id": message.data.job_id,
                 "reason": message.data.reason,
@@ -1310,16 +1308,6 @@ class PipelineWorker(BaseWorker):
         # Start worker observer.
         await self._observer.setup(self.task_manager)
 
-        # Services spend most of the start sequence waiting on the network, which
-        # leaves room to load the imports while setup is happening.
-        async def warm_lazy_imports() -> tuple[int, int]:
-            """Warm the deferred imports, reporting when the work ran."""
-            started_at_ns = time.monotonic_ns()
-            await asyncio.to_thread(warm_deferred_imports)
-            return started_at_ns, time.monotonic_ns()
-
-        lazy_imports_task = self.create_task(warm_lazy_imports())
-
         # Setup processors
         setup = FrameProcessorSetup(
             audio_in_sample_rate=self._params.audio_in_sample_rate,
@@ -1341,14 +1329,6 @@ class PipelineWorker(BaseWorker):
             tool_resources=self._app_resources,
         )
         await self.create_task(self._pipeline.setup(setup))
-
-        # Make sure lazy imports are done at this point. Whatever of the load
-        # outlasts setting the processors up is startup time no processor
-        # accounts for, so observers are told when it ran.
-        warm_started_at_ns, warm_finished_at_ns = await lazy_imports_task
-        await self._observer.on_startup_warmup(
-            StartupWarmup(started_at_ns=warm_started_at_ns, finished_at_ns=warm_finished_at_ns)
-        )
 
     async def _cleanup(self, cleanup_pipeline: bool):
         """Clean up the pipeline worker and processors."""

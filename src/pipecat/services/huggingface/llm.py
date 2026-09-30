@@ -51,6 +51,7 @@ class HuggingFaceLLMService(OpenAILLMService):
 
                 .. deprecated:: 0.0.105
                     Use ``settings=HuggingFaceLLMService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
 
             settings: Runtime-updatable settings.
             **kwargs: Additional keyword arguments passed to OpenAILLMService.

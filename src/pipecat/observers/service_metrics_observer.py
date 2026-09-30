@@ -156,30 +156,23 @@ class ServiceMetricsObserver(BaseObserver):
                 a test place records without waiting.
             **kwargs: Additional arguments passed to parent class.
         """
-        super().__init__(**kwargs)
+        super().__init__(observe_every_push=False, **kwargs)
         self._now = time_source
-        # Every processor that passes a frame along reports it, so a metric is
-        # remembered once it has been read. Only metrics frames are kept, and a
-        # call produces few enough of them for the set to stay small.
-        self._reported: set[int] = set()
 
         self._register_event_handler("on_service_latency")
         self._register_event_handler("on_service_usage")
 
     async def on_push_frame(self, data: FramePushed):
-        """Report the metrics carried by a frame, the first time it is seen.
+        """Report the metrics carried by a frame.
 
-        Metrics travel in one direction, so a frame is identified by its ID
-        alone. A frame broadcast both ways would arrive as two frames with two
-        IDs, and would be reported twice.
+        Metrics travel in one direction. A frame broadcast both ways would
+        arrive as two frames, and would be reported twice.
 
         Args:
             data: Frame push event containing the frame and direction.
         """
-        if not isinstance(data.frame, MetricsFrame) or data.frame.id in self._reported:
+        if not isinstance(data.frame, MetricsFrame):
             return
-
-        self._reported.add(data.frame.id)
 
         for metrics in data.frame.data:
             latency = self._as_latency(metrics)

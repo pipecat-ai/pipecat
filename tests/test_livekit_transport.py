@@ -18,8 +18,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 try:
     from livekit import rtc
 
+    from pipecat.frames.frames import OutputImageRawFrame
     from pipecat.transports.livekit.transport import (
         LiveKitCallbacks,
+        LiveKitOutputTransport,
         LiveKitParams,
         LiveKitTransportClient,
     )
@@ -654,6 +656,366 @@ class TestLiveKitAudioTrackSubscribedHandler(unittest.TestCase):
             "on_video_track_subscribed", "participant-1"
         )
         transport._client.room.remote_participants.get.assert_not_called()
+
+
+@unittest.skipUnless(LIVEKIT_AVAILABLE, "livekit package not installed")
+class TestLiveKitVideoOutputPublish(unittest.IsolatedAsyncioTestCase):
+    """Video output (publishing) support for the LiveKit transport.
+
+    Mirrors how ``connect()`` always publishes one ``pipecat-audio``
+    microphone track: when ``LiveKitParams.video_out_enabled`` is set, it
+    should also publish one ``pipecat-video`` camera track using an
+    ``rtc.VideoSource``/``rtc.LocalVideoTrack`` pair, the same way audio uses
+    ``rtc.AudioSource``/``rtc.LocalAudioTrack``.
+    """
+
+    def _create_client(self, video_out_enabled: bool) -> LiveKitTransportClient:
+        params = LiveKitParams(video_out_enabled=video_out_enabled)
+        callbacks = LiveKitCallbacks(
+            on_connected=AsyncMock(),
+            on_disconnected=AsyncMock(),
+            on_before_disconnect=AsyncMock(),
+            on_participant_connected=AsyncMock(),
+            on_participant_disconnected=AsyncMock(),
+            on_audio_track_subscribed=AsyncMock(),
+            on_audio_track_unsubscribed=AsyncMock(),
+            on_video_track_subscribed=AsyncMock(),
+            on_video_track_unsubscribed=AsyncMock(),
+            on_data_received=AsyncMock(),
+            on_first_participant_joined=AsyncMock(),
+            on_dtmf_event=AsyncMock(),
+        )
+        client = LiveKitTransportClient(
+            url="wss://test.livekit.cloud",
+            token="test-token",
+            room_name="test-room",
+            params=params,
+            callbacks=callbacks,
+            transport_name="test-transport",
+        )
+        client._task_manager = MagicMock()
+        # Normally set in setup(); connect() reads this directly.
+        client._out_sample_rate = 16000
+
+        mock_room = MagicMock()
+        mock_room.connect = AsyncMock()
+        mock_room.local_participant.publish_track = AsyncMock()
+        mock_room.local_participant.identity = "bot"
+        mock_room.remote_participants = {}
+        client._room = mock_room
+        return client
+
+    async def test_video_out_disabled_publishes_only_audio_track(self):
+        """When video output is disabled, only the microphone track is published."""
+        client = self._create_client(video_out_enabled=False)
+
+        with (
+            patch.object(rtc, "AudioSource", return_value=MagicMock()),
+            patch.object(rtc.LocalAudioTrack, "create_audio_track", return_value=MagicMock()),
+            patch.object(rtc, "VideoSource") as mock_video_source_cls,
+            patch.object(rtc.LocalVideoTrack, "create_video_track") as mock_create_video_track,
+        ):
+            await client.connect()
+
+            mock_video_source_cls.assert_not_called()
+            mock_create_video_track.assert_not_called()
+
+        self.assertIsNone(client._video_source)
+        self.assertIsNone(client._video_track)
+        client.room.local_participant.publish_track.assert_awaited_once()
+
+    async def test_video_out_enabled_publishes_audio_and_video_tracks(self):
+        """When video output is enabled, both a microphone and a camera track are published."""
+        client = self._create_client(video_out_enabled=True)
+
+        mock_video_source = MagicMock()
+        mock_video_track = MagicMock()
+
+        with (
+            patch.object(rtc, "AudioSource", return_value=MagicMock()),
+            patch.object(rtc.LocalAudioTrack, "create_audio_track", return_value=MagicMock()),
+            patch.object(
+                rtc, "VideoSource", return_value=mock_video_source
+            ) as mock_video_source_cls,
+            patch.object(
+                rtc.LocalVideoTrack, "create_video_track", return_value=mock_video_track
+            ) as mock_create_video_track,
+        ):
+            await client.connect()
+
+            mock_video_source_cls.assert_called_once_with(
+                client._params.video_out_width, client._params.video_out_height
+            )
+            mock_create_video_track.assert_called_once_with("pipecat-video", mock_video_source)
+
+        self.assertIs(client._video_source, mock_video_source)
+        self.assertIs(client._video_track, mock_video_track)
+
+        # Both the microphone and camera tracks got published.
+        self.assertEqual(client.room.local_participant.publish_track.await_count, 2)
+        published_tracks = [
+            call.args[0] for call in client.room.local_participant.publish_track.await_args_list
+        ]
+        self.assertIn(mock_video_track, published_tracks)
+
+        published_sources = [
+            call.args[1].source
+            for call in client.room.local_participant.publish_track.await_args_list
+        ]
+        self.assertIn(rtc.TrackSource.SOURCE_CAMERA, published_sources)
+        self.assertIn(rtc.TrackSource.SOURCE_MICROPHONE, published_sources)
+
+    def _video_publish_options(self, **params) -> "rtc.TrackPublishOptions":
+        client = self._create_client(video_out_enabled=True)
+        client._params = LiveKitParams(video_out_enabled=True, **params)
+        return client._video_publish_options()
+
+    async def test_video_publish_options_default_leaves_encoding_to_livekit(self):
+        """Without a bitrate or codec, LiveKit chooses the encoding and codec."""
+        options = self._video_publish_options()
+
+        self.assertEqual(options.source, rtc.TrackSource.SOURCE_CAMERA)
+        self.assertFalse(options.HasField("video_encoding"))
+        self.assertFalse(options.HasField("video_codec"))
+
+    async def test_video_publish_options_apply_bitrate_framerate_and_codec(self):
+        """The max bitrate, framerate and codec params reach the publish options."""
+        options = self._video_publish_options(
+            video_out_max_bitrate=2_000_000, video_out_framerate=24, video_out_codec="h264"
+        )
+
+        self.assertEqual(options.video_encoding.max_bitrate, 2_000_000)
+        self.assertEqual(options.video_encoding.max_framerate, 24)
+        self.assertEqual(options.video_codec, rtc.VideoCodec.H264)
+
+    async def test_video_publish_options_ignore_unknown_codec(self):
+        """An unknown codec is ignored so LiveKit falls back to its default."""
+        options = self._video_publish_options(video_out_codec="MPEG2")
+
+        self.assertFalse(options.HasField("video_codec"))
+
+    async def test_publish_video_writes_to_video_source(self):
+        """``publish_video`` captures the frame on the connected VideoSource."""
+        client = self._create_client(video_out_enabled=True)
+        client._connected = True
+        mock_video_source = MagicMock()
+        client._video_source = mock_video_source
+
+        video_frame = MagicMock()
+        result = await client.publish_video(video_frame)
+
+        self.assertTrue(result)
+        mock_video_source.capture_frame.assert_called_once_with(video_frame)
+
+    async def test_publish_video_without_source_returns_false(self):
+        """``publish_video`` is a no-op when no video source has been set up."""
+        client = self._create_client(video_out_enabled=False)
+        client._connected = True
+
+        result = await client.publish_video(MagicMock())
+
+        self.assertFalse(result)
+
+    async def test_failed_publish_is_rolled_back_so_retry_publishes(self):
+        """A publish failure leaves the client disconnected, so a retry publishes again."""
+        client = self._create_client(video_out_enabled=True)
+        client.room.disconnect = AsyncMock()
+        # Fail the video publish on the first attempt only.
+        client.room.local_participant.publish_track = AsyncMock(
+            side_effect=[None, RuntimeError("publish failed"), None, None]
+        )
+        audio_source = MagicMock()
+        audio_source.aclose = AsyncMock()
+        video_source = MagicMock()
+        video_source.aclose = AsyncMock()
+        # Call the undecorated method so the test controls each attempt.
+        connect = LiveKitTransportClient.connect.__wrapped__
+
+        with (
+            patch.object(rtc, "AudioSource", return_value=audio_source),
+            patch.object(rtc.LocalAudioTrack, "create_audio_track", return_value=MagicMock()),
+            patch.object(rtc, "VideoSource", return_value=video_source),
+            patch.object(rtc.LocalVideoTrack, "create_video_track", return_value=MagicMock()),
+        ):
+            with self.assertRaises(RuntimeError):
+                await connect(client)
+
+            self.assertFalse(client._connected)
+            self.assertEqual(client._disconnect_counter, 0)
+            client.room.disconnect.assert_awaited_once()
+            audio_source.aclose.assert_awaited_once()
+            video_source.aclose.assert_awaited_once()
+            client._callbacks.on_connected.assert_not_awaited()
+
+            await connect(client)
+
+        self.assertTrue(client._connected)
+        self.assertEqual(client._disconnect_counter, 1)
+        self.assertEqual(client.room.local_participant.publish_track.await_count, 4)
+        client._callbacks.on_connected.assert_awaited_once()
+
+    async def test_room_disconnect_event_reports_disconnect_of_connected_client(self):
+        """A disconnect the client did not start is reported once."""
+        client = self._create_client(video_out_enabled=False)
+        client._connected = True
+
+        await client._async_on_disconnected()
+
+        self.assertFalse(client._connected)
+        client._callbacks.on_disconnected.assert_awaited_once()
+
+    async def test_disconnect_reports_disconnect_once(self):
+        """The room's event during disconnect() does not report a second disconnect."""
+        client = self._create_client(video_out_enabled=False)
+        client._connected = True
+        client._disconnect_counter = 1
+
+        async def room_disconnect():
+            # LiveKit emits its "disconnected" event while disconnecting.
+            await client._async_on_disconnected()
+
+        client.room.disconnect = AsyncMock(side_effect=room_disconnect)
+
+        await client.disconnect()
+
+        client.room.disconnect.assert_awaited_once()
+        client._callbacks.on_disconnected.assert_awaited_once()
+
+    async def test_failed_connect_does_not_report_disconnect(self):
+        """Rolling back a failed connect does not report a disconnect."""
+        client = self._create_client(video_out_enabled=False)
+        client.room.local_participant.publish_track = AsyncMock(
+            side_effect=RuntimeError("publish failed")
+        )
+
+        async def room_disconnect():
+            await client._async_on_disconnected()
+
+        client.room.disconnect = AsyncMock(side_effect=room_disconnect)
+        audio_source = MagicMock()
+        audio_source.aclose = AsyncMock()
+
+        with (
+            patch.object(rtc, "AudioSource", return_value=audio_source),
+            patch.object(rtc.LocalAudioTrack, "create_audio_track", return_value=MagicMock()),
+        ):
+            with self.assertRaises(RuntimeError):
+                await LiveKitTransportClient.connect.__wrapped__(client)
+
+        client.room.disconnect.assert_awaited_once()
+        client._callbacks.on_disconnected.assert_not_awaited()
+
+    async def test_disconnect_closes_output_sources(self):
+        """Disconnecting closes the audio and video sources and forgets them."""
+        client = self._create_client(video_out_enabled=True)
+        client.room.disconnect = AsyncMock()
+
+        audio_source = MagicMock()
+        audio_source.aclose = AsyncMock()
+        video_source = MagicMock()
+        video_source.aclose = AsyncMock()
+
+        with (
+            patch.object(rtc, "AudioSource", return_value=audio_source),
+            patch.object(rtc.LocalAudioTrack, "create_audio_track", return_value=MagicMock()),
+            patch.object(rtc, "VideoSource", return_value=video_source),
+            patch.object(rtc.LocalVideoTrack, "create_video_track", return_value=MagicMock()),
+        ):
+            await client.connect()
+        await client.disconnect()
+
+        audio_source.aclose.assert_awaited_once()
+        video_source.aclose.assert_awaited_once()
+        self.assertIsNone(client._audio_source)
+        self.assertIsNone(client._audio_track)
+        self.assertIsNone(client._video_source)
+        self.assertIsNone(client._video_track)
+        self.assertFalse(await client.publish_video(MagicMock()))
+
+
+@unittest.skipUnless(LIVEKIT_AVAILABLE, "livekit package not installed")
+class TestLiveKitOutputTransportWriteVideoFrame(unittest.IsolatedAsyncioTestCase):
+    """``LiveKitOutputTransport.write_video_frame`` conversion and dispatch."""
+
+    def _create_output_transport(self, **param_overrides) -> LiveKitOutputTransport:
+        params = LiveKitParams(
+            video_out_enabled=True,
+            video_out_width=4,
+            video_out_height=4,
+            video_out_color_format="RGB",
+            **param_overrides,
+        )
+        client = MagicMock()
+        client.publish_video = AsyncMock(return_value=True)
+        transport = MagicMock()
+        return LiveKitOutputTransport(transport, client, params)
+
+    async def test_write_video_frame_converts_and_publishes(self):
+        """A supported color format is converted to an rtc.VideoFrame and published."""
+        output = self._create_output_transport()
+        image_bytes = bytes(range(4 * 4 * 3))
+        frame = OutputImageRawFrame(image=image_bytes, size=(4, 4), format="RGB")
+
+        result = await output.write_video_frame(frame)
+
+        self.assertTrue(result)
+        output._client.publish_video.assert_awaited_once()
+        (livekit_frame,) = output._client.publish_video.await_args.args
+        self.assertIsInstance(livekit_frame, rtc.VideoFrame)
+        self.assertEqual(livekit_frame.width, 4)
+        self.assertEqual(livekit_frame.height, 4)
+        self.assertEqual(bytes(livekit_frame.data), image_bytes)
+
+    async def test_write_video_frame_maps_four_byte_formats(self):
+        """RGBA, BGRA and ARGB images map to the matching LiveKit buffer types."""
+        expected_types = {
+            "RGBA": rtc.VideoBufferType.RGBA,
+            "BGRA": rtc.VideoBufferType.BGRA,
+            "ARGB": rtc.VideoBufferType.ARGB,
+        }
+        for color_format, buffer_type in expected_types.items():
+            with self.subTest(color_format=color_format):
+                output = self._create_output_transport()
+                image_bytes = bytes(range(4 * 4 * 4))
+                frame = OutputImageRawFrame(image=image_bytes, size=(4, 4), format=color_format)
+
+                result = await output.write_video_frame(frame)
+
+                self.assertTrue(result)
+                (livekit_frame,) = output._client.publish_video.await_args.args
+                self.assertEqual(livekit_frame.type, buffer_type)
+                self.assertEqual(bytes(livekit_frame.data), image_bytes)
+
+    async def test_write_video_frame_unsupported_format_does_not_publish(self):
+        """An unknown color format is rejected without touching the client."""
+        output = self._create_output_transport()
+        frame = OutputImageRawFrame(image=b"\x00" * 16, size=(4, 4), format="I420")
+
+        result = await output.write_video_frame(frame)
+
+        self.assertFalse(result)
+        output._client.publish_video.assert_not_awaited()
+
+    async def test_unsupported_format_error_is_logged_once(self):
+        """Repeated frames with the same unsupported format log a single error."""
+        output = self._create_output_transport()
+        frame = OutputImageRawFrame(image=b"\x00" * 16, size=(4, 4), format="I420")
+
+        with patch("pipecat.transports.livekit.transport.logger") as mock_logger:
+            await output.write_video_frame(frame)
+            await output.write_video_frame(frame)
+
+        mock_logger.error.assert_called_once()
+
+    async def test_write_video_frame_wrong_length_does_not_publish(self):
+        """An image whose length does not match its size and format is rejected."""
+        output = self._create_output_transport()
+        frame = OutputImageRawFrame(image=b"\x00" * 10, size=(4, 4), format="RGB")
+
+        result = await output.write_video_frame(frame)
+
+        self.assertFalse(result)
+        output._client.publish_video.assert_not_awaited()
 
 
 if __name__ == "__main__":

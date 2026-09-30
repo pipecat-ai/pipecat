@@ -51,6 +51,7 @@ def test_sarvam_llm_constructor_rejects_unsupported_model():
 @pytest.mark.parametrize(
     "model",
     [
+        "deepseekv4-flash",
         "gemma4",
         "glm5.2",
         "sarvam-105b",
@@ -76,6 +77,7 @@ def test_sarvam_llm_default_model_is_sarvam_105b():
     "model, expected_base_url",
     [
         ("sarvam-105b", "https://api.sarvam.ai/v2"),
+        ("deepseekv4-flash", "https://api.sarvam.ai/v2"),
         ("gemma4", "https://api.sarvam.ai/v2"),
         ("glm5.2", "https://api.sarvam.ai/v2"),
         ("sarvam-105b-conversations", "https://api.sarvam.ai/v1"),

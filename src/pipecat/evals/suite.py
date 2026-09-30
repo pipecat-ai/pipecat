@@ -28,25 +28,59 @@ Manifest format (YAML)::
         scenarios: [simple_math, greeting]
       - bot: examples/voice/voice-openai.py
         scenarios: [simple_math, interruption]
+      - bot: examples/voice/voice-groq.py
+        concurrency: 2                           # this bot's own cap
+        scenarios: [simple_math, interruption]
       - bot: examples/vision/vision-openai.py
-        runner_body: scenarios/vision-cat.json   # passed to the bot as --runner-body
+        runner_body:
+          path: scenarios/vision-cat.yaml        # passed to the bot as --runner-body
         scenarios: [vision_describe]
+      - bot: examples/turns/filter-incomplete-turns.py
+        name: openai/gpt-4o-mini                 # this entry's label, the bot path by default
+        runner_body:
+          data: {model: gpt-4o-mini}             # written to a file for the bot
+        scenarios: [turn_completion]
+      - bot: examples/turns/filter-incomplete-turns.py
+        name: groq/llama-3.3-70b
+        runner_body:
+          data: {model: llama-3.3-70b}
+        scenarios: [turn_completion]
       - bot: examples/flows/restaurant_reservation.py
         scenarios: [book_table]                  # a simulation: its file has a persona
 
-A ``scenarios:`` entry names a scenario file of either kind, a scripted one or a
-simulation, and the file says which (see
-:func:`~pipecat.evals.scenario.load_scenario_file`). A name resolves under
-``scenarios_dir`` with ``.yaml`` added and may carry a folder, as
-``scripted/greeting``; a name ending in ``.yaml`` is a path relative to the
-manifest instead. A simulation runs as many
-times as its ``runs:`` says, and every run must pass.
+A ``scenarios:`` entry names a scenario file, and the file contributes one run
+per scenario it holds, scripted or a simulation as each says (see
+:class:`~pipecat.evals.scenario.EvalScenarioFile`), named
+``<file name>/<scenario name>``. A name resolves under ``scenarios_dir`` with
+``.yaml`` added and may carry a folder, as ``scripted/greeting``; a name ending
+in ``.yaml`` is a path relative to the manifest instead. A simulation runs as
+many times as its ``runs:`` says, and every run must pass.
 
-An optional ``runner_body:`` (a JSON file, resolved relative to the manifest) is
-passed to the bot as ``--runner-body``, supplying runner-args data it would
-normally receive in a ``/start`` request body (e.g. a vision bot's image path).
-The bot is spawned with the body file's directory as its working directory, so
-relative paths inside the body (like an image) resolve next to the file.
+An optional ``runner_body:`` supplies runner-args data the bot would normally
+receive in a ``/start`` request body (e.g. a vision bot's image path), passed
+to it as ``--runner-body``. It holds either ``path:``, a YAML or JSON file
+resolved relative to the manifest, or ``data:``, the body itself as a mapping,
+which the suite writes to a file among the run's logs. A bot given a file runs
+with the file's directory as its working directory, so relative paths inside
+the body (like an image) resolve next to the file; a body that holds such
+paths belongs in a file for that reason.
+
+.. deprecated:: 1.11.0
+    Use ``runner_body: {path: <file>}`` instead of a bare ``runner_body: <file>``.
+    Will be removed in 2.0.0.
+
+An entry's ``name:`` is its label: what the display, the ``-p`` filter, the
+results records and the artifact file names use, and what an entry's own
+``concurrency:`` is keyed on. It defaults to the ``bot:`` path, so it is only
+needed when several entries share a bot, as when sweeping a model with
+``runner_body:``; two entries may not run the same scenario under the same
+label.
+
+``concurrency`` is how many runs execute at once. The suite keeps that many
+going, taking the next run from the first entry in manifest order that still
+has one, so an entry's scenarios finish together and no slot waits while any
+entry still has runs. An entry whose provider rate-limits sets its own
+``concurrency:``, and never has more than that many runs in flight.
 
 Manifest-relative paths (``bot``/``bots_dir``, ``scenarios_dir``,
 ``runs_dir``) resolve relative to the manifest file, so a manifest is portable;
@@ -54,9 +88,10 @@ the same values passed as CLI overrides resolve against the working directory.
 
 ``repeat`` (or ``--repeat``) runs every (bot, scenario) pair N times, which is how
 a flaky behavior gets measured rather than sampled: a bot that passes a scenario
-half the time looks identical to a reliable one in a single pass. Attempts are
-interleaved across bots and carry an :attr:`EvalRun.attempt` number that joins
-their artifact filenames, so no attempt overwrites another's logs.
+half the time looks identical to a reliable one in a single pass. Attempts run
+attempt-major, every entry's first attempt before any entry's second, and carry
+an :attr:`EvalRun.attempt` number that joins their artifact filenames, so no
+attempt overwrites another's logs.
 """
 
 import asyncio
@@ -68,6 +103,7 @@ import sys
 import time
 import traceback
 import warnings
+from collections import deque
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -77,13 +113,15 @@ from loguru import logger
 
 from pipecat.evals.results import (
     EvalAssertionFailure,
+    EvalExpectationResult,
     EvalScriptResult,
     EvalScriptTurnResult,
     EvalSimulationMetricScore,
     EvalSimulationResult,
     EvalSimulationTurnVerdict,
 )
-from pipecat.evals.scenario import EvalKind, load_scenario_file
+from pipecat.evals.scenario import EvalKind, EvalScenarioFile
+from pipecat.evals.script import EvalScriptScenario
 from pipecat.evals.session import EvalSessionParams, _params_with_deprecated_knobs
 from pipecat.evals.simulation import EvalSimulationScenario
 from pipecat.utils.base_object import BaseObject
@@ -199,6 +237,7 @@ def _scenario_record(run: "EvalRun", artifacts: dict) -> dict:
     result = run.result if isinstance(run.result, EvalScriptResult) else None
     record = {
         "bot": run.bot,
+        "name": run.label,
         "scenario": run.scenario,
         "kind": run.kind,
         "attempt": run.attempt,
@@ -217,7 +256,20 @@ def _scenario_record(run: "EvalRun", artifacts: dict) -> dict:
             for f in (result.failures if result else [])
         ],
         "turns": [
-            {"turn_index": t.turn_index, "status": t.status, "duration_ms": t.duration_ms}
+            {
+                "turn_index": t.turn_index,
+                "status": t.status,
+                "duration_ms": t.duration_ms,
+                "expectations": [
+                    {
+                        "expectation_index": e.expectation_index,
+                        "event_name": e.event_name,
+                        "passed": e.passed,
+                        "matched": e.matched,
+                    }
+                    for e in t.expectations
+                ],
+            }
             for t in (result.turns if result else [])
         ],
         "artifacts": artifacts,
@@ -232,6 +284,7 @@ def _simulation_record(run: "EvalRun", artifacts: dict) -> dict:
     result = run.result if isinstance(run.result, EvalSimulationResult) else None
     record = {
         "bot": run.bot,
+        "name": run.label,
         "scenario": run.scenario,
         "kind": run.kind,
         "attempt": run.attempt,
@@ -302,6 +355,7 @@ def _result_from_dict(data: dict) -> EvalScriptResult:
                 turn_index=t["turn_index"],
                 status=t.get("status", "not_run"),
                 failures=[EvalAssertionFailure(**f) for f in t.get("failures", [])],
+                expectations=[EvalExpectationResult(**e) for e in t.get("expectations", [])],
                 duration_ms=t.get("duration_ms", 0),
             )
             for t in data.get("turns", [])
@@ -330,7 +384,9 @@ class EvalRun:
     """Mutable per-(bot, scenario) state, updated in place so a live display can read it.
 
     Parameters:
-        bot: Display name — the manifest's ``bot:`` (suite) or the bot URL (run).
+        bot: The manifest's ``bot:`` path (suite) or the bot URL (run).
+        name: The manifest entry's ``name:``, or ``None`` when it has none;
+            :attr:`label` is what the display, the filters and the results use.
         scenario: Display name (the scenario or simulation, without ``.yaml``).
         scenario_path: Path to the scenario or simulation file.
         kind: ``script`` (played by :class:`~pipecat.evals.script_session.EvalScriptSession`)
@@ -343,24 +399,36 @@ class EvalRun:
             simulation's ``runs`` (a requirement: every attempt must pass).
         bot_path: The bot to spawn (suite); ``None`` when connecting to ``bot_url``.
         bot_url: Connect here instead of spawning (used by ``pipecat eval run``).
-        runner_body_path: Optional ``--runner-body`` JSON for the bot's runner args.
+        runner_body_path: Optional ``--runner-body`` file for the bot's runner args.
+        runner_body: The bot's runner-args body given inline, written to a
+            file for the bot when it is spawned; ``None`` when there is none or
+            it comes from ``runner_body_path``.
+        concurrency: How many runs of this bot's entry may be in flight at
+            once, when its manifest entry says; ``None`` is as many as the
+            suite runs.
         attempt: 1-based attempt number when the suite repeats (see
             :attr:`EvalManifest.repeat`); always 1 for a single pass.
         status: ``pending``, ``running``, or ``done``.
         stopping: True while the bot is being stopped after the run is done.
-            The run still holds its concurrency slot, so the next one waits.
+            The run still counts as in flight, so the next one waits.
         result: The outcome, once the run is done.
         error: Spawn/connection error message, if the run failed before producing a result.
         started_at: Monotonic start time, for the live elapsed counter.
         duration_ms: Wall-clock time the run took, in milliseconds.
+        loaded: The scenario, when the run was built from a loaded file;
+            :meth:`load` returns it, or reads the file when it is ``None``.
     """
 
     bot: str
     scenario: str
     scenario_path: Path
+    name: str | None = None
+    loaded: EvalScriptScenario | EvalSimulationScenario | None = None
     bot_path: Path | None = None
     bot_url: str | None = None
     runner_body_path: Path | None = None
+    runner_body: dict | None = None
+    concurrency: int | None = None
     kind: EvalKind = EvalKind.SCRIPT
     attempts: int = 1
     sweep: bool = False
@@ -371,6 +439,37 @@ class EvalRun:
     error: str | None = None
     started_at: float | None = None
     duration_ms: int | None = None
+
+    @property
+    def label(self) -> str:
+        """The run's label: the entry's ``name``, or its ``bot`` when it has none."""
+        return self.name or self.bot
+
+    @property
+    def stem(self) -> str:
+        """The scenario name as a file name stem: a group entry's ``/`` becomes ``__``."""
+        return self.scenario.replace("/", "__")
+
+    def load(self) -> EvalScriptScenario | EvalSimulationScenario:
+        """The run's scenario: as loaded when the run was built, else read from its file.
+
+        Raises:
+            ValueError: If the file is invalid.
+            KeyError: If the file holds no scenario of this name.
+            FileNotFoundError: If the file doesn't exist.
+        """
+        loaded = self.loaded
+        if loaded is None:
+            loaded = self.loaded = EvalScenarioFile.load(self.scenario_path)[self.scenario]
+        return loaded
+
+
+@dataclass(frozen=True)
+class _RunnerBody:
+    """A manifest entry's ``runner_body:``: a file to pass to the bot, or data to write to one."""
+
+    path: Path | None = None
+    data: dict | None = None
 
 
 @dataclass(frozen=True)
@@ -399,8 +498,8 @@ class EvalManifest:
         spawn: Spawn command template (``{python}``/``{bot}``/``{port}`` substituted).
         python: Interpreter used to spawn each bot.
         concurrency: How many runs to execute at once.
-        repeat: How many times to run each (bot, scenario) pair. Attempts are
-            interleaved rather than grouped per bot, so every bot meets the same
+        repeat: How many times to run each (bot, scenario) pair. Attempts run
+            attempt-major rather than grouped per bot, so every bot meets the same
             machine conditions in the same stretch of the sweep and a transient
             slowdown shows up as a band across all of them instead of a regression
             in whichever bot happened to be running.
@@ -481,7 +580,7 @@ class EvalManifest:
             cache_dir=cache_dir,
         )
         return cls(
-            runs=cls._runs(data, base, settings),
+            runs=cls._runs(data, base, path, settings),
             spawn=settings.spawn,
             python=settings.python,
             concurrency=settings.concurrency,
@@ -553,46 +652,70 @@ class EvalManifest:
         )
 
     @classmethod
-    def _runs(cls, data: dict, base: Path, settings: "_ManifestSettings") -> list[EvalRun]:
+    def _runs(
+        cls, data: dict, base: Path, path: Path, settings: "_ManifestSettings"
+    ) -> list[EvalRun]:
         """The runs the ``suite:`` list describes, one per bot, scenario, and attempt.
 
         The scenario file says which kind it is. A simulation runs as many
         times as its file says unless a repeat makes the suite a measurement; a
         file that fails to load still gets its run, which reports the error.
         Attempts are attempt-major (bot A #1, bot B #1, ..., bot A #2), so a
-        sweep spreads each attempt across the bots without fast ones waiting on
+        sweep runs each attempt across the bots without fast ones waiting on
         slow ones.
         """
         runs: list[EvalRun] = []
         for item in data.get("suite", []):
             bot = str(item["bot"])
             bot_path = (settings.bots_dir / bot).resolve()
-            # A body file is passed to the bot as --runner-body: runner-args data
-            # it would normally get from a /start request (a vision bot's image).
-            runner_body = item.get("runner_body")
-            runner_body_path = (base / str(runner_body)).resolve() if runner_body else None
+            name = item.get("name")
+            if name is not None and (not isinstance(name, str) or not name.strip()):
+                raise ValueError(f"{path}: bot {bot!r} 'name:' must be a non-empty string")
+            body = cls._runner_body(item.get("runner_body"), base, f"{path}: bot {bot!r}")
+            concurrency = item.get("concurrency")
+            if concurrency is not None and (
+                isinstance(concurrency, bool) or not isinstance(concurrency, int) or concurrency < 1
+            ):
+                raise ValueError(f"{path}: bot {bot!r} 'concurrency:' must be a positive integer")
             for scenario in item.get("scenarios", []):
-                name, scenario_path = _resolve_scenario(str(scenario), base, settings.scenarios_dir)
-                kind, attempts = EvalKind.SCRIPT, settings.repeat
-                try:
-                    loaded = load_scenario_file(scenario_path)
-                except (ValueError, FileNotFoundError):
-                    loaded = None
-                if isinstance(loaded, EvalSimulationScenario):
-                    kind = EvalKind.SIMULATION
-                    attempts = settings.repeat if settings.repeat_given else loaded.runs
-                runs.append(
-                    EvalRun(
-                        bot=bot,
-                        scenario=name,
-                        bot_path=bot_path,
-                        scenario_path=scenario_path,
-                        runner_body_path=runner_body_path,
-                        kind=kind,
-                        attempts=attempts,
-                        sweep=settings.repeat_given,
-                    )
+                file_name, scenario_path = _resolve_scenario(
+                    str(scenario), base, settings.scenarios_dir
                 )
+                # A file that fails to load still gets a run, under the
+                # manifest's name for it, so the failure is reported.
+                try:
+                    named = [(one.name, one) for one in EvalScenarioFile.load(scenario_path)]
+                except (ValueError, FileNotFoundError):
+                    named = [(file_name, None)]
+                for run_name, one in named:
+                    kind, attempts = EvalKind.SCRIPT, settings.repeat
+                    if isinstance(one, EvalSimulationScenario):
+                        kind = EvalKind.SIMULATION
+                        attempts = settings.repeat if settings.repeat_given else one.runs
+                    runs.append(
+                        EvalRun(
+                            bot=bot,
+                            name=name,
+                            scenario=run_name,
+                            loaded=one,
+                            bot_path=bot_path,
+                            scenario_path=scenario_path,
+                            runner_body_path=body.path,
+                            runner_body=body.data,
+                            concurrency=concurrency,
+                            kind=kind,
+                            attempts=attempts,
+                            sweep=settings.repeat_given,
+                        )
+                    )
+        seen: set[tuple[str, str]] = set()
+        for run in runs:
+            if (run.label, run.scenario) in seen:
+                raise ValueError(
+                    f"{path}: {run.label!r} runs {run.scenario!r} twice; give one of the "
+                    f"entries a 'name:'"
+                )
+            seen.add((run.label, run.scenario))
         most = max((run.attempts for run in runs), default=1)
         if most > 1:
             runs = [
@@ -602,6 +725,94 @@ class EvalManifest:
                 if n <= run.attempts
             ]
         return runs
+
+    @classmethod
+    def _runner_body(cls, spec, base: Path, where: str) -> _RunnerBody:
+        """An entry's ``runner_body:`` as the bot gets it: a file to pass, or data the suite writes to one."""
+        if spec is None:
+            return _RunnerBody()
+        if isinstance(spec, str):
+            warnings.warn(
+                f"{where} a bare 'runner_body: <file>' is deprecated since 1.11.0 and will be "
+                "removed in 2.0.0. Use 'runner_body: {path: <file>}' instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            spec = {"path": spec}
+        if not isinstance(spec, dict) or sorted(spec) not in (["data"], ["path"]):
+            raise ValueError(f"{where} 'runner_body:' must hold one of 'path:' or 'data:'")
+        if "path" in spec:
+            return _RunnerBody(path=(base / str(spec["path"])).resolve())
+        if not isinstance(spec["data"], dict):
+            raise ValueError(f"{where} 'runner_body:' 'data:' must be a mapping")
+        return _RunnerBody(data=spec["data"])
+
+
+class _RunQueue:
+    """The suite's runs, handed out to workers in manifest order.
+
+    Each queue is one entry's runs for one attempt, in the order the entries
+    were given. A worker takes the next run from the first queue whose entry
+    is under its cap; when every queue with runs left is at its cap, it waits
+    for a run to finish.
+    """
+
+    def __init__(self, queues: list[tuple[str, int | None, deque[EvalRun]]]):
+        """Initialize the queue.
+
+        Args:
+            queues: Each entry's runs per attempt, with the entry's label and
+                its cap on runs in flight, ``None`` for no cap.
+        """
+        self._queues = queues
+        self._caps = {label: cap for label, cap, _ in queues}
+        self._in_flight = {label: 0 for label, _, _ in queues}
+        self._changed = asyncio.Condition()
+
+    async def take(self) -> EvalRun | None:
+        """The next run to make, or ``None`` when none is left."""
+        async with self._changed:
+            while any(queue for _, _, queue in self._queues):
+                run = self._pick()
+                if run is not None:
+                    return run
+                await self._changed.wait()
+            return None
+
+    async def done(self, run: EvalRun) -> None:
+        """Count the run as finished, so its entry may take another."""
+        async with self._changed:
+            self._in_flight[run.label] -= 1
+            self._changed.notify_all()
+
+    def _pick(self) -> EvalRun | None:
+        """The first queued run whose entry is under its cap."""
+        for label, cap, queue in self._queues:
+            if queue and (cap is None or self._in_flight[label] < cap):
+                self._in_flight[label] += 1
+                return queue.popleft()
+        return None
+
+
+@dataclass(frozen=True)
+class _SuiteRunSetup:
+    """What one :meth:`EvalSuite.run` call sets up for every run it makes.
+
+    Parameters:
+        ports: The port assigned to each run, keyed by the run's ``id()``.
+        logs_dir: Directory for per-run logs.
+        record_dir: Directory for per-run conversation recordings, or ``None``.
+        results_path: JSONL file to append one record per finished run to, or ``None``.
+        debug: Whether each run saves its combined ``<run>.debug.log``.
+        params: How each run behaves.
+    """
+
+    ports: dict[int, int]
+    logs_dir: Path
+    record_dir: Path | None
+    results_path: Path | None
+    debug: bool
+    params: EvalSessionParams
 
 
 @dataclass(frozen=True)
@@ -615,6 +826,7 @@ class _RunFiles:
         trace: The harness's decision trace, ``<prefix>.eval.log``.
         config: The worker's config, the handoff in.
         result: The worker's result, the handoff out.
+        body: The bot's runner-args body, written when the manifest gives it inline.
         record: The conversation recording, or ``None`` when not recording.
     """
 
@@ -624,6 +836,7 @@ class _RunFiles:
     trace: Path
     config: Path
     result: Path
+    body: Path
     record: Path | None
 
     @classmethod
@@ -631,10 +844,15 @@ class _RunFiles:
         """The files of ``run`` under ``logs_dir`` and ``record_dir``.
 
         The bot is part of the prefix because one bot can run several scenarios
-        at once; the attempt number joins it when the suite repeats, so no
-        attempt writes over another's artifacts.
+        at once, and the run's name joins it when the entry has one of its own,
+        so a bot's files list together and each entry's stay apart; the attempt
+        number joins it when the suite repeats, so no attempt writes over
+        another's artifacts.
         """
-        prefix = f"{run.bot.replace('/', '_')}__{run.scenario}"
+        prefix = run.bot.replace("/", "_")
+        if run.name is not None:
+            prefix += f"__{run.name.replace('/', '_')}"
+        prefix += f"__{run.stem}"
         if run.attempts > 1:
             prefix += f"__{run.attempt:03d}"
         return cls(
@@ -644,6 +862,7 @@ class _RunFiles:
             trace=logs_dir / f"{prefix}.eval.log",
             config=logs_dir / f"{prefix}.config.json",
             result=logs_dir / f"{prefix}.result.json",
+            body=logs_dir / f"{prefix}.body.json",
             record=(record_dir / f"{prefix}.wav") if record_dir else None,
         )
 
@@ -700,11 +919,13 @@ class EvalSuite(BaseObject):
         scenario: str | None = None,
         kind: EvalKind | None = None,
     ) -> list[EvalRun]:
-        """Keep only the runs matching a bot-name substring, a scenario name, and/or a kind.
+        """Keep only the runs matching a bot substring, a scenario name, and/or a kind.
 
         Args:
-            pattern: Keep only runs whose bot name contains this substring.
-            scenario: Keep only runs for this exact scenario name.
+            pattern: Keep only runs whose name or bot path contains this substring.
+            scenario: Keep only runs of this scenario: its full
+                ``<file>/<scenario>`` name, or either half of it, so a file's
+                name selects every scenario it holds.
             kind: Keep only runs of this kind.
 
         Returns:
@@ -712,9 +933,9 @@ class EvalSuite(BaseObject):
         """
         runs = self.runs
         if pattern:
-            runs = [r for r in runs if pattern in r.bot]
+            runs = [r for r in runs if pattern in r.label or pattern in r.bot]
         if scenario:
-            runs = [r for r in runs if r.scenario == scenario]
+            runs = [r for r in runs if scenario in (r.scenario, *r.scenario.split("/"))]
         if kind:
             runs = [r for r in runs if r.kind == kind]
         self.runs = runs
@@ -734,9 +955,13 @@ class EvalSuite(BaseObject):
     ) -> None:
         """Run all of the suite's runs, in place, with the manifest's concurrency.
 
-        Each run gets its own port (``base_port + index``). Runs come off one
-        queue with no barrier between attempts, so a slow bot never holds up the
-        rest.
+        Each run gets its own port (``base_port + index``). ``concurrency``
+        workers each take the next run and run it until none is left. Runs are
+        taken in manifest order, every entry's first attempt before any
+        entry's second, so an entry's scenarios finish together and no worker
+        waits while any entry still has runs. An entry with a ``concurrency:``
+        of its own never has more than that many runs in flight, across its
+        attempts; a worker that finds it full takes the next entry's run.
 
         Args:
             logs_dir: Directory for per-run logs.
@@ -776,60 +1001,82 @@ class EvalSuite(BaseObject):
             results_path.parent.mkdir(parents=True, exist_ok=True)
         self._bound_cpu_threads()
         handler = self._add_legacy_update_callback(on_update) if on_update is not None else None
-        sem = asyncio.Semaphore(self.manifest.concurrency)
+        setup = _SuiteRunSetup(
+            ports={id(run): self.manifest.base_port + i for i, run in enumerate(self.runs)},
+            logs_dir=logs_dir,
+            record_dir=record_dir,
+            results_path=results_path,
+            debug=debug,
+            params=params,
+        )
+        queue = _RunQueue(self._entry_queues(self.runs))
+        workers = min(self.manifest.concurrency, len(self.runs))
         try:
-            await asyncio.gather(
-                *(
-                    self._run_one(
-                        run,
-                        self.manifest.base_port + i,
-                        logs_dir,
-                        record_dir,
-                        results_path,
-                        sem,
-                        debug,
-                        params,
-                    )
-                    for i, run in enumerate(self.runs)
-                )
-            )
+            await asyncio.gather(*(self._run_worker(queue, setup) for _ in range(workers)))
         finally:
             if handler is not None:
                 self.remove_event_handler("on_update", handler)
 
-    async def _run_one(
-        self,
-        run: EvalRun,
-        port: int,
-        logs_dir: Path,
-        record_dir: Path | None,
-        results_path: Path | None,
-        sem: asyncio.Semaphore,
-        debug: bool,
-        params: EvalSessionParams,
-    ) -> None:
-        """Spawn one bot, run its scenario against it, and record the outcome on ``run``."""
-        async with sem:
-            files = _RunFiles.for_run(run, logs_dir, record_dir)
-            run.status = "running"
-            run.started_at = time.monotonic()
-            await self._call_event_handler("on_update", run)
-            bot: asyncio.subprocess.Process | None = None
-            worker: asyncio.subprocess.Process | None = None
+    async def _run_worker(self, queue: "_RunQueue", setup: _SuiteRunSetup) -> None:
+        """Take runs from the queue and run them, one after another, until none is left."""
+        while (run := await queue.take()) is not None:
             try:
-                run.error = self._missing_file(run)
-                if run.error is not None:
-                    return
-                bot = await self._spawn_bot(run, port, files)
-                worker = await self._run_harness(run, port, files, debug=debug, params=params)
-            except Exception as e:
-                # The worker reports its own failures in its result; this is a
-                # problem on the suite's side (spawning, reading the result back).
-                run.error = f"error: {type(e).__name__}: {e}"
-                with contextlib.suppress(OSError):
-                    files.trace.write_text(traceback.format_exc())
+                await self._run_one(run, setup)
             finally:
-                await self._finish(run, files, bot, worker, results_path, logs_dir, record_dir)
+                await queue.done(run)
+
+    async def _run_one(self, run: EvalRun, setup: _SuiteRunSetup) -> None:
+        """Spawn one bot, run its scenario against it, and record the outcome on ``run``."""
+        port = setup.ports[id(run)]
+        files = _RunFiles.for_run(run, setup.logs_dir, setup.record_dir)
+        run.status = "running"
+        run.started_at = time.monotonic()
+        await self._call_event_handler("on_update", run)
+        bot: asyncio.subprocess.Process | None = None
+        worker: asyncio.subprocess.Process | None = None
+        try:
+            run.error = self._missing_file(run)
+            if run.error is not None:
+                return
+            bot = await self._spawn_bot(run, port, files)
+            worker = await self._run_harness(
+                run, port, files, debug=setup.debug, params=setup.params
+            )
+        except Exception as e:
+            # The worker reports its own failures in its result; this is a
+            # problem on the suite's side (spawning, reading the result back).
+            run.error = f"error: {type(e).__name__}: {e}"
+            with contextlib.suppress(OSError):
+                files.trace.write_text(traceback.format_exc())
+        finally:
+            await self._finish(
+                run,
+                files,
+                bot,
+                worker,
+                setup.results_path,
+                setup.logs_dir,
+                setup.record_dir,
+            )
+
+    @staticmethod
+    def _entry_queues(runs: list[EvalRun]) -> list[tuple[str, int | None, deque[EvalRun]]]:
+        """One queue per entry label and attempt, attempt-major then in manifest order, with the label and the entry's cap.
+
+        A queue keeps its runs in manifest order. An entry's cap is the lowest
+        ``concurrency:`` among its runs, ``None`` when none sets it, and it
+        covers all of its attempts.
+        """
+        queues: dict[tuple[int, str], deque[EvalRun]] = {}
+        caps: dict[str, int] = {}
+        for run in runs:
+            queues.setdefault((run.attempt, run.label), deque()).append(run)
+            if run.concurrency is not None:
+                caps[run.label] = min(caps.get(run.label, run.concurrency), run.concurrency)
+        return [
+            (label, caps.get(label), queue)
+            for (_, label), queue in sorted(queues.items(), key=lambda item: item[0][0])
+        ]
 
     def _missing_file(self, run: EvalRun) -> str | None:
         """Why the run cannot start, when one of its files is missing."""
@@ -847,13 +1094,18 @@ class EvalSuite(BaseObject):
         """Start the bot with its eval transport on ``port``, its output going to the bot log.
 
         A body file's directory is the bot's working directory, so relative
-        paths inside the body (an image) resolve next to the file.
+        paths inside the body (an image) resolve next to the file. A body given
+        inline is written to the run's body file first.
         """
         assert run.bot_path is not None
         cwd = str(run.runner_body_path.parent) if run.runner_body_path else None
+        body_path = run.runner_body_path
+        if run.runner_body is not None:
+            body_path = files.body
+            body_path.write_text(json.dumps(run.runner_body))
         with files.log.open("wb") as logf:
             return await asyncio.create_subprocess_exec(
-                *self._spawn_argv(run.bot_path, port, run.runner_body_path),
+                *self._spawn_argv(run.bot_path, port, body_path),
                 stdout=logf,
                 stderr=asyncio.subprocess.STDOUT,
                 cwd=cwd,

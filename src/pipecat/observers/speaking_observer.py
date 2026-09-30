@@ -102,9 +102,8 @@ class SpeakingObserver(BaseObserver):
                 a test place moments without waiting.
             **kwargs: Additional arguments passed to parent class.
         """
-        super().__init__(**kwargs)
+        super().__init__(observe_every_push=False, **kwargs)
         self._now = time_source
-        self._reported: set[int] = set()
         # When each open stretch of speech began, so the moment that closes one
         # can carry it.
         self._open: dict[SpeechEventKind, float] = {}
@@ -112,25 +111,22 @@ class SpeakingObserver(BaseObserver):
         self._register_event_handler("on_speech_event")
 
     async def on_push_frame(self, data: FramePushed):
-        """Report the moment a frame represents, the first time it is seen.
+        """Report the moment a frame represents.
 
         Args:
             data: Frame push event containing the frame and direction.
         """
         frame = data.frame
 
-        # An interruption is broadcast, arriving as two frames with two IDs, so
-        # an ID alone would not tell them apart. Read the downstream one.
+        # An interruption is broadcast, arriving as two frames, each pushed
+        # for the first time once. Read the downstream one.
         if frame.broadcast_sibling_id is not None and data.direction != FrameDirection.DOWNSTREAM:
-            return
-        if frame.id in self._reported:
             return
 
         event = self._as_event(frame)
         if not event:
             return
 
-        self._reported.add(frame.id)
         await self._call_event_handler("on_speech_event", event)
 
     def _as_event(self, frame: Frame) -> SpeechEvent | None:

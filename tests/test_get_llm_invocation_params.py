@@ -930,6 +930,122 @@ class TestGeminiGetLLMInvocationParams(unittest.TestCase):
         """An empty message list returns empty."""
         self.assertEqual(self.adapter._merge_parallel_tool_calls_for_thinking([], []), [])
 
+    # --- _add_placeholder_thought_signatures ---
+    #
+    # Gemini 3 rejects function calls without a thought signature, so calls
+    # another provider produced get the placeholder Google documents for them.
+
+    PLACEHOLDER = b"skip_thought_signature_validator"
+
+    def test_unsigned_tool_call_gets_placeholder_signature(self):
+        """A tool call converted from a standard message carries the placeholder."""
+        messages = [
+            {"role": "user", "content": "Switch to Gemini."},
+            {
+                "role": "assistant",
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "switch_llm", "arguments": '{"llm": "Google"}'},
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": "call_1", "content": '{"ok": true}'},
+        ]
+        context = LLMContext(messages=messages)
+        params = self.adapter.get_llm_invocation_params(context)
+
+        call_part = params["messages"][1].parts[0]
+        self.assertEqual(call_part.function_call.id, "call_1")
+        self.assertEqual(call_part.thought_signature, self.PLACEHOLDER)
+
+    def test_signed_parallel_group_left_unsigned_after_first_call(self):
+        """A parallel batch keeps Gemini's shape: the first call signed, the rest unsigned."""
+        messages = [
+            self._tool_call_message("c1", signature="sig-c1"),
+            self._tool_response_message("c1"),
+            self._tool_call_message("c2"),
+            self._tool_response_message("c2"),
+        ]
+        messages = self.adapter._merge_parallel_tool_calls_for_thinking(
+            [self._thought_signature_dict("c1")], messages
+        )
+        self.adapter._add_placeholder_thought_signatures(messages)
+
+        self.assertEqual([p.thought_signature for p in messages[0].parts], ["sig-c1", None])
+
+    def test_placeholder_skips_text_and_user_parts(self):
+        """Text parts and user turns never receive a signature."""
+        messages = [
+            Content(role="user", parts=[Part(text="Hi")]),
+            Content(role="model", parts=[Part(text="Hello")]),
+            self._tool_response_message("c1"),
+        ]
+        self.adapter._add_placeholder_thought_signatures(messages)
+
+        self.assertTrue(all(p.thought_signature is None for m in messages for p in m.parts))
+
+    def test_ensure_last_message_is_user_appends_when_trailing_model(self):
+        """ensure_last_message_is_user=True appends a user message after a trailing model turn."""
+        context = LLMContext(
+            messages=[
+                {"role": "user", "content": "Hello"},
+                {"role": "assistant", "content": "Let me check on that."},
+            ]
+        )
+        params = self.adapter.get_llm_invocation_params(context, ensure_last_message_is_user=True)
+        self.assertEqual([m.role for m in params["messages"]], ["user", "model", "user"])
+        self.assertEqual(params["messages"][-1].parts[0].text, ".")
+
+    def test_ensure_last_message_is_user_after_function_response_and_model_text(self):
+        """A settled tool result followed by spoken filler ends with a user turn."""
+        context = LLMContext(
+            messages=[
+                {"role": "user", "content": "What's the weather?"},
+                {
+                    "role": "assistant",
+                    "tool_calls": [
+                        {
+                            "id": "call_1",
+                            "type": "function",
+                            "function": {"name": "get_weather", "arguments": "{}"},
+                        }
+                    ],
+                },
+                {"role": "tool", "tool_call_id": "call_1", "content": '{"temperature": "75"}'},
+                {"role": "assistant", "content": "Let me check on that."},
+            ]
+        )
+        params = self.adapter.get_llm_invocation_params(context, ensure_last_message_is_user=True)
+        self.assertEqual(params["messages"][-2].role, "model")
+        self.assertEqual(params["messages"][-1].role, "user")
+        self.assertEqual(params["messages"][-1].parts[0].text, ".")
+
+    def test_ensure_last_message_is_user_off_keeps_trailing_model(self):
+        """Without the flag (default), a trailing model turn is preserved."""
+        context = LLMContext(
+            messages=[
+                {"role": "user", "content": "Hello"},
+                {"role": "assistant", "content": "Hi there!"},
+            ]
+        )
+        params = self.adapter.get_llm_invocation_params(context)
+        self.assertEqual([m.role for m in params["messages"]], ["user", "model"])
+
+    def test_ensure_last_message_is_user_noop_when_trailing_user(self):
+        """ensure_last_message_is_user=True does nothing when the list already ends with a user."""
+        context = LLMContext(
+            messages=[
+                {"role": "user", "content": "Hello"},
+                {"role": "assistant", "content": "Hi there!"},
+                {"role": "user", "content": "How are you?"},
+            ]
+        )
+        params = self.adapter.get_llm_invocation_params(context, ensure_last_message_is_user=True)
+        self.assertEqual(len(params["messages"]), 3)
+        self.assertEqual(params["messages"][-1].parts[0].text, "How are you?")
+
     def _opening_tool_call_messages(self) -> list[LLMStandardMessage]:
         """A context whose opening turn is a tool call, with its result."""
         return [
@@ -3401,6 +3517,54 @@ class TestTrailingUserMessageInjection(unittest.TestCase):
         for model, expected in cases.items():
             service = self._bedrock(model=model)
             self.assertEqual(service._should_inject_trailing_user_message(), expected, model)
+
+    def _google(self, **settings):
+        from pipecat.services.google.llm import GoogleLLMService
+
+        return GoogleLLMService(api_key="test-key", settings=GoogleLLMService.Settings(**settings))
+
+    def test_google_gate_by_model(self):
+        """Gemini models not known to continue a trailing model turn, including future ones, inject."""
+        cases = {
+            "gemini-3.6-flash": True,
+            "gemini-3.8-flash": True,
+            "gemini-3.5-flash-lite": True,
+            "gemini-flash-latest": True,
+            "gemini-flash-lite-latest": True,
+            "gemini-4-pro": True,  # hypothetical future model: must default to inject
+            "gemini-2.5-flash": False,
+            "gemini-2.5-flash-lite": False,
+            "gemini-2.5-pro": False,
+            "gemini-3-flash-preview": False,
+            "gemini-3.1-pro-preview": False,
+            "gemini-3.5-flash": True,
+            "gemini-pro-latest": False,
+        }
+        for model, expected in cases.items():
+            service = self._google(model=model)
+            self.assertEqual(service._should_inject_trailing_user_message(), expected, model)
+
+    def test_google_stream_params_append_trailing_user(self):
+        """A trailing model turn gets a user turn appended, request-only."""
+        from unittest.mock import AsyncMock
+
+        service = self._google(model="gemini-3.6-flash")
+        service._client = AsyncMock()
+        context = LLMContext(
+            messages=[
+                {"role": "user", "content": "What's the weather?"},
+                {"role": "assistant", "content": "Let me check on that."},
+            ]
+        )
+        adapter = service.get_llm_adapter()
+        params = adapter.get_llm_invocation_params(
+            context,
+            ensure_last_message_is_user=service._should_inject_trailing_user_message(),
+        )
+
+        self.assertEqual(params["messages"][-1].role, "user")
+        self.assertEqual(params["messages"][-1].parts[0].text, ".")
+        self.assertEqual(context.messages[-1]["role"], "assistant")
 
 
 class TestContextSystemMessageDeprecation(unittest.TestCase):

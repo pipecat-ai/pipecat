@@ -126,13 +126,6 @@ class TestSpeakingObserver(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(self.events), 1)
 
-    async def test_a_relayed_frame_is_reported_once(self):
-        """A frame passed along the pipeline is one moment, not one per hop."""
-        frame = BotStartedSpeakingFrame()
-        for _ in range(4):
-            await self._push(frame)
-        self.assertEqual(len(self.events), 1)
-
     async def test_a_stretch_whose_start_was_missed_closes_without_one(self):
         """Rather than borrowing a start from another stretch."""
         await self._push(BotStoppedSpeakingFrame())

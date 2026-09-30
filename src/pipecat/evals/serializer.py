@@ -223,9 +223,12 @@ class EvalSerializer(FrameSerializer):
             report_level = {k: RTVIFunctionCallReportLevel(v) for k, v in levels.items()}
         vad = payload.get("vad_user_speaking")
         vad_user_speaking_enabled = bool(vad) if vad is not None else None
+        markers = payload.get("llm_markers")
+        bot_llm_marker_enabled = bool(markers) if markers is not None else None
         return RTVIConfigureObserverFrame(
             function_call_report_level=report_level,
             vad_user_speaking_enabled=vad_user_speaking_enabled,
+            bot_llm_marker_enabled=bot_llm_marker_enabled,
         )
 
 

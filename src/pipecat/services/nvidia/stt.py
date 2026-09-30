@@ -434,7 +434,7 @@ class NvidiaSTTService(STTService):
         return True
 
     async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
-        """Apply a settings delta and sync internal state.
+        """Apply a settings delta, then reconnect so the stream picks it up.
 
         Args:
             delta: A :class:`STTSettings` (or ``NvidiaSTTService.Settings``) delta.
@@ -444,8 +444,17 @@ class NvidiaSTTService(STTService):
         """
         changed = await super()._update_settings(delta)
 
-        if changed and self._config is not None:
+        if not changed:
+            return changed
+
+        if self._config is not None:
             self._config = self._create_recognition_config()
+
+        # streaming_response_generator() receives streaming_config once, when the
+        # gRPC stream is opened, so rebuilding the config alone leaves the running
+        # stream transcribing with the previous settings. _request_reconnect()
+        # defers until the user stops speaking, so this cannot cut into a turn.
+        await self._request_reconnect()
 
         return changed
 

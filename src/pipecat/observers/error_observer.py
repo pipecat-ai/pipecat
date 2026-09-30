@@ -77,26 +77,22 @@ class ErrorObserver(BaseObserver):
                 a test place failures without waiting.
             **kwargs: Additional arguments passed to parent class.
         """
-        super().__init__(**kwargs)
+        super().__init__(observe_every_push=False, **kwargs)
         self._now = time_source
-        self._reported: set[int] = set()
 
         self._register_event_handler("on_error")
 
     async def on_push_frame(self, data: FramePushed):
-        """Report an error frame, the first time it is seen.
+        """Report an error frame.
 
-        An error is pushed again by every processor it travels through, and
-        only the first of those pushes comes from the processor that failed.
+        The first push of an error comes from the processor that failed.
 
         Args:
             data: Frame push event containing the frame and direction.
         """
         frame = data.frame
-        if not isinstance(frame, ErrorFrame) or frame.id in self._reported:
+        if not isinstance(frame, ErrorFrame):
             return
-
-        self._reported.add(frame.id)
 
         # An error assembled by hand rather than reported through `push_error`
         # arrives without the processor and category that method settles, so

@@ -62,6 +62,7 @@ from pipecat.services.llm_service import (
     WebsocketLLMService,
     WebsocketReconnectedError,
 )
+from pipecat.services.openai.base_llm import OPENAI_MODEL_WITHOUT_RESPONSE_SCHEMA
 from pipecat.services.settings import LLMSettings
 from pipecat.utils.http import TIMEOUT_EXCEPTIONS, connection_limits
 from pipecat.utils.tracing.service_decorators import traced_llm
@@ -126,12 +127,18 @@ class OpenAIResponsesReasoningConfig(BaseModel):
             default) requests no summary. Any summary is surfaced via thought
             frames (the ``on_assistant_thought`` event); the encrypted reasoning
             itself is preserved across turns regardless of this setting.
+        mode: Reasoning mode for models that offer one, such as the gpt-5.6
+            series: ``"standard"`` or the slower, more thorough ``"pro"``.
+            ``None`` (the default) leaves the field unset, so the model's own
+            default applies. ``effort`` selects the reasoning intensity within
+            the chosen mode.
     """
 
     # ``| str`` for forward compatibility: if OpenAI adds new levels, users can
     # pass the new string without waiting for a Pipecat release.
     effort: Literal["none", "minimal", "low", "medium", "high", "xhigh", "max"] | str | None = None
     summary: Literal["auto", "concise", "detailed"] | str | None = None
+    mode: Literal["standard", "pro"] | str | None = None
 
 
 @dataclass
@@ -168,6 +175,16 @@ class OpenAIResponsesLLMSettings(LLMSettings):
 def _is_o_series(model: str) -> bool:
     """Whether the model is an o-series reasoning model (o1, o3, o4-mini, ...)."""
     return bool(re.match(r"o\d", model.lower()))
+
+
+def _rejects_effort_none(model: str) -> bool:
+    """Whether a reasoning model rejects ``effort="none"`` with an API error.
+
+    The reasoning-first o-series and ``gpt-6-astra`` accept only a positive
+    effort level, so reasoning cannot be switched off for them.
+    """
+    model = model.lower()
+    return _is_o_series(model) or model.startswith("gpt-6-astra")
 
 
 def _model_supports_reasoning(model: str) -> bool | None:
@@ -216,6 +233,8 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
     ReasoningConfig = OpenAIResponsesReasoningConfig
 
     adapter_class = OpenAIResponsesLLMAdapter
+
+    supports_response_schema: bool = True
 
     def __init__(
         self,
@@ -396,11 +415,23 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
 
         return params
 
+    @staticmethod
+    def model_supports_response_schema(model: str) -> bool:
+        """Whether a model can enforce a response schema.
+
+        OpenAI models before gpt-4o-mini and gpt-4o-2024-08-06 cannot.
+
+        Args:
+            model: The model name.
+        """
+        return not OPENAI_MODEL_WITHOUT_RESPONSE_SCHEMA.match(model)
+
     async def run_inference(
         self,
         context: LLMContext,
         max_tokens: int | None = None,
         system_instruction: str | None = None,
+        response_schema: dict[str, Any] | None = None,
     ) -> str | None:
         """Run a one-shot, out-of-band inference with the given LLM context.
 
@@ -410,6 +441,9 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
             context: The LLM context containing conversation history.
             max_tokens: Optional maximum number of tokens to generate.
             system_instruction: Optional system instruction for this inference.
+            response_schema: Optional JSON schema the reply must follow. The
+                service asks the provider to enforce it, so the reply is JSON
+                text matching the schema.
 
         Returns:
             The LLM's response as a string, or None if no response is generated.
@@ -429,6 +463,17 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
 
         if max_tokens is not None:
             params["max_output_tokens"] = max_tokens
+
+        response_schema = self._check_response_schema(response_schema)
+        if response_schema is not None:
+            params["text"] = {
+                "format": {
+                    "type": "json_schema",
+                    "name": "response",
+                    "schema": response_schema,
+                    "strict": True,
+                }
+            }
 
         response = await self._client.responses.create(**params)
 
@@ -475,20 +520,17 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
         When the caller hasn't configured ``reasoning``, request ``effort="none"``
         for whatever models possible. Note that this is a no-op for models like
         ``gpt-5.4`` that already default to ``none``. Some models are left at the
-        provider default: the reasoning-first o-series doesn't accept
-        ``effort="none"`` (and choosing one is a deliberate decision to reason),
-        and gpt-4.x and earlier don't reason at all. Mirrors Gemini's
-        ``_maybe_unset_thinking_budget``, which disables or minimizes thinking on
-        its latency-sensitive models.
+        provider default: those that reject ``effort="none"`` outright (see
+        :func:`_rejects_effort_none`), and gpt-4.x and earlier, which don't reason
+        at all. Mirrors Gemini's ``_maybe_unset_thinking_budget``, which disables
+        or minimizes thinking on its latency-sensitive models.
 
         Args:
             params: The response params dict (modified in place).
         """
         model = assert_given(self._settings.model)
         # Lower reasoning only for models that reason *and* accept effort="none".
-        # The o-series reasons but rejects "none" (and choosing it is a deliberate
-        # decision to reason), so exclude it.
-        if model and _model_supports_reasoning(model) and not _is_o_series(model):
+        if model and _model_supports_reasoning(model) and not _rejects_effort_none(model):
             params["reasoning"] = {"effort": "none"}
 
     def _warn_if_reasoning_unsupported(self):

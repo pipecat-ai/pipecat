@@ -298,9 +298,10 @@ tts='Hello there world'   original='Hello world'
 
 The other half of the job: word-timestamp tokens are *messy*, and no two providers agree.
 **Rather than special-casing each one**, `_classify_hop` matches the token against the
-text left in the segment using three strategies, in order, stopping at the first hit. Each
-one lives in its own method — `_literal_hop`, `_folded_hop`, `_markup_hop` — so
-`_classify_hop` itself only decides the order and what to do when all three miss.
+text left in the segment using four strategies, in order, stopping at the first hit. Each
+one lives in its own method — `_literal_hop`, `_folded_hop`, `_markup_hop`,
+`_lookahead_hop` — so `_classify_hop` itself only decides the order and what to do when
+all four miss.
 
 ```mermaid
 flowchart TD
@@ -316,16 +317,27 @@ flowchart TD
 
     S3{"<b>3 · markup stripped</b><br/><i>tags removed from<br/>both sides</i>"}
     S3 -->|hit| R
-    S3 -->|miss| ST
+    S3 -->|miss| S4
+
+    S4{"<b>4 · lookahead</b><br/><i>whole word, up to 3<br/>words further in</i>"}
+    S4 -->|hit| R
+    S4 -->|miss| ST
 
     R(["<b>PLACED</b> — fits here<br/><b>CROSSES</b> — spills onward"])
     ST{"any alphanumeric<br/>left in this segment?"}
     ST -->|no| EX(["<b>EXHAUSTED</b><br/>finish segment, try the next"])
-    ST -->|yes| NM(["<b>NO_MATCH</b><br/>nudge past punctuation, stop"])
+    ST -->|yes| NM(["<b>NO_MATCH</b><br/>step past the next<br/>run of punctuation, stop"])
 ```
 
-Every strategy also retries with the token's own trailing punctuation removed
-(`_word_variants`), and the first two are offered three starting points into the segment
+Every strategy also retries the token with trailing punctuation removed
+(`_word_variants`), in two steps: first only the last mark, then all of them. A provider
+that adds a period to a line's last token (Cartesia) reports `images:` as `images:.`, so
+removing just the period matches the text's own colon and the cursor lands past it.
+Removing every mark would leave the cursor in front of the colon, where the next token
+(`---`) could not match. A token made only of punctuation, such as `---.`, also still has
+`---` to match; with every mark removed nothing would be left.
+
+The first two strategies are offered three starting points into the segment
 (`_match_candidates`): the text as it is, past any spaces, and past everything that is not
 a letter or digit.
 
@@ -340,20 +352,32 @@ nothing remembered between words.
 | Token carries its own leading space (Inworld) | `" world"` | `" world"` | 1 literal | `PLACED` (6 chars) |
 | Provider skipped punctuation it did not speak | `", I can help"` | `I` | 1 literal *(skip offset)* | `PLACED` (3 chars) |
 | Provider added a terminal period | `account and more` | `account.` | 1 literal *(trailing trim)* | `PLACED` (7 chars) |
+| Provider added a period after the text's own mark | `images:\n\n---` | `images:.` | 1 literal *(last mark removed)* | `PLACED` (7 chars) |
+| Provider added a period to a punctuation-only token | `\n\n---\n\n###` | `---.` | 1 literal *(skip offset, last mark removed)* | `PLACED` (5 chars) |
 | Provider lowercased the word | `SQL is great` | `sql` | 2 folded | `PLACED` (3 chars) |
 | Provider stripped a diacritic | `café open` | `cafe` | 2 folded | `PLACED` (4 chars) |
 | Provider normalized an apostrophe | `don’t worry` | `don't` | 2 folded | `PLACED` (5 chars) |
 | Token reported without its tags | `<spell>1234</spell> ok` | `1234` | 3 markup | `PLACED` (11 chars) |
+| Provider never reported the words before this one | `how it is supposed` | `supposed` | 4 lookahead | `PLACED` (18 chars) |
 | Token straddles the frame boundary | `1111` | `1111And` | 1 literal | `CROSSES` (4 chars used) |
 | Foreign token (dropped event upstream) | `hello world` | `goodbye` | none | `NO_MATCH` |
 | Nothing spoken left here | `<break/>` | `hello` | none | `EXHAUSTED` |
 
-Note how strategy 1 alone covers four different provider quirks, because it tries three
-starting points *and* a trailing-punctuation-trimmed form of the token.
+Note how strategy 1 alone covers several provider quirks, because it tries three starting
+points *and* trimmed forms of the token.
 
 Strategy 2 has one extra rule: because folding hides case, `account` would otherwise match
 the start of `Accountant`, so a match there is only accepted if it ends where a word ends.
 Strategy 1 needs no such guard, being case-sensitive already.
+
+Strategy 4 is how a segment recovers from an event the provider garbled or never sent. No
+event will ever name the text at the cursor, so the next word that does arrive is looked
+for a few words further in, and the text stepped over is consumed with it. Two limits keep
+a coincidence from reading as a recovery: only whole words anchor the match (it reuses
+strategy 2's word-boundary rule), and only the next `LOOKAHEAD_WORDS` (3) of them are
+tried. A segment holding markup is skipped, since tag names are made of letters. Scripts
+written without spaces between words (Japanese, Chinese) offer no word starts to anchor
+on, so frames in them recover through force-complete instead.
 
 ### The four outcomes
 
@@ -362,7 +386,7 @@ Strategy 1 needs no such guard, being case-sensitive already.
 | `PLACED` | Token fits inside this segment | Move to the end of the match, stop |
 | `CROSSES` | This segment holds only the start of the token | Finish the segment, carry the **rest of the token** onward |
 | `EXHAUSTED` | Nothing here can be spoken | Finish the segment, carry the **whole token** onward |
-| `NO_MATCH` | Token does not belong here | Step past leading punctuation, stop |
+| `NO_MATCH` | Token does not belong here | Step every cursor past the next run of punctuation, stop |
 
 Each outcome is returned as a `_Hop`, carrying two numbers: `segment_advance`, how far to
 move in this segment, and `word_consumed`, how much of the token this segment used up.
@@ -415,7 +439,7 @@ If a `CROSSES` remainder runs out of segments entirely, the leftover is exposed 
 
 A token with no letters or digits in it at all — an emoji, a bare punctuation mark, or a
 symbol the provider swapped for another (ElevenLabs reports `→` as `-`) — cannot be
-matched by any of the three strategies, because there is nothing to compare.
+matched by any of the strategies, because there is nothing to compare.
 `word_belongs_current_segment` falls through to a separate check, `_symbol_belongs_here`,
 which accepts the token when either:
 
@@ -426,9 +450,11 @@ which accepts the token when either:
 
 `advance_word` does **not** consult this path. A substituted symbol therefore passes
 `word_belongs_here` — so the slot is not force-completed over it — and then classifies as
-`NO_MATCH`, nudging the raw cursor past leading punctuation and stopping. The token is
-accepted without being placed, which is the right outcome for a mark the source text
-spells differently.
+`NO_MATCH`. The token is taken to stand for the next run of punctuation in the text
+(`_unmatched_symbol_len`): every cursor steps past leading whitespace and that one run,
+the same as for a placed word, and stops at the next space, line break, letter or digit.
+The symbol was spoken, just reported differently, so the context records it for this
+token and a client's highlight covers it now rather than a word later.
 
 Feeding a provider's tokens for `Step one → step two`, where the arrow is reported as `-`:
 
@@ -436,24 +462,28 @@ Feeding a provider's tokens for `Step one → step two`, where the arrow is repo
 | --- | --- | --- | ---: | ---: |
 | `Step` | True | `PLACED` | 4 | 4 |
 | `one` | True | `PLACED` | 8 | 8 |
-| `-` | **True** | **`NO_MATCH`** | **11** | **8** |
+| `-` | **True** | **`NO_MATCH`** | **10** | **10** |
 | `step` | True | `PLACED` | 15 | 15 |
 | `two` | True | `PLACED` | 19 | 19 |
 
-The `-` is accepted but never placed. On its row the raw cursor moves from 8 to 11,
-stepping over ` → ` so the next token is not blocked by it, while `user_facing_pos` holds
-at 8 — nothing the source text spells was actually spoken. `step` then lands normally and
-the frame completes.
+On the `-` row every cursor moves from 8 to 10, over ` →`, and the token's LLM span is
+`→`. `step` then matches from its skip-whitespace starting point and the frame completes.
 
 Spelling out what each `raw_pos` above points at:
 
 ```
   pos= 4  consumed='Step'                 next char=' '
   pos= 8  consumed='Step one'             next char=' '
-  pos=11  consumed='Step one → '          next char='s'
+  pos=10  consumed='Step one →'           next char=' '
   pos=15  consumed='Step one → step'      next char=' '
   pos=19  consumed='Step one → step two'  next char=(end)
 ```
+
+Stopping at whitespace is what keeps the symbols after it reachable. In
+`Step one →\n\n### **Step two**` the tokens `###` and `**Step` arrive as events of their
+own. Stepping over the whole punctuation run instead would put the cursor at `Step two`
+before they arrive, leaving them nothing to match, and the frame would be force-completed
+with every later word of the turn dropped.
 
 Had the dry run rejected `-`, the caller would have read that as a dropped event and
 force-completed the frame. No text would be lost — `_force_complete` emits the entire

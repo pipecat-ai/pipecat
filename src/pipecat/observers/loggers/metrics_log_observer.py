@@ -74,7 +74,7 @@ class MetricsLogObserver(BaseObserver):
                 metrics types will be logged. If None, all metrics are logged.
             **kwargs: Additional arguments passed to parent class.
         """
-        super().__init__(**kwargs)
+        super().__init__(observe_every_push=False, **kwargs)
         # Normalize deprecated types in include_metrics
         if include_metrics and SmartTurnMetricsData in include_metrics:
             import warnings
@@ -87,7 +87,6 @@ class MetricsLogObserver(BaseObserver):
             )
             include_metrics = (include_metrics - {SmartTurnMetricsData}) | {TurnMetricsData}
         self._include_metrics = include_metrics
-        self._frames_seen = set()
 
     async def on_push_frame(self, data: FramePushed):
         """Handle frame push events and log metrics frames.
@@ -103,12 +102,6 @@ class MetricsLogObserver(BaseObserver):
 
         if not isinstance(frame, MetricsFrame):
             return
-
-        # Skip frames we've already seen to avoid duplicate logging
-        if frame.id in self._frames_seen:
-            return
-
-        self._frames_seen.add(frame.id)
 
         time_sec = timestamp / 1_000_000_000
 

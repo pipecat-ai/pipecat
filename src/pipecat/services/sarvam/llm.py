@@ -8,7 +8,7 @@
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Any, Literal
 
 from loguru import logger
 from openai import NOT_GIVEN as OPENAI_NOT_GIVEN
@@ -47,9 +47,11 @@ class SarvamLLMService(OpenAILLMService):
     # This value is used by BaseOpenAILLMService when calling the adapter.
     supports_developer_role = False
 
-    _SUPPORTED_MODELS = frozenset({"gemma4", "glm5.2", "sarvam-105b", "sarvam-105b-conversations"})
+    _SUPPORTED_MODELS = frozenset(
+        {"deepseekv4-flash", "gemma4", "glm5.2", "sarvam-105b", "sarvam-105b-conversations"}
+    )
     _VISION_MODELS = frozenset({"gemma4"})
-    _REASONING_MODELS = frozenset({"gemma4", "glm5.2", "sarvam-105b"})
+    _REASONING_MODELS = frozenset({"deepseekv4-flash", "gemma4", "glm5.2", "sarvam-105b"})
     _WIKI_GROUNDING_MODELS = frozenset({"gemma4", "sarvam-105b"})
     _V1_MODELS = frozenset({"sarvam-105b-conversations"})
     Settings = SarvamLLMSettings
@@ -155,6 +157,7 @@ class SarvamLLMService(OpenAILLMService):
         context: LLMContext,
         max_tokens: int | None = None,
         system_instruction: str | None = None,
+        response_schema: dict[str, Any] | None = None,
     ) -> str | None:
         """Run inference, pushing an error frame on misconfiguration.
 
@@ -167,6 +170,7 @@ class SarvamLLMService(OpenAILLMService):
             context: The LLM context containing conversation history.
             max_tokens: Optional maximum number of tokens to generate.
             system_instruction: Optional system instruction for this inference.
+            response_schema: Optional JSON schema the reply must follow.
 
         Returns:
             The LLM's response, or None if the request is invalid or produced
@@ -180,7 +184,10 @@ class SarvamLLMService(OpenAILLMService):
             return None
 
         return await super().run_inference(
-            context, max_tokens=max_tokens, system_instruction=system_instruction
+            context,
+            max_tokens=max_tokens,
+            system_instruction=system_instruction,
+            response_schema=response_schema,
         )
 
     def _invocation_params(

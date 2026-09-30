@@ -8,9 +8,9 @@
 
 Example::
 
-    scenario = EvalSimulationScenario.load("scenarios/simulated/curious_caller.yaml")
-    run = await EvalSimulationSession.from_scenario(scenario, "ws://localhost:7860").run()
-    print(f"{'succeeded' if run.succeeded else 'failed'}: {run.reason}")
+    for scenario in EvalScenarioFile.load("scenarios/simulated/curious_caller.yaml"):
+        run = await EvalSimulationSession.from_scenario(scenario, "ws://localhost:7860").run()
+        print(f"{'succeeded' if run.succeeded else 'failed'}: {run.reason}")
 """
 
 from loguru import logger

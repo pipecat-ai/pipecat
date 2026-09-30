@@ -31,7 +31,7 @@ class JobParams(BaseModel):
             the worker to become ready and the job itself.
         label: Optional human-readable description of the work, e.g.
             ``"Research: Radiohead"``. A
-            :class:`~pipecat.workers.base_ui_worker.BaseUIWorker` titles
+            :class:`~pipecat.workers.ui.UIWorker` titles
             the client's progress card with it.
         cancellable: Whether an external requester, such as the client UI,
             may ask for the job to be cancelled. Cancellation the worker

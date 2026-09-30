@@ -56,6 +56,9 @@ class ExpectationMatcher:
         # a user transcript), surfaced to verbose progress. Empty for events with
         # no text (llm_started, function_call, speaking events).
         self.last_match_text: str = ""
+        # When the most recent expectation matched, so an absence check can tell
+        # a reply that began after it from the rest of the one it matched.
+        self._last_match_at: float = 0.0
 
     def reset_turn(self) -> None:
         """Forget the previous turn's unclaimed function calls."""
@@ -117,6 +120,7 @@ class ExpectationMatcher:
         judge_failure = await self._check_judge(event, expectation, turn_idx, exp_idx)
         if judge_failure is None:
             self.last_match_text = self._match_summary(event)
+            self._last_match_at = time.monotonic()
         return judge_failure
 
     async def _match_aggregating(
@@ -164,6 +168,9 @@ class ExpectationMatcher:
             seen_any = True
             delta = self._event_text(event)
             aggregate += delta
+            excluded = self._text_excluded(aggregate, expectation, turn_idx, exp_idx)
+            if excluded is not None:
+                return excluded
             # Feed each segment to the judge as its own assistant message, so it
             # judges the bot's reply in the conversation's context (the cumulative
             # `aggregate` is kept only for text_contains and the match summary).
@@ -173,6 +180,7 @@ class ExpectationMatcher:
             self._trace.log(f"eval: {status} (aggregate={aggregate.strip()!r}) {reason}")
             if status == "pass":
                 self.last_match_text = aggregate
+                self._last_match_at = time.monotonic()
                 return None
             if status == "fail":
                 # Only the judge can affirmatively fail an aggregate, and only
@@ -234,14 +242,28 @@ class ExpectationMatcher:
         turn_idx: int,
         exp_idx: int,
     ) -> EvalAssertionFailure | None:
-        """Pass when no event of this type arrives before the deadline; an arriving one fails at once, with its content."""
+        """Pass when no event of this type arrives before the deadline; an arriving one fails at once, with its content.
+
+        A reply reaches the stream in segments, one per pause in the bot's
+        speech, so a ``response`` that continues the reply an earlier
+        expectation matched is not a new one: only a response the bot began
+        after that match counts.
+        """
         self._trace.log(f"match: expecting NO {expectation.event!r} for {budget_ms}ms")
-        try:
-            event = await self._stream.next_event(expectation.event, deadline)
-        except TimeoutError:
-            # The quiet window held: absence confirmed.
-            self.last_match_text = f"no {expectation.event!r} for {budget_ms}ms"
-            return None
+        while True:
+            try:
+                event = await self._stream.next_event(expectation.event, deadline)
+            except TimeoutError:
+                # The quiet window held: absence confirmed.
+                self.last_match_text = f"no {expectation.event!r} for {budget_ms}ms"
+                return None
+            if expectation.event == "response" and not self._reply_began_after_last_match():
+                self._trace.log(
+                    f"absent: the matched reply goes on, not a new one: "
+                    f"{self._match_summary(event)!r}"
+                )
+                continue
+            break
         return self._failure(
             expectation,
             turn_idx,
@@ -251,6 +273,12 @@ class ExpectationMatcher:
             "unexpected_event",
         )
 
+    def _reply_began_after_last_match(self) -> bool:
+        """Whether the bot started a reply since the most recent match, by its LLM or its speech."""
+        times = self._stream.latest_event_times
+        began = max(times.get("llm_started", 0.0), times.get("bot_started_speaking", 0.0))
+        return began > self._last_match_at
+
     async def _match_function_calls(
         self,
         expectation: EvalExpectation,
@@ -258,7 +286,20 @@ class ExpectationMatcher:
         turn_idx: int,
         exp_idx: int,
     ) -> EvalAssertionFailure | None:
-        """Match every call in the expectation, in any order, within the budget; else a failure naming the call that was missing or whose args did not match."""
+        """Match every call in the expectation, in any order, within the budget; else a failure naming the call that was missing or whose args did not match.
+
+        With ``eval:``, each matched call is also put to the judge, and the
+        first one it rejects fails the expectation.
+        """
+        if expectation.eval is not None and self._judge is None:
+            return self._failure(
+                expectation,
+                turn_idx,
+                exp_idx,
+                "scenario uses 'eval:' but no judge could be built",
+                "no_judge",
+            )
+
         matched: list[str] = []
         for spec in expectation.calls or []:
             want = spec.args or None
@@ -292,10 +333,47 @@ class ExpectationMatcher:
                     f"function call {missing!r} not seen (matched: {seen})",
                     "missing_function_call",
                 )
+            judge_failure = await self._check_call_judge(event, expectation, turn_idx, exp_idx)
+            if judge_failure:
+                return judge_failure
             matched.append(str(event.get("name")))
 
         self.last_match_text = ", ".join(matched) or "function call"
+        self._last_match_at = time.monotonic()
         return None
+
+    async def _check_call_judge(
+        self,
+        event: dict,
+        expectation: EvalExpectation,
+        turn_idx: int,
+        exp_idx: int,
+    ) -> EvalAssertionFailure | None:
+        """Put a matched call to the judge if ``eval:`` was set on the expectation.
+
+        The judge is asked about the call by name and arguments, in the light
+        of the spoken conversation so far. A call is not a partial reply, so a
+        ``continue`` fails it like a ``no``.
+        """
+        if expectation.eval is None:
+            return None
+        # _match_function_calls fails before matching when there is no judge.
+        assert self._judge is not None
+        name = str(event.get("name") or "?")
+        args = event.get("args") or {}
+        with logger.contextualize(eval_pipeline="judge"):
+            verdict = await self._judge.evaluate_call(name, args, expectation.eval)
+        self._trace.log(f"eval: {verdict.verdict} ({self._match_summary(event)}) {verdict.reason}")
+        if verdict.passed:
+            return None
+        return self._failure(
+            expectation,
+            turn_idx,
+            exp_idx,
+            f"eval {expectation.eval!r} on {self._match_summary(event)}: "
+            f"judge said {verdict.verdict} — {verdict.reason}",
+            "judge_no",
+        )
 
     async def _next_function_call(
         self,
@@ -380,6 +458,65 @@ class ExpectationMatcher:
                     f"text {content!r} does not contain {expectation.text_contains!r}",
                     "text_mismatch",
                 )
+        excluded = self._text_excluded(self._event_text(event), expectation, turn_idx, exp_idx)
+        if excluded is not None:
+            return excluded
+        if expectation.marker is not None:
+            kind = event.get("kind")
+            wanted = (
+                ("short", "long") if expectation.marker == "incomplete" else (expectation.marker,)
+            )
+            if kind not in wanted:
+                return self._failure(
+                    expectation,
+                    turn_idx,
+                    exp_idx,
+                    f"marker {self._event_text(event)!r} is {kind or 'of no known kind'}, "
+                    f"expected {expectation.marker}",
+                    "marker_mismatch",
+                )
+        problem = self._check_marker_format(event, expectation)
+        if problem is not None:
+            return self._failure(expectation, turn_idx, exp_idx, problem, "marker_format")
+        return None
+
+    def _check_marker_format(self, event: dict, expectation: EvalExpectation) -> str | None:
+        """What is wrong with the shape of the response's raw text, if anything.
+
+        The checks read the raw text the marker event carries against every
+        marker the bot recognizes, so they see what the LLM wrote before the
+        bot held any of it back.
+        """
+        if (
+            expectation.marker_first is None
+            and expectation.markers is None
+            and expectation.text_after is None
+        ):
+            return None
+        raw: str = event.get("raw") or ""
+        known: list[str] = event.get("markers") or []
+        found = sorted((raw.find(m), m) for m in known if m in raw)
+        count = sum(raw.count(m) for m in known)
+        first_at, first = found[0] if found else (-1, None)
+        excerpt = repr(raw[:80])
+        if expectation.markers is not None and count != expectation.markers:
+            return f"raw text holds {count} marker(s), expected {expectation.markers}: {excerpt}"
+        if expectation.marker_first is not None:
+            is_first = first is not None and not raw[:first_at].strip()
+            if is_first != expectation.marker_first:
+                return (
+                    f"raw text {'starts' if is_first else 'does not start'} with a marker, "
+                    f"expected it {'to' if expectation.marker_first else 'not to'}: {excerpt}"
+                )
+        if expectation.text_after is not None:
+            if first is None:
+                return f"raw text holds no marker to check text after: {excerpt}"
+            has_after = bool(raw[first_at + len(first) :].strip())
+            if has_after != expectation.text_after:
+                return (
+                    f"raw text has {'text' if has_after else 'nothing'} after the marker, "
+                    f"expected {'text' if expectation.text_after else 'nothing'}: {excerpt}"
+                )
         return None
 
     async def _check_judge(
@@ -442,6 +579,22 @@ class ExpectationMatcher:
     def _event_text(self, event: dict) -> str:
         """The text an event carries: reply events use ``text``, ``user_transcription`` ``transcript``."""
         return event.get("text") or event.get("transcript") or ""
+
+    def _text_excluded(
+        self, content: str, expectation: EvalExpectation, turn_idx: int, exp_idx: int
+    ) -> EvalAssertionFailure | None:
+        """The failure for ``text_excludes`` when ``content`` holds it, else ``None``."""
+        if expectation.text_excludes is None or not self._text_contains(
+            content, expectation.text_excludes
+        ):
+            return None
+        return self._failure(
+            expectation,
+            turn_idx,
+            exp_idx,
+            f"text {content.strip()!r} contains {expectation.text_excludes!r}",
+            "text_present",
+        )
 
     def _text_contains(self, content: str, needle: str) -> bool:
         """Whether ``needle`` occurs in ``content``, ignoring spacing."""

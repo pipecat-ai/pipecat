@@ -11,6 +11,7 @@ tracking when turns start and end based on user and bot speech patterns.
 """
 
 import asyncio
+import warnings
 from collections import deque
 
 from loguru import logger
@@ -58,17 +59,27 @@ class TurnTrackingObserver(BaseObserver):
       duration in seconds, and whether it was interrupted
     """
 
-    def __init__(self, max_frames=100, turn_end_timeout_secs=2.5, **kwargs):
+    def __init__(self, max_frames: int | None = None, turn_end_timeout_secs: float = 2.5, **kwargs):
         """Initialize the turn tracking observer.
 
         Args:
-            max_frames: Maximum number of frame IDs to keep in history for
-                duplicate detection. Defaults to 100.
+            max_frames: Unused.
+
+                .. deprecated:: 1.12.0
+                    No replacement. The observer receives each frame once.
+                    Will be removed in 2.0.0.
             turn_end_timeout_secs: Timeout in seconds after bot stops speaking
                 before automatically ending the turn. Defaults to 2.5.
             **kwargs: Additional arguments passed to the parent observer.
         """
-        super().__init__(**kwargs)
+        if max_frames is not None:
+            warnings.warn(
+                "`max_frames` parameter of `TurnTrackingObserver` is deprecated since 1.12.0 "
+                "and will be removed in 2.0.0. No replacement.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        super().__init__(observe_every_push=False, **kwargs)
         self._turn_count = 0
         self._is_turn_active = False
         self._is_bot_speaking = False
@@ -84,9 +95,8 @@ class TurnTrackingObserver(BaseObserver):
         self._turn_end_timeout_secs = turn_end_timeout_secs
         self._end_turn_timer = None
 
-        # Track processed frames to avoid duplicates
-        self._processed_frames = set()
-        self._frame_history = deque(maxlen=max_frames)
+        # WorkerObserver deduplicates pushes; broadcast siblings are distinct frames.
+        self._broadcast_sibling_ids = deque(maxlen=100)
 
         # These handlers run inside this observer's worker task, so awaiting
         # them preserves the exact frame order without blocking the pipeline.
@@ -103,26 +113,11 @@ class TurnTrackingObserver(BaseObserver):
         Args:
             data: Frame push event data containing the frame and metadata.
         """
-        # A broadcast creates distinct upstream/downstream frame instances that
-        # represent one logical event. Use their shared minimum ID so whichever
-        # sibling arrives first owns processing and the other is ignored.
-        frame_key = min(
-            data.frame.id,
-            data.frame.broadcast_sibling_id or data.frame.id,
-        )
-
-        # Skip already processed frames and broadcast siblings.
-        if frame_key in self._processed_frames:
-            return
-
-        self._processed_frames.add(frame_key)
-        self._frame_history.append(frame_key)
-
-        # If we've exceeded our history size, remove the oldest frame ID
-        # from the set of processed frames.
-        if len(self._processed_frames) > len(self._frame_history):
-            # Rebuild the set from the current deque contents
-            self._processed_frames = set(self._frame_history)
+        sibling_id = data.frame.broadcast_sibling_id
+        if sibling_id is not None:
+            if data.frame.id in self._broadcast_sibling_ids:
+                return
+            self._broadcast_sibling_ids.append(sibling_id)
 
         if isinstance(data.frame, StartFrame):
             # Start the first turn immediately when the pipeline starts
@@ -181,6 +176,7 @@ class TurnTrackingObserver(BaseObserver):
 
     async def _handle_user_started_speaking(self, data: FramePushed):
         """Handle user speaking events, including interruptions."""
+        assert isinstance(data.frame, UserStartedSpeakingFrame)
         if self._is_user_muted:
             logger.trace(f"Ignoring muted user speech start in Turn {self._turn_count}")
             return

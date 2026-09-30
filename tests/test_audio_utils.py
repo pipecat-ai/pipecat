@@ -5,6 +5,7 @@
 #
 
 import io
+import struct
 import unittest
 import wave
 
@@ -50,6 +51,29 @@ class TestPcmToWav(unittest.TestCase):
         wav = pcm_to_wav(pcm, 16000)
         _, _, _, frames = self._read_wav(wav)
         self.assertEqual(frames, bytes(pcm))
+
+    def test_typed_memoryview_preserves_complete_frames(self):
+        for channels, samples in ((1, (1, -2, 3)), (2, (1, -2))):
+            with self.subTest(channels=channels):
+                pcm = struct.pack("<" + "h" * len(samples), *samples)
+                wav = pcm_to_wav(memoryview(pcm).cast("h"), 16000, channels)
+                num_channels, sample_width, sample_rate, frames = self._read_wav(wav)
+                self.assertEqual(num_channels, channels)
+                self.assertEqual(sample_width, 2)
+                self.assertEqual(sample_rate, 16000)
+                self.assertEqual(frames, pcm)
+
+    def test_typed_memoryview_drops_only_partial_trailing_frame(self):
+        pcm = struct.pack("<5h", 1, -2, 3, -4, 5)
+        wav = pcm_to_wav(memoryview(pcm).cast("h"), 24000, num_channels=2)
+        _, _, _, frames = self._read_wav(wav)
+        self.assertEqual(frames, pcm[:-2])
+
+    def test_byte_memoryview(self):
+        pcm = b"\x01\x00\x02\x00\x03"
+        wav = pcm_to_wav(memoryview(pcm), 16000)
+        _, _, _, frames = self._read_wav(wav)
+        self.assertEqual(frames, pcm[:-1])
 
     def test_drops_partial_trailing_frame(self):
         pcm = b"\x01\x00\x02\x00" * 100 + b"\x03\x00"  # stereo plus a lone sample

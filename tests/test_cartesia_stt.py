@@ -102,6 +102,21 @@ async def test_cartesia_connect_websocket_url_encodes_keyterm_spaces_as_percent_
 
 
 @pytest.mark.asyncio
+async def test_cartesia_connect_websocket_url_includes_keyterm_for_ink_preview(monkeypatch):
+    captured = _capture_connect_url(monkeypatch)
+
+    service = _connected_service(
+        settings=CartesiaSTTService.Settings(model="ink-preview", keyterm=["Cartesia"]),
+    )
+
+    await service._connect_websocket()
+
+    query = parse_qs(urlparse(captured["url"]).query)
+    assert query["model"] == ["ink-preview"]
+    assert query["keyterm"] == ["Cartesia"]
+
+
+@pytest.mark.asyncio
 async def test_cartesia_connect_websocket_url_omits_keyterm_when_not_set(monkeypatch):
     captured = _capture_connect_url(monkeypatch)
 

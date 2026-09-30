@@ -309,6 +309,13 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         "The function `{function_name}` failed and returned no result."
     )
 
+    supports_response_schema: bool = False
+    """Whether the provider can enforce a response schema in ``run_inference()``.
+
+    Services whose provider can set this to ``True``. When only some of its
+    models can, they also override :meth:`model_supports_response_schema`.
+    """
+
     def __init__(
         self,
         run_in_parallel: bool = True,
@@ -453,6 +460,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         context: LLMContext,
         max_tokens: int | None = None,
         system_instruction: str | None = None,
+        response_schema: dict[str, Any] | None = None,
     ) -> str | None:
         """Run a one-shot, out-of-band (i.e. out-of-pipeline) inference with the given LLM context.
 
@@ -464,11 +472,45 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 overrides the service's default max_tokens/max_completion_tokens setting.
             system_instruction: Optional system instruction to use for this inference.
                 If provided, overrides any system instruction in the context.
+            response_schema: Optional JSON schema the reply must follow. Services
+                that can have the provider enforce it return JSON text matching
+                the schema. When the service or its current model cannot
+                enforce one (see :attr:`supports_response_schema`), the schema
+                is ignored with a warning. The schema must satisfy the
+                strictest provider in use: every object lists all its
+                properties as required and sets ``additionalProperties`` to
+                false.
 
         Returns:
             The LLM's response as a string, or None if no response is generated.
         """
         raise NotImplementedError(f"run_inference() not supported by {self.__class__.__name__}")
+
+    def _check_response_schema(
+        self, response_schema: dict[str, Any] | None
+    ) -> dict[str, Any] | None:
+        """The schema to send, or None with a warning if it cannot be enforced."""
+        if response_schema is None:
+            return None
+        if not self.supports_response_schema:
+            logger.warning(f"{self}: response_schema is not supported and is ignored")
+            return None
+        if not self.model_supports_response_schema(self._settings.model or ""):
+            logger.warning(
+                f"{self}: response_schema is not supported by model {self._settings.model} "
+                "and is ignored"
+            )
+            return None
+        return response_schema
+
+    @staticmethod
+    def model_supports_response_schema(model: str) -> bool:
+        """Whether a model can enforce a response schema, on a provider that can.
+
+        Args:
+            model: The model name.
+        """
+        return True
 
     @property
     def reports_ttfat(self) -> bool:
@@ -536,6 +578,10 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         await super().start(frame)
         if not self._run_in_parallel:
             await self._create_sequential_runner_task()
+        # A realtime service can run a tool it was configured with before the
+        # first context frame reaches it, so the handlers of its own tools are
+        # registered up front. Context frames re-sync them from then on.
+        self._sync_registered_tool_handlers(None)
 
     async def stop(self, frame: EndFrame):
         """Stop the LLM service.
@@ -963,7 +1009,9 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 global ``function_call_timeout_secs``. A call that runs past it is
                 cancelled: the handler is thrown an ``asyncio.CancelledError``, the
                 call is settled as cancelled, and inference runs so the LLM can
-                report that it didn't complete. Defaults to ``None`` (fall back to
+                report that it didn't complete. The deadline covers the handler's
+                execution as a whole, so reporting an intermediate result neither
+                clears it nor restarts it. Defaults to ``None`` (fall back to
                 the ``@tool_options`` decorator value, then to the global timeout).
             is_node_transition: Whether this function performs a workflow-control
                 transition, such as changing nodes, ending the call, or transferring
@@ -1079,7 +1127,9 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 global ``function_call_timeout_secs``. A call that runs past it is
                 cancelled: the handler is thrown an ``asyncio.CancelledError``, the
                 call is settled as cancelled, and inference runs so the LLM can
-                report that it didn't complete. Defaults to ``None`` (fall back to
+                report that it didn't complete. The deadline covers the handler's
+                execution as a whole, so reporting an intermediate result neither
+                clears it nor restarts it. Defaults to ``None`` (fall back to
                 the ``@tool_options`` decorator value, then to the global timeout).
         """
         self._register_direct_function(
@@ -1219,6 +1269,32 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             return explicit
         return decorated if decorated is not None else default
 
+    def _advertised_handler_changed(self, item: FunctionCallRegistryItem, new_handler: Any) -> bool:
+        """Whether an advertised handler differs from the one already registered.
+
+        Normalizes a ``DirectFunctionWrapper`` to its underlying ``.function`` on
+        both sides, then compares by identity. Flows reuses one closure per node
+        across repeated context frames (no change) but builds a fresh closure on
+        transition (a real change), so identity is the right test.
+
+        Args:
+            item: The currently registered entry.
+            new_handler: The advertised handler — a raw callable or a
+                ``DirectFunctionWrapper``.
+
+        Returns:
+            True if ``new_handler`` is a different callable than ``item`` holds.
+        """
+        current = (
+            item.handler.function
+            if isinstance(item.handler, DirectFunctionWrapper)
+            else item.handler
+        )
+        new = (
+            new_handler.function if isinstance(new_handler, DirectFunctionWrapper) else new_handler
+        )
+        return current is not new
+
     def _register_advertised_tool_handlers(self, tools: Any) -> None:
         """Register handlers for any tools in the given set that carry one.
 
@@ -1232,9 +1308,12 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         plain list of direct functions / ``FunctionSchema`` objects, or
         ``NOT_GIVEN`` — normalizing as needed.
 
-        Any tool whose name is already registered (explicitly, or from a previous
-        context / tool set) is left untouched, so explicit registration always
-        wins and repeated frames don't re-register.
+        Explicit ``register_function`` registrations are always left untouched,
+        so explicit registration wins. An auto-registered entry (from a previous
+        advertised set) is rebound when the new set carries a *different* handler
+        for the same name — so a re-declared per-node handler takes effect — and
+        left untouched when the handler is unchanged, so repeated frames don't
+        churn.
 
         Args:
             tools: The tools to scan for handlers.
@@ -1250,7 +1329,21 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
 
         # Register direct functions.
         for wrapper in normalized.direct_functions:
-            if wrapper.name in self._functions:
+            existing = self._functions.get(wrapper.name)
+            if existing is not None:
+                # An auto-registered entry whose advertised handler changed is
+                # rebound to the new handler. Explicit registrations and unchanged
+                # handlers are left untouched, so explicit wins and repeated frames
+                # don't churn.
+                if existing.auto_registered and self._advertised_handler_changed(
+                    existing, wrapper.function
+                ):
+                    self._register_direct_function(wrapper.function)
+                    self._functions[wrapper.name].auto_registered = True
+                    logger.debug(
+                        f"{self}: rebound advertised direct function '{wrapper.name}' "
+                        "to its new handler"
+                    )
                 continue
             if wrapper.name in self._explicitly_unregistered_function_names:
                 # Explicitly unregistered while still advertised — leave it gone so
@@ -1258,9 +1351,9 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 continue
             self._register_direct_function(wrapper.function)
             # Mark the entry as advertised-tool-set-managed so it can be pruned on a
-            # later sync that stops advertising it. Names already in _functions are
-            # skipped above, so explicit registrations keep their default
-            # auto_registered=False and are never pruned.
+            # later sync that stops advertising it. Explicit registrations are
+            # handled above and keep their default auto_registered=False, so they
+            # are never pruned.
             self._functions[wrapper.name].auto_registered = True
             logger.debug(
                 f"{self}: auto-registered handler for advertised direct function '{wrapper.name}'"
@@ -1273,8 +1366,22 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         for schema in normalized.standard_tools:
             if schema.handler is None:
                 continue
-            if schema.name in self._functions:
-                self._warn_if_redundant_manual_registration(schema.name)
+            existing = self._functions.get(schema.name)
+            if existing is not None:
+                # Rebind an auto-registered entry whose advertised handler changed;
+                # otherwise leave it (explicit wins, unchanged handlers don't churn)
+                # and warn if a manual registration shadows a handler-carrying schema.
+                if existing.auto_registered and self._advertised_handler_changed(
+                    existing, schema.handler
+                ):
+                    self.register_function(schema.name, schema.handler)
+                    self._functions[schema.name].auto_registered = True
+                    logger.debug(
+                        f"{self}: rebound advertised FunctionSchema '{schema.name}' "
+                        "to its new handler"
+                    )
+                else:
+                    self._warn_if_redundant_manual_registration(schema.name)
                 continue
             if schema.name in self._explicitly_unregistered_function_names:
                 continue
@@ -1720,10 +1827,12 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
 
             if is_final:
                 runner_item.settled = True
-
-            # Cancel timeout task if it exists
-            if timeout_task and not timeout_task.done():
-                await self.cancel_task(timeout_task)
+                # Only a final result settles the call, so only a final result
+                # clears the deadline. An intermediate update must leave it
+                # armed — otherwise a progress report permanently unbounds a
+                # hanging async tool.
+                if timeout_task and not timeout_task.done():
+                    await self.cancel_task(timeout_task)
 
             await self.broadcast_frame(
                 FunctionCallResultFrame,

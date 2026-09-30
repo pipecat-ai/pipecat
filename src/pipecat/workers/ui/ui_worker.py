@@ -8,24 +8,50 @@
 
 import asyncio
 import json
+import time
+import warnings
 from dataclasses import asdict, is_dataclass
-from typing import Any
+from typing import Any, NamedTuple
 
+from loguru import logger
 from pydantic import BaseModel
 
 from pipecat.bus.messages import (
     BusJobRequestMessage,
+    BusJobResponseMessage,
+    BusJobResponseUrgentMessage,
+    BusJobStreamEndMessage,
+    BusJobUpdateMessage,
+    BusJobUpdateUrgentMessage,
     BusMessage,
     BusTTSSpeakMessage,
 )
 from pipecat.bus.ui.messages import (
-    _UI_CANCEL_JOB_GROUP_BUS_EVENT_NAME,
-    _UI_SNAPSHOT_BUS_EVENT_NAME,
+    UI_CANCEL_JOB_GROUP_EVENT_NAME,
+    UI_SNAPSHOT_EVENT_NAME,
     BusUICommandMessage,
     BusUIEventMessage,
+    BusUIJobCompletedMessage,
+    BusUIJobGroupCompletedMessage,
+    BusUIJobGroupStartedMessage,
+    BusUIJobUpdateMessage,
 )
+from pipecat.classifiers.base_classifier import (
+    BaseClassifier,
+    ChoiceQuestion,
+    ClassifierError,
+    YesNoQuestion,
+    YesNoResult,
+)
+from pipecat.classifiers.llm.classifier import LLMClassifier
 from pipecat.frames.frames import LLMContextFrame, LLMMessagesAppendFrame, LLMMessagesUpdateFrame
-from pipecat.pipeline.job_context import JobGroupContext, JobGroupParams, JobStatus
+from pipecat.pipeline.job_context import (
+    JobGroup,
+    JobGroupContext,
+    JobGroupParams,
+    JobGroupResponse,
+    JobStatus,
+)
 from pipecat.pipeline.job_decorator import job
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
@@ -40,13 +66,36 @@ from pipecat.processors.frameworks.rtvi.models import (
 )
 from pipecat.services.llm_service import LLMService
 from pipecat.utils.deprecation import deprecated
-from pipecat.workers.base_ui_worker import BaseUIWorker
 from pipecat.workers.llm.llm_context_worker import LLMContextWorker
 from pipecat.workers.ui.ui_event_decorator import _collect_ui_event_handlers
 from pipecat.workers.ui.ui_prompts import UI_STATE_PROMPT_GUIDE
 
+# The confidence below which the classifier's pick of an element is no answer.
+_ELEMENT_THRESHOLD = 0.5
 
-class UIWorker(BaseUIWorker, LLMContextWorker):
+
+class UISelection(NamedTuple):
+    """The text the user has selected on the page, and the element it is in."""
+
+    ref: str
+    text: str
+
+
+class _Element(NamedTuple):
+    """A named element of the snapshot, as the screen questions see it."""
+
+    ref: str
+    role: str
+    name: str
+    state: list[str]
+    value: str | None
+
+
+#: What ``act`` can do to an element, each a command helper on the worker.
+_ACTIONS = frozenset({"click", "scroll_to", "highlight", "select_text", "set_input_value"})
+
+
+class UIWorker(LLMContextWorker):
     """LLM worker that reads and drives a client GUI over the RTVI UI channel.
 
     A ``UIWorker`` connects an LLM to whatever the user is looking at: it sees
@@ -59,19 +108,36 @@ class UIWorker(BaseUIWorker, LLMContextWorker):
 
     - See the screen. The latest accessibility snapshot is rendered as
       ``<ui_state>`` and auto-injected into the LLM context before each inference.
+      Code reads it through ``snapshot`` and the user's ``selection``.
     - React to UI events, dispatched to ``@ui_event(name)`` handlers.
     - Drive the UI with ``send_command`` and the ``scroll_to`` / ``highlight`` /
       ``select_text`` / ``click`` / ``set_input_value`` helpers.
+    - Decide small things with a classifier, not an LLM turn: whether a UI
+      event deserves a comment (``should_respond``), which element on screen
+      the user means (``which_element``), whether something is true of the
+      screen (``check_screen``), which elements match a description
+      (``select_elements``), and ``act`` on an element named in words.
+    - Answer a voice LLM's questions about the screen through the ``screen``
+      job: find an element, check whether something is true, select the
+      elements matching a description, list what is on screen, read the
+      user's selection, or click, scroll to, highlight, select or fill an
+      element. Every answer is short data and never the page;
+      :func:`~pipecat.workers.ui.ui_tools.screen_tools` gives the voice LLM the
+      tool that sends it.
     - Answer as a delegate. The built-in single-flight ``respond`` job runs one
-      screen-grounded LLM turn that a ``@tool`` ends by calling ``respond_to_job``
-      (which decides how the answer reaches the user).
-    - Surface long work. ``ui_job_group`` / ``start_ui_job_group`` fan work out to
-      peer workers as cancellable job-group cards on the client.
+      screen-grounded LLM turn and answers with the reply the LLM writes. A
+      ``@tool`` that calls ``respond_to_job`` answers instead when it needs to
+      decide how the answer reaches the user.
+    - Surface long work. Every job group this worker dispatches is reported
+      to the client as it goes: a card when the group starts, a line per
+      worker's progress and completion, and the close when the group
+      completes, whether normally, by cancellation or by timeout. The client
+      can cancel a group dispatched as cancellable.
 
     ``PipelineWorker`` connects a UIWorker to the client automatically when RTVI
-    is enabled -- no extra wiring. A working subclass needs only an LLM and a
-    ``@tool`` that calls ``respond_to_job``; override ``render_query`` to read a
-    non-default job payload.
+    is enabled -- no extra wiring. A working worker needs only an LLM; subclass
+    it to react to UI events or add jobs and tools, and override
+    ``render_query`` to read a non-default job payload.
 
     Example::
 
@@ -80,11 +146,6 @@ class UIWorker(BaseUIWorker, LLMContextWorker):
             async def on_nav(self, message):
                 view = message.payload.get("view")
                 ...
-
-            @tool
-            async def answer(self, params, text: str):
-                await self.respond_to_job(text)
-                await params.result_callback(None)
 
         worker = MyUIWorker("ui", llm=OpenAILLMService(api_key="..."))
 
@@ -99,6 +160,7 @@ class UIWorker(BaseUIWorker, LLMContextWorker):
         *,
         llm: LLMService[Any],
         context: LLMContext | None = None,
+        classifier: BaseClassifier | None = None,
         assistant_params: LLMAssistantAggregatorParams | None = None,
         inject_events: bool = True,
         auto_inject_ui_state: bool = True,
@@ -114,6 +176,14 @@ class UIWorker(BaseUIWorker, LLMContextWorker):
                 of the mutable history and are cleared on each
                 ``keep_history=False`` reset; put durable instructions in the
                 LLM's ``system_instruction`` instead.
+            classifier: Answers the small questions about the screen
+                (``should_respond``, ``which_element``). Without one, the
+                ``llm`` answers them through an
+                :class:`~pipecat.classifiers.llm.classifier.LLMClassifier`,
+                which costs an LLM call per question; a
+                :class:`~pipecat.classifiers.jev.classifier.JevClassifier`
+                answers in about a tenth of a second with a calibrated
+                probability.
             assistant_params: Optional assistant-aggregator parameters, e.g. to
                 enable context summarization for ``keep_history=True`` workers.
             inject_events: When True (the default), append each UI event to the
@@ -152,6 +222,7 @@ class UIWorker(BaseUIWorker, LLMContextWorker):
         # ``prompt_guide`` to override the text, or ``None`` to disable.
         if prompt_guide:
             self.llm.append_system_instruction(prompt_guide)
+        self._classifier = classifier or LLMClassifier(llm=llm)
         self._inject_events = inject_events
         self._auto_inject_ui_state = auto_inject_ui_state
         self._keep_history = keep_history
@@ -189,6 +260,51 @@ class UIWorker(BaseUIWorker, LLMContextWorker):
             content = self.render_ui_state()
             if content:
                 frame.context.add_message({"role": "developer", "content": content})
+
+        # The reply the LLM writes answers the in-flight job, unless a tool is
+        # answering it: a reply that comes with tool calls is a preamble.
+        @self.assistant_aggregator.event_handler("on_assistant_turn_stopped")
+        async def _answer_with_reply(aggregator, message):
+            if message.interrupted or not message.content:
+                return
+            if aggregator.has_function_calls_in_progress:
+                return
+            await self.respond_to_job(message.content)
+
+    @property
+    def classifier(self) -> BaseClassifier:
+        """The classifier this worker asks the small questions about the screen."""
+        return self._classifier
+
+    @property
+    def snapshot(self) -> dict[str, Any] | None:
+        """The latest accessibility snapshot of the page, or ``None`` before the first."""
+        return self._latest_snapshot
+
+    @property
+    def selection(self) -> UISelection | None:
+        """The text the user has selected on the page, or ``None`` when nothing is."""
+        selection = (self._latest_snapshot or {}).get("selection")
+        if not isinstance(selection, dict):
+            return None
+        ref, text = selection.get("ref"), selection.get("text")
+        if not isinstance(ref, str) or not ref or not isinstance(text, str) or not text.strip():
+            return None
+        return UISelection(ref=ref, text=text.strip())
+
+    async def on_activated(self, args: dict | None) -> None:
+        """Set the classifier up with this worker's task manager, then activate as usual.
+
+        Args:
+            args: Optional activation arguments.
+        """
+        await self._classifier.setup(self.task_manager)
+        await super().on_activated(args)
+
+    async def cleanup(self) -> None:
+        """Clean up the classifier along with the worker."""
+        await self._classifier.cleanup()
+        await super().cleanup()
 
     async def send_command(self, name: str, payload: Any = None) -> None:
         """Send a named UI command to the client.
@@ -236,8 +352,7 @@ class UIWorker(BaseUIWorker, LLMContextWorker):
         Convenience wrapper around ``send_command("scroll_to", ScrollTo(ref=ref))``.
         These ``scroll_to`` / ``highlight`` / ``select_text`` / ``click`` /
         ``set_input_value`` helpers are plain methods, not LLM tools: compose
-        them inside a custom ``@tool`` body, or use ``ReplyToolMixin`` for the
-        standard shape.
+        them inside a ``@job`` handler or a custom ``@tool`` body.
 
         Args:
             ref: Snapshot ref (e.g. ``"e42"``) from the latest ``<ui_state>``.
@@ -307,12 +422,167 @@ class UIWorker(BaseUIWorker, LLMContextWorker):
             SetInputValue(ref=ref, value=value, replace=replace),
         )
 
+    async def should_respond(
+        self,
+        message: BusUIEventMessage,
+        criteria: str = "the assistant should say something about what the user just did",
+    ) -> bool:
+        """Ask the classifier whether a UI event calls for the assistant to speak.
+
+        Most clicks and edits need no comment, and a handler that reacts to
+        events has to tell the few that do apart without an LLM turn. The
+        question carries the event and the latest ``<ui_state>`` snapshot.
+
+        Args:
+            message: The UI event.
+            criteria: What is being checked for, as a yes or no question.
+
+        Returns:
+            Whether the assistant should respond to the event.
+
+        Raises:
+            ClassifierError: If the classifier could not answer.
+        """
+        state: dict[str, Any] = {
+            "event": {"name": message.event_name, "payload": message.payload},
+        }
+        screen = self.render_ui_state()
+        if screen:
+            state["screen"] = screen
+        question = YesNoQuestion(
+            instructions=criteria,
+            yes="the event changes what the user is doing or asks for the assistant's attention",
+            no="a routine click, scroll, hover or edit that needs no comment",
+        )
+        result = (await self._classifier.yes_no(state, {"respond": question}))["respond"]
+        logger.debug(f"{self.name}: respond to '{message.event_name}'? {result.probability:.2f}")
+        return result.is_yes
+
+    async def which_element(
+        self, description: str, threshold: float = _ELEMENT_THRESHOLD
+    ) -> str | None:
+        """Ask the classifier which element on screen the user means.
+
+        The candidates are the snapshot's named elements, described by their
+        role and name. The user's words and the screen are the state.
+
+        Args:
+            description: What the user said, such as "the blue button".
+            threshold: The probability below which no element is returned.
+
+        Returns:
+            The element's snapshot ref, or ``None`` when there is no
+            snapshot, no named element, or no confident answer.
+
+        Raises:
+            ClassifierError: If the classifier could not answer.
+        """
+        found = await self._find(description)
+        if found["confidence"] < threshold:
+            return None
+        return found["ref"]
+
+    async def check_screen(self, criteria: str) -> YesNoResult:
+        """Ask the classifier whether something is true of the screen.
+
+        Args:
+            criteria: What is being checked for, as a yes or no question, such
+                as "is anything on the list still unchecked?".
+
+        Returns:
+            How likely the answer is yes.
+
+        Raises:
+            ClassifierError: If the classifier could not answer.
+        """
+        question = YesNoQuestion(instructions=criteria)
+        state = {"screen": self.render_ui_state()}
+        result = (await self._classifier.yes_no(state, {"check": question}))["check"]
+        logger.debug(f"{self.name}: '{criteria}'? {result.probability:.2f}")
+        return result
+
+    async def select_elements(self, criteria: str) -> list[dict[str, Any]]:
+        """Ask the classifier which named elements on screen match a description.
+
+        One yes or no question per element, all in one call.
+
+        Args:
+            criteria: What the elements should be, such as "dairy products".
+
+        Returns:
+            The matching elements, each as ``ref``, ``label`` and
+            ``probability``, most likely first. Empty when nothing on screen
+            matches or there is no snapshot.
+
+        Raises:
+            ClassifierError: If the classifier could not answer.
+        """
+        elements = self._named_elements()
+        if not elements:
+            return []
+        questions = {
+            e.ref: YesNoQuestion(instructions=f'{criteria}: does {e.role} "{e.name}" match?')
+            for e in elements
+        }
+        state = {"criteria": criteria, "screen": self.render_ui_state()}
+        results = await self._classifier.yes_no(state, questions)
+        matches = [
+            {"ref": e.ref, "label": e.name, "probability": results[e.ref].probability}
+            for e in elements
+            if results[e.ref].is_yes
+        ]
+        matches.sort(key=lambda m: m["probability"], reverse=True)
+        logger.debug(f"{self.name}: '{criteria}' -> {[m['label'] for m in matches]}")
+        return matches
+
+    async def act(self, action: str, description: str, *, value: str | None = None) -> str | None:
+        """Find the element the description means and act on it.
+
+        Args:
+            action: One of ``click``, ``scroll_to``, ``highlight``,
+                ``select_text`` or ``set_input_value``.
+            description: The element in words, such as "the checkout button".
+            value: The text to write, for ``set_input_value``.
+
+        Returns:
+            The ref of the element acted on, or ``None`` when no element
+            matched with enough confidence.
+
+        Raises:
+            ValueError: If ``action`` is not one of the five.
+            ClassifierError: If the classifier could not answer.
+        """
+        if action not in _ACTIONS:
+            raise ValueError(f"unknown screen action {action!r}, not one of {sorted(_ACTIONS)}")
+        ref = await self.which_element(description)
+        if not ref:
+            return None
+        if action == "set_input_value":
+            await self.set_input_value(ref, value or "")
+        else:
+            await getattr(self, action)(ref)
+        return ref
+
+    def list_elements(self, role: str | None = None) -> list[dict[str, Any]]:
+        """The named elements on screen, without their refs.
+
+        Args:
+            role: Only elements of this role, such as ``checkbox``; all when
+                ``None``.
+
+        Returns:
+            One entry per element: ``role``, ``name``, its ``state`` tags and,
+            for an input, its ``value``.
+        """
+        return [
+            {"role": e.role, "name": e.name, "state": e.state, "value": e.value}
+            for e in self._named_elements()
+            if role is None or e.role == role
+        ]
+
     async def on_bus_message(self, message: BusMessage) -> None:
         """Dispatch UI events alongside base lifecycle handling."""
         await super().on_bus_message(message)
-
-        # Job-group lifecycle forwarding and the reserved cancel event
-        # are handled by ``BaseUIWorker`` (via the ``super()`` call above).
 
         if not isinstance(message, BusUIEventMessage):
             return
@@ -321,14 +591,14 @@ class UIWorker(BaseUIWorker, LLMContextWorker):
 
         # Reserved snapshot event: store and return without dispatch or
         # ``<ui_event>`` injection. Apps render via ``inject_ui_state``.
-        if message.event_name == _UI_SNAPSHOT_BUS_EVENT_NAME:
+        if message.event_name == UI_SNAPSHOT_EVENT_NAME:
             if isinstance(message.payload, dict):
                 self._latest_snapshot = message.payload
             return
 
-        # Reserved cancel event: handled in ``BaseUIWorker``; never
-        # dispatched to app ``@ui_event`` handlers.
-        if message.event_name == _UI_CANCEL_JOB_GROUP_BUS_EVENT_NAME:
+        # Reserved cancel event: a cancel request, never an app event.
+        if message.event_name == UI_CANCEL_JOB_GROUP_EVENT_NAME:
+            await self._handle_cancel_job_event(message)
             return
 
         await self._handle_ui_event(message)
@@ -350,6 +620,25 @@ class UIWorker(BaseUIWorker, LLMContextWorker):
     async def _respond_job(self, message: BusJobRequestMessage) -> None:
         await self._run_llm_turn(message)
 
+    @job(name="screen")
+    async def _screen_job(self, message: BusJobRequestMessage) -> None:
+        """Answer a question about the screen, or act on it, for a voice LLM.
+
+        The payload names the ``action``, its ``target`` and, for a fill, the
+        ``value``. Every answer is short data and never the page.
+        """
+        payload = message.payload or {}
+        action = self._text(message, "action")
+        target = self._text(message, "target")
+        value = payload.get("value")
+        try:
+            answer = await self._screen(action, target, str(value) if value else None)
+        except (ClassifierError, ValueError) as e:
+            logger.warning(f"{self.name}: screen {action!r} failed: {e}")
+            await self.send_job_response(message.job_id, {"error": str(e)}, status=JobStatus.ERROR)
+            return
+        await self.send_job_response(message.job_id, answer)
+
     def render_query(self, message: BusJobRequestMessage) -> str:
         """Extract the user's query text from a job request.
 
@@ -366,14 +655,14 @@ class UIWorker(BaseUIWorker, LLMContextWorker):
         return (message.payload or {}).get("query", "")
 
     async def _run_llm_turn(self, message: BusJobRequestMessage) -> None:
-        """Run one LLM turn for a job and respond when a ``@tool`` completes it.
+        """Run one LLM turn for a job and respond when the turn answers it.
 
         Body of the built-in ``respond`` job. Records the in-flight job, clears
         the context when ``keep_history=False``, appends the rendered query, and
         runs the LLM (the current ``<ui_state>`` is injected by the
-        ``on_before_process_frame`` hook). Then blocks until a ``@tool`` calls
-        ``respond_to_job``, which chooses how the answer is delivered, and sends
-        the job response.
+        ``on_before_process_frame`` hook). Then blocks until the LLM's reply
+        ends the turn or a ``@tool`` calls ``respond_to_job``, which chooses
+        how the answer is delivered, and sends the job response.
 
         Spanning the full round-trip is what makes the job single-flight
         (``@job(..., sequential=True)``; see the class docstring).
@@ -427,26 +716,30 @@ class UIWorker(BaseUIWorker, LLMContextWorker):
     ) -> None:
         """Complete the in-flight job with the worker's answer.
 
-        Called from a ``@tool`` once the worker has decided how to answer.
-        ``tts_speak`` picks the delivery; the two modes are mutually exclusive
-        (one voice per turn):
-
-        - default: the job responds with ``{"answer": answer}`` for the
-          requester's voice LLM to phrase.
-        - ``tts_speak=True``: ``answer`` is spoken verbatim by the requester's
-          TTS (via ``BusTTSSpeakMessage``, and added to its context) while the
-          job responds ``None`` so the voice LLM doesn't also speak.
-
-        A falsy ``answer`` completes the turn silently. No-op when no job is in
+        The reply the LLM writes completes the job on its own; call this from
+        a ``@tool`` to answer with something else. The job responds with
+        ``{"answer": answer}`` for the requester's voice LLM to phrase, and a
+        falsy ``answer`` completes the turn silently. No-op when no job is in
         flight or it was already answered.
 
         Args:
-            answer: The worker's answer -- spoken verbatim (``tts_speak=True``)
-                or handed to the requester's voice LLM to phrase (default).
-            tts_speak: Speak ``answer`` verbatim via the requester's TTS instead
-                of returning it for the requester's voice LLM to phrase.
+            answer: The worker's answer, handed to the requester's voice LLM to
+                phrase.
+            tts_speak: Speak ``answer`` verbatim through the requester's TTS
+                and respond ``None``.
+
+                .. deprecated:: 1.12.0
+                    No replacement: respond with ``answer`` and let the
+                    requester's voice LLM say it. Will be removed in 2.0.0.
             status: Completion status. Defaults to ``JobStatus.COMPLETED``.
         """
+        if tts_speak:
+            warnings.warn(
+                "`tts_speak` on `respond_to_job` is deprecated since 1.12.0 and will be "
+                "removed in 2.0.0. Respond with the answer and let the voice LLM say it.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         pending = self._pending
         if pending is None or pending.done() or self._current_job is None:
             return
@@ -465,6 +758,123 @@ class UIWorker(BaseUIWorker, LLMContextWorker):
             response = {"answer": answer} if answer else None
         pending.set_result({"response": response, "status": status})
 
+    async def create_job_group_and_request_job(self, worker_names: list[str], **kwargs) -> JobGroup:
+        """Dispatch a job group and announce it to the client.
+
+        Args:
+            worker_names: Names of the workers to send the job to.
+            **kwargs: Everything
+                :meth:`~pipecat.workers.base_worker.BaseWorker.create_job_group_and_request_job`
+                takes, forwarded unchanged.
+
+        Returns:
+            The created ``JobGroup``.
+        """
+        group = await super().create_job_group_and_request_job(worker_names, **kwargs)
+        await self.send_bus_message(
+            BusUIJobGroupStartedMessage(
+                source=self.name,
+                target=None,
+                job_id=group.job_id,
+                workers=list(group.worker_names),
+                label=group.label,
+                cancellable=group.cancellable,
+                at=int(time.time() * 1000),
+            )
+        )
+        return group
+
+    async def cancel_job_group(self, job_id: str, *, reason: str | None = None) -> None:
+        """Cancel a running job group and complete its client card.
+
+        Args:
+            job_id: The job identifier to cancel.
+            reason: Optional human-readable reason for cancellation.
+        """
+        # Capture the group before ``super()`` tears it down: the client's
+        # card is completed from it below.
+        group = self._job_groups.get(job_id)
+        await super().cancel_job_group(job_id, reason=reason)
+        if not group:
+            return
+        # The workers' own CANCELLED responses arrive after the group is
+        # gone, so synthesize the terminal envelope for every worker the
+        # cancellation actually cut short, deterministically instead of
+        # racing the round trip. Workers that already finished keep the
+        # status the client saw.
+        for worker_name in group.worker_names:
+            if worker_name in group.terminated:
+                continue
+            await self._send_job_completed(
+                job_id=job_id,
+                worker_name=worker_name,
+                status=str(JobStatus.CANCELLED),
+                response=None,
+            )
+        await self._send_group_completed(job_id)
+
+    async def on_job_update(self, message: BusJobUpdateMessage | BusJobUpdateUrgentMessage) -> None:
+        """Forward a worker's progress update to the client."""
+        await super().on_job_update(message)
+        # A group torn down by a cancellation still has messages in flight
+        # from its workers; the client's card is already closed.
+        if message.job_id not in self._job_groups:
+            return
+        await self.send_bus_message(
+            BusUIJobUpdateMessage(
+                source=self.name,
+                target=None,
+                job_id=message.job_id,
+                worker_name=message.source,
+                data=message.update,
+                at=int(time.time() * 1000),
+            )
+        )
+
+    async def on_job_response(
+        self, message: BusJobResponseMessage | BusJobResponseUrgentMessage
+    ) -> None:
+        """Forward a worker's response to the client as its terminal envelope.
+
+        Runs before the group is torn down, so on an error status (with
+        ``cancel_on_error``) the client learns which worker failed before
+        the card closes.
+        """
+        await super().on_job_response(message)
+        # A cancelled group is already gone, and every worker it cut short
+        # was reported at cancellation; their own CANCELLED responses land
+        # here afterwards and would double up.
+        if message.job_id not in self._job_groups:
+            return
+        await self._send_job_completed(
+            job_id=message.job_id,
+            worker_name=message.source,
+            status=str(message.status),
+            response=message.response,
+        )
+
+    async def on_job_stream_end(self, message: BusJobStreamEndMessage) -> None:
+        """Forward a worker's stream end as its terminal envelope.
+
+        A worker may finish by ending its stream instead of responding; the
+        client is told it completed, with the final stream data as the
+        response payload.
+        """
+        await super().on_job_stream_end(message)
+        if message.job_id not in self._job_groups:
+            return
+        await self._send_job_completed(
+            job_id=message.job_id,
+            worker_name=message.source,
+            status=str(JobStatus.COMPLETED),
+            response=message.data,
+        )
+
+    async def on_job_completed(self, result: JobGroupResponse) -> None:
+        """Complete the client's card for a group whose workers all finished."""
+        await super().on_job_completed(result)
+        await self._send_group_completed(result.job_id)
+
     @deprecated(
         "`UIWorker.ui_job_group` is deprecated since 1.8.0 and will be removed in 2.0.0. "
         "Use `job_group` instead."
@@ -482,8 +892,8 @@ class UIWorker(BaseUIWorker, LLMContextWorker):
         """Deprecated wrapper for client-visible job groups.
 
         .. deprecated:: 1.8.0
-            Use :meth:`~pipecat.workers.base_ui_worker.BaseUIWorker.job_group`
-            instead, since every group a ``BaseUIWorker`` dispatches is
+            Use :meth:`~pipecat.workers.base_worker.BaseWorker.job_group`
+            instead, since every group a ``UIWorker`` dispatches is
             client-visible. Will be removed in 2.0.0.
         """
         return self.job_group(
@@ -515,8 +925,8 @@ class UIWorker(BaseUIWorker, LLMContextWorker):
         """Deprecated wrapper for fire-and-forget client-visible job groups.
 
         .. deprecated:: 1.8.0
-            Use :meth:`~pipecat.workers.base_ui_worker.BaseUIWorker.request_job_group`
-            instead, since every group a ``BaseUIWorker`` dispatches is
+            Use :meth:`~pipecat.workers.base_worker.BaseWorker.request_job_group`
+            instead, since every group a ``UIWorker`` dispatches is
             client-visible. Will be removed in 2.0.0.
         """
         return await self.request_job_group(
@@ -626,6 +1036,143 @@ class UIWorker(BaseUIWorker, LLMContextWorker):
             handler(message),
             f"{self.name}::ui_event_{message.event_name}",
         )
+
+    async def _find(self, description: str) -> dict[str, Any]:
+        """The element the description means: ``ref``, ``label`` and ``confidence``.
+
+        The candidates are the snapshot's named elements, described by role
+        and name; ``ref`` and ``label`` are ``None`` when there are none.
+        """
+        elements = self._named_elements()
+        if not elements:
+            return {"ref": None, "label": None, "confidence": 0.0}
+        options: dict[str, str | dict[str, Any] | list[Any] | None] = {
+            e.ref: f'{e.role} "{e.name}"' for e in elements
+        }
+        state = {"utterance": description, "screen": self.render_ui_state()}
+        question = ChoiceQuestion(
+            instructions="the element on screen the user is referring to", options=options
+        )
+        result = (await self._classifier.choice(state, {"element": question}))["element"]
+        logger.debug(f"{self.name}: '{description}' -> {result.choice} ({result.confidence:.2f})")
+        label = next(e.name for e in elements if e.ref == result.choice)
+        return {"ref": result.choice, "label": label, "confidence": result.confidence}
+
+    def _named_elements(self) -> list[_Element]:
+        """The snapshot's named elements, breadth first."""
+        elements: list[_Element] = []
+        root = (self._latest_snapshot or {}).get("root")
+        if not isinstance(root, dict):
+            return elements
+        pending = [root]
+        while pending:
+            node = pending.pop(0)
+            ref = node.get("ref")
+            name = node.get("name")
+            if isinstance(ref, str) and ref and isinstance(name, str) and name:
+                state = [s for s in node.get("state") or [] if isinstance(s, str)]
+                value = node.get("value")
+                elements.append(
+                    _Element(
+                        ref=ref,
+                        role=str(node.get("role", "element")),
+                        name=name,
+                        state=state,
+                        value=value if isinstance(value, str) else None,
+                    )
+                )
+            children = node.get("children") or []
+            pending.extend(c for c in children if isinstance(c, dict))
+        return elements
+
+    def _text(self, message: BusJobRequestMessage, key: str) -> str:
+        """The string a job's payload carries under ``key``, empty when missing."""
+        value = (message.payload or {}).get(key)
+        return value if isinstance(value, str) else ""
+
+    async def _screen(self, action: str, target: str, value: str | None) -> dict[str, Any]:
+        """The answer to one screen action, as the ``screen`` job returns it."""
+        if action == "find":
+            found = await self._find(target)
+            confident = found["confidence"] >= _ELEMENT_THRESHOLD
+            return {
+                "label": found["label"] if confident else None,
+                "confidence": found["confidence"],
+            }
+        if action == "check":
+            result = await self.check_screen(target)
+            return {"yes": result.is_yes, "probability": result.probability}
+        if action == "select":
+            matches = await self.select_elements(target)
+            return {"matches": [{k: m[k] for k in ("label", "probability")} for m in matches]}
+        if action == "list":
+            return {"elements": self.list_elements(target or None)}
+        if action == "selection":
+            return {"text": self.selection.text if self.selection else None}
+        command = "set_input_value" if action == "fill" else action
+        ref = await self.act(command, target, value=value)
+        label = next((e.name for e in self._named_elements() if e.ref == ref), None)
+        return {"done": ref is not None, "label": label}
+
+    async def _send_job_completed(
+        self,
+        *,
+        job_id: str,
+        worker_name: str,
+        status: str,
+        response: dict | None,
+    ) -> None:
+        """Publish one worker's terminal envelope."""
+        await self.send_bus_message(
+            BusUIJobCompletedMessage(
+                source=self.name,
+                target=None,
+                job_id=job_id,
+                worker_name=worker_name,
+                status=status,
+                response=response,
+                at=int(time.time() * 1000),
+            )
+        )
+
+    async def _send_group_completed(self, job_id: str) -> None:
+        """Publish the envelope that closes the client's card.
+
+        Reached once per group: a group either completes with every worker
+        having finished, or is cancelled, and the two paths are exclusive.
+        """
+        await self.send_bus_message(
+            BusUIJobGroupCompletedMessage(
+                source=self.name,
+                target=None,
+                job_id=job_id,
+                at=int(time.time() * 1000),
+            )
+        )
+
+    async def _handle_cancel_job_event(self, message: BusUIEventMessage) -> None:
+        """Translate the client's cancel event into a cancel request.
+
+        Hands the request to
+        :meth:`~pipecat.workers.base_worker.BaseWorker.request_cancel_job_group`,
+        which refuses it for a group that is unknown or was dispatched as
+        non-cancellable.
+        """
+        payload = message.payload if isinstance(message.payload, dict) else {}
+        job_id = payload.get("job_id")
+        if not isinstance(job_id, str) or not job_id:
+            logger.warning(f"{self.name}: received a cancel event with no job_id; ignoring")
+            return
+        reason = payload.get("reason")
+        if reason is not None and not isinstance(reason, str):
+            reason = None
+        cancelled = await self.request_cancel_job_group(
+            job_id, reason=reason or "cancelled by user"
+        )
+        if not cancelled:
+            logger.debug(
+                f"{self.name}: cancel event for unknown or non-cancellable group {job_id}; ignoring"
+            )
 
 
 def _is_user_turn(context: LLMContext) -> bool:

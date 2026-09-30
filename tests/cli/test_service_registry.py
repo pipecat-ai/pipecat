@@ -3,6 +3,7 @@
 import pytest
 
 from pipecat.cli.registry import ServiceLoader, ServiceRegistry
+from pipecat.cli.registry.service_metadata import ServiceDefinition
 
 
 class TestServiceRegistryIntegrity:
@@ -47,6 +48,20 @@ class TestServiceRegistryIntegrity:
 
 class TestServiceLoader:
     """Test ServiceLoader functionality."""
+
+    def test_client_package_requires_a_version(self):
+        """A client package and its version range must be declared together."""
+        with pytest.raises(ValueError, match="go together"):
+            ServiceDefinition(
+                value="x",
+                label="X",
+                package="pipecat-ai[x]",
+                client_package="@pipecat-ai/x-transport",
+            )
+        with pytest.raises(ValueError, match="go together"):
+            ServiceDefinition(
+                value="x", label="X", package="pipecat-ai[x]", client_package_version="^1.0.0"
+            )
 
     def test_get_service_by_value(self):
         """Test finding a service by value."""

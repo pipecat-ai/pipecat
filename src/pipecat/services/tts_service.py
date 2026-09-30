@@ -10,7 +10,7 @@ import asyncio
 import uuid
 import warnings
 from abc import abstractmethod
-from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Sequence
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import (
@@ -56,9 +56,14 @@ from pipecat.utils.context.aggregated_frame_sequencer import AggregatedFrameSequ
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.frame_queue import FrameQueue
+from pipecat.utils.string import resolve_sentence_tokenizer_language
 from pipecat.utils.text.base_text_filter import BaseTextFilter
 from pipecat.utils.text.pattern_pair_aggregator import PatternMatch
 from pipecat.utils.text.simple_text_aggregator import SimpleTextAggregator
+from pipecat.utils.text.transforms.pronunciations import (
+    PronunciationTransform,
+    pronunciation_transform,
+)
 from pipecat.utils.text.word_timestamp_utils import merge_punct_tokens
 from pipecat.utils.time import seconds_to_nanoseconds
 from pipecat.utils.types import is_given
@@ -258,6 +263,10 @@ class TTSService(AIService):
             **kwargs,
         )
 
+        aggregation_language = resolve_sentence_tokenizer_language(
+            self._settings.language if is_given(self._settings.language) else None
+        )
+
         # Convert Language enum to service-specific format at init time.
         # Runtime updates are handled by _update_settings(), but init-time
         # settings bypass that path and need explicit conversion.
@@ -328,12 +337,18 @@ class TTSService(AIService):
         self._append_trailing_space: bool = append_trailing_space
         self._init_sample_rate = sample_rate
         self._sample_rate = 0
-        self._text_aggregator = SimpleTextAggregator(aggregation_type=self._text_aggregation_mode)
+        self._text_aggregator = SimpleTextAggregator(
+            aggregation_type=self._text_aggregation_mode,
+            language=aggregation_language,
+        )
 
         self._skip_aggregator_types: list[str] = skip_aggregator_types or []
         self._text_transforms: list[
             tuple[AggregationType | str, Callable[[str, AggregationType | str], Awaitable[str]]]
         ] = text_transforms or []
+        # Whether pronunciation transforms are being skipped, so the warning is
+        # logged once each time they start being skipped, not for every sentence.
+        self._skipping_pronunciations = False
         # TODO: Deprecate _text_filters when added to LLMTextProcessor
         self._text_filters: Sequence[BaseTextFilter] = text_filters or []
         self._transport_destination: str | None = transport_destination
@@ -403,7 +418,7 @@ class TTSService(AIService):
         #           must be emitted in-order relative to surrounding audio contexts.
         #   None  – shutdown sentinel (sent by stop()).
         # Created once here so it survives interruptions: on interruption we call reset()
-        # which drops non-UninterruptibleFrame items while keeping uninterruptible ones
+        # which drops interruptible items while keeping uninterruptible ones
         # (e.g. FunctionCallResultFrame) that must not be lost mid-flight.
         self._serialization_queue: FrameQueue = FrameQueue(
             frame_getter=lambda item: item if isinstance(item, Frame) else None
@@ -595,6 +610,11 @@ class TTSService(AIService):
         """
         pass
 
+    @property
+    def text_aggregation_language(self) -> str:
+        """Current sentence tokenizer language, derived from TTS settings."""
+        return self._text_aggregator.language
+
     async def setup(self, setup: FrameProcessorSetup):
         """Set up the service.
 
@@ -675,6 +695,87 @@ class TTSService(AIService):
             if not (agg_type == aggregation_type and func == transform_function)
         ]
 
+    @classmethod
+    def format_pronunciation(cls, word: str, ipa: str) -> str | None:
+        """Render a word's pronunciation in this service's markup.
+
+        Services that support pronunciation hints override this. The base
+        implementation supports none.
+
+        Args:
+            word: The word as it appears in the text.
+            ipa: How to pronounce it, in IPA.
+
+        Returns:
+            The text to send in place of ``word``, or None when this service cannot
+            use the pronunciation.
+        """
+        return None
+
+    @property
+    def supports_pronunciations(self) -> bool:
+        """Whether this service reads pronunciation markup with its current settings.
+
+        Pronunciation transforms are skipped while this is False, so their words
+        are spoken as written. Services whose markup depends on the model or on a
+        setting override this; it is checked for every text sent, so it follows
+        settings updates.
+
+        Returns:
+            True in the base implementation.
+        """
+        return True
+
+    @classmethod
+    def pronunciation_transform_ipa(
+        cls, pronunciations: Mapping[str, str]
+    ) -> PronunciationTransform:
+        """Create a text transform that makes this service say words as IPA describes.
+
+        Each word is replaced with :meth:`format_pronunciation` output, so the
+        same IPA works with any service that supports it. Words the service
+        cannot use are reported once and spoken as written. While the service
+        cannot read pronunciation markup at all (see
+        :attr:`supports_pronunciations`), the transform is skipped.
+
+        Register this transform last in ``text_transforms``. Transforms run in
+        order, and one that runs after it (stripping markdown or symbols,
+        replacing text) can rewrite the markup it inserts, such as Cartesia's
+        ``<<…>>`` blocks or an SSML ``<phoneme>`` tag, and break the hint.
+
+        Args:
+            pronunciations: Word to IPA, e.g. ``{"Metformin": "mɛtˈfɔɹmɪn"}``.
+
+        Returns:
+            A transform to register with ``text_transforms``.
+
+        Example::
+
+            pronounce = CartesiaTTSService.pronunciation_transform_ipa(
+                {"Metformin": "mɛtˈfɔɹmɪn"}
+            )
+            tts = CartesiaTTSService(
+                text_transforms=[
+                    ("*", strip_markdown),
+                    ("*", expand_currency),
+                    ("*", pronounce),  # last, so nothing rewrites its markup
+                ],
+            )
+        """
+        return pronunciation_transform(
+            pronunciations, cls.format_pronunciation, service_name=cls.__name__
+        )
+
+    def _can_apply_pronunciations(self) -> bool:
+        supported = self.supports_pronunciations
+        if not supported and not self._skipping_pronunciations:
+            logger.warning(
+                f"{self} does not read pronunciation markup with its current settings "
+                f"(model {self._settings.model}), so pronunciation hints are spoken as written"
+            )
+        self._skipping_pronunciations = not supported
+        return supported
+
     async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
         """Apply a TTS settings delta.
 
@@ -686,6 +787,7 @@ class TTSService(AIService):
         Returns:
             Dict mapping changed field names to their previous values.
         """
+        language = delta.language
         # Translate language *before* applying so the stored value is canonical.
         # Raw strings are first converted to Language enums for proper resolution.
         if (
@@ -706,6 +808,9 @@ class TTSService(AIService):
                 delta.language = converted
 
         changed = await super()._update_settings(delta)
+
+        if is_given(language):
+            self._text_aggregator.set_language(language)
 
         return changed
 
@@ -1056,7 +1161,7 @@ class TTSService(AIService):
         await self.reset_word_timestamps()
 
         await self._stop_audio_context_task()
-        # Drops non-UninterruptibleFrame items while keeping uninterruptible ones
+        # Drops interruptible items while keeping uninterruptible ones
         # (e.g. FunctionCallResultFrame) that must not be lost mid-flight.
         self._serialization_queue.reset()
         audio_contexts = self.get_audio_contexts()
@@ -1069,11 +1174,11 @@ class TTSService(AIService):
         self._create_audio_context_task()
         # When pause_frame_processing=True, the process task may be blocked at
         # __process_event.wait() because pause_processing_frames() was called
-        # after LLMFullResponseEndFrame and an UninterruptibleFrame was dequeued
+        # after LLMFullResponseEndFrame and an uninterruptible frame was dequeued
         # before the interrupt arrived. _start_interruption() in the base class
-        # handles the common case (non-uninterruptible frames) by cancelling and
-        # recreating the process task. But when _start_interruption() detects an
-        # UninterruptibleFrame it only resets the queue, leaving the process task
+        # handles the common case (interruptible frames) by cancelling and
+        # recreating the process task. But when _start_interruption() finds an
+        # uninterruptible frame it only resets the queue, leaving the process task
         # blocked. BotStoppedSpeakingFrame never arrives (no audio played), so we
         # must resume here to prevent a permanent deadlock.
         await self._maybe_resume_frame_processing()
@@ -1260,6 +1365,10 @@ class TTSService(AIService):
         transformed_text = text
         for aggregation_type, transform in self._text_transforms:
             if aggregation_type == type or aggregation_type == "*":
+                if isinstance(transform, PronunciationTransform) and not (
+                    self._can_apply_pronunciations()
+                ):
+                    continue
                 try:
                     transformed_text = await transform(transformed_text, type)
                 except Exception as e:
@@ -1307,6 +1416,7 @@ class TTSService(AIService):
                 prepared_text,
                 append_to_context=self._tts_contexts[context_id].append_to_context,
                 build_tracker=not self._push_text_frames,
+                language=self.text_aggregation_language,
             ),
             context_id,
         )

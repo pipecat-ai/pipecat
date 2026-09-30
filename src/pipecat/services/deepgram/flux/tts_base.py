@@ -39,7 +39,7 @@ class DeepgramFluxTTSSettings(TTSSettings):
     ``voice`` and is not directly settable.
 
     Parameters:
-        speed: Speech-rate multiplier, from 0.85 to 1.15 in steps of 0.05.
+        speed: Speech-rate multiplier, from 0.5 to 1.5 in steps of 0.05.
             ``None`` leaves Flux at its default rate. Applied to the open
             connection, so a speed change keeps the cross-turn acoustic state.
         expressivity: Expressive range on a calm-to-animated axis. ``None``
@@ -63,6 +63,13 @@ class DeepgramFluxTTSBase(TTSService):
 
     Flux keeps acoustic state across turns on a single connection, so prosody
     and pacing stay consistent throughout a conversation.
+
+    Flux has no pronunciation markup, so ``format_pronunciation`` is left at the
+    base implementation and
+    :meth:`~pipecat.services.tts_service.TTSService.pronunciation_transform_ipa`
+    speaks the words as written. The Aura-2 services take inline pronunciations;
+    see https://developers.deepgram.com/docs/tts-voice-controls for which
+    controls each model supports.
 
     Event handlers:
 

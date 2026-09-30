@@ -1,0 +1,94 @@
+# The instructions are English; the conversation is not.
+#
+# Text modality; every scenario shares the judge below. A scenario's
+# context: is the history the assistant aggregator would have left.
+
+name: language
+
+judge: !include judge_text.yaml
+
+scenarios:
+- name: lang_es_complete
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Si pudieras viajar a cualquier parte del mundo ahora mismo, ¿adónde irías y por qué?
+  turns:
+  - user: Iría a Japón porque me encanta la comida.
+    expect:
+    - event: llm_marker
+      marker: complete
+      marker_first: true
+      markers: 1
+      text_after: true
+- name: lang_es_cutoff
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Si pudieras viajar a cualquier parte del mundo ahora mismo, ¿adónde irías y por qué?
+  turns:
+  - user: Iría a Japón porque me encanta la
+    expect:
+    - event: llm_marker
+      marker: incomplete
+      marker_first: true
+      markers: 1
+      text_after: false
+- name: lang_es_think
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Si pudieras viajar a cualquier parte del mundo ahora mismo, ¿adónde irías y por qué?
+  turns:
+  - user: Déjame pensarlo un momento.
+    expect:
+    - event: llm_marker
+      marker: incomplete
+      marker_first: true
+      markers: 1
+      text_after: false
+- name: lang_fr_short_complete
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Voulez-vous que je réserve la table pour vous ?
+  turns:
+  - user: Oui.
+    expect:
+    - event: llm_marker
+      marker: complete
+      marker_first: true
+      markers: 1
+      text_after: true
+- name: lang_de_cutoff
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Wenn du jetzt überall hinreisen könntest, wohin würdest du fahren und warum?
+  turns:
+  - user: Ich würde nach Japan fahren, weil ich
+    expect:
+    - event: llm_marker
+      marker: incomplete
+      marker_first: true
+      markers: 1
+      text_after: false
+- name: lang_ja_complete
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● 今すぐ世界のどこにでも旅行できるとしたら、どこに行きたいですか？
+  turns:
+  - user: 日本に行きたいです。食べ物が大好きだからです。
+    expect:
+    - event: llm_marker
+      marker: complete
+      marker_first: true
+      markers: 1
+      text_after: true

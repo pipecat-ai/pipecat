@@ -1,0 +1,52 @@
+name: empty_user_turn
+
+# Audio modality. Covers user turns that end with no transcript. The bot under
+# test drops any transcript containing "pineapple", so saying it produces voice
+# activity the bot never gets text for.
+#
+# Interrupting the bot that way must not leave the conversation stalled: the bot
+# asks the user to repeat, or repeats what they missed. The same empty turn
+# while the bot is idle is treated as noise and gets no answer, but the idle
+# timer still runs after it, so the bot checks in once the user stays quiet.
+#
+# An empty turn is closed by the bot's 5s user turn stop timeout, and the idle
+# check-in comes after the bot's 8s idle timeout, so the budgets leave room for
+# both on top of inference and TTS.
+
+user: !include ../user_audio.yaml
+
+judge: !include ../judge_audio.yaml
+
+scenarios:
+  - name: empty_user_turn
+    turns:
+      # Wait for the bot's on-connect greeting before speaking.
+      - expect:
+          - event: response
+            eval: "the bot opens the conversation in some way (a greeting, an introduction, an offer to help, or a question to get the user started)"
+
+      - user: "Tell me a long, detailed story about the history of Paris."
+        expect:
+          - event: llm_started
+
+      # Barge in with speech the bot can't transcribe.
+      - user: "Pineapple."
+        send_after:
+          event: llm_started
+          delay_ms: 2000
+        expect:
+          - event: bot_interrupted
+          - event: response
+            eval: "the bot says it didn't catch or understand what the user said, asks them to repeat, or picks the Paris story back up; it does not mention pineapples"
+            within_ms: 20000
+
+      # Once the bot is done, the same untranscribable speech is noise: no reply
+      # to it, then the idle check-in.
+      - user: "Pineapple."
+        expect:
+          - event: response
+            absent: true
+            within_ms: 7000
+          - event: response
+            eval: "the bot checks in on the user, asking whether they are still there or still with the bot"
+            within_ms: 30000

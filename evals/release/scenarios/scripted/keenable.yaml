@@ -1,0 +1,40 @@
+name: keenable
+
+# Text, end to end: the bot answers with Keenable's tools. Tests that it
+# invokes the right tool and speaks a grounded answer.
+
+judge: !include ../judge_text.yaml
+
+scenarios:
+  # Current news, which the model can only answer by searching the web.
+  - name: web_search
+    turns:
+      # Wait for the bot's on-connect greeting before speaking (avoids barging into it).
+      - expect:
+          - event: response
+            eval: "the bot opens the conversation in some way (a greeting, an introduction, an offer to help, or a question to get the user started)"
+
+      - user: "What's in the news today?"
+        expect:
+          - event: function_call
+            calls:
+              - name: search_web_pages
+          - event: response
+            eval: "the response shares one or more current news headlines or news topics, rather than refusing or saying it cannot access up-to-date information"
+
+  # A specific URL to read. example.com is a stable documentation domain, so
+  # the judged answer is robust over time.
+  - name: fetch_page
+    turns:
+      # Wait for the bot's on-connect greeting before speaking (avoids barging into it).
+      - expect:
+          - event: response
+            eval: "the bot opens the conversation in some way (a greeting, an introduction, an offer to help, or a question to get the user started)"
+
+      - user: "Please read the page at https://example.com and tell me what it says."
+        expect:
+          - event: function_call
+            calls:
+              - name: fetch_page_content
+          - event: response
+            eval: "the response describes example.com as a domain used for illustrative examples or documentation"

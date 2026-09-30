@@ -33,14 +33,16 @@ name: starter_text
 #         calls:
 #           - name: get_current_weather
 
-turns:
-  # The bot speaks first on connect. A turn with no `user:` just waits for and
-  # asserts on events — here, the greeting — so we don't barge into it.
-  - expect:
-      - event: response
-        eval: "the bot opens the conversation (a greeting, an introduction, or an offer to help)"
+scenarios:
+  - name: starter_text
+    turns:
+      # The bot speaks first on connect. A turn with no `user:` just waits for and
+      # asserts on events — here, the greeting — so we don't barge into it.
+      - expect:
+          - event: response
+            eval: "the bot opens the conversation (a greeting, an introduction, or an offer to help)"
 
-  - user: "What can you help me with?"
-    expect:
-      - event: response
-        eval: "the bot answers, describing what it can do or offering to help"
+      - user: "What can you help me with?"
+        expect:
+          - event: response
+            eval: "the bot answers, describing what it can do or offering to help"

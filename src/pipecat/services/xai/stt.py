@@ -149,7 +149,7 @@ class XAISTTService(WebsocketSTTService):
             **kwargs: Additional arguments passed to WebsocketSTTService.
         """
         default_settings = self.Settings(
-            model=None,
+            model="grok-voice-transcribe-2.0",
             language=Language.EN,
             interim_results=True,
             endpointing=None,
@@ -243,6 +243,7 @@ class XAISTTService(WebsocketSTTService):
             params["language"] = s.language
 
         optional_fields = {
+            "model": s.model,
             "interim_results": s.interim_results,
             "endpointing": s.endpointing,
             "multichannel": s.multichannel,

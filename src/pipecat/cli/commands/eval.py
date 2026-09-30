@@ -38,11 +38,11 @@ from pipecat.evals.results import (
 )
 from pipecat.evals.scenario import (
     EvalKind,
+    EvalScenarioFile,
     EvalSimulationScenario,
     describe_config,
     describe_simulation,
     is_scenario_file,
-    load_scenario_file,
 )
 from pipecat.evals.session import EvalSession, EvalSessionParams
 from pipecat.evals.suite import (
@@ -248,7 +248,7 @@ def _expand_scenario_paths(paths: list[Path]) -> list[Path]:
 
 
 def _build_scenario_runs(paths: list[Path], bot_url: str) -> list[EvalRun]:
-    """Build an EvalRun per scenario file, scripted or a simulation, run against ``bot_url``.
+    """Build an EvalRun per scenario in each file, scripted or a simulation, run against ``bot_url``.
 
     A file that fails to load becomes an EvalRun already marked done with an
     error, so it shows in the dashboard and the final tally like any other failure.
@@ -256,21 +256,29 @@ def _build_scenario_runs(paths: list[Path], bot_url: str) -> list[EvalRun]:
     runs: list[EvalRun] = []
     for path in paths:
         try:
-            loaded = load_scenario_file(path)
+            file = EvalScenarioFile.load(path)
         except (ValueError, FileNotFoundError) as e:
             run = EvalRun(bot=bot_url, scenario=path.stem, scenario_path=path, bot_url=bot_url)
             run.status = "done"
             run.error = f"failed to load: {e}"
             runs.append(run)
             continue
-        kind = (
-            EvalKind.SIMULATION if isinstance(loaded, EvalSimulationScenario) else EvalKind.SCRIPT
-        )
-        runs.append(
-            EvalRun(
-                bot=bot_url, scenario=loaded.name, scenario_path=path, bot_url=bot_url, kind=kind
+        for loaded in file:
+            kind = (
+                EvalKind.SIMULATION
+                if isinstance(loaded, EvalSimulationScenario)
+                else EvalKind.SCRIPT
             )
-        )
+            runs.append(
+                EvalRun(
+                    bot=bot_url,
+                    scenario=loaded.name,
+                    loaded=loaded,
+                    scenario_path=path,
+                    bot_url=bot_url,
+                    kind=kind,
+                )
+            )
     return runs
 
 
@@ -284,7 +292,7 @@ async def _execute_scenario(
     debug: bool,
     verbose: bool,
 ) -> None:
-    """Run one scenario file, scripted or a simulation, against its ``bot_url``.
+    """Run one scenario, scripted or a simulation, against its ``bot_url``.
 
     Updates ``run`` in place.
 
@@ -297,9 +305,9 @@ async def _execute_scenario(
     url = run.bot_url
     assert url is not None  # always set by _build_scenario_runs
     try:
-        loaded = load_scenario_file(run.scenario_path)
-        record_path = _record_path(record_dir, run.scenario) if audio else None
-        with capture_pipeline_logs(Path(logs_dir), run.scenario, name=run.scenario, enabled=debug):
+        loaded = run.load()
+        record_path = _record_path(record_dir, run.stem) if audio else None
+        with capture_pipeline_logs(Path(logs_dir), run.stem, name=run.scenario, enabled=debug):
             session = EvalSession.from_scenario(
                 loaded, url, params=params.model_copy(update={"record_path": record_path})
             )
@@ -310,7 +318,7 @@ async def _execute_scenario(
             run.result = await session.run()
         if run.result.debug_log:
             Path(logs_dir).mkdir(parents=True, exist_ok=True)
-            (Path(logs_dir) / f"{run.scenario}.eval.log").write_text(
+            (Path(logs_dir) / f"{run.stem}.eval.log").write_text(
                 "\n".join(run.result.debug_log) + "\n"
             )
     except Exception as e:  # noqa: BLE001
@@ -321,7 +329,7 @@ async def _execute_scenario(
         run.error = f"error: {type(e).__name__}: {e}"
         with contextlib.suppress(OSError):
             Path(logs_dir).mkdir(parents=True, exist_ok=True)
-            (Path(logs_dir) / f"{run.scenario}.eval.log").write_text(traceback.format_exc())
+            (Path(logs_dir) / f"{run.stem}.eval.log").write_text(traceback.format_exc())
     finally:
         if run.started_at is not None:
             run.duration_ms = int((time.monotonic() - run.started_at) * 1000)
@@ -613,7 +621,7 @@ def _row_seconds(group: list[EvalRun]) -> float | None:
 
 
 def _group_key(r: EvalRun) -> tuple[str, str]:
-    return (r.bot, r.scenario)
+    return (r.label, r.scenario)
 
 
 def _grouped_runs(runs: list[EvalRun]) -> dict[tuple[str, str], list[EvalRun]]:
@@ -662,7 +670,7 @@ class _EvalDashboard:
             cells.append(
                 (
                     _eval_status_cell(r, self._spinner),
-                    Text(r.bot),
+                    Text(r.label),
                     Text(r.scenario, style="cyan"),
                     Text(detail, style="dim"),
                 )
@@ -851,7 +859,7 @@ def _print_eval_line(r: EvalRun, *, show_attempt: bool = False) -> None:
     if tally:
         extra = f"{tally} {extra}"
     scenario = f"{r.scenario} #{r.attempt}" if show_attempt else r.scenario
-    print(f"  {_color(glyph, code)} {r.bot} {_color(scenario, '36')} {_dim(extra)}", flush=True)
+    print(f"  {_color(glyph, code)} {r.label} {_color(scenario, '36')} {_dim(extra)}", flush=True)
 
 
 def _plural(count: int, noun: str) -> str:
@@ -865,14 +873,15 @@ def _audio_runs(runs: list[EvalRun]) -> int:
     A run whose scenario fails to load counts as text: it fails before it could
     record anyway.
     """
-    bot_audio: dict[Path, bool] = {}
+    bot_audio: dict[tuple[Path, str], bool] = {}
     for r in runs:
-        if r.scenario_path not in bot_audio:
+        key = (r.scenario_path, r.scenario)
+        if key not in bot_audio:
             try:
-                bot_audio[r.scenario_path] = load_scenario_file(r.scenario_path).bot_audio
+                bot_audio[key] = r.load().bot_audio
             except Exception:  # noqa: BLE001
-                bot_audio[r.scenario_path] = False
-    return sum(bot_audio[r.scenario_path] for r in runs)
+                bot_audio[key] = False
+    return sum(bot_audio[(r.scenario_path, r.scenario)] for r in runs)
 
 
 def _recording_setting(runs: list[EvalRun], record: bool) -> str:
@@ -942,7 +951,7 @@ def _print_scenario_configs(runs: list[EvalRun]) -> None:
                 print(heading)
             seen.add(r.scenario)
             try:
-                loaded = load_scenario_file(r.scenario_path)
+                loaded = r.load()
                 if isinstance(loaded, EvalSimulationScenario):
                     cfg = describe_simulation(loaded, color=sys.stdout.isatty())
                 else:
@@ -980,7 +989,7 @@ def _print_failures(failed: list[EvalRun], total: int, *, show_attempt: bool) ->
     for r in failed:
         attempt = f" {_dim('#' + str(r.attempt))}" if show_attempt else ""
         tally = _turn_tally(r)
-        header = f"  {_red('✗')} {r.bot} {_color(r.scenario, '36')}{attempt}"
+        header = f"  {_red('✗')} {r.label} {_color(r.scenario, '36')}{attempt}"
         if tally and isinstance(r.result, EvalScriptResult):
             header = f"{header} {_dim(tally + ' passed')}"
         if r.error:
@@ -1135,7 +1144,7 @@ def suite(
         ..., help="Manifest YAML listing bots + their scenarios (scripted, or simulations)."
     ),
     pattern: str = typer.Option(
-        None, "-p", "--pattern", help="Only bots whose path contains this."
+        None, "-p", "--pattern", help="Only entries whose name or bot path contains this."
     ),
     scenario: str = typer.Option(None, "-s", "--scenario", help="Only this scenario name."),
     kind: EvalKind = typer.Option(None, "-k", "--kind", help="Only scenarios of this kind."),
@@ -1161,8 +1170,8 @@ def suite(
         "--repeat",
         help="Run each (bot, scenario) this many times, to measure flakiness, and "
         "each simulation this many times instead of its own runs (1 included); a "
-        "repeated sweep reports rates and exits 0. Attempts interleave across bots "
-        "and each writes its own logs.",
+        "repeated sweep reports rates and exits 0. Attempts run attempt-major across "
+        "bots and each writes its own logs.",
     ),
     base_port: int = typer.Option(None, "--base-port", help="Override manifest base_port."),
     cache_dir: str = typer.Option(None, "--cache-dir", help="Override manifest cache_dir."),

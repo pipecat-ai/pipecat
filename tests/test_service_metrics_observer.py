@@ -181,13 +181,6 @@ class TestServiceMetricsObserver(unittest.IsolatedAsyncioTestCase):
             )
         self.assertEqual([r.prompt_tokens for r in self.usage], [10, 20])
 
-    async def test_a_relayed_metric_is_reported_once(self):
-        """A frame passed along the pipeline is one metric, not one per hop."""
-        frame = MetricsFrame(data=[TTFBMetricsData(processor="LLM#0", value=0.2)])
-        for processor in ("LLM#0", "TTS#0", "Transport#0"):
-            await self._push(frame, source=processor)
-        self.assertEqual(len(self.latency), 1)
-
     async def test_metrics_measuring_something_else_are_left_alone(self):
         """Only what a service made someone wait for is a record."""
         await self._push(

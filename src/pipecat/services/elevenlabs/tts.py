@@ -11,6 +11,7 @@ with support for streaming audio, word timestamps, and voice customization.
 """
 
 import base64
+import html
 import json
 import warnings
 from collections.abc import AsyncGenerator, Mapping
@@ -55,6 +56,7 @@ from pipecat.services.tts_service import (
 )
 from pipecat.transcriptions.language import Language
 from pipecat.utils.deprecation import deprecated
+from pipecat.utils.text.phonemes import normalize_ipa
 from pipecat.utils.tracing.service_decorators import traced_tts
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
@@ -107,6 +109,37 @@ def build_elevenlabs_voice_settings(
             voice_settings[key] = val
 
     return voice_settings or None
+
+
+# Models that read SSML <phoneme> tags. ElevenLabs' docs list only
+# eleven_flash_v2; eleven_turbo_v2 reads them too.
+ELEVENLABS_PHONEME_MODELS = frozenset({"eleven_flash_v2", "eleven_turbo_v2"})
+
+
+def format_elevenlabs_pronunciation(word: str, ipa: str) -> str | None:
+    """Render a pronunciation as ElevenLabs SSML ``<phoneme>`` tags.
+
+    A phoneme tag holds a single word, so a phrase gets one tag per word and its
+    IPA must have as many words. Only the models in
+    :data:`ELEVENLABS_PHONEME_MODELS` read phoneme tags.
+
+    Args:
+        word: The word being pronounced, kept inside the tag.
+        ipa: The pronunciation, in IPA.
+
+    Returns:
+        The phoneme tags, e.g.
+        ``<phoneme alphabet="ipa" ph="mɛtˈfɔɹmɪn">Metformin</phoneme>``, or None
+        when the words and the IPA do not line up.
+    """
+    words = word.split()
+    spoken = normalize_ipa(ipa).split()
+    if not words or len(spoken) != len(words):
+        return None
+    return " ".join(
+        f'<phoneme alphabet="ipa" ph="{html.escape(ph)}">{html.escape(w, quote=False)}</phoneme>'
+        for w, ph in zip(words, spoken)
+    )
 
 
 @deprecated(
@@ -438,6 +471,33 @@ class ElevenLabsTTSService(ElevenLabsTTSBase):
         # Context IDs whose context-init has been sent, so the keepalive knows
         # which contexts are safe to target.
         self._context_init_sent: set[str] = set()
+
+    @classmethod
+    def format_pronunciation(cls, word: str, ipa: str) -> str | None:
+        """Render a pronunciation as SSML ``<phoneme>`` tags.
+
+        See :func:`format_elevenlabs_pronunciation`.
+
+        Args:
+            word: The word being pronounced.
+            ipa: The pronunciation, in IPA.
+
+        Returns:
+            The phoneme tags, or None when the pronunciation cannot be used.
+        """
+        return format_elevenlabs_pronunciation(word, ipa)
+
+    @property
+    def supports_pronunciations(self) -> bool:
+        """Whether phoneme tags are read with the current settings.
+
+        They are read only with a model in :data:`ELEVENLABS_PHONEME_MODELS` and
+        with ``enable_ssml_parsing=True``.
+
+        Returns:
+            True when phoneme tags are read.
+        """
+        return self._settings.model in ELEVENLABS_PHONEME_MODELS and bool(self._enable_ssml_parsing)
 
     def _set_voice_settings(self):
         return build_elevenlabs_voice_settings(self._settings)
@@ -856,6 +916,32 @@ class ElevenLabsHttpTTSService(TTSService):
             True, as ElevenLabs HTTP service supports metrics generation.
         """
         return True
+
+    @classmethod
+    def format_pronunciation(cls, word: str, ipa: str) -> str | None:
+        """Render a pronunciation as SSML ``<phoneme>`` tags.
+
+        See :func:`format_elevenlabs_pronunciation`.
+
+        Args:
+            word: The word being pronounced.
+            ipa: The pronunciation, in IPA.
+
+        Returns:
+            The phoneme tags, or None when the pronunciation cannot be used.
+        """
+        return format_elevenlabs_pronunciation(word, ipa)
+
+    @property
+    def supports_pronunciations(self) -> bool:
+        """Whether phoneme tags are read with the current model.
+
+        They are read only with a model in :data:`ELEVENLABS_PHONEME_MODELS`.
+
+        Returns:
+            True when phoneme tags are read.
+        """
+        return self._settings.model in ELEVENLABS_PHONEME_MODELS
 
     def _set_voice_settings(self):
         return build_elevenlabs_voice_settings(self._settings)

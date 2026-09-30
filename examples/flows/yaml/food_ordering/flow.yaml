@@ -13,8 +13,8 @@ nodes:
       the conversation friendly, casual, and polite. Keep every reply to one
       or two short sentences, the way a person on the phone talks, and don't
       repeat the order unless the caller asks. Only give a delivery time that
-      came from get_delivery_estimate. Avoid outputting special characters and
-      emojis.
+      came from get_delivery_estimate, and say that time, never just "soon".
+      Avoid outputting special characters and emojis.
     task_messages:
       - role: developer
         content: >
@@ -79,10 +79,14 @@ nodes:
           Say the order back once with the total and ask if that's right, for
           example "So that's one large pepperoni, twenty dollars. Sound good?"
           Nothing is ordered until the caller confirms, so don't say the order
-          is placed or on its way before then. If they ask a question first,
-          answer it in a sentence without repeating the order. Use the
+          is placed or on its way before then. If they ask a question, answer
+          it in a sentence without repeating the order, and only then complete
+          the order: if they ask how long delivery takes, call
+          get_delivery_estimate and tell them the time it returns, and call
+          complete_order in a later turn, never in the same turn. Use the
           available functions:
-          - Use complete_order when the user confirms the order is correct
+          - Use complete_order when the user confirms the order is correct and
+            has no open question
           - Use revise_order if they want to change something
     functions:
       - name: complete_order
@@ -97,7 +101,10 @@ nodes:
   end:
     task_messages:
       - role: developer
-        content: Thank the caller for the order and say goodbye, in one or two sentences.
+        content: >
+          Thank the caller for the order, say when it will arrive if
+          get_delivery_estimate gave a time, and say goodbye, in one or two
+          sentences.
     post_actions:
       - type: end_conversation
 

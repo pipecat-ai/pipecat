@@ -92,6 +92,7 @@ from pipecat.processors.aggregators.llm_context_summarizer import (
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 from pipecat.services.stt_latency import DEFAULT_TTFS_P99
+from pipecat.turns.empty_user_turn import EmptyUserTurnConfig
 from pipecat.turns.types import UserTurnSpeculation
 from pipecat.turns.user_idle_controller import UserIdleController
 from pipecat.turns.user_mute import BaseUserMuteStrategy
@@ -150,6 +151,11 @@ class LLMUserAggregatorParams:
             has been idle (not speaking) for this duration. Set to 0 to disable
             idle detection.
         vad_analyzer: Voice Activity Detection analyzer instance.
+        empty_user_turn: How to respond to a user turn that ends with no
+            transcript. By default, the bot answers such a turn when it
+            interrupted the bot, and leaves it unanswered otherwise. ``None``
+            leaves every such turn unanswered. Ignored with a realtime LLM
+            service, which hears the user's audio directly.
         filter_incomplete_user_turns: When enabled, the LLM outputs a
             turn-completion marker at the start of each response: ● (complete),
             ◐ (incomplete short), or ○ (incomplete long). Incomplete
@@ -179,6 +185,7 @@ class LLMUserAggregatorParams:
     user_turn_stop_timeout: float = 5.0
     user_idle_timeout: float = 0
     vad_analyzer: VADAnalyzer | None = None
+    empty_user_turn: EmptyUserTurnConfig | None = field(default_factory=EmptyUserTurnConfig)
     filter_incomplete_user_turns: bool = False
     user_turn_completion_config: UserTurnCompletionConfig | None = None
 
@@ -701,6 +708,7 @@ class LLMUserAggregator(LLMContextAggregator):
                 user_turn_strategies,
                 are_user_provided_custom_strategies=self._params.user_turn_strategies is not None,
             )
+            self._disable_empty_user_turn_recovery()
 
         self._user_is_muted = False
         self._user_turn_start_timestamp = ""
@@ -726,6 +734,10 @@ class LLMUserAggregator(LLMContextAggregator):
         # surfaces the full turn transcript even when several
         # inferences fire before finalization.
         self._full_user_turn_aggregation: str | None = None
+
+        # Whether the current user turn interrupted the bot.
+        self._user_turn_interrupted_bot = False
+        self._consecutive_empty_user_turn_recoveries = 0
 
         self._user_turn_controller = UserTurnController(
             user_turn_strategies=user_turn_strategies,
@@ -1001,6 +1013,20 @@ class LLMUserAggregator(LLMContextAggregator):
         else:
             logger.debug(msg)
 
+    def _disable_empty_user_turn_recovery(self):
+        """Turn off empty user turn recovery for realtime mode.
+
+        A realtime LLM service hears the user's audio directly, so an empty
+        transcript doesn't mean the model missed the speech.
+        """
+        if self._params.empty_user_turn is None:
+            return
+        self._params.empty_user_turn = None
+        logger.debug(
+            f"{self}: realtime mode — empty user turn recovery disabled; the realtime "
+            "LLM service hears the user's audio directly."
+        )
+
     async def _handle_service_metadata(self, frame: ServiceMetadataFrame):
         """Dispatch a service metadata frame.
 
@@ -1121,6 +1147,8 @@ class LLMUserAggregator(LLMContextAggregator):
         if not self._realtime_service_mode:
             # Explicitly disabled — honor it silently; the user opted out.
             return
+
+        self._disable_empty_user_turn_recovery()
 
         strategies = self._user_turn_controller.user_turn_strategies
         self._apply_realtime_mode_strategy_mutations(
@@ -1364,6 +1392,15 @@ class LLMUserAggregator(LLMContextAggregator):
         interruptions_allowed = (
             self._params.should_interrupt is None or self._params.should_interrupt()
         )
+
+        # Unless the bot is waiting for the user, it's thinking, speaking or
+        # running a function call, and the interruption below cancels that.
+        self._user_turn_interrupted_bot = (
+            params.enable_interruptions
+            and interruptions_allowed
+            and not self._user_idle_controller.waiting_for_user
+        )
+
         if params.enable_user_speaking_frames:
             await self.broadcast_frame(
                 UserStartedSpeakingFrame, enable_interruptions=interruptions_allowed
@@ -1523,6 +1560,52 @@ class LLMUserAggregator(LLMContextAggregator):
             )
             await self._call_event_handler("on_user_turn_stopped", strategy, message)
             self._user_turn_start_timestamp = ""
+
+        interrupted_bot = self._user_turn_interrupted_bot
+        self._user_turn_interrupted_bot = False
+
+        if content:
+            self._consecutive_empty_user_turn_recoveries = 0
+        elif not on_session_end:
+            # An empty turn doesn't run the LLM, so the bot stays silent unless
+            # a recovery runs it. Without one, restart the idle timer, which
+            # this turn's start cancelled.
+            if not await self._maybe_recover_empty_user_turn(interrupted_bot):
+                await self._user_idle_controller.wait_for_user()
+
+    async def _maybe_recover_empty_user_turn(self, interrupted_bot: bool) -> bool:
+        """Run the LLM for a user turn that ended with no transcript.
+
+        Args:
+            interrupted_bot: Whether the turn interrupted a response in progress.
+
+        Returns:
+            Whether the LLM was asked to respond.
+        """
+        config = self._params.empty_user_turn
+        if not config:
+            return False
+
+        prompt = config.interrupted_prompt if interrupted_bot else config.idle_prompt
+        if not prompt:
+            return False
+
+        if self._consecutive_empty_user_turn_recoveries >= config.max_consecutive_recoveries:
+            logger.debug(f"{self}: Empty user turn left unanswered (too many in a row)")
+            return False
+
+        # A pending function call result runs the LLM itself, and a muted user
+        # shouldn't be prompted to speak.
+        if self._user_is_muted or self._user_idle_controller.function_calls_in_progress:
+            return False
+
+        logger.debug(
+            f"{self}: Empty user turn ({'interrupted' if interrupted_bot else 'idle'}), running LLM"
+        )
+        self._consecutive_empty_user_turn_recoveries += 1
+        self._context.add_message(cast(LLMContextMessage, {"role": "developer", "content": prompt}))
+        await self.push_context_frame()
+        return True
 
 
 class LLMAssistantAggregator(LLMContextAggregator):
@@ -2327,16 +2410,17 @@ class LLMAssistantAggregator(LLMContextAggregator):
         before the conversation moved on is indistinguishable from a synchronous
         one, and settles in place: its "started" placeholder becomes the tool
         result, and the LLM sees an ordinary call. The context alone decides.
-        The result is deferred when anything but protocol bookkeeping follows
-        the placeholder: a user message, assistant text, a developer message
-        such as new task instructions, or an intermediate update from this
-        call. Bookkeeping is other calls' placeholders and results, their
-        deferred messages, and assistant messages that carry only tool calls,
-        which a sibling in the same batch writes after this placeholder. A
-        model response that produced no text, or a later batch of tool calls
-        with none, is therefore invisible here. A placeholder that is no
-        longer in the context, because the context was rebuilt while the call
-        ran, also defers.
+        The result is deferred when a user or developer message follows the
+        placeholder: something the user said, new task instructions, or an
+        intermediate update from this call. Assistant messages are ignored,
+        so filler spoken with a ``TTSSpeakFrame`` while the call runs does
+        not defer it, whether the tool handler or an event handler spoke it.
+        The same holds for text the model wrote after seeing the placeholder
+        with no user turn in between, as when an ungrouped sibling's result
+        runs inference; the result still settles in place. Other calls'
+        placeholders, results, and deferred messages are ignored too. A
+        placeholder that is no longer in the context, because the context was
+        rebuilt while the call ran, also defers.
 
         Args:
             in_progress_frame: The call's in-progress frame.
@@ -2357,8 +2441,8 @@ class LLMAssistantAggregator(LLMContextAggregator):
                 )
                 continue
             role = message.get("role")
-            if role == "tool" or (role == "assistant" and not message.get("content")):
-                # A sibling's placeholder, result, or tool-call message.
+            if role in ("tool", "assistant"):
+                # A sibling's placeholder or result, or assistant output.
                 continue
             payload = async_tool_messages.parse_message(message)
             if payload is not None and payload.tool_call_id != tool_call_id:

@@ -14,8 +14,8 @@ import json
 import random
 import string
 from collections.abc import AsyncGenerator
-from dataclasses import dataclass
-from typing import Any, cast
+from dataclasses import dataclass, field
+from typing import Any, Literal, cast
 
 from loguru import logger
 from websockets import Subprotocol
@@ -43,14 +43,24 @@ from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.errors import ErrorCategory, extract_http_status_code
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
-from pipecat.utils.types import assert_given
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
 
 @dataclass
 class AWSTranscribeSTTSettings(STTSettings):
-    """Settings for AWSTranscribeSTTService."""
+    """Settings for AWSTranscribeSTTService.
 
-    pass
+    Parameters:
+        partial_results_stability: How stable interim results should be, trading
+            accuracy against latency: ``"low"`` is the most accurate, ``"high"``
+            the fastest. AWS binds this to a connection, so updating it at
+            runtime triggers a reconnect. See
+            https://docs.aws.amazon.com/transcribe/latest/dg/streaming.html#streaming-partial-result-stabilization.
+    """
+
+    partial_results_stability: Literal["high", "medium", "low"] | NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
 
 
 class AWSTranscribeSTTService(WebsocketSTTService):
@@ -117,6 +127,7 @@ class AWSTranscribeSTTService(WebsocketSTTService):
         default_settings = self.Settings(
             model=None,
             language=Language.EN,
+            partial_results_stability="high",
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -324,7 +335,7 @@ class AWSTranscribeSTTService(WebsocketSTTService):
                 sample_rate=connect_sample_rate,
                 number_of_channels=self._number_of_channels,
                 enable_partial_results_stabilization=True,
-                partial_results_stability="high",
+                partial_results_stability=assert_given(self._settings.partial_results_stability),
                 show_speaker_label=self._show_speaker_label,
                 enable_channel_identification=self._enable_channel_identification,
             )

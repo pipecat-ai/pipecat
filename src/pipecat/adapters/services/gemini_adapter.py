@@ -65,7 +65,11 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
         return "google"
 
     def get_llm_invocation_params(
-        self, context: LLMContext, *, system_instruction: str | None = None
+        self,
+        context: LLMContext,
+        *,
+        system_instruction: str | None = None,
+        ensure_last_message_is_user: bool = False,
     ) -> GeminiLLMInvocationParams:
         """Get Gemini-specific LLM invocation parameters from a universal LLM context.
 
@@ -73,6 +77,9 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
             context: The LLM context containing messages, tools, etc.
             system_instruction: Optional system instruction from service settings
                 or ``run_inference``.
+            ensure_last_message_is_user: Whether to append a minimal user message
+                when the converted message list ends with a model message. The
+                Gemini API rejects a generate request that ends with a model turn.
 
         Returns:
             Dictionary of parameters for Gemini's API.
@@ -80,6 +87,8 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
         converted = self._from_universal_context_messages(
             self.get_messages(context), system_instruction=system_instruction
         )
+        if ensure_last_message_is_user:
+            self._ensure_last_message_is_user(converted.messages)
         effective_system = self._resolve_system_instruction(
             converted.system_instruction,
             system_instruction,
@@ -287,6 +296,24 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
 
         tool_call_id_to_name_mapping: dict[str, str]
 
+    @staticmethod
+    def _ensure_last_message_is_user(messages: list[Content]) -> list[Content]:
+        """Ensure the message list does not end with a model message.
+
+        When the last message has ``role="model"``, a minimal user message is
+        appended so that the API request is accepted. "." represents a
+        language-neutral no-op user turn.
+
+        Args:
+            messages: The converted message list (may be mutated in-place).
+
+        Returns:
+            The same list, possibly with an appended user message.
+        """
+        if messages and messages[-1].role == "model":
+            messages.append(Content(role="user", parts=[Part(text=".")]))
+        return messages
+
     def _from_universal_context_messages(
         self,
         universal_context_messages: list[LLMContextMessage],
@@ -369,6 +396,8 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
 
         # When thinking is enabled, merge parallel tool calls into single messages
         messages = self._merge_parallel_tool_calls_for_thinking(thought_signature_dicts, messages)
+
+        self._add_placeholder_thought_signatures(messages)
 
         # Check if we only have function-related messages (no regular text)
         effective_system = extracted_system or system_instruction
@@ -681,6 +710,29 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
                 i += 1
 
         return merged_messages
+
+    # Gemini 3 rejects a model turn whose function calls carry no thought
+    # signature, which is what a call from another provider (an LLM switched
+    # mid-conversation) or one injected by the application looks like. Google
+    # documents this placeholder to skip that check; both the Gemini API and
+    # Vertex AI accept it, and the SDK encodes it on the wire as it would a
+    # real signature.
+    _PLACEHOLDER_THOUGHT_SIGNATURE = b"skip_thought_signature_validator"
+
+    def _add_placeholder_thought_signatures(self, messages: list[Content]) -> None:
+        """Give function calls in unsigned model turns the placeholder signature.
+
+        A model turn with a signed part is left alone: Gemini signs only the
+        first call of a parallel batch and expects the rest unsigned.
+        """
+        for message in messages:
+            if not isinstance(message, Content) or message.role != "model" or not message.parts:
+                continue
+            if any(getattr(part, "thought_signature", None) for part in message.parts):
+                continue
+            for part in message.parts:
+                if getattr(part, "function_call", None):
+                    part.thought_signature = self._PLACEHOLDER_THOUGHT_SIGNATURE
 
     def _apply_thought_signatures_to_messages(
         self, thought_signature_dicts: list[dict], messages: list[Content]

@@ -112,18 +112,6 @@ class TestErrorObserver(unittest.IsolatedAsyncioTestCase):
 
         await asyncio.sleep(0.01)
 
-    async def test_an_error_is_reported_once_however_far_it_travels(self):
-        """Every processor it passes through pushes it again."""
-        failing = IdentityFilter(name="tts")
-        error = ErrorFrame(error="failed", processor=failing, category=ErrorCategory.SERVER)
-
-        await self._push(error, source=failing)
-        await self._push(error, source=IdentityFilter(name="passing it along"))
-        await self._push(error, source=IdentityFilter(name="and along"))
-
-        (event,) = self.events
-        self.assertEqual(event.processor, "tts")
-
     async def test_each_error_is_its_own_event(self):
         """A processor that fails twice failed twice."""
         failing = IdentityFilter(name="tts")

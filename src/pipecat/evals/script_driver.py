@@ -17,6 +17,7 @@ from pipecat.evals.judge import EvalJudge
 from pipecat.evals.matcher import ExpectationMatcher
 from pipecat.evals.results import (
     EvalAssertionFailure,
+    EvalExpectationResult,
     EvalProgress,
     EvalScriptResult,
     EvalScriptTurnProgress,
@@ -163,12 +164,28 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
         return await self._match_expectations(turn, turn_idx)
 
     async def _await_bot_quiet(self) -> None:
-        """Hold the send while the bot is speaking, up to ``BOT_QUIET_MAX_WAIT_S``."""
-        if not self._stream.bot_speaking:
+        """Hold the send while the bot is speaking, and until its speech is transcribed, up to ``BOT_QUIET_MAX_WAIT_S``.
+
+        What the bot said before the send belongs to the turn before, so the
+        send waits for the last of it to be transcribed and closed into a turn:
+        a transcript can land seconds after its audio, and one landing after
+        the send would otherwise be taken for the reply.
+        """
+        if self._stream.bot_speaking:
+            self._trace.log("send: waiting for the bot to finish speaking")
+            if not await self._stream.wait_bot_quiet(BOT_QUIET_MAX_WAIT_S):
+                self._trace.log(
+                    f"send: bot still speaking after {BOT_QUIET_MAX_WAIT_S:g}s, sending"
+                )
+                return
+        if self._stream.bot_transcribed:
             return
-        self._trace.log("send: waiting for the bot to finish speaking")
-        if not await self._stream.wait_bot_quiet(BOT_QUIET_MAX_WAIT_S):
-            self._trace.log(f"send: bot still speaking after {BOT_QUIET_MAX_WAIT_S:g}s, sending")
+        self._trace.log("send: waiting for the bot's speech to be transcribed")
+        if not await self._stream.wait_bot_transcribed(BOT_QUIET_MAX_WAIT_S):
+            self._trace.log(
+                f"send: bot speech still being transcribed after {BOT_QUIET_MAX_WAIT_S:g}s "
+                f"({self._stream.bot_speech_outstanding}), sending"
+            )
 
     async def _await_previous_reply(self) -> None:
         """Let a reply the bot is still speaking end before an observing turn starts.
@@ -181,6 +198,7 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
             return
         self._trace.log("observe: waiting for the bot to finish the previous reply")
         await self._stream.wait_bot_quiet(BOT_QUIET_MAX_WAIT_S)
+        await self._stream.wait_bot_transcribed(BOT_QUIET_MAX_WAIT_S)
         self._stream.drop_pending_bot_output("the previous reply")
         self._stream.turn_boundary()
 
@@ -265,6 +283,7 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
         one budget per expectation.
         """
         failures: list[EvalAssertionFailure] = []
+        resolved = self.turns[turn_idx].expectations
         anchor = time.monotonic()
         for exp_idx, expectation in enumerate(turn.expect):
             budget_ms = expectation.within_ms or self._default_timeout_ms
@@ -283,6 +302,7 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
                         kind="timeout",
                     )
                 )
+                resolved.append(EvalExpectationResult(exp_idx, expectation.event, passed=False))
                 self._trace.log(f"FAIL: {expectation.event}: {reason}")
                 await self._progress(
                     EvalScriptTurnProgress(turn_idx, exp_idx, expectation.event, "timeout", reason)
@@ -291,6 +311,7 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
 
             if failure:
                 failures.append(failure)
+                resolved.append(EvalExpectationResult(exp_idx, expectation.event, passed=False))
                 self._trace.log(f"FAIL: {expectation.event}: {failure.reason}")
                 await self._progress(
                     EvalScriptTurnProgress(
@@ -298,13 +319,11 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
                     )
                 )
             else:
+                matched = self._matcher.last_match_text
+                resolved.append(
+                    EvalExpectationResult(exp_idx, expectation.event, passed=True, matched=matched)
+                )
                 await self._progress(
-                    EvalScriptTurnProgress(
-                        turn_idx,
-                        exp_idx,
-                        expectation.event,
-                        "matched",
-                        self._matcher.last_match_text,
-                    )
+                    EvalScriptTurnProgress(turn_idx, exp_idx, expectation.event, "matched", matched)
                 )
         return failures
