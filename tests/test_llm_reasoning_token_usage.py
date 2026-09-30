@@ -100,6 +100,30 @@ async def test_gemini_live_adds_thoughts_to_completion_tokens():
     assert tokens.total_tokens == 170
 
 
+@pytest.mark.asyncio
+async def test_gemini_live_computes_the_total_from_input_and_output():
+    """Gemini Live's own total sometimes leaves the thinking tokens out."""
+    service = GeminiLiveLLMService(api_key="test-key")
+    service.start_llm_usage_metrics = AsyncMock()
+
+    await service._handle_msg_usage_metadata(
+        LiveServerMessage(
+            usage_metadata=UsageMetadata(
+                prompt_token_count=2921,
+                response_token_count=41,
+                thoughts_token_count=176,
+                tool_use_prompt_token_count=33,
+                total_token_count=2962,
+            )
+        )
+    )
+
+    tokens = service.start_llm_usage_metrics.call_args.args[0]
+    assert tokens.prompt_tokens == 2954
+    assert tokens.completion_tokens == 217
+    assert tokens.total_tokens == 3171
+
+
 # -- Anthropic --------------------------------------------------------------
 
 

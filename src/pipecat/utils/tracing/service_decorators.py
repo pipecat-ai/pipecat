@@ -1315,7 +1315,7 @@ def traced_gemini_live(operation: str) -> Callable:
                                 usage = msg.usage_metadata
                                 operation_attrs["gen_ai.usage.input_tokens"] = (
                                     usage.prompt_token_count or 0
-                                )
+                                ) + (usage.tool_use_prompt_token_count or 0)
                                 operation_attrs["gen_ai.usage.output_tokens"] = (
                                     usage.response_token_count or 0
                                 ) + (usage.thoughts_token_count or 0)

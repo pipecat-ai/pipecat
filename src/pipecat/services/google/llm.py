@@ -739,14 +739,17 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
                 # We use assignment (not accumulation) because the final chunk always contains
                 # the authoritative, billable token usage for the entire response.
                 if chunk.usage_metadata:
-                    prompt_tokens = chunk.usage_metadata.prompt_token_count or 0
                     reasoning_tokens = chunk.usage_metadata.thoughts_token_count or 0
-                    # Gemini counts thinking tokens apart from the candidates, but they
-                    # are generated output too.
+                    # Gemini counts tool results fed back to the model apart from the
+                    # prompt, and thinking tokens apart from the candidates, but they
+                    # are input and output too.
+                    prompt_tokens = (chunk.usage_metadata.prompt_token_count or 0) + (
+                        chunk.usage_metadata.tool_use_prompt_token_count or 0
+                    )
                     completion_tokens = (
                         chunk.usage_metadata.candidates_token_count or 0
                     ) + reasoning_tokens
-                    total_tokens = chunk.usage_metadata.total_token_count or 0
+                    total_tokens = prompt_tokens + completion_tokens
                     cache_read_input_tokens = chunk.usage_metadata.cached_content_token_count or 0
 
                 if not chunk.candidates:
