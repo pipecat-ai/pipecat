@@ -210,7 +210,7 @@ jobs:
             - Read each doc page fully before editing (SKILL.md Guidelines)
             - Use `GH_TOKEN=$DOCS_TOKEN` for all `gh` commands targeting pipecat-ai/docs
           claude_args: |
-            --model claude-sonnet-4-5-20250929
+            --model claude-sonnet-5-5
             --max-turns 90
             --allowedTools "Read,Write,Edit,Glob,Grep,Bash"
 
