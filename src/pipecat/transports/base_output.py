@@ -454,6 +454,9 @@ class BaseOutputTransport(FrameProcessor):
             # reconstructed as the same frame type).
             self._audio_runs: deque[tuple[bytearray, bool]] = deque()
             self._audio_buffer_cls: type[OutputAudioRawFrame] = OutputAudioRawFrame
+            # Whether the last audio fed to the resampler was uninterruptible,
+            # since that's the audio its filter is still holding.
+            self._resampler_uninterruptible = False
 
             # This will be used to resample incoming audio to the output sample
             # rate. Speech boundaries are signalled explicitly (see
@@ -542,6 +545,10 @@ class BaseOutputTransport(FrameProcessor):
             Args:
                 frame: The end frame signaling sender shutdown.
             """
+            # Play the audio still held back (a partial chunk and whatever the
+            # resampler holds) instead of dropping it when the sender stops.
+            await self._enqueue_flushed_audio_buffer()
+
             # Let the sink tasks process the queue until they reach this EndFrame.
             await self._clock_queue.put((float("inf"), next(self._clock_queue_counter), frame))
             await self._audio_queue.put(frame)
@@ -610,6 +617,10 @@ class BaseOutputTransport(FrameProcessor):
             self._create_video_task()
             self._create_clock_task()
 
+            # Audio buffered but never played belongs to the turn being
+            # interrupted, whether or not the bot had started speaking it.
+            await self._discard_buffered_audio()
+
             # Let's send a bot stopped speaking if we have to.
             await self._bot_stopped_speaking()
 
@@ -630,6 +641,7 @@ class BaseOutputTransport(FrameProcessor):
 
             cls = type(frame)
             self._audio_buffer_cls = cls
+            self._resampler_uninterruptible = not frame.interruptible
             self._buffer_audio(resampled, uninterruptible=not frame.interruptible)
             while self._buffered_audio_bytes >= self._audio_chunk_size:
                 audio, uninterruptible = self._take_audio_chunk()
@@ -751,6 +763,7 @@ class BaseOutputTransport(FrameProcessor):
             # The resampler holds the tail of the audio it was fed, which
             # belongs at the end of this speech run, with the last run's flag.
             tail = await self._resampler.flush()
+            self._resampler_uninterruptible = False
             last_uninterruptible = self._audio_runs[-1][1] if self._audio_runs else False
             self._buffer_audio(tail, uninterruptible=last_uninterruptible)
 
@@ -800,6 +813,19 @@ class BaseOutputTransport(FrameProcessor):
         def _clear_audio_buffer(self):
             self._audio_runs.clear()
 
+        async def _discard_buffered_audio(self):
+            """Drop the audio that hasn't been queued for playback yet.
+
+            Uninterruptible audio is kept, together with the resampler state
+            that goes with it, just like uninterruptible frames already queued.
+            """
+            if self._resampler_uninterruptible or any(
+                uninterruptible for _, uninterruptible in self._audio_runs
+            ):
+                return
+            self._clear_audio_buffer()
+            await self._resampler.reset()
+
         async def _enqueue_audio_chunk(self, audio: bytes, uninterruptible: bool):
             """Queue one full chunk of output-rate audio for playback."""
             frame = self._audio_buffer_cls(
@@ -819,12 +845,11 @@ class BaseOutputTransport(FrameProcessor):
             self._bot_speaking = False
             self._tts_audio_received = False
 
-            # Any remaining leftover here (e.g. from an interruption) is
-            # discarded rather than flushed, since it's no longer wanted. The
-            # same goes for the audio still inside the resampler, which would
-            # otherwise be prepended to whatever the bot says next.
-            self._clear_audio_buffer()
-            await self._resampler.reset()
+            # Buffered audio is left alone here. Playback runs behind the
+            # producer, so by the time it stops the turn that just ended has
+            # already been flushed (see `handle_tts_stopped`), and what is still
+            # buffered, including the resampler state, is the start of what the
+            # bot says next. Interruptions discard it in `handle_interruptions`.
 
             logger.debug(
                 f"Bot{f' [{self._destination}]' if self._destination else ''} stopped speaking"
@@ -925,7 +950,12 @@ class BaseOutputTransport(FrameProcessor):
                         yield frame
                         self._audio_queue.task_done()
                     except TimeoutError:
-                        # Fallback: notify the bot stopped speaking upstream if necessary based on timeout.
+                        # Fallback: nothing has been queued for a while, so a
+                        # turn ended without a TTSStoppedFrame. Drop its leftover
+                        # rather than prepend it to whatever the bot says next.
+                        if self._bot_speaking:
+                            await self._discard_buffered_audio()
+                        # Notify the bot stopped speaking upstream if necessary based on timeout.
                         await self._bot_stopped_speaking()
 
             async def with_mixer(vad_stop_secs: float) -> AsyncGenerator[Frame, None]:
@@ -947,6 +977,8 @@ class BaseOutputTransport(FrameProcessor):
                         # Fallback: notify the bot stopped speaking upstream if necessary based on timeout.
                         diff_time = time.time() - last_frame_time
                         if diff_time > vad_stop_secs:
+                            if self._bot_speaking:
+                                await self._discard_buffered_audio()
                             await self._bot_stopped_speaking()
                         # Generate an audio frame with only the mixer's part.
                         frame = OutputAudioRawFrame(

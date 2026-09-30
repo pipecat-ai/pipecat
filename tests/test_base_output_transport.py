@@ -28,6 +28,7 @@ from pipecat.frames.frames import (
     InterruptionFrame,
     MixerControlFrame,
     OutputAudioRawFrame,
+    SpeechOutputAudioRawFrame,
     StartFrame,
     TTSAudioRawFrame,
     TTSStoppedFrame,
@@ -112,6 +113,35 @@ async def _make_transport(
     await transport.process_frame(start_frame, FrameDirection.DOWNSTREAM)
     await transport.set_transport_ready(start_frame)
     return transport
+
+
+def _pace_writes(transport: BaseOutputTransport):
+    """Make each write take as long as the audio it carries, like a real output."""
+
+    async def write(frame):
+        await asyncio.sleep(len(frame.audio) / (2 * frame.num_channels * frame.sample_rate))
+        return True
+
+    transport.write_audio_frame = AsyncMock(side_effect=write)
+
+
+def _written_audio(transport: BaseOutputTransport) -> bytes:
+    return b"".join(call.args[0].audio for call in transport.write_audio_frame.call_args_list)
+
+
+def _bot_stops(transport: BaseOutputTransport) -> int:
+    """Count the downstream `BotStoppedSpeakingFrame`s pushed so far."""
+    return sum(
+        1
+        for call in transport.push_frame.call_args_list
+        if isinstance(call.args[0], BotStoppedSpeakingFrame) and len(call.args) == 1
+    )
+
+
+async def _wait_for(condition, timeout: float = 5.0):
+    async with asyncio.timeout(timeout):
+        while not condition():
+            await asyncio.sleep(0.01)
 
 
 class TestBaseOutputTransportInterruptions(unittest.IsolatedAsyncioTestCase):
@@ -344,6 +374,123 @@ class TestBaseOutputTransportAudioBuffering(unittest.IsolatedAsyncioTestCase):
             await transport.cancel(CancelFrame())
 
 
+class TestBaseOutputTransportPlaybackStop(unittest.IsolatedAsyncioTestCase):
+    """Playback stopping must not discard audio buffered for what comes next.
+
+    Audio is buffered (and resampled) on arrival, ahead of the paced playback
+    queue, so the producer can already be sending the next turn, or the next
+    sentence of a speech stream, when playback reaches the end of the current
+    one. ``_bot_stopped_speaking`` fires at that point, and the partial chunk
+    it finds buffered belongs to what the bot says next.
+    """
+
+    def _tts(self, audio: bytes, sender, context_id: str = "ctx1") -> TTSAudioRawFrame:
+        return TTSAudioRawFrame(
+            audio=audio, sample_rate=sender.sample_rate, num_channels=1, context_id=context_id
+        )
+
+    async def test_turn_stop_keeps_next_turn_audio_buffered_during_playback(self):
+        transport = await _make_transport(mixer=None)
+        try:
+            sender = transport._media_senders[None]
+            chunk_size = sender.audio_chunk_size
+            _pace_writes(transport)
+
+            first = b"\x01\x02" * (3 * chunk_size // 2)
+            second = b"\x03\x04" * (3 * chunk_size // 4)
+            head, rest = second[: chunk_size // 2], second[chunk_size // 2 :]
+
+            # TTS delivers faster than real time: the next turn starts arriving
+            # while the first one is still playing.
+            await transport.process_frame(self._tts(first, sender), FrameDirection.DOWNSTREAM)
+            await transport.process_frame(
+                TTSStoppedFrame(context_id="ctx1"), FrameDirection.DOWNSTREAM
+            )
+            await transport.process_frame(
+                self._tts(head, sender, "ctx2"), FrameDirection.DOWNSTREAM
+            )
+
+            # Playback reaches the first turn's TTSStoppedFrame with `head` buffered.
+            await _wait_for(lambda: _bot_stops(transport) == 1)
+            await transport.process_frame(
+                self._tts(rest, sender, "ctx2"), FrameDirection.DOWNSTREAM
+            )
+            await transport.process_frame(
+                TTSStoppedFrame(context_id="ctx2"), FrameDirection.DOWNSTREAM
+            )
+            await _wait_for(lambda: _bot_stops(transport) == 2)
+
+            padding = b"\x00" * (chunk_size - len(second) % chunk_size)
+            self.assertEqual(_written_audio(transport), first + second + padding)
+        finally:
+            await transport.cancel(CancelFrame())
+
+    async def test_speech_stream_pause_keeps_next_sentence_buffered_during_playback(self):
+        transport = await _make_transport(mixer=None)
+        try:
+            sender = transport._media_senders[None]
+            chunk_size = sender.audio_chunk_size
+            _pace_writes(transport)
+
+            def speech(audio: bytes) -> SpeechOutputAudioRawFrame:
+                return SpeechOutputAudioRawFrame(
+                    audio=audio, sample_rate=sender.sample_rate, num_channels=1
+                )
+
+            sentence = b"\x01\x02" * chunk_size
+            # Longer than BOT_VAD_STOP_SECS, so playback stops the bot in it.
+            pause = b"\x00" * (10 * chunk_size)
+            next_sentence = b"\x03\x04" * (3 * chunk_size // 4)
+            head, rest = next_sentence[: chunk_size // 2], next_sentence[chunk_size // 2 :]
+
+            # The stream delivers the next sentence while the pause is playing.
+            for audio in (sentence, pause, head):
+                await transport.process_frame(speech(audio), FrameDirection.DOWNSTREAM)
+
+            await _wait_for(lambda: _bot_stops(transport) == 1)
+            for audio in (rest, pause):
+                await transport.process_frame(speech(audio), FrameDirection.DOWNSTREAM)
+            await _wait_for(lambda: _bot_stops(transport) == 2)
+
+            self.assertIn(next_sentence, _written_audio(transport))
+        finally:
+            await transport.cancel(CancelFrame())
+
+    async def test_interruption_before_playback_drops_buffered_audio(self):
+        transport = await _make_transport(mixer=None)
+        try:
+            sender = transport._media_senders[None]
+            partial = b"\x05\x06" * (sender.audio_chunk_size // 4)
+            await transport.process_frame(self._tts(partial, sender), FrameDirection.DOWNSTREAM)
+            self.assertFalse(sender._bot_speaking)
+
+            # The user interrupts before any of the turn is played, and the
+            # turn's TTSStoppedFrame still arrives afterwards.
+            await transport.process_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
+            await transport.process_frame(
+                TTSStoppedFrame(context_id="ctx1"), FrameDirection.DOWNSTREAM
+            )
+            await asyncio.sleep(0.1)
+
+            self.assertEqual(_written_audio(transport), b"")
+        finally:
+            await transport.cancel(CancelFrame())
+
+    async def test_end_frame_plays_buffered_audio(self):
+        transport = await _make_transport(mixer=None)
+        try:
+            sender = transport._media_senders[None]
+            audio = b"\x01\x02" * (3 * sender.audio_chunk_size // 4)
+            await transport.process_frame(self._tts(audio, sender), FrameDirection.DOWNSTREAM)
+
+            # The pipeline ends right after the last audio, with no TTSStoppedFrame.
+            await transport.process_frame(EndFrame(), FrameDirection.DOWNSTREAM)
+
+            self.assertEqual(_written_audio(transport)[: len(audio)], audio)
+        finally:
+            await transport.cancel(CancelFrame())
+
+
 async def _make_wedging_transport(
     write_audio_frame: AsyncMock, *, timeout: float
 ) -> BaseOutputTransport:
@@ -545,6 +692,39 @@ class TestBaseOutputTransportResampling(unittest.IsolatedAsyncioTestCase):
             samples = np.frombuffer(after, dtype=np.int16)
             self.assertGreater(len(samples), 0)
             self.assertLessEqual(int(samples.max()), 0)
+        finally:
+            await transport.cancel(CancelFrame())
+
+    async def test_turn_stop_keeps_resampler_state_for_the_next_turn(self):
+        """The next turn's audio held in the resampler survives a playback stop.
+
+        The first frame of the next turn arrives while the previous turn is
+        still playing, and most of it is still inside the resampler's filter
+        when playback reaches the previous turn's TTSStoppedFrame.
+        """
+        transport = await _make_transport(audio_out_sample_rate=self.OUT_RATE)
+        try:
+            _pace_writes(transport)
+            for frame in self._constant_frames(8000, 3200):
+                await transport.process_frame(frame, FrameDirection.DOWNSTREAM)
+            await transport.process_frame(
+                TTSStoppedFrame(context_id="ctx1"), FrameDirection.DOWNSTREAM
+            )
+
+            # The next turn is entirely negative, so it's easy to count.
+            next_turn = self._constant_frames(-8000, 3200)
+            await transport.process_frame(next_turn[0], FrameDirection.DOWNSTREAM)
+            await _wait_for(lambda: _bot_stops(transport) == 1)
+            for frame in next_turn[1:]:
+                await transport.process_frame(frame, FrameDirection.DOWNSTREAM)
+            await transport.process_frame(
+                TTSStoppedFrame(context_id="ctx2"), FrameDirection.DOWNSTREAM
+            )
+            await _wait_for(lambda: _bot_stops(transport) == 2)
+
+            samples = np.frombuffer(_written_audio(transport), dtype=np.int16)
+            negative = int(np.count_nonzero(samples < 0))
+            self.assertGreaterEqual(negative, 3200 * self.OUT_RATE // self.TTS_RATE)
         finally:
             await transport.cancel(CancelFrame())
 
