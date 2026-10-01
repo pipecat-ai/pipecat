@@ -209,6 +209,22 @@ class TestClassifierUserTurnCompletionStopStrategy(unittest.IsolatedAsyncioTestC
         )
         self.assertEqual(len(self.stopped), 1)
 
+    async def test_speech_that_never_ends_is_held_only_until_max_hold(self):
+        strategy = await self._strategy("short", "short", short_timeout=0.2, max_hold=0.25)
+        for words in ("four lane highway", "city streets road signs"):
+            await strategy.process_frame(_said(words))
+            await self.detector.trigger_user_turn_stopped()
+            await asyncio.sleep(0.05)
+            await strategy.process_frame(VADUserStartedSpeakingFrame())
+            await asyncio.sleep(0.12)
+        self.assertEqual(self.stopped, [])
+
+        # Past max_hold, the next pause ends the turn without asking.
+        await self.detector.trigger_user_turn_stopped()
+        await asyncio.sleep(SETTLE)
+        self.assertEqual(len(self.classifier.asked), 2)
+        self.assertEqual(len(self.stopped), 1)
+
     async def test_classifier_error_ends_the_turn(self):
         strategy = await self._strategy(ClassifierError("down"))
         await strategy.process_frame(_said("hello"))
