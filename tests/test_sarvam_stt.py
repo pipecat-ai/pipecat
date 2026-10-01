@@ -251,39 +251,6 @@ def test_base_language_settings_use_sarvam_locale_codes(language, legacy_code, r
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "language,code",
-    [
-        ("ne-IN", "ne-IN"),
-        (Language.HI, "hi-IN"),
-        ("or", "or-IN"),
-    ],
-)
-async def test_realtime_language_update_reaches_config_message(language, code):
-    service = SarvamRealtimeSTTService(api_key="test-key")
-    service._websocket = _FakeWebsocket()
-    await service._update_settings(service.Settings(language=language))
-
-    assert service._websocket.sent == [
-        json.dumps({"event": "config.update", "language_code": code})
-    ]
-    assert service._settings.language_code == code
-
-
-@pytest.mark.asyncio
-async def test_realtime_explicit_language_code_wins_during_update():
-    service = SarvamRealtimeSTTService(api_key="test-key")
-    service._websocket = _FakeWebsocket()
-
-    await service._update_settings(service.Settings(language="ne-IN", language_code="auto"))
-
-    assert service._websocket.sent == [
-        json.dumps({"event": "config.update", "language_code": "auto"})
-    ]
-    assert service._settings.language_code == "auto"
-
-
-@pytest.mark.asyncio
 async def test_realtime_unrecognized_language_keeps_fallback_and_warns(monkeypatch):
     logger = _CapturingLogger()
     monkeypatch.setattr("pipecat.services.sarvam.stt.logger", logger)
@@ -321,15 +288,19 @@ async def test_realtime_raw_language_through_pipeline_and_websocket():
             service,
             frames_to_send=[
                 STTUpdateSettingsFrame(delta=STTSettings(language="ks-IN")),
+                STTUpdateSettingsFrame(
+                    delta=SarvamRealtimeSTTService.Settings(language="ne-IN", language_code="auto")
+                ),
                 STTUpdateSettingsFrame(delta=STTSettings(language="new-IN")),
             ],
         )
 
     assert queries[0]["language_code"] == ["ne-IN"]
     assert [message for message in messages if message["event"] == "config.update"] == [
-        {"event": "config.update", "language_code": "ks-IN"}
+        {"event": "config.update", "language_code": "ks-IN"},
+        {"event": "config.update", "language_code": "auto"},
     ]
-    assert service._settings.language_code == "ks-IN"
+    assert service._settings.language_code == "auto"
 
 
 @pytest.mark.parametrize(
