@@ -109,10 +109,12 @@ ERROR_UPDATE_TYPE = "error"
 
 #: The mark the backend's model puts at the start of a message it wants the
 #: user told. The message is sent with ``prefers_spoken=True``, mark stripped;
-#: a message without it is a note (``prefers_spoken=False``). The model is
-#: told to put the mark first, but sometimes writes a note paragraph and then
-#: a marked one, so a mark at the start of a later line splits the message:
-#: a note before it, a spoken message from it on.
+#: a message without it is a note (``prefers_spoken=False``). Strict prompt,
+#: flexible parsing: the model is told to put the mark first, but sometimes
+#: writes a note paragraph and then a marked one, so a mark at the start of a
+#: later line splits the message, a note before it and a spoken message from
+#: it on, rather than losing the result. The turn-completion markers are
+#: read the same way (``user_turn_completion_mixin``).
 SPOKEN_MARK = ">>"
 
 #: Where a message's spoken part starts: the first line that begins with the mark.
