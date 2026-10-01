@@ -74,17 +74,29 @@ def language_to_sarvam_language(language: Language) -> str:
     """
     # Mapping of pipecat Language enum to Sarvam language codes
     LANGUAGE_MAP = {
+        Language.BN: "bn-IN",
         Language.BN_IN: "bn-IN",
+        Language.GU: "gu-IN",
         Language.GU_IN: "gu-IN",
+        Language.HI: "hi-IN",
         Language.HI_IN: "hi-IN",
+        Language.KN: "kn-IN",
         Language.KN_IN: "kn-IN",
+        Language.ML: "ml-IN",
         Language.ML_IN: "ml-IN",
+        Language.MR: "mr-IN",
         Language.MR_IN: "mr-IN",
+        Language.TA: "ta-IN",
         Language.TA_IN: "ta-IN",
+        Language.TE: "te-IN",
         Language.TE_IN: "te-IN",
+        Language.PA: "pa-IN",
         Language.PA_IN: "pa-IN",
+        Language.OR: "od-IN",
         Language.OR_IN: "od-IN",
+        Language.EN: "en-IN",
         Language.EN_IN: "en-IN",
+        Language.AS: "as-IN",
         Language.AS_IN: "as-IN",
     }
 
@@ -877,20 +889,35 @@ _SHORT_LANGUAGE_DEFAULTS = {
 def language_to_sarvam_realtime_language(language: Language) -> str:
     """Convert a Language enum to Sarvam realtime's language code."""
     language_map = {
+        Language.AS: "as-IN",
         Language.AS_IN: "as-IN",
+        Language.BN: "bn-IN",
         Language.BN_IN: "bn-IN",
+        Language.EN: "en-IN",
         Language.EN_IN: "en-IN",
+        Language.GU: "gu-IN",
         Language.GU_IN: "gu-IN",
+        Language.HI: "hi-IN",
         Language.HI_IN: "hi-IN",
+        Language.KN: "kn-IN",
         Language.KN_IN: "kn-IN",
+        Language.KOK: "kok-IN",
         Language.KOK_IN: "kok-IN",
+        Language.MAI: "mai-IN",
         Language.MAI_IN: "mai-IN",
+        Language.ML: "ml-IN",
         Language.ML_IN: "ml-IN",
+        Language.MR: "mr-IN",
         Language.MR_IN: "mr-IN",
+        Language.OR: "or-IN",
         Language.OR_IN: "or-IN",
+        Language.PA: "pa-IN",
         Language.PA_IN: "pa-IN",
+        Language.SD: "sd-IN",
         Language.SD_IN: "sd-IN",
+        Language.TA: "ta-IN",
         Language.TA_IN: "ta-IN",
+        Language.TE: "te-IN",
         Language.TE_IN: "te-IN",
     }
     return resolve_language(language, language_map, use_base_code=False)
@@ -1031,6 +1058,8 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
             language = _as_language(default_settings.language)
             if language is not None:
                 default_settings.language_code = language_to_sarvam_realtime_language(language)
+            elif isinstance(default_settings.language, str):
+                default_settings.language_code = default_settings.language
 
         self._validate_settings(default_settings)
 
@@ -1333,17 +1362,22 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
         ``language`` but none of the Sarvam fields, so the delta is widened to
         these settings first. Mirrors the constructor: an explicit
         ``language_code`` wins, since it also expresses ``auto``, which has no
-        :class:`Language` equivalent.
+        :class:`Language` equivalent. Unrecognized language strings are
+        forwarded as-is.
         """
         if not isinstance(delta, self.Settings):
             delta = self.Settings.from_mapping(delta.given_fields())
         if is_given(delta.language_code):
             return delta
         language = _as_language(delta.language)
-        if language is None:
+        if language is not None:
+            language_code = language_to_sarvam_realtime_language(language)
+        elif isinstance(delta.language, str):
+            language_code = delta.language
+        else:
             return delta
         derived = delta.copy()
-        derived.language_code = language_to_sarvam_realtime_language(language)
+        derived.language_code = language_code
         return derived
 
     async def _handle_speech_start(self, message: dict[str, Any]):

@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock
 from urllib.parse import parse_qs, urlparse
 
 import pytest
+from websockets.asyncio.server import serve
 from websockets.exceptions import ConnectionClosedError
 from websockets.frames import Close
 from websockets.protocol import State
@@ -24,6 +25,7 @@ from pipecat.frames.frames import (
     MetricsFrame,
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
+    STTUpdateSettingsFrame,
     TranscriptionFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
@@ -40,6 +42,7 @@ from pipecat.services.sarvam.stt import (
 )
 from pipecat.services.settings import STTSettings
 from pipecat.services.stt_service import WebsocketSTTService
+from pipecat.tests.utils import run_test
 from pipecat.transcriptions.language import Language
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.asyncio.task_manager import TaskManager
@@ -220,6 +223,130 @@ def test_configured_language_is_used_when_message_has_none():
         api_key="test-key", settings=SarvamSTTService.Settings(language=Language.EN_IN)
     )
     assert service._map_language_code_to_enum(service._get_language_string()) == Language.EN_IN
+
+
+@pytest.mark.parametrize(
+    "language,legacy_code,realtime_code",
+    [
+        (Language.AS, "as-IN", "as-IN"),
+        (Language.BN, "bn-IN", "bn-IN"),
+        (Language.EN, "en-IN", "en-IN"),
+        (Language.GU, "gu-IN", "gu-IN"),
+        (Language.HI, "hi-IN", "hi-IN"),
+        (Language.KN, "kn-IN", "kn-IN"),
+        (Language.ML, "ml-IN", "ml-IN"),
+        (Language.MR, "mr-IN", "mr-IN"),
+        (Language.OR, "od-IN", "or-IN"),
+        (Language.PA, "pa-IN", "pa-IN"),
+        (Language.TA, "ta-IN", "ta-IN"),
+        (Language.TE, "te-IN", "te-IN"),
+    ],
+)
+@pytest.mark.parametrize("as_string", [False, True])
+def test_base_language_settings_use_sarvam_locale_codes(
+    language, legacy_code, realtime_code, as_string
+):
+    value = language.value if as_string else language
+    legacy = SarvamSTTService(
+        api_key="test-key", settings=SarvamSTTService.Settings(language=value)
+    )
+    realtime = SarvamRealtimeSTTService(
+        api_key="test-key", settings=SarvamRealtimeSTTService.Settings(language=value)
+    )
+
+    assert legacy._get_language_string() == legacy_code
+    assert _query(realtime)["language_code"] == [realtime_code]
+
+
+@pytest.mark.parametrize(
+    "language,code",
+    [(Language.KOK, "kok-IN"), (Language.MAI, "mai-IN"), (Language.SD, "sd-IN")],
+)
+def test_realtime_additional_base_languages_use_sarvam_locale_codes(language, code):
+    service = SarvamRealtimeSTTService(
+        api_key="test-key", settings=SarvamRealtimeSTTService.Settings(language=language)
+    )
+
+    assert _query(service)["language_code"] == [code]
+
+
+@pytest.mark.parametrize(
+    "language",
+    ["ne-IN", "ks-IN", "sa-IN", "sat-IN", "mni-IN", "brx-IN", "doi-IN", "auto", "new-IN"],
+)
+def test_realtime_raw_language_reaches_connection_url(language):
+    service = SarvamRealtimeSTTService(
+        api_key="test-key", settings=SarvamRealtimeSTTService.Settings(language=language)
+    )
+
+    assert _query(service)["language_code"] == [language]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("settings_type", [STTSettings, SarvamRealtimeSTTService.Settings])
+@pytest.mark.parametrize(
+    "language,code",
+    [
+        ("ne-IN", "ne-IN"),
+        ("auto", "auto"),
+        ("new-IN", "new-IN"),
+        (Language.HI, "hi-IN"),
+        ("or", "or-IN"),
+    ],
+)
+async def test_realtime_language_update_reaches_config_message(settings_type, language, code):
+    service = SarvamRealtimeSTTService(api_key="test-key")
+    service._websocket = _FakeWebsocket()
+    delta = settings_type(language=language)
+    original_fields = delta.given_fields()
+
+    changed = await service._update_settings(delta)
+
+    assert service._websocket.sent == [
+        json.dumps({"event": "config.update", "language_code": code})
+    ]
+    assert service._settings.language_code == code
+    assert "language_code" in changed
+    assert delta.given_fields() == original_fields
+
+
+@pytest.mark.asyncio
+async def test_realtime_explicit_language_code_wins_during_update():
+    service = SarvamRealtimeSTTService(api_key="test-key")
+    service._websocket = _FakeWebsocket()
+
+    await service._update_settings(service.Settings(language="ne-IN", language_code="auto"))
+
+    assert service._websocket.sent == [
+        json.dumps({"event": "config.update", "language_code": "auto"})
+    ]
+    assert service._settings.language_code == "auto"
+
+
+@pytest.mark.asyncio
+async def test_realtime_raw_language_through_pipeline_and_websocket():
+    queries = []
+    messages = []
+
+    async def handle_connection(websocket):
+        queries.append(parse_qs(urlparse(websocket.request.path).query))
+        async for message in websocket:
+            messages.append(json.loads(message))
+
+    async with serve(handle_connection, "127.0.0.1", 0) as server:
+        port = server.sockets[0].getsockname()[1]
+        service = SarvamRealtimeSTTService(
+            api_key="test-key",
+            base_url=f"ws://127.0.0.1:{port}/speech-to-text/realtime",
+            settings=SarvamRealtimeSTTService.Settings(language="ne-IN"),
+        )
+        await run_test(
+            service,
+            frames_to_send=[STTUpdateSettingsFrame(delta=STTSettings(language="ks-IN"))],
+        )
+
+    assert queries[0]["language_code"] == ["ne-IN"]
+    assert {"event": "config.update", "language_code": "ks-IN"} in messages
 
 
 @pytest.mark.parametrize(
@@ -1034,11 +1161,12 @@ async def test_confidence_defaults_to_one_when_not_numeric(monkeypatch):
     assert pushed[1].result["confidence"] == 0.42
 
 
-def test_explicit_language_code_is_not_overridden_by_language():
+@pytest.mark.parametrize("language", [Language.EN_IN, "ne-IN"])
+def test_explicit_language_code_is_not_overridden_by_language(language):
     service = SarvamRealtimeSTTService(
         api_key="test-key",
         settings=SarvamRealtimeSTTService.Settings(
-            language=Language.EN_IN,
+            language=language,
             language_code="hi-IN",
         ),
     )
