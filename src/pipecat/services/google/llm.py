@@ -383,7 +383,7 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
             self._settings.system_instruction
         )
         adapter = self.get_llm_adapter()
-        params = adapter.get_llm_invocation_params(
+        params = await adapter.prepare_llm_invocation_params(
             context,
             system_instruction=effective_instruction,
             ensure_last_message_is_user=self._should_inject_trailing_user_message(),
@@ -566,7 +566,7 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
 
     async def _stream_content(self, context: LLMContext) -> AsyncIterator[GenerateContentResponse]:
         adapter = self.get_llm_adapter()
-        params = adapter.get_llm_invocation_params(
+        params = await adapter.prepare_llm_invocation_params(
             context,
             system_instruction=assert_given(self._settings.system_instruction),
             ensure_last_message_is_user=self._should_inject_trailing_user_message(),
@@ -729,8 +729,6 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
         accumulated_text = ""
 
         try:
-            await self.resolve_context_files(context)
-
             await self.start_ttfb_metrics()
 
             function_calls = []

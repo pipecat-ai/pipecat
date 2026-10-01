@@ -308,7 +308,7 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
             self._settings.system_instruction
         )
         adapter = self.get_llm_adapter()
-        params = adapter.get_llm_invocation_params(
+        params = await adapter.prepare_llm_invocation_params(
             context,
             system_instruction=effective_instruction,
             ensure_last_message_is_user=self._should_inject_trailing_user_message(),
@@ -436,9 +436,11 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
             return False
         return not any(p in model for p in self._PREFILL_SUPPORTED_PATTERNS)
 
-    def _get_llm_invocation_params(self, context: LLMContext) -> AWSBedrockLLMInvocationParams:
+    async def _get_llm_invocation_params(
+        self, context: LLMContext
+    ) -> AWSBedrockLLMInvocationParams:
         adapter = self.get_llm_adapter()
-        params = adapter.get_llm_invocation_params(
+        params = await adapter.prepare_llm_invocation_params(
             context,
             system_instruction=assert_given(self._settings.system_instruction),
             ensure_last_message_is_user=self._should_inject_trailing_user_message(),
@@ -461,11 +463,9 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
             await self.push_frame(LLMFullResponseStartFrame())
             await self.start_processing_metrics()
 
-            await self.resolve_context_files(context)
-
             await self.start_ttfb_metrics()
 
-            params_from_context = self._get_llm_invocation_params(context)
+            params_from_context = await self._get_llm_invocation_params(context)
             messages = params_from_context["messages"]
             system = params_from_context["system"]
             tools = params_from_context["tools"]

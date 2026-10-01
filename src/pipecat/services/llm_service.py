@@ -349,7 +349,10 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 :class:`~pipecat.utils.file_resolver.FileResolver`). Pass one
                 configured with a ``file_storage`` to resolve uploaded-file
                 URLs (e.g. ``FileResolver(file_storage=runner_file_storage())``
-                with the development runner). Defaults to a resolver that
+                with the development runner), and share one instance across
+                services that may consume the same files (e.g. services
+                switched between mid-session) so downloads are reused.
+                Defaults to a resolver that
                 handles ``data:`` and ``http(s)`` URLs only.
             **kwargs: Additional arguments passed to the parent AIService.
 
@@ -402,6 +405,9 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         # Cast to TAdapter to keep `_adapter` and `get_llm_adapter()` precisely
         # typed for callers that opt into `LLMService[XAdapter]`.
         self._adapter = cast(TAdapter, self._resolve_adapter_class()())
+        # The adapter reads the resolver's caches during every conversion —
+        # invocation params and logging alike.
+        self._adapter.file_resolver = self._file_resolver
         self._functions: dict[str | None, FunctionCallRegistryItem] = {}
         # Cleanup callables carried by registered tool handlers, awaited at
         # service teardown (see _record_tool_cleanup).
@@ -446,18 +452,6 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             The adapter instance used for LLM communication.
         """
         return self._adapter
-
-    async def resolve_context_files(self, context: LLMContext) -> None:
-        """Resolve the context's file content items into forms this provider can consume.
-
-        Called before each completion. File URLs the provider can't fetch
-        itself are downloaded via the service's file resolver and inlined —
-        see :meth:`~pipecat.adapters.base_llm_adapter.BaseLLMAdapter.resolve_file_items`.
-
-        Args:
-            context: The LLM context whose messages to resolve.
-        """
-        await self.get_llm_adapter().resolve_file_items(context, self._file_resolver)
 
     def create_llm_specific_message(self, message: Any) -> LLMSpecificMessage:
         """Create an LLM-specific message (as opposed to a standard message) for use in an LLMContext.

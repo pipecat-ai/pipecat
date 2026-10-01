@@ -279,6 +279,50 @@ class AWSBedrockLLMAdapter(BaseLLMAdapter[AWSBedrockLLMInvocationParams]):
             messages.append({"role": "user", "content": [{"text": "."}]})
         return messages
 
+    def _inline_file_item(
+        self, raw_bytes: bytes, filename: str | None, mime_type: str
+    ) -> dict[str, Any]:
+        """Build the Converse content block for an inline file's bytes."""
+        image_format = _MIME_TO_BEDROCK_IMAGE_FORMAT.get(mime_type)
+        if image_format is not None:
+            return {"image": {"format": image_format, "source": {"bytes": raw_bytes}}}
+        video_format = _bedrock_video_format(mime_type, filename)
+        if video_format is not None:
+            return {"video": {"format": video_format, "source": {"bytes": raw_bytes}}}
+        bedrock_format = _MIME_TO_BEDROCK_FORMAT.get(mime_type)
+        if bedrock_format is None:
+            # Wrapped as LLMContextConversionError by the caller in
+            # _from_universal_context_messages.
+            raise ValueError(f"Unsupported 'file' MIME type for Bedrock: {mime_type}")
+        return {
+            "document": {
+                "name": _sanitize_bedrock_document_name(filename or "document"),
+                "format": bedrock_format,
+                "source": {"bytes": raw_bytes},
+            }
+        }
+
+    def _s3_file_item(self, url: str, filename: str | None, mime_type: str) -> dict[str, Any]:
+        """Build the Converse content block for a file Bedrock reads from S3 itself."""
+        image_format = _MIME_TO_BEDROCK_IMAGE_FORMAT.get(mime_type)
+        if image_format is not None:
+            return {"image": {"format": image_format, "source": {"s3Location": {"uri": url}}}}
+        video_format = _bedrock_video_format(mime_type, filename)
+        if video_format is not None:
+            return {"video": {"format": video_format, "source": {"s3Location": {"uri": url}}}}
+        bedrock_format = _MIME_TO_BEDROCK_FORMAT.get(mime_type)
+        if bedrock_format is None:
+            # Wrapped as LLMContextConversionError by the caller in
+            # _from_universal_context_messages.
+            raise ValueError(f"Unsupported MIME type for Bedrock S3 URI: {mime_type}")
+        return {
+            "document": {
+                "name": _sanitize_bedrock_document_name(filename or "document"),
+                "format": bedrock_format,
+                "source": {"s3Location": {"uri": url}},
+            }
+        }
+
     def _from_universal_context_message(self, message: LLMContextMessage) -> dict[str, Any]:
         if isinstance(message, LLMSpecificMessage):
             return copy.deepcopy(message.message)
@@ -401,98 +445,35 @@ class AWSBedrockLLMAdapter(BaseLLMAdapter[AWSBedrockLLMInvocationParams]):
                         logger.warning(f"Unsupported 'image_url': {url}")
                 elif item["type"] == "file_base64":
                     f_data = item["file"]
-                    mime_type = f_data["mime_type"]
-                    raw_bytes = f_data.get("_raw_bytes")
-                    if raw_bytes is None:
-                        raw_bytes = base64.b64decode(f_data["file_data"].split(",")[1])
-                    image_format = _MIME_TO_BEDROCK_IMAGE_FORMAT.get(mime_type)
-                    if image_format is not None:
-                        new_content.append(
-                            {
-                                "image": {
-                                    "format": image_format,
-                                    "source": {"bytes": raw_bytes},
-                                }
-                            }
-                        )
-                        continue
-                    video_format = _bedrock_video_format(mime_type, f_data["filename"])
-                    if video_format is not None:
-                        new_content.append(
-                            {
-                                "video": {
-                                    "format": video_format,
-                                    "source": {"bytes": raw_bytes},
-                                }
-                            }
-                        )
-                        continue
-                    bedrock_format = _MIME_TO_BEDROCK_FORMAT.get(mime_type)
-                    if bedrock_format is None:
-                        # Wrapped as LLMContextConversionError by the caller in
-                        # _from_universal_context_messages.
-                        raise ValueError(f"Unsupported 'file' MIME type for Bedrock: {mime_type}")
                     new_content.append(
-                        {
-                            "document": {
-                                "name": _sanitize_bedrock_document_name(
-                                    f_data["filename"] or "document"
-                                ),
-                                "format": bedrock_format,
-                                "source": {"bytes": raw_bytes},
-                            }
-                        }
+                        self._inline_file_item(
+                            self.decoded_file_bytes(f_data),
+                            f_data["filename"],
+                            f_data["mime_type"],
+                        )
                     )
                 elif item["type"] == "file_url":
                     f_data = item["file"]
-                    url = f_data["url"]
-                    if url.startswith("s3://"):
-                        mime_type = f_data["mime_type"]
-                        image_format = _MIME_TO_BEDROCK_IMAGE_FORMAT.get(mime_type)
-                        if image_format is not None:
-                            new_content.append(
-                                {
-                                    "image": {
-                                        "format": image_format,
-                                        "source": {"s3Location": {"uri": url}},
-                                    }
-                                }
-                            )
-                            continue
-                        video_format = _bedrock_video_format(mime_type, f_data["filename"])
-                        if video_format is not None:
-                            new_content.append(
-                                {
-                                    "video": {
-                                        "format": video_format,
-                                        "source": {"s3Location": {"uri": url}},
-                                    }
-                                }
-                            )
-                            continue
-                        bedrock_format = _MIME_TO_BEDROCK_FORMAT.get(mime_type)
-                        if bedrock_format is None:
-                            # Wrapped as LLMContextConversionError by the caller in
-                            # _from_universal_context_messages.
-                            raise ValueError(
-                                f"Unsupported MIME type for Bedrock S3 URI: {mime_type}"
-                            )
+                    # Raises for a URL the provider can't consume with nothing
+                    # resolved (wrapped as LLMContextConversionError by the
+                    # caller in _from_universal_context_messages).
+                    resolved = self.inlined_file_content(f_data)
+                    if resolved is None:
+                        # Pass-through: supports_file_url admits only s3:// URIs.
                         new_content.append(
-                            {
-                                "document": {
-                                    "name": _sanitize_bedrock_document_name(
-                                        f_data["filename"] or "document"
-                                    ),
-                                    "format": bedrock_format,
-                                    "source": {"s3Location": {"uri": url}},
-                                }
-                            }
+                            self._s3_file_item(
+                                f_data["url"], f_data.get("filename"), f_data["mime_type"]
+                            )
                         )
                     else:
-                        # Wrapped as LLMContextConversionError by the caller in
-                        # _from_universal_context_messages.
-                        raise ValueError(f"Bedrock only supports S3 URLs for file sources: {url}")
-
+                        # Raw-bytes adapters always cache the decoded form.
+                        new_content.append(
+                            self._inline_file_item(
+                                cast(bytes, resolved),
+                                f_data.get("filename"),
+                                f_data["mime_type"],
+                            )
+                        )
             # In the case where there's a single image, document, or video in
             # the list (like what would result from a UserImageRawFrame),
             # ensure it comes before text
