@@ -1,0 +1,1 @@
+- Added `text_matches` to scripted eval expectations: one or more regular expressions the event's text must each match, such as a format a reply must open with. A miss fails the expectation with the new `text_unmatched` failure kind.
