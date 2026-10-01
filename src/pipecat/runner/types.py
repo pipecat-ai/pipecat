@@ -295,9 +295,12 @@ class SIPRunnerArguments(RunnerArguments):
         extra_params: Extra baresip account parameters, each a
             ``"key=value"`` string, appended verbatim to the SIP
             address-of-record — e.g. ``("medianat=stun",
-            "stunserver=stun:HOST:PORT")`` for media-NAT traversal behind
-            NAT against a non-ICE peer (a PSTN trunk); use ``medianat=ice``
-            only when the peer also speaks ICE. None adds nothing.
+            "stunserver=stun:HOST:PORT")`` for media-NAT traversal behind an
+            endpoint-independent NAT, ``medianat=turn`` behind a symmetric
+            one, and ``medianat=ice`` only when the peer also speaks ICE; see
+            the NAT notes on
+            :class:`~pipecat.transports.sip.connection.SIPConnection`. None
+            adds nothing.
         reg_interval: Seconds between registration refreshes; 0 disables
             registration entirely (trunk mode).
         rtp_timeout: Seconds without received RTP after which a call is

@@ -45,10 +45,12 @@ stacking a stale one. To debug signaling or media-path problems,
 auth material — not for production) and ``SIP_NATIVE_LOG_LEVEL=debug``
 captures the native stack's own logs. For NAT traversal, the runner enables
 ``medianat=stun`` by default with a STUN server (``SIP_STUN_SERVER``, default
-stun.l.google.com) so the bot advertises its public media address — the
-traversal a non-ICE peer such as a PSTN trunk needs behind NAT. Set
-``SIP_EXTRA_PARAMS`` (comma-separated ``key=value`` account parameters, passed
-verbatim) to override that, or ``SIP_STUN_SERVER=off`` to disable it. For knobs
+stun.l.google.com) so the bot advertises its public media address. That address
+reaches the bot through an endpoint-independent NAT; behind a symmetric one (an
+AWS NAT Gateway) the peer has to latch onto the bot's RTP source address, or the
+account needs ``medianat=turn``. Set ``SIP_EXTRA_PARAMS`` (comma-separated
+``key=value`` account parameters, passed verbatim) to override that, or
+``SIP_STUN_SERVER=off`` to disable it. For knobs
 beyond the ``SIP_*`` environment
 variables, construct ``SIPConnection(...)`` yourself and pass it to
 ``SIPTransport`` instead of using ``create_transport``::

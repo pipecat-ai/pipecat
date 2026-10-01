@@ -403,10 +403,35 @@ class SIPConnection(BaseObject):
         async def on_incoming(connection, data):
             await connection.answer()
 
-    Behind NAT, advertise the STUN-discovered public media address through
-    ``extra_params`` (raw baresip account parameters). Use ``medianat=stun``
-    for a non-ICE peer such as a PSTN SIP trunk (plain RTP); use
-    ``medianat=ice`` only when the far side also speaks ICE::
+    Behind NAT, media needs an address in the SDP that the peer can reach.
+    It is set through ``extra_params`` (raw baresip account parameters).
+
+    ``medianat=stun`` advertises the address a STUN server reports back.
+    That address reaches the bot behind an endpoint-independent NAT — a
+    home or office NAT, or a host with a one-to-one public address such as
+    an EC2 Elastic IP. Behind an endpoint-dependent ("symmetric") NAT, an
+    AWS NAT Gateway among them, it does not: the NAT allocates a fresh
+    external port per destination, so the port STUN reported is valid only
+    towards the STUN server, and the peer's RTP to the advertised port is
+    dropped — the bot receives nothing. Two things carry media across such
+    a NAT:
+
+    - The peer latches onto the source address and port the bot's RTP
+      actually arrives from, rather than trusting the SDP ("symmetric
+      RTP"; the ``Symmetric RTP`` setting on a Twilio Elastic SIP Trunk).
+      baresip sends from call establishment, so there is always something
+      to latch onto. This is per peer: every carrier or SBC the bot talks
+      to has to do it.
+    - ``medianat=turn`` works whatever the peer does. baresip allocates a
+      relayed address on a TURN server, advertises that in the SDP, and
+      binds the peer's RTP and RTCP addresses on the relay, for the cost of
+      one relay hop of latency. It takes four parameters:
+      ``medianat=turn``, ``stunserver=turn:HOST:3478`` (the scheme must be
+      ``turn:`` or ``turns:``; UDP unless the URI carries
+      ``?transport=tcp``), and ``stunuser`` / ``stunpass``, both mandatory.
+
+    ``medianat=ice`` is for a peer that also speaks ICE, never a PSTN SIP
+    trunk::
 
         connection = SIPConnection(
             user="1001",
@@ -470,12 +495,11 @@ class SIPConnection(BaseObject):
                 address-of-record — the escape hatch for account directives
                 pipecat does not model. Media-NAT traversal is the common
                 case: ``("medianat=stun", "stunserver=stun:HOST:PORT")``
-                advertises the STUN-discovered public media address for calls
-                behind NAT (``stunserver`` has no effect without ``medianat``;
-                use ``medianat=stun`` for non-ICE peers like a PSTN trunk,
-                ``medianat=ice`` only when the peer also speaks ICE). Values
-                are passed through unchanged; None (the default) adds
-                nothing.
+                behind an endpoint-independent NAT, ``medianat=turn`` behind
+                a symmetric one — see the NAT notes on this class for which
+                one a deployment needs (``stunserver`` has no effect without
+                ``medianat``). Values are passed through unchanged; None
+                (the default) adds nothing.
             jitter_buffer_mode: The receive jitter buffer: ``"off"``,
                 ``"fixed"``, or ``"adaptive"``; None (the default), with
                 no range, selects :data:`DEFAULT_JITTER_BUFFER` — a fixed

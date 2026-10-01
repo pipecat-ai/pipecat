@@ -1552,11 +1552,14 @@ async def _run_sip(args: argparse.Namespace):
     ``SIP_AUTH_USER`` (credential-list digest username),
     ``SIP_EXTRA_PARAMS`` (comma-separated ``key=value`` account parameters
     passed verbatim to the baresip account, e.g.
-    ``medianat=stun,stunserver=stun:HOST:PORT``),
+    ``medianat=stun,stunserver=stun:HOST:PORT``, or
+    ``medianat=turn,stunserver=turn:HOST:3478,stunuser=USER,stunpass=PASS``
+    behind a symmetric NAT),
     ``SIP_STUN_SERVER`` (STUN server for the default media-NAT traversal — when
     ``SIP_EXTRA_PARAMS`` is not set, the runner adds ``medianat=stun`` with this
-    server, default stun.l.google.com, so a peer can reach the bot's media
-    behind NAT; set to ``off`` to disable),
+    server, default stun.l.google.com; the address it advertises reaches the bot
+    through an endpoint-independent NAT but not a symmetric one; set to ``off``
+    to disable),
     ``SIP_REG_INTERVAL`` (0 for registration-less trunk mode),
     ``SIP_RTP_TIMEOUT`` (dead-call detection, seconds; 0 disables),
     ``SIP_INSTANCE_ID`` (a stable UUID for RFC 5626 ``+sip.instance``),
