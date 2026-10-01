@@ -32,6 +32,10 @@ Run one the usual way, then connect a client and try "fix the flaky retry test i
 python openai-responses-frontend.py
 ```
 
+Each frontend has a commented-out `connector=BackendConnector(client_trace=True)`: with it, every exchange with the backend is sent to the client as an RTVI server message and shows in the prebuilt UI's Events panel.
+
+The behavioral evals for these bots are in [`evals/llm-with-backend/`](../../../evals/llm-with-backend/).
+
 ### A conversation to try
 
 A longer session exercises more of what the pair does: delegating a quick lookup, delegating a judgment call, work that takes a while, and a change of course. One that works well, as a sequence of things to say:
@@ -42,10 +46,6 @@ A longer session exercises more of what the pair does: delegating a quick lookup
 4. If it finds a problem with the pull request, tell it to go ahead and make the change.
 
 Whenever a step takes a while, ask how it is going, formally or not ("what's the status?", "what are you working on now?"): the frontend answers from the backend's silent progress messages rather than delegating again.
-
-Each frontend has a commented-out `connector=BackendConnector(client_trace=True)`: with it, every exchange with the backend is sent to the client as an RTVI server message and shows in the prebuilt UI's Events panel.
-
-The behavioral evals for these bots are in [`evals/llm-with-backend/`](../../../evals/llm-with-backend/).
 
 ## A backend in another process
 
