@@ -82,7 +82,7 @@ class LLMWorker(PipelineWorker):
 
     def __init__(
         self,
-        name: str,
+        name: str | None = None,
         *,
         llm: LLMService[Any],
         pipeline: Pipeline | None = None,
@@ -93,7 +93,9 @@ class LLMWorker(PipelineWorker):
         """Initialize the LLMWorker.
 
         Args:
-            name: Unique name for this worker.
+            name: Unique name for this worker on the bus. Auto-generated when
+                omitted; give one when other workers address this one by
+                name, as they must when it runs in another process.
             llm: The LLM service. ``@tool`` decorated methods are
                 automatically registered on it.
             pipeline: Optional pipeline override. When ``None``,
