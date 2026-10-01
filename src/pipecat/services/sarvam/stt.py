@@ -994,7 +994,7 @@ class SarvamRealtimeSTTSettings(STTSettings):
         min_speech_duration_ms: Optional minimum speech duration.
     """
 
-    language_code: str | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    language_code: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     stream_type: Literal["fast", "balanced", "simulated"] | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
@@ -1092,6 +1092,7 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
         default_settings = self.Settings(
             model=_REALTIME_MODEL,
             language=Language.EN_IN,
+            language_code=None,
             stream_type="balanced",
             mode="transcribe",
             prompt=None,
@@ -1619,7 +1620,7 @@ def _language_from_code(language_code: str) -> str | None:
 
 def _without_language_code(settings: SarvamRealtimeSTTSettings) -> SarvamRealtimeSTTSettings:
     """Fold the deprecated ``language_code`` setting into ``language``."""
-    if not is_given(settings.language_code):
+    if not is_given(settings.language_code) or settings.language_code is None:
         return settings
     warnings.warn(
         "`SarvamRealtimeSTTService.Settings.language_code` is deprecated since 1.13.0 and "
