@@ -657,6 +657,7 @@ class SonioxTTSService(WebsocketTTSService):
                 await self._connect()
 
             try:
+                await self._send_config(context_id)
                 text_msg = {"text": text, "text_end": False, "stream_id": context_id}
                 await self._get_websocket().send(json.dumps(text_msg))
                 await self.start_tts_usage_metrics(text)
