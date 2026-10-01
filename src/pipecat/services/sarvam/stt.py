@@ -64,22 +64,6 @@ except ModuleNotFoundError as e:
     raise ImportError(f"Missing module: {e}") from e
 
 
-def _validate_keyterms(keyterms: list[str] | None, model: str | None):
-    """Validate connection-time keyterms against Sarvam's constraints."""
-    if keyterms is None:
-        return
-    if model != "saaras:v4":
-        raise ValueError("keyterms are only supported with model 'saaras:v4'.")
-    if not isinstance(keyterms, list) or any(not isinstance(term, str) for term in keyterms):
-        raise ValueError("keyterms must be a list of strings.")
-    if len(keyterms) > 50:
-        raise ValueError("keyterms must contain at most 50 terms.")
-    if any(len(term) > 64 for term in keyterms):
-        raise ValueError("Each keyterm must contain at most 64 characters.")
-    if any("," in term for term in keyterms):
-        raise ValueError("Each keyterm must be one phrase, not comma-separated terms.")
-
-
 def language_to_sarvam_language(language: Language) -> str:
     """Convert a Language enum to Sarvam's language code format.
 
@@ -359,7 +343,6 @@ class SarvamSTTService(STTService):
             allowed = ", ".join(sorted(MODEL_CONFIGS.keys()))
             raise ValueError(f"Unsupported model '{resolved_model}'. Allowed values: {allowed}.")
 
-        _validate_keyterms(keyterms, resolved_model)
         self._config = MODEL_CONFIGS[resolved_model]
 
         # Validate parameters against model capabilities
@@ -633,7 +616,6 @@ class SarvamSTTService(STTService):
             # documented SDK parameter that survives SDK signature changes.
             request_options: RequestOptions = {"additional_headers": self._sdk_headers}
             if self._keyterms is not None:
-                _validate_keyterms(self._keyterms, assert_given(self._settings.model))
                 request_options["additional_query_parameters"] = {
                     "keyterms": json.dumps(self._keyterms)
                 }
@@ -1135,7 +1117,6 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
             default_settings.apply_update(_without_language_code(settings))
 
         self._validate_settings(default_settings)
-        _validate_keyterms(keyterms, assert_given(default_settings.model))
 
         super().__init__(
             sample_rate=sample_rate,
@@ -1544,7 +1525,6 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
         return True
 
     def _query_params(self) -> dict[str, Any]:
-        _validate_keyterms(self._keyterms, assert_given(self._settings.model))
         params: dict[str, Any] = {
             "language_code": self._language_code(),
             "stream_type": self._settings.stream_type,
