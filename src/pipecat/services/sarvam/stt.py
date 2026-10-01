@@ -64,6 +64,22 @@ except ModuleNotFoundError as e:
     raise ImportError(f"Missing module: {e}") from e
 
 
+def _validate_keyterms(keyterms: list[str] | None, model: str | None):
+    """Validate connection-time keyterms against Sarvam's constraints."""
+    if keyterms is None:
+        return
+    if model != "saaras:v4":
+        raise ValueError("keyterms are only supported with model 'saaras:v4'.")
+    if not isinstance(keyterms, list) or any(not isinstance(term, str) for term in keyterms):
+        raise ValueError("keyterms must be a list of strings.")
+    if len(keyterms) > 50:
+        raise ValueError("keyterms must contain at most 50 terms.")
+    if any(len(term) > 64 for term in keyterms):
+        raise ValueError("Each keyterm must contain at most 64 characters.")
+    if any("," in term for term in keyterms):
+        raise ValueError("Each keyterm must be one phrase, not comma-separated terms.")
+
+
 def language_to_sarvam_language(language: Language) -> str:
     """Convert a Language enum to Sarvam's language code format.
 
@@ -260,6 +276,7 @@ class SarvamSTTService(STTService):
         mode: SarvamMode | None = None,
         sample_rate: int | None = None,
         input_audio_codec: str = "wav",
+        keyterms: list[str] | None = None,
         params: InputParams | None = None,
         settings: Settings | None = None,
         ttfs_p99_latency: float | None = SARVAM_TTFS_P99,
@@ -282,6 +299,8 @@ class SarvamSTTService(STTService):
                 Defaults to the model's default mode.
             sample_rate: Audio sample rate. Defaults to 16000 if not specified.
             input_audio_codec: Audio codec/format of the input file. Defaults to "wav".
+            keyterms: Connection-time recognition hints for saaras:v4. At most 50
+                terms of 64 characters each; put each phrase in a separate item.
             params: Configuration parameters for Sarvam STT service.
 
                 .. deprecated:: 0.0.105
@@ -340,6 +359,7 @@ class SarvamSTTService(STTService):
             allowed = ", ".join(sorted(MODEL_CONFIGS.keys()))
             raise ValueError(f"Unsupported model '{resolved_model}'. Allowed values: {allowed}.")
 
+        _validate_keyterms(keyterms, resolved_model)
         self._config = MODEL_CONFIGS[resolved_model]
 
         # Validate parameters against model capabilities
@@ -367,6 +387,7 @@ class SarvamSTTService(STTService):
 
         # Init-only connection config (not runtime-updatable)
         self._mode = mode
+        self._keyterms = list(keyterms) if keyterms is not None else None
 
         # Store connection parameters
         self._input_audio_codec = input_audio_codec
@@ -611,6 +632,11 @@ class SarvamSTTService(STTService):
             # Headers are supplied through request_options because this is a
             # documented SDK parameter that survives SDK signature changes.
             request_options: RequestOptions = {"additional_headers": self._sdk_headers}
+            if self._keyterms is not None:
+                _validate_keyterms(self._keyterms, assert_given(self._settings.model))
+                request_options["additional_query_parameters"] = {
+                    "keyterms": json.dumps(self._keyterms)
+                }
 
             try:
                 self._websocket_context = self._sarvam_client.speech_to_text_streaming.connect(
@@ -618,6 +644,8 @@ class SarvamSTTService(STTService):
                     request_options=request_options,
                 )
             except TypeError:
+                if self._keyterms is not None:
+                    raise
                 # Fallback for SDK builds that don't expose request_options.
                 self._websocket_context = self._sarvam_client.speech_to_text_streaming.connect(
                     **connect_kwargs
@@ -1043,6 +1071,7 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
         endpointing: Literal["vad", "manual"] = "vad",
         sample_rate: int | None = None,
         return_timestamps: bool = False,
+        keyterms: list[str] | None = None,
         prefix_padding_ms: int | None = None,
         settings: Settings | None = None,
         should_interrupt: bool = True,
@@ -1062,6 +1091,8 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
                 adopts the pipeline's input rate.
             return_timestamps: Whether final transcripts should include segment
                 offsets. Defaults to False.
+            keyterms: Connection-time recognition hints for saaras:v4. At most 50
+                terms of 64 characters each; put each phrase in a separate item.
             prefix_padding_ms: Optional VAD prefix padding, used only under
                 ``endpointing="vad"``.
             settings: Runtime-updatable realtime settings.
@@ -1104,6 +1135,7 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
             default_settings.apply_update(_without_language_code(settings))
 
         self._validate_settings(default_settings)
+        _validate_keyterms(keyterms, assert_given(default_settings.model))
 
         super().__init__(
             sample_rate=sample_rate,
@@ -1116,6 +1148,7 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
         self._api_key = api_key
         self._base_url = base_url
         self._return_timestamps = return_timestamps
+        self._keyterms = list(keyterms) if keyterms is not None else None
         self._prefix_padding_ms = prefix_padding_ms
         self._should_interrupt = should_interrupt
         self._receive_task: asyncio.Task | None = None
@@ -1511,6 +1544,7 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
         return True
 
     def _query_params(self) -> dict[str, Any]:
+        _validate_keyterms(self._keyterms, assert_given(self._settings.model))
         params: dict[str, Any] = {
             "language_code": self._language_code(),
             "stream_type": self._settings.stream_type,
@@ -1521,6 +1555,8 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
             "mode": self._settings.mode,
             "return_timestamps": str(self._return_timestamps).lower(),
         }
+        if self._keyterms is not None:
+            params["keyterms"] = json.dumps(self._keyterms)
         optional: dict[str, Any] = {"prompt": self._settings.prompt}
         if self._endpointing == "vad":
             optional["prefix_padding_ms"] = self._prefix_padding_ms
