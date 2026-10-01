@@ -236,6 +236,10 @@ def test_configured_language_is_used_when_message_has_none():
         (Language.OR, "od-IN", "or-IN"),
         (Language.NE, "ne-IN", "ne-IN"),
         (Language.SA, "sa-IN", "sa-IN"),
+        (Language.KOK, "kok-IN", "kok-IN"),
+        (Language.MAI, "mai-IN", "mai-IN"),
+        (Language.SD, "sd-IN", "sd-IN"),
+        (Language.UR, "ur-IN", "ur-IN"),
     ],
 )
 def test_base_language_settings_use_sarvam_locale_codes(language, legacy_code, realtime_code):

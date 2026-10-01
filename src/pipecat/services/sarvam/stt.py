@@ -74,10 +74,18 @@ def language_to_sarvam_language(language: Language) -> str:
     """
     # Mapping of pipecat Language enum to Sarvam language codes
     LANGUAGE_MAP = {
+        Language.KOK: "kok-IN",
+        Language.KOK_IN: "kok-IN",
+        Language.MAI: "mai-IN",
+        Language.MAI_IN: "mai-IN",
         Language.BN: "bn-IN",
         Language.BN_IN: "bn-IN",
         Language.GU: "gu-IN",
         Language.GU_IN: "gu-IN",
+        Language.SD: "sd-IN",
+        Language.SD_IN: "sd-IN",
+        Language.UR: "ur-IN",
+        Language.UR_IN: "ur-IN",
         Language.HI: "hi-IN",
         Language.HI_IN: "hi-IN",
         Language.KN: "kn-IN",
@@ -950,6 +958,8 @@ def language_to_sarvam_realtime_language(language: Language) -> str:
         Language.SAT_IN: "sat-IN",
         Language.SD: "sd-IN",
         Language.SD_IN: "sd-IN",
+        Language.UR: "ur-IN",
+        Language.UR_IN: "ur-IN",
         Language.TA: "ta-IN",
         Language.TA_IN: "ta-IN",
         Language.TE: "te-IN",
