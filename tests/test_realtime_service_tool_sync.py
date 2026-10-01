@@ -29,7 +29,7 @@ import pytest
 from pipecat.adapters.schemas.direct_function import tool_options
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
-from pipecat.processors.aggregators.llm_context import NOT_GIVEN
+from pipecat.processors.aggregators.llm_context import NOT_GIVEN, LLMContext
 from pipecat.services.llm_service import FunctionCallParams
 
 
@@ -56,6 +56,10 @@ def _sample_schema(handler) -> FunctionSchema:
 
 def _tools(handler) -> ToolsSchema:
     return ToolsSchema(standard_tools=[_sample_schema(handler)])
+
+
+def _names(tools) -> set[str]:
+    return {t.get("name") or t["function"]["name"] for t in tools}
 
 
 class _ServiceToolSyncTests:
@@ -94,6 +98,35 @@ class _ServiceToolSyncTests:
         self.assertEqual(list(service._functions), [])
 
 
+class TestRealtimeSessionTools(unittest.TestCase):
+    """The tool set a realtime adapter settles for a session."""
+
+    def test_the_contexts_own_tools_win_and_built_ins_ride_along(self):
+        mod = pytest.importorskip("pipecat.adapters.services.open_ai_realtime_adapter")
+        adapter = mod.OpenAIRealtimeLLMAdapter()
+        adapter.builtin_tools["delegate"] = FunctionSchema(
+            name="delegate", description="Delegate.", properties={}, required=[]
+        )
+        from_context = ToolsSchema(
+            standard_tools=[
+                FunctionSchema(name="from_context", description="c", properties={}, required=[])
+            ]
+        )
+        service_tools = _tools(sample_handler)
+
+        def tools(context, service_tools):
+            params = adapter.get_llm_invocation_params(context, service_tools=service_tools)
+            return _names(params["tools"])
+
+        self.assertEqual(
+            tools(LLMContext(tools=from_context), service_tools), {"from_context", "delegate"}
+        )
+        self.assertEqual(tools(LLMContext(), service_tools), {"sample", "delegate"})
+        self.assertEqual(tools(LLMContext(), None), {"delegate"})
+        bare = mod.OpenAIRealtimeLLMAdapter().get_llm_invocation_params(LLMContext())
+        self.assertEqual(bare["tools"], [])
+
+
 class _SessionUpdateToolPreservationTests:
     """Regression cases for services with a ``_send_session_update``.
 
@@ -116,6 +149,32 @@ class _SessionUpdateToolPreservationTests:
         self.assertIsInstance(service._settings.session_properties.tools, ToolsSchema)
         service._sync_registered_tool_handlers(NOT_GIVEN)
         self.assertTrue(service.has_function("sample"))
+
+    async def test_built_in_tools_join_the_service_tools(self):
+        service = self._service(_tools(sample_handler))
+        service.send_client_event = AsyncMock()
+        service.get_llm_adapter().builtin_tools["delegate"] = FunctionSchema(
+            name="delegate", description="Delegate.", properties={}, required=[]
+        )
+        service._context = LLMContext()
+
+        await service._send_session_update()
+
+        session = service.send_client_event.await_args.args[0].session
+        self.assertEqual(_names(session.tools), {"sample", "delegate"})
+
+    async def test_built_in_tools_are_sent_when_the_service_has_none(self):
+        service = self._service(None)
+        service.send_client_event = AsyncMock()
+        service.get_llm_adapter().builtin_tools["delegate"] = FunctionSchema(
+            name="delegate", description="Delegate.", properties={}, required=[]
+        )
+        service._context = LLMContext()
+
+        await service._send_session_update()
+
+        session = service.send_client_event.await_args.args[0].session
+        self.assertEqual(_names(session.tools), {"delegate"})
 
     async def test_session_properties_normalizes_tool_list(self):
         # A plain list passed to SessionProperties.tools is normalized to a
