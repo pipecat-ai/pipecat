@@ -7,6 +7,7 @@
 import base64
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from pipecat.adapters.base_llm_adapter import LLMContextConversionError
@@ -18,6 +19,7 @@ from pipecat.adapters.services.open_ai_responses_adapter import OpenAIResponsesL
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.utils.file_resolver import FileResolver, FileResolverError
 from pipecat.utils.file_storage import LocalFileStorage
+from pipecat.utils.security.ssrf import UrlReachability
 
 
 def _mock_http_session(response):
@@ -191,17 +193,34 @@ class TestFileResolverFetch(unittest.IsolatedAsyncioTestCase):
             result = await resolver.fetch(file_url)
         self.assertEqual(result, raw)
 
+    async def test_forget_forces_a_refetch(self):
+        """An application that knows a URL's content changed can drop the cache."""
+        raw_v1 = b"version 1"
+        raw_v2 = b"version 2"
+        resolver = FileResolver()
+        resolver._fetch_uncached = AsyncMock(side_effect=[raw_v1, raw_v2])
+
+        self.assertEqual(await resolver.fetch("https://example.com/live.pdf"), raw_v1)
+        self.assertEqual(await resolver.fetch("https://example.com/live.pdf"), raw_v1)
+
+        resolver.forget("https://example.com/live.pdf")
+
+        self.assertEqual(await resolver.fetch("https://example.com/live.pdf"), raw_v2)
+        self.assertIsNone(resolver.cached_data_url("https://example.com/live.pdf"))
+
     async def test_local_storage_upload_deleted_after_load(self):
-        """LocalFileStorage owns its uploads, so a consumed file is removed from disk."""
+        """LocalFileStorage owns its uploads: a consumed file is removed from disk,
+        and the resolver's cache becomes the surviving copy."""
         raw = b"%PDF-1.4 uploaded content"
         with tempfile.TemporaryDirectory() as tmpdir:
             storage = LocalFileStorage(tmpdir)
             file_url = await storage.save("doc.pdf", raw)
             resolver = FileResolver(file_storage=storage)
-            await resolver.fetch(file_url)
+            self.assertEqual(await resolver.fetch(file_url), raw)
 
-            with self.assertRaises(FileResolverError):
-                await resolver.fetch(file_url)
+            self.assertEqual(list(Path(tmpdir).iterdir()), [])
+            # Deleted from disk, but still resolvable from the cache.
+            self.assertEqual(await resolver.fetch(file_url), raw)
 
     async def test_storage_without_delete_after_load_keeps_the_file(self):
         """A backend that doesn't own its URLs (delete_after_load False) is never deleted from."""
@@ -290,15 +309,21 @@ class TestAdapterSupportsFileUrl(unittest.TestCase):
 
 
 class TestResolveFileItems(unittest.IsolatedAsyncioTestCase):
-    """The resolution pass: pass through what the provider can consume, fetch and inline the rest."""
+    """The resolution pass: pass through what the provider can consume, fetch the
+    rest into the resolver's caches — never touching the context itself."""
 
     RAW = b"%PDF-1.4 fetched"
 
-    def _resolver(self, *, classify="public"):
+    def _resolver(self):
+        """A real resolver with the network edge stubbed out: _fetch_uncached is
+        mocked, so fetch() still populates the caches."""
         resolver = FileResolver()
-        resolver.classify = AsyncMock(return_value=classify)
-        resolver.fetch = AsyncMock(return_value=self.RAW)
+        resolver._fetch_uncached = AsyncMock(return_value=self.RAW)
         return resolver
+
+    @staticmethod
+    def _seed_reachability(resolver, url, verdict):
+        resolver._reachability_cache[url] = verdict
 
     @staticmethod
     def _file_url_context(url, mime="application/pdf", filename="doc.pdf"):
@@ -306,118 +331,198 @@ class TestResolveFileItems(unittest.IsolatedAsyncioTestCase):
         return LLMContext(messages=[message])
 
     @staticmethod
-    def _file_item(context):
-        return context.get_messages()[0]["content"][-1]
+    def _snapshot(context):
+        import copy
 
-    async def test_supported_public_url_passes_through(self):
+        return copy.deepcopy(context.get_messages())
+
+    async def test_supported_public_url_passes_through_untouched(self):
         context = self._file_url_context("https://example.com/a.png", mime="image/png")
-        resolver = self._resolver(classify="public")
-        await OpenAILLMAdapter().resolve_file_items(context, resolver)
-
-        item = self._file_item(context)
-        self.assertEqual(item["type"], "file_url")
-        self.assertEqual(item["file"]["url"], "https://example.com/a.png")
-        resolver.fetch.assert_not_called()
-
-    async def test_unsupported_url_is_fetched_and_inlined(self):
-        context = self._file_url_context("https://example.com/a.pdf")
+        before = self._snapshot(context)
         resolver = self._resolver()
-        await OpenAILLMAdapter().resolve_file_items(context, resolver)
+        self._seed_reachability(resolver, "https://example.com/a.png", UrlReachability.PUBLIC)
 
-        resolver.fetch.assert_called_once_with("https://example.com/a.pdf")
-        item = self._file_item(context)
-        self.assertEqual(item["type"], "file_base64")
+        adapter = OpenAILLMAdapter()
+        adapter.file_resolver = resolver
+        await adapter.prepare_file_content(context)
+
+        resolver._fetch_uncached.assert_not_called()
+        self.assertEqual(context.get_messages(), before)
+
+    async def test_unsupported_url_is_fetched_and_inlined_at_conversion(self):
+        context = self._file_url_context("https://example.com/a.pdf")
+        before = self._snapshot(context)
+        resolver = self._resolver()
+
+        adapter = OpenAILLMAdapter()
+        adapter.file_resolver = resolver
+        params = await adapter.prepare_llm_invocation_params(
+            context, convert_developer_to_user=False
+        )
+
+        resolver._fetch_uncached.assert_called_once_with("https://example.com/a.pdf")
+        # The provider request carries the inlined bytes...
+        item = params["messages"][0]["content"][-1]
         expected_b64 = base64.b64encode(self.RAW).decode()
+        self.assertEqual(item["type"], "file")
         self.assertEqual(item["file"]["file_data"], f"data:application/pdf;base64,{expected_b64}")
-        self.assertEqual(item["file"]["filename"], "doc.pdf")
-        self.assertEqual(item["file"]["mime_type"], "application/pdf")
+        # ...while the canonical context still holds the URL, untouched.
+        self.assertEqual(context.get_messages(), before)
 
     async def test_supported_url_on_private_allowed_network_is_fetched(self):
         context = self._file_url_context("https://internal.example.com/a.pdf")
-        resolver = self._resolver(classify="allowed")
-        await AnthropicLLMAdapter().resolve_file_items(context, resolver)
+        resolver = self._resolver()
+        self._seed_reachability(
+            resolver, "https://internal.example.com/a.pdf", UrlReachability.ALLOWED
+        )
 
-        resolver.fetch.assert_called_once()
-        self.assertEqual(self._file_item(context)["type"], "file_base64")
+        adapter = AnthropicLLMAdapter()
+        adapter.file_resolver = resolver
+        await adapter.prepare_file_content(context)
+
+        resolver._fetch_uncached.assert_called_once()
+        self.assertIsNotNone(resolver.cached_data_url("https://internal.example.com/a.pdf"))
 
     async def test_cloud_uri_passes_through_without_reachability_check(self):
         context = self._file_url_context("s3://bucket/a.pdf")
         resolver = self._resolver()
-        await AWSBedrockLLMAdapter().resolve_file_items(context, resolver)
 
-        resolver.classify.assert_not_called()
-        resolver.fetch.assert_not_called()
-        self.assertEqual(self._file_item(context)["type"], "file_url")
+        with patch(
+            "pipecat.utils.file_resolver.classify_url_reachability", new=AsyncMock()
+        ) as classify_mock:
+            adapter = AWSBedrockLLMAdapter()
+        adapter.file_resolver = resolver
+        await adapter.prepare_file_content(context)
 
-    async def test_pass_through_is_memoized_per_adapter(self):
+        classify_mock.assert_not_called()
+        resolver._fetch_uncached.assert_not_called()
+
+    async def test_reachability_classified_once_per_url(self):
+        """DNS classification is cached on the resolver, so repeated resolution
+        passes — and other adapters sharing the resolver — don't re-resolve."""
         context = self._file_url_context("https://example.com/a.png", mime="image/png")
-        resolver = self._resolver(classify="public")
-        adapter = OpenAILLMAdapter()
-        await adapter.resolve_file_items(context, resolver)
-        await adapter.resolve_file_items(context, resolver)
-
-        resolver.classify.assert_called_once()
-
-    async def test_switching_adapters_reevaluates_the_url(self):
-        """A URL one provider passes through gets fetched when another can't consume it."""
-        context = self._file_url_context("gs://bucket/a.pdf")
         resolver = self._resolver()
 
-        await GeminiVertexLLMAdapter().resolve_file_items(context, resolver)
-        self.assertEqual(self._file_item(context)["type"], "file_url")
-        resolver.fetch.assert_not_called()
+        with patch(
+            "pipecat.utils.file_resolver.classify_url_reachability",
+            new=AsyncMock(return_value=UrlReachability.PUBLIC),
+        ) as classify_mock:
+            adapter = OpenAILLMAdapter()
+            adapter.file_resolver = resolver
+            await adapter.prepare_file_content(context)
+            await adapter.prepare_file_content(context)
+            other_adapter = OpenAIResponsesLLMAdapter()
+            other_adapter.file_resolver = resolver
+            await other_adapter.prepare_file_content(context)
 
-        await AnthropicLLMAdapter().resolve_file_items(context, resolver)
-        resolver.fetch.assert_called_once_with("gs://bucket/a.pdf")
-        self.assertEqual(self._file_item(context)["type"], "file_base64")
+        classify_mock.assert_called_once()
 
-    async def test_provider_variants_do_not_share_pass_through_decisions(self):
-        """Adapters sharing an LLM-specific-message id (Vertex vs developer-API Gemini)
-        still re-evaluate each other's pass-through decisions."""
+    async def test_switching_adapters_shares_the_download(self):
+        """A URL one provider passes through gets fetched when another can't
+        consume it — and adapters sharing the resolver download it only once."""
         context = self._file_url_context("gs://bucket/a.pdf")
+        before = self._snapshot(context)
         resolver = self._resolver()
 
-        await GeminiVertexLLMAdapter().resolve_file_items(context, resolver)
-        resolver.fetch.assert_not_called()
+        adapter = GeminiVertexLLMAdapter()
+        adapter.file_resolver = resolver
+        await adapter.prepare_file_content(context)
+        resolver._fetch_uncached.assert_not_called()
 
-        await GeminiLLMAdapter().resolve_file_items(context, resolver)
-        resolver.fetch.assert_called_once_with("gs://bucket/a.pdf")
-        self.assertEqual(self._file_item(context)["type"], "file_base64")
+        adapter = AnthropicLLMAdapter()
+        adapter.file_resolver = resolver
+        await adapter.prepare_file_content(context)
+        resolver._fetch_uncached.assert_called_once_with("gs://bucket/a.pdf")
 
-    async def test_raw_bytes_cached_for_adapters_that_prefer_them(self):
+        # A third provider (raw-bytes consumer) reuses the cached download.
+        adapter = AWSBedrockLLMAdapter()
+        adapter.file_resolver = resolver
+        await adapter.prepare_file_content(context)
+        resolver._fetch_uncached.assert_called_once()
+        self.assertEqual(resolver.cached_bytes("gs://bucket/a.pdf"), self.RAW)
+
+        self.assertEqual(context.get_messages(), before)
+
+    async def test_data_url_form_prepared_for_base64_consumers(self):
         context = self._file_url_context("https://example.com/a.pdf")
         resolver = self._resolver()
-        await AWSBedrockLLMAdapter().resolve_file_items(context, resolver)
+        self._seed_reachability(resolver, "https://example.com/a.pdf", UrlReachability.ALLOWED)
 
-        self.assertEqual(self._file_item(context)["file"]["_raw_bytes"], self.RAW)
+        adapter = AnthropicLLMAdapter()
+        adapter.file_resolver = resolver
+        await adapter.prepare_file_content(context)
+
+        expected_b64 = base64.b64encode(self.RAW).decode()
+        self.assertEqual(
+            resolver.cached_data_url("https://example.com/a.pdf"),
+            f"data:application/pdf;base64,{expected_b64}",
+        )
 
     async def test_inline_base64_decoded_once_for_adapters_that_prefer_raw_bytes(self):
         raw = b"inline content"
         b64 = base64.b64encode(raw).decode()
+        data_url = f"data:application/pdf;base64,{b64}"
         message = await LLMContext.create_file_message(
-            type="bytes", format="application/pdf", file=f"data:application/pdf;base64,{b64}"
+            type="bytes", format="application/pdf", file=data_url
         )
         context = LLMContext(messages=[message])
-        resolver = self._resolver()
-        await AWSBedrockLLMAdapter().resolve_file_items(context, resolver)
+        before = self._snapshot(context)
+        resolver = FileResolver()
 
-        item = self._file_item(context)
-        self.assertEqual(item["file"]["_raw_bytes"], raw)
+        adapter = AWSBedrockLLMAdapter()
+        adapter.file_resolver = resolver
+        await adapter.prepare_file_content(context)
+
+        self.assertEqual(resolver.cached_bytes(data_url), raw)
+        self.assertEqual(context.get_messages(), before)
+
+    async def test_logging_conversion_reads_the_same_caches(self):
+        """get_messages_for_logging converts the context too; a resolved file
+        must not blow it up just because that path doesn't run resolution."""
+        context = self._file_url_context("https://example.com/a.pdf")
+        resolver = self._resolver()
+        self._seed_reachability(resolver, "https://example.com/a.pdf", UrlReachability.ALLOWED)
+
+        adapter = AWSBedrockLLMAdapter()
+        adapter.file_resolver = resolver
+        await adapter.prepare_llm_invocation_params(context)
+
+        messages = adapter.get_messages_for_logging(context)
+        self.assertEqual(len(messages), 1)
 
     async def test_fetch_failure_raises_conversion_error(self):
         context = self._file_url_context("https://example.com/a.pdf")
         resolver = self._resolver()
-        resolver.fetch = AsyncMock(side_effect=FileResolverError("nope"))
+        resolver._fetch_uncached = AsyncMock(side_effect=FileResolverError("nope"))
 
+        adapter = OpenAILLMAdapter()
+        adapter.file_resolver = resolver
         with self.assertRaises(LLMContextConversionError):
-            await OpenAILLMAdapter().resolve_file_items(context, resolver)
+            await adapter.prepare_file_content(context)
+
+    async def test_prepare_without_resolver_skips_resolution_and_kwarg(self):
+        """Adapters that don't take a file_resolver kwarg (e.g. the realtime
+        family) stay callable through prepare when no resolver is configured."""
+
+        class KwargIntolerantAdapter(OpenAILLMAdapter):
+            def get_llm_invocation_params(self, context, *, convert_developer_to_user):  # type: ignore[override]
+                return super().get_llm_invocation_params(
+                    context, convert_developer_to_user=convert_developer_to_user
+                )
+
+        context = LLMContext(messages=[{"role": "user", "content": "hello"}])
+        params = await KwargIntolerantAdapter().prepare_llm_invocation_params(
+            context, convert_developer_to_user=False
+        )
+        self.assertEqual(params["messages"][0]["content"], "hello")
 
     async def test_text_only_context_is_untouched(self):
         context = LLMContext(messages=[{"role": "user", "content": "hello"}])
         resolver = self._resolver()
-        await OpenAILLMAdapter().resolve_file_items(context, resolver)
-        resolver.fetch.assert_not_called()
-        resolver.classify.assert_not_called()
+        adapter = OpenAILLMAdapter()
+        adapter.file_resolver = resolver
+        await adapter.prepare_file_content(context)
+        resolver._fetch_uncached.assert_not_called()
 
 
 if __name__ == "__main__":

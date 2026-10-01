@@ -12,7 +12,7 @@ from typing import Any, Required, TypedDict, cast
 from openai._types import NotGiven as OpenAINotGiven
 from openai.types.responses import FunctionToolParam, ResponseInputItemParam, ToolParam
 
-from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
+from pipecat.adapters.base_llm_adapter import BaseLLMAdapter, LLMContextConversionError
 from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
 from pipecat.adapters.services.open_ai_adapter import openai_from_llm_context_tools
 from pipecat.processors.aggregators.llm_context import (
@@ -310,20 +310,46 @@ class OpenAIResponsesLLMAdapter(BaseLLMAdapter[OpenAIResponsesLLMInvocationParam
                     )
             elif part_type == "file_url":
                 f_data = part["file"]
-                if f_data["mime_type"].startswith("image/"):
-                    result.append(
-                        {
-                            "type": "input_image",
-                            "image_url": f_data["url"],
-                        }
-                    )
+                # inlined_file_content raises a plain ValueError so adapters
+                # with a message-level wrapper don't double-wrap; this adapter
+                # has no such wrapper, so wrap here.
+                try:
+                    resolved = self.inlined_file_content(f_data)
+                except ValueError as e:
+                    raise LLMContextConversionError(e) from e
+                if resolved is None:
+                    if f_data["mime_type"].startswith("image/"):
+                        result.append(
+                            {
+                                "type": "input_image",
+                                "image_url": f_data["url"],
+                            }
+                        )
+                    else:
+                        result.append(
+                            {
+                                "type": "input_file",
+                                "file_url": f_data["url"],
+                            }
+                        )
                 else:
-                    result.append(
-                        {
-                            "type": "input_file",
-                            "file_url": f_data["url"],
-                        }
-                    )
+                    # Non-raw adapters always cache the data-URL form.
+                    data_url = cast(str, resolved)
+                    if f_data["mime_type"].startswith("image/"):
+                        result.append(
+                            {
+                                "type": "input_image",
+                                "image_url": data_url,
+                            }
+                        )
+                    else:
+                        result.append(
+                            {
+                                "type": "input_file",
+                                "filename": f_data.get("filename", ""),
+                                "file_data": data_url,
+                            }
+                        )
             else:
                 # Pass through other types as-is. Note: "input_audio" is not
                 # yet supported by the Responses API (coming soon per OpenAI
