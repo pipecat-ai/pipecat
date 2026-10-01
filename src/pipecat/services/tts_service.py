@@ -1169,7 +1169,11 @@ class TTSService(AIService):
         audio_contexts = self.get_audio_contexts()
         if audio_contexts:
             for ctx_id in audio_contexts:
-                await self.on_audio_context_interrupted(context_id=ctx_id)
+                # A failing hook must not skip restarting the audio context task below.
+                try:
+                    await self.on_audio_context_interrupted(context_id=ctx_id)
+                except Exception as e:
+                    logger.warning(f"{self} on_audio_context_interrupted failed for {ctx_id}: {e}")
         self.reset_active_audio_context()
         self._turn_context_id = None
         self._word_last_pts = 0
@@ -1827,7 +1831,13 @@ class TTSService(AIService):
                 # If audio resumes after a timeout, the context is recreated
                 # without the partial sample held here.
                 self._audio_remainders.pop(context_id, None)
-                await self.on_audio_context_completed(context_id=context_id)
+                # A failing hook must not end this task, or no more audio is played.
+                try:
+                    await self.on_audio_context_completed(context_id=context_id)
+                except Exception as e:
+                    logger.warning(
+                        f"{self} on_audio_context_completed failed for {context_id}: {e}"
+                    )
                 self.reset_active_audio_context()
             else:
                 running = False
