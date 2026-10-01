@@ -305,6 +305,9 @@ class _FakeConversationJudge:
     turn, a metric left out of a dict passing that turn.
     """
 
+    GOAL_CONFIDENCE = 0.8
+    TURN_CONFIDENCE = 0.9
+
     def __init__(self, verdicts: list[str], turn_verdicts: list[dict[str, str]] | None = None):
         self.verdicts = list(verdicts)
         self.turn_verdicts = list(turn_verdicts or [])
@@ -329,7 +332,10 @@ class _FakeConversationJudge:
         self.run_criteria = dict(criteria)
         turns = sum(1 for e in self.transcript if e["role"] == "assistant")
         goal = JudgeVerdict(
-            verdict=self.verdicts.pop(0), reason=f"because {success}", raw_response=""
+            verdict=self.verdicts.pop(0),
+            reason=f"because {success}",
+            raw_response="",
+            confidence=self.GOAL_CONFIDENCE,
         )
         by_name = {}
         for name, criterion in criteria.items():
@@ -341,6 +347,7 @@ class _FakeConversationJudge:
                         verdict=scripted.get(name, "yes"),
                         reason=f"because {criterion}",
                         raw_response="",
+                        confidence=self.TURN_CONFIDENCE,
                     )
                 )
         return RunVerdicts(goal=goal, turns=by_name)
@@ -490,6 +497,35 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(result.failure)
         self.assertEqual(result.messages, judge.transcript)
         self.assertIn(END_CALL_EVENT, [e["type"] for e in stream.events_seen])
+
+    async def test_the_judges_confidences_reach_the_result(self):
+        judge = _FakeConversationJudge(["yes"], [{"politeness": "no"}])
+        metrics = [EvalSimulationMetric("politeness", "stayed polite")]
+        driver, stream, llm, _ = _driver(_simulation(metrics=metrics), judge, [])
+
+        async def conversation():
+            await stream.append({"type": "llm_response", "text": "What do you want."})
+            await stream.append({"type": PERSONA_TURN_EVENT, "text": "The capital of Germany?"})
+            await _end_call(llm, success=True, reason="answered")
+            await stream.append({"type": "llm_response", "text": "Berlin."})
+
+        task = asyncio.create_task(conversation())
+        await driver.run()
+        await task
+        result = driver.result(
+            failures=[], duration_ms=10, events_seen=stream.events_seen, debug_log=[]
+        )
+        self.assertEqual(result.confidence, _FakeConversationJudge.GOAL_CONFIDENCE)
+        self.assertEqual(
+            [v.confidence for v in result.metrics[0].verdicts],
+            [_FakeConversationJudge.TURN_CONFIDENCE] * len(result.metrics[0].verdicts),
+        )
+        self.assertTrue(result.metrics[0].verdicts)
+
+        errored = driver.result(
+            failures=[], duration_ms=10, events_seen=[], debug_log=[], skipped="no audio"
+        )
+        self.assertIsNone(errored.confidence)
 
     async def test_a_metric_below_its_min_score_fails_the_run(self):
         judge = _FakeConversationJudge(["yes"], [{"politeness": "no"}])

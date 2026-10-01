@@ -311,7 +311,11 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
 
             if failure:
                 failures.append(failure)
-                resolved.append(EvalExpectationResult(exp_idx, expectation.event, passed=False))
+                resolved.append(
+                    EvalExpectationResult(
+                        exp_idx, expectation.event, passed=False, confidence=failure.confidence
+                    )
+                )
                 self._trace.log(f"FAIL: {expectation.event}: {failure.reason}")
                 await self._progress(
                     EvalScriptTurnProgress(
@@ -321,7 +325,13 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
             else:
                 matched = self._matcher.last_match_text
                 resolved.append(
-                    EvalExpectationResult(exp_idx, expectation.event, passed=True, matched=matched)
+                    EvalExpectationResult(
+                        exp_idx,
+                        expectation.event,
+                        passed=True,
+                        matched=matched,
+                        confidence=self._matcher.last_match_confidence,
+                    )
                 )
                 await self._progress(
                     EvalScriptTurnProgress(turn_idx, exp_idx, expectation.event, "matched", matched)

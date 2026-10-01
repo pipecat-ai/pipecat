@@ -533,6 +533,7 @@ if __name__ == "__main__":
 import dataclasses  # noqa: E402
 
 from pipecat.evals.results import (  # noqa: E402
+    EvalAssertionFailure,
     EvalExpectationResult,
     EvalScriptResult,
     EvalScriptTurnResult,
@@ -751,7 +752,7 @@ class TestScenarioRecords(unittest.TestCase):
                     status="passed",
                     expectations=[
                         EvalExpectationResult(0, "llm_marker", True, "◐"),
-                        EvalExpectationResult(1, "llm_response", True, "Hi"),
+                        EvalExpectationResult(1, "llm_response", True, "Hi", confidence=0.52),
                     ],
                     duration_ms=50,
                 )
@@ -787,16 +788,41 @@ class TestScenarioRecords(unittest.TestCase):
                         "event_name": "llm_marker",
                         "passed": True,
                         "matched": "◐",
+                        "confidence": None,
                     },
                     {
                         "expectation_index": 1,
                         "event_name": "llm_response",
                         "passed": True,
                         "matched": "Hi",
+                        "confidence": 0.52,
                     },
                 ],
             )
             self.assertNotIn("events_seen", record)
+
+    def test_results_jsonl_record_keeps_the_judges_confidence_in_a_failure(self):
+        result = EvalScriptResult(
+            scenario_name="greet",
+            passed=False,
+            failures=[
+                EvalAssertionFailure(0, 0, "llm_response", "judge said no", "judge_no", 0.97)
+            ],
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            run = EvalRun(
+                bot="voice/x.py",
+                scenario="greet",
+                scenario_path=base / "greet.yaml",
+                status="done",
+                result=result,
+            )
+            _append_result(base / "results.jsonl", run, "voice_x.py__greet", base, None)
+            record = json.loads((base / "results.jsonl").read_text())
+            self.assertEqual(record["failures"][0]["confidence"], 0.97)
+            rebuilt = _result_from_dict(json.loads(json.dumps(dataclasses.asdict(result))))
+            self.assertEqual(rebuilt.failures[0].confidence, 0.97)
 
 
 class TestSimulationRecords(unittest.TestCase):
@@ -813,8 +839,8 @@ class TestSimulationRecords(unittest.TestCase):
                     reason="turn 2: curt",
                     min_score=1.0,
                     verdicts=[
-                        EvalSimulationTurnVerdict(1, True, "warm"),
-                        EvalSimulationTurnVerdict(2, False, "curt"),
+                        EvalSimulationTurnVerdict(1, True, "warm", "yes", 0.9),
+                        EvalSimulationTurnVerdict(2, False, "curt", "no", 0.6),
                     ],
                 )
             ],
@@ -823,6 +849,7 @@ class TestSimulationRecords(unittest.TestCase):
             ended_by="end_call",
             end_call={"success": True, "reason": "done"},
             duration_ms=1234,
+            confidence=0.83,
         )
         rebuilt = _simulation_result_from_dict(json.loads(json.dumps(dataclasses.asdict(result))))
         self.assertEqual(rebuilt, result)
@@ -843,9 +870,17 @@ class TestSimulationRecords(unittest.TestCase):
                     simulation_name="book",
                     succeeded=False,
                     reason="no table",
+                    metrics=[
+                        EvalSimulationMetricScore(
+                            name="politeness",
+                            score=1.0,
+                            verdicts=[EvalSimulationTurnVerdict(1, True, "warm", "yes", 0.9)],
+                        )
+                    ],
                     turns=3,
                     ended_by="bot",
                     events_seen=[{"type": "llm_started"}],
+                    confidence=0.71,
                 ),
             )
             _append_result(base / "results.jsonl", run, "flows_x.py__book__002", base, None)
@@ -858,6 +893,8 @@ class TestSimulationRecords(unittest.TestCase):
             self.assertFalse(record["succeeded"])
             self.assertEqual(record["ended_by"], "bot")
             self.assertEqual(record["reason"], "no table")
+            self.assertEqual(record["confidence"], 0.71)
+            self.assertEqual(record["metrics"][0]["verdicts"][0]["confidence"], 0.9)
             self.assertEqual(record["events_seen"], [{"type": "llm_started"}])
 
 
