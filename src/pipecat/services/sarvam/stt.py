@@ -1100,15 +1100,9 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
         # `language` may still be a raw string here, since the base class only
         # normalizes it once super().__init__() runs.
         if not language_code_given:
-            language = _as_language(default_settings.language)
-            if language is not None:
-                default_settings.language_code = language_to_sarvam_realtime_language(language)
-            elif isinstance(default_settings.language, str):
-                logger.warning(
-                    f"Ignoring unrecognized language {default_settings.language!r}; "
-                    f"using language_code={default_settings.language_code!r}. "
-                    "Use settings.language_code to pass a provider-specific code."
-                )
+            language_code = _language_code_for(default_settings.language)
+            if language_code is not None:
+                default_settings.language_code = language_code
 
         self._validate_settings(default_settings)
 
@@ -1411,24 +1405,17 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
         ``language`` but none of the Sarvam fields, so the delta is widened to
         these settings first. Mirrors the constructor: an explicit
         ``language_code`` wins, since it also expresses ``auto``, which has no
-        :class:`Language` equivalent. Unrecognized strings leave the current
-        ``language_code`` unchanged and log a warning.
+        :class:`Language` equivalent.
         """
         if not isinstance(delta, self.Settings):
             delta = self.Settings.from_mapping(delta.given_fields())
         if is_given(delta.language_code):
             return delta
-        language = _as_language(delta.language)
-        if language is None:
-            if isinstance(delta.language, str):
-                logger.warning(
-                    f"Ignoring unrecognized language {delta.language!r}; "
-                    f"keeping language_code={self._settings.language_code!r}. "
-                    "Use settings.language_code to pass a provider-specific code."
-                )
+        language_code = _language_code_for(delta.language)
+        if language_code is None:
             return delta
         derived = delta.copy()
-        derived.language_code = language_to_sarvam_realtime_language(language)
+        derived.language_code = language_code
         return derived
 
     async def _handle_speech_start(self, message: dict[str, Any]):
@@ -1656,3 +1643,17 @@ def _as_language(value: Any) -> Language | None:
         return Language(value)
     except ValueError:
         return None
+
+
+def _language_code_for(value: Any) -> str | None:
+    """Resolve a settings ``language`` value to a Sarvam ``language_code``.
+
+    A string that is not a :class:`Language` value is passed through as-is, so
+    a code Sarvam supports before Pipecat does still reaches the server.
+    """
+    language = _as_language(value)
+    if language is not None:
+        return language_to_sarvam_realtime_language(language)
+    if isinstance(value, str):
+        return value
+    return None

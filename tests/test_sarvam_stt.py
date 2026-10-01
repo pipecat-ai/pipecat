@@ -255,20 +255,18 @@ def test_base_language_settings_use_sarvam_locale_codes(language, legacy_code, r
 
 
 @pytest.mark.asyncio
-async def test_realtime_unrecognized_language_keeps_fallback_and_warns(monkeypatch):
-    logger = _CapturingLogger()
-    monkeypatch.setattr("pipecat.services.sarvam.stt.logger", logger)
+async def test_realtime_unrecognized_language_is_passed_through():
     service = SarvamRealtimeSTTService(
         api_key="test-key", settings=SarvamRealtimeSTTService.Settings(language="new-IN")
     )
-    assert _query(service)["language_code"] == ["en-IN"]
+    assert _query(service)["language_code"] == ["new-IN"]
 
     service._websocket = _FakeWebsocket()
-    await service._update_settings(STTSettings(language="new-IN"))
-    assert service._websocket.sent == []
-    assert service._settings.language_code == "en-IN"
-    assert len(logger.warning_messages) == 2
-    assert all("new-IN" in message for message in logger.warning_messages)
+    await service._update_settings(STTSettings(language="next-IN"))
+    assert [json.loads(message) for message in service._websocket.sent] == [
+        {"event": "config.update", "language_code": "next-IN"}
+    ]
+    assert service._settings.language_code == "next-IN"
 
 
 @pytest.mark.asyncio
@@ -303,8 +301,9 @@ async def test_realtime_raw_language_through_pipeline_and_websocket():
     assert [message for message in messages if message["event"] == "config.update"] == [
         {"event": "config.update", "language_code": "ks-IN"},
         {"event": "config.update", "language_code": "auto"},
+        {"event": "config.update", "language_code": "new-IN"},
     ]
-    assert service._settings.language_code == "auto"
+    assert service._settings.language_code == "new-IN"
 
 
 @pytest.mark.parametrize(
