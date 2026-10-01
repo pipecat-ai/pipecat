@@ -1295,3 +1295,88 @@ def _capture_class(frames):
         frames.append(frame_cls)
 
     return inner
+
+
+def test_realtime_keyterms_are_json_encoded_and_copied():
+    terms = ["New Delhi", "नाम", 'quote" & plus+', "x" * 64] + [f"term{i}" for i in range(46)]
+    service = SarvamRealtimeSTTService(
+        api_key="test-key",
+        settings=SarvamRealtimeSTTService.Settings(model="saaras:v4"),
+        keyterms=terms,
+    )
+    expected = list(terms)
+    terms.append("not part of the connection")
+    query = _query(service)
+    assert json.loads(query["keyterms"][0]) == expected
+    assert query["model"] == ["saaras:v4"]
+    assert query["language_code"] == ["en-IN"]
+    assert "keyterms" not in _query(SarvamRealtimeSTTService(api_key="test-key"))
+
+
+@pytest.mark.parametrize("keyterms", [None, [], ["New Delhi", "नाम", 'quote" & plus+']])
+@pytest.mark.asyncio
+async def test_legacy_sdk_carries_keyterms_on_every_connection(monkeypatch, keyterms):
+    from contextlib import asynccontextmanager
+
+    queries = []
+    headers = []
+
+    @asynccontextmanager
+    async def fake_connect(url, **kwargs):
+        queries.append(parse_qs(urlparse(url).query))
+        headers.append(kwargs["extra_headers"])
+        yield _FakeWebsocket()
+
+    monkeypatch.setattr(
+        "sarvamai.speech_to_text_streaming.client.websockets_client_connect", fake_connect
+    )
+    service = SarvamSTTService(api_key="test-key", sample_rate=16000, keyterms=keyterms)
+    expected = list(keyterms) if keyterms is not None else None
+    if keyterms is not None:
+        keyterms.append("not part of the connection")
+    await service.setup(frame_processor_setup(TaskManager()))
+    try:
+        assert service._socket_client is not None
+        await service._disconnect()
+        await service._connect()
+        assert service._socket_client is not None
+        await service._disconnect()
+    finally:
+        await service.cleanup()
+    assert len(queries) == 2
+    for query in queries:
+        if expected is None:
+            assert "keyterms" not in query
+        else:
+            assert json.loads(query["keyterms"][0]) == expected
+        assert query["model"] == ["saaras:v4"]
+        assert query["sample_rate"] == ["16000"]
+    assert all(h["User-Agent"] == sdk_headers()["User-Agent"] for h in headers)
+
+
+@pytest.mark.asyncio
+async def test_realtime_websocket_receives_keyterms():
+    queries = []
+
+    async def capture(websocket):
+        queries.append(parse_qs(urlparse(websocket.request.path).query))
+        await websocket.wait_closed()
+
+    async with serve(capture, "127.0.0.1", 0) as server:
+        port = server.sockets[0].getsockname()[1]
+        service = SarvamRealtimeSTTService(
+            api_key="test-key",
+            base_url=f"ws://127.0.0.1:{port}",
+            settings=SarvamRealtimeSTTService.Settings(model="saaras:v4"),
+            keyterms=["New Delhi", "नाम"],
+        )
+        await service._connect_websocket()
+        await service._disconnect_websocket()
+    assert json.loads(queries[0]["keyterms"][0]) == ["New Delhi", "नाम"]
+
+
+@pytest.mark.asyncio
+async def test_keyterms_cannot_be_updated_mid_stream():
+    service = SarvamRealtimeSTTService(api_key="test-key")
+    with pytest.raises(ValueError, match="keyterms"):
+        await service.update_config(keyterms=["Sarvam"])
