@@ -395,6 +395,52 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
             expected_down_frames=expected_down_frames,
         )
 
+    async def test_a_start_proposed_while_the_stop_awaits_its_transcript_extends_the_turn(self):
+        """A service that proposes the stop before its transcript can see the user resume.
+
+        The stop strategy holds the turn while it waits on the transcript. A
+        start proposed in that window keeps the turn open, so both halves land
+        in one user message and the bot is interrupted only once.
+
+        The hold is set far longer than the test runs, so the turn can only
+        close on the stop proposed after the final transcript.
+        """
+        context = LLMContext()
+        user_aggregator = LLMUserAggregator(
+            context,
+            params=LLMUserAggregatorParams(
+                user_turn_strategies=UserTurnStrategies(
+                    start=[ExternalUserTurnStartStrategy()],
+                    stop=[ExternalUserTurnStopStrategy(timeout=60.0)],
+                )
+            ),
+        )
+
+        frames_to_send = [
+            ProposedUserStartedSpeakingFrame(),
+            InterimTranscriptionFrame(text="I'd like to book a", user_id="", timestamp="now"),
+            ProposedUserStoppedSpeakingFrame(),
+            TranscriptionFrame(text="I'd like to book a", user_id="", timestamp="now"),
+            ProposedUserStartedSpeakingFrame(),
+            InterimTranscriptionFrame(text="table for", user_id="", timestamp="now"),
+            TranscriptionFrame(text="table for two", user_id="", timestamp="now"),
+            ProposedUserStoppedSpeakingFrame(),
+            SleepFrame(sleep=0.3),
+        ]
+        received_down, _ = await run_test(
+            Pipeline([user_aggregator]),
+            frames_to_send=frames_to_send,
+            expected_down_frames=None,
+        )
+        names = [type(f).__name__ for f in received_down]
+        self.assertEqual(names.count("UserStartedSpeakingFrame"), 1)
+        self.assertEqual(names.count("InterruptionFrame"), 1)
+        self.assertEqual(names.count("UserStoppedSpeakingFrame"), 1)
+        self.assertEqual(
+            [m["content"] for m in context.get_messages() if m["role"] == "user"],
+            ["I'd like to book a table for two"],
+        )
+
     async def test_turn_closes_on_the_stop_signal_when_the_transcript_precedes_it(self):
         """A service that pushes the transcript before proposing the stop closes at once.
 
