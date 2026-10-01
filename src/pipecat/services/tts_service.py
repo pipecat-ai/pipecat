@@ -2157,18 +2157,32 @@ class WebsocketTTSService(TTSService, WebsocketService):
         await super().cleanup()
         await self._disconnect()
 
-    async def _websocket_connect(self, uri: str, **kwargs):
-        # Providers keep context state per connection and don't resume it on a
-        # new one, so audio still due on the old connection never arrives. Close
-        # every open context (audio already received still plays), and move a
-        # turn in progress to a new context ID so its remaining sentences open a
-        # fresh provider context.
+    async def _close_connection_contexts(self):
+        """End the audio contexts of a connection that is being replaced.
+
+        Providers keep context state per connection and don't resume it on a
+        new one, so audio still due on the old connection never arrives. Every
+        open context is closed (audio already received still plays), and a turn
+        in progress moves to a new context ID so its remaining sentences open a
+        fresh provider context. Reopening a connection that was already closed,
+        to send the text at hand, doesn't come through here, so the context it
+        sends to stays open.
+        """
         for context_id in self.get_audio_contexts():
             await self.remove_audio_context(context_id)
         if self._turn_context_id:
             self._turn_context_id = None
             self._turn_context_id = self.create_context_id()
-        return await super()._websocket_connect(uri, **kwargs)
+
+    async def _disconnect(self):
+        # Subclasses call super()._disconnect() first, so this runs before they
+        # close their socket.
+        await self._close_connection_contexts()
+        await super()._disconnect()
+
+    async def _reconnect_websocket(self, attempt_number: int) -> bool:
+        await self._close_connection_contexts()
+        return await super()._reconnect_websocket(attempt_number)
 
     async def _report_error(self, error: ErrorFrame, force_treat_as_permanent: bool = False):
         await self._call_event_handler("on_connection_error", error.error)
