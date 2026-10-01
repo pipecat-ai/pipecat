@@ -64,6 +64,7 @@ def _make_service(**kwargs):
     adapter = MagicMock()
     adapter.get_messages_for_logging.return_value = []
     adapter.get_llm_invocation_params.return_value = {}
+    adapter.prepare_llm_invocation_params = AsyncMock(return_value={})
     service.get_llm_adapter = MagicMock(return_value=adapter)
     service._build_response_params = MagicMock(return_value={})
 

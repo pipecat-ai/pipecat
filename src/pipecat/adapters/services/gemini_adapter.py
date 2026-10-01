@@ -564,23 +564,34 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
                     parts.append(Part(inline_data=Blob(mime_type="audio/wav", data=audio_bytes)))
                 elif c["type"] == "file_base64":
                     f_data = c["file"]
-                    mime_type = f_data["mime_type"]
-                    raw_bytes = f_data.get("_raw_bytes")
-                    if raw_bytes is None:
-                        raw_bytes = base64.b64decode(f_data["file_data"].split(",")[1])
                     parts.append(
                         Part(
                             inline_data=Blob(
-                                mime_type=mime_type,
-                                data=raw_bytes,
+                                mime_type=f_data["mime_type"],
+                                data=self.decoded_file_bytes(f_data),
                             )
                         )
                     )
                 elif c["type"] == "file_url":
                     f_data = c["file"]
-                    parts.append(
-                        Part.from_uri(file_uri=f_data["url"], mime_type=f_data["mime_type"])
-                    )
+                    # Raises for a URL the provider can't consume with nothing
+                    # resolved (wrapped as LLMContextConversionError by the
+                    # caller in _from_universal_context_messages).
+                    resolved = self.inlined_file_content(f_data)
+                    if resolved is None:
+                        parts.append(
+                            Part.from_uri(file_uri=f_data["url"], mime_type=f_data["mime_type"])
+                        )
+                    else:
+                        # Raw-bytes adapters always cache the decoded form.
+                        parts.append(
+                            Part(
+                                inline_data=Blob(
+                                    mime_type=f_data["mime_type"],
+                                    data=cast(bytes, resolved),
+                                )
+                            )
+                        )
                 elif c["type"] == "file_data":
                     file_data = c["file_data"]
                     parts.append(

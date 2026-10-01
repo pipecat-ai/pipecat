@@ -70,6 +70,7 @@ For BaseLLMAdapter helpers:
 2. _resolve_system_instruction: conflict resolution between context and settings
 """
 
+import asyncio
 import base64
 import subprocess
 import sys
@@ -146,7 +147,8 @@ class TestOpenAIGetLLMInvocationParams(unittest.TestCase):
     def test_unsupported_file_url_raises_conversion_error(self):
         """Test that a file_url message raises instead of silently dropping the file.
 
-        OpenAI Chat doesn't support URL-based files at all.
+        OpenAI Chat can't consume non-image URLs, so without resolved content
+        in a file resolver's cache the conversion must fail loudly.
         """
         message = {
             "role": "user",
@@ -162,7 +164,7 @@ class TestOpenAIGetLLMInvocationParams(unittest.TestCase):
         with self.assertRaises(LLMContextConversionError) as ctx:
             self.adapter.get_llm_invocation_params(context, convert_developer_to_user=False)
 
-        self.assertIn("does not support URL-based files", str(ctx.exception))
+        self.assertIn("Unresolved file URL", str(ctx.exception))
 
     def test_image_file_url_converted_to_image_url(self):
         """Test that a file_url with an image MIME type becomes image_url content.
@@ -707,12 +709,12 @@ class TestGeminiGetLLMInvocationParams(unittest.TestCase):
             self.assertEqual(model_with_text.parts[i].text, expected_text)
 
     def test_file_url_converted_to_file_uri_part(self):
-        """Test that a file_url message part is converted to a Gemini file_uri Part.
+        """Test that a supported file_url becomes a Gemini file_uri Part.
 
-        Gemini's `Part.from_uri` accepts an arbitrary URL directly, the same
-        way the adapter already handles public `image_url` content, so a
-        `file_url` part shouldn't be silently dropped.
+        The developer API consumes its own Files API URIs directly, so those
+        pass through as `Part.from_uri` rather than being inlined.
         """
+        url = "https://generativelanguage.googleapis.com/v1beta/files/abc"
         messages = [
             {
                 "role": "user",
@@ -720,7 +722,7 @@ class TestGeminiGetLLMInvocationParams(unittest.TestCase):
                     {
                         "type": "file_url",
                         "file": {
-                            "url": "https://example.com/report.pdf",
+                            "url": url,
                             "mime_type": "application/pdf",
                             "filename": "report.pdf",
                         },
@@ -734,7 +736,7 @@ class TestGeminiGetLLMInvocationParams(unittest.TestCase):
 
         self.assertEqual(len(params["messages"]), 1)
         part = params["messages"][0].parts[0]
-        self.assertEqual(part.file_data.file_uri, "https://example.com/report.pdf")
+        self.assertEqual(part.file_data.file_uri, url)
         self.assertEqual(part.file_data.mime_type, "application/pdf")
 
     def test_file_base64_uses_cached_raw_bytes(self):
@@ -744,7 +746,12 @@ class TestGeminiGetLLMInvocationParams(unittest.TestCase):
         conversational turn; using it must take precedence over decoding
         the data URL.
         """
+        from pipecat.utils.file_resolver import FileResolver
+
+        data_url = "data:application/pdf;base64,aGVsbG8="
         cached = b"cached raw bytes"
+        resolver = FileResolver()
+        resolver._bytes_cache[data_url] = cached
         messages = [
             {
                 "role": "user",
@@ -752,10 +759,9 @@ class TestGeminiGetLLMInvocationParams(unittest.TestCase):
                     {
                         "type": "file_base64",
                         "file": {
-                            "file_data": "data:application/pdf;base64,aGVsbG8=",
+                            "file_data": data_url,
                             "filename": "a.pdf",
                             "mime_type": "application/pdf",
-                            "_raw_bytes": cached,
                         },
                     },
                 ],
@@ -763,6 +769,7 @@ class TestGeminiGetLLMInvocationParams(unittest.TestCase):
         ]
 
         context = LLMContext(messages=messages)
+        self.adapter.file_resolver = resolver
         params = self.adapter.get_llm_invocation_params(context)
 
         part = params["messages"][0].parts[0]
@@ -2028,7 +2035,8 @@ class TestAWSBedrockGetLLMInvocationParams(unittest.TestCase):
     def test_unsupported_s3_url_raises_conversion_error(self):
         """Test that a non-S3 file_url raises instead of silently dropping the file.
 
-        Bedrock only accepts documents referenced via an s3:// URI.
+        Bedrock only consumes s3:// URIs directly, so without resolved content
+        in a file resolver's cache the conversion must fail loudly.
         """
         message = {
             "role": "user",
@@ -2047,7 +2055,7 @@ class TestAWSBedrockGetLLMInvocationParams(unittest.TestCase):
         with self.assertRaises(LLMContextConversionError) as ctx:
             self.adapter.get_llm_invocation_params(context)
 
-        self.assertIn("Bedrock only supports S3 URLs", str(ctx.exception))
+        self.assertIn("Unresolved file URL", str(ctx.exception))
 
     def test_file_base64_document_name_is_sanitized_for_bedrock(self):
         """Test that an ordinary filename is sanitized to satisfy Bedrock's document name rules.
@@ -2133,23 +2141,28 @@ class TestAWSBedrockGetLLMInvocationParams(unittest.TestCase):
         conversational turn; using it must take precedence over decoding
         the data URL.
         """
+        from pipecat.utils.file_resolver import FileResolver
+
+        data_url = "data:application/pdf;base64,aGVsbG8="
         cached = b"cached raw bytes"
+        resolver = FileResolver()
+        resolver._bytes_cache[data_url] = cached
         message = {
             "role": "user",
             "content": [
                 {
                     "type": "file_base64",
                     "file": {
-                        "file_data": "data:application/pdf;base64,aGVsbG8=",
+                        "file_data": data_url,
                         "filename": "a.pdf",
                         "mime_type": "application/pdf",
-                        "_raw_bytes": cached,
                     },
                 },
             ],
         }
         context = LLMContext(messages=[message])
 
+        self.adapter.file_resolver = resolver
         params = self.adapter.get_llm_invocation_params(context)
 
         document = params["messages"][0]["content"][0]["document"]
@@ -3959,7 +3972,7 @@ class TestTrailingUserMessageInjection(unittest.TestCase):
                 {"role": "assistant", "content": "◐"},
             ]
         )
-        params = service._get_llm_invocation_params(context)
+        params = asyncio.run(service._get_llm_invocation_params(context))
 
         self.assertEqual(params["messages"][-1]["role"], "user")
         self.assertEqual(params["messages"][-1]["content"], [{"type": "text", "text": "."}])
@@ -3975,7 +3988,7 @@ class TestTrailingUserMessageInjection(unittest.TestCase):
                 {"role": "assistant", "content": "◐"},
             ]
         )
-        params = service._get_llm_invocation_params(context)
+        params = asyncio.run(service._get_llm_invocation_params(context))
 
         self.assertEqual(params["messages"][-1]["role"], "assistant")
 

@@ -259,38 +259,30 @@ class OpenAILLMAdapter(BaseLLMAdapter[OpenAILLMInvocationParams]):
                     for item in content:
                         if item["type"] == "file_base64":
                             f_data = item["file"]
-                            mime_type = f_data["mime_type"]
-                            if mime_type.startswith("image/"):
-                                item = {
-                                    "type": "image_url",
-                                    "image_url": {"url": f_data["file_data"]},
-                                }
-                            elif mime_type == "application/pdf":
-                                item = {
-                                    "type": "file",
-                                    "file": {
-                                        "filename": f_data["filename"],
-                                        "file_data": f_data["file_data"],
-                                    },
-                                }
-                            else:
-                                raise LLMContextConversionError(
-                                    ValueError(
-                                        f"Unsupported 'file' MIME type for OpenAI: {mime_type}"
-                                    )
-                                )
+                            item = self._inline_file_item(
+                                f_data["file_data"], f_data["filename"], f_data["mime_type"]
+                            )
                         elif item["type"] == "file_url":
                             f_data = item["file"]
-                            if f_data["mime_type"].startswith("image/"):
+                            # inlined_file_content raises a plain ValueError so
+                            # adapters with a message-level wrapper don't double-wrap;
+                            # this adapter has no such wrapper, so wrap here.
+                            try:
+                                resolved = self.inlined_file_content(f_data)
+                            except ValueError as e:
+                                raise LLMContextConversionError(e) from e
+                            if resolved is None:
+                                # Pass-through: only image URLs, per supports_file_url.
                                 item = {
                                     "type": "image_url",
                                     "image_url": {"url": f_data["url"]},
                                 }
                             else:
-                                raise LLMContextConversionError(
-                                    ValueError(
-                                        f"OpenAI does not support URL-based files: {f_data['url']}"
-                                    )
+                                # Non-raw adapters always cache the data-URL form.
+                                item = self._inline_file_item(
+                                    cast(str, resolved),
+                                    f_data.get("filename", ""),
+                                    f_data["mime_type"],
                                 )
                         new_content.append(item)
                     msg["content"] = new_content
@@ -308,6 +300,16 @@ class OpenAILLMAdapter(BaseLLMAdapter[OpenAILLMInvocationParams]):
             ]
 
         return result
+
+    def _inline_file_item(self, file_data_url: str, filename: str, mime_type: str) -> dict:
+        """Build the ChatCompletion content item for an inline (base64) file."""
+        if mime_type.startswith("image/"):
+            return {"type": "image_url", "image_url": {"url": file_data_url}}
+        if mime_type == "application/pdf":
+            return {"type": "file", "file": {"filename": filename, "file_data": file_data_url}}
+        raise LLMContextConversionError(
+            ValueError(f"Unsupported 'file' MIME type for OpenAI: {mime_type}")
+        )
 
     def _from_standard_tool_choice(
         self, tool_choice: LLMContextToolChoice | NotGiven

@@ -340,7 +340,7 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
         adapter = self.get_llm_adapter()
         self._log_llm_response(context)
 
-        params_from_context = adapter.get_llm_invocation_params(
+        params_from_context = await adapter.prepare_llm_invocation_params(
             context,
             system_instruction=assert_given(self._settings.system_instruction),
             convert_developer_to_user=not self.supports_developer_role,
@@ -458,7 +458,7 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
             self._settings.system_instruction
         )
         adapter = self.get_llm_adapter()
-        invocation_params = adapter.get_llm_invocation_params(
+        invocation_params = await adapter.prepare_llm_invocation_params(
             context,
             system_instruction=effective_instruction,
             convert_developer_to_user=not self.supports_developer_role,
@@ -532,8 +532,6 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
 
     @traced_llm
     async def _process_context(self, context: LLMContext):
-        await self.resolve_context_files(context)
-
         functions_list = []
         arguments_list = []
         tool_id_list = []
