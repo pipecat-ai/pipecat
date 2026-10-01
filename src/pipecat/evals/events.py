@@ -32,7 +32,10 @@ scenario ``event:``             RTVI server message(s)
                                 (audio modality only)
 ``response``                    the harness's own transcription of the bot's audio
                                 (audio modality only); ``llm_response`` in text modality
-``function_call``               ``llm-function-call-in-progress``
+``function_call``               ``llm-function-call-in-progress``; a call made
+                                outside the bot's pipeline and reported into it
+                                (``ExternalFunctionCall*Frame``), such as a
+                                backend's, counts the same
 ``function_call_stopped``       ``llm-function-call-stopped``; its ``args`` carry
                                 ``tool_call_id`` and ``cancelled``, so a scenario
                                 can tell work that was stopped from work that
@@ -51,6 +54,9 @@ from pipecat.evals.serializer import EVAL_BOT_IMAGE_TYPE
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
+    ExternalFunctionCallCancelFrame,
+    ExternalFunctionCallInProgressFrame,
+    ExternalFunctionCallResultFrame,
     Frame,
     FunctionCallCancelFrame,
     FunctionCallInProgressFrame,
@@ -66,6 +72,7 @@ from pipecat.frames.frames import (
 # The bot's reports that end its current turn: what it produced so far is not
 # its reply to what comes next.
 _INTERRUPTION_EVENTS = ("user_started_speaking", "bot_interrupted")
+_FUNCTION_CALL_EVENTS = ("function_call", "function_call_stopped")
 
 
 class EvalEventStream:
@@ -90,6 +97,9 @@ class EvalEventStream:
         self._bot_audio = bot_audio
         self._trace = trace
         self._queue: asyncio.Queue[dict] = asyncio.Queue()
+        # Function-call events popped while waiting for another event, kept so
+        # a later call expectation in the same turn can still claim them.
+        self.unclaimed_function_calls: list[dict] = []
         # Every event in arrival order, for the result's diagnostics.
         self.events_seen: list[dict] = []
         # When each event type last arrived, for send_after anchoring.
@@ -259,7 +269,10 @@ class EvalEventStream:
         """Pop events until one of ``event_type`` arrives.
 
         Events of other types are dropped from the queue, so a scenario need not
-        list every event the bot emits; they stay in :attr:`events_seen`.
+        list every event the bot emits; they stay in :attr:`events_seen`. A
+        function-call event among them is kept in
+        :attr:`unclaimed_function_calls`, so a call expectation later in the
+        turn can still claim it.
 
         Args:
             event_type: The event type to wait for.
@@ -275,6 +288,8 @@ class EvalEventStream:
             event = await self.next_any(deadline)
             if event.get("type") == event_type:
                 return event
+            if event.get("type") in _FUNCTION_CALL_EVENTS:
+                self.unclaimed_function_calls.append(event)
 
     def drop_pending_bot_output(self, why: str) -> None:
         """Drop the bot's queued output, so a later turn cannot match it.
@@ -374,13 +389,23 @@ class EvalEventStream:
         elif isinstance(frame, BotStoppedSpeakingFrame):
             self._bot_quiet.set()
             return {"type": "bot_stopped_speaking"}
-        elif isinstance(frame, FunctionCallInProgressFrame):
+        elif isinstance(frame, (FunctionCallInProgressFrame, ExternalFunctionCallInProgressFrame)):
             return {
                 "type": "function_call",
                 "name": frame.function_name or None,
                 "args": dict(frame.arguments or {}),
             }
-        elif isinstance(frame, (FunctionCallResultFrame, FunctionCallCancelFrame)):
+        elif isinstance(frame, ExternalFunctionCallResultFrame) and not frame.is_final:
+            return None
+        elif isinstance(
+            frame,
+            (
+                FunctionCallResultFrame,
+                FunctionCallCancelFrame,
+                ExternalFunctionCallResultFrame,
+                ExternalFunctionCallCancelFrame,
+            ),
+        ):
             # How the call ended is the assertable part, so `cancelled` sits in
             # `args` alongside the id: a scenario matches both through the same
             # `calls:`/`args:` check a function_call uses.
@@ -389,7 +414,9 @@ class EvalEventStream:
                 "name": frame.function_name or None,
                 "args": {
                     "tool_call_id": frame.tool_call_id,
-                    "cancelled": isinstance(frame, FunctionCallCancelFrame),
+                    "cancelled": isinstance(
+                        frame, (FunctionCallCancelFrame, ExternalFunctionCallCancelFrame)
+                    ),
                 },
             }
         return None
