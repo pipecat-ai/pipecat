@@ -254,6 +254,8 @@ class AudioBufferProcessor(FrameProcessor):
         if not self._recording:
             return
         await self._call_on_audio_data_handler()
+        if self._enable_turn_audio and self._user_speaking:
+            self._end_user_run()
         self._reset_recording(clear_turn_audio=False)
         self._recording = False
         await self._call_event_handler("on_recording_stopped")
@@ -273,6 +275,16 @@ class AudioBufferProcessor(FrameProcessor):
             if self._auto_start_recording:
                 await self.start_recording()
 
+        # Keep speaking state current while recording is off as well.
+        if isinstance(frame, UserStartedSpeakingFrame):
+            self._user_speaking = True
+        elif isinstance(frame, UserStoppedSpeakingFrame):
+            self._user_speaking = False
+        elif isinstance(frame, BotStartedSpeakingFrame):
+            self._bot_speaking = True
+        elif isinstance(frame, BotStoppedSpeakingFrame):
+            self._bot_speaking = False
+
         if isinstance(frame, AudioBufferStartRecordingFrame):
             await self.start_recording()
         elif isinstance(frame, AudioBufferStopRecordingFrame):
@@ -288,17 +300,6 @@ class AudioBufferProcessor(FrameProcessor):
 
     async def _process_recording(self, frame: Frame):
         """Process audio frames for recording."""
-        # Track speaking state here (not just in _process_turn_recording) so the
-        # silence-injection guards below work regardless of enable_turn_audio.
-        if isinstance(frame, UserStartedSpeakingFrame):
-            self._user_speaking = True
-        elif isinstance(frame, UserStoppedSpeakingFrame):
-            self._user_speaking = False
-        elif isinstance(frame, BotStartedSpeakingFrame):
-            self._bot_speaking = True
-        elif isinstance(frame, BotStoppedSpeakingFrame):
-            self._bot_speaking = False
-
         resampled = None
         if isinstance(frame, InputAudioRawFrame):
             resampled = await self._resample_input_audio(frame)
@@ -427,7 +428,7 @@ class AudioBufferProcessor(FrameProcessor):
     async def _process_turn_recording(self, frame: Frame, resampled_audio: bytes | None = None):
         """Process frames for turn-based audio recording."""
         # Speaking state (_user_speaking / _bot_speaking) is maintained by
-        # _process_recording so it is always up-to-date here.
+        # process_frame so it is always up-to-date here.
         if isinstance(frame, UserStoppedSpeakingFrame):
             await self._call_event_handler(
                 "on_user_turn_audio_data", self._user_turn_audio_buffer, self.sample_rate, 1
