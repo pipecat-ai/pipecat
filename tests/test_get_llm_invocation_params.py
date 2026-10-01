@@ -89,6 +89,7 @@ from pipecat.adapters.services.deepseek_adapter import DeepSeekLLMAdapter
 from pipecat.adapters.services.gemini_adapter import GeminiLLMAdapter
 from pipecat.adapters.services.gemini_live_adapter import GeminiLiveLLMAdapter
 from pipecat.adapters.services.grok_realtime_adapter import GrokRealtimeLLMAdapter
+from pipecat.adapters.services.inworld_realtime_adapter import InworldRealtimeLLMAdapter
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter
 from pipecat.adapters.services.open_ai_realtime_adapter import OpenAIRealtimeLLMAdapter
 from pipecat.adapters.services.open_ai_responses_adapter import OpenAIResponsesLLMAdapter
@@ -3080,6 +3081,21 @@ class TestOpenAIRealtimeGetLLMInvocationParams(unittest.TestCase):
         params = self.adapter.get_llm_invocation_params(context, system_instruction="Be concise.")
 
         self.assertEqual(params["system_instruction"], "Be concise.")
+
+
+class TestRealtimePackedHistoryKeepsNonAscii(unittest.TestCase):
+    def test_packed_history_is_not_escaped(self):
+        """Multi-message history packed into one text item keeps non-ASCII text readable."""
+        for cls in (OpenAIRealtimeLLMAdapter, GrokRealtimeLLMAdapter, InworldRealtimeLLMAdapter):
+            with self.subTest(adapter=cls.__name__):
+                messages: list[LLMStandardMessage] = [
+                    {"role": "user", "content": "मेरा ऑर्डर कहाँ है?"},
+                    {"role": "assistant", "content": "आपका ऑर्डर कल पहुँचेगा।"},
+                ]
+                params = cls().get_llm_invocation_params(LLMContext(messages=messages))
+                text = params["messages"][0].content[0].text
+                self.assertIn("मेरा ऑर्डर कहाँ है?", text)
+                self.assertIn("आपका ऑर्डर कल पहुँचेगा।", text)
 
 
 class TestGrokRealtimeGetLLMInvocationParams(unittest.TestCase):

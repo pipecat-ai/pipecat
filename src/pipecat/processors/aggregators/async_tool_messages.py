@@ -171,7 +171,7 @@ def _payload_to_json(payload: AsyncToolMessagePayload) -> str:
     }
     if payload.result is not None:
         obj["result"] = payload.result
-    return json.dumps(obj)
+    return json.dumps(obj, ensure_ascii=False)
 
 
 def _payload_to_message(payload: AsyncToolMessagePayload) -> LLMStandardMessage:

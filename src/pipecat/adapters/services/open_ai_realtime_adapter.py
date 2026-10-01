@@ -164,7 +164,11 @@ class OpenAIRealtimeLLMAdapter(BaseLLMAdapter):
                         events.ItemContent(
                             type="input_text",
                             text="\n\n".join(
-                                [intro_text, json.dumps(messages, indent=2), trailing_text]
+                                [
+                                    intro_text,
+                                    json.dumps(messages, indent=2, ensure_ascii=False),
+                                    trailing_text,
+                                ]
                             ),
                         )
                     ],
