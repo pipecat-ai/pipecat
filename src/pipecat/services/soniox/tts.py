@@ -449,7 +449,6 @@ class SonioxTTSService(WebsocketTTSService):
         except Exception as e:
             await self.push_error(error_msg=f"Error closing Soniox websocket: {e}", exception=e)
         finally:
-            await self.remove_active_audio_context()
             self._configured_contexts.clear()
             self._partials.clear()
             self._websocket = None
@@ -657,6 +656,7 @@ class SonioxTTSService(WebsocketTTSService):
                 await self._connect()
 
             try:
+                await self._send_config(context_id)
                 text_msg = {"text": text, "text_end": False, "stream_id": context_id}
                 await self._get_websocket().send(json.dumps(text_msg))
                 await self.start_tts_usage_metrics(text)

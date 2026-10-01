@@ -1169,7 +1169,11 @@ class TTSService(AIService):
         audio_contexts = self.get_audio_contexts()
         if audio_contexts:
             for ctx_id in audio_contexts:
-                await self.on_audio_context_interrupted(context_id=ctx_id)
+                # A failing hook must not skip restarting the audio context task below.
+                try:
+                    await self.on_audio_context_interrupted(context_id=ctx_id)
+                except Exception as e:
+                    logger.warning(f"{self} on_audio_context_interrupted failed for {ctx_id}: {e}")
         self.reset_active_audio_context()
         self._turn_context_id = None
         self._word_last_pts = 0
@@ -1827,7 +1831,13 @@ class TTSService(AIService):
                 # If audio resumes after a timeout, the context is recreated
                 # without the partial sample held here.
                 self._audio_remainders.pop(context_id, None)
-                await self.on_audio_context_completed(context_id=context_id)
+                # A failing hook must not end this task, or no more audio is played.
+                try:
+                    await self.on_audio_context_completed(context_id=context_id)
+                except Exception as e:
+                    logger.warning(
+                        f"{self} on_audio_context_completed failed for {context_id}: {e}"
+                    )
                 self.reset_active_audio_context()
             else:
                 running = False
@@ -2148,9 +2158,16 @@ class WebsocketTTSService(TTSService, WebsocketService):
         await self._disconnect()
 
     async def _websocket_connect(self, uri: str, **kwargs):
-        # A new connection starts every stream on a sample boundary, so a partial
-        # sample held from the old one would shift all the audio after it.
-        self._audio_remainders.clear()
+        # Providers keep context state per connection and don't resume it on a
+        # new one, so audio still due on the old connection never arrives. Close
+        # every open context (audio already received still plays), and move a
+        # turn in progress to a new context ID so its remaining sentences open a
+        # fresh provider context.
+        for context_id in self.get_audio_contexts():
+            await self.remove_audio_context(context_id)
+        if self._turn_context_id:
+            self._turn_context_id = None
+            self._turn_context_id = self.create_context_id()
         return await super()._websocket_connect(uri, **kwargs)
 
     async def _report_error(self, error: ErrorFrame, force_treat_as_permanent: bool = False):

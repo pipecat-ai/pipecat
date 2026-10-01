@@ -4,7 +4,11 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import json
 import unittest
+
+import pytest
+from websockets.protocol import State
 
 from pipecat.frames.frames import (
     AggregatedTextFrame,
@@ -223,3 +227,31 @@ class TestSonioxUpdateSettingsFinalizesOldContext(unittest.IsolatedAsyncioTestCa
 
         self.assertEqual([s.frame.text for s in seq._slots], ["Hi there"])
         self.assertEqual(service._turn_context_id, "ctx-new")
+
+
+class _FakeWebsocket:
+    state = State.OPEN
+
+    def __init__(self):
+        self.sent: list[dict] = []
+
+    async def send(self, message: str):
+        self.sent.append(json.loads(message))
+
+
+@pytest.mark.asyncio
+async def test_soniox_run_tts_configures_a_stream_it_has_not_opened():
+    # A stream ID first seen on this connection (e.g. after a reconnect) must
+    # be configured before its text, or Soniox rejects it.
+    service = SonioxTTSService(api_key="test-key")
+    service._websocket = _FakeWebsocket()
+
+    async for _ in service.run_tts("Hello.", "stream-1"):
+        pass
+    async for _ in service.run_tts("Again.", "stream-1"):
+        pass
+
+    sent = service._websocket.sent
+    assert [m.get("stream_id") for m in sent] == ["stream-1"] * 3
+    assert "text" not in sent[0]
+    assert [m.get("text") for m in sent[1:]] == ["Hello.", "Again."]
