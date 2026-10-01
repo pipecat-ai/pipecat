@@ -20,6 +20,9 @@ from pipecat.audio.utils import detect_speech_onset
 from pipecat.frames.frames import (
     Frame,
     InterruptionFrame,
+    LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
+    TextFrame,
     TTSAudioRawFrame,
     TTSSpeakFrame,
     TTSStoppedFrame,
@@ -123,6 +126,24 @@ async def test_trailing_partial_sample_is_padded_at_end_of_context():
     last_audio = max(i for i, f in enumerate(down_frames) if isinstance(f, TTSAudioRawFrame))
     stopped = next(i for i, f in enumerate(down_frames) if isinstance(f, TTSStoppedFrame))
     assert last_audio < stopped
+    assert service._audio_remainders == {}
+
+
+@pytest.mark.asyncio
+async def test_context_timeout_drops_partial_sample():
+    # The response stalls mid-sample until its audio context times out.
+    service = MockTTSService([_PCM[:1023]], delay_s=0.3, stop_frame_timeout_s=0.1)
+
+    await run_test(
+        service,
+        frames_to_send=[
+            LLMFullResponseStartFrame(),
+            TextFrame("Hello."),
+            LLMFullResponseEndFrame(),
+            SleepFrame(sleep=0.5),
+        ],
+    )
+
     assert service._audio_remainders == {}
 
 

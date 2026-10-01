@@ -1729,8 +1729,6 @@ class TTSService(AIService):
             logger.trace(f"{self} marking audio context {context_id} for deletion")
             await self.append_to_audio_context(context_id, None)
         else:
-            # The stream has ended, so a partial sample held for it is no longer needed.
-            self._audio_remainders.pop(context_id, None)
             logger.warning(f"{self} unable to remove context {context_id}")
 
     def has_active_audio_context(self) -> bool:
@@ -1826,10 +1824,9 @@ class TTSService(AIService):
 
                 # We just finished processing the context, so we can safely remove it.
                 del self._audio_contexts[context_id]
-                # A context that timed out mid-turn may be recreated for the same
-                # stream, so its held-back bytes stay until remove_audio_context.
-                if context_id != self._turn_context_id:
-                    self._audio_remainders.pop(context_id, None)
+                # If audio resumes after a timeout, the context is recreated
+                # without the partial sample held here.
+                self._audio_remainders.pop(context_id, None)
                 await self.on_audio_context_completed(context_id=context_id)
                 self.reset_active_audio_context()
             else:
