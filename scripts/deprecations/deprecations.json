@@ -3820,6 +3820,17 @@
       "location": "pipecat/services/sambanova/llm.py"
     },
     {
+      "subject": "SarvamRealtimeSTTSettings.language_code",
+      "module": "pipecat.services.sarvam.stt",
+      "kind": "parameter",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "language",
+      "message": "Use ``language`` instead, with ``None`` for ``auto``. Will be removed in 2.0.0.",
+      "location": "pipecat/services/sarvam/stt.py"
+    },
+    {
       "subject": "SarvamSTTService.InputParams",
       "module": "pipecat.services.sarvam.stt",
       "kind": "class",

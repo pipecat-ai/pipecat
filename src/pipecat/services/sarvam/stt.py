@@ -16,6 +16,7 @@ server-side endpointing and in-band configuration updates.
 import asyncio
 import base64
 import json
+import warnings
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field, fields
 from typing import Any, Literal, cast
@@ -74,18 +75,52 @@ def language_to_sarvam_language(language: Language) -> str:
     """
     # Mapping of pipecat Language enum to Sarvam language codes
     LANGUAGE_MAP = {
+        Language.KOK: "kok-IN",
+        Language.KOK_IN: "kok-IN",
+        Language.MAI: "mai-IN",
+        Language.MAI_IN: "mai-IN",
+        Language.BN: "bn-IN",
         Language.BN_IN: "bn-IN",
+        Language.GU: "gu-IN",
         Language.GU_IN: "gu-IN",
+        Language.SD: "sd-IN",
+        Language.SD_IN: "sd-IN",
+        Language.UR: "ur-IN",
+        Language.UR_IN: "ur-IN",
+        Language.HI: "hi-IN",
         Language.HI_IN: "hi-IN",
+        Language.KN: "kn-IN",
         Language.KN_IN: "kn-IN",
+        Language.ML: "ml-IN",
         Language.ML_IN: "ml-IN",
+        Language.MR: "mr-IN",
         Language.MR_IN: "mr-IN",
+        Language.TA: "ta-IN",
         Language.TA_IN: "ta-IN",
+        Language.TE: "te-IN",
         Language.TE_IN: "te-IN",
+        Language.PA: "pa-IN",
         Language.PA_IN: "pa-IN",
+        Language.OR: "od-IN",
         Language.OR_IN: "od-IN",
+        Language.EN: "en-IN",
         Language.EN_IN: "en-IN",
+        Language.AS: "as-IN",
         Language.AS_IN: "as-IN",
+        Language.BRX: "brx-IN",
+        Language.BRX_IN: "brx-IN",
+        Language.DOI: "doi-IN",
+        Language.DOI_IN: "doi-IN",
+        Language.KS: "ks-IN",
+        Language.KS_IN: "ks-IN",
+        Language.MNI: "mni-IN",
+        Language.MNI_IN: "mni-IN",
+        Language.NE: "ne-IN",
+        Language.NE_IN: "ne-IN",
+        Language.SA: "sa-IN",
+        Language.SA_IN: "sa-IN",
+        Language.SAT: "sat-IN",
+        Language.SAT_IN: "sat-IN",
     }
 
     return resolve_language(language, LANGUAGE_MAP, use_base_code=False)
@@ -759,6 +794,13 @@ class SarvamSTTService(STTService):
             "mai-IN": Language.MAI_IN,
             "sd-IN": Language.SD_IN,
             "kok-IN": Language.KOK_IN,
+            "ne-IN": Language.NE_IN,
+            "ks-IN": Language.KS_IN,
+            "sa-IN": Language.SA_IN,
+            "sat-IN": Language.SAT_IN,
+            "mni-IN": Language.MNI_IN,
+            "brx-IN": Language.BRX_IN,
+            "doi-IN": Language.DOI_IN,
         }
         # "unknown" is Sarvam's own placeholder for "not detected/configured yet"
         # (see MODEL_CONFIGS.default_language), not a data gap worth warning about.
@@ -846,9 +888,10 @@ SUPPORTED_SAMPLE_RATES = {8000, 16000}
 # transcript latency doesn't scale with the chosen profile.
 _CLIENT_CHUNK_MS = 50
 
-# Accepted in a `config.update` message, and so the whole of `Settings`. Of
-# these, `language_code`, `stream_type`, `mode`, and `prompt` are
-# boundary-gated: the server defers them to the next utterance boundary.
+# Accepted in a `config.update` message. `Settings.language` reaches Sarvam as
+# `language_code`; the rest share their `Settings` names. Of these,
+# `language_code`, `stream_type`, `mode`, and `prompt` are boundary-gated: the
+# server defers them to the next utterance boundary.
 _RUNTIME_CONFIG_FIELDS = frozenset(
     {
         "language_code",
@@ -877,20 +920,51 @@ _SHORT_LANGUAGE_DEFAULTS = {
 def language_to_sarvam_realtime_language(language: Language) -> str:
     """Convert a Language enum to Sarvam realtime's language code."""
     language_map = {
+        Language.AS: "as-IN",
         Language.AS_IN: "as-IN",
+        Language.BN: "bn-IN",
         Language.BN_IN: "bn-IN",
+        Language.BRX: "brx-IN",
+        Language.BRX_IN: "brx-IN",
+        Language.DOI: "doi-IN",
+        Language.DOI_IN: "doi-IN",
+        Language.EN: "en-IN",
         Language.EN_IN: "en-IN",
+        Language.GU: "gu-IN",
         Language.GU_IN: "gu-IN",
+        Language.HI: "hi-IN",
         Language.HI_IN: "hi-IN",
+        Language.KN: "kn-IN",
         Language.KN_IN: "kn-IN",
+        Language.KOK: "kok-IN",
         Language.KOK_IN: "kok-IN",
+        Language.KS: "ks-IN",
+        Language.KS_IN: "ks-IN",
+        Language.MAI: "mai-IN",
         Language.MAI_IN: "mai-IN",
+        Language.ML: "ml-IN",
         Language.ML_IN: "ml-IN",
+        Language.MNI: "mni-IN",
+        Language.MNI_IN: "mni-IN",
+        Language.MR: "mr-IN",
         Language.MR_IN: "mr-IN",
+        Language.NE: "ne-IN",
+        Language.NE_IN: "ne-IN",
+        Language.OR: "or-IN",
         Language.OR_IN: "or-IN",
+        Language.PA: "pa-IN",
         Language.PA_IN: "pa-IN",
+        Language.SA: "sa-IN",
+        Language.SA_IN: "sa-IN",
+        Language.SAT: "sat-IN",
+        Language.SAT_IN: "sat-IN",
+        Language.SD: "sd-IN",
         Language.SD_IN: "sd-IN",
+        Language.UR: "ur-IN",
+        Language.UR_IN: "ur-IN",
+        Language.TA: "ta-IN",
         Language.TA_IN: "ta-IN",
+        Language.TE: "te-IN",
         Language.TE_IN: "te-IN",
     }
     return resolve_language(language, language_map, use_base_code=False)
@@ -902,10 +976,16 @@ class SarvamRealtimeSTTSettings(STTSettings):
 
     Sarvam reads these from the connection query string but also accepts them
     in a ``config.update``. The values it only reads at connection time are
-    constructor arguments on the service instead.
+    constructor arguments on the service instead. ``language=None`` asks Sarvam
+    to detect the language of each utterance.
 
     Parameters:
         language_code: Sarvam realtime language code or ``auto``.
+
+            .. deprecated:: 1.13.0
+                Use ``language`` instead, with ``None`` for ``auto``. Will be
+                removed in 2.0.0.
+
         stream_type: Streaming cadence: ``fast``, ``balanced``, or ``simulated``.
         mode: Realtime STT task mode.
         prompt: Optional decoding prompt.
@@ -914,7 +994,7 @@ class SarvamRealtimeSTTSettings(STTSettings):
         min_speech_duration_ms: Optional minimum speech duration.
     """
 
-    language_code: str | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    language_code: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     stream_type: Literal["fast", "balanced", "simulated"] | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
@@ -1011,8 +1091,8 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
             raise ValueError(f"Unsupported sample_rate '{sample_rate}'. Allowed values: {allowed}.")
         default_settings = self.Settings(
             model=_REALTIME_MODEL,
-            language=None,
-            language_code="en-IN",
+            language=Language.EN_IN,
+            language_code=None,
             stream_type="balanced",
             mode="transcribe",
             prompt=None,
@@ -1020,17 +1100,8 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
             silence_duration_ms=None,
             min_speech_duration_ms=None,
         )
-        language_code_given = settings is not None and is_given(settings.language_code)
         if settings is not None:
-            default_settings.apply_update(settings)
-
-        # An explicit language_code wins; otherwise derive it from `language`.
-        # `language` may still be a raw string here, since the base class only
-        # normalizes it once super().__init__() runs.
-        if not language_code_given:
-            language = _as_language(default_settings.language)
-            if language is not None:
-                default_settings.language_code = language_to_sarvam_realtime_language(language)
+            default_settings.apply_update(_without_language_code(settings))
 
         self._validate_settings(default_settings)
 
@@ -1296,55 +1367,36 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
             return
         # The store has to follow what the server was told, or a later delta
         # diffs against a stale value and skips an update the server needs.
-        self._settings.apply_update(self.Settings(**fields))
+        stored = dict(fields)
+        if "language_code" in stored:
+            stored["language"] = _language_from_code(stored.pop("language_code"))
+        self._settings.apply_update(self.Settings(**stored))
 
     async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
         """Apply runtime settings and send supported fields via ``config.update``."""
-        delta = self._with_derived_language_code(delta)
-        proposed = self._settings.copy()
-        proposed.apply_update(delta)
-
-        # Drawn from the runtime-updatable set, so the payload carries nothing
-        # a `config.update` would have to reject.
-        payload = {
-            name: getattr(proposed, name)
-            for name in _RUNTIME_CONFIG_FIELDS
-            if is_given(getattr(proposed, name))
-            and getattr(proposed, name) != getattr(self._settings, name)
-        }
-
+        if isinstance(delta, self.Settings):
+            delta = _without_language_code(delta)
         changed = await super()._update_settings(delta)
         if not changed:
             return changed
 
-        # `language` reaches Sarvam as `language_code`, so it is never unhandled.
         unsupported = set(changed) - _RUNTIME_CONFIG_FIELDS - {"language"}
         if unsupported:
             self._warn_unhandled_updated_settings({key: changed[key] for key in unsupported})
 
+        payload = {
+            name: getattr(self._settings, name) for name in _RUNTIME_CONFIG_FIELDS & changed.keys()
+        }
+        if "language" in changed:
+            payload["language_code"] = self._language_code()
         if payload:
-            await self._send_config_update(payload)
+            await self._send_json({"event": "config.update", **payload})
         return changed
 
-    def _with_derived_language_code(self, delta: STTSettings) -> Settings:
-        """Fill in ``language_code`` from a ``language`` delta.
-
-        A caller can send the base :class:`STTSettings`, which carries
-        ``language`` but none of the Sarvam fields, so the delta is widened to
-        these settings first. Mirrors the constructor: an explicit
-        ``language_code`` wins, since it also expresses ``auto``, which has no
-        :class:`Language` equivalent.
-        """
-        if not isinstance(delta, self.Settings):
-            delta = self.Settings.from_mapping(delta.given_fields())
-        if is_given(delta.language_code):
-            return delta
-        language = _as_language(delta.language)
-        if language is None:
-            return delta
-        derived = delta.copy()
-        derived.language_code = language_to_sarvam_realtime_language(language)
-        return derived
+    def _language_code(self) -> str:
+        """The ``language_code`` Sarvam is sent for the configured language."""
+        language = self._settings.language
+        return str(language) if is_given(language) and language else "auto"
 
     async def _handle_speech_start(self, message: dict[str, Any]):
         if self._provider_speech_active:
@@ -1460,7 +1512,7 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
 
     def _query_params(self) -> dict[str, Any]:
         params: dict[str, Any] = {
-            "language_code": self._settings.language_code,
+            "language_code": self._language_code(),
             "stream_type": self._settings.stream_type,
             "endpointing": self._endpointing,
             "encoding": "linear16",
@@ -1503,7 +1555,7 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
         return payload
 
     def _language_for_frame(self, raw_language: str | None = None) -> Language | None:
-        configured_language_code = assert_given(self._settings.language_code)
+        configured_language_code = self._language_code()
         language_code = self._normalize_language_code(raw_language or configured_language_code)
         if language_code == "auto":
             return None
@@ -1514,9 +1566,9 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
 
     def _normalize_language_code(self, language_code: str | None) -> str:
         if not language_code:
-            return assert_given(self._settings.language_code)
+            return self._language_code()
         if "-" not in language_code and language_code != "auto":
-            configured = assert_given(self._settings.language_code)
+            configured = self._language_code()
             if configured != "auto" and configured.startswith(f"{language_code}-"):
                 return configured
             return _SHORT_LANGUAGE_DEFAULTS.get(language_code, language_code)
@@ -1534,7 +1586,7 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
 
     def _validate_config_update(self, update: dict[str, Any]):
         """Reject a ``config.update`` field Sarvam has no setting for."""
-        unknown = sorted(set(update) - {setting.name for setting in fields(self.Settings)})
+        unknown = sorted(set(update) - _RUNTIME_CONFIG_FIELDS)
         if unknown:
             names = ", ".join(unknown)
             raise ValueError(f"Unknown config.update field(s) {names}.")
@@ -1561,13 +1613,22 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
         pass
 
 
-def _as_language(value: Any) -> Language | None:
-    """Coerce a settings ``language`` value to a ``Language``, or ``None``."""
-    if isinstance(value, Language):
-        return value
-    if not isinstance(value, str):
-        return None
-    try:
-        return Language(value)
-    except ValueError:
-        return None
+def _language_from_code(language_code: str) -> str | None:
+    """Convert a Sarvam ``language_code`` to a ``language`` setting value."""
+    return None if language_code == "auto" else language_code
+
+
+def _without_language_code(settings: SarvamRealtimeSTTSettings) -> SarvamRealtimeSTTSettings:
+    """Fold the deprecated ``language_code`` setting into ``language``."""
+    if not is_given(settings.language_code) or settings.language_code is None:
+        return settings
+    warnings.warn(
+        "`SarvamRealtimeSTTService.Settings.language_code` is deprecated since 1.13.0 and "
+        "will be removed in 2.0.0. Use `language` instead.",
+        DeprecationWarning,
+        stacklevel=3,
+    )
+    folded = settings.copy()
+    folded.language = _language_from_code(settings.language_code)
+    folded.language_code = NOT_GIVEN
+    return folded

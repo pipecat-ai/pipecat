@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock
 from urllib.parse import parse_qs, urlparse
 
 import pytest
+from websockets.asyncio.server import serve
 from websockets.exceptions import ConnectionClosedError
 from websockets.frames import Close
 from websockets.protocol import State
@@ -24,6 +25,7 @@ from pipecat.frames.frames import (
     MetricsFrame,
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
+    STTUpdateSettingsFrame,
     TranscriptionFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
@@ -40,6 +42,7 @@ from pipecat.services.sarvam.stt import (
 )
 from pipecat.services.settings import STTSettings
 from pipecat.services.stt_service import WebsocketSTTService
+from pipecat.tests.utils import run_test
 from pipecat.transcriptions.language import Language
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.asyncio.task_manager import TaskManager
@@ -170,19 +173,17 @@ async def test_default_configuration_leaves_language_unset(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_unrecognized_language_code_leaves_language_unset(monkeypatch):
-    """A real Sarvam code with no `Language` equivalent at all (Sanskrit has no
-    "sa-IN" member, only the base "sa") is left unset, not silently relabeled as
-    a different language, and is warned about exactly once."""
+    """An unrecognized code leaves the frame language unset and warns once."""
     service = SarvamSTTService(api_key="test-key")
     pushed = []
     monkeypatch.setattr(service, "push_frame", _capture(pushed))
 
-    await service._handle_message(_FakeSarvamMessage("first", language_code="sa-IN"))
-    await service._handle_message(_FakeSarvamMessage("second", language_code="sa-IN"))
+    await service._handle_message(_FakeSarvamMessage("first", language_code="new-IN"))
+    await service._handle_message(_FakeSarvamMessage("second", language_code="new-IN"))
 
     assert pushed[0].language is None
     assert pushed[1].language is None
-    assert service._unmapped_language_codes_warned == {"sa-IN"}
+    assert service._unmapped_language_codes_warned == {"new-IN"}
 
 
 @pytest.mark.asyncio
@@ -204,13 +205,19 @@ async def test_recognized_language_code_is_mapped(monkeypatch):
         ("mai-IN", Language.MAI_IN),
         ("sd-IN", Language.SD_IN),
         ("kok-IN", Language.KOK_IN),
+        ("ne-IN", Language.NE_IN),
+        ("ks-IN", Language.KS_IN),
+        ("sa-IN", Language.SA_IN),
+        ("sat-IN", Language.SAT_IN),
+        ("mni-IN", Language.MNI_IN),
+        ("brx-IN", Language.BRX_IN),
+        ("doi-IN", Language.DOI_IN),
     ],
 )
 def test_previously_missing_codes_now_map(language_code, language):
-    """Urdu, Maithili, Sindhi, and Konkani have exact `Language` matches and are
-    real entries in SarvamRealtimeSTTService's SUPPORTED_LANGUAGES -- they were
-    simply missing from this table."""
+    """Supported Sarvam locale codes resolve to exact Language members."""
     service = SarvamSTTService(api_key="test-key")
+    assert Language(language_code) == language
     assert service._map_language_code_to_enum(language_code) == language
 
 
@@ -220,6 +227,81 @@ def test_configured_language_is_used_when_message_has_none():
         api_key="test-key", settings=SarvamSTTService.Settings(language=Language.EN_IN)
     )
     assert service._map_language_code_to_enum(service._get_language_string()) == Language.EN_IN
+
+
+@pytest.mark.parametrize(
+    "language,legacy_code,realtime_code",
+    [
+        (Language.HI, "hi-IN", "hi-IN"),
+        (Language.OR, "od-IN", "or-IN"),
+        (Language.NE, "ne-IN", "ne-IN"),
+        (Language.SA, "sa-IN", "sa-IN"),
+        (Language.KOK, "kok-IN", "kok-IN"),
+        (Language.MAI, "mai-IN", "mai-IN"),
+        (Language.SD, "sd-IN", "sd-IN"),
+        (Language.UR, "ur-IN", "ur-IN"),
+    ],
+)
+def test_base_language_settings_use_sarvam_locale_codes(language, legacy_code, realtime_code):
+    legacy = SarvamSTTService(
+        api_key="test-key", settings=SarvamSTTService.Settings(language=language)
+    )
+    realtime = SarvamRealtimeSTTService(
+        api_key="test-key", settings=SarvamRealtimeSTTService.Settings(language=language)
+    )
+
+    assert legacy._get_language_string() == legacy_code
+    assert _query(realtime)["language_code"] == [realtime_code]
+
+
+@pytest.mark.asyncio
+async def test_realtime_unrecognized_language_is_passed_through():
+    service = SarvamRealtimeSTTService(
+        api_key="test-key", settings=SarvamRealtimeSTTService.Settings(language="new-IN")
+    )
+    assert _query(service)["language_code"] == ["new-IN"]
+
+    service._websocket = _FakeWebsocket()
+    await service._update_settings(STTSettings(language="next-IN"))
+    assert [json.loads(message) for message in service._websocket.sent] == [
+        {"event": "config.update", "language_code": "next-IN"}
+    ]
+    assert service._settings.language == "next-IN"
+
+
+@pytest.mark.asyncio
+async def test_realtime_raw_language_through_pipeline_and_websocket():
+    queries = []
+    messages = []
+
+    async def handle_connection(websocket):
+        queries.append(parse_qs(urlparse(websocket.request.path).query))
+        async for message in websocket:
+            messages.append(json.loads(message))
+
+    async with serve(handle_connection, "127.0.0.1", 0) as server:
+        port = server.sockets[0].getsockname()[1]
+        service = SarvamRealtimeSTTService(
+            api_key="test-key",
+            base_url=f"ws://127.0.0.1:{port}/speech-to-text/realtime",
+            settings=SarvamRealtimeSTTService.Settings(language="ne-IN"),
+        )
+        await run_test(
+            service,
+            frames_to_send=[
+                STTUpdateSettingsFrame(delta=STTSettings(language="ks-IN")),
+                STTUpdateSettingsFrame(delta=STTSettings(language=None)),
+                STTUpdateSettingsFrame(delta=STTSettings(language="new-IN")),
+            ],
+        )
+
+    assert queries[0]["language_code"] == ["ne-IN"]
+    assert [message for message in messages if message["event"] == "config.update"] == [
+        {"event": "config.update", "language_code": "ks-IN"},
+        {"event": "config.update", "language_code": "auto"},
+        {"event": "config.update", "language_code": "new-IN"},
+    ]
+    assert service._settings.language == "new-IN"
 
 
 @pytest.mark.parametrize(
@@ -288,7 +370,7 @@ def test_validation_accepts_auto_language_and_modes():
     service = SarvamRealtimeSTTService(
         api_key="test-key",
         settings=SarvamRealtimeSTTService.Settings(
-            language_code="auto",
+            language=None,
             mode="translate",
             threshold=0.4,
             silence_duration_ms=700,
@@ -343,7 +425,7 @@ def test_unusable_sample_rate_raises():
 @pytest.mark.parametrize(
     "settings",
     [
-        SarvamRealtimeSTTService.Settings(language_code="fr-FR"),
+        SarvamRealtimeSTTService.Settings(language="fr-FR"),
         SarvamRealtimeSTTService.Settings(stream_type="slow"),
         SarvamRealtimeSTTService.Settings(mode="sing"),
         SarvamRealtimeSTTService.Settings(threshold=1.1),
@@ -744,7 +826,7 @@ async def test_language_delta_is_sent_as_language_code():
     assert service._websocket.sent == [
         json.dumps({"event": "config.update", "language_code": "hi-IN"})
     ]
-    assert service._settings.language_code == "hi-IN"
+    assert service._settings.language == "hi-IN"
 
 
 @pytest.mark.asyncio
@@ -762,7 +844,7 @@ async def test_base_settings_delta_still_derives_a_language_code():
     assert service._websocket.sent == [
         json.dumps({"event": "config.update", "language_code": "hi-IN"})
     ]
-    assert service._settings.language_code == "hi-IN"
+    assert service._settings.language == "hi-IN"
 
 
 def test_sample_rate_defaults_to_the_pipeline_rate():
@@ -1034,16 +1116,32 @@ async def test_confidence_defaults_to_one_when_not_numeric(monkeypatch):
     assert pushed[1].result["confidence"] == 0.42
 
 
-def test_explicit_language_code_is_not_overridden_by_language():
-    service = SarvamRealtimeSTTService(
-        api_key="test-key",
-        settings=SarvamRealtimeSTTService.Settings(
-            language=Language.EN_IN,
-            language_code="hi-IN",
-        ),
-    )
+@pytest.mark.parametrize(("language_code", "language"), [("hi-IN", "hi-IN"), ("auto", None)])
+def test_deprecated_language_code_sets_language(language_code, language):
+    with pytest.warns(DeprecationWarning, match="language_code"):
+        service = SarvamRealtimeSTTService(
+            api_key="test-key",
+            settings=SarvamRealtimeSTTService.Settings(
+                language=Language.EN_IN, language_code=language_code
+            ),
+        )
 
-    assert _query(service)["language_code"] == ["hi-IN"]
+    assert service._settings.language == language
+    assert _query(service)["language_code"] == [language_code]
+
+
+@pytest.mark.asyncio
+async def test_deprecated_language_code_delta_is_sent_as_language():
+    service = SarvamRealtimeSTTService(api_key="test-key")
+    service._websocket = _FakeWebsocket()
+
+    with pytest.warns(DeprecationWarning, match="language_code"):
+        await service._update_settings(SarvamRealtimeSTTService.Settings(language_code="auto"))
+
+    assert service._websocket.sent == [
+        json.dumps({"event": "config.update", "language_code": "auto"})
+    ]
+    assert service._settings.language is None
 
 
 def test_service_metadata_recommends_external_turn_strategies_in_vad_mode():
