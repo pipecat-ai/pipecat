@@ -545,21 +545,14 @@ class DeepgramHttpTTSService(TTSService):
 
                 await self.start_tts_usage_metrics(text)
 
-                CHUNK_SIZE = self.chunk_size
-
-                first_chunk = True
-                async for chunk in response.content.iter_chunked(CHUNK_SIZE):
-                    if first_chunk:
-                        await self.stop_ttfb_metrics()
-                        first_chunk = False
-
-                    if chunk:
-                        yield TTSAudioRawFrame(
-                            audio=chunk,
-                            sample_rate=self.sample_rate,
-                            num_channels=1,
-                            context_id=context_id,
-                        )
+                # HTTP chunk boundaries can fall mid-sample, so let the iterator
+                # helper keep emitted frames sample-aligned.
+                async for frame in self._stream_audio_frames_from_iterator(
+                    response.content.iter_chunked(self.chunk_size),
+                    context_id=context_id,
+                ):
+                    await self.stop_ttfb_metrics()
+                    yield frame
 
         except Exception as e:
             yield ErrorFrame(f"Error getting audio: {str(e)}")
