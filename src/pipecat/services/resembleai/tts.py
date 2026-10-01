@@ -197,6 +197,8 @@ class ResembleAITTSService(WebsocketTTSService):
 
     async def _disconnect(self):
         """Disconnect from the Resemble AI WebSocket."""
+        await super()._disconnect()
+
         if self._receive_task:
             await self.cancel_task(self._receive_task)
             self._receive_task = None
