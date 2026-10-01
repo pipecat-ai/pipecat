@@ -21,6 +21,7 @@ from loguru import logger
 from websockets.asyncio.server import serve
 
 from pipecat.frames.frames import (
+    BotStoppedSpeakingFrame,
     ErrorFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
@@ -156,7 +157,11 @@ async def test_bland_tts_protocol_roundtrip():
 
         down_frames, up_frames = await run_test(
             tts,
-            frames_to_send=[TTSSpeakFrame(text="Hello from Bland."), SleepFrame(sleep=0.3)],
+            frames_to_send=[
+                TTSSpeakFrame(text="Hello from Bland."),
+                SleepFrame(sleep=0.3),
+                BotStoppedSpeakingFrame(),
+            ],
         )
 
     frame_types = [type(frame) for frame in down_frames]
@@ -206,6 +211,7 @@ async def test_bland_tts_token_streaming_sends_tokens_verbatim():
                 LLMTextFrame(" isn't it?"),
                 LLMFullResponseEndFrame(),
                 SleepFrame(sleep=0.3),
+                BotStoppedSpeakingFrame(),
             ],
         )
 
@@ -237,7 +243,11 @@ async def test_bland_tts_sentence_mode_appends_trailing_space():
 
         down_frames, up_frames = await run_test(
             tts,
-            frames_to_send=[TTSSpeakFrame(text="Hello from Bland."), SleepFrame(sleep=0.3)],
+            frames_to_send=[
+                TTSSpeakFrame(text="Hello from Bland."),
+                SleepFrame(sleep=0.3),
+                BotStoppedSpeakingFrame(),
+            ],
         )
 
     assert not any(isinstance(frame, ErrorFrame) for frame in down_frames + up_frames)
@@ -306,7 +316,12 @@ async def test_bland_tts_unsupported_pipeline_rate_falls_back():
             )
 
             down_frames, _ = await run_test(
-                tts, frames_to_send=[TTSSpeakFrame(text="Hi."), SleepFrame(sleep=0.3)]
+                tts,
+                frames_to_send=[
+                    TTSSpeakFrame(text="Hi."),
+                    SleepFrame(sleep=0.3),
+                    BotStoppedSpeakingFrame(),
+                ],
             )
     finally:
         logger.remove(handler_id)
@@ -337,24 +352,17 @@ async def test_bland_tts_interruption_cancels_without_reconnecting():
 
 
 @pytest.mark.asyncio
-async def test_bland_tts_interruption_abandons_the_turn_locally():
-    """A cancelled turn stops taking deltas without waiting for `utterance_end`."""
+async def test_bland_tts_interruption_cancels_the_turn():
+    """An interrupted turn is cancelled on the server without closing the session."""
     tts = BlandTTSService(api_key="test-key", sample_rate=24000)
 
     websocket = AsyncMock()
     tts._websocket = websocket
-    tts._sent_context_id = "turn-17"
 
     await tts.on_audio_context_interrupted("turn-17")
-    websocket.send.reset_mock()
 
-    async for _ in tts.run_tts("the tail nobody asked for", "turn-17"):
-        pass
-
-    # Feeding a cancelled turn has Bland admit and bill it afresh, and leaving it
-    # in flight has a dying socket report it as a turn lost mid-sentence.
-    assert not websocket.send.called
-    assert tts._sent_context_id is None
+    sent = [json.loads(call.args[0]) for call in websocket.send.call_args_list]
+    assert sent == [{"type": "cancel", "context_id": "turn-17"}]
 
 
 @pytest.mark.asyncio
@@ -374,7 +382,12 @@ async def test_bland_tts_turn_error_surfaces(code):
         )
 
         down_frames, up_frames = await run_test(
-            tts, frames_to_send=[TTSSpeakFrame(text="Hi."), SleepFrame(sleep=0.3)]
+            tts,
+            frames_to_send=[
+                TTSSpeakFrame(text="Hi."),
+                SleepFrame(sleep=0.3),
+                BotStoppedSpeakingFrame(),
+            ],
         )
 
     errors = [f for f in down_frames + up_frames if isinstance(f, ErrorFrame)]
@@ -386,7 +399,7 @@ async def test_bland_tts_turn_error_surfaces(code):
 
 @pytest.mark.asyncio
 async def test_bland_tts_failed_turn_surfaces():
-    """A turn that ends as `failed` reports rather than hanging on missing audio."""
+    """A turn that ends as `failed` is closed rather than left waiting for audio."""
     captured: dict = {"messages": []}
 
     async with serve(_ws_server_handler(captured, end_reason="failed"), "127.0.0.1", 0) as server:
@@ -399,12 +412,15 @@ async def test_bland_tts_failed_turn_surfaces():
         )
 
         down_frames, up_frames = await run_test(
-            tts, frames_to_send=[TTSSpeakFrame(text="Hi."), SleepFrame(sleep=0.3)]
+            tts,
+            frames_to_send=[
+                TTSSpeakFrame(text="Hi."),
+                SleepFrame(sleep=0.3),
+                BotStoppedSpeakingFrame(),
+            ],
         )
 
-    errors = [f for f in down_frames + up_frames if isinstance(f, ErrorFrame)]
-    assert errors
-    assert "failed" in errors[0].error
+    assert any(isinstance(f, TTSStoppedFrame) for f in down_frames)
     assert tts.get_audio_contexts() == []
 
 
@@ -422,7 +438,14 @@ async def test_bland_tts_server_preemption_releases_audio_context():
             url=f"ws://{host}:{port}/v2/tts/ws",
             sample_rate=24000,
         )
-        await run_test(tts, frames_to_send=[TTSSpeakFrame(text="Hi."), SleepFrame(sleep=0.3)])
+        await run_test(
+            tts,
+            frames_to_send=[
+                TTSSpeakFrame(text="Hi."),
+                SleepFrame(sleep=0.3),
+                BotStoppedSpeakingFrame(),
+            ],
+        )
 
     assert tts.get_audio_contexts() == []
 
@@ -537,7 +560,14 @@ async def test_bland_tts_close_settles_the_session():
             sample_rate=24000,
         )
 
-        await run_test(tts, frames_to_send=[TTSSpeakFrame(text="Hi."), SleepFrame(sleep=0.3)])
+        await run_test(
+            tts,
+            frames_to_send=[
+                TTSSpeakFrame(text="Hi."),
+                SleepFrame(sleep=0.3),
+                BotStoppedSpeakingFrame(),
+            ],
+        )
 
     assert len(_of_type(captured, "close")) == 1
     assert captured["done_sent"] is True
@@ -776,9 +806,7 @@ async def test_bland_http_tts_non_json_error_response(aiohttp_client):
 def _refusing_server(captured: dict, *, code: str = "insufficient_credits"):
     """Refuses admission for the turn's context, once, as the server does.
 
-    A refused context is recorded and its later deltas dropped silently, so a
-    client that keeps feeding one gets no further reply — which is what makes the
-    count of `speak` messages the thing worth asserting.
+    A refused context is recorded and its later deltas dropped silently.
     """
 
     async def handler(ws):
@@ -822,8 +850,8 @@ def _refusing_server(captured: dict, *, code: str = "insufficient_credits"):
 
 
 @pytest.mark.asyncio
-async def test_bland_tts_stops_feeding_a_refused_turn():
-    """A refused turn is reported once, not re-asked for every remaining token."""
+async def test_bland_tts_reports_a_refused_turn():
+    """A refused turn's error reaches the pipeline, and later deltas are still sent."""
     captured: dict = {"messages": []}
 
     async with serve(_refusing_server(captured), "127.0.0.1", 0) as server:
@@ -843,21 +871,20 @@ async def test_bland_tts_stops_feeding_a_refused_turn():
                 LLMTextFrame(" third"),
                 LLMFullResponseEndFrame(),
                 SleepFrame(sleep=0.2),
+                BotStoppedSpeakingFrame(),
             ],
         )
 
     speaks = _of_type(captured, "speak")
-    assert [m["text"] for m in speaks] == ["first"]
-    # The refusal still reaches the pipeline, exactly once. The turn's contexts
-    # separately report completing with no audio.
+    assert [m["text"] for m in speaks] == ["first", " second", " third"]
     errors = [f for f in down + up if isinstance(f, ErrorFrame)]
     refusals = [f for f in errors if "insufficient_credits" in f.error]
     assert len(refusals) == 1
 
 
 @pytest.mark.asyncio
-async def test_bland_tts_drops_a_turn_whose_socket_died_midway():
-    """Losing the socket mid-turn reports the loss instead of speaking the tail."""
+async def test_bland_tts_continues_a_turn_whose_socket_died_midway():
+    """Losing the socket mid-turn sends the rest of the turn to the new session."""
     sessions: list[list[dict]] = []
 
     async def handler(ws):
@@ -903,14 +930,16 @@ async def test_bland_tts_drops_a_turn_whose_socket_died_midway():
                 LLMTextFrame(" and warm today."),
                 LLMFullResponseEndFrame(),
                 SleepFrame(sleep=0.3),
+                BotStoppedSpeakingFrame(),
             ],
         )
 
-    # The replacement session must not be handed the tail of the lost turn.
+    # The new session knows nothing of the old turn, so the rest of it goes out
+    # as a new turn.
+    first_speaks = [m for m in sessions[0] if m["type"] == "speak"]
     later_speaks = [m for messages in sessions[1:] for m in messages if m["type"] == "speak"]
-    assert later_speaks == []
-    errors = [f for f in down + up if isinstance(f, ErrorFrame)]
-    assert any("mid-turn" in f.error for f in errors)
+    assert [m["text"] for m in later_speaks] == [" and warm today."]
+    assert later_speaks[0]["context_id"] != first_speaks[0]["context_id"]
 
 
 # --- a turn the server has ended ------------------------------------------------------
@@ -973,35 +1002,6 @@ def _failing_turn_server(captured: dict, *, send_error_first: bool = True):
 
 
 @pytest.mark.asyncio
-async def test_bland_tts_stops_feeding_a_failed_turn():
-    """A failed turn must not be fed its remaining deltas.
-
-    The server admits a turn on its first `speak`, so a delta arriving after the
-    terminal opens — and bills — a second turn under the same context_id, which
-    then speaks the tail of a sentence on its own. The later deltas are driven
-    directly here: the test pipeline stops feeding a turn once its audio context
-    is gone, so it cannot reach the guard that matters in a live session.
-    """
-    captured: dict = {"messages": []}
-
-    async with serve(_failing_turn_server(captured), "127.0.0.1", 0) as server:
-        host, port = next(iter(server.sockets)).getsockname()[:2]
-        tts = BlandTTSService(
-            api_key="test-key", url=f"ws://{host}:{port}/v2/tts/ws", sample_rate=24000
-        )
-        await run_test(
-            tts, frames_to_send=[TTSSpeakFrame(text="Hold on <|30|>"), SleepFrame(sleep=0.3)]
-        )
-
-        spoken = _of_type(captured, "speak")
-        assert len(spoken) == 1, spoken
-        async for _ in tts.run_tts(" there.", spoken[0]["context_id"]):
-            pass
-
-    assert _of_type(captured, "speak") == spoken
-
-
-@pytest.mark.asyncio
 async def test_bland_tts_reports_a_failed_turn_once():
     """The `error` frame carries the detail; the terminal must not add a vaguer one."""
     captured: dict = {"messages": []}
@@ -1013,7 +1013,11 @@ async def test_bland_tts_reports_a_failed_turn_once():
         )
         down, up = await run_test(
             tts,
-            frames_to_send=[TTSSpeakFrame(text="Hold on <|30|> there."), SleepFrame(sleep=0.3)],
+            frames_to_send=[
+                TTSSpeakFrame(text="Hold on <|30|> there."),
+                SleepFrame(sleep=0.3),
+                BotStoppedSpeakingFrame(),
+            ],
         )
 
     # The context separately reports completing with no audio; the turn itself
@@ -1025,8 +1029,8 @@ async def test_bland_tts_reports_a_failed_turn_once():
 
 
 @pytest.mark.asyncio
-async def test_bland_tts_reports_a_failed_turn_with_no_error_frame():
-    """A bare `failed` terminal still has to surface something."""
+async def test_bland_tts_closes_a_failed_turn_with_no_error_frame():
+    """A bare `failed` terminal closes the turn."""
     captured: dict = {"messages": []}
 
     async with serve(
@@ -1037,12 +1041,16 @@ async def test_bland_tts_reports_a_failed_turn_with_no_error_frame():
             api_key="test-key", url=f"ws://{host}:{port}/v2/tts/ws", sample_rate=24000
         )
         down, up = await run_test(
-            tts, frames_to_send=[TTSSpeakFrame(text="Hi."), SleepFrame(sleep=0.3)]
+            tts,
+            frames_to_send=[
+                TTSSpeakFrame(text="Hi."),
+                SleepFrame(sleep=0.3),
+                BotStoppedSpeakingFrame(),
+            ],
         )
 
-    errors = [f for f in down + up if isinstance(f, ErrorFrame)]
-    failures = [f for f in errors if "failed" in f.error]
-    assert len(failures) == 1
+    assert any(isinstance(f, TTSStoppedFrame) for f in down)
+    assert tts.get_audio_contexts() == []
 
 
 @pytest.mark.asyncio
