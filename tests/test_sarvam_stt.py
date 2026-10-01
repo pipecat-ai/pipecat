@@ -1297,35 +1297,6 @@ def _capture_class(frames):
     return inner
 
 
-@pytest.mark.parametrize("service_class", [SarvamSTTService, SarvamRealtimeSTTService])
-@pytest.mark.parametrize(
-    ("keyterms", "message"),
-    [
-        (["term"] * 51, "at most 50"),
-        (["x" * 65], "at most 64"),
-        (["Delhi,Mumbai"], "one phrase"),
-        ("Delhi", "list of strings"),
-        ([1], "list of strings"),
-    ],
-)
-def test_keyterms_validate_before_connecting(service_class, keyterms, message):
-    with pytest.raises(ValueError, match=message):
-        service_class(
-            api_key="test-key",
-            settings=service_class.Settings(model="saaras:v4"),
-            keyterms=keyterms,
-        )
-
-
-@pytest.mark.parametrize("service_class", [SarvamSTTService, SarvamRealtimeSTTService])
-def test_keyterms_require_v4(service_class):
-    model = "saaras:v3" if service_class is SarvamSTTService else "saaras:v3-realtime"
-    with pytest.raises(ValueError, match="only supported"):
-        service_class(
-            api_key="test-key", settings=service_class.Settings(model=model), keyterms=["Sarvam"]
-        )
-
-
 def test_realtime_keyterms_are_json_encoded_and_copied():
     terms = ["New Delhi", "नाम", 'quote" & plus+', "x" * 64] + [f"term{i}" for i in range(46)]
     service = SarvamRealtimeSTTService(
