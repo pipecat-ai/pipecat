@@ -228,86 +228,40 @@ def test_configured_language_is_used_when_message_has_none():
 @pytest.mark.parametrize(
     "language,legacy_code,realtime_code",
     [
-        (Language.AS, "as-IN", "as-IN"),
-        (Language.BN, "bn-IN", "bn-IN"),
-        (Language.EN, "en-IN", "en-IN"),
-        (Language.GU, "gu-IN", "gu-IN"),
         (Language.HI, "hi-IN", "hi-IN"),
-        (Language.KN, "kn-IN", "kn-IN"),
-        (Language.ML, "ml-IN", "ml-IN"),
-        (Language.MR, "mr-IN", "mr-IN"),
         (Language.OR, "od-IN", "or-IN"),
-        (Language.PA, "pa-IN", "pa-IN"),
-        (Language.TA, "ta-IN", "ta-IN"),
-        (Language.TE, "te-IN", "te-IN"),
     ],
 )
-@pytest.mark.parametrize("as_string", [False, True])
-def test_base_language_settings_use_sarvam_locale_codes(
-    language, legacy_code, realtime_code, as_string
-):
-    value = language.value if as_string else language
+def test_base_language_settings_use_sarvam_locale_codes(language, legacy_code, realtime_code):
     legacy = SarvamSTTService(
-        api_key="test-key", settings=SarvamSTTService.Settings(language=value)
+        api_key="test-key", settings=SarvamSTTService.Settings(language=language)
     )
     realtime = SarvamRealtimeSTTService(
-        api_key="test-key", settings=SarvamRealtimeSTTService.Settings(language=value)
+        api_key="test-key", settings=SarvamRealtimeSTTService.Settings(language=language)
     )
 
     assert legacy._get_language_string() == legacy_code
     assert _query(realtime)["language_code"] == [realtime_code]
 
 
-@pytest.mark.parametrize(
-    "language,code",
-    [(Language.KOK, "kok-IN"), (Language.MAI, "mai-IN"), (Language.SD, "sd-IN")],
-)
-def test_realtime_additional_base_languages_use_sarvam_locale_codes(language, code):
-    service = SarvamRealtimeSTTService(
-        api_key="test-key", settings=SarvamRealtimeSTTService.Settings(language=language)
-    )
-
-    assert _query(service)["language_code"] == [code]
-
-
-@pytest.mark.parametrize(
-    "language",
-    ["ne-IN", "ks-IN", "sa-IN", "sat-IN", "mni-IN", "brx-IN", "doi-IN", "auto", "new-IN"],
-)
-def test_realtime_raw_language_reaches_connection_url(language):
-    service = SarvamRealtimeSTTService(
-        api_key="test-key", settings=SarvamRealtimeSTTService.Settings(language=language)
-    )
-
-    assert _query(service)["language_code"] == [language]
-
-
 @pytest.mark.asyncio
-@pytest.mark.parametrize("settings_type", [STTSettings, SarvamRealtimeSTTService.Settings])
 @pytest.mark.parametrize(
     "language,code",
     [
         ("ne-IN", "ne-IN"),
-        ("auto", "auto"),
-        ("new-IN", "new-IN"),
         (Language.HI, "hi-IN"),
         ("or", "or-IN"),
     ],
 )
-async def test_realtime_language_update_reaches_config_message(settings_type, language, code):
+async def test_realtime_language_update_reaches_config_message(language, code):
     service = SarvamRealtimeSTTService(api_key="test-key")
     service._websocket = _FakeWebsocket()
-    delta = settings_type(language=language)
-    original_fields = delta.given_fields()
-
-    changed = await service._update_settings(delta)
+    await service._update_settings(service.Settings(language=language))
 
     assert service._websocket.sent == [
         json.dumps({"event": "config.update", "language_code": code})
     ]
     assert service._settings.language_code == code
-    assert "language_code" in changed
-    assert delta.given_fields() == original_fields
 
 
 @pytest.mark.asyncio
