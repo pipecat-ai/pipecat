@@ -159,6 +159,42 @@ def _get_system_instruction(service, context) -> str | None:
     return None
 
 
+def _gross_input_tokens(
+    prompt_tokens: int,
+    completion_tokens: int | None,
+    total_tokens: int | None,
+    cache_read_input_tokens: int | None,
+    cache_creation_input_tokens: int | None,
+) -> int:
+    """Count the input tokens the way ``gen_ai.usage.input_tokens`` is defined.
+
+    The attribute counts every input token, cached ones included. Services
+    differ in whether ``prompt_tokens`` already contains the cache counts
+    (see ``LLMTokenUsage``), but ``total_tokens`` is gross on every service,
+    so the cache counts are added only when the total shows them outside
+    ``prompt_tokens``. A service that reports them inside it, or reports no
+    usable total, keeps ``prompt_tokens`` as its input count.
+
+    Args:
+        prompt_tokens: Prompt token count, net or gross of the cache counts.
+        completion_tokens: Completion token count, if reported.
+        total_tokens: Total token count, gross of the cache counts, if reported.
+        cache_read_input_tokens: Tokens read from the prompt cache, if reported.
+        cache_creation_input_tokens: Tokens written to the prompt cache, if reported.
+
+    Returns:
+        The input token count including cached tokens.
+    """
+    cached = (cache_read_input_tokens or 0) + (cache_creation_input_tokens or 0)
+    if (
+        cached
+        and completion_tokens is not None
+        and total_tokens == prompt_tokens + cached + completion_tokens
+    ):
+        return prompt_tokens + cached
+    return prompt_tokens
+
+
 def _add_token_usage_to_span(span, token_usage):
     """Add token usage metrics to a span (internal use only).
 
@@ -171,7 +207,16 @@ def _add_token_usage_to_span(span, token_usage):
 
     if isinstance(token_usage, dict):
         if "prompt_tokens" in token_usage:
-            span.set_attribute("gen_ai.usage.input_tokens", token_usage["prompt_tokens"])
+            span.set_attribute(
+                "gen_ai.usage.input_tokens",
+                _gross_input_tokens(
+                    token_usage["prompt_tokens"],
+                    token_usage.get("completion_tokens"),
+                    token_usage.get("total_tokens"),
+                    token_usage.get("cache_read_input_tokens"),
+                    token_usage.get("cache_creation_input_tokens"),
+                ),
+            )
         if "completion_tokens" in token_usage:
             span.set_attribute("gen_ai.usage.output_tokens", token_usage["completion_tokens"])
         # Add cached token metrics for dictionary
@@ -210,17 +255,25 @@ def _add_token_usage_to_span(span, token_usage):
             )
     else:
         # Handle LLMTokenUsage object
-        span.set_attribute("gen_ai.usage.input_tokens", getattr(token_usage, "prompt_tokens", 0))
+        completion_tokens = getattr(token_usage, "completion_tokens", 0)
+        cache_read_tokens = getattr(token_usage, "cache_read_input_tokens", None)
+        cache_creation_tokens = getattr(token_usage, "cache_creation_input_tokens", None)
         span.set_attribute(
-            "gen_ai.usage.output_tokens", getattr(token_usage, "completion_tokens", 0)
+            "gen_ai.usage.input_tokens",
+            _gross_input_tokens(
+                getattr(token_usage, "prompt_tokens", 0),
+                completion_tokens,
+                getattr(token_usage, "total_tokens", None),
+                cache_read_tokens,
+                cache_creation_tokens,
+            ),
         )
+        span.set_attribute("gen_ai.usage.output_tokens", completion_tokens)
 
         # Add cached token metrics for LLMTokenUsage object
-        cache_read_tokens = getattr(token_usage, "cache_read_input_tokens", None)
         if cache_read_tokens is not None:
             span.set_attribute("gen_ai.usage.cache_read.input_tokens", cache_read_tokens)
 
-        cache_creation_tokens = getattr(token_usage, "cache_creation_input_tokens", None)
         if cache_creation_tokens is not None:
             span.set_attribute("gen_ai.usage.cache_creation.input_tokens", cache_creation_tokens)
 
