@@ -1,0 +1,41 @@
+# Two things in flight, and the user drops one of them. The backend cancels
+# the tool for the dropped one and finishes the other; the user hears the
+# result they still want and nothing about the one they dropped.
+- expect:
+    - event: response
+      eval: "the bot opens the conversation in some way (a greeting, an introduction, an offer to help, or a question to get the user started)"
+
+- user: "Run the integration tests for the HTTP client, and also look up what the on-call runbook says to do about upstream timeouts."
+  expect:
+    - event: function_call
+      calls:
+        - name: delegate
+    - event: function_call
+      within_ms: 45000
+      calls:
+        - name: run_integration_tests
+
+# Sent while the integration tests are running.
+- user: "Forget the tests, Sam already ran them. I just need the runbook answer."
+  send_after:
+    event: function_call
+    delay_ms: 500
+  expect:
+    - event: function_call
+      calls:
+        - name: delegate
+    - event: response
+      within_ms: 60000
+      eval: "reports what the runbook says about upstream timeouts (check the upstream's status page, then the retry dashboard) and does not report any test results (if the bot has only acknowledged so far, answer continue, not no)"
+      text_excludes: "backend"
+    - event: function_call_stopped
+      within_ms: 60000
+      calls:
+        - name: run_integration_tests
+          args: { cancelled: true }
+
+# Nothing about the tests arrives later.
+- expect:
+    - event: response
+      absent: true
+      within_ms: 30000

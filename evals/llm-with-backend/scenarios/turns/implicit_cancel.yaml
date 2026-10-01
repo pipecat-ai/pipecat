@@ -1,0 +1,40 @@
+# The user changes their mind while a tool is running, without saying "stop"
+# or "cancel". The frontend only delegates; the backend cancels the tool
+# whose result is no longer wanted, and the user hears nothing stale.
+- expect:
+    - event: response
+      eval: "the bot opens the conversation in some way (a greeting, an introduction, an offer to help, or a question to get the user started)"
+
+- user: "Run the integration tests for the HTTP client and tell me what you find."
+  expect:
+    - event: function_call
+      calls:
+        - name: delegate
+    - event: function_call
+      within_ms: 45000
+      calls:
+        - name: run_integration_tests
+
+# Sent while the integration tests are running.
+- user: "Oh wait, actually, don't bother, Sam already ran them on his branch this morning and they were fine."
+  send_after:
+    event: function_call
+    delay_ms: 500
+  expect:
+    - event: function_call
+      calls:
+        - name: delegate
+    # The acknowledgement and the cancellation land in either order: the
+    # cascades acknowledge first, the speech-to-speech bots cancel first.
+    - event: response
+      within_ms: 25000
+      eval: "acknowledges the change of plan briefly, without reporting any test results and without promising further work; speaks as itself, without mentioning a backend or handing work off (this reply is complete in itself: answer yes or no, never continue)"
+      text_excludes: "backend"
+    - event: function_call_stopped
+      within_ms: 25000
+      calls:
+        - name: run_integration_tests
+          args: { cancelled: true }
+    - event: response
+      absent: true
+      within_ms: 30000
