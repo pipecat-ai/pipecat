@@ -549,7 +549,7 @@ class ElevenLabsTTSBase(WebsocketTTSService):
             enable_logging: Whether to enable ElevenLabs server-side logging.
             **kwargs: Additional arguments passed to the parent service.
         """
-        super().__init__(**kwargs)
+        super().__init__(keepalive_interval=10, **kwargs)
 
         self._api_key = api_key
         self._url = url
@@ -564,7 +564,6 @@ class ElevenLabsTTSBase(WebsocketTTSService):
         self._partial_word_start_time = 0.0
 
         self._receive_task = None
-        self._keepalive_task = None
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -681,8 +680,8 @@ class ElevenLabsTTSBase(WebsocketTTSService):
         if self._websocket and not self._receive_task:
             self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
-        if self._websocket and not self._keepalive_task:
-            self._keepalive_task = self.create_task(self._keepalive_task_handler())
+        if self._websocket:
+            self._create_keepalive_task()
 
     async def _disconnect(self):
         await super()._disconnect()
@@ -691,9 +690,7 @@ class ElevenLabsTTSBase(WebsocketTTSService):
             await self.cancel_task(self._receive_task)
             self._receive_task = None
 
-        if self._keepalive_task:
-            await self.cancel_task(self._keepalive_task)
-            self._keepalive_task = None
+        await self._cancel_keepalive_task()
 
         await self._disconnect_websocket()
 
@@ -778,17 +775,6 @@ class ElevenLabsTTSBase(WebsocketTTSService):
         """Reset alignment state after all audio for the context has played."""
         self._reset_alignment_state(context_id)
         await super().on_audio_context_completed(context_id)
-
-    async def _keepalive_task_handler(self):
-        """Send periodic keepalive messages to maintain WebSocket connection."""
-        KEEPALIVE_SLEEP = 10
-        while True:
-            await asyncio.sleep(KEEPALIVE_SLEEP)
-            try:
-                await self._send_keepalive()
-            except websockets.ConnectionClosed as e:
-                logger.warning(f"{self} keepalive error: {e}")
-                break
 
     @traced_tts
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:

@@ -13,7 +13,6 @@ Contains two TTS services:
 Inworld’s text-to-speech (TTS) models offer ultra-realistic, context-aware speech synthesis and precise voice cloning capabilities, enabling developers to build natural and engaging experiences with human-like speech quality at an accessible price point.
 """
 
-import asyncio
 import base64
 import json
 import uuid
@@ -27,7 +26,6 @@ from typing import (
 )
 
 import aiohttp
-import websockets
 from loguru import logger
 
 from pipecat import version as pipecat_version
@@ -746,6 +744,7 @@ class InworldTTSService(WebsocketTTSService):
             text_aggregation_mode=text_aggregation_mode,
             append_trailing_space=append_trailing_space,
             settings=default_settings,
+            keepalive_interval=60,
             **kwargs,
         )
 
@@ -759,7 +758,6 @@ class InworldTTSService(WebsocketTTSService):
         }
 
         self._receive_task = None
-        self._keepalive_task = None
 
         # Track cumulative time across generations for monotonic timestamps within a turn.
         # When auto_mode is enabled, the server controls generations and timestamps reset
@@ -969,8 +967,8 @@ class InworldTTSService(WebsocketTTSService):
         if self._websocket and not self._receive_task:
             self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
-        if self._websocket and not self._keepalive_task:
-            self._keepalive_task = self.create_task(self._keepalive_task_handler())
+        if self._websocket:
+            self._create_keepalive_task()
 
     async def _disconnect(self):
         """Disconnect from the Inworld WebSocket TTS service.
@@ -984,9 +982,7 @@ class InworldTTSService(WebsocketTTSService):
             await self.cancel_task(self._receive_task)
             self._receive_task = None
 
-        if self._keepalive_task:
-            await self.cancel_task(self._keepalive_task)
-            self._keepalive_task = None
+        await self._cancel_keepalive_task()
 
         await self._disconnect_websocket()
 
@@ -1149,27 +1145,19 @@ class InworldTTSService(WebsocketTTSService):
                 await self.append_to_audio_context(ctx_id, TTSStoppedFrame(context_id=ctx_id))
                 await self.remove_audio_context(ctx_id)
 
-    async def _keepalive_task_handler(self):
-        """Send periodic keepalive messages to maintain WebSocket connection."""
-        KEEPALIVE_SLEEP = 60
-        while True:
-            await asyncio.sleep(KEEPALIVE_SLEEP)
-            try:
-                if self._websocket and self._websocket.state is State.OPEN:
-                    context_id = self.get_active_audio_context_id()
-                    if context_id:
-                        keepalive_message = {
-                            "send_text": {"text": ""},
-                            "contextId": context_id,
-                        }
-                        logger.trace(f"Sending keepalive for context {context_id}")
-                    else:
-                        keepalive_message = {"send_text": {"text": ""}}
-                        logger.trace("Sending keepalive without context")
-                    await self._websocket.send(json.dumps(keepalive_message))
-            except websockets.ConnectionClosed as e:
-                logger.warning(f"{self} keepalive error: {e}")
-                break
+    async def _send_keepalive(self):
+        """Send empty text, on the active context if there is one."""
+        context_id = self.get_active_audio_context_id()
+        if context_id:
+            keepalive_message = {
+                "send_text": {"text": ""},
+                "contextId": context_id,
+            }
+            logger.trace(f"Sending keepalive for context {context_id}")
+        else:
+            keepalive_message = {"send_text": {"text": ""}}
+            logger.trace("Sending keepalive without context")
+        await self._get_websocket().send(json.dumps(keepalive_message))
 
     async def _send_context(self, context_id: str):
         """Send a context to the Inworld WebSocket TTS service.

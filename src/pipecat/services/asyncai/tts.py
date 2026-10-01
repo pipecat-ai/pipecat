@@ -6,7 +6,6 @@
 
 """Async text-to-speech service implementations."""
 
-import asyncio
 import base64
 import json
 from collections.abc import AsyncGenerator
@@ -14,7 +13,6 @@ from dataclasses import dataclass
 from typing import Any
 
 import aiohttp
-import websockets
 from loguru import logger
 from pydantic import BaseModel
 from websockets.protocol import State
@@ -192,6 +190,7 @@ class AsyncAITTSService(WebsocketTTSService):
             push_start_frame=True,
             push_stop_frames=True,
             settings=default_settings,
+            keepalive_interval=10,
             **kwargs,
         )
 
@@ -205,7 +204,6 @@ class AsyncAITTSService(WebsocketTTSService):
         self._output_sample_rate = 0  # Set in start()
 
         self._receive_task = None
-        self._keepalive_task = None
 
     async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
         """Apply a settings delta, reconnecting when a session-init field changes.
@@ -275,8 +273,8 @@ class AsyncAITTSService(WebsocketTTSService):
         if self._websocket and not self._receive_task:
             self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
-        if self._websocket and not self._keepalive_task:
-            self._keepalive_task = self.create_task(self._keepalive_task_handler())
+        if self._websocket:
+            self._create_keepalive_task()
 
     async def _disconnect(self):
         await super()._disconnect()
@@ -285,9 +283,7 @@ class AsyncAITTSService(WebsocketTTSService):
             await self.cancel_task(self._receive_task)
             self._receive_task = None
 
-        if self._keepalive_task:
-            await self.cancel_task(self._keepalive_task)
-            self._keepalive_task = None
+        await self._cancel_keepalive_task()
 
         await self._disconnect_websocket()
 
@@ -398,30 +394,22 @@ class AsyncAITTSService(WebsocketTTSService):
                 frame = TTSAudioRawFrame(audio, self.sample_rate, 1, context_id=received_ctx_id)
                 await self.append_to_audio_context(received_ctx_id, frame)
 
-    async def _keepalive_task_handler(self):
-        """Send periodic keepalive messages to maintain WebSocket connection."""
-        KEEPALIVE_SLEEP = 10
-        while True:
-            await asyncio.sleep(KEEPALIVE_SLEEP)
-            try:
-                if self._websocket and self._websocket.state is State.OPEN:
-                    context_id = self.get_active_audio_context_id()
-                    if context_id:
-                        keepalive_message = {
-                            "transcript": " ",
-                            "context_id": context_id,
-                        }
-                        logger.trace("Sending keepalive message")
-                    else:
-                        # It's possible to have a user interruption which clears the context
-                        # without generating a new TTS response. In this case, we'll just send
-                        # an empty message to keep the connection alive.
-                        keepalive_message = {"transcript": " "}
-                        logger.trace("Sending keepalive without context")
-                    await self._websocket.send(json.dumps(keepalive_message))
-            except websockets.ConnectionClosed as e:
-                logger.warning(f"{self} keepalive error: {e}")
-                break
+    async def _send_keepalive(self):
+        """Send a blank transcript, on the active context if there is one."""
+        context_id = self.get_active_audio_context_id()
+        if context_id:
+            keepalive_message = {
+                "transcript": " ",
+                "context_id": context_id,
+            }
+            logger.trace("Sending keepalive message")
+        else:
+            # It's possible to have a user interruption which clears the context
+            # without generating a new TTS response. In this case, we'll just send
+            # an empty message to keep the connection alive.
+            keepalive_message = {"transcript": " "}
+            logger.trace("Sending keepalive without context")
+        await self._get_websocket().send(json.dumps(keepalive_message))
 
     async def _close_context(self, context_id: str):
         # Async AI requires explicit context closure to free server-side resources,
