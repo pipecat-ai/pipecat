@@ -1,0 +1,5 @@
+name: partial_cancel
+judge: !include ../../../release/scenarios/judge_text.yaml
+scenarios:
+  - name: text
+    turns: !include ../turns/partial_cancel.yaml
