@@ -16,7 +16,8 @@ own.
 The backend, its tools and both prompts are in ``backend.py``, shared with
 ``openai-realtime-frontend.py`` and ``gemini-live-frontend.py``, which put a
 speech-to-speech model in the frontend's place. Try: "fix the flaky retry test
-in the HTTP client", then ask for something else while it works.
+in the HTTP client", then ask for something else while it works; the README
+has a longer conversation to try.
 
 Architecture::
 

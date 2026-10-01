@@ -17,7 +17,8 @@ request itself, since its context can lag the audio.
 The backend, its tools and both prompts are in ``backend.py``, shared with
 ``openai-responses-frontend.py``, which puts a cascade pipeline in the
 frontend's place. Try: "fix the flaky retry test in the HTTP client", then
-ask for something else while it works.
+ask for something else while it works; the README has a longer conversation
+to try.
 
 Architecture::
 
