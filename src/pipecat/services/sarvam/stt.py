@@ -98,6 +98,20 @@ def language_to_sarvam_language(language: Language) -> str:
         Language.EN_IN: "en-IN",
         Language.AS: "as-IN",
         Language.AS_IN: "as-IN",
+        Language.BRX: "brx-IN",
+        Language.BRX_IN: "brx-IN",
+        Language.DOI: "doi-IN",
+        Language.DOI_IN: "doi-IN",
+        Language.KS: "ks-IN",
+        Language.KS_IN: "ks-IN",
+        Language.MNI: "mni-IN",
+        Language.MNI_IN: "mni-IN",
+        Language.NE: "ne-IN",
+        Language.NE_IN: "ne-IN",
+        Language.SA: "sa-IN",
+        Language.SA_IN: "sa-IN",
+        Language.SAT: "sat-IN",
+        Language.SAT_IN: "sat-IN",
     }
 
     return resolve_language(language, LANGUAGE_MAP, use_base_code=False)
@@ -771,6 +785,13 @@ class SarvamSTTService(STTService):
             "mai-IN": Language.MAI_IN,
             "sd-IN": Language.SD_IN,
             "kok-IN": Language.KOK_IN,
+            "ne-IN": Language.NE_IN,
+            "ks-IN": Language.KS_IN,
+            "sa-IN": Language.SA_IN,
+            "sat-IN": Language.SAT_IN,
+            "mni-IN": Language.MNI_IN,
+            "brx-IN": Language.BRX_IN,
+            "doi-IN": Language.DOI_IN,
         }
         # "unknown" is Sarvam's own placeholder for "not detected/configured yet"
         # (see MODEL_CONFIGS.default_language), not a data gap worth warning about.
@@ -893,6 +914,10 @@ def language_to_sarvam_realtime_language(language: Language) -> str:
         Language.AS_IN: "as-IN",
         Language.BN: "bn-IN",
         Language.BN_IN: "bn-IN",
+        Language.BRX: "brx-IN",
+        Language.BRX_IN: "brx-IN",
+        Language.DOI: "doi-IN",
+        Language.DOI_IN: "doi-IN",
         Language.EN: "en-IN",
         Language.EN_IN: "en-IN",
         Language.GU: "gu-IN",
@@ -903,16 +928,26 @@ def language_to_sarvam_realtime_language(language: Language) -> str:
         Language.KN_IN: "kn-IN",
         Language.KOK: "kok-IN",
         Language.KOK_IN: "kok-IN",
+        Language.KS: "ks-IN",
+        Language.KS_IN: "ks-IN",
         Language.MAI: "mai-IN",
         Language.MAI_IN: "mai-IN",
         Language.ML: "ml-IN",
         Language.ML_IN: "ml-IN",
+        Language.MNI: "mni-IN",
+        Language.MNI_IN: "mni-IN",
         Language.MR: "mr-IN",
         Language.MR_IN: "mr-IN",
+        Language.NE: "ne-IN",
+        Language.NE_IN: "ne-IN",
         Language.OR: "or-IN",
         Language.OR_IN: "or-IN",
         Language.PA: "pa-IN",
         Language.PA_IN: "pa-IN",
+        Language.SA: "sa-IN",
+        Language.SA_IN: "sa-IN",
+        Language.SAT: "sat-IN",
+        Language.SAT_IN: "sat-IN",
         Language.SD: "sd-IN",
         Language.SD_IN: "sd-IN",
         Language.TA: "ta-IN",
@@ -1059,7 +1094,11 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
             if language is not None:
                 default_settings.language_code = language_to_sarvam_realtime_language(language)
             elif isinstance(default_settings.language, str):
-                default_settings.language_code = default_settings.language
+                logger.warning(
+                    f"Ignoring unrecognized language {default_settings.language!r}; "
+                    f"using language_code={default_settings.language_code!r}. "
+                    "Use settings.language_code to pass a provider-specific code."
+                )
 
         self._validate_settings(default_settings)
 
@@ -1362,22 +1401,24 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
         ``language`` but none of the Sarvam fields, so the delta is widened to
         these settings first. Mirrors the constructor: an explicit
         ``language_code`` wins, since it also expresses ``auto``, which has no
-        :class:`Language` equivalent. Unrecognized language strings are
-        forwarded as-is.
+        :class:`Language` equivalent. Unrecognized strings leave the current
+        ``language_code`` unchanged and log a warning.
         """
         if not isinstance(delta, self.Settings):
             delta = self.Settings.from_mapping(delta.given_fields())
         if is_given(delta.language_code):
             return delta
         language = _as_language(delta.language)
-        if language is not None:
-            language_code = language_to_sarvam_realtime_language(language)
-        elif isinstance(delta.language, str):
-            language_code = delta.language
-        else:
+        if language is None:
+            if isinstance(delta.language, str):
+                logger.warning(
+                    f"Ignoring unrecognized language {delta.language!r}; "
+                    f"keeping language_code={self._settings.language_code!r}. "
+                    "Use settings.language_code to pass a provider-specific code."
+                )
             return delta
         derived = delta.copy()
-        derived.language_code = language_code
+        derived.language_code = language_to_sarvam_realtime_language(language)
         return derived
 
     async def _handle_speech_start(self, message: dict[str, Any]):

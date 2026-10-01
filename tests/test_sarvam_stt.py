@@ -173,19 +173,17 @@ async def test_default_configuration_leaves_language_unset(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_unrecognized_language_code_leaves_language_unset(monkeypatch):
-    """A real Sarvam code with no `Language` equivalent at all (Sanskrit has no
-    "sa-IN" member, only the base "sa") is left unset, not silently relabeled as
-    a different language, and is warned about exactly once."""
+    """An unrecognized code leaves the frame language unset and warns once."""
     service = SarvamSTTService(api_key="test-key")
     pushed = []
     monkeypatch.setattr(service, "push_frame", _capture(pushed))
 
-    await service._handle_message(_FakeSarvamMessage("first", language_code="sa-IN"))
-    await service._handle_message(_FakeSarvamMessage("second", language_code="sa-IN"))
+    await service._handle_message(_FakeSarvamMessage("first", language_code="new-IN"))
+    await service._handle_message(_FakeSarvamMessage("second", language_code="new-IN"))
 
     assert pushed[0].language is None
     assert pushed[1].language is None
-    assert service._unmapped_language_codes_warned == {"sa-IN"}
+    assert service._unmapped_language_codes_warned == {"new-IN"}
 
 
 @pytest.mark.asyncio
@@ -207,13 +205,19 @@ async def test_recognized_language_code_is_mapped(monkeypatch):
         ("mai-IN", Language.MAI_IN),
         ("sd-IN", Language.SD_IN),
         ("kok-IN", Language.KOK_IN),
+        ("ne-IN", Language.NE_IN),
+        ("ks-IN", Language.KS_IN),
+        ("sa-IN", Language.SA_IN),
+        ("sat-IN", Language.SAT_IN),
+        ("mni-IN", Language.MNI_IN),
+        ("brx-IN", Language.BRX_IN),
+        ("doi-IN", Language.DOI_IN),
     ],
 )
 def test_previously_missing_codes_now_map(language_code, language):
-    """Urdu, Maithili, Sindhi, and Konkani have exact `Language` matches and are
-    real entries in SarvamRealtimeSTTService's SUPPORTED_LANGUAGES -- they were
-    simply missing from this table."""
+    """Supported Sarvam locale codes resolve to exact Language members."""
     service = SarvamSTTService(api_key="test-key")
+    assert Language(language_code) == language
     assert service._map_language_code_to_enum(language_code) == language
 
 
@@ -230,6 +234,8 @@ def test_configured_language_is_used_when_message_has_none():
     [
         (Language.HI, "hi-IN", "hi-IN"),
         (Language.OR, "od-IN", "or-IN"),
+        (Language.NE, "ne-IN", "ne-IN"),
+        (Language.SA, "sa-IN", "sa-IN"),
     ],
 )
 def test_base_language_settings_use_sarvam_locale_codes(language, legacy_code, realtime_code):
@@ -278,6 +284,23 @@ async def test_realtime_explicit_language_code_wins_during_update():
 
 
 @pytest.mark.asyncio
+async def test_realtime_unrecognized_language_keeps_fallback_and_warns(monkeypatch):
+    logger = _CapturingLogger()
+    monkeypatch.setattr("pipecat.services.sarvam.stt.logger", logger)
+    service = SarvamRealtimeSTTService(
+        api_key="test-key", settings=SarvamRealtimeSTTService.Settings(language="new-IN")
+    )
+    assert _query(service)["language_code"] == ["en-IN"]
+
+    service._websocket = _FakeWebsocket()
+    await service._update_settings(STTSettings(language="new-IN"))
+    assert service._websocket.sent == []
+    assert service._settings.language_code == "en-IN"
+    assert len(logger.warning_messages) == 2
+    assert all("new-IN" in message for message in logger.warning_messages)
+
+
+@pytest.mark.asyncio
 async def test_realtime_raw_language_through_pipeline_and_websocket():
     queries = []
     messages = []
@@ -296,11 +319,17 @@ async def test_realtime_raw_language_through_pipeline_and_websocket():
         )
         await run_test(
             service,
-            frames_to_send=[STTUpdateSettingsFrame(delta=STTSettings(language="ks-IN"))],
+            frames_to_send=[
+                STTUpdateSettingsFrame(delta=STTSettings(language="ks-IN")),
+                STTUpdateSettingsFrame(delta=STTSettings(language="new-IN")),
+            ],
         )
 
     assert queries[0]["language_code"] == ["ne-IN"]
-    assert {"event": "config.update", "language_code": "ks-IN"} in messages
+    assert [message for message in messages if message["event"] == "config.update"] == [
+        {"event": "config.update", "language_code": "ks-IN"}
+    ]
+    assert service._settings.language_code == "ks-IN"
 
 
 @pytest.mark.parametrize(
