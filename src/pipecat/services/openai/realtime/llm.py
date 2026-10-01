@@ -804,21 +804,19 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
             llm_invocation_params = adapter.get_llm_invocation_params(
                 self._context,
                 system_instruction=assert_given(self._settings.system_instruction),
+                service_tools=settings.tools,
             )
-
-            # tools given in the context override the tools in the session properties
-            if llm_invocation_params["tools"]:
-                settings.tools = llm_invocation_params["tools"]
 
             # The adapter resolves conflicts between init-provided and
             # context-provided system instructions (preferring init-provided).
             if llm_invocation_params["system_instruction"]:
                 settings.instructions = llm_invocation_params["system_instruction"]
 
-        # If needed, map settings.tools from ToolsSchema to list of dicts,
-        # which remote server expects. It would only be a ToolsSchema if that's
-        # how it was provided in the constructor or via LLMUpdateSettingsFrame.
-        if settings.tools and isinstance(settings.tools, ToolsSchema):
+            # The adapter settles the tools too: the context's own when it has
+            # any, else the init-provided ones; built-in tools ride along either way.
+            settings.tools = cast(list[Any], llm_invocation_params["tools"])
+        else:
+            # No context yet: the init-provided tools; built-in tools ride along.
             settings.tools = cast(list[Any], adapter.from_standard_tools(settings.tools))
 
         outgoing = self._strip_unsupported_reasoning(settings)
