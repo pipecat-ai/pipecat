@@ -112,6 +112,15 @@ class _WordTimestampEntry:
     includes_inter_frame_spaces: bool = False
 
 
+@dataclass
+class _AudioRemainder:
+    """Internal: the bytes of a sample split across audio chunks, with their format."""
+
+    audio: bytes
+    sample_rate: int
+    num_channels: int
+
+
 class TTSService(AIService):
     """Base class for text-to-speech services.
 
@@ -407,6 +416,9 @@ class TTSService(AIService):
         self._playing_context_id: str | None = None
         self._turn_context_id: str | None = None
         self._audio_contexts: dict[str, asyncio.Queue] = {}
+        # Trailing bytes of a sample split across audio chunks, per context. See
+        # _align_audio_frame.
+        self._audio_remainders: dict[str, _AudioRemainder] = {}
         self._audio_context_task: asyncio.Task | None = None
 
         # Single FIFO queue that serializes everything the TTS service emits downstream.
@@ -1635,19 +1647,69 @@ class TTSService(AIService):
         if not context_id:
             logger.debug(f"{self} unable to append audio to context: no context ID provided")
             return
-        if self.audio_context_available(context_id):
-            logger.trace(f"{self} appending audio {frame} to audio context {context_id}")
-            await self._audio_contexts[context_id].put(frame)
-        # In case the frame is None, we should not recreate the context.
-        elif context_id == self._turn_context_id and frame:
-            # Sometimes the HTTP service can take more than 3 seconds without sending any audio
-            # So we are now recreating the context id while we are in the same turn
-            logger.debug(f"{self} recreating audio context {context_id}")
-            await self.create_audio_context(context_id)
-            logger.trace(f"{self} appending audio {frame} to audio context {context_id}")
-            await self._audio_contexts[context_id].put(frame)
-        else:
-            logger.debug(f"{self} unable to append audio to context {context_id}")
+        if not self.audio_context_available(context_id):
+            # In case the frame is None, we should not recreate the context.
+            if context_id == self._turn_context_id and frame:
+                # Sometimes the HTTP service can take more than 3 seconds without sending any audio
+                # So we are now recreating the context id while we are in the same turn
+                logger.debug(f"{self} recreating audio context {context_id}")
+                await self.create_audio_context(context_id)
+            else:
+                logger.debug(f"{self} unable to append audio to context {context_id}")
+                return
+        if isinstance(frame, TTSAudioRawFrame) and not self._align_audio_frame(context_id, frame):
+            return
+        # The context's audio ends here, so a held-back partial sample must be
+        # queued before the stop frame (or the end marker) that follows it.
+        if frame is None or isinstance(frame, TTSStoppedFrame):
+            await self._flush_audio_remainder(context_id)
+        logger.trace(f"{self} appending audio {frame} to audio context {context_id}")
+        await self._audio_contexts[context_id].put(frame)
+
+    def _align_audio_frame(self, context_id: str, frame: TTSAudioRawFrame) -> bool:
+        """Trim an audio frame to whole samples, carrying a split sample forward.
+
+        Providers may cut their PCM stream at any byte, so a chunk can end
+        mid-sample. The partial sample is held back and prepended to the
+        context's next frame, keeping every queued frame sample-aligned for
+        consumers that read audio frame by frame (metrics, resamplers, filters).
+        Frames that are already aligned pass through untouched.
+
+        Args:
+            context_id: The audio context the frame belongs to.
+            frame: The audio frame to align; its audio is replaced in place.
+
+        Returns:
+            False if the frame holds less than one whole sample and should be
+            dropped, True otherwise.
+        """
+        block_size = 2 * max(frame.num_channels, 1)
+        remainder = self._audio_remainders.pop(context_id, None)
+        if not remainder and len(frame.audio) % block_size == 0:
+            return True
+        audio = (remainder.audio if remainder else b"") + frame.audio
+        aligned_length = len(audio) - len(audio) % block_size
+        if aligned_length < len(audio):
+            self._audio_remainders[context_id] = _AudioRemainder(
+                audio[aligned_length:], frame.sample_rate, frame.num_channels
+            )
+        if not aligned_length:
+            return False
+        frame.audio = audio[:aligned_length]
+        frame.num_frames = aligned_length // block_size
+        return True
+
+    async def _flush_audio_remainder(self, context_id: str):
+        """Queue a context's held-back partial sample, zero-padded to a whole one."""
+        remainder = self._audio_remainders.pop(context_id, None)
+        if not remainder:
+            return
+        block_size = 2 * max(remainder.num_channels, 1)
+        audio = remainder.audio.ljust(block_size, b"\x00")
+        frame = TTSAudioRawFrame(
+            audio, remainder.sample_rate, remainder.num_channels, context_id=context_id
+        )
+        await self._audio_contexts[context_id].put(frame)
 
     async def remove_audio_context(self, context_id: str | None):
         """Remove an existing audio context.
@@ -1667,6 +1729,8 @@ class TTSService(AIService):
             logger.trace(f"{self} marking audio context {context_id} for deletion")
             await self.append_to_audio_context(context_id, None)
         else:
+            # The stream has ended, so a partial sample held for it is no longer needed.
+            self._audio_remainders.pop(context_id, None)
             logger.warning(f"{self} unable to remove context {context_id}")
 
     def has_active_audio_context(self) -> bool:
@@ -1727,6 +1791,7 @@ class TTSService(AIService):
     def _create_audio_context_task(self):
         if not self._audio_context_task:
             self._audio_contexts: dict[str, asyncio.Queue] = {}
+            self._audio_remainders = {}
             self._audio_context_task = self.create_task(self._audio_context_task_handler())
 
     async def _stop_audio_context_task(self):
@@ -1761,6 +1826,10 @@ class TTSService(AIService):
 
                 # We just finished processing the context, so we can safely remove it.
                 del self._audio_contexts[context_id]
+                # A context that timed out mid-turn may be recreated for the same
+                # stream, so its held-back bytes stay until remove_audio_context.
+                if context_id != self._turn_context_id:
+                    self._audio_remainders.pop(context_id, None)
                 await self.on_audio_context_completed(context_id=context_id)
                 self.reset_active_audio_context()
             else:
@@ -2080,6 +2149,12 @@ class WebsocketTTSService(TTSService, WebsocketService):
         """Release websocket TTS resources at teardown."""
         await super().cleanup()
         await self._disconnect()
+
+    async def _websocket_connect(self, uri: str, **kwargs):
+        # A new connection starts every stream on a sample boundary, so a partial
+        # sample held from the old one would shift all the audio after it.
+        self._audio_remainders.clear()
+        return await super()._websocket_connect(uri, **kwargs)
 
     async def _report_error(self, error: ErrorFrame, force_treat_as_permanent: bool = False):
         await self._call_event_handler("on_connection_error", error.error)

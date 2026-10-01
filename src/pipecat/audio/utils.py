@@ -368,7 +368,8 @@ def detect_speech_onset(
     if sample_rate <= 0:
         return None
 
-    samples = np.frombuffer(pcm_bytes, dtype=np.int16)
+    # A trailing partial sample can't be read as int16; ignore it.
+    samples = np.frombuffer(pcm_bytes[: len(pcm_bytes) & ~1], dtype=np.int16)
     if samples.size == 0:
         return None
 
