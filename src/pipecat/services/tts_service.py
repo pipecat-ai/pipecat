@@ -2158,9 +2158,16 @@ class WebsocketTTSService(TTSService, WebsocketService):
         await self._disconnect()
 
     async def _websocket_connect(self, uri: str, **kwargs):
-        # A new connection starts every stream on a sample boundary, so a partial
-        # sample held from the old one would shift all the audio after it.
-        self._audio_remainders.clear()
+        # Providers keep context state per connection and don't resume it on a
+        # new one, so audio still due on the old connection never arrives. Close
+        # every open context (audio already received still plays), and move a
+        # turn in progress to a new context ID so its remaining sentences open a
+        # fresh provider context.
+        for context_id in self.get_audio_contexts():
+            await self.remove_audio_context(context_id)
+        if self._turn_context_id:
+            self._turn_context_id = None
+            self._turn_context_id = self.create_context_id()
         return await super()._websocket_connect(uri, **kwargs)
 
     async def _report_error(self, error: ErrorFrame, force_treat_as_permanent: bool = False):

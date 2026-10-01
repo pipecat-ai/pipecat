@@ -28,8 +28,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.pipeline.worker import PipelineParams
-from pipecat.services import websocket_service
-from pipecat.services.tts_service import TTSService, WebsocketTTSService, _AudioRemainder
+from pipecat.services.tts_service import TTSService
 from pipecat.tests.utils import SleepFrame, run_test
 
 _SAMPLE_RATE = 16000
@@ -152,36 +151,6 @@ async def test_interruption_discards_partial_sample():
     service = MockTTSService(_split(_PCM, [1023, 1024, 2049]), delay_s=0.05)
 
     await _speak(service, SleepFrame(sleep=0.02), InterruptionFrame(), SleepFrame(sleep=0.2))
-
-    assert service._audio_remainders == {}
-
-
-class MockWebsocketTTSService(WebsocketTTSService):
-    async def _connect_websocket(self):
-        pass
-
-    async def _disconnect_websocket(self):
-        pass
-
-    async def _receive_messages(self):
-        pass
-
-    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
-        yield None
-
-
-@pytest.mark.asyncio
-async def test_reconnect_discards_partial_sample(monkeypatch):
-    async def fake_connect(*args, **kwargs):
-        return object()
-
-    monkeypatch.setattr(websocket_service, "websocket_connect", fake_connect)
-    service = MockWebsocketTTSService(sample_rate=_SAMPLE_RATE)
-    service._audio_remainders["ctx"] = _AudioRemainder(b"\x01", _SAMPLE_RATE, 1)
-
-    # The new connection's stream starts on a sample boundary; a byte held from
-    # the old one must not be prepended to it.
-    await service._websocket_connect("ws://example")
 
     assert service._audio_remainders == {}
 

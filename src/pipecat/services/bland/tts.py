@@ -239,6 +239,18 @@ class BlandTTSService(WebsocketTTSService):
 
         await self._disconnect_websocket()
 
+    async def _websocket_connect(self, uri: str, **kwargs):
+        # A new connection moves the turn to a new context ID. A turn abandoned
+        # on the old connection stays abandoned under its new ID.
+        turn_abandoned = (
+            self._abandoned_context_id is not None
+            and self._abandoned_context_id == self._turn_context_id
+        )
+        websocket = await super()._websocket_connect(uri, **kwargs)
+        if turn_abandoned:
+            self._abandoned_context_id = self._turn_context_id
+        return websocket
+
     async def _connect_websocket(self):
         """Open the socket and hold the session at ``ready``."""
         websocket = None
