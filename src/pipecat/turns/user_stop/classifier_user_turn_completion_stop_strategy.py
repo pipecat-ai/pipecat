@@ -11,7 +11,12 @@ import asyncio
 from loguru import logger
 
 from pipecat.classifiers.base_classifier import BaseClassifier, ChoiceQuestion, ClassifierError
-from pipecat.frames.frames import Frame, MetricsFrame, TranscriptionFrame
+from pipecat.frames.frames import (
+    Frame,
+    MetricsFrame,
+    TranscriptionFrame,
+    VADUserStartedSpeakingFrame,
+)
 from pipecat.metrics.metrics import MetricsData
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
@@ -196,6 +201,11 @@ class ClassifierUserTurnCompletionStopStrategy(BaseUserTurnStopStrategy):
         """Collect the turn's text and forward the frame to the inner strategy."""
         if isinstance(frame, TranscriptionFrame) and frame.text.strip():
             self._text = f"{self._text} {frame.text.strip()}".strip()
+        elif isinstance(frame, VADUserStartedSpeakingFrame):
+            # The user is talking again: a hold or a verdict still on its way
+            # is about words that are no longer the whole turn. The detector's
+            # next stop asks again, about everything they said.
+            await self._cancel_pending()
         return await self._inner.process_frame(frame)
 
     async def _on_inner_stopped(self, strategy, params: UserTurnStoppedParams):

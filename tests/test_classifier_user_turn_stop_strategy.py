@@ -8,7 +8,12 @@ import asyncio
 import unittest
 
 from pipecat.classifiers.base_classifier import BaseClassifier, ChoiceResult, ClassifierError
-from pipecat.frames.frames import Frame, MetricsFrame, TranscriptionFrame
+from pipecat.frames.frames import (
+    Frame,
+    MetricsFrame,
+    TranscriptionFrame,
+    VADUserStartedSpeakingFrame,
+)
 from pipecat.metrics.metrics import ProcessingMetricsData
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.turns.types import ProcessFrameResult
@@ -181,6 +186,28 @@ class TestClassifierUserTurnCompletionStopStrategy(unittest.IsolatedAsyncioTestC
         await asyncio.sleep(0.3)
         self.assertEqual(self.stopped, [])
         self.assertEqual(self.detector.started, 2)
+
+    async def test_user_speaking_again_cancels_a_short_hold(self):
+        strategy = await self._strategy("short", "complete", short_timeout=0.2)
+        await strategy.process_frame(_said("my account number is seven three one zero dash"))
+        await self.detector.trigger_user_turn_stopped()
+        await asyncio.sleep(SETTLE)
+
+        # The user carries on inside the hold and is still talking when it
+        # would have run out.
+        await strategy.process_frame(VADUserStartedSpeakingFrame())
+        await strategy.process_frame(_said("two one one zero five"))
+        await asyncio.sleep(0.3)
+        self.assertEqual(self.stopped, [])
+
+        # Their next pause asks again, about the whole turn.
+        await self.detector.trigger_user_turn_stopped()
+        await asyncio.sleep(SETTLE)
+        self.assertEqual(
+            self.classifier.asked[-1],
+            {"user": "my account number is seven three one zero dash two one one zero five"},
+        )
+        self.assertEqual(len(self.stopped), 1)
 
     async def test_classifier_error_ends_the_turn(self):
         strategy = await self._strategy(ClassifierError("down"))
