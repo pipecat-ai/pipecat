@@ -336,6 +336,9 @@ class LLMFunctionCallStartMessageData(BaseModel):
 
     Contains the function name being called. Fields may be omitted based on
     the configured function_call_report_level for security.
+
+    Parameters:
+        function_name: Name of the function called.
     """
 
     function_name: str | None = None
@@ -369,6 +372,11 @@ class LLMFunctionCallInProgressMessageData(BaseModel):
 
     Contains function call details including name, ID, and arguments.
     Fields may be omitted based on the configured function_call_report_level for security.
+
+    Parameters:
+        tool_call_id: Unique identifier of the call.
+        function_name: Name of the function called.
+        arguments: Arguments passed to the function.
     """
 
     tool_call_id: str
@@ -393,6 +401,12 @@ class LLMFunctionCallStoppedMessageData(BaseModel):
     Contains details about the function call that stopped, including
     whether it was cancelled or completed with a result.
     Fields may be omitted based on the configured function_call_report_level for security.
+
+    Parameters:
+        tool_call_id: Unique identifier of the call.
+        cancelled: Whether the call was cancelled rather than completed.
+        function_name: Name of the function called.
+        result: The result, when the call completed with one.
     """
 
     tool_call_id: str
