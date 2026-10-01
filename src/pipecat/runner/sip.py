@@ -32,7 +32,9 @@ Environment variables:
   provisioned Daily SIP client.
 - SIP_STUN_SERVER (optional) - STUN server for the default media-NAT traversal
   (medianat=stun, default stun.l.google.com); set to "off" to disable. Ignored
-  when SIP_EXTRA_PARAMS is set.
+  when SIP_EXTRA_PARAMS is set. The address STUN reports does not reach the bot
+  through a symmetric NAT; that deployment needs a peer that latches onto the
+  bot's RTP source address, or medianat=turn via SIP_EXTRA_PARAMS.
 - SIP_NET_INTERFACE (optional) - Restrict the stack to one local interface, by
   name or address: "127.0.0.1" for a registrar on loopback, or one address of
   a multi-homed host. Unset lets the OS pick the source address.
@@ -245,15 +247,22 @@ def resolve_media_nat_params(explicit: str | None) -> tuple[str, ...] | None:
 
     ``SIP_EXTRA_PARAMS`` (``explicit``), if set, wins verbatim. Otherwise, unless
     ``SIP_STUN_SERVER`` is "off"/"none"/empty, ``medianat=stun`` is enabled with
-    that STUN server (default stun.l.google.com) so baresip advertises its
-    STUN-discovered public media address — the traversal a non-ICE peer such as
-    a PSTN SIP trunk needs behind NAT.
+    that STUN server (default stun.l.google.com) so baresip advertises the
+    address the STUN server reports back.
+
+    That address reaches the bot behind an endpoint-independent NAT. Behind an
+    endpoint-dependent ("symmetric") NAT such as an AWS NAT Gateway it does not,
+    and the call needs either a peer that latches onto the bot's RTP source
+    address or ``medianat=turn``, which only ``SIP_EXTRA_PARAMS`` can express —
+    see the NAT notes on
+    :class:`~pipecat.transports.sip.connection.SIPConnection`.
 
     ``ice`` is deliberately not the default: against a non-ICE peer it gates
     media and breaks audio, whereas ``stun`` runs plain RTP. It is on by default
     rather than gated on NAT detection because a dev/deployed bot is behind NAT
     in the common case; on a public-IP host it is harmless beyond a dependency
-    on the STUN server, which the warning notes.
+    on the STUN server, which the logged message notes alongside the
+    symmetric-NAT case.
 
     Args:
         explicit: The raw ``SIP_EXTRA_PARAMS`` value, or None.
@@ -270,9 +279,12 @@ def resolve_media_nat_params(explicit: str | None) -> tuple[str, ...] | None:
 
     stun_uri = stun if stun.startswith(("stun:", "stuns:")) else f"stun:{stun}"
     logger.info(
-        f"SIP media-NAT: enabling medianat=stun via {stun_uri} by default so media "
-        "works behind NAT. If calls have one-way or no audio, this STUN server may be "
-        "unreachable (baresip logs 'medianat ... failed'); on a public-IP host STUN is "
-        "unnecessary. Override with SIP_EXTRA_PARAMS, or disable with SIP_STUN_SERVER=off."
+        f"SIP media-NAT: enabling medianat=stun via {stun_uri} by default. If a call has "
+        "one-way or no audio, either this STUN server is unreachable (baresip logs "
+        "'medianat ... failed'), or a symmetric NAT (an AWS NAT Gateway) made the "
+        "advertised port unreachable and the bot received no RTP: the peer has to latch "
+        "onto the bot's RTP source address (on Twilio, the trunk's Symmetric RTP "
+        "setting), or set SIP_EXTRA_PARAMS=medianat=turn,stunserver=turn:HOST:3478,"
+        "stunuser=USER,stunpass=PASS. Disable with SIP_STUN_SERVER=off."
     )
     return ("medianat=stun", f"stunserver={stun_uri}")
