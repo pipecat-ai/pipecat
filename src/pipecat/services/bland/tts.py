@@ -352,7 +352,6 @@ class BlandTTSService(WebsocketTTSService):
     async def _disconnect_websocket(self):
         await self.stop_all_metrics()
         await self._close_socket()
-        await self.remove_active_audio_context()
         await self._call_event_handler("on_disconnected")
 
     def _get_websocket(self):

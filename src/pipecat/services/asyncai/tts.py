@@ -333,7 +333,6 @@ class AsyncAITTSService(WebsocketTTSService):
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
             self._websocket = None
-            await self.remove_active_audio_context()
             await self._call_event_handler("on_disconnected")
 
     def _get_websocket(self):
