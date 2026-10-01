@@ -20,6 +20,14 @@ Indian languages:
       simran, kavya, amit, dev, ishita, shreya, ratan, varun, manan, sumit, roopa,
       kabir, aayan, ashutosh, advait
 
+- **bulbul:v4-flash**: Low-latency TTS model
+    - Supports: pitch, loudness, pace (0.5-2.0)
+    - Does NOT support: temperature
+    - Default sample rate: 24000 Hz
+    - Preprocessing is always enabled
+    - Speakers: its own catalogue, listed in Sarvam's docs; the bulbul:v3 names
+      are not accepted
+
 - **bulbul:v2** (deprecated): Sarvam's previous TTS model. Sarvam's API answers a
   request for it with "Model 'bulbul:v2' has been deprecated. Please use
   'bulbul:v3' instead.", so it cannot synthesize.
@@ -75,11 +83,18 @@ class SarvamTTSModel(StrEnum):
             - Supports temperature parameter
             - Default sample rate: 24000 Hz
             - Preprocessing is always enabled
+        BULBUL_V4_FLASH: Low-latency TTS model, with its own speaker catalogue.
+            - Supports pitch/loudness
+            - Pace range: 0.5-2.0
+            - Does NOT support temperature
+            - Default sample rate: 24000 Hz
+            - Preprocessing is always enabled
     """
 
     BULBUL_V2 = "bulbul:v2"
     BULBUL_V3_BETA = "bulbul:v3-beta"
     BULBUL_V3 = "bulbul:v3"
+    BULBUL_V4_FLASH = "bulbul:v4-flash"
 
 
 class SarvamTTSSpeakerV2(StrEnum):
@@ -187,6 +202,18 @@ TTS_MODEL_CONFIGS: dict[str, TTSModelConfig] = {
         preprocessing_always_enabled=True,
         speakers=tuple(s.value for s in SarvamTTSSpeakerV3),
     ),
+    "bulbul:v4-flash": TTSModelConfig(
+        supports_pitch=True,
+        supports_loudness=True,
+        supports_temperature=False,
+        default_sample_rate=24000,
+        default_speaker="shubh_en_narration_gentle",
+        pace_range=(0.5, 2.0),
+        preprocessing_always_enabled=True,
+        # Empty rather than a catalogue: this model's speakers come from Sarvam's
+        # docs, and its API rejects an unknown one with the list it accepts.
+        speakers=(),
+    ),
 }
 
 
@@ -250,14 +277,15 @@ class SarvamHttpTTSSettings(TTSSettings):
 
     Parameters:
         enable_preprocessing: Whether to enable text preprocessing. Defaults to False.
-            **Note:** Always enabled for bulbul:v3 (cannot be disabled).
-        pace: Speech pace multiplier, 0.5 to 2.0 on bulbul:v3. Defaults to 1.0.
-        pitch: Voice pitch adjustment (-0.75 to 0.75). Defaults to 0.0.
-            **Note:** Only supported by the deprecated bulbul:v2; ignored by bulbul:v3.
-        loudness: Volume multiplier (0.3 to 3.0). Defaults to 1.0.
-            **Note:** Only supported by the deprecated bulbul:v2; ignored by bulbul:v3.
-        temperature: Controls output randomness for bulbul:v3 (0.01 to 1.0).
-            Lower values = more deterministic, higher = more random. Defaults to 0.6.
+            **Note:** Always enabled for bulbul:v3 and bulbul:v4-flash (cannot be disabled).
+        pace: Speech pace multiplier, 0.5 to 2.0. Defaults to 1.0.
+        pitch: Voice pitch adjustment. Defaults to 0.0.
+            **Note:** Supported by bulbul:v4-flash; ignored by bulbul:v3.
+        loudness: Volume multiplier. Defaults to 1.0.
+            **Note:** Supported by bulbul:v4-flash; ignored by bulbul:v3.
+        temperature: Controls output randomness (0.01 to 1.0). Lower values = more
+            deterministic, higher = more random. Defaults to 0.6.
+            **Note:** Supported by bulbul:v3; ignored by bulbul:v4-flash.
     """
 
     enable_preprocessing: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -292,7 +320,7 @@ class SarvamHttpTTSService(TTSService):
     Converts text to speech using Sarvam AI's TTS models with support for multiple
     Indian languages. Provides control over voice characteristics.
 
-    **Model:**
+    **Models:**
 
     - **bulbul:v3** (default):
         - Does NOT support: pitch, loudness (will be ignored)
@@ -302,6 +330,14 @@ class SarvamHttpTTSService(TTSService):
         - Speakers: shubh, aditya, ritu, priya, neha, rahul, pooja, rohan, simran,
           kavya, amit, dev, ishita, shreya, ratan, varun, manan, sumit, roopa,
           kabir, aayan, ashutosh, advait
+
+    - **bulbul:v4-flash**:
+        - Supports: pitch, loudness, pace (0.5 to 2.0)
+        - Does NOT support: temperature (will be ignored)
+        - Default sample rate: 24000 Hz
+        - Preprocessing is always enabled
+        - Speakers: its own catalogue, listed in Sarvam's docs; the bulbul:v3
+          names are not accepted
 
     The previous model, bulbul:v2, is deprecated: Sarvam's API rejects it.
 
@@ -405,7 +441,8 @@ class SarvamHttpTTSService(TTSService):
                     Use ``settings=SarvamHttpTTSService.Settings(voice=...)`` instead.
                     Will be removed in 2.0.0.
 
-            model: TTS model to use. Defaults to "bulbul:v3", Sarvam's current model.
+            model: TTS model to use. Defaults to "bulbul:v3", Sarvam's current
+                model; "bulbul:v4-flash" is also available.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=SarvamHttpTTSService.Settings(model=...)`` instead.
@@ -546,6 +583,23 @@ class SarvamHttpTTSService(TTSService):
         """
         return language_to_sarvam_language(language)
 
+    async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
+        """Apply a settings delta, switching to the new model's capabilities on a model change."""
+        changed = await super()._update_settings(delta)
+
+        if "model" in changed:
+            config = TTS_MODEL_CONFIGS.get(assert_given(self._settings.model) or "")
+            if config is None:
+                logger.warning(f"Unsupported model '{self._settings.model}', ignoring")
+                self._settings.model = changed.pop("model")
+                self._sync_model_name_to_metrics()
+            else:
+                self._config = config
+                if "voice" not in changed:
+                    self._settings.voice = config.default_speaker
+
+        return changed
+
     @traced_tts
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:
         """Generate speech from text using Sarvam AI's API.
@@ -634,7 +688,7 @@ class SarvamTTSService(InterruptibleTTSService):
     Provides streaming TTS with real-time audio generation for multiple Indian languages.
     Uses WebSocket for low-latency streaming audio synthesis.
 
-    **Model:**
+    **Models:**
 
     - **bulbul:v3** (default):
         - Does NOT support: pitch, loudness (will be ignored)
@@ -644,6 +698,14 @@ class SarvamTTSService(InterruptibleTTSService):
         - Speakers: shubh, aditya, ritu, priya, neha, rahul, pooja, rohan, simran,
           kavya, amit, dev, ishita, shreya, ratan, varun, manan, sumit, roopa,
           kabir, aayan, ashutosh, advait
+
+    - **bulbul:v4-flash**:
+        - Supports: pitch, loudness, pace (0.5 to 2.0)
+        - Does NOT support: temperature (will be ignored)
+        - Default sample rate: 24000 Hz
+        - Preprocessing is always enabled
+        - Speakers: its own catalogue, listed in Sarvam's docs; the bulbul:v3
+          names are not accepted
 
     The previous model, bulbul:v2, is deprecated: Sarvam's API rejects it.
 
@@ -784,7 +846,8 @@ class SarvamTTSService(InterruptibleTTSService):
 
         Args:
             api_key: Sarvam API key for authenticating TTS requests.
-            model: TTS model to use. Defaults to "bulbul:v3", Sarvam's current model.
+            model: TTS model to use. Defaults to "bulbul:v3", Sarvam's current
+                model; "bulbul:v4-flash" is also available.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=SarvamTTSService.Settings(model=...)`` instead.
@@ -943,6 +1006,7 @@ class SarvamTTSService(InterruptibleTTSService):
         # WebSocket endpoint URL with model query parameter. We explicitly request
         # the completion event so we can emit TTSStoppedFrame as soon as synthesis
         # finishes, rather than waiting for the stop_frame_timeout_s idle timer.
+        self._url = url
         self._websocket_url = f"{url}?model={resolved_model}&send_completion_event=true"
         self._api_key = api_key
 
@@ -989,8 +1053,26 @@ class SarvamTTSService(InterruptibleTTSService):
             await self.push_error(error_msg=f"Error sending flush to Sarvam: {e}", exception=e)
 
     async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
-        """Apply a settings delta and resend config if voice changed."""
+        """Apply a settings delta, reconnecting on a model change and resending config otherwise."""
         changed = await super()._update_settings(delta)
+
+        if "model" in changed:
+            config = TTS_MODEL_CONFIGS.get(assert_given(self._settings.model) or "")
+            if config is None:
+                logger.warning(f"Unsupported model '{self._settings.model}', ignoring")
+                self._settings.model = changed.pop("model")
+                self._sync_model_name_to_metrics()
+            else:
+                self._config = config
+                if "voice" not in changed:
+                    self._settings.voice = config.default_speaker
+                # The model is a URL query parameter, so a new model needs a new connection.
+                self._websocket_url = (
+                    f"{self._url}?model={self._settings.model}&send_completion_event=true"
+                )
+                await self._disconnect()
+                await self._connect()
+                return changed
 
         if changed:
             await self._send_config()
@@ -1068,11 +1150,11 @@ class SarvamTTSService(InterruptibleTTSService):
             "pace": self._settings.pace,
             "model": self._settings.model,
         }
-        if self._settings.pitch is not None:
+        if self._config.supports_pitch and self._settings.pitch is not None:
             config_data["pitch"] = self._settings.pitch
-        if self._settings.loudness is not None:
+        if self._config.supports_loudness and self._settings.loudness is not None:
             config_data["loudness"] = self._settings.loudness
-        if self._settings.temperature is not None:
+        if self._config.supports_temperature and self._settings.temperature is not None:
             config_data["temperature"] = self._settings.temperature
         logger.debug(f"Config being sent is {config_data}")
         config_message = {"type": "config", "data": config_data}
