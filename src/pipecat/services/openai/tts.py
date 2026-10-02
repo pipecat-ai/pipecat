@@ -221,6 +221,15 @@ class OpenAITTSService(TTSService):
         )
 
         self._client = AsyncOpenAI(api_key=api_key, base_url=base_url, http_client=http_client)
+        self._owns_http_client = http_client is None
+
+    async def cleanup(self):
+        """Release the SDK client when the processor is torn down."""
+        try:
+            await super().cleanup()
+        finally:
+            if self._owns_http_client:
+                await self._client.close()
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
