@@ -26,6 +26,7 @@ from pipecat.utils.base_object import BaseObject
 try:
     import aiortc.rtcsctptransport as _sctp_transport
     from aiortc import (
+        RTCBundlePolicy,
         RTCConfiguration,
         RTCIceServer,
         RTCPeerConnection,
@@ -310,7 +311,11 @@ class SmallWebRTCConnection(BaseObject):
     def _initialize(self):
         """Initialize the peer connection and associated components."""
         logger.debug("Initializing new peer connection")
-        rtc_config = RTCConfiguration(iceServers=self.ice_servers)
+        # With aiortc's default (balanced) policy, the screen share's transceiver is
+        # left off the bundled transport, so its packets never reach it.
+        rtc_config = RTCConfiguration(
+            iceServers=self.ice_servers, bundlePolicy=RTCBundlePolicy.MAX_BUNDLE
+        )
 
         self._answer: RTCSessionDescription | None = None
         self._pc = RTCPeerConnection(rtc_config)

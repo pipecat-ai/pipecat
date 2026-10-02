@@ -12,7 +12,6 @@ real-time communication features.
 """
 
 import asyncio
-import time
 from collections.abc import Awaitable, Callable, Mapping
 from concurrent.futures import CancelledError as FuturesCancelledError
 from dataclasses import dataclass, field
@@ -55,6 +54,7 @@ from pipecat.transcriptions.language import Language
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
+from pipecat.transports.video_in_sampler import _VideoInSampler
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
 from pipecat.utils.shared import acquires, releases
 
@@ -1812,7 +1812,8 @@ class DailyInputTransport(BaseInputTransport):
         self._client = client
         self._params = params
 
-        self._video_renderers = {}
+        # Video samplers by participant and video source.
+        self._video_samplers: dict[str, dict[str, _VideoInSampler]] = {}
 
         # Whether we have started audio streaming.
         self._streaming_started = False
@@ -2025,14 +2026,9 @@ class DailyInputTransport(BaseInputTransport):
             video_source: Video source to capture from.
             color_format: Color format for video frames.
         """
-        if participant_id not in self._video_renderers:
-            self._video_renderers[participant_id] = {}
-
-        self._video_renderers[participant_id][video_source] = {
-            "framerate": framerate,
-            "timestamp": 0,
-            "render_next_frame": [],
-        }
+        self._video_samplers.setdefault(participant_id, {})[video_source] = _VideoInSampler(
+            framerate
+        )
 
         await self._client.capture_participant_video(
             participant_id, self._on_participant_video_frame, framerate, video_source, color_format
@@ -2044,32 +2040,17 @@ class DailyInputTransport(BaseInputTransport):
         Args:
             frame: The user image request frame.
         """
-        if frame.user_id in self._video_renderers:
-            video_source = frame.video_source if frame.video_source else "camera"
-            self._video_renderers[frame.user_id][video_source]["render_next_frame"].append(frame)
+        video_source = frame.video_source if frame.video_source else "camera"
+        sampler = self._video_samplers.get(frame.user_id, {}).get(video_source)
+        if sampler:
+            sampler.add_request(frame)
 
     async def _on_participant_video_frame(
         self, participant_id: str, video_frame: VideoFrame, video_source: str
     ):
         """Handle received participant video frames."""
-        render_frame = False
-
-        curr_time = time.time()
-        prev_time = self._video_renderers[participant_id][video_source]["timestamp"]
-        framerate = self._video_renderers[participant_id][video_source]["framerate"]
-
-        # Some times we render frames because of a request.
-        request_frame = None
-
-        if framerate > 0:
-            next_time = prev_time + 1 / framerate
-            render_frame = (next_time - curr_time) < 0.1
-
-        if self._video_renderers[participant_id][video_source]["render_next_frame"]:
-            request_frame = self._video_renderers[participant_id][video_source][
-                "render_next_frame"
-            ].pop(0)
-            render_frame = True
+        sampler = self._video_samplers[participant_id][video_source]
+        render_frame, request_frame = sampler.sample()
 
         if render_frame:
             frame = UserImageRawFrame(
@@ -2083,7 +2064,6 @@ class DailyInputTransport(BaseInputTransport):
             )
             frame.transport_source = video_source
             await self.push_video_frame(frame)
-            self._video_renderers[participant_id][video_source]["timestamp"] = curr_time
 
 
 class DailyOutputTransport(BaseOutputTransport):
@@ -2975,6 +2955,14 @@ class DailyTransport(BaseTransport):
             await self._input.capture_participant_audio(
                 id, "microphone", self._client.in_sample_rate
             )
+
+        # Capture the configured video sources before the event handlers run, so
+        # a handler that captures a source itself takes precedence.
+        if self._input:
+            for video_source, source_params in self._params.video_in_sources.items():
+                await self._input.capture_participant_video(
+                    id, source_params.framerate, video_source
+                )
 
         if not self._other_participant_has_joined:
             self._other_participant_has_joined = True

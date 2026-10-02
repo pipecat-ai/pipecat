@@ -25,6 +25,9 @@ class BotCapabilities(BaseModel):
         audio_in: Whether the bot receives the user's audio.
         audio_out: Whether the bot sends audio to the user.
         video_in: Whether the bot receives the user's video.
+        screen_in: Whether the bot receives the user's screen share. Known when
+            the transport captures its video sources from ``video_in_sources``;
+            unknown when the application captures them itself.
         video_out: Whether the bot sends video to the user.
         metrics: Whether the bot reports metrics.
     """
@@ -32,6 +35,7 @@ class BotCapabilities(BaseModel):
     audio_in: bool | None = None
     audio_out: bool | None = None
     video_in: bool | None = None
+    screen_in: bool | None = None
     video_out: bool | None = None
     metrics: bool | None = None
 

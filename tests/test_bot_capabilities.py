@@ -16,7 +16,7 @@ from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.frameworks.rtvi.processor import RTVIProcessor
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
-from pipecat.transports.base_transport import TransportParams
+from pipecat.transports.base_transport import TransportParams, VideoInSourceParams
 from pipecat.transports.heygen.transport import HeyGenOutputTransport
 
 
@@ -49,9 +49,38 @@ class TestPipelineWorkerCapabilities(unittest.TestCase):
         self.assertEqual(
             worker.capabilities,
             BotCapabilities(
-                audio_in=True, audio_out=True, video_in=False, video_out=False, metrics=False
+                audio_in=True,
+                audio_out=True,
+                video_in=False,
+                screen_in=False,
+                video_out=False,
+                metrics=False,
             ),
         )
+
+    def test_screen_in_when_sources_include_screen_video(self):
+        input, output = _transport(
+            video_in_enabled=True,
+            video_in_sources={
+                "camera": VideoInSourceParams(),
+                "screenVideo": VideoInSourceParams(),
+            },
+        )
+        worker = PipelineWorker(Pipeline([input, output]))
+        self.assertTrue(worker.capabilities.screen_in)
+
+    def test_no_screen_in_when_sources_exclude_screen_video(self):
+        input, output = _transport(
+            video_in_enabled=True, video_in_sources={"camera": VideoInSourceParams()}
+        )
+        worker = PipelineWorker(Pipeline([input, output]))
+        self.assertIs(worker.capabilities.screen_in, False)
+
+    def test_screen_in_unknown_without_sources(self):
+        input, output = _transport(video_in_enabled=True)
+        worker = PipelineWorker(Pipeline([input, output]))
+        self.assertTrue(worker.capabilities.video_in)
+        self.assertIsNone(worker.capabilities.screen_in)
 
     def test_metrics_from_pipeline_params(self):
         input, output = _transport()
