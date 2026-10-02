@@ -387,6 +387,9 @@ class GeminiLiveLLMSettings(LLMSettings):
         vad: Voice activity detection parameters.
         turn_coverage: Which realtime input a user turn covers. Unset uses the
             model's own default.
+        input_transcription_language_codes: Language codes (BCP-47, e.g.
+            ``["te-IN"]``) hinting the language of the user's speech for input
+            audio transcription. Unset lets the model auto-detect.
         context_window_compression: Context window compression configuration.
         thinking: Thinking configuration. Live thinking models require a
             ``thinking_level``; when none is set, the service applies the
@@ -401,6 +404,9 @@ class GeminiLiveLLMSettings(LLMSettings):
     media_resolution: GeminiMediaResolution | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     vad: GeminiVADParams | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     turn_coverage: TurnCoverage | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    input_transcription_language_codes: list[str] | None | NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
     context_window_compression: ContextWindowCompressionParams | dict | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
@@ -683,6 +689,7 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
             media_resolution=GeminiMediaResolution.UNSPECIFIED,
             vad=None,
             turn_coverage=None,
+            input_transcription_language_codes=None,
             context_window_compression={},
             thinking={},
             enable_affective_dialog=False,
@@ -1337,7 +1344,10 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
                     ),
                     media_resolution=MediaResolution(media_resolution.value),
                 ),
-                input_audio_transcription=AudioTranscriptionConfig(),
+                input_audio_transcription=AudioTranscriptionConfig(
+                    language_codes=assert_given(self._settings.input_transcription_language_codes)
+                    or None
+                ),
                 output_audio_transcription=AudioTranscriptionConfig(),
                 session_resumption=SessionResumptionConfig(handle=session_resumption_handle),
             )
