@@ -50,6 +50,7 @@ from pipecat.workers.llm.backend_llm_worker import (
     BackendOutput,
     BackendToolCall,
     _BackendSession,
+    _render_explicit_request,
     _render_transcript_request,
 )
 from pipecat.workers.runner import WorkerRunner
@@ -154,6 +155,10 @@ async def book_taxi(params: FunctionCallParams, time: str):
 
 def test_render_transcript_request_is_the_instruction_alone_when_nothing_was_said():
     assert _render_transcript_request([], instruction="Do it") == "Do it"
+
+
+def test_render_explicit_request_puts_the_instruction_after_the_request():
+    assert _render_explicit_request("Book a taxi", instruction="Do it") == "Book a taxi\n\nDo it"
 
 
 def test_render_transcript_request_points_the_backend_at_the_conversation():
