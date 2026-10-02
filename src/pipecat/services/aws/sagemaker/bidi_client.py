@@ -288,8 +288,12 @@ class SageMakerBidiClient:
                 # A rejected credential is rejected again on every attempt: the
                 # client resolves its credentials once, so only a new session
                 # (and client) can pick up refreshed ones.
-                retryable = category in _RETRYABLE_CATEGORIES and status not in _AUTH_STATUSES
-                if retryable and attempt < self.max_connect_attempts:
+                if (
+                    category is not None
+                    and category in _RETRYABLE_CATEGORIES
+                    and status not in _AUTH_STATUSES
+                    and attempt < self.max_connect_attempts
+                ):
                     wait = random.uniform(
                         0,
                         exponential_backoff_time(
