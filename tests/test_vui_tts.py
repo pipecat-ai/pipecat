@@ -44,15 +44,25 @@ def _make_mock_engine():
     return engine, row
 
 
+SPK_TOKEN = torch.ones(1, 1, 8)
+COND_BIAS = torch.full((1, 1, 8), 0.25)
+
+
 def _patch_voice(service_cls_module, transcript="Hello."):
-    """Bypass the Hub download: every voice resolves to a fixed segment."""
+    """Bypass the Hub download: every voice resolves to a fixed segment.
+
+    Shipped voices come with a baked speaker token and conditioning bias, a
+    ``.wav`` clone with neither.
+    """
     from vui.engine import Segment
 
-    return patch.object(
-        service_cls_module.VuiTTSService,
-        "_resolve_voice",
-        lambda self, voice: Segment(transcript, torch.zeros(4, 16, dtype=torch.long)),
-    )
+    def _resolve(self, voice):
+        segment = Segment(transcript, torch.zeros(4, 16, dtype=torch.long))
+        if voice.endswith(".wav"):
+            return segment, None, None
+        return segment, SPK_TOKEN, COND_BIAS
+
+    return patch.object(service_cls_module.VuiTTSService, "_resolve_voice", _resolve)
 
 
 @pytest.mark.asyncio
@@ -66,6 +76,8 @@ async def test_run_vui_tts_success():
 
         tts_service = vui_tts.VuiTTSService(sample_rate=SAMPLE_RATE)
         mock_engine_cls.assert_called_once_with("vui-nano-1.1", max_rows=1)
+        # The voice is loaded with the engine, not inside the first utterance.
+        row.prefill.assert_called_once()
 
         frames_received = await run_test(
             tts_service,
@@ -102,8 +114,12 @@ async def test_run_vui_tts_success():
         assert (samples[:2400] == 0).all()
         assert (samples[2400:] == 16383).all()
 
-        # The voice is prefilled once; the row is rewound to it after the turn.
+        # The voice is prefilled once, with its baked speaker token and bias;
+        # the row is rewound to it after the turn.
         row.prefill.assert_called_once()
+        assert row.prefill.call_args.kwargs["spk_emb"] is SPK_TOKEN
+        assert row.prefill.call_args.kwargs["cond_bias"] is COND_BIAS
+        engine.set_conditioning.assert_not_called()
         row.stream.assert_called_once()
         assert row.stream.call_args.args[0] == "Hello world."
         row.rewind.assert_called_once()
@@ -111,7 +127,11 @@ async def test_run_vui_tts_success():
 
 @pytest.mark.asyncio
 async def test_vui_tts_voice_update():
-    """A runtime voice change re-prefills the row on the next utterance."""
+    """A runtime voice change re-prefills the row on the next utterance.
+
+    Switching from a shipped voice to a ``.wav`` clone zeroes the engine-wide
+    conditioning bias, which a prefill without one would otherwise keep.
+    """
     import pipecat.services.vui.tts as vui_tts
 
     with patch.object(vui_tts, "Engine") as mock_engine_cls, _patch_voice(vui_tts):
@@ -122,12 +142,14 @@ async def test_vui_tts_voice_update():
         frames_to_send = [
             TTSSpeakFrame(text="First voice."),
             SleepFrame(0.5),
-            TTSUpdateSettingsFrame(delta=vui_tts.VuiTTSService.Settings(voice="abraham")),
+            TTSUpdateSettingsFrame(delta=vui_tts.VuiTTSService.Settings(voice="clone.wav")),
             TTSSpeakFrame(text="Second voice."),
             SleepFrame(0.5),
         ]
         await run_test(tts_service, frames_to_send=frames_to_send)
 
         assert row.prefill.call_count == 2, "expected a re-prefill after the voice change"
+        assert row.prefill.call_args.kwargs["cond_bias"] is None
+        engine.set_conditioning.assert_called_once_with()
         assert row.stream.call_count == 2
-        assert tts_service._voice_loaded == "abraham"
+        assert tts_service._voice_loaded == "clone.wav"

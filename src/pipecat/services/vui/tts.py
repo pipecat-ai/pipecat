@@ -25,7 +25,7 @@ from pipecat.utils.types import require_given
 try:
     import torch
     from vui.engine import Engine, GenConfig, Segment
-    from vui.prompt_files import hub_prompt, hub_prompt_transcript, prompt_transcript
+    from vui.prompt_files import load_official_prompt, prompt_transcript
     from vui.qwen_codec import SAMPLE_RATE as VUI_SAMPLE_RATE
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
@@ -111,16 +111,20 @@ class VuiTTSService(TTSService):
         logger.debug(f"Loading Vui checkpoint '{checkpoint}'")
 
         def _load():
-            self._engine = Engine(checkpoint, max_rows=1)
-            self._row = self._engine.new_row()
+            engine = Engine(checkpoint, max_rows=1)
+            return engine, engine.new_row()
 
-        self._executor.submit(_load).result()
+        self._engine, self._row = self._executor.submit(_load).result()
         logger.debug(f"Loaded Vui checkpoint '{checkpoint}'")
 
         # The voice prompt is prefilled into the row once and the KV cache is
         # rewound to the end of it after every utterance; None forces a
         # re-prefill on the next utterance (voice changed).
         self._voice_loaded: str | None = None
+        # Load the voice now rather than in the first utterance: a .wav
+        # reference is encoded on load, which can outlast the audio context's
+        # stop_frame_timeout_s and end the utterance with no audio.
+        self._executor.submit(self._ensure_voice).result()
 
     def can_generate_metrics(self) -> bool:
         """Indicate that this service supports TTFB and usage metrics."""
@@ -129,14 +133,22 @@ class VuiTTSService(TTSService):
     async def _update_settings(self, delta: Settings) -> dict[str, Any]:
         """Apply a settings delta.
 
-        Voice changes take effect on the next utterance. Model changes are
-        stored but not applied, since they would require reloading weights.
+        A new voice is loaded here, after any utterance in progress, so the
+        next utterance starts rendering at once. Model changes are stored but
+        not applied, since they would require reloading weights.
         """
         changed = await super()._update_settings(delta)
         if not changed:
             return changed
         if "voice" in changed:
             self._voice_loaded = None
+            async with self._lock:
+                try:
+                    await asyncio.get_running_loop().run_in_executor(
+                        self._executor, self._ensure_voice
+                    )
+                except Exception as e:  # retried, and reported, by the next utterance
+                    logger.warning(f"{self}: loading voice failed: {e}")
         unhandled = {k: v for k, v in changed.items() if k != "voice"}
         if unhandled:
             self._warn_unhandled_updated_settings(unhandled)
@@ -146,21 +158,35 @@ class VuiTTSService(TTSService):
     # Voice prompts
     # ------------------------------------------------------------------
 
-    def _resolve_voice(self, voice: str) -> Segment:
-        """Turn a voice spec into a ``(transcript, codes)`` prompt segment."""
+    def _resolve_voice(
+        self, voice: str
+    ) -> tuple[Segment, torch.Tensor | None, torch.Tensor | None]:
+        """Turn a voice spec into ``(segment, speaker token, conditioning bias)``.
+
+        Shipped voices and baked prompts carry the speaker token and bias baked
+        for the checkpoint; a ``.wav`` reference has neither (``None``).
+        """
         from safetensors.torch import load_file
 
         path = Path(voice)
         if voice in VUI_BUILTIN_VOICES and not path.exists():
-            st = hub_prompt(voice, self._engine.checkpoint)
-            return Segment(hub_prompt_transcript(voice, st), load_file(st)["codes"].long())
+            text, codes, spk_token, cond_bias = load_official_prompt(
+                voice, checkpoint=self._engine.checkpoint
+            )
+            return Segment(text, codes), spk_token, cond_bias
         if path.suffix == ".safetensors":
             text = prompt_transcript(path)
             if not text:
                 raise ValueError(f"{path}: no transcript in metadata or sibling .txt")
-            return Segment(text, load_file(str(path))["codes"].long())
+            st = load_file(str(path))
+            spk_token, cond_bias = st.get("spk_token_emb"), st.get("cond_bias")
+            return (
+                Segment(text, st["codes"].long()),
+                spk_token.float() if spk_token is not None else None,
+                cond_bias.float() if cond_bias is not None else None,
+            )
         if path.suffix.lower() == ".wav":
-            return self._encode_wav(path)
+            return self._encode_wav(path), None, None
         raise ValueError(
             f"Unknown Vui voice {voice!r}: expected one of {VUI_BUILTIN_VOICES}, "
             "a prompt .safetensors, or a .wav"
@@ -169,7 +195,7 @@ class VuiTTSService(TTSService):
     def _encode_wav(self, path: Path) -> Segment:
         """Encode a reference wav to codec codes; transcript from a sibling file or ASR."""
         from julius.resample import resample_frac
-        from torchcodec.decoders import AudioDecoder
+        from torchcodec.decoders import AudioDecoder  # pyright: ignore[reportPrivateImportUsage]
         from vui.qwen_codec import QwenCodecEncoder
 
         wav_16k = (
@@ -204,10 +230,14 @@ class VuiTTSService(TTSService):
         if self._voice_loaded == voice:
             return
         logger.debug(f"{self}: loading voice [{voice}]")
-        segment = self._resolve_voice(voice)
+        segment, spk_token, cond_bias = self._resolve_voice(voice)
         with torch.inference_mode():
             self._row.reset()
-            self._row.prefill([segment])
+            if cond_bias is None:
+                # The bias is engine-wide and a prefill without one keeps it:
+                # a cloned voice must not inherit the previous voice's.
+                self._engine.set_conditioning()
+            self._row.prefill([segment], spk_emb=spk_token, cond_bias=cond_bias)
         self._voice_loaded = voice
 
     # ------------------------------------------------------------------
