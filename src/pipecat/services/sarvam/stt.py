@@ -345,6 +345,9 @@ class SarvamSTTService(STTService):
         self._websocket_context = None
         self._socket_client = None
         self._receive_task = None
+        # Warn only once per unrecognized language code, so a session stuck
+        # detecting one unmapped language doesn't spam a warning per turn.
+        self._unmapped_language_codes_warned: set[str] = set()
 
         if default_settings.vad_signals:
             self._register_event_handler("on_speech_started")
@@ -684,14 +687,12 @@ class SarvamSTTService(STTService):
                 transcript = message.data.transcript
                 language_code = message.data.language_code
                 # Prefer language from message (auto-detected for translate models). Fallback to configured.
-                if language_code:
-                    language = self._map_language_code_to_enum(language_code)
-                else:
-                    language_string = self._get_language_string()
-                    if language_string:
-                        language = self._map_language_code_to_enum(language_string)
-                    else:
-                        language = Language.HI_IN
+                # Either can resolve to None -- an unrecognized code, or Sarvam's own
+                # "unknown"/auto-detect placeholder -- in which case the frame is left
+                # without a language rather than guessing one.
+                language = self._map_language_code_to_enum(
+                    language_code or self._get_language_string()
+                )
 
                 # Emit utterance end event
                 await self._call_event_handler("on_utterance_end")
@@ -725,8 +726,15 @@ class SarvamSTTService(STTService):
         """
         pass
 
-    def _map_language_code_to_enum(self, language_code: str) -> Language:
-        """Map Sarvam language code to pipecat Language enum."""
+    def _map_language_code_to_enum(self, language_code: str | None) -> Language | None:
+        """Map a Sarvam language code to a pipecat Language, or None if unresolved.
+
+        Returns None for Sarvam's own "unknown"/auto-detect placeholder and for
+        any code -- present or future -- this table doesn't have an entry for,
+        rather than guessing a specific language. A code that IS recognized but
+        maps to a language this table doesn't carry only logs a warning once,
+        so a long-running session doesn't spam it every turn.
+        """
         mapping = {
             "bn-IN": Language.BN_IN,
             "gu-IN": Language.GU_IN,
@@ -741,8 +749,24 @@ class SarvamSTTService(STTService):
             "en-US": Language.EN_US,
             "en-IN": Language.EN_IN,
             "as-IN": Language.AS_IN,
+            "ur-IN": Language.UR_IN,
+            "mai-IN": Language.MAI_IN,
+            "sd-IN": Language.SD_IN,
+            "kok-IN": Language.KOK_IN,
         }
-        return mapping.get(language_code, Language.HI_IN)
+        # "unknown" is Sarvam's own placeholder for "not detected/configured yet"
+        # (see MODEL_CONFIGS.default_language), not a data gap worth warning about.
+        if not language_code or language_code == "unknown":
+            return None
+        language = mapping.get(language_code)
+        if language is None and language_code not in self._unmapped_language_codes_warned:
+            self._unmapped_language_codes_warned.add(language_code)
+            logger.warning(
+                f"{self} received Sarvam language code {language_code!r}, which has no "
+                "Language mapping; leaving TranscriptionFrame.language unset for it "
+                "rather than guessing."
+            )
+        return language
 
     def _is_keepalive_ready(self) -> bool:
         """Check if the Sarvam SDK websocket client is connected."""
@@ -773,6 +797,13 @@ class SarvamSTTService(STTService):
 
 
 _REALTIME_MODEL = "saaras:v3-realtime"
+
+# Sarvam's realtime endpoint serves both generations over the same connection
+# parameters and event protocol, so only the model string differs. The default
+# follows Sarvam's own, which is still v3. The second generation is named
+# `saaras:v4` here, without the `-realtime` suffix its predecessor carries: that
+# is the name the endpoint accepts, and it rejects `saaras:v4-realtime`.
+_SUPPORTED_REALTIME_MODELS = frozenset({"saaras:v3-realtime", "saaras:v4"})
 
 SUPPORTED_LANGUAGES = {
     "auto",
@@ -893,6 +924,10 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
 
     Streams raw audio bytes to Sarvam's realtime websocket endpoint and maps
     provider VAD and transcript events into Pipecat frames.
+
+    Serves ``saaras:v3-realtime`` and ``saaras:v4``, selected with
+    ``settings=SarvamRealtimeSTTService.Settings(model=...)`` and defaulting to
+    ``saaras:v3-realtime``, Sarvam's own default.
 
     With the default ``endpointing="vad"`` the server drives turn boundaries. With
     ``endpointing="manual"`` the pipeline drives them instead, so the pipeline
@@ -1508,8 +1543,9 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
         block values Sarvam adds later.
         """
         model = assert_given(settings.model)
-        if model != _REALTIME_MODEL:
-            raise ValueError(f"Unsupported model '{model}'. Only '{_REALTIME_MODEL}' is supported.")
+        if model not in _SUPPORTED_REALTIME_MODELS:
+            allowed = ", ".join(sorted(_SUPPORTED_REALTIME_MODELS))
+            raise ValueError(f"Unsupported model '{model}'. Allowed values: {allowed}.")
 
     @traced_stt
     async def _trace_transcription(

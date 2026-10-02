@@ -479,22 +479,20 @@ class SonioxSTTService(WebsocketSTTService):
     async def stop(self, frame: EndFrame):
         """Stop the Soniox STT websocket connection.
 
-        Stopping waits for the server to close the connection as we might receive
-        additional final tokens after sending the stop recording message.
-
         Args:
             frame: The end frame.
         """
-        await super().stop(frame)
+        # The end-of-audio frame has to reach the socket before teardown closes
+        # it. Trailing final tokens are not waited for: that would hold shutdown
+        # open for a transcript that generates no further turn.
         await self._send_stop_recording()
-        await self._disconnect()
+        await super().stop(frame)
 
     async def cancel(self, frame: CancelFrame):
         """Cancel the Soniox STT websocket connection.
 
-        Compared to stop, this method closes the connection immediately without waiting
-        for the server to close it. This is useful when we want to stop the connection
-        immediately without waiting for the server to send any final tokens.
+        Compared to stop, this closes the connection without sending the
+        end-of-audio frame.
 
         Args:
             frame: The cancel frame.
@@ -549,10 +547,12 @@ class SonioxSTTService(WebsocketSTTService):
                 logger.debug(f"Triggered finalize event on: {frame.name=}, {direction=}")
 
     async def _send_stop_recording(self):
-        """Send stop recording message to Soniox."""
+        """Send the end-of-audio frame, an empty message that ends the session."""
         if self._websocket and self._websocket.state is State.OPEN:
-            # Send stop recording message
-            await self._websocket.send("")
+            try:
+                await self._websocket.send("")
+            except Exception as e:
+                logger.warning(f"{self}: end-of-audio send failed: {e}")
 
     async def _connect(self):
         """Connect to the Soniox service.

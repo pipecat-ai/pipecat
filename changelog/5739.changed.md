@@ -1,0 +1,1 @@
+- `DeepgramFluxSTTService` now documents its default `url` as Deepgram's Flux endpoint, `wss://api.deepgram.com/v2/listen`.

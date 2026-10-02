@@ -35,7 +35,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SERVICES_DIR = REPO_ROOT / "src" / "pipecat" / "services"
-MANIFEST = REPO_ROOT / "scripts" / "release-evals" / "manifest.yaml"
+MANIFEST = REPO_ROOT / "evals" / "release" / "manifest.yaml"
 ENV_EXAMPLE = REPO_ROOT / "env.example"
 README = REPO_ROOT / "README.md"
 

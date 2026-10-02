@@ -59,6 +59,11 @@ def test_gemini_37_flash_uses_the_lowest_level_it_accepts():
     assert _applied_thinking_config("gemini-3.7-flash") == {"thinking_level": "low"}
 
 
+def test_gemini_38_flash_uses_the_lowest_level_it_accepts():
+    """3.8 Flash rejects minimal outright, so it gets low instead."""
+    assert _applied_thinking_config("gemini-3.8-flash") == {"thinking_level": "low"}
+
+
 def test_unrecognized_gemini_3_flash_falls_back_to_minimal():
     """An unknown flash model is assumed to accept the fastest level."""
     assert _applied_thinking_config("gemini-3.9-flash") == {"thinking_level": "minimal"}

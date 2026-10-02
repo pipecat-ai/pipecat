@@ -1,0 +1,1 @@
+- Added a `keywords` field to `OpenAISTTService.Settings`, which passes product names, acronyms and other specialized terms to OpenAI's transcription request as hints. Supported by `gpt-transcribe`.

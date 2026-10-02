@@ -96,3 +96,30 @@ def assert_given(value: _T | NotGiven) -> _T:
     if not is_given(value):
         raise RuntimeError("Expected a value, got NOT_GIVEN")
     return value
+
+
+def require_given(value: _T | None | NotGiven, what: str) -> _T:
+    """Extract a value that must have been provided and must not be empty.
+
+    Like :func:`assert_given`, but also rejects ``None`` and the empty string,
+    which is what an unset or blank environment variable produces. Use it for
+    settings a service cannot work without, such as a local model or voice
+    that no provider will validate on its behalf::
+
+        voice = require_given(self._settings.voice, "Piper TTS voice")  # narrowed str
+
+    Args:
+        value: The value to extract.
+        what: How to name the value in the error, e.g. ``"Piper TTS voice"``.
+
+    Returns:
+        The value, narrowed to exclude :class:`NotGiven` and ``None``.
+
+    Raises:
+        RuntimeError: If *value* is ``NOT_GIVEN``.
+        ValueError: If *value* is ``None`` or an empty string.
+    """
+    value = assert_given(value)
+    if value is None or value == "":
+        raise ValueError(f"{what} must be specified")
+    return value

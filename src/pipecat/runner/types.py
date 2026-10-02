@@ -253,7 +253,7 @@ class EvalRunnerArguments(RunnerArguments):
     """Eval transport session arguments for the runner.
 
     Used to launch a bot with a local ``SingleClientWebsocketServerTransport`` speaking RTVI
-    (via ``RTVIEvalSerializer``). The eval harness connects as an RTVI client,
+    (via ``EvalSerializer``). The eval harness connects as an RTVI client,
     sends scripted user input, and asserts on the RTVI events the bot emits.
     Intended for fast pipeline behavioral evaluations.
 

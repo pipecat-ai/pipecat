@@ -11,6 +11,7 @@ name: starter_audio
 # is how you eval it — the same way a person would talk to it: speech in,
 # speech out, end to end.
 {% endif %}#
+
 # Run it (two terminals, both in server/):
 #
 #   uv run bot.py -t eval                                 # 1: the bot, headless
@@ -37,14 +38,16 @@ judge:
     service: moonshine
     model: small-streaming
 
-turns:
-  # The bot speaks first on connect. A turn with no `user:` just waits for and
-  # asserts on events — here, the greeting — so we don't barge into it.
-  - expect:
-      - event: response
-        eval: "the bot opens the conversation (a greeting, an introduction, or an offer to help)"
+scenarios:
+  - name: starter_audio
+    turns:
+      # The bot speaks first on connect. A turn with no `user:` just waits for and
+      # asserts on events — here, the greeting — so we don't barge into it.
+      - expect:
+          - event: response
+            eval: "the bot opens the conversation (a greeting, an introduction, or an offer to help)"
 
-  - user: "What can you help me with?"
-    expect:
-      - event: response
-        eval: "the bot answers, describing what it can do or offering to help"
+      - user: "What can you help me with?"
+        expect:
+          - event: response
+            eval: "the bot answers, describing what it can do or offering to help"

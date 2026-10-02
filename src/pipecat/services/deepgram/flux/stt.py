@@ -115,6 +115,7 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
         params: InputParams | None = None,
         should_interrupt: bool = True,
         watchdog_min_timeout: float = 0.5,
+        enable_eager_end_of_turn: bool = False,
         settings: Settings | None = None,
         **kwargs,
     ):
@@ -122,7 +123,8 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
 
         Args:
             api_key: Deepgram API key for authentication. Required for API access.
-            url: WebSocket URL for the Deepgram Flux API. Defaults to the preview endpoint.
+            url: WebSocket URL for the Deepgram Flux API. Defaults to Deepgram's
+                Flux endpoint, ``wss://api.deepgram.com/v2/listen``.
             sample_rate: Audio sample rate in Hz. If None, uses the pipeline
                 sample rate.
             mip_opt_out: Opt out of the Deepgram Model Improvement Program.
@@ -148,6 +150,15 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
                 recommendation and this setting with it.
             watchdog_min_timeout: Minimum silence duration in seconds before the watchdog
                 sends silence to prevent dangling turns. Defaults to 0.5.
+            enable_eager_end_of_turn: Whether to answer Flux's predicted end
+                of turn ahead of the committed one, so the gap between the two
+                is spent generating a response rather than waiting. The response
+                is discarded if the user resumes speaking or the committed
+                transcript differs from the predicted one. Off by default: it
+                spends an inference on every prediction, including the ones Flux
+                withdraws. Turning it on sets ``eager_eot_threshold`` to 0.5
+                when the settings leave it unset, since Flux reports no
+                prediction without it.
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to the parent classes.
@@ -236,6 +247,7 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
             tag=tag,
             should_interrupt=should_interrupt,
             watchdog_min_timeout=watchdog_min_timeout,
+            enable_eager_end_of_turn=enable_eager_end_of_turn,
             settings=default_settings,
             sample_rate=sample_rate,
             **kwargs,

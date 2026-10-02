@@ -314,8 +314,11 @@ class HeyGenClient:
         if event_type == "session.state_updated":
             state = event.get("state")
             logger.debug(f"HeyGenClient ws session state updated: {state}")
-        elif event_type == "agent.state":
-            logger.debug(f"HeyGenClient ws received agent status: {event}")
+        elif event_type == "agent.state_updated":
+            logger.debug(
+                f"HeyGenClient ws agent state updated: "
+                f"{event.get('previous_state')} -> {event.get('new_state')}"
+            )
         else:
             logger.trace(f"HeyGenClient ws received unknown event: {event_type}")
 

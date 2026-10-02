@@ -115,7 +115,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
         # Optionally, you can wait for 30 seconds and then change the voice.
         # await asyncio.sleep(30)
-        # await worker.queue_frame(TTSUpdateSettingsFrame(settings={"voice": "anushka"}))
+        # await worker.queue_frame(TTSUpdateSettingsFrame(settings={"voice": "anand"}))
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):

@@ -16,7 +16,6 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Literal, Optional, Union
 
-import httpx
 from loguru import logger
 from pydantic import BaseModel, Field
 
@@ -24,6 +23,7 @@ from pipecat.adapters.base_llm_adapter import LLMContextConversionError
 from pipecat.adapters.services.anthropic_adapter import (
     AnthropicLLMAdapter,
     AnthropicLLMInvocationParams,
+    anthropic_is_given,
 )
 from pipecat.frames.frames import (
     Frame,
@@ -41,6 +41,7 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.utils.deprecation import deprecated
+from pipecat.utils.http import TIMEOUT_EXCEPTIONS
 from pipecat.utils.tracing.service_decorators import traced_llm
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 
@@ -69,6 +70,34 @@ def _sonnet_generation(model: str) -> int | None:
     """
     match = re.search(r"sonnet-(\d{1,2})(?!\d)", model.lower())
     return int(match.group(1)) if match else None
+
+
+def _apply_sampling_settings(params: dict[str, Any], settings: "AnthropicLLMSettings"):
+    """Carry the sampling settings into a request through ``extra_body``.
+
+    ``temperature``, ``top_k`` and ``top_p`` are not parameters of the Messages
+    API methods, since current models don't use them. Older models still honor
+    them, and ``extra_body`` is merged into the request JSON as-is.
+
+    Args:
+        params: Request parameters, updated in place.
+        settings: Settings to read the sampling values from. Values left unset
+            are omitted from the request.
+    """
+    sampling = {
+        name: value
+        for name, value in (
+            ("temperature", settings.temperature),
+            ("top_k", settings.top_k),
+            ("top_p", settings.top_p),
+        )
+        if is_given(value) and anthropic_is_given(value)
+    }
+    # An extra_body supplied through Settings.extra wins key by key, matching
+    # how extra overrides every other request parameter.
+    extra_body = {**sampling, **params.get("extra_body", {})}
+    if extra_body:
+        params["extra_body"] = extra_body
 
 
 class AnthropicThinkingConfig(BaseModel):
@@ -381,9 +410,6 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
             "model": self._settings.model,
             "max_tokens": max_tokens if max_tokens is not None else self._settings.max_tokens,
             "stream": False,
-            "temperature": self._settings.temperature,
-            "top_k": self._settings.top_k,
-            "top_p": self._settings.top_p,
             "messages": messages,
             "system": system,
             "tools": tools,
@@ -394,6 +420,7 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
             params["thinking"] = thinking.model_dump(exclude_unset=True)
 
         params.update(self._settings.extra)
+        _apply_sampling_settings(params, self._settings)
 
         # Applied last, so an explicit thinking config from the settings or from
         # extra wins over the low-latency default.
@@ -470,9 +497,6 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
                 "model": self._settings.model,
                 "max_tokens": self._settings.max_tokens,
                 "stream": True,
-                "temperature": self._settings.temperature,
-                "top_k": self._settings.top_k,
-                "top_p": self._settings.top_p,
             }
 
             # Add thinking parameter if set
@@ -484,6 +508,7 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
             params.update(params_from_context)
 
             params.update(self._settings.extra)
+            _apply_sampling_settings(params, self._settings)
 
             # Applied last, so an explicit thinking config from the settings or from
             # extra wins over the low-latency default.
@@ -600,7 +625,7 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
             # also get cancelled.
             use_completion_tokens_estimate = True
             raise
-        except httpx.TimeoutException:
+        except TIMEOUT_EXCEPTIONS:
             await self._call_event_handler("on_completion_timeout")
         except LLMContextConversionError as e:
             await self.push_error(error_msg=str(e), exception=e)

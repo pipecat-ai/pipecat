@@ -27,7 +27,7 @@ from pipecat.services.stt_service import SegmentedSTTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
-from pipecat.utils.types import assert_given
+from pipecat.utils.types import assert_given, require_given
 
 try:
     from moonshine_voice import (
@@ -139,9 +139,11 @@ class MoonshineSTTService(SegmentedSTTService):
     model works, including the streaming-capable ones. Audio is expected as 16-bit
     mono PCM at 16 kHz.
 
-    Models are language-specific, so a language change reloads the model. The
-    non-English models are released under the non-commercial Moonshine Community
-    License (https://www.moonshine.ai/license).
+    Models are language-specific, so a language change reloads the model. They are
+    MIT-licensed in every language and size, except the legacy non-streaming models
+    for languages other than English (``TINY`` and ``BASE``), which are under the
+    non-commercial Moonshine Community License (https://www.moonshine.ai/license);
+    Moonshine's ``LICENSE`` enumerates them.
     """
 
     Settings = MoonshineSTTSettings
@@ -211,7 +213,7 @@ class MoonshineSTTService(SegmentedSTTService):
             ValueError: If no language is set, or Moonshine publishes no model for it.
         """
         logger.debug("Loading Moonshine model...")
-        model = assert_given(self._settings.model)
+        model = require_given(self._settings.model, "Moonshine model")
         model_str = model.value if isinstance(model, Model) else str(model)
 
         language = assert_given(self._settings.language)

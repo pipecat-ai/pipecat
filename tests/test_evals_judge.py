@@ -6,7 +6,42 @@
 
 import unittest
 
-from pipecat.evals.judge import EvalJudge, JudgeVerdict, _parse_verdict
+from pipecat.evals.judge import EvalJudge, JudgeVerdict, _parse_run_verdicts, _parse_verdict
+
+
+class TestParseRunVerdicts(unittest.TestCase):
+    def test_the_goal_and_a_verdict_per_turn_per_criterion(self):
+        out = _parse_run_verdicts(
+            '{"goal": {"verdict": "yes", "reason": "Berlin was named."}, '
+            '"turns": {"politeness": ["yes", "no"], "brevity": ["yes", "yes"]}, '
+            '"reasons": {"politeness": {"2": "curt"}}}',
+            ["politeness", "brevity"],
+            2,
+        )
+        self.assertEqual((out.goal.verdict, out.goal.reason), ("yes", "Berlin was named."))
+        self.assertEqual([v.verdict for v in out.turns["politeness"]], ["yes", "no"])
+        self.assertEqual(out.turns["politeness"][1].reason, "curt")
+        self.assertEqual(out.turns["politeness"][0].reason, "")
+        self.assertEqual([v.verdict for v in out.turns["brevity"]], ["yes", "yes"])
+
+    def test_a_short_array_or_a_missing_criterion_fails_the_turns_it_lacks(self):
+        out = _parse_run_verdicts(
+            '```json\n{"goal": {"verdict": "no"}, "turns": {"Politeness": ["yes"]}}\n```',
+            ["politeness", "brevity"],
+            2,
+        )
+        self.assertEqual((out.goal.verdict, out.goal.reason), ("no", "(no reason given)"))
+        self.assertEqual([v.verdict for v in out.turns["politeness"]], ["yes", "none"])
+        self.assertEqual(out.turns["politeness"][1].reason, "(judge gave no verdict)")
+        self.assertEqual([v.reason for v in out.turns["brevity"]], ["(judge gave no verdict)"] * 2)
+
+    def test_a_failed_call_or_no_json_fails_everything(self):
+        out = _parse_run_verdicts("\0judge call failed: Boom", ["politeness"], 1)
+        self.assertEqual((out.goal.verdict, out.goal.reason), ("none", "judge call failed: Boom"))
+        self.assertEqual(out.turns["politeness"][0].reason, "judge call failed: Boom")
+        out = _parse_run_verdicts("no json here", ["politeness"], 1)
+        self.assertEqual(out.goal.verdict, "none")
+        self.assertEqual(out.turns["politeness"][0].verdict, "none")
 
 
 class TestParseVerdict(unittest.TestCase):
@@ -185,6 +220,61 @@ class TestJudgeEvaluate(unittest.IsolatedAsyncioTestCase):
         judge.add_assistant_message("anything")
         v = await judge.evaluate("anything")
         self.assertFalse(v.passed)
+
+
+class TestJudgeEvaluateRun(unittest.IsolatedAsyncioTestCase):
+    async def test_the_run_is_judged_over_the_conversation_the_judge_kept(self):
+        """Reply segments merge into one numbered bot turn; tool calls sit inline."""
+        svc = _FakeLLMService(
+            [
+                '{"goal": {"verdict": "yes", "reason": "booked"}, "turns": {"polite": ["yes", "yes"]}}'
+            ]
+        )
+        judge = EvalJudge(svc)
+        judge.add_user_message("Book a table at six.")
+        judge.add_tool_call('book({"time": "6pm"})')
+        judge.add_assistant_message("Let me check.")
+        judge.add_assistant_message("Done, six o'clock.")
+        judge.add_user_message("Thanks.")
+        judge.add_assistant_message("You're welcome.")
+
+        verdicts = await judge.evaluate_run({"polite": "is polite"}, "a table is booked")
+
+        ask = svc.calls[0]["messages"][-1]["content"]
+        self.assertIn("User: Book a table at six.", ask)
+        self.assertIn('[tool call] book({"time": "6pm"})', ask)
+        self.assertIn("Bot turn 1: Let me check. Done, six o'clock.", ask)
+        self.assertIn("Bot turn 2: You're welcome.", ask)
+        self.assertIn("there are 2 bot turns", ask)
+        self.assertTrue(verdicts.goal.passed)
+        self.assertEqual([v.verdict for v in verdicts.turns["polite"]], ["yes", "yes"])
+
+    async def test_a_reply_is_judged_on_the_spoken_conversation_only(self):
+        svc = _FakeLLMService(['{"verdict": "yes", "reason": "ok"}'])
+        judge = EvalJudge(svc)
+        judge.add_tool_call("lookup()")
+        judge.add_assistant_message("It's 72 and sunny.")
+        await judge.evaluate("describes the weather")
+        roles = [m["role"] for m in svc.calls[0]["messages"]]
+        self.assertEqual(roles, ["assistant", "user"])
+
+    async def test_a_transcript_passed_in_is_deprecated_and_judged_in_place_of_the_kept_one(self):
+        svc = _FakeLLMService(
+            ['{"goal": {"verdict": "yes", "reason": "ok"}, "turns": {"polite": ["yes"]}}'] * 2
+        )
+        judge = EvalJudge(svc)
+        judge.add_assistant_message("kept")
+        given = [{"role": "assistant", "content": "given"}]
+        for call in (
+            lambda: judge.evaluate_run(given, {"polite": "is polite"}, "done"),
+            lambda: judge.evaluate_run({"polite": "is polite"}, "done", transcript=given),
+        ):
+            with self.assertWarns(DeprecationWarning):
+                verdicts = await call()
+            self.assertTrue(verdicts.goal.passed)
+            ask = svc.calls[-1]["messages"][-1]["content"]
+            self.assertIn("Bot turn 1: given", ask)
+            self.assertNotIn("kept", ask)
 
 
 class TestJudgeVerdictDataclass(unittest.TestCase):

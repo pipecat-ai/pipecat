@@ -1,0 +1,1 @@
+- `BasetenLLMService` defaults to `zai-org/GLM-5.3`. Set `settings=BasetenLLMService.Settings(model=...)` to use a different model.

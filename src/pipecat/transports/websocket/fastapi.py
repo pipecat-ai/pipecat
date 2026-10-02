@@ -560,7 +560,8 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
         """Serialize and send a frame through the WebSocket.
 
         Returns:
-            Whether the frame was sent.
+            Whether the transport took the frame. A serializer that emits no
+            payload has still taken it; see :meth:`FrameSerializer.serialize`.
         """
         if self._client.is_closing or not self._client.is_connected:
             return False
@@ -568,7 +569,7 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
         if not self._params.serializer:
             return False
 
-        success = False
+        success = True
         try:
             payload = await self._params.serializer.serialize(frame)
             if payload:
@@ -588,8 +589,6 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
                     return True
 
                 await self._client.send(payload)
-
-                success = True
         except Exception as e:
             logger.error(f"{self} exception sending data: {e.__class__.__name__} ({e})")
             success = False

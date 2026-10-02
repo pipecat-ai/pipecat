@@ -90,7 +90,7 @@ def _flux_server_handler(
                                 "code": "SPEED_OUT_OF_RANGE",
                                 "field": "speed",
                                 "value": msg.get("speed"),
-                                "description": "Speed must be between 0.85 and 1.15.",
+                                "description": "Speed must be between 0.5 and 1.5.",
                             }
                         )
                     )

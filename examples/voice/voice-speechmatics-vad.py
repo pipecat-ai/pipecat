@@ -52,37 +52,25 @@ transport_params = {
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
-    """Speechmatics STT and TTS Service Example
+    """Speechmatics STT and TTS Service Example (server-side VAD).
 
-    This example demonstrates using Speechmatics Speech-to-Text and Text-to-Speech services
-    with speaker diarization and intelligent speaker management. Key features:
+    This example demonstrates Speechmatics Speech-to-Text and Text-to-Speech with speaker
+    diarization, using the service's own VAD for turn detection. Key features:
 
     1. Speaker Diarization (STT)
        - Automatically identifies and distinguishes between different speakers
        - First speaker is identified as 'S1', others get subsequent IDs
-       - Uses `enable_diarization` parameter to manage speaker detection
+       - Enabled with the `enable_diarization` parameter
+       - `speaker_active_format` wraps each result with the speaker label for the LLM
 
-    2. Smart Speaker Control (STT)
-       - `focus_speakers` parameter lets you target specific speakers (e.g. ["S1"])
-       - Other speakers will be wrapped in PASSIVE tags
-       - Only processes speech from focused speakers
-       - Words from all speakers are wrapped with XML tags for clear speaker identification
-       - Other speakers' speech only sent when focused speaker is active
+    2. Turn detection (STT)
+       - `turn_detection_mode=VAD`: the Speechmatics service runs its own VAD and closes
+         turns itself, so no external VAD is needed in the pipeline
+       - Use `EXTERNAL` instead to drive turns from Pipecat's own VAD via `finalize()`
 
-    3. Voice Activity Detection (STT)
-       - Built-in VAD using `enable_vad` parameter
-       - Remove `vad_analyzer` from `transport` config to use module's VAD
-       - Emits speaker started/stopped events
-
-    4. Text-to-Speech (TTS)
+    3. Text-to-Speech (TTS)
        - Low latency streaming audio synthesis
        - Multiple voice options available including `sarah`, `theo`, `megan` and `jack`
-
-    5. Configuration Options
-       - `operating_point` parameter defaults to `ENHANCED` for optimal accuracy
-       - Configurable `end_of_utterance_silence_trigger` (default 0.5s)
-       - Customizable speaker formatting
-       - Additional diarization settings available
 
     For detailed information:
     - STT: https://docs.speechmatics.com/rt-api-ref
@@ -95,10 +83,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             api_key=os.environ["SPEECHMATICS_API_KEY"],
             settings=SpeechmaticsSTTService.Settings(
                 language=Language.EN,
-                turn_detection_mode=SpeechmaticsSTTService.TurnDetectionMode.ADAPTIVE,
-                # focus_speakers=["S1"],
+                # VAD mode: the Speechmatics service runs its own VAD and closes turns itself.
+                turn_detection_mode=SpeechmaticsSTTService.TurnDetectionMode.VAD,
+                enable_diarization=True,
                 speaker_active_format="<{speaker_id}>{text}</{speaker_id}>",
-                speaker_passive_format="<PASSIVE><{speaker_id}>{text}</{speaker_id}></PASSIVE>",
             ),
         )
 
@@ -114,7 +102,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             api_key=os.environ["OPENAI_API_KEY"],
             settings=OpenAILLMService.Settings(
                 temperature=0.75,
-                system_instruction="You are a helpful British assistant called Sarah in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Always include punctuation in your responses. Give very short replies - do not give longer replies unless strictly necessary. Respond to what the user said in a concise, funny, creative and helpful way. Use `<Sn/>` tags to identify different speakers - do not use tags in your replies. Do not respond to speakers within `<PASSIVE/>` tags unless explicitly asked to.",
+                system_instruction="You are a helpful British assistant called Sarah in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Always include punctuation in your responses. Give very short replies - do not give longer replies unless strictly necessary. Respond to what the user said in a concise, funny, creative and helpful way. Use `<Sn/>` tags to identify different speakers - do not use tags in your replies.",
             ),
         )
 

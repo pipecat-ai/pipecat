@@ -1,0 +1,1 @@
+- Corrected the documented range of the Deepgram Flux TTS `speed` setting: Flux accepts 0.5 to 1.5 in steps of 0.05, not 0.85 to 1.15.

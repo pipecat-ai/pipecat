@@ -606,7 +606,7 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
             # message via LLMMarkerFrame: the bot produces no spoken
             # output for incomplete turns, so the marker is the entire
             # context entry.
-            await self.push_frame(LLMMarkerFrame(marker))
+            await self.push_frame(LLMMarkerFrame(marker, kind=incomplete_type.value))
 
             self._turn_text_buffer = ""
             await self._start_incomplete_timeout(incomplete_type)
@@ -624,7 +624,9 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
                     f"treating as stale: suppressing text"
                 )
                 self._turn_marker = TurnMarker.INCOMPLETE
-                await self.push_frame(LLMMarkerFrame(config.incomplete_short_marker))
+                await self.push_frame(
+                    LLMMarkerFrame(config.incomplete_short_marker, kind=IncompleteType.SHORT.value)
+                )
                 self._turn_text_buffer = ""
                 await self._start_incomplete_timeout(IncompleteType.SHORT)
                 return
@@ -652,7 +654,11 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
             # aggregator will prepend to the upcoming aggregated text,
             # so the context message ends up as "● <response>".
             await self.push_frame(
-                LLMMarkerFrame(config.complete_marker, append_to_context_immediately=False)
+                LLMMarkerFrame(
+                    config.complete_marker,
+                    append_to_context_immediately=False,
+                    kind=TurnMarker.COMPLETE.value,
+                )
             )
 
             # Split buffer at the marker to handle cases where marker and text

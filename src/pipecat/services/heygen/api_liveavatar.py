@@ -86,6 +86,9 @@ class LiveAvatarNewSessionRequest(BaseModel):
         is_sandbox (bool): Enable sandbox mode (default: False).
         avatar_persona (AvatarPersona): Avatar persona configuration.
         livekit_config (CustomSDKLiveKitConfig): Custom LiveKit configuration.
+        max_session_duration (Optional[int]): Maximum session duration in seconds. The
+            ceiling is set by the LiveAvatar subscription tier, which also supplies the
+            default when this is unset.
     """
 
     mode: str = "LITE"
@@ -94,6 +97,7 @@ class LiveAvatarNewSessionRequest(BaseModel):
     is_sandbox: bool | None = False
     avatar_persona: AvatarPersona | None = None
     livekit_config: CustomSDKLiveKitConfig | None = None
+    max_session_duration: int | None = None
 
 
 class SessionTokenData(BaseModel):
@@ -271,6 +275,9 @@ class LiveAvatarApi(BaseAvatarApi):
 
         if request_data.is_sandbox is not None:
             params["is_sandbox"] = request_data.is_sandbox
+
+        if request_data.max_session_duration is not None:
+            params["max_session_duration"] = request_data.max_session_duration
 
         if request_data.video_settings is not None:
             video_settings = {

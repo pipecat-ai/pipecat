@@ -1,0 +1,1 @@
+- `AWSTranscribeSTTService.Settings` gained `partial_results_stability`, which selects AWS Transcribe's `"high"`, `"medium"` or `"low"` interim-result stability. It still defaults to `"high"`.

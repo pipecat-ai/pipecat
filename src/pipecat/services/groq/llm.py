@@ -6,19 +6,34 @@
 
 """Groq LLM Service implementation using OpenAI-compatible interface."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Literal
 
 from loguru import logger
 
+from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
 from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.utils.types import NOT_GIVEN, NotGiven, is_given
 
 
 @dataclass
 class GroqLLMSettings(BaseOpenAILLMService.Settings):
-    """Settings for GroqLLMService."""
+    """Settings for GroqLLMService.
 
-    pass
+    Parameters:
+        reasoning_effort: How much the model thinks before answering. Which
+            values a model accepts varies: "low", "medium" and "high" on the
+            GPT-OSS models and ``qwen/qwen3.8-27b``, "none" and "default" on the
+            Qwen models, and the non-reasoning models reject the parameter
+            altogether. "none" also keeps a Qwen model's reasoning out of the
+            spoken response, which Groq otherwise streams inline in ``<think>``
+            tags. When unset, Groq's per-model default applies.
+    """
+
+    reasoning_effort: Literal["none", "default", "low", "medium", "high"] | None | NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
 
 
 class GroqLLMService(OpenAILLMService):
@@ -56,7 +71,10 @@ class GroqLLMService(OpenAILLMService):
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = self.Settings(model="openai/gpt-oss-120b")
+        default_settings = self.Settings(
+            model="openai/gpt-oss-120b",
+            reasoning_effort=None,
+        )
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
@@ -84,3 +102,26 @@ class GroqLLMService(OpenAILLMService):
         """
         logger.debug(f"Creating Groq client with api {base_url}")
         return super().create_client(api_key, base_url, **kwargs)
+
+    def build_chat_completion_params(self, params_from_context: OpenAILLMInvocationParams) -> dict:
+        """Build parameters for Groq chat completion request.
+
+        Extends the base OpenAI parameters with Groq's reasoning effort control.
+
+        Args:
+            params_from_context: Parameters, derived from the LLM context, to
+                use for the chat completion. Contains messages, tools, and tool
+                choice.
+
+        Returns:
+            Dictionary of parameters for the chat completion request.
+        """
+        params = super().build_chat_completion_params(params_from_context)
+
+        if (
+            is_given(self._settings.reasoning_effort)
+            and self._settings.reasoning_effort is not None
+        ):
+            params["reasoning_effort"] = self._settings.reasoning_effort
+
+        return params

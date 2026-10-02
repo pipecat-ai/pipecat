@@ -41,8 +41,8 @@ from pipecat.utils.types import NOT_GIVEN, NotGiven, is_given
 _MAX_KEYTERMS = 100
 _MAX_KEYTERM_CHARS = 1200
 
-# Keyterms are only honored by the ink-2 model family.
-_KEYTERM_MODEL_PREFIX = "ink-2"
+# Keyterms are only honored by the ink-2 and ink-preview model families.
+_KEYTERM_MODEL_PREFIXES = ("ink-2", "ink-preview")
 
 
 def _prepare_keyterms(keyterms: list[str] | None | NotGiven) -> list[str]:
@@ -87,8 +87,8 @@ class CartesiaSTTSettings(STTSettings):
     Parameters:
         keyterm: Key terms or phrases to bias transcription towards, sent as
             repeated ``keyterm`` query parameters on the connection URL. Only
-            honored by ink-2 models; keyterms set for any other model are
-            ignored with a warning. Cartesia binds keyterms to a connection,
+            honored by ink-2 and ink-preview models; keyterms set for any other
+            model are ignored with a warning. Cartesia binds keyterms to a connection,
             so updating this setting at runtime triggers a reconnect. See
             https://docs.cartesia.ai/use-the-api/stt/keyterms.
     """
@@ -404,11 +404,12 @@ class CartesiaSTTService(WebsocketSTTService):
             ]
             keyterms = _prepare_keyterms(self._settings.keyterm)
             if keyterms:
-                if str(self._settings.model).startswith(_KEYTERM_MODEL_PREFIX):
+                if str(self._settings.model).startswith(_KEYTERM_MODEL_PREFIXES):
                     params.extend(("keyterm", term) for term in keyterms)
                 else:
+                    supported = " or ".join(_KEYTERM_MODEL_PREFIXES)
                     logger.warning(
-                        f"keyterms are only supported on {_KEYTERM_MODEL_PREFIX} models; "
+                        f"keyterms are only supported on {supported} models; "
                         f"ignoring keyterms for model {self._settings.model!r}"
                     )
             # Cartesia expects spaces inside a keyterm as %20, which urlencode

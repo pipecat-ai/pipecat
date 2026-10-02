@@ -1,0 +1,1 @@
+- `RimeHttpTTSService` now sends `noTextNormalization` to Rime, so the setting takes effect on Mist requests.

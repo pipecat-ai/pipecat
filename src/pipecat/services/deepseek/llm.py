@@ -12,6 +12,7 @@ from typing import Literal
 from loguru import logger
 from pydantic import BaseModel
 
+from pipecat.adapters.services.deepseek_adapter import DeepSeekLLMAdapter
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
 from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.openai.llm import OpenAILLMService
@@ -36,8 +37,11 @@ class DeepSeekLLMSettings(BaseOpenAILLMService.Settings):
     """Settings for DeepSeekLLMService.
 
     Parameters:
-        thinking: Thinking mode configuration. When unset, DeepSeek's own
-            default applies: thinking enabled at "high" reasoning effort.
+        thinking: Thinking mode configuration. The service defaults this to
+            disabled: DeepSeek's V4 models otherwise run a reasoning pass before
+            every answer, which delays the first spoken token. Set
+            ``DeepSeekThinkingConfig(type="enabled")`` to turn it on, or
+            ``None`` to leave the choice to DeepSeek's own default.
     """
 
     thinking: DeepSeekThinkingConfig | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -59,6 +63,10 @@ class DeepSeekLLMService(OpenAILLMService):
     # This value is used by BaseOpenAILLMService when calling the adapter.
     supports_developer_role = False
 
+    # Supplies the `reasoning_content` DeepSeek requires on assistant messages
+    # in thinking mode.
+    adapter_class = DeepSeekLLMAdapter
+
     Settings = DeepSeekLLMSettings
     ThinkingConfig = DeepSeekThinkingConfig
     _settings: Settings
@@ -77,7 +85,7 @@ class DeepSeekLLMService(OpenAILLMService):
         Args:
             api_key: The API key for accessing DeepSeek's API.
             base_url: The base URL for DeepSeek API. Defaults to "https://api.deepseek.com/v1".
-            model: The model identifier to use. Defaults to "deepseek-v4-flash".
+            model: The model identifier to use. Defaults to "deepseek-flash".
 
                 .. deprecated:: 0.0.105
                     Use ``settings=DeepSeekLLMService.Settings(model=...)`` instead.
@@ -88,7 +96,9 @@ class DeepSeekLLMService(OpenAILLMService):
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = self.Settings(model="deepseek-v4-flash", thinking=None)
+        default_settings = self.Settings(
+            model="deepseek-flash", thinking=DeepSeekThinkingConfig(type="disabled")
+        )
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:

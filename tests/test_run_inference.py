@@ -185,13 +185,11 @@ async def test_anthropic_run_inference_with_llm_context():
         model="claude-3-sonnet-20240229",
         max_tokens=2048,
         stream=False,
-        temperature=0.6,
-        top_k=50,
-        top_p=0.95,
         messages=test_messages,
         system=test_system,
         tools=[],
         betas=["interleaved-thinking-2025-05-14"],
+        extra_body={"temperature": 0.6, "top_k": 50, "top_p": 0.95},
     )
 
 

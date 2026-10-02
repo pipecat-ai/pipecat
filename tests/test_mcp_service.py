@@ -19,23 +19,29 @@ from loguru import logger
 # isn't installed.
 pytest.importorskip("mcp")
 
+import anyio  # noqa: E402
 from mcp.client.session_group import StreamableHttpParameters  # noqa: E402
 
+from pipecat.services import mcp_service  # noqa: E402
 from pipecat.services.llm_service import LLMService  # noqa: E402
 from pipecat.services.mcp_service import MCPClient  # noqa: E402
 
 
-def _tool(name, properties=None, required=None, description="A tool."):
-    """Build a fake MCP server tool as returned by ``session.list_tools()``."""
+def _tool(name, properties=None, required=None, description="A tool.", schema_field="inputSchema"):
+    """Build a fake MCP server tool as returned by ``session.list_tools()``.
+
+    ``schema_field`` selects which spelling of the schema attribute the tool
+    carries: the SDK spells it inputSchema on 1.x and input_schema on 2.x.
+    """
     return SimpleNamespace(
         name=name,
         description=description,
-        inputSchema={"properties": properties or {}, "required": required or []},
+        **{schema_field: {"properties": properties or {}, "required": required or []}},
     )
 
 
 class _FakeTransport:
-    """Fake streamablehttp_client context manager; records enter/exit tasks."""
+    """Fake streamable-HTTP transport; records enter/exit tasks."""
 
     def __init__(self, record, exit_error=None, connect_delay=0):
         self._record = record
@@ -69,6 +75,9 @@ class _FakeSession:
         self._fail_initializes = fail_initializes
         self._cancel_initialize = cancel_initialize
         self.calls = []
+        # Errors the next tool calls raise, in order. An empty result has no content.
+        self.call_errors = []
+        self.empty_results = False
 
     async def __aenter__(self):
         return self
@@ -91,6 +100,10 @@ class _FakeSession:
 
     async def call_tool(self, name, arguments=None):
         self.calls.append((name, arguments))
+        if self.call_errors:
+            raise self.call_errors.pop(0)
+        if self.empty_results:
+            return SimpleNamespace(content=[])
         return SimpleNamespace(content=[SimpleNamespace(text=f"{name}-RESULT")])
 
 
@@ -110,7 +123,7 @@ class MCPClientTestBase(unittest.IsolatedAsyncioTestCase):
         session = _FakeSession(tools, record, fail_initializes, cancel_initialize)
         ctx = patch.multiple(
             "pipecat.services.mcp_service",
-            streamablehttp_client=lambda **kwargs: _FakeTransport(
+            _streamable_http_transport=lambda params: _FakeTransport(
                 record, transport_exit_error, connect_delay
             ),
             ClientSession=lambda read, write: session,
@@ -152,6 +165,26 @@ class TestTools(MCPClientTestBase):
         for schema in tools_schema.standard_tools:
             self.assertIsNotNone(schema.handler)
         await client.close()
+
+    async def test_tools_reads_either_schema_field_spelling(self):
+        """The SDK spells the schema field inputSchema in 1.x, input_schema in 2.x."""
+        for schema_field in ("inputSchema", "input_schema"):
+            with self.subTest(schema_field=schema_field):
+                client, _, _ = self._make_client(
+                    [
+                        _tool(
+                            "tool_a",
+                            properties={"x": {"type": "string"}},
+                            required=["x"],
+                            schema_field=schema_field,
+                        )
+                    ]
+                )
+                tools_schema = await client.tools()
+                schema = tools_schema.standard_tools[0]
+                self.assertEqual(schema.properties, {"x": {"type": "string"}})
+                self.assertEqual(schema.required, ["x"])
+                await client.close()
 
     async def test_tools_is_idempotent_on_connection(self):
         client, session, record = self._make_client([_tool("tool_a")])
@@ -253,6 +286,64 @@ class TestToolsArguments(MCPClientTestBase):
         # ...but the argument is still injected at call time.
         await self._call_via_handler(tools_schema, "other", {"x": "y"})
         self.assertEqual(session.calls, [("other", {"x": "y", "hidden": 1})])
+        await client.close()
+
+
+class TestCallErrors(MCPClientTestBase):
+    """A failed tool call: the error the call raised reaches the model."""
+
+    async def test_a_failed_call_returns_the_error_to_the_model(self):
+        client, session, record = self._make_client([_tool("tool_a")])
+        tools_schema = await client.tools()
+        session.call_errors.append(RuntimeError("upstream unavailable"))
+        result_callback = await self._call_via_handler(tools_schema, "tool_a")
+        result_callback.assert_awaited_once_with(
+            "Error calling mcp tool tool_a: upstream unavailable"
+        )
+        await client.close()
+
+    async def test_an_error_with_no_message_gives_its_class_name(self):
+        # str(ClosedResourceError()) is empty, so the model would otherwise read
+        # a line that ends at the colon.
+        client, session, record = self._make_client([_tool("tool_a")])
+        tools_schema = await client.tools()
+        session.call_errors.append(anyio.ClosedResourceError())
+        result_callback = await self._call_via_handler(tools_schema, "tool_a")
+        result_callback.assert_awaited_once_with(
+            "Error calling mcp tool tool_a: ClosedResourceError"
+        )
+        await client.close()
+
+    async def test_a_group_of_one_gives_the_cause_it_wraps(self):
+        # The group itself says only that a task group failed.
+        client, session, record = self._make_client([_tool("tool_a")])
+        tools_schema = await client.tools()
+        session.call_errors.append(
+            ExceptionGroup("unhandled errors in a TaskGroup", [anyio.BrokenResourceError()])
+        )
+        result_callback = await self._call_via_handler(tools_schema, "tool_a")
+        result_callback.assert_awaited_once_with(
+            "Error calling mcp tool tool_a: BrokenResourceError"
+        )
+        await client.close()
+
+    async def test_a_long_error_is_cut_to_size(self):
+        # The line goes into the LLM context, so it is cut to a fixed length.
+        client, session, record = self._make_client([_tool("tool_a")])
+        tools_schema = await client.tools()
+        session.call_errors.append(ValueError("x" * (mcp_service._MAX_ERROR_DETAIL * 2)))
+        result_callback = await self._call_via_handler(tools_schema, "tool_a")
+        result_callback.assert_awaited_once_with(
+            f"Error calling mcp tool tool_a: {'x' * mcp_service._MAX_ERROR_DETAIL}..."
+        )
+        await client.close()
+
+    async def test_an_empty_result_still_reads_as_the_stock_line(self):
+        client, session, record = self._make_client([_tool("tool_a")])
+        session.empty_results = True
+        tools_schema = await client.tools()
+        result_callback = await self._call_via_handler(tools_schema, "tool_a")
+        result_callback.assert_awaited_once_with("Sorry, could not call the mcp tool")
         await client.close()
 
 

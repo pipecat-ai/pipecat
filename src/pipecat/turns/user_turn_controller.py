@@ -20,7 +20,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
-from pipecat.turns.types import ProcessFrameResult
+from pipecat.turns.types import ProcessFrameResult, UserTurnSpeculation
 from pipecat.turns.user_start import (
     BaseUserTurnStartStrategy,
     UserTurnStartedParams,
@@ -43,7 +43,8 @@ class UserTurnController(BaseObject):
 
     - on_user_turn_started: Emitted when a user turn starts.
     - on_user_turn_inference_triggered: Emitted when enough signal exists to
-      start LLM inference. Fires together with `on_user_turn_stopped` for
+      start LLM inference, carrying a `UserTurnSpeculation` when the turn it
+      answers hasn't ended yet. Fires together with `on_user_turn_stopped` for
       most strategies; fires alone when a downstream strategy gates
       finalization on the LLM's verdict.
     - on_user_turn_stopped: Emitted when a user turn is semantically final.
@@ -58,7 +59,11 @@ class UserTurnController(BaseObject):
             ...
 
         @controller.event_handler("on_user_turn_inference_triggered")
-        async def on_user_turn_inference_triggered(controller, strategy: BaseUserTurnStopStrategy):
+        async def on_user_turn_inference_triggered(
+            controller,
+            strategy: BaseUserTurnStopStrategy,
+            speculation: UserTurnSpeculation | None,
+        ):
             ...
 
         @controller.event_handler("on_user_turn_stopped")
@@ -107,6 +112,7 @@ class UserTurnController(BaseObject):
         self._register_event_handler("on_broadcast_frame", sync=True)
         self._register_event_handler("on_user_turn_started", sync=True)
         self._register_event_handler("on_user_turn_inference_triggered", sync=True)
+        self._register_event_handler("on_user_turn_speculation_cancelled", sync=True)
         self._register_event_handler("on_user_turn_stopped", sync=True)
         self._register_event_handler("on_user_turn_stop_timeout", sync=True)
         self._register_event_handler("on_reset_aggregation", sync=True)
@@ -241,6 +247,9 @@ class UserTurnController(BaseObject):
             s.add_event_handler(
                 "on_user_turn_inference_triggered", self._on_user_turn_inference_triggered
             )
+            s.add_event_handler(
+                "on_user_turn_speculation_cancelled", self._on_user_turn_speculation_cancelled
+            )
             s.add_event_handler("on_user_turn_stopped", self._on_user_turn_stopped)
 
     async def _cleanup_strategies(self):
@@ -260,6 +269,9 @@ class UserTurnController(BaseObject):
             s.remove_event_handler("on_broadcast_frame", self._on_broadcast_frame)
             s.remove_event_handler(
                 "on_user_turn_inference_triggered", self._on_user_turn_inference_triggered
+            )
+            s.remove_event_handler(
+                "on_user_turn_speculation_cancelled", self._on_user_turn_speculation_cancelled
             )
             s.remove_event_handler("on_user_turn_stopped", self._on_user_turn_stopped)
 
@@ -311,6 +323,9 @@ class UserTurnController(BaseObject):
     ):
         await self._call_event_handler("on_broadcast_frame", frame_cls, **kwargs)
 
+    async def _on_user_turn_speculation_cancelled(self, strategy: BaseUserTurnStopStrategy):
+        await self._call_event_handler("on_user_turn_speculation_cancelled")
+
     async def _on_user_turn_started(
         self,
         strategy: BaseUserTurnStartStrategy,
@@ -318,8 +333,10 @@ class UserTurnController(BaseObject):
     ):
         await self._trigger_user_turn_start(strategy, params)
 
-    async def _on_user_turn_inference_triggered(self, strategy: BaseUserTurnStopStrategy):
-        await self._trigger_user_turn_inference_triggered(strategy)
+    async def _on_user_turn_inference_triggered(
+        self, strategy: BaseUserTurnStopStrategy, speculation: UserTurnSpeculation | None
+    ):
+        await self._trigger_user_turn_inference_triggered(strategy, speculation)
 
     async def _on_user_turn_stopped(
         self, strategy: BaseUserTurnStopStrategy, params: UserTurnStoppedParams
@@ -351,7 +368,9 @@ class UserTurnController(BaseObject):
         await self._call_event_handler("on_user_turn_started", strategy, params)
 
     async def _trigger_user_turn_inference_triggered(
-        self, strategy: BaseUserTurnStopStrategy | None
+        self,
+        strategy: BaseUserTurnStopStrategy | None,
+        speculation: UserTurnSpeculation | None = None,
     ):
         # Inference-triggered fires only while a turn is active. The turn
         # remains active afterward — only `on_user_turn_stopped` flips state.
@@ -362,7 +381,7 @@ class UserTurnController(BaseObject):
         # finalization never arrives) still times out and finalizes.
         self._user_turn_stop_timeout_event.set()
 
-        await self._call_event_handler("on_user_turn_inference_triggered", strategy)
+        await self._call_event_handler("on_user_turn_inference_triggered", strategy, speculation)
 
     async def _trigger_user_turn_stop(
         self, strategy: BaseUserTurnStopStrategy | None, params: UserTurnStoppedParams

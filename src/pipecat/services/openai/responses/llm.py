@@ -17,7 +17,6 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-import httpx
 from loguru import logger
 from openai import NOT_GIVEN as OPENAI_NOT_GIVEN
 from openai import APITimeoutError, AsyncOpenAI, AsyncStream, DefaultAsyncHttpxClient
@@ -64,6 +63,7 @@ from pipecat.services.llm_service import (
     WebsocketReconnectedError,
 )
 from pipecat.services.settings import LLMSettings
+from pipecat.utils.http import TIMEOUT_EXCEPTIONS, connection_limits
 from pipecat.utils.tracing.service_decorators import traced_llm
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
@@ -126,12 +126,18 @@ class OpenAIResponsesReasoningConfig(BaseModel):
             default) requests no summary. Any summary is surfaced via thought
             frames (the ``on_assistant_thought`` event); the encrypted reasoning
             itself is preserved across turns regardless of this setting.
+        mode: Reasoning mode for models that offer one, such as the gpt-5.6
+            series: ``"standard"`` or the slower, more thorough ``"pro"``.
+            ``None`` (the default) leaves the field unset, so the model's own
+            default applies. ``effort`` selects the reasoning intensity within
+            the chosen mode.
     """
 
     # ``| str`` for forward compatibility: if OpenAI adds new levels, users can
     # pass the new string without waiting for a Pipecat release.
     effort: Literal["none", "minimal", "low", "medium", "high", "xhigh", "max"] | str | None = None
     summary: Literal["auto", "concise", "detailed"] | str | None = None
+    mode: Literal["standard", "pro"] | str | None = None
 
 
 @dataclass
@@ -168,6 +174,16 @@ class OpenAIResponsesLLMSettings(LLMSettings):
 def _is_o_series(model: str) -> bool:
     """Whether the model is an o-series reasoning model (o1, o3, o4-mini, ...)."""
     return bool(re.match(r"o\d", model.lower()))
+
+
+def _rejects_effort_none(model: str) -> bool:
+    """Whether a reasoning model rejects ``effort="none"`` with an API error.
+
+    The reasoning-first o-series and ``gpt-6-astra`` accept only a positive
+    effort level, so reasoning cannot be switched off for them.
+    """
+    model = model.lower()
+    return _is_o_series(model) or model.startswith("gpt-6-astra")
 
 
 def _model_supports_reasoning(model: str) -> bool | None:
@@ -324,7 +340,7 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
             organization=organization,
             project=project,
             http_client=DefaultAsyncHttpxClient(
-                limits=httpx.Limits(
+                limits=connection_limits(
                     max_keepalive_connections=100, max_connections=1000, keepalive_expiry=None
                 )
             ),
@@ -475,20 +491,17 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
         When the caller hasn't configured ``reasoning``, request ``effort="none"``
         for whatever models possible. Note that this is a no-op for models like
         ``gpt-5.4`` that already default to ``none``. Some models are left at the
-        provider default: the reasoning-first o-series doesn't accept
-        ``effort="none"`` (and choosing one is a deliberate decision to reason),
-        and gpt-4.x and earlier don't reason at all. Mirrors Gemini's
-        ``_maybe_unset_thinking_budget``, which disables or minimizes thinking on
-        its latency-sensitive models.
+        provider default: those that reject ``effort="none"`` outright (see
+        :func:`_rejects_effort_none`), and gpt-4.x and earlier, which don't reason
+        at all. Mirrors Gemini's ``_maybe_unset_thinking_budget``, which disables
+        or minimizes thinking on its latency-sensitive models.
 
         Args:
             params: The response params dict (modified in place).
         """
         model = assert_given(self._settings.model)
         # Lower reasoning only for models that reason *and* accept effort="none".
-        # The o-series reasons but rejects "none" (and choosing it is a deliberate
-        # decision to reason), so exclude it.
-        if model and _model_supports_reasoning(model) and not _is_o_series(model):
+        if model and _model_supports_reasoning(model) and not _rejects_effort_none(model):
             params["reasoning"] = {"effort": "none"}
 
     def _warn_if_reasoning_unsupported(self):
@@ -1245,7 +1258,7 @@ class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
                 await self.push_frame(LLMFullResponseStartFrame())
                 await self.start_processing_metrics()
                 await self._process_context(frame.context)
-            except httpx.TimeoutException as e:
+            except TIMEOUT_EXCEPTIONS as e:
                 await self._call_event_handler("on_completion_timeout")
                 await self.push_error(error_msg="LLM completion timeout", exception=e)
             except Exception as e:

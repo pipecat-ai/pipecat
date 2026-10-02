@@ -8,9 +8,9 @@
 
 Demonstrates LLM-based turn completion detection to suppress bot responses when
 the user was cut off mid-thought. The LLM outputs one of three markers:
-- ✓ (complete): User finished their thought, respond normally
-- ○ (incomplete short): User was cut off, wait ~5s then prompt
-- ◐ (incomplete long): User needs time to think, wait ~10s then prompt
+- ● (complete): User finished their thought, respond normally
+- ◐ (incomplete short): User was cut off, wait ~5s then prompt
+- ○ (incomplete long): User needs time to think, wait ~10s then prompt
 
 When incomplete is detected, the bot's response is suppressed. After the timeout
 expires, the LLM is automatically prompted to re-engage the user.
@@ -92,11 +92,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # `FilterIncompleteUserTurnStrategies` pairs the default detector
     # chain with `LLMTurnCompletionUserTurnStopStrategy`: detectors
     # trigger LLM inference but the public `on_user_turn_stopped` event
-    # fires only when the LLM confirms ✓. The LLM marks each response
+    # fires only when the LLM confirms ●. The LLM marks each response
     # with one of:
-    # ✓ = complete (respond normally)
-    # ○ = incomplete short (wait 5s, then prompt)
-    # ◐ = incomplete long (wait 10s, then prompt)
+    # ● = complete (respond normally)
+    # ◐ = incomplete short (wait 5s, then prompt)
+    # ○ = incomplete long (wait 10s, then prompt)
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(

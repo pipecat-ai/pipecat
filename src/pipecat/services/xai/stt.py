@@ -82,8 +82,10 @@ class XAISTTSettings(STTSettings):
     Parameters:
         interim_results: When True, partial transcripts are emitted
             approximately every 500ms.
-        endpointing: Silence duration in milliseconds that triggers a
-            speech-final event. Range 0-5000. Server default is 10ms.
+        endpointing: Silence duration in milliseconds that triggers the
+            speech-final event carrying the utterance's
+            :class:`~pipecat.frames.frames.TranscriptionFrame`. Range 0-5000.
+            Server default is 400ms.
         multichannel: When True, transcribes each interleaved channel
             independently. Requires ``channels`` >= 2.
         channels: Number of interleaved channels (2-8). Required when
@@ -108,8 +110,13 @@ class XAISTTService(WebsocketSTTService):
 
     The connection is persistent: audio is streamed continuously and the
     server emits ``transcript.partial`` events with ``is_final`` and
-    ``speech_final`` flags to mark utterance boundaries. If the connection
-    drops mid-session, the base class reconnects automatically.
+    ``speech_final`` flags. Interim results (``is_final=false``) and chunk
+    finals (``is_final=true, speech_final=false``) are pushed as
+    :class:`~pipecat.frames.frames.InterimTranscriptionFrame`. Only the
+    utterance final (``speech_final=true``) is pushed as a
+    :class:`~pipecat.frames.frames.TranscriptionFrame`, because it restates
+    the entire utterance, including the text of every earlier chunk final. If
+    the connection drops mid-session, the base class reconnects automatically.
     """
 
     Settings = XAISTTSettings
@@ -332,7 +339,7 @@ class XAISTTService(WebsocketSTTService):
             await self._handle_transcript(message)
         elif msg_type == "transcript.done":
             if message.get("text"):
-                await self._push_final_transcript(message, speech_final=True)
+                await self._push_final_transcript(message)
         elif msg_type == "error":
             await self.push_error(
                 error_msg=f"xAI STT error: {message.get('message', message)}",
@@ -350,10 +357,8 @@ class XAISTTService(WebsocketSTTService):
         speech_final = bool(message.get("speech_final"))
         language = self._language_for_frame()
 
-        if is_final:
-            await self._push_final_transcript(
-                message, speech_final=speech_final, language=language, text=text
-            )
+        if is_final and speech_final:
+            await self._push_final_transcript(message, language=language, text=text)
         else:
             await self.push_frame(
                 InterimTranscriptionFrame(
@@ -369,7 +374,6 @@ class XAISTTService(WebsocketSTTService):
         self,
         message: dict[str, Any],
         *,
-        speech_final: bool,
         language: Language | None = None,
         text: str | None = None,
     ):
@@ -388,7 +392,7 @@ class XAISTTService(WebsocketSTTService):
                 time_now_iso8601(),
                 language,
                 result=message,
-                finalized=speech_final,
+                finalized=True,
             )
         )
         await self._trace_transcription(text, True, language)

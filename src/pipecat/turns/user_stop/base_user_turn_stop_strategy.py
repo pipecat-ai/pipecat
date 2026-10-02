@@ -11,7 +11,7 @@ from dataclasses import dataclass
 
 from pipecat.frames.frames import Frame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
-from pipecat.turns.types import ProcessFrameResult
+from pipecat.turns.types import ProcessFrameResult, UserTurnSpeculation
 from pipecat.utils.base_object import BaseObject
 
 
@@ -29,10 +29,15 @@ class UserTurnStoppedParams:
             turn. False when the turn end was already announced elsewhere — by a
             shared :class:`~pipecat.turns.user_turn_processor.UserTurnProcessor`,
             or by a service that emits turn frames rather than proposing them.
+        confirms_speculation: Whether this turn end confirms a speculative
+            response that was already generated. The aggregator then writes the
+            turn to the context without running inference again, since the
+            answer is already on its way.
 
     """
 
     enable_user_speaking_frames: bool
+    confirms_speculation: bool = False
 
 
 class BaseUserTurnStopStrategy(BaseObject):
@@ -46,8 +51,10 @@ class BaseUserTurnStopStrategy(BaseObject):
 
       - `on_push_frame`: Indicates the strategy wants to push a frame.
       - `on_user_turn_inference_triggered`: Signals that enough evidence
-        exists to start LLM inference for the current user turn. In most
-        cases this fires together with `on_user_turn_stopped`. Strategies
+        exists to start LLM inference for the current user turn, carrying a
+        :class:`~pipecat.turns.types.UserTurnSpeculation` when the turn it
+        answers hasn't ended yet. In most cases this fires together with
+        `on_user_turn_stopped`. Strategies
         that gate finalization on the LLM (e.g.
         ``LLMTurnCompletionUserTurnStopStrategy``) fire only this event
         upstream and a separate strategy fires `on_user_turn_stopped` once
@@ -91,6 +98,7 @@ class BaseUserTurnStopStrategy(BaseObject):
         self._register_event_handler("on_push_frame", sync=True)
         self._register_event_handler("on_broadcast_frame", sync=True)
         self._register_event_handler("on_user_turn_inference_triggered", sync=True)
+        self._register_event_handler("on_user_turn_speculation_cancelled", sync=True)
         self._register_event_handler("on_user_turn_stopped", sync=True)
 
     def __init_subclass__(cls, **kwargs):
@@ -201,6 +209,16 @@ class BaseUserTurnStopStrategy(BaseObject):
         """
         await self._call_event_handler("on_broadcast_frame", frame_cls, **kwargs)
 
+    async def trigger_user_turn_speculation_cancelled(self):
+        """Withdraw the speculation this strategy has in flight.
+
+        Emitted rather than pushed so the host broadcasts it the same way it
+        broadcasts the turn end. A withdrawal that took the queued path would
+        reach a downstream gate *after* the turn end that follows it, and the
+        gate would release the response the withdrawal was meant to discard.
+        """
+        await self._call_event_handler("on_user_turn_speculation_cancelled")
+
     async def trigger_user_turn_stopped(self, *, enable_user_speaking_frames: bool | None = None):
         """Fire both ``on_user_turn_inference_triggered`` and ``on_user_turn_stopped``.
 
@@ -221,11 +239,26 @@ class BaseUserTurnStopStrategy(BaseObject):
             enable_user_speaking_frames=enable_user_speaking_frames
         )
 
-    async def trigger_user_turn_inference_triggered(self):
-        """Trigger only the `on_user_turn_inference_triggered` event."""
-        await self._call_event_handler("on_user_turn_inference_triggered")
+    async def trigger_user_turn_inference_triggered(
+        self, *, speculation: UserTurnSpeculation | None = None
+    ):
+        """Trigger only the `on_user_turn_inference_triggered` event.
 
-    async def trigger_user_turn_finalized(self, *, enable_user_speaking_frames: bool | None = None):
+        Args:
+            speculation: Set to run this inference speculatively, against a
+                provisional context carrying the turn text it names, for a turn
+                that hasn't ended yet. The response it produces is held back
+                until the turn is confirmed. Leave None to run the inference
+                against the conversation as it stands.
+        """
+        await self._call_event_handler("on_user_turn_inference_triggered", speculation)
+
+    async def trigger_user_turn_finalized(
+        self,
+        *,
+        enable_user_speaking_frames: bool | None = None,
+        confirms_speculation: bool = False,
+    ):
         """Trigger only the `on_user_turn_stopped` event.
 
         Args:
@@ -233,6 +266,9 @@ class BaseUserTurnStopStrategy(BaseObject):
                 :class:`~pipecat.frames.frames.UserStoppedSpeakingFrame` for this
                 turn. Pass False when something else in the pipeline has already
                 emitted it.
+            confirms_speculation: Whether a response generated ahead of this
+                turn ending already answers it, so inference should not run
+                again.
         """
         await self._call_event_handler(
             "on_user_turn_stopped",
@@ -241,6 +277,7 @@ class BaseUserTurnStopStrategy(BaseObject):
                     self._enable_user_speaking_frames
                     if enable_user_speaking_frames is None
                     else enable_user_speaking_frames
-                )
+                ),
+                confirms_speculation=confirms_speculation,
             ),
         )

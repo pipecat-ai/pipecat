@@ -470,6 +470,33 @@ class BotLLMTextMessage(BaseModel):
     data: TextMessageData
 
 
+class BotLLMMarkerMessageData(BaseModel):
+    """Data for a bot LLM marker message.
+
+    Parameters:
+        text: The marker as the LLM produced it.
+        kind: What the marker means, in the emitter's vocabulary (the
+            turn-completion mixin's ``complete``, ``short`` or ``long``), or
+            ``None`` when the emitter gave none.
+    """
+
+    text: str
+    kind: str | None = None
+
+
+class BotLLMMarkerMessage(BaseModel):
+    """Message carrying a sideband marker the bot's LLM emitted.
+
+    A marker is structured assistant output kept out of the spoken text, such
+    as the turn-completion markers of ``filter_incomplete_user_turns``. Sent
+    only when the observer's ``bot_llm_marker_enabled`` is on.
+    """
+
+    label: MessageLiteral = MESSAGE_LABEL
+    type: Literal["bot-llm-marker"] = "bot-llm-marker"
+    data: BotLLMMarkerMessageData
+
+
 class BotTTSTextMessage(BaseModel):
     """Message containing bot TTS text output.
 

@@ -73,6 +73,7 @@ except ModuleNotFoundError as e:
 # model that isn't listed is assumed to accept "minimal", the fastest setting.
 _LOWEST_MODEL_THINKING_LEVELS = {
     "gemini-3.7-flash": "low",
+    "gemini-3.8-flash": "low",
 }
 
 # Models that take their thinking configuration from thinking_level, keyed by
@@ -90,8 +91,8 @@ class GoogleThinkingConfig(BaseModel):
     Parameters:
         thinking_level: Thinking level, for Gemini 3 models.
             Gemini 3 Flash accepts "minimal", "low", "medium", and "high",
-            except Gemini 3.7 Flash, which accepts only "low", "medium", and
-            "high". Gemini 3 Pro accepts "low" and "high".
+            except Gemini 3.7 Flash and Gemini 3.8 Flash, which accept only
+            "low", "medium", and "high". Gemini 3 Pro accepts "low" and "high".
             If not provided, the flash models default to "medium" and Pro
             defaults to "high".
             Note: Gemini 2.5 series must use thinking_budget instead.

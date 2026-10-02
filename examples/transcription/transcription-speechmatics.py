@@ -60,13 +60,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     each individual speaker and wrap them with XML tags.
 
     If you do not wish to use diarization, then set the `enable_diarization` parameter
-    to `False` or omit it altogether. The `text_format` will only be used if diarization is enabled.
+    to `False` or omit it altogether. The `speaker_active_format` is only used when
+    diarization is enabled.
 
-    By default, this example will use our ENHANCED operating point, which is optimized for
-    high accuracy. You can change this by setting the `operating_point` parameter to a different
-    value.
+    The transcription model defaults to `linden-1`; set the `model` parameter to choose a
+    different one.
 
-    For more information on operating points, see the Speechmatics documentation:
+    For more information, see the Speechmatics documentation:
     https://docs.speechmatics.com/rt-api-ref
     """
     logger.info("Starting bot")

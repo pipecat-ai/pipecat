@@ -4,22 +4,21 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Tests for the eval transport's per-connection query flags and virtual mic."""
+"""Tests for the eval transport's per-connection query flags."""
 
 import asyncio
-import time
 import types
 import unittest
+from unittest.mock import AsyncMock
 
 from pipecat.evals.transport import (
-    AUDIO_CHUNK_MS,
     CAPTURE_AUDIO_QUERY_PARAM,
-    RECORD_QUERY_PARAM,
     SKIP_TTS_QUERY_PARAM,
-    EvalMicrophone,
+    EvalTransport,
+    EvalTransportParams,
     _query_flag,
-    _query_value,
 )
+from pipecat.frames.frames import LLMConfigureOutputFrame
 
 
 def _ws(path=None, request_path=None):
@@ -56,69 +55,38 @@ class TestQueryFlag(unittest.TestCase):
         self.assertFalse(_query_flag(_ws(), SKIP_TTS_QUERY_PARAM))
 
 
-class TestEvalMicrophone(unittest.IsolatedAsyncioTestCase):
-    """The virtual mic paces queued utterances at real time, silence otherwise."""
+class TestConnectionOutputSettings(unittest.IsolatedAsyncioTestCase):
+    async def test_audio_connection_reenables_tts_without_query_flag(self):
+        await self._assert_tts_resets_between_connections("/")
 
-    SR = 16000
-    CHUNK_BYTES = (SR * AUDIO_CHUNK_MS // 1000) * 2  # 20ms of 16kHz 16-bit mono
+    async def test_audio_connection_reenables_tts_with_false_query_flag(self):
+        await self._assert_tts_resets_between_connections("/?skip_tts=false")
 
-    async def _run_mic(self, mic, seconds):
-        task = asyncio.create_task(mic.run(self.SR))
-        try:
-            await asyncio.sleep(seconds)
-        finally:
-            task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
+    async def _assert_tts_resets_between_connections(self, audio_path: str):
+        transport = EvalTransport(params=EvalTransportParams())
+        self.addAsyncCleanup(transport.cleanup)
+        input_transport = transport.input()
+        push_frame = AsyncMock()
+        input_transport.push_frame = push_frame
+        transport.output().set_client_connection = AsyncMock()
+        greeting_settings = asyncio.Queue()
 
-    async def test_paces_utterance_in_chunks_with_silence_around(self):
-        pushed: list[tuple[bytes, int]] = []
+        @transport.event_handler("on_client_connected")
+        async def on_connected(transport, websocket):
+            settings = [
+                call.args[0].skip_tts
+                for call in push_frame.await_args_list
+                if isinstance(call.args[0], LLMConfigureOutputFrame)
+            ]
+            greeting_settings.put_nowait(settings[-1])
 
-        async def push(pcm, rate):
-            pushed.append((pcm, rate))
+        observed = []
+        for path in ("/?skip_tts=true", audio_path, "/?skip_tts=true"):
+            await transport._on_client_connected(_ws(path=path))
+            observed.append(await asyncio.wait_for(greeting_settings.get(), timeout=1))
 
-        mic = EvalMicrophone(push)
-        utterance = b"\x01\x02" * (self.SR // 10)  # 100ms -> five 20ms chunks
-        mic.add_audio(utterance, self.SR)
-
-        start = time.monotonic()
-        await self._run_mic(mic, 0.3)
-        elapsed = time.monotonic() - start
-
-        speech = [pcm for pcm, _ in pushed if pcm != b"\x00" * len(pcm)]
-        self.assertEqual(b"".join(speech), utterance)  # full utterance, in order
-        self.assertTrue(all(len(pcm) == self.CHUNK_BYTES for pcm in speech))
-        silence = b"\x00\x00" * (self.SR * AUDIO_CHUNK_MS // 1000)
-        self.assertIn(silence, [pcm for pcm, _ in pushed])  # silence keeps flowing
-        # Real-time pacing: ~300ms of run time emits ~15 frames, not hundreds.
-        self.assertLess(len(pushed), int(elapsed / (AUDIO_CHUNK_MS / 1000)) + 5)
-
-    async def test_reset_drops_queued_audio(self):
-        pushed: list[bytes] = []
-
-        async def push(pcm, rate):
-            pushed.append(pcm)
-
-        mic = EvalMicrophone(push)
-        mic.add_audio(b"\x01\x02" * self.SR, self.SR)  # 1s queued
-        mic.reset()
-        await self._run_mic(mic, 0.1)
-
-        self.assertTrue(all(pcm == b"\x00" * len(pcm) for pcm in pushed))  # only silence
-
-
-class TestQueryValue(unittest.TestCase):
-    def test_reads_url_decoded_value(self):
-        ws = _ws(path="/?record=%2Ftmp%2Frec%2Fcap.wav")
-        self.assertEqual(_query_value(ws, RECORD_QUERY_PARAM), "/tmp/rec/cap.wav")
-
-    def test_none_when_absent(self):
-        self.assertIsNone(_query_value(_ws(path="/?skip_tts=true"), RECORD_QUERY_PARAM))
-
-    def test_none_when_empty(self):
-        self.assertIsNone(_query_value(_ws(path="/?record="), RECORD_QUERY_PARAM))
+        # Each greeting must see its own session's output setting.
+        self.assertEqual(observed, [True, False, True])
 
 
 if __name__ == "__main__":

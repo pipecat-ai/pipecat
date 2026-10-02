@@ -73,6 +73,11 @@ class AzureTTSSettings(TTSSettings):
     """Settings for AzureTTSService and AzureHttpTTSService.
 
     Parameters:
+        effect: Audio effect processor that compensates for playback distortion on
+            a target device, as SSML's ``effect`` attribute on ``<voice>``:
+            ``"eq_car"`` for enclosed vehicles, ``"eq_telecomhp8k"`` for narrowband
+            telephony (pair it with an 8 kHz pipeline, or the output is not
+            optimized). Azure ignores an unrecognized value.
         emphasis: Emphasis level for speech ("strong", "moderate", "reduced").
         force_locale: Wrap synthesized text in SSML's ``<lang xml:lang>`` so the
             voice speaks in the configured ``language`` rather than the one it
@@ -96,6 +101,7 @@ class AzureTTSSettings(TTSSettings):
         volume: Volume level (e.g., "+20%", "loud", "x-soft").
     """
 
+    effect: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     emphasis: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     force_locale: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     pitch: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -201,6 +207,8 @@ class AzureBaseTTSService:
         escaped_text = self._escape_text(text)
 
         voice_attrs = f"name='{self._settings.voice}'"
+        if self._settings.effect:
+            voice_attrs += f" effect='{self._settings.effect}'"
         if self._settings.voice_parameters:
             voice_attrs += f" parameters='{self._settings.voice_parameters}'"
 

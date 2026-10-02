@@ -8,8 +8,10 @@
 
 import asyncio
 import json
+import sys
 from collections.abc import Awaitable, Callable
-from contextlib import AsyncExitStack
+from contextlib import AsyncExitStack, asynccontextmanager
+from datetime import timedelta
 from typing import Any, TypeAlias
 
 from loguru import logger
@@ -27,13 +29,75 @@ try:
     from mcp.client.session_group import SseServerParameters, StreamableHttpParameters
     from mcp.client.sse import sse_client
     from mcp.client.stdio import stdio_client
-    from mcp.client.streamable_http import streamablehttp_client
+    from mcp.client.streamable_http import streamable_http_client
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error('In order to use an MCP client, you need to `uv add "pipecat-ai[mcp]"`.')
     raise ImportError(f"Missing module: {e}") from e
 
 ServerParameters: TypeAlias = StdioServerParameters | SseServerParameters | StreamableHttpParameters
+
+_MAX_ERROR_DETAIL = 200
+
+
+def _sole_cause(error: BaseException) -> BaseException:
+    """Read the one exception a group of one wraps, at whatever depth.
+
+    A group carries neither the type nor the message of what went wrong, so a
+    group of one reports as the cause it holds.
+    """
+    while isinstance(error, BaseExceptionGroup) and len(error.exceptions) == 1:
+        error = error.exceptions[0]
+    return error
+
+
+def _error_detail(error: BaseException) -> str:
+    """Name the cause of a failed tool call, in the one line the model reads."""
+    cause = _sole_cause(error)
+    detail = str(cause)
+    if not detail:
+        # An anyio stream error carries no message, so name its class instead.
+        return type(cause).__name__
+    if len(detail) > _MAX_ERROR_DETAIL:
+        return detail[:_MAX_ERROR_DETAIL] + "..."
+    return detail
+
+
+@asynccontextmanager
+async def _streamable_http_transport(params: StreamableHttpParameters):
+    """Open a streamable-HTTP transport, owning the HTTP client it runs on.
+
+    The transport takes its HTTP settings as a prepared client and leaves that
+    client's lifetime to its caller.
+
+    Args:
+        params: Connection parameters for the MCP server.
+
+    Yields:
+        The transport's streams, read stream first.
+    """
+    # The client class has to come from the httpx family the SDK itself is built
+    # on, which follows the SDK's major version, so take it from the transport's
+    # own module rather than importing a family directly.
+    transport_module = sys.modules[streamable_http_client.__module__]
+    http = getattr(transport_module, "httpx2", None) or transport_module.httpx
+    async with http.AsyncClient(
+        headers=params.headers,
+        timeout=http.Timeout(
+            _timeout_seconds(params.timeout), read=_timeout_seconds(params.sse_read_timeout)
+        ),
+        # Matches the client the SDK builds when given none.
+        follow_redirects=True,
+    ) as client:
+        async with streamable_http_client(
+            params.url, http_client=client, terminate_on_close=params.terminate_on_close
+        ) as streams:
+            yield streams
+
+
+def _timeout_seconds(value: float | timedelta) -> float:
+    """Read a timeout as seconds, whichever way the SDK models it."""
+    return value.total_seconds() if isinstance(value, timedelta) else value
 
 
 def _connect_failure_cause(*candidates: BaseException | None) -> Exception | None:
@@ -53,10 +117,11 @@ def _connect_failure_cause(*candidates: BaseException | None) -> Exception | Non
         candidate is a cancellation.
     """
     for candidate in candidates:
-        while isinstance(candidate, BaseExceptionGroup) and len(candidate.exceptions) == 1:
-            candidate = candidate.exceptions[0]
-        if isinstance(candidate, Exception):
-            return candidate
+        if candidate is None:
+            continue
+        cause = _sole_cause(candidate)
+        if isinstance(cause, Exception):
+            return cause
     return None
 
 
@@ -220,9 +285,12 @@ class MCPClient(BaseObject):
                     sse_client(**self._server_params.model_dump())
                 )
             else:  # StreamableHttpParameters (validated in __init__)
-                read_stream, write_stream, _ = await exit_stack.enter_async_context(
-                    streamablehttp_client(**self._server_params.model_dump())
+                # Indexed rather than unpacked: the transport yields three
+                # stream elements on the SDK's 1.x line and two on 2.x.
+                streams = await exit_stack.enter_async_context(
+                    _streamable_http_transport(self._server_params)
                 )
+                read_stream, write_stream = streams[0], streams[1]
 
             session = await exit_stack.enter_async_context(ClientSession(read_stream, write_stream))
             await session.initialize()
@@ -439,10 +507,11 @@ class MCPClient(BaseObject):
 
         logger.debug(f"Calling mcp tool '{function_name}'")
         results = None
+        error_msg = None
         try:
             results = await session.call_tool(function_name, arguments=arguments)
         except Exception as e:
-            error_msg = f"Error calling mcp tool {function_name}: {str(e)}"
+            error_msg = f"Error calling mcp tool {function_name}: {_error_detail(e)}"
             logger.error(error_msg)
 
         response = ""
@@ -468,11 +537,11 @@ class MCPClient(BaseObject):
                 logger.error(f"Error applying output filter for {function_name}")
                 response = ""
 
-        if response and len(response) and isinstance(response, str):
+        if isinstance(response, str) and response:
             logger.info(f"Tool '{function_name}' completed successfully")
             logger.debug(f"Final response: {response}")
         else:
-            response = "Sorry, could not call the mcp tool"
+            response = error_msg or "Sorry, could not call the mcp tool"
 
         return response
 
@@ -503,9 +572,13 @@ class MCPClient(BaseObject):
 
             try:
                 # Convert the schema
+                # The SDK spells this field inputSchema on 1.x, input_schema on 2.x.
+                input_schema = (
+                    tool.input_schema if hasattr(tool, "input_schema") else tool.inputSchema
+                )
                 function_schema = self._convert_mcp_schema_to_pipecat(
                     tool_name,
-                    {"description": tool.description, "input_schema": tool.inputSchema},
+                    {"description": tool.description, "input_schema": input_schema},
                     handler=self._tool_wrapper_with_cleanup if attach_handlers else None,
                 )
 

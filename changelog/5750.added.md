@@ -1,0 +1,1 @@
+- Added a `delay` field to `OpenAIRealtimeSTTService.Settings`, OpenAI's latency-versus-accuracy control for how long the model waits before emitting transcription text (`minimal`, `low`, `medium`, `high`, `xhigh`). Supported by `gpt-realtime-whisper`.

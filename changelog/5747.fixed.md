@@ -1,0 +1,1 @@
+- Updated the Fireworks update-settings example to use `nemotron-3-ultra-nvfp4`; Fireworks retired `gpt-oss-20b` from serverless.
