@@ -328,3 +328,31 @@ class TestReadVideoFrameMediaStreamError(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestBundledTransceivers(unittest.IsolatedAsyncioTestCase):
+    """Every media section of a bundled offer shares one transport."""
+
+    async def test_screen_share_transceiver_shares_the_transport(self):
+        from aiortc import RTCBundlePolicy, RTCConfiguration, RTCPeerConnection
+
+        # An offer shaped like the browser client's: audio, camera and screen
+        # share transceivers plus a data channel, all bundled.
+        client = RTCPeerConnection(RTCConfiguration(bundlePolicy=RTCBundlePolicy.MAX_BUNDLE))
+        client.addTransceiver("audio", direction="sendrecv")
+        client.addTransceiver("video", direction="sendrecv")
+        client.addTransceiver("video", direction="sendonly")
+        client.createDataChannel("chat")
+        await client.setLocalDescription(await client.createOffer())
+
+        connection = SmallWebRTCConnection()
+        await connection.initialize(
+            sdp=client.localDescription.sdp, type=client.localDescription.type
+        )
+
+        transports = {t.receiver.transport for t in connection.pc.getTransceivers()}
+        self.assertEqual(len(connection.pc.getTransceivers()), 3)
+        self.assertEqual(len(transports), 1)
+
+        await connection.disconnect()
+        await client.close()
