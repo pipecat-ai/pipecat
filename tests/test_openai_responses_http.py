@@ -635,7 +635,11 @@ class TestHttpReasoningParams:
         """Mainline gpt models from gpt-5 onward default to effort="none"."""
         assert self._params("gpt-5.5")["reasoning"] == {"effort": "none"}
 
+    def test_original_gpt_5_gets_minimal(self):
+        """The original gpt-5 models reject effort="none", so they get "minimal"."""
+        assert self._params("gpt-5-mini")["reasoning"] == {"effort": "minimal"}
+
     def test_models_rejecting_effort_none_left_untouched(self):
         """Models that reject effort="none" are left at the provider default."""
-        for model in ("o3", "gpt-6-astra", "gpt-6.1-sol"):
+        for model in ("o3", "gpt-6-astra", "gpt-6.1-sol", "gpt-5.5-pro"):
             assert "reasoning" not in self._params(model), model
