@@ -36,6 +36,7 @@ jobs:
             --extra aws-nova-sonic \
             --extra azure \
             --extra cli \
+            --extra cloudflare \
             --extra daily \
             --extra deepgram \
             --extra google \
