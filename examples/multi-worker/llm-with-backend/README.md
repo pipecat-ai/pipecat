@@ -43,7 +43,7 @@ A longer session exercises more of what the pair does: delegating a quick lookup
 3. Ask what you should do to dig into the review.
 4. If it finds a problem with the pull request, tell it to go ahead and make the change.
 
-Whenever a step takes a while, ask how it is going, formally or not ("what's the status?", "what are you working on now?"): the frontend answers from the backend's silent progress messages rather than delegating again.
+Whenever a step takes a while, either ask how it is going, formally or not ("what's the status?", "what are you working on now?"), or ask for a joke while you wait. A status question is answered from the backend's silent progress messages, without delegating again; a joke is the frontend's to tell, and the result arrives afterwards on whatever turn is under way.
 
 ## A backend in another process
 
