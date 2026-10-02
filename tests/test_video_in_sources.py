@@ -315,5 +315,66 @@ class TestSmallWebRTCVideoInSampling(unittest.IsolatedAsyncioTestCase):
         self.assertIs(sampler.sample()[1], request)
 
 
+class TestSmallWebRTCVideoInSourcesCapture(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        try:
+            from pipecat.transports.smallwebrtc import transport
+        except Exception as e:
+            self.skipTest(f"SmallWebRTC transport unavailable: {e}")
+        self.module = transport
+
+    def _fake_transport(self, params):
+        # Captures and event handler calls share one parent mock, so their order
+        # is recorded in calls.mock_calls.
+        calls = MagicMock(capture=AsyncMock(), event=AsyncMock())
+        fake = MagicMock()
+        fake._params = params
+        fake._input.capture_participant_media = calls.capture
+        fake._input.push_frame = AsyncMock()
+        fake._call_event_handler = calls.event
+        return fake, calls
+
+    async def test_captures_configured_sources_on_connect(self):
+        params = TransportParams(
+            video_in_enabled=True,
+            video_in_sources={
+                "camera": VideoInSourceParams(framerate=0),
+                "screenVideo": VideoInSourceParams(framerate=1),
+            },
+        )
+        fake, calls = self._fake_transport(params)
+
+        await self.module.SmallWebRTCTransport._on_client_connected(fake, MagicMock())
+
+        self.assertEqual(
+            calls.capture.await_args_list,
+            [call(source="camera", framerate=0), call(source="screenVideo", framerate=1)],
+        )
+        names = [name for name, _args, _kwargs in calls.mock_calls]
+        self.assertEqual(names[:2], ["capture", "capture"])
+        self.assertIn("event", names)
+
+    async def test_unsupported_source_warned_and_not_captured(self):
+        params = TransportParams(
+            video_in_enabled=True,
+            video_in_sources={"camera": VideoInSourceParams(), "microphone": VideoInSourceParams()},
+        )
+        with patch.object(self.module, "logger") as logger:
+            self.module.SmallWebRTCTransport(webrtc_connection=MagicMock(), params=params)
+        logger.warning.assert_called_once()
+        self.assertIn("microphone", logger.warning.call_args.args[0])
+
+        fake, calls = self._fake_transport(params)
+        await self.module.SmallWebRTCTransport._on_client_connected(fake, MagicMock())
+        self.assertEqual(calls.capture.await_args_list, [call(source="camera", framerate=30)])
+
+    async def test_no_sources_captures_nothing(self):
+        fake, calls = self._fake_transport(TransportParams(video_in_enabled=True))
+
+        await self.module.SmallWebRTCTransport._on_client_connected(fake, MagicMock())
+
+        calls.capture.assert_not_awaited()
+
+
 if __name__ == "__main__":
     unittest.main()

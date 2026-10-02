@@ -987,6 +987,14 @@ class SmallWebRTCTransport(BaseTransport):
         super().__init__(input_name=input_name, output_name=output_name)
         self._params = params
 
+        unsupported = set(params.video_in_sources) - {CAM_VIDEO_SOURCE, SCREEN_VIDEO_SOURCE}
+        if unsupported:
+            logger.warning(
+                f"{self}: video_in_sources {sorted(unsupported)} are not supported and will "
+                f"not be captured; SmallWebRTC supports {CAM_VIDEO_SOURCE!r} and "
+                f"{SCREEN_VIDEO_SOURCE!r}."
+            )
+
         self._callbacks = SmallWebRTCCallbacks(
             on_app_message=self._on_app_message,
             on_client_connected=self._on_client_connected,
@@ -1054,6 +1062,15 @@ class SmallWebRTCTransport(BaseTransport):
 
     async def _on_client_connected(self, webrtc_connection):
         """Handle client connection events."""
+        # Capture the configured video sources before the event handlers run, so
+        # a handler that captures a source itself takes precedence.
+        if self._input:
+            for video_source, source_params in self._params.video_in_sources.items():
+                if video_source in (CAM_VIDEO_SOURCE, SCREEN_VIDEO_SOURCE):
+                    await self._input.capture_participant_media(
+                        source=video_source, framerate=source_params.framerate
+                    )
+
         await self._call_event_handler("on_client_connected", webrtc_connection)
         if self._input:
             await self._input.push_frame(ClientConnectedFrame())
