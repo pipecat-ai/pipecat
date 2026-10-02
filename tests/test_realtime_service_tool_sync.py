@@ -194,6 +194,20 @@ class TestGrokRealtimeServiceToolSync(
         )
 
 
+class TestAzureVoiceLiveServiceToolSync(
+    _ServiceToolSyncTests, _SessionUpdateToolPreservationTests, unittest.IsolatedAsyncioTestCase
+):
+    def _service(self, tools):
+        mod = pytest.importorskip("pipecat.services.azure.voicelive.llm")
+        events = pytest.importorskip("pipecat.services.azure.voicelive.events")
+        sp = events.SessionProperties(tools=tools)
+        return mod.AzureVoiceLiveLLMService(
+            endpoint="https://my-resource.services.ai.azure.com",
+            api_key="test-key",
+            settings=mod.AzureVoiceLiveLLMService.Settings(session_properties=sp),
+        )
+
+
 class TestInworldRealtimeServiceToolSync(
     _ServiceToolSyncTests, _SessionUpdateToolPreservationTests, unittest.IsolatedAsyncioTestCase
 ):
