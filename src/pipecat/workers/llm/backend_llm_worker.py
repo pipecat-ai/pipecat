@@ -120,11 +120,12 @@ SPOKEN_MARK = ">>"
 #: Where a message's spoken part starts: the first line that begins with the mark.
 _SPOKEN_MARK_LINE = re.compile(rf"(?m)^[ \t]*{re.escape(SPOKEN_MARK)}")
 
-#: Appended to the backend model's system instruction: who it is, which of what
-#: it writes the user hears, and how it takes requests. The backend's own
-#: system instruction says what it does; this says how what it writes reaches
-#: the user. ``BackendLLMWorker(instructions=...)`` replaces it.
-BACKEND_OUTPUT_INSTRUCTIONS = (
+#: How the backend's model works with the assistant, appended to its system
+#: instruction: who it is, which of what it writes the user hears, and how it
+#: takes requests. The backend's own system instruction says what it does;
+#: this says how what it writes reaches the user.
+#: ``BackendLLMWorker(pairing_instruction=...)`` replaces it.
+BACKEND_PAIRING_INSTRUCTION = (
     "You are the backend of a voice assistant. The assistant talks with the user and sends "
     "you requests: the conversation it is having, or a request it worded for you. Do the "
     "parts that need your tools or careful reasoning; the assistant handles the rest of the "
@@ -312,7 +313,7 @@ class BackendOutputTransform(Protocol):
 
 
 #: What :func:`_render_transcript_request` tells the backend to do with a transcript.
-_DEFAULT_TRANSCRIPT_INSTRUCTION = (
+TRANSCRIPT_REQUEST_INSTRUCTION = (
     "Act on the user's most recent request in the conversation above. If it asks for "
     "something, tell the user the result as soon as you have it, before going on with other "
     f"work, in a message that begins with {SPOKEN_MARK}. If it only stops or changes work "
@@ -321,7 +322,7 @@ _DEFAULT_TRANSCRIPT_INSTRUCTION = (
 
 #: Appended to a request the frontend worded itself, so the backend tells the
 #: user its result on its own rather than with whatever else it is doing.
-_TELL_INSTRUCTION = (
+EXPLICIT_REQUEST_INSTRUCTION = (
     "If this request asks for something, tell the user the result as soon as you have it, "
     f"before going on with other work, in a message that begins with {SPOKEN_MARK}. If it "
     "only stops or changes work already under way, tell them nothing: the assistant already "
@@ -329,7 +330,9 @@ _TELL_INSTRUCTION = (
 )
 
 
-def _render_explicit_request(request: str, *, instruction: str = _TELL_INSTRUCTION) -> str:
+def _render_explicit_request(
+    request: str, *, instruction: str = EXPLICIT_REQUEST_INSTRUCTION
+) -> str:
     """Render a request the frontend worded itself, with what the backend should do with it after.
 
     Args:
@@ -363,7 +366,7 @@ def _split_spoken(text: str) -> tuple[str, str]:
 def _render_transcript_request(
     conversation: Sequence[LLMContextMessage],
     *,
-    instruction: str = _DEFAULT_TRANSCRIPT_INSTRUCTION,
+    instruction: str = TRANSCRIPT_REQUEST_INSTRUCTION,
     first: bool = True,
 ) -> str:
     """Render a conversation as a labelled transcript for the backend to act on.
@@ -454,9 +457,10 @@ class BackendLLMWorker(LLMContextWorker):
     A mark at the start of a later line splits the message into a note and
     a spoken part, since the model sometimes writes it that way.
     The backend's own system instruction says what it does and, in plain
-    words, what the user should be told; the instruction the worker appends
-    (:data:`BACKEND_OUTPUT_INSTRUCTIONS`) is the only place the mark is named.
-    ``transform_output`` can change the flag, or the text, or drop the output.
+    words, what the user should be told; the pairing instruction the worker
+    appends (:data:`BACKEND_PAIRING_INSTRUCTION`, or the ``pairing_instruction``
+    given) is the only place the mark is named. ``transform_output`` can
+    change the flag, or the text, or drop the output.
 
     Example::
 
@@ -476,7 +480,7 @@ class BackendLLMWorker(LLMContextWorker):
         context: LLMContext | None = None,
         name: str | None = None,
         transform_output: BackendOutputTransform | None = None,
-        instructions: str = BACKEND_OUTPUT_INSTRUCTIONS,
+        pairing_instruction: str = BACKEND_PAIRING_INSTRUCTION,
         user_params: LLMUserAggregatorParams | None = None,
         assistant_params: LLMAssistantAggregatorParams | None = None,
     ):
@@ -494,13 +498,13 @@ class BackendLLMWorker(LLMContextWorker):
                 whether the user may hear it, or to return ``None`` and send
                 nothing. Outputs the app sends itself are not passed through
                 it unless the call asks.
-            instructions: What is appended to the LLM's system instruction:
-                :data:`BACKEND_OUTPUT_INSTRUCTIONS` unless given. An app that
-                gives its own takes on telling the model what the assistant
-                sends it, that the user hears what it marks with
-                :data:`SPOKEN_MARK` and nothing else, and how to take
-                requests that arrive while it works; the instruction the
-                worker adds to each request names the mark as well.
+            pairing_instruction: How the model works with the assistant,
+                appended to the LLM's system instruction:
+                :data:`BACKEND_PAIRING_INSTRUCTION` unless given. One of its
+                own has to say what that one says: that the assistant sends
+                it requests, that the user hears what it marks with
+                :data:`SPOKEN_MARK` and nothing else, and how to take requests
+                that arrive while it works.
             user_params: Optional parameters for the user aggregator. Defaults
                 to external turn strategies: the backend has no audio, so the
                 default VAD and turn-analysis strategies (and the model the
@@ -524,7 +528,7 @@ class BackendLLMWorker(LLMContextWorker):
         )
         self._attached: _AttachedFrontend | None = None
         self._transform_output = transform_output
-        self.llm.append_system_instruction(instructions)
+        self.llm.append_system_instruction(pairing_instruction)
 
         # Whether the backend is working is read off its pipeline: requests
         # queued but not yet taken up, LLM runs picked up but not yet ended,
