@@ -52,6 +52,7 @@ from pipecat.workers.llm.backend_llm_worker import (
     _BackendSession,
     _render_explicit_request,
     _render_transcript_request,
+    _split_spoken,
 )
 from pipecat.workers.runner import WorkerRunner
 
@@ -155,6 +156,11 @@ async def book_taxi(params: FunctionCallParams, time: str):
 
 def test_render_transcript_request_is_the_instruction_alone_when_nothing_was_said():
     assert _render_transcript_request([], instruction="Do it") == "Do it"
+
+
+def test_a_mark_on_a_later_line_is_not_spoken_as_text():
+    note, spoken = _split_spoken("Found it.\n\n>> The test is fixed.\n>> All 42 pass.")
+    assert (note, spoken) == ("Found it.", "The test is fixed.\nAll 42 pass.")
 
 
 def test_render_explicit_request_puts_the_instruction_after_the_request():
@@ -470,6 +476,34 @@ async def test_closing_the_session_stops_the_backend_and_the_next_session_starts
     await _drive(runner, requester, backend, body)
 
     assert [e.text for e in second if isinstance(e, BackendOutput)] == ["Second time round."]
+
+
+@pytest.mark.asyncio
+async def test_detaching_lets_go_of_a_request_held_for_a_call_in_flight():
+    """The cancellations a detach brings must not run the model on the request they settle."""
+    lookup_started = asyncio.Event()
+
+    async def slow_lookup(params: FunctionCallParams):
+        """Look something up, slowly."""
+        lookup_started.set()
+        await asyncio.sleep(30)
+        await params.result_callback({"found": True})
+
+    llm = _ScriptedLLM([[("call", "slow_lookup", "call_1", {})], [("text", ">> Never ran.")]])
+    backend, requester, runner = _attached_backend(llm, tools=[slow_lookup])
+
+    async def body():
+        async with _BackendSession(requester, "backend") as session:
+            await session.send("First")
+            await asyncio.wait_for(lookup_started.wait(), 5)
+            # Held for the synchronous call in flight.
+            assert (await session.send("Second")) == "working"
+        # Detached: the call is cancelled, and the held request goes with it.
+        await asyncio.sleep(0.5)
+        assert not backend.working
+        assert len(llm.contexts_seen) == 1
+
+    await _drive(runner, requester, backend, body)
 
 
 @pytest.mark.asyncio
