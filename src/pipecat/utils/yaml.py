@@ -8,10 +8,14 @@
 
 The main helper is :func:`include_loader`, which builds a loader class that
 understands an ``!include <relative-path>`` tag so a document can pull in
-sibling files::
+other files::
 
     judge: !include judge_audio.yaml
     task_messages: !include prompts/greeting.yaml
+
+Include paths are not confined to the base directory; ``..`` and absolute
+paths reach anywhere the process can read. Use these loaders only on trusted
+documents.
 """
 
 from pathlib import Path
@@ -25,7 +29,7 @@ def add_include_constructor(loader_class: type[yaml.SafeLoader], base_dir: Path)
 
     Included files load with the same loader class, so nested includes work and
     scalars get the same resolver treatment as the top-level document. Paths
-    resolve against ``base_dir``.
+    resolve against ``base_dir`` and may reach outside it.
 
     This mutates ``loader_class``. Register on a private subclass rather than
     on ``yaml.SafeLoader`` itself so the constructor has no global side
