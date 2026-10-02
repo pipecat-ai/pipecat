@@ -1656,7 +1656,9 @@ class LLMAssistantAggregator(LLMContextAggregator):
         # A function call result asked to run inference and the push hasn't happened yet:
         # it was held for results still queued, or for a user who is speaking. Whichever
         # result is handled once the way is clear makes the push, whatever its own
-        # `run_llm` says.
+        # `run_llm` says. A run that starts meanwhile, such as the one the user's turn
+        # brings, settles it: that run sees the context as it stands. A user turn with
+        # nothing in it brings no run, so the push stays owed until the next arrival.
         self._context_push_owed: bool = False
 
         self._assistant_turn_start_timestamp = ""
@@ -1763,6 +1765,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
             await self._handle_tts_started(frame)
             await self.push_frame(frame, direction)
         elif isinstance(frame, LLMFullResponseStartFrame):
+            self._context_push_owed = False
             await self._handle_llm_start(frame)
         elif isinstance(frame, LLMFullResponseEndFrame):
             await self._handle_llm_end(frame)
@@ -1812,10 +1815,6 @@ class LLMAssistantAggregator(LLMContextAggregator):
             await self.push_frame(frame, direction)
         elif isinstance(frame, UserStoppedSpeakingFrame):
             self._user_speaking = False
-            # The turn that just ended runs inference on the context as it
-            # stands, results and appends included, so nothing held for the
-            # user to finish is owed any more.
-            self._context_push_owed = False
             await self.push_frame(frame, direction)
         elif isinstance(frame, BotStartedSpeakingFrame):
             self._bot_speaking = True
