@@ -37,7 +37,8 @@ from pipecat.processors.frameworks.rtvi.frames import RTVIServerMessageFrame
 from pipecat.services.llm_service import FunctionCallParams, LLMService
 from pipecat.workers.base_worker import BaseWorker
 from pipecat.workers.llm.backend_llm_worker import (
-    _DEFAULT_TRANSCRIPT_INSTRUCTION,
+    EXPLICIT_REQUEST_INSTRUCTION,
+    TRANSCRIPT_REQUEST_INSTRUCTION,
     BackendError,
     BackendEvent,
     BackendIdle,
@@ -83,33 +84,40 @@ RELAY_NOTE = (
     "first and relay this at the end of the same reply.)"
 )
 
-#: When the frontend delegates and when it does not, ahead of each request
-#: strategy's own guidance. The frontend's own system instruction says what
-#: the backend is for.
-_DELEGATION_POLICY = (
-    "Delegate to the backend when any part of what the user asks needs a backend tool or "
-    "careful reasoning, and whenever the user says anything about work already handed over: "
-    "a change, a narrowing, or calling it off, in any words, even in passing. Whether that "
-    "work goes on is not yours to decide: hand the message over and the backend decides. "
-    "You cannot stop or change that work yourself, and nothing you say reaches the backend: "
-    "only a delegate call does, so saying you will stop without one leaves the work running. A "
-    "request that arrives while the backend is already working is delegated like any "
-    "other. Do not delegate only when the message neither needs backend work nor concerns "
-    "work already handed over: small talk, or a question you can answer from a result you "
-    "already have, or when you need a brief clarification first. Delegate before giving any "
-    "answer that depends on "
-    "backend work, and do not guess the result while waiting. To delegate, call the "
-    "delegate tool at once, in that same reply, and do the rest of the reply yourself "
-    "around it. "
-)
+#: Where the request strategy's own guidance goes in :data:`FRONTEND_PAIRING_INSTRUCTION`.
+STRATEGY_PLACEHOLDER = "{strategy}"
 
-#: What the frontend does with the backend's messages, and that anything the
-#: user says about work already handed over is handed over too.
-_MESSAGES_INSTRUCTION = (
-    "To the user there is one assistant, you: never mention the backend, delegation, a "
-    'handoff or tools. Say what is being done as your own doing, such as "I\'m checking" or '
-    '"I\'ve fixed it", never "the backend is checking".\n\n'
-    "After delegating, acknowledge briefly, without offering updates or asking whether to "
+#: How the frontend's model works with a backend, appended to its system
+#: instruction: when and how to delegate, that to the user there is one
+#: assistant, what to do after delegating, and what to do with the backend's
+#: messages. The request strategy's guidance (how the request is worded) goes
+#: where :data:`STRATEGY_PLACEHOLDER` stands, inside the delegating
+#: paragraph. The frontend's own system instruction says what the backend is
+#: for. ``BackendConnector(frontend_pairing_instruction=...)`` replaces it.
+#:
+#: The order of the paragraphs matters, and the placeholder's place inside the
+#: first one: with the one-assistant paragraph first, or the strategy's
+#: guidance in a paragraph of its own, gpt-4.1 answers a user's "never mind"
+#: with "I won't make any changes" and no delegate call in nearly every run,
+#: where this order delegates the stop every time.
+FRONTEND_PAIRING_INSTRUCTION = (
+    "DELEGATING: Delegate to the backend when any part of what the user asks needs a backend "
+    "tool or careful reasoning, and whenever the user says anything about work already "
+    "handed over: a change, a narrowing, or calling it off, in any words, even in passing. "
+    "Whether that work goes on is not yours to decide: hand the message over and the "
+    "backend decides. You cannot stop or change that work yourself, and nothing you say "
+    "reaches the backend: only a delegate call does, so saying you will stop without one "
+    "leaves the work running. A request that arrives while the backend is already working "
+    "is delegated like any other. Do not delegate only when the message neither needs "
+    "backend work nor concerns work already handed over: small talk, or a question you can "
+    "answer from a result you already have, or when you need a brief clarification first. "
+    "Delegate before giving any answer that depends on backend work, and do not guess the "
+    "result while waiting. To delegate, call the delegate tool at once, in that same reply, "
+    f"and do the rest of the reply yourself around it. {STRATEGY_PLACEHOLDER}\n\n"
+    "ONE ASSISTANT: To the user there is one assistant, you: never mention the backend, "
+    "delegation, a handoff or tools. Say what is being done as your own doing, such as \"I'm "
+    'checking" or "I\'ve fixed it", never "the backend is checking".\n\n'
+    "AFTER DELEGATING: Acknowledge briefly, without offering updates or asking whether to "
     "go ahead, and do whatever else the user asked that you can do yourself. The result says "
     "whether the backend was idle or already working; if it was working, your request joins "
     "that work. The backend sees nothing of the conversation but what you delegate, so every "
@@ -145,6 +153,46 @@ _MESSAGES_INSTRUCTION = (
     "backend has not said is done."
 )
 
+#: The transcript strategy's guidance, in the pairing instruction's delegating paragraph.
+TRANSCRIPT_FRONTEND_INSTRUCTION = (
+    "A delegation hands over the whole conversation, not one item: the backend reads it and "
+    "does everything in it that is its job, so delegate once per reply however many things "
+    "the user asked for, and do not word the request."
+)
+
+#: How the transcript strategy describes the ``delegate`` tool.
+TRANSCRIPT_TOOL_DESCRIPTION = (
+    "Hand the conversation over to the backend, which reads it and does everything in it "
+    "that needs a backend tool or careful reasoning. Call this as soon as any part of what "
+    "the user asks needs that, and do the rest yourself. One handoff per reply, however "
+    "many things the user asked for: two questions, or one question about two places, is "
+    "one handoff. The backend sees nothing but what is handed over, so a request the user "
+    "makes after your last handoff needs a handoff of its own, even while the backend is "
+    "still working, and so does anything the user says about work already handed over: a "
+    "change, a narrowing, or calling it off, in any words. It takes no arguments. Keep "
+    "talking with the user while it works."
+)
+
+#: The explicit strategy's guidance, in the pairing instruction's delegating paragraph.
+EXPLICIT_FRONTEND_INSTRUCTION = (
+    "Word the request so it stands on its own: the user's goal, the exact "
+    "details they gave and their latest correction, with everything new they asked for in "
+    "the one request, so you delegate once per reply however many things that is. Work "
+    "already handed over stays with the backend: a new request joins it, so do not restate "
+    "earlier requests; a correction names what changes, and a stop names what to stop."
+)
+
+#: How the explicit strategy describes the ``delegate`` tool.
+EXPLICIT_TOOL_DESCRIPTION = (
+    "Hand a request to the backend, which does everything in it that needs a backend tool "
+    "or careful reasoning. Call this as soon as any part of what the user asks needs that, "
+    "with the request worded to stand on its own, and do the rest yourself. One call per "
+    "reply, however many things the user asked for: two questions, or one question about "
+    "two places, go in one request. Work already handed over stays with the backend, so "
+    "send only what is new, including anything the user says about that work, such as to "
+    "stop or change it. Keep talking with the user while it works."
+)
+
 
 @dataclass
 class ConnectorContext:
@@ -178,16 +226,12 @@ class BackendRequestStrategy:
     tool_parameters: dict[str, Any] = {}
     #: Which of the properties are required.
     tool_required: list[str] = []
-    #: Guidance appended to the frontend's system instruction, if any.
+    #: The strategy's guidance to the frontend model, if any: how the request
+    #: is worded. It goes where the pairing instruction's
+    #: :data:`STRATEGY_PLACEHOLDER` stands.
     frontend_instruction: str | None = None
-
-    def tool_description(self) -> str:
-        """Describe the ``delegate`` tool to the frontend model.
-
-        Returns:
-            The description.
-        """
-        raise NotImplementedError
+    #: How the ``delegate`` tool is described to the frontend model.
+    tool_description: str = ""
 
     async def compose_request(self, params: FunctionCallParams) -> str | None:
         """Turn a ``delegate`` call into the text put to the backend.
@@ -220,36 +264,27 @@ class TranscriptBackendRequestStrategy(BackendRequestStrategy):
     delegation sends nothing.
     """
 
-    frontend_instruction = _DELEGATION_POLICY + (
-        "A delegation hands over the whole conversation, not one item: the backend reads "
-        "it and does everything in it that is its job, so delegate once per reply however "
-        "many things the user asked for, and do not word the request."
-    )
-
-    def __init__(self, *, instruction: str = _DEFAULT_TRANSCRIPT_INSTRUCTION):
+    def __init__(
+        self,
+        *,
+        frontend_instruction: str | None = TRANSCRIPT_FRONTEND_INSTRUCTION,
+        tool_description: str = TRANSCRIPT_TOOL_DESCRIPTION,
+        request_instruction: str = TRANSCRIPT_REQUEST_INSTRUCTION,
+    ):
         """Initialize the strategy.
 
         Args:
-            instruction: What the backend should do with the transcript, placed
-                after it.
+            frontend_instruction: The strategy's guidance to the frontend
+                model, placed in the pairing instruction: that a delegation
+                hands over the whole conversation, unworded.
+            tool_description: How the ``delegate`` tool is described.
+            request_instruction: What the backend should do with the
+                transcript, placed after it.
         """
-        self._instruction = instruction
+        self.frontend_instruction = frontend_instruction
+        self.tool_description = tool_description
+        self._request_instruction = request_instruction
         self._delegated_through = 0
-
-    def tool_description(self) -> str:
-        """Describe the tool: hand the conversation over."""
-        return (
-            "Hand the conversation over to the backend, which reads it and does everything "
-            "in it that needs a backend tool or careful reasoning. Call this as soon as any "
-            "part of what the user asks needs that, and do the rest yourself. One handoff "
-            "per reply, however many things the user asked for: two questions, or one "
-            "question about two places, is one handoff. The backend sees nothing but what "
-            "is handed over, so a request the user makes after your last handoff needs a "
-            "handoff of its own, even while the backend is still working, and so does "
-            "anything the user says about work already handed over: a change, a narrowing, "
-            "or calling it off, in any words. It takes no arguments. Keep talking with the "
-            "user while it works."
-        )
 
     async def compose_request(self, params: FunctionCallParams) -> str | None:
         """Render the turns since the previous delegation as the request."""
@@ -269,7 +304,9 @@ class TranscriptBackendRequestStrategy(BackendRequestStrategy):
         self._delegated_through = len(messages)
         if not any(m.get("role") in ("user", "assistant") for m in conversation):
             return None
-        return _render_transcript_request(conversation, instruction=self._instruction, first=first)
+        return _render_transcript_request(
+            conversation, instruction=self._request_instruction, first=first
+        )
 
 
 class ExplicitBackendRequestStrategy(BackendRequestStrategy):
@@ -294,32 +331,34 @@ class ExplicitBackendRequestStrategy(BackendRequestStrategy):
         }
     }
     tool_required = ["request"]
-    frontend_instruction = _DELEGATION_POLICY + (
-        "Word the request so it stands on its own: the user's goal, the exact details "
-        "they gave and their latest correction, with everything new they asked for in the "
-        "one request, so you delegate once per reply however many things that is. Work "
-        "already handed over stays with the backend: a new request joins it, so do not "
-        "restate earlier requests; a correction names what changes, and a stop names what "
-        "to stop."
-    )
 
-    def tool_description(self) -> str:
-        """Describe the tool: hand a worded request over."""
-        return (
-            "Hand a request to the backend, which does everything in it that needs a "
-            "backend tool or careful reasoning. Call this as soon as any part of what the "
-            "user asks needs that, with the request worded to stand on its own, and do the "
-            "rest yourself. One call per reply, however many things the user asked for: two "
-            "questions, or one question about two places, go in one request. Work already "
-            "handed over stays with the backend, so send only what is new, including "
-            "anything the user says about that work, such as to stop or change it. Keep "
-            "talking with the user while it works."
-        )
+    def __init__(
+        self,
+        *,
+        frontend_instruction: str | None = EXPLICIT_FRONTEND_INSTRUCTION,
+        tool_description: str = EXPLICIT_TOOL_DESCRIPTION,
+        request_instruction: str = EXPLICIT_REQUEST_INSTRUCTION,
+    ):
+        """Initialize the strategy.
+
+        Args:
+            frontend_instruction: The strategy's guidance to the frontend
+                model, placed in the pairing instruction: how to word the
+                request.
+            tool_description: How the ``delegate`` tool is described.
+            request_instruction: What the backend should do with the request,
+                placed after it.
+        """
+        self.frontend_instruction = frontend_instruction
+        self.tool_description = tool_description
+        self._request_instruction = request_instruction
 
     async def compose_request(self, params: FunctionCallParams) -> str | None:
         """Send the model's request as it stands, with the reporting expectation after it."""
         request = str(params.arguments.get("request") or "").strip()
-        return _render_explicit_request(request) if request else None
+        if not request:
+            return None
+        return _render_explicit_request(request, instruction=self._request_instruction)
 
 
 def _is_backend_message(message: LLMContextMessage) -> bool:
@@ -362,6 +401,7 @@ class BackendConnector:
         self,
         *,
         request_strategy: BackendRequestStrategy | None = None,
+        frontend_pairing_instruction: str = FRONTEND_PAIRING_INSTRUCTION,
         respond_on_delegate: bool = True,
         timeout_secs: float | None = 30,
         client_trace: bool = False,
@@ -371,6 +411,15 @@ class BackendConnector:
         Args:
             request_strategy: How a ``delegate`` call becomes the backend's
                 request. Picked by frontend kind when omitted.
+            frontend_pairing_instruction: How the model works with a backend,
+                appended to its system instruction:
+                :data:`FRONTEND_PAIRING_INSTRUCTION` unless given. One of its
+                own has to say what that one says: when and how to delegate,
+                that to the user there is one assistant, what to do after
+                delegating, and what to do with the backend's messages. The
+                request strategy's guidance goes where
+                :data:`STRATEGY_PLACEHOLDER` stands, or after the text when
+                it has none.
             respond_on_delegate: Whether the frontend runs again as soon as a
                 delegation is sent, which is where its acknowledgement comes
                 from: a text model's tool-call turn carries no prose. Off for
@@ -384,6 +433,7 @@ class BackendConnector:
                 log shows them.
         """
         self._request_strategy = request_strategy
+        self._frontend_pairing_instruction = frontend_pairing_instruction
         self._respond_on_delegate = respond_on_delegate
         self._timeout_secs = timeout_secs
         self._client_trace = client_trace
@@ -411,9 +461,12 @@ class BackendConnector:
 
     @property
     def frontend_instruction(self) -> str | None:
-        """Guidance for the frontend model. Available once bound."""
-        parts = [self.request_strategy.frontend_instruction, _MESSAGES_INSTRUCTION]
-        return "\n\n".join(p for p in parts if p) or None
+        """What is appended to the frontend's system instruction: the pairing instruction with the strategy's guidance in place. Available once bound."""
+        pairing = self._frontend_pairing_instruction
+        guidance = self.request_strategy.frontend_instruction or ""
+        if STRATEGY_PLACEHOLDER in pairing:
+            return pairing.replace(STRATEGY_PLACEHOLDER, guidance).replace(" \n", "\n").strip()
+        return "\n\n".join(p for p in (pairing, guidance) if p) or None
 
     @property
     def session(self) -> _BackendSession | None:
@@ -451,7 +504,7 @@ class BackendConnector:
         return [
             FunctionSchema(
                 name=DELEGATE_TOOL_NAME,
-                description=self.request_strategy.tool_description(),
+                description=self.request_strategy.tool_description,
                 properties=self.request_strategy.tool_parameters,
                 required=self.request_strategy.tool_required,
                 handler=delegate,
@@ -677,10 +730,12 @@ class LLMWithBackend(Pipeline):
     has ``delegate`` and no more, though a tool
     it must keep, in its context or configured on the service, stays.
 
-    The guidance says when to delegate in general terms. The frontend's own
-    system instruction is the place to say what the backend is for, in plain
-    words, as the backend's own instruction does: no tool names, nothing to
-    update when a tool changes.
+    The guidance is the connector's pairing instruction (how to work with a
+    backend: when and how to delegate, and what to do with the backend's
+    messages) with the strategy's (how the request is worded) in place. The
+    frontend's own system instruction is the place to say what the backend is
+    for, in plain words, as the backend's own instruction does: no tool names,
+    nothing to update when a tool changes.
 
     Example::
 
