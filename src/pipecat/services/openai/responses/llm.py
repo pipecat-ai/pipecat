@@ -180,11 +180,11 @@ def _is_o_series(model: str) -> bool:
 def _rejects_effort_none(model: str) -> bool:
     """Whether a reasoning model rejects ``effort="none"`` with an API error.
 
-    The reasoning-first o-series and ``gpt-6-astra`` accept only a positive
-    effort level, so reasoning cannot be switched off for them.
+    The reasoning-first o-series, ``gpt-6-astra`` and ``gpt-6.1-sol`` accept
+    only a positive effort level, so reasoning cannot be switched off for them.
     """
     model = model.lower()
-    return _is_o_series(model) or model.startswith("gpt-6-astra")
+    return _is_o_series(model) or model.startswith(("gpt-6-astra", "gpt-6.1-sol"))
 
 
 def _model_supports_reasoning(model: str) -> bool | None:

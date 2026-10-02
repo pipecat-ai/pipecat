@@ -614,3 +614,28 @@ class TestHttpRetryOnTimeout:
 
         assert await service._create_stream({}) is stream
         assert attempts == 2
+
+
+# ---------------------------------------------------------------------------
+# _build_response_params — default reasoning effort
+# ---------------------------------------------------------------------------
+
+
+class TestHttpReasoningParams:
+    def _params(self, model):
+        # Built without _make_service, which stubs out _build_response_params.
+        with patch.object(OpenAIResponsesHttpLLMService, "_create_client"):
+            service = OpenAIResponsesHttpLLMService(
+                api_key="test-key",
+                settings=OpenAIResponsesHttpLLMService.Settings(model=model),
+            )
+        return service._build_response_params({"input": []})
+
+    def test_mainline_gpt_disabled_by_default(self):
+        """Mainline gpt models from gpt-5 onward default to effort="none"."""
+        assert self._params("gpt-5.5")["reasoning"] == {"effort": "none"}
+
+    def test_models_rejecting_effort_none_left_untouched(self):
+        """Models that reject effort="none" are left at the provider default."""
+        for model in ("o3", "gpt-6-astra", "gpt-6.1-sol"):
+            assert "reasoning" not in self._params(model), model
