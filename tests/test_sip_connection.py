@@ -16,7 +16,7 @@ import pytest
 # isn't installed, matching CI environments that don't pull it.
 pytest.importorskip("baresip")
 
-from baresip import CallBusy, CallState, Config  # noqa: E402
+from baresip import BaresipError, CallBusy, CallState, Config  # noqa: E402
 from baresip.events import Event, StackEvent  # noqa: E402
 
 import pipecat.transports.sip.connection as sip_connection  # noqa: E402
@@ -55,6 +55,7 @@ def make_fake_call(handle=0x1, peer="sip:2002@example.com", headers=None):
 def make_fake_ua():
     ua = Mock()
     ua.register = AsyncMock()
+    ua.unregister = AsyncMock()
     ua.dial = AsyncMock()
     ua.incoming_callbacks = []
     ua.on_incoming = Mock(side_effect=ua.incoming_callbacks.append)
@@ -594,6 +595,43 @@ async def test_renegotiated_fires_only_once_established(env):
     await asyncio.wait_for(arrived.wait(), EVENT_TIMEOUT)
     assert len(payloads) == 1
     assert payloads[0]["sdp"] == "offer"
+
+
+@pytest.mark.asyncio
+async def test_disconnect_unregisters_the_account(env):
+    connection = make_connection()
+    await connection.connect()
+
+    await connection.disconnect()
+
+    env.ua.unregister.assert_awaited_once()
+    env.runtime.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_shared_account_unregisters_after_its_last_connection(env):
+    first = make_connection()
+    second = make_connection()
+    await first.connect()
+    await second.connect()
+
+    await first.disconnect()
+    env.ua.unregister.assert_not_awaited()
+
+    await second.disconnect()
+    env.ua.unregister.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_unregister_failure_does_not_block_disconnect(env):
+    env.ua.unregister = AsyncMock(side_effect=BaresipError("registrar gone"))
+    connection = make_connection()
+    await connection.connect()
+
+    await connection.disconnect()
+
+    env.ua.unregister.assert_awaited_once()
+    env.runtime.close.assert_awaited_once()
 
 
 @pytest.mark.asyncio
