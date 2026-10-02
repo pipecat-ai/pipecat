@@ -21,6 +21,7 @@ from loguru import logger
 from pydantic import BaseModel
 
 from pipecat.audio.dtmf.types import KeypadEntry
+from pipecat.audio.resamplers.base_audio_resampler import BaseAudioResampler
 from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
     AudioRawFrame,
@@ -864,7 +865,9 @@ class LiveKitInputTransport(BaseInputTransport):
 
         self._audio_in_task = None
         self._video_in_task = None
-        self._resampler = create_stream_resampler()
+        # One resampler per participant: a stream resampler keeps state between
+        # calls, so sharing one would mix the audio of participants who talk at once.
+        self._resamplers: dict[str, BaseAudioResampler] = {}
 
     async def setup(self, setup: FrameProcessorSetup):
         """Setup the input transport with shared client setup.
@@ -949,6 +952,10 @@ class LiveKitInputTransport(BaseInputTransport):
             LiveKitInputTransportMessageFrame, message=message, participant_id=sender
         )
 
+    def release_participant(self, participant_id: str):
+        """Drop a participant's resampler once their audio track is gone."""
+        self._resamplers.pop(participant_id, None)
+
     async def _audio_in_task_handler(self):
         """Handle incoming audio frames from participants."""
         logger.info("Audio input task started")
@@ -957,7 +964,7 @@ class LiveKitInputTransport(BaseInputTransport):
             if audio_data:
                 audio_frame_event, participant_id = audio_data
                 pipecat_audio_frame = await self._convert_livekit_audio_to_pipecat(
-                    audio_frame_event
+                    audio_frame_event, participant_id
                 )
 
                 # Skip frames with no audio data
@@ -996,12 +1003,14 @@ class LiveKitInputTransport(BaseInputTransport):
                 await self.push_video_frame(input_video_frame)
 
     async def _convert_livekit_audio_to_pipecat(
-        self, audio_frame_event: rtc.AudioFrameEvent
+        self, audio_frame_event: rtc.AudioFrameEvent, participant_id: str
     ) -> AudioRawFrame:
-        """Convert LiveKit audio frame to Pipecat audio frame."""
+        """Convert a participant's LiveKit audio frame to a Pipecat audio frame."""
         audio_frame = audio_frame_event.frame
 
-        audio_data = await self._resampler.resample(
+        if participant_id not in self._resamplers:
+            self._resamplers[participant_id] = create_stream_resampler()
+        audio_data = await self._resamplers[participant_id].resample(
             audio_frame.data.tobytes(), audio_frame.sample_rate, self.sample_rate
         )
 
@@ -1489,6 +1498,8 @@ class LiveKitTransport(BaseTransport):
 
     async def _on_audio_track_unsubscribed(self, participant_id: str):
         """Handle audio track unsubscribed events."""
+        if self._input:
+            self._input.release_participant(participant_id)
         await self._call_event_handler("on_audio_track_unsubscribed", participant_id)
 
     async def _on_video_track_subscribed(self, participant_id: str):
