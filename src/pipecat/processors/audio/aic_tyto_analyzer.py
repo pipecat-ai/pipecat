@@ -138,34 +138,32 @@ class AICTytoAnalyzer(FrameProcessor):
         self._analysis_interval = analysis_interval
 
         self._model: Model | None = None
+        self._loaded_model_id: str | None = None
         self._collector: Collector | None = None
         self._analyzer: Analyzer | None = None
         self._sample_rate = 0
         self._num_channels = 0
         self._block_size = 0
         self._analysis_task: asyncio.Task | None = None
-        # Latch: log analysis errors at ERROR once, then DEBUG until a success
-        # re-arms it (so a recovery followed by a new failure surfaces again).
+        # (sample_rate, num_channels) whose collector initialization failed, so
+        # the same failing setup is not retried on every audio frame.
+        self._failed_config: tuple[int, int] | None = None
+        # Latches: log each failure class at ERROR once, then DEBUG until a
+        # success re-arms it (so a recovery followed by a new failure surfaces).
+        self._buffer_error_logged = False
         self._analysis_error_logged = False
 
         # Blocking analysis runs here, off the event loop. analyze_buffered() is
         # not real-time safe, so it must never run on the audio/event-loop path.
-        self._executor = ThreadPoolExecutor(max_workers=1)
+        # Created on start and released on cleanup, so the processor can be
+        # reused across pipeline runs.
+        self._executor: ThreadPoolExecutor | None = None
 
         self._register_event_handler("on_audio_analysis")
 
-        # Eager model load shifts the CDN download out of the hot path. If it
-        # raises, shut down the executor so the half-constructed instance does
-        # not leak its worker thread, then propagate.
-        try:
-            set_sdk_id(_AIC_SDK_PIPECAT_ID)
-            self._ensure_model_loaded()
-        except Exception:
-            try:
-                self._executor.shutdown(wait=False)
-            except Exception as e:  # noqa: BLE001 - executor cleanup is best-effort
-                logger.debug(f"AICTytoAnalyzer executor shutdown failed: {e}")
-            raise
+        # Eager model load shifts the CDN download out of the hot path.
+        set_sdk_id(_AIC_SDK_PIPECAT_ID)
+        self._ensure_model_loaded()
 
     def _ensure_model_loaded(self) -> None:
         if self._model is not None:
@@ -173,13 +171,14 @@ class AICTytoAnalyzer(FrameProcessor):
         if self._model_path is not None:
             logger.debug(f"Loading Tyto model from file: {self._model_path}")
             self._model = Model.from_file(str(self._model_path))
-            return
-        # model_id path (validated in __init__).
-        assert self._model_id is not None
-        self._model_download_dir.mkdir(parents=True, exist_ok=True)
-        logger.debug(f"Downloading Tyto model {self._model_id!r} to {self._model_download_dir}")
-        model_path = Model.download(self._model_id, str(self._model_download_dir))
-        self._model = Model.from_file(model_path)
+        else:
+            # model_id path (validated in __init__).
+            assert self._model_id is not None
+            self._model_download_dir.mkdir(parents=True, exist_ok=True)
+            logger.debug(f"Downloading Tyto model {self._model_id!r} to {self._model_download_dir}")
+            model_path = Model.download(self._model_id, str(self._model_download_dir))
+            self._model = Model.from_file(model_path)
+        self._loaded_model_id = self._model.get_id()
 
     def _initialize_collector(self, sample_rate: int, num_channels: int) -> None:
         self._ensure_model_loaded()
@@ -199,6 +198,8 @@ class AICTytoAnalyzer(FrameProcessor):
         self._analyzer = analyzer
         self._sample_rate = sample_rate
         self._num_channels = num_channels
+        self._failed_config = None
+        self._buffer_error_logged = False
         self._analysis_error_logged = False
         logger.debug(f"AICTytoAnalyzer initialized at {sample_rate} Hz, {num_channels} channel(s)")
 
@@ -221,18 +222,29 @@ class AICTytoAnalyzer(FrameProcessor):
             self._buffer_audio(frame)
 
     def _start(self) -> None:
+        if self._executor is None:
+            self._executor = ThreadPoolExecutor(max_workers=1)
         if self._analysis_task is None:
             self._analysis_task = self.create_task(self._analysis_loop(), f"{self}::analysis_loop")
 
     def _buffer_audio(self, frame: InputAudioRawFrame) -> None:
         channels = frame.num_channels or 1
+        config = (frame.sample_rate, channels)
         # Lazily (re)initialize once the concrete rate/channel layout is known.
-        if (
-            self._collector is None
-            or frame.sample_rate != self._sample_rate
-            or channels != self._num_channels
-        ):
-            self._initialize_collector(frame.sample_rate, channels)
+        if self._collector is None or config != (self._sample_rate, self._num_channels):
+            if config == self._failed_config:
+                return
+            try:
+                self._initialize_collector(*config)
+            except Exception as e:  # noqa: BLE001 - keep the pipeline alive on SDK errors
+                logger.error(
+                    f"Tyto initialization failed at {frame.sample_rate} Hz, "
+                    f"{channels} channel(s): {e}"
+                )
+                self._failed_config = config
+                self._collector = None
+                self._analyzer = None
+                return
         assert self._collector is not None
 
         samples = np.frombuffer(frame.audio, dtype=_INT16_DTYPE).astype(np.float32)
@@ -243,9 +255,9 @@ class AICTytoAnalyzer(FrameProcessor):
             for offset in range(0, len(audio), self._block_size):
                 self._collector.buffer(audio[offset : offset + self._block_size])
         except Exception as e:  # noqa: BLE001 - keep the pipeline alive on SDK errors
-            if not self._analysis_error_logged:
+            if not self._buffer_error_logged:
                 logger.error(f"Tyto buffering error: {e}")
-                self._analysis_error_logged = True
+                self._buffer_error_logged = True
             else:
                 logger.debug(f"Tyto buffering error: {e}")
 
@@ -261,13 +273,12 @@ class AICTytoAnalyzer(FrameProcessor):
         errors are latched and swallowed so the pipeline stays alive.
         """
         analyzer = self._analyzer
-        if analyzer is None:
+        executor = self._executor
+        if analyzer is None or executor is None:
             return
         loop = asyncio.get_running_loop()
         try:
-            result: AnalysisResult = await loop.run_in_executor(
-                self._executor, analyzer.analyze_buffered
-            )
+            result: AnalysisResult = await loop.run_in_executor(executor, analyzer.analyze_buffered)
             # Successful analysis re-arms the error latch.
             self._analysis_error_logged = False
         except Exception as e:  # noqa: BLE001 - keep the pipeline alive on SDK errors
@@ -285,7 +296,7 @@ class AICTytoAnalyzer(FrameProcessor):
     def _build_metrics(self, result: AnalysisResult) -> AICAudioQualityMetricsData:
         return AICAudioQualityMetricsData(
             processor=self.name,
-            model=self._model_id,
+            model=self._loaded_model_id,
             risk_score=result.risk_score,
             speaker_reverb=result.speaker_reverb,
             speaker_loudness=result.speaker_loudness,
@@ -296,15 +307,21 @@ class AICTytoAnalyzer(FrameProcessor):
         )
 
     async def cleanup(self) -> None:
-        """Cancel the analysis task and release the SDK handles."""
+        """Cancel the analysis task and release the per-run SDK handles.
+
+        The loaded model is kept so the processor can be started again without
+        reloading it.
+        """
         await super().cleanup()
         if self._analysis_task is not None:
             await self.cancel_task(self._analysis_task)
             self._analysis_task = None
-        try:
-            self._executor.shutdown(wait=False)
-        except Exception as e:  # noqa: BLE001 - cleanup is best-effort
-            logger.debug(f"AICTytoAnalyzer executor shutdown failed: {e}")
+        if self._executor is not None:
+            try:
+                self._executor.shutdown(wait=False)
+            except Exception as e:  # noqa: BLE001 - cleanup is best-effort
+                logger.debug(f"AICTytoAnalyzer executor shutdown failed: {e}")
+            self._executor = None
         self._collector = None
         self._analyzer = None
-        self._model = None
+        self._failed_config = None

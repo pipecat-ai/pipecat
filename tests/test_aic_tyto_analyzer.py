@@ -5,6 +5,7 @@
 #
 
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -79,6 +80,12 @@ class TestAICTytoAnalyzer(unittest.IsolatedAsyncioTestCase):
         analyzer_kwargs.update(kwargs)
         return self.AICTytoAnalyzer(**analyzer_kwargs)
 
+    def _with_executor(self, analyzer):
+        """Give the analyzer the executor that _start() would create."""
+        analyzer._executor = ThreadPoolExecutor(max_workers=1)
+        self.addCleanup(analyzer._executor.shutdown, wait=False)
+        return analyzer
+
     @staticmethod
     def _audio_frame(*, num_samples: int, sample_rate: int = 16000, num_channels: int = 1):
         from pipecat.frames.frames import InputAudioRawFrame
@@ -121,16 +128,13 @@ class TestAICTytoAnalyzer(unittest.IsolatedAsyncioTestCase):
         self.mocks["Model"].download.assert_not_called()
         self.mocks["Model"].from_file.assert_called_once_with("/tmp/custom.aicmodel")
 
-    def test_init_shuts_down_executor_on_eager_load_failure(self):
-        """A failed eager load tears down the executor so no worker thread leaks."""
-        mock_executor = MagicMock()
-        with (
-            patch(f"{TYTO_MODULE}.ThreadPoolExecutor", return_value=mock_executor),
-            patch.object(self.mocks["Model"], "download", side_effect=RuntimeError("network")),
-        ):
-            with self.assertRaises(RuntimeError):
-                self._make()
-        mock_executor.shutdown.assert_called_once_with(wait=False)
+    def test_eager_load_failure_propagates_without_executor(self):
+        """A failed eager load raises, and no worker thread exists to leak."""
+        with patch(f"{TYTO_MODULE}.ThreadPoolExecutor") as executor_cls:
+            with patch.object(self.mocks["Model"], "download", side_effect=RuntimeError("network")):
+                with self.assertRaises(RuntimeError):
+                    self._make()
+        executor_cls.assert_not_called()
 
     # --- Audio buffering -----------------------------------------------------
 
@@ -196,7 +200,32 @@ class TestAICTytoAnalyzer(unittest.IsolatedAsyncioTestCase):
         analyzer = self._make()
         self.mock_collector.raise_on_buffer = True
         analyzer._buffer_audio(self._audio_frame(num_samples=160))  # must not raise
-        self.assertTrue(analyzer._analysis_error_logged)
+        self.assertTrue(analyzer._buffer_error_logged)
+        # Buffering failures do not mute a later, unrelated analysis failure.
+        self.assertFalse(analyzer._analysis_error_logged)
+
+    def test_buffer_init_failure_is_not_retried_for_same_config(self):
+        """A failed collector init is logged once, not retried on every frame."""
+        analyzer = self._make()
+        self.mocks["analyzer_pair"].side_effect = RuntimeError("invalid license")
+        analyzer._buffer_audio(self._audio_frame(num_samples=160))  # must not raise
+        analyzer._buffer_audio(self._audio_frame(num_samples=160))
+        self.assertEqual(self.mocks["analyzer_pair"].call_count, 1)
+        self.assertIsNone(analyzer._collector)
+        self.assertIsNone(analyzer._analyzer)
+
+    def test_buffer_init_retries_after_config_change(self):
+        """A new rate/channel layout gets a fresh initialization attempt."""
+        analyzer = self._make()
+        self.mocks["analyzer_pair"].side_effect = [
+            RuntimeError("unsupported rate"),
+            (self.mock_collector, self.mock_analyzer),
+        ]
+        analyzer._buffer_audio(self._audio_frame(num_samples=80, sample_rate=8000))
+        analyzer._buffer_audio(self._audio_frame(num_samples=160, sample_rate=16000))
+        self.assertEqual(self.mocks["analyzer_pair"].call_count, 2)
+        self.assertIs(analyzer._collector, self.mock_collector)
+        self.assertEqual(len(self.mock_collector.buffer_calls), 1)
 
     # --- Analysis ------------------------------------------------------------
 
@@ -224,11 +253,18 @@ class TestAICTytoAnalyzer(unittest.IsolatedAsyncioTestCase):
         self.assertAlmostEqual(data.noise, 0.4)
         self.assertAlmostEqual(data.packet_loss, 0.05)
 
+    def test_build_metrics_reports_model_loaded_from_path(self):
+        """With model_path, metrics name the loaded model, not the default model_id."""
+        self.mocks["Model"].from_file.return_value = MockModel(model_id="tyto-custom")
+        analyzer = self._make(model_path=Path("/tmp/custom.aicmodel"))
+        data = analyzer._build_metrics(MockAnalysisResult())
+        self.assertEqual(data.model, "tyto-custom")
+
     async def test_analyze_once_emits_metrics_frame(self):
         """A successful analysis pushes a MetricsFrame with the scores."""
         from pipecat.frames.frames import MetricsFrame
 
-        analyzer = self._make()
+        analyzer = self._with_executor(self._make())
         analyzer._analyzer = MockAnalyzer(result=MockAnalysisResult(risk_score=0.8))
         analyzer.push_frame = AsyncMock()
         await analyzer._analyze_once()
@@ -240,7 +276,7 @@ class TestAICTytoAnalyzer(unittest.IsolatedAsyncioTestCase):
 
     async def test_analyze_once_fires_event(self):
         """on_audio_analysis handlers receive the metrics data."""
-        analyzer = self._make()
+        analyzer = self._with_executor(self._make())
         analyzer._analyzer = MockAnalyzer(result=MockAnalysisResult(noise=0.6))
         analyzer.push_frame = AsyncMock()
         captured = []
@@ -267,12 +303,21 @@ class TestAICTytoAnalyzer(unittest.IsolatedAsyncioTestCase):
 
     async def test_analyze_once_swallows_sdk_errors(self):
         """An analysis error is latched and swallowed; nothing is pushed."""
-        analyzer = self._make()
+        analyzer = self._with_executor(self._make())
         analyzer._analyzer = MockAnalyzer(raise_on_analyze=True)
         analyzer.push_frame = AsyncMock()
         await analyzer._analyze_once()
         analyzer.push_frame.assert_not_called()
         self.assertTrue(analyzer._analysis_error_logged)
+
+    async def test_analyze_once_without_executor_is_noop(self):
+        """No analysis runs before _start() creates the executor."""
+        analyzer = self._make()
+        analyzer._analyzer = self.mock_analyzer
+        analyzer.push_frame = AsyncMock()
+        await analyzer._analyze_once()
+        self.assertEqual(self.mock_analyzer.analyze_calls, 0)
+        analyzer.push_frame.assert_not_called()
 
     # --- Lifecycle -----------------------------------------------------------
 
@@ -290,14 +335,44 @@ class TestAICTytoAnalyzer(unittest.IsolatedAsyncioTestCase):
         analyzer.create_task.assert_called_once()
 
     async def test_cleanup_releases_handles(self):
-        """cleanup() shuts the executor and nils SDK handles."""
-        analyzer = self._make()
+        """cleanup() shuts the executor and nils per-run SDK handles, keeping the model."""
+        analyzer = self._with_executor(self._make())
+        executor = analyzer._executor
         analyzer._collector = self.mock_collector
         analyzer._analyzer = self.mock_analyzer
         await analyzer.cleanup()
+        self.assertIsNone(analyzer._executor)
+        self.assertTrue(executor._shutdown)
         self.assertIsNone(analyzer._collector)
         self.assertIsNone(analyzer._analyzer)
-        self.assertIsNone(analyzer._model)
+        self.assertIs(analyzer._model, self.mock_model)
+
+    async def test_restart_after_cleanup(self):
+        """A cleaned-up analyzer can be started and analyze again without reloading."""
+        from pipecat.frames.frames import MetricsFrame
+
+        analyzer = self._make(analysis_interval=100.0)
+
+        def _fake_create_task(coro, *args, **kwargs):
+            coro.close()
+            return MagicMock()
+
+        analyzer.create_task = MagicMock(side_effect=_fake_create_task)
+        analyzer.cancel_task = AsyncMock()
+        analyzer.push_frame = AsyncMock()
+
+        analyzer._start()
+        first_executor = analyzer._executor
+        await analyzer.cleanup()
+        analyzer._start()
+        self.addCleanup(analyzer._executor.shutdown, wait=False)
+
+        self.assertIsNot(analyzer._executor, first_executor)
+        self.assertEqual(analyzer.create_task.call_count, 2)
+        analyzer._buffer_audio(self._audio_frame(num_samples=160))
+        await analyzer._analyze_once()
+        self.assertIsInstance(analyzer.push_frame.await_args.args[0], MetricsFrame)
+        self.mocks["Model"].from_file.assert_called_once()
 
     async def test_cleanup_cancels_analysis_task(self):
         """cleanup() cancels a running analysis task."""
@@ -323,6 +398,7 @@ class TestAICTytoAnalyzer(unittest.IsolatedAsyncioTestCase):
             analyzer,
             frames_to_send=[audio, TextFrame("hello")],
             expected_down_frames=[InputAudioRawFrame, TextFrame],
+            start_timeout=5.0,
         )
         # The input audio frame was tapped into the collector.
         self.assertGreaterEqual(len(self.mock_collector.buffer_calls), 1)

@@ -45,23 +45,6 @@ from pipecat.workers.runner import WorkerRunner
 load_dotenv(override=True)
 
 
-aic_tyto_analyzer = AICTytoAnalyzer(
-    license_key=os.environ["AIC_SDK_LICENSE"],
-    analysis_interval=1.0,
-)
-
-
-@aic_tyto_analyzer.event_handler("on_audio_analysis")
-async def on_audio_analysis(_processor, scores: AICAudioQualityMetricsData) -> None:
-    logger.info(
-        "audio quality: "
-        f"risk={scores.risk_score:.2f} noise={scores.noise:.2f} "
-        f"interfering_speech={scores.interfering_speech:.2f} "
-        f"codec_degradation={scores.codec_degradation:.2f} reverb={scores.speaker_reverb:.2f} "
-        f"loudness={scores.speaker_loudness:.2f} packet_loss={scores.packet_loss:.2f}"
-    )
-
-
 transport_params = {
     "daily": lambda: DailyParams(audio_in_enabled=True),
     "twilio": lambda: FastAPIWebsocketParams(audio_in_enabled=True),
@@ -71,6 +54,23 @@ transport_params = {
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> None:
     logger.info("Audio-quality test bot starting")
+
+    aic_tyto_analyzer = AICTytoAnalyzer(
+        license_key=os.environ["AIC_SDK_LICENSE"],
+        analysis_interval=1.0,
+    )
+
+    @aic_tyto_analyzer.event_handler("on_audio_analysis")
+    async def on_audio_analysis(_processor, scores: AICAudioQualityMetricsData) -> None:
+        logger.info(
+            "audio quality: "
+            f"risk={scores.risk_score:.2f} noise={scores.noise:.2f} "
+            f"interfering_speech={scores.interfering_speech:.2f} "
+            f"codec_degradation={scores.codec_degradation:.2f} "
+            f"reverb={scores.speaker_reverb:.2f} loudness={scores.speaker_loudness:.2f} "
+            f"packet_loss={scores.packet_loss:.2f}"
+        )
+
     pipeline = Pipeline([transport.input(), aic_tyto_analyzer])
     worker = PipelineWorker(pipeline, params=PipelineParams(enable_metrics=True))
     runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
