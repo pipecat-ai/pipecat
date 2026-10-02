@@ -2956,6 +2956,14 @@ class DailyTransport(BaseTransport):
                 id, "microphone", self._client.in_sample_rate
             )
 
+        # Capture the configured video sources before the event handlers run, so
+        # a handler that captures a source itself takes precedence.
+        if self._input:
+            for video_source, source_params in self._params.video_in_sources.items():
+                await self._input.capture_participant_video(
+                    id, source_params.framerate, video_source
+                )
+
         if not self._other_participant_has_joined:
             self._other_participant_has_joined = True
             await self._call_event_handler("on_first_participant_joined", participant)

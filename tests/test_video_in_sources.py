@@ -6,7 +6,7 @@
 
 import unittest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 from pydantic import ValidationError
 
@@ -172,6 +172,65 @@ class TestDailyVideoInSampling(unittest.IsolatedAsyncioTestCase):
         request = UserImageRequestFrame(user_id="p1", video_source="screenVideo")
         await self.transport_cls.request_participant_image(fake, request)
         self.assertEqual(fake._video_samplers["p1"].keys(), {"camera"})
+
+
+class TestDailyVideoInSourcesCapture(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        try:
+            from pipecat.transports.daily.transport import DailyParams, DailyTransport
+        except Exception as e:
+            self.skipTest(f"Daily transport unavailable: {e}")
+        self.transport_cls = DailyTransport
+        self.params_cls = DailyParams
+
+    def _fake_transport(self, params):
+        # Captures and event handler calls share one parent mock, so their order
+        # is recorded in calls.mock_calls.
+        calls = MagicMock(capture=AsyncMock(), event=AsyncMock())
+        fake = MagicMock()
+        fake._params = params
+        fake._other_participant_has_joined = True
+        fake._input.capture_participant_video = calls.capture
+        fake._input.capture_participant_audio = AsyncMock()
+        fake._input.push_frame = AsyncMock()
+        fake._call_event_handler = calls.event
+        return fake, calls
+
+    async def test_captures_configured_sources_on_join(self):
+        params = self.params_cls(
+            video_in_enabled=True,
+            video_in_sources={
+                "camera": VideoInSourceParams(framerate=0),
+                "screenVideo": VideoInSourceParams(framerate=1),
+            },
+        )
+        fake, calls = self._fake_transport(params)
+
+        await self.transport_cls._on_participant_joined(fake, {"id": "p1"})
+
+        self.assertEqual(
+            calls.capture.await_args_list,
+            [call("p1", 0, "camera"), call("p1", 1, "screenVideo")],
+        )
+
+    async def test_captures_before_event_handlers(self):
+        params = self.params_cls(
+            video_in_enabled=True, video_in_sources={"camera": VideoInSourceParams()}
+        )
+        fake, calls = self._fake_transport(params)
+
+        await self.transport_cls._on_participant_joined(fake, {"id": "p1"})
+
+        names = [name for name, _args, _kwargs in calls.mock_calls]
+        self.assertEqual(names[0], "capture")
+        self.assertIn("event", names)
+
+    async def test_no_sources_captures_nothing(self):
+        fake, calls = self._fake_transport(self.params_cls(video_in_enabled=True))
+
+        await self.transport_cls._on_participant_joined(fake, {"id": "p1"})
+
+        calls.capture.assert_not_awaited()
 
 
 class TestSmallWebRTCVideoInSampling(unittest.IsolatedAsyncioTestCase):
