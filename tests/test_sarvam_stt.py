@@ -1445,24 +1445,32 @@ async def test_legacy_reconnects_after_the_connection_drops(monkeypatch):
     async with serve(endpoint, "127.0.0.1", 0) as server:
         service = _legacy_service_for(server.sockets[0].getsockname()[1])
         monkeypatch.setattr(service, "push_error", _capture_errors(errors))
+        events = []
+        for name in ("on_connected", "on_disconnected", "on_connection_error"):
+            service.add_event_handler(name, lambda _service, *_args, name=name: events.append(name))
         await service.setup(frame_processor_setup(TaskManager()))
         try:
-            await _wait_for(lambda: len(handshakes) == 2 and service._socket_client is not None)
+            await _wait_for(lambda: len(handshakes) == 2 and events.count("on_connected") == 2)
         finally:
             await service._disconnect()
             await service.cleanup()
 
     assert errors == []
     assert service.is_usable
+    assert events[:3] == ["on_connected", "on_disconnected", "on_connected"]
 
 
 @pytest.mark.asyncio
 async def test_legacy_rejected_key_gives_up_without_reporting_the_key(monkeypatch):
     process_request, handshakes = _refuse(HTTPStatus.UNAUTHORIZED, None)
     errors = []
+    connection_errors = []
     async with serve(AsyncMock(), "127.0.0.1", 0, process_request=process_request) as server:
         service = _legacy_service_for(server.sockets[0].getsockname()[1])
         monkeypatch.setattr(service, "push_error", _capture_errors(errors))
+        service.add_event_handler(
+            "on_connection_error", lambda _service, error: connection_errors.append(error)
+        )
         await service.setup(frame_processor_setup(TaskManager()))
         try:
             await _wait_for(lambda: service._connection_task.done())
@@ -1472,6 +1480,7 @@ async def test_legacy_rejected_key_gives_up_without_reporting_the_key(monkeypatc
 
     assert len(handshakes) == 1
     assert len(errors) == 1
+    assert connection_errors == [errors[0][0]]
     message, permanent = errors[0]
     assert permanent
     assert "401" in message

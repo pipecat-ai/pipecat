@@ -691,6 +691,7 @@ class SarvamSTTService(STTService):
                         self._socket_client = socket_client
                         self._connection_settled.set()
                         logger.info("Connected to Sarvam successfully")
+                        await self._call_event_handler("on_connected")
 
                         await socket_client.start_listening()
 
@@ -700,14 +701,18 @@ class SarvamSTTService(STTService):
                     # ApiError's str() includes the request headers, which carry
                     # the API key, so only the status and body are reported.
                     msg = f"Sarvam rejected the connection (status {e.status_code}): {e.body}"
+                    await self._call_event_handler("on_connection_error", msg)
                     if e.status_code is not None and 400 <= e.status_code < 500:
                         await self.push_error(error_msg=msg, force_treat_as_permanent=True)
                         return
                     await self.push_error(error_msg=msg)
                 except Exception as e:
+                    await self._call_event_handler("on_connection_error", str(e))
                     await self.push_error(error_msg=f"Sarvam connection error: {e}", exception=e)
                 finally:
                     self._socket_client = None
+                    if connected_at is not None:
+                        await self._call_event_handler("on_disconnected")
 
                 # How long the connection lasted, which is nothing at all when
                 # the handshake never completed.
