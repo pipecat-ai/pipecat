@@ -43,7 +43,7 @@ from pipecat.services.settings import LLMSettings
 from pipecat.workers.base_worker import BaseWorker
 from pipecat.workers.llm import BackendLLMWorker
 from pipecat.workers.llm.backend_llm_worker import (
-    BACKEND_OUTPUT_INSTRUCTIONS,
+    BACKEND_PAIRING_INSTRUCTION,
     SPOKEN_MARK,
     BackendError,
     BackendIdle,
@@ -745,17 +745,17 @@ def test_the_model_is_told_how_what_it_writes_reaches_the_user():
     BackendLLMWorker(llm=llm)
 
     told = llm._settings.system_instruction or ""
-    assert BACKEND_OUTPUT_INSTRUCTIONS in told
-    assert SPOKEN_MARK in BACKEND_OUTPUT_INSTRUCTIONS
+    assert BACKEND_PAIRING_INSTRUCTION in told
+    assert SPOKEN_MARK in BACKEND_PAIRING_INSTRUCTION
 
 
-def test_an_app_can_replace_the_instruction_the_worker_appends():
+def test_an_app_can_replace_the_backends_pairing_instruction():
     llm = _ScriptedLLM([])
-    BackendLLMWorker(llm=llm, instructions="Begin what the user should hear with >>.")
+    BackendLLMWorker(llm=llm, pairing_instruction="Begin what the user should hear with >>.")
 
     told = llm._settings.system_instruction or ""
     assert "Begin what the user should hear with >>." in told
-    assert BACKEND_OUTPUT_INSTRUCTIONS not in told
+    assert BACKEND_PAIRING_INSTRUCTION not in told
 
 
 @pytest.mark.asyncio
