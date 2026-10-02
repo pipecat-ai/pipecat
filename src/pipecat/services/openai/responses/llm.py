@@ -105,12 +105,13 @@ class _ResponseTimeoutError(_RetryableError):
 class OpenAIResponsesReasoningConfig(BaseModel):
     """Reasoning configuration for reasoning-capable OpenAI Responses models.
 
-    Only reasoning-capable models use this — the gpt-5.x series and the o-series.
-    The service's default model, ``gpt-4.1``, does not reason, so this config has
-    no effect there; select a reasoning-capable model to use it. See OpenAI's
-    reasoning guide (https://platform.openai.com/docs/guides/reasoning) and model
-    list (https://platform.openai.com/docs/models) to choose one and to check
-    which effort levels it accepts.
+    Only reasoning-capable models use this — the mainline gpt series from gpt-5
+    onward and the o-series. The service's default model, ``gpt-4.1``, does not
+    reason, so this config has no effect there; select a reasoning-capable model
+    to use it. See OpenAI's reasoning guide
+    (https://platform.openai.com/docs/guides/reasoning) and model list
+    (https://platform.openai.com/docs/models) to choose one and to check which
+    effort levels it accepts.
 
     Reasoning models use internal reasoning tokens before producing a response.
     This controls how much reasoning they do and whether a human-readable summary
@@ -180,11 +181,11 @@ def _is_o_series(model: str) -> bool:
 def _rejects_effort_none(model: str) -> bool:
     """Whether a reasoning model rejects ``effort="none"`` with an API error.
 
-    The reasoning-first o-series and ``gpt-6-astra`` accept only a positive
-    effort level, so reasoning cannot be switched off for them.
+    The reasoning-first o-series, ``gpt-6-astra`` and ``gpt-6.1-sol`` accept
+    only a positive effort level, so reasoning cannot be switched off for them.
     """
     model = model.lower()
-    return _is_o_series(model) or model.startswith("gpt-6-astra")
+    return _is_o_series(model) or model.startswith(("gpt-6-astra", "gpt-6.1-sol"))
 
 
 def _model_supports_reasoning(model: str) -> bool | None:
@@ -406,8 +407,8 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
             params["include"] = ["reasoning.encrypted_content"]
             self._warn_if_reasoning_unsupported()
         else:
-            # No reasoning configured: disable it by default on the gpt-5.x series
-            # for real-time latency (see the helper).
+            # No reasoning configured: disable it by default on the mainline gpt
+            # series from gpt-5 onward, for real-time latency (see the helper).
             self._maybe_disable_reasoning(params)
 
         # Extra settings
@@ -551,7 +552,8 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
         logger.error(
             f"{self}: `reasoning` is configured but model '{model}' does not support "
             "reasoning, so requests will fail. Reasoning is supported only by "
-            "reasoning-capable models — the gpt-5.x series and the o-series; see "
+            "reasoning-capable models — the mainline gpt series from gpt-5 onward "
+            "and the o-series; see "
             "OpenAI's reasoning guide (https://platform.openai.com/docs/guides/reasoning). "
             "Remove the `reasoning` setting or select a reasoning-capable model."
         )

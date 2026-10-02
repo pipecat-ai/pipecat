@@ -817,6 +817,24 @@ class TestReasoningParams:
         params = self._params(service)
         assert "reasoning" not in params
 
+    def test_gpt_6_1_sol_left_untouched(self):
+        """gpt-6.1-sol reasons but rejects effort="none", so leave it at the default."""
+        service = _make_service(settings=OpenAIResponsesLLMService.Settings(model="gpt-6.1-sol"))
+        params = self._params(service)
+        assert "reasoning" not in params
+
+    def test_gpt_6_1_sol_explicit_effort_honored(self):
+        """An explicit effort on gpt-6.1-sol reaches the request unchanged."""
+        service = _make_service(
+            settings=OpenAIResponsesLLMService.Settings(
+                model="gpt-6.1-sol",
+                reasoning=OpenAIResponsesLLMService.ReasoningConfig(effort="low"),
+            )
+        )
+        params = self._params(service)
+        assert params["reasoning"] == {"effort": "low"}
+        assert params["include"] == ["reasoning.encrypted_content"]
+
     def test_gpt5_chat_variant_left_untouched(self):
         """The non-reasoning gpt-5-chat variant is excluded from the default-off logic."""
         service = _make_service(
