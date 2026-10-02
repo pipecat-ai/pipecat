@@ -34,6 +34,8 @@ from pipecat.services.deepgram.flux.sagemaker.tts import (  # noqa: E402
 )
 from pipecat.services.deepgram.sagemaker.stt import DeepgramSageMakerSTTService  # noqa: E402
 from pipecat.services.deepgram.sagemaker.tts import DeepgramSageMakerTTSService  # noqa: E402
+from pipecat.services.nvidia.sagemaker.stt import NvidiaSageMakerSTTService  # noqa: E402
+from pipecat.services.nvidia.sagemaker.tts import NvidiaSageMakerTTSService  # noqa: E402
 from pipecat.tests.utils import SleepFrame, run_test  # noqa: E402
 from pipecat.utils.errors import ErrorCategory  # noqa: E402
 
@@ -267,4 +269,42 @@ async def test_flux_tts_stays_usable_and_retries_next_turn(fake_sdk):
 
     assert ErrorCategory.RATE_LIMIT in categories
     assert fake_sdk.attempts == 8
+    assert tts.is_usable
+
+
+@pytest.mark.asyncio
+async def test_nvidia_stt_unusable_when_session_never_starts(fake_sdk):
+    fake_sdk.fail_forever = throttled()
+    stt = NvidiaSageMakerSTTService(endpoint_name="endpoint", region="us-east-2")
+    audio = InputAudioRawFrame(audio=b"\x00" * 3200, sample_rate=16000, num_channels=1)
+
+    categories = await run_until_connect_fails(stt, [audio])
+
+    assert fake_sdk.attempts == 4
+    assert categories == [ErrorCategory.RATE_LIMIT]
+    assert not stt.is_usable
+
+
+@pytest.mark.asyncio
+async def test_nvidia_tts_stays_usable_and_retries_next_turn(fake_sdk):
+    # NVIDIA TTS starts a new session on the next turn, so a failed start isn't permanent.
+    fake_sdk.fail_forever = throttled()
+    tts = NvidiaSageMakerTTSService(endpoint_name="endpoint", region="us-east-2")
+
+    categories = await run_until_connect_fails(tts, [TTSSpeakFrame(text="hello")])
+
+    assert ErrorCategory.RATE_LIMIT in categories
+    assert fake_sdk.attempts == 8
+    assert tts.is_usable
+
+
+@pytest.mark.asyncio
+async def test_nvidia_tts_treats_rejected_credentials_as_recoverable(fake_sdk):
+    fake_sdk.fail_forever = unmodeled_error(403, "InvalidSignatureException")
+    tts = NvidiaSageMakerTTSService(endpoint_name="endpoint", region="us-east-2")
+
+    categories = await run_until_connect_fails(tts, [])
+
+    assert fake_sdk.attempts == 1
+    assert categories == [ErrorCategory.CONNECTIVITY]
     assert tts.is_usable
