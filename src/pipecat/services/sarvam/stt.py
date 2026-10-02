@@ -1137,6 +1137,9 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
         self._speech_end_audio_position_s: float | None = None
         self._audio_position_bytes = 0
         self._endpointing = endpointing
+        # Whether the pipeline has opened a manual-endpointing turn it has not
+        # closed yet.
+        self._manual_turn_open = False
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing and usage metrics."""
@@ -1197,8 +1200,10 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
         if self._endpointing != "manual":
             return
         if isinstance(frame, VADUserStartedSpeakingFrame):
+            self._manual_turn_open = True
             await self._send_json({"event": "speech_start"})
         elif isinstance(frame, VADUserStoppedSpeakingFrame):
+            self._manual_turn_open = False
             # The tail of the turn must reach Sarvam before the boundary, or the
             # final transcript is cut short. `speech_end` finalizes the utterance
             # on its own; Sarvam's separate `flush` event force-finalizes
@@ -1314,13 +1319,19 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
             await self.set_usable(False)
 
     async def _reconnect_websocket(self, attempt_number: int) -> bool:
-        """Close out the active utterance before replacing the socket.
+        """Carry the turn in progress across the socket swap.
 
-        The new session starts with no knowledge of the old one's utterance, so
-        its ``vad.speech_end`` would never arrive.
+        The new session starts with no knowledge of the old one's utterance.
+        Under ``vad`` its ``vad.speech_end`` would never arrive, so the
+        utterance is closed here. Under ``manual`` the pipeline's turn is still
+        open, and Sarvam ignores a ``speech_end`` without a matching
+        ``speech_start``, so the new session is told the turn has started.
         """
         await self._complete_active_utterance()
-        return await super()._reconnect_websocket(attempt_number)
+        reconnected = await super()._reconnect_websocket(attempt_number)
+        if reconnected and self._manual_turn_open:
+            await self._send_json({"event": "speech_start"})
+        return reconnected
 
     async def _receive_messages(self):
         """Receive Sarvam realtime server events."""

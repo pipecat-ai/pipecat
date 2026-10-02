@@ -1329,6 +1329,35 @@ async def test_reconnect_completes_the_turn(monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("boundaries", "resent"),
+    [
+        ([VADUserStartedSpeakingFrame], True),
+        ([VADUserStartedSpeakingFrame, VADUserStoppedSpeakingFrame], False),
+    ],
+)
+async def test_reconnect_reopens_an_open_manual_turn(monkeypatch, boundaries, resent):
+    """Sarvam ignores a `speech_end` whose `speech_start` went to the old session."""
+    service = SarvamRealtimeSTTService(api_key="test-key", endpointing="manual")
+    monkeypatch.setattr(service, "push_frame", _noop)
+    service._websocket = _FakeWebsocket()
+    for boundary in boundaries:
+        await service.process_frame(boundary(), FrameDirection.DOWNSTREAM)
+
+    new_websocket = _FakeWebsocket()
+
+    async def reconnect(self, attempt_number):
+        self._websocket = new_websocket
+        return True
+
+    monkeypatch.setattr(WebsocketSTTService, "_reconnect_websocket", reconnect)
+    await service._reconnect_websocket(1)
+
+    expected = [json.dumps({"event": "speech_start"})] if resent else []
+    assert new_websocket.sent == expected
+
+
+@pytest.mark.asyncio
 async def test_error_preserves_raw_payload(monkeypatch):
     service = SarvamRealtimeSTTService(api_key="test-key")
     pushed_errors = []
