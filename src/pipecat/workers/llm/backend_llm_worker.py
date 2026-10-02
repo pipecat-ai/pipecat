@@ -329,6 +329,20 @@ _TELL_INSTRUCTION = (
 )
 
 
+def _render_explicit_request(request: str, *, instruction: str = _TELL_INSTRUCTION) -> str:
+    """Render a request the frontend worded itself, with what the backend should do with it after.
+
+    Args:
+        request: The request, as the frontend's model worded it.
+        instruction: What the backend should do with the request, placed
+            after it.
+
+    Returns:
+        The rendered request.
+    """
+    return f"{request}\n\n{instruction}"
+
+
 def _split_spoken(text: str) -> tuple[str, str]:
     """Split a message the model wrote into its note and its spoken part, by the mark.
 

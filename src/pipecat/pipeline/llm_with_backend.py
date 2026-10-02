@@ -38,7 +38,6 @@ from pipecat.services.llm_service import FunctionCallParams, LLMService
 from pipecat.workers.base_worker import BaseWorker
 from pipecat.workers.llm.backend_llm_worker import (
     _DEFAULT_TRANSCRIPT_INSTRUCTION,
-    _TELL_INSTRUCTION,
     BackendError,
     BackendEvent,
     BackendIdle,
@@ -46,6 +45,7 @@ from pipecat.workers.llm.backend_llm_worker import (
     BackendOutput,
     BackendToolCall,
     _BackendSession,
+    _render_explicit_request,
     _render_transcript_request,
 )
 
@@ -319,7 +319,7 @@ class ExplicitBackendRequestStrategy(BackendRequestStrategy):
     async def compose_request(self, params: FunctionCallParams) -> str | None:
         """Send the model's request as it stands, with the reporting expectation after it."""
         request = str(params.arguments.get("request") or "").strip()
-        return f"{request}\n\n{_TELL_INSTRUCTION}" if request else None
+        return _render_explicit_request(request) if request else None
 
 
 def _is_backend_message(message: LLMContextMessage) -> bool:
