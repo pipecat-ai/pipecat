@@ -43,6 +43,7 @@ from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection, SmallWebRTCTrack
+from pipecat.transports.video_in_sampler import _VideoInSampler
 from pipecat.utils.shared import acquires, releases
 
 try:
@@ -626,7 +627,8 @@ class SmallWebRTCInputTransport(BaseInputTransport):
         self._receive_audio_task = None
         self._receive_video_task = None
         self._receive_screen_video_task = None
-        self._image_requests: list[UserImageRequestFrame] = []
+        # Video samplers by video source.
+        self._video_samplers: dict[str, _VideoInSampler] = {}
 
     async def setup(self, setup: FrameProcessorSetup):
         """Set up the transport and establish the WebRTC connection.
@@ -730,31 +732,19 @@ class SmallWebRTCInputTransport(BaseInputTransport):
         try:
             video_iterator = self._client.read_video_frame(video_source)
             async for video_frame in video_iterator:
-                if video_frame:
-                    await self.push_video_frame(video_frame)
-
-                    # Check if there are any pending image requests and create
-                    # UserImageRawFrame. Use a shallow copy so we can remove
-                    # elements.
-                    for request_frame in self._image_requests[:]:
-                        request_text = request_frame.text if request_frame else None
-                        add_to_context = request_frame.append_to_context if request_frame else None
-                        if request_frame.video_source == video_source:
-                            # Create UserImageRawFrame using the current video frame
-                            image_frame = UserImageRawFrame(
-                                user_id=request_frame.user_id,
-                                image=video_frame.image,
-                                size=video_frame.size,
-                                format=video_frame.format,
-                                text=request_text,
-                                append_to_context=add_to_context,
-                                request=request_frame,
-                            )
-                            image_frame.transport_source = video_source
-                            # Push the frame to the pipeline
-                            await self.push_video_frame(image_frame)
-                            # Remove from pending requests
-                            self._image_requests.remove(request_frame)
+                if not video_frame:
+                    continue
+                sampler = self._video_samplers.get(video_source)
+                if not sampler:
+                    continue
+                due, request_frame = sampler.sample()
+                if not due:
+                    continue
+                if request_frame:
+                    video_frame.text = request_frame.text
+                    video_frame.append_to_context = request_frame.append_to_context
+                    video_frame.request = request_frame
+                await self.push_video_frame(video_frame)
 
         except Exception as e:
             logger.error(f"{self} exception receiving data: {e.__class__.__name__} ({e})")
@@ -780,12 +770,14 @@ class SmallWebRTCInputTransport(BaseInputTransport):
         """
         logger.debug(f"Requesting image from participant: {frame.user_id}")
 
-        # Store the request
-        self._image_requests.append(frame)
-
         # Default to camera if no source specified
         if frame.video_source is None:
             frame.video_source = CAM_VIDEO_SOURCE
+
+        # A request for a source that isn't being captured starts receiving it,
+        # passing on every frame.
+        sampler = self._video_samplers.setdefault(frame.video_source, _VideoInSampler(None))
+        sampler.add_request(frame)
         # If we're not already receiving video, try to get a frame now
         if (
             frame.video_source == CAM_VIDEO_SOURCE
@@ -807,12 +799,22 @@ class SmallWebRTCInputTransport(BaseInputTransport):
     async def capture_participant_media(
         self,
         source: str = CAM_VIDEO_SOURCE,
+        framerate: int | None = None,
     ):
         """Capture media from a specific participant.
 
         Args:
             source: Media source to capture from. ("camera", "microphone", or "screenVideo")
+            framerate: For a video source, frames per second to pass on. ``0`` passes
+                on only the frames that answer image requests, and ``None`` passes on
+                every frame.
         """
+        if source in (CAM_VIDEO_SOURCE, SCREEN_VIDEO_SOURCE):
+            # Keep an existing sampler so image requests already waiting on it
+            # are still answered.
+            sampler = self._video_samplers.setdefault(source, _VideoInSampler(framerate))
+            sampler.framerate = framerate
+
         # If we're not already receiving video, try to get a frame now
         if (
             source == MIC_AUDIO_SOURCE
@@ -1063,14 +1065,17 @@ class SmallWebRTCTransport(BaseTransport):
     async def capture_participant_video(
         self,
         video_source: str = CAM_VIDEO_SOURCE,
+        framerate: int | None = None,
     ):
         """Capture video from a specific participant.
 
         Args:
             video_source: Video source to capture from ("camera" or "screenVideo").
+            framerate: Frames per second to pass on. ``0`` passes on only the frames
+                that answer image requests, and ``None`` passes on every frame.
         """
         if self._input:
-            await self._input.capture_participant_media(source=video_source)
+            await self._input.capture_participant_media(source=video_source, framerate=framerate)
 
     async def capture_participant_audio(
         self,

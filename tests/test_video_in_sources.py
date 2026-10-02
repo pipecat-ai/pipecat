@@ -174,5 +174,87 @@ class TestDailyVideoInSampling(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(fake._video_samplers["p1"].keys(), {"camera"})
 
 
+class TestSmallWebRTCVideoInSampling(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        try:
+            from pipecat.transports.smallwebrtc.transport import SmallWebRTCInputTransport
+        except Exception as e:
+            self.skipTest(f"SmallWebRTC transport unavailable: {e}")
+        self.transport_cls = SmallWebRTCInputTransport
+
+    def _fake_input(self, frames: list[UserImageRawFrame], samplers: dict):
+        async def read_video_frame(_source):
+            for frame in frames:
+                yield frame
+
+        fake = MagicMock()
+        fake._client.read_video_frame = read_video_frame
+        fake._video_samplers = samplers
+        fake._params = TransportParams(video_in_enabled=True)
+        fake.push_video_frame = AsyncMock()
+        return fake
+
+    def _pushed(self, fake) -> list[UserImageRawFrame]:
+        return [awaited.args[0] for awaited in fake.push_video_frame.await_args_list]
+
+    async def test_unthrottled_source_passes_every_frame(self):
+        fake = self._fake_input(
+            [_image_frame() for _ in range(3)], {"camera": _VideoInSampler(None)}
+        )
+        await self.transport_cls._receive_video(fake, "camera")
+        self.assertEqual(fake.push_video_frame.await_count, 3)
+
+    async def test_request_rides_on_the_pushed_frame(self):
+        sampler = _VideoInSampler(0)
+        request = UserImageRequestFrame(
+            user_id="requester", text="describe", append_to_context=True
+        )
+        sampler.add_request(request)
+        fake = self._fake_input([_image_frame(), _image_frame()], {"camera": sampler})
+
+        await self.transport_cls._receive_video(fake, "camera")
+
+        (frame,) = self._pushed(fake)
+        self.assertIs(frame.request, request)
+        self.assertEqual(frame.text, "describe")
+        self.assertTrue(frame.append_to_context)
+        self.assertEqual(frame.user_id, "peer")
+
+    async def test_waiting_requests_answered_by_successive_frames(self):
+        sampler = _VideoInSampler(0)
+        requests = [UserImageRequestFrame(user_id="a"), UserImageRequestFrame(user_id="b")]
+        for request in requests:
+            sampler.add_request(request)
+        fake = self._fake_input([_image_frame(), _image_frame()], {"camera": sampler})
+
+        await self.transport_cls._receive_video(fake, "camera")
+
+        self.assertEqual([f.request for f in self._pushed(fake)], requests)
+
+    async def test_request_starts_an_uncaptured_source(self):
+        fake = self._fake_input([], {})
+        fake._receive_video_task = None
+        request = UserImageRequestFrame(user_id="requester")
+
+        await self.transport_cls.request_participant_image(fake, request)
+
+        sampler = fake._video_samplers["camera"]
+        self.assertIsNone(sampler.framerate)
+        self.assertIs(sampler.sample()[1], request)
+        fake.create_task.assert_called_once()
+
+    async def test_capture_sets_framerate_without_dropping_requests(self):
+        fake = self._fake_input([], {})
+        fake._receive_video_task = object()
+        request = UserImageRequestFrame(user_id="requester")
+
+        await self.transport_cls.request_participant_image(fake, request)
+        await self.transport_cls.capture_participant_media(fake, source="camera", framerate=1)
+
+        sampler = fake._video_samplers["camera"]
+        self.assertEqual(sampler.framerate, 1)
+        self.assertIs(sampler.sample()[1], request)
+
+
 if __name__ == "__main__":
     unittest.main()
