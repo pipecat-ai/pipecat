@@ -4,6 +4,20 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""A bot that can look at the user's camera or screen share when asked.
+
+The transport captures both video sources as the client connects, listed in
+``video_in_sources``. Each is captured at ``framerate=0``, so no frames flow
+until the bot asks for one: the LLM has a tool per source,
+``fetch_camera_image`` and ``fetch_screen_share_image``, and each pushes a
+``UserImageRequestFrame`` for its source. The transport answers with the next
+frame from that source, which is added to the LLM context so the LLM can
+describe it.
+
+Share your screen from the client and ask what's on it, or turn on your camera
+and ask what it sees.
+"""
+
 import os
 
 from dotenv import load_dotenv
@@ -11,24 +25,15 @@ from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.evals.transport import EvalTransportParams
-from pipecat.frames.frames import (
-    Frame,
-    LLMFullResponseEndFrame,
-    LLMFullResponseStartFrame,
-    LLMRunFrame,
-    TextFrame,
-    TTSSpeakFrame,
-    UserImageRequestFrame,
-)
-from pipecat.pipeline.parallel_pipeline import ParallelPipeline
+from pipecat.frames.frames import LLMRunFrame, TTSSpeakFrame, UserImageRequestFrame
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.worker import PipelineWorker, ProcessorUnusablePolicy
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
 )
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import (
     create_transport,
@@ -37,8 +42,7 @@ from pipecat.runner.utils import (
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.llm_service import FunctionCallParams
-from pipecat.services.moondream.vision import MoondreamService
-from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.openai.responses.llm import OpenAIResponsesLLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams, VideoInSourceParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.workers.runner import WorkerRunner
@@ -46,29 +50,24 @@ from pipecat.workers.runner import WorkerRunner
 load_dotenv(override=True)
 
 
-async def fetch_user_image(params: FunctionCallParams, user_id: str, question: str):
-    """Fetch the user image.
+async def request_user_image(
+    params: FunctionCallParams, user_id: str, question: str, video_source: str
+):
+    """Request an image from the user's video and add it to the LLM context.
 
-    When called, this function pushes a UserImageRequestFrame upstream to the
-    transport. As a result, the transport will request the user image and push a
-    UserImageRawFrame downstream. The result_callback will be invoked once the
-    image is retrieved and processed.
-
-    Args:
-        user_id: The ID of the user to grab the image from.
-        question: The question that the user is asking about the image.
+    This pushes a UserImageRequestFrame upstream to the transport. The transport
+    answers it with the next frame from the requested video source, as a
+    UserImageRawFrame that the LLM assistant aggregator adds to the context. The
+    result_callback is invoked once the image is retrieved and processed.
     """
-    logger.debug(f"Requesting image with user_id={user_id}, question={question}")
+    logger.debug(f"Requesting {video_source} image with user_id={user_id}, question={question}")
 
-    # Request a user image frame. In this case, we don't want the requested
-    # image to be added to the context because we will process it with
-    # Moondream. Also associate it to the function call. Pass the result_callback
-    # so it can be invoked when the image is actually retrieved.
     await params.llm.push_frame(
         UserImageRequestFrame(
             user_id=user_id,
             text=question,
-            append_to_context=False,
+            video_source=video_source,
+            append_to_context=True,
             function_name=params.function_name,
             tool_call_id=params.tool_call_id,
             result_callback=params.result_callback,
@@ -77,25 +76,24 @@ async def fetch_user_image(params: FunctionCallParams, user_id: str, question: s
     )
 
 
-class MoondreamTextFrameWrapper(FrameProcessor):
-    """Wraps Moondream-provided TextFrames with LLM response start/end frames.
+async def fetch_camera_image(params: FunctionCallParams, user_id: str, question: str):
+    """Get an image from the user's camera to answer a question about it.
 
-    This processor detects TextFrames and automatically wraps them with
-    LLMFullResponseStartFrame and LLMFullResponseEndFrame to provide proper
-    response boundaries for downstream processors.
+    Args:
+        user_id: The ID of the user to grab the image from.
+        question: The question that the user is asking about the image.
     """
+    await request_user_image(params, user_id, question, "camera")
 
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
 
-        # If we receive a TextFrame, wrap it with response start/end frames
-        if isinstance(frame, TextFrame):
-            await self.push_frame(LLMFullResponseStartFrame(), direction)
-            await self.push_frame(frame, direction)
-            await self.push_frame(LLMFullResponseEndFrame(), direction)
-        else:
-            # For all other frames, just pass them through
-            await self.push_frame(frame, direction)
+async def fetch_screen_share_image(params: FunctionCallParams, user_id: str, question: str):
+    """Get an image of the user's screen share to answer a question about it.
+
+    Args:
+        user_id: The ID of the user to grab the image from.
+        question: The question that the user is asking about the image.
+    """
+    await request_user_image(params, user_id, question, "screenVideo")
 
 
 # We use lambdas to defer transport parameter creation until the transport
@@ -111,6 +109,7 @@ transport_params = {
         video_in_enabled=True,
         video_in_sources={
             "camera": VideoInSourceParams(framerate=0),
+            "screenVideo": VideoInSourceParams(framerate=0),
         },
     ),
     "webrtc": lambda: TransportParams(
@@ -119,6 +118,7 @@ transport_params = {
         video_in_enabled=True,
         video_in_sources={
             "camera": VideoInSourceParams(framerate=0),
+            "screenVideo": VideoInSourceParams(framerate=0),
         },
     ),
 }
@@ -136,41 +136,29 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ),
     )
 
-    llm = OpenAILLMService(
+    llm = OpenAIResponsesLLMService(
         api_key=os.environ["OPENAI_API_KEY"],
-        settings=OpenAILLMService.Settings(
-            system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way. You are able to describe images from the user camera.",
+        settings=OpenAIResponsesLLMService.Settings(
+            system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way. You are able to describe images from the user's camera and screen share.",
         ),
     )
 
     @llm.event_handler("on_function_calls_started")
     async def on_function_calls_started(service, function_calls):
-        await tts.queue_frame(TTSSpeakFrame("Let me check on that."))
+        await tts.queue_frame(TTSSpeakFrame("Let me check on that.", append_to_context=False))
 
-    context = LLMContext(tools=[fetch_user_image])
+    context = LLMContext(tools=[fetch_camera_image, fetch_screen_share_image])
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
     )
-
-    # If you run into weird description, try with use_cpu=True
-    moondream = MoondreamService()
-
-    # Wrap TextFrames with LLM response start/end frames, which makes Moondream
-    # output be treated like LLM responses for the purpose of context
-    # aggregation. Without this, the assistant context aggregator would ignore
-    # Moondream output (if the TTS service is disabled).
-    moondream_text_wrapper = MoondreamTextFrameWrapper()
 
     pipeline = Pipeline(
         [
             transport.input(),  # Transport user input
             stt,  # STT
             user_aggregator,  # User responses
-            ParallelPipeline(
-                [llm],  # LLM
-                [moondream, moondream_text_wrapper],
-            ),
+            llm,  # LLM
             tts,  # TTS
             transport.output(),  # Transport bot output
             assistant_aggregator,  # Assistant spoken responses
@@ -179,6 +167,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     worker = PipelineWorker(
         pipeline,
+        params=PipelineParams(
+            enable_metrics=True,
+            enable_usage_metrics=True,
+        ),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
         processor_unusable_policy=ProcessorUnusablePolicy.END,
     )
@@ -189,9 +181,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
-        logger.info(f"Client connected: {client}")
+        logger.info("Client connected")
 
-        # Set the participant ID in the image requester
         client_id = get_transport_client_id(transport, client)
 
         # Kick off the conversation.
@@ -207,6 +198,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_disconnected(transport, client):
         logger.info("Client disconnected")
         await runner.cancel()
+
+    @tts.event_handler("on_tts_request")
+    async def on_tts_request(tts, context_id: str, text: str):
+        logger.debug(f"On TTS request: {context_id}: {text}")
 
     await runner.run()
 
