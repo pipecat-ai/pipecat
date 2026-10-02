@@ -228,6 +228,7 @@ FEATURE_IMPORTS = {
     "observability": ["from pipecat_whisker import WhiskerObserver"],
     "create_transport": ["from pipecat.runner.utils import create_transport"],
     "eval": ["from pipecat.evals.transport import EvalTransportParams"],
+    "video_in_sources": ["from pipecat.transports.base_transport import VideoInSourceParams"],
 }
 
 # Base imports always included in generated bot files

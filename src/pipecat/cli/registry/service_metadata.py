@@ -121,6 +121,9 @@ FEATURE_DEFINITIONS: dict[str, list[str]] = {
     # The "eval" transport entry (pc create --eval) needs EvalTransportParams so the
     # generated bot is runnable with `-t eval` for behavioral evals.
     "eval": ["EvalTransportParams"],
+    # Video input on a Daily or SmallWebRTC transport captures its sources from
+    # video_in_sources.
+    "video_in_sources": ["VideoInSourceParams"],
 }
 
 
