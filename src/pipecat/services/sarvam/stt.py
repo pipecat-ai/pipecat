@@ -1040,6 +1040,10 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
     after the server's silence window and would time a shorter interval than
     every other STT service reports. Under ``manual`` those same frames also mark
     the turn for Sarvam, reaching it as ``speech_start`` and ``speech_end``.
+
+    A dropped socket is reopened with backoff unless
+    ``reconnect_on_error=False``. Once the service stops trying it is no longer
+    usable, so a ``ServiceSwitcher`` can move on.
     """
 
     Settings = SarvamRealtimeSTTSettings
@@ -1094,11 +1098,6 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
                 f"{names} must be passed via "
                 "settings=SarvamRealtimeSTTService.Settings(...), not as constructor kwargs"
             )
-        if "reconnect_on_error" in kwargs:
-            raise TypeError(
-                "SarvamRealtimeSTTService does not support reconnect_on_error; "
-                "reconnection is always disabled"
-            )
         if sample_rate is not None and sample_rate not in SUPPORTED_SAMPLE_RATES:
             allowed = ", ".join(str(rate) for rate in sorted(SUPPORTED_SAMPLE_RATES))
             raise ValueError(f"Unsupported sample_rate '{sample_rate}'. Allowed values: {allowed}.")
@@ -1122,7 +1121,6 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
             sample_rate=sample_rate,
             settings=default_settings,
             ttfs_p99_latency=ttfs_p99_latency,
-            reconnect_on_error=False,
             **kwargs,
         )
 
@@ -1302,19 +1300,27 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
     async def _receive_task_handler(self, report_error: ReportErrorCallback):
         """Close out the active utterance once the receive loop is done.
 
-        Reconnection is disabled, so the loop exiting means no further server
-        event can arrive. An utterance still open at that point would leave
-        downstream turn aggregation waiting on a boundary that is never coming,
-        and the service has no transcripts left to give, so it also stops being
-        usable — the base class reports the drop as retryable, which holds only
-        for services that reconnect on demand. Cancellation is left alone: that
-        only happens during an intentional disconnect, where teardown is
-        already under way.
+        The loop exits for good only when reconnection is off or has given up,
+        so no further server event can arrive. An utterance still open at that
+        point would leave downstream turn aggregation waiting on a boundary
+        that is never coming, and the service has no transcripts left to give,
+        so it also stops being usable.
+        Cancellation is left alone: that only happens during an intentional
+        disconnect, where teardown is already under way.
         """
         await super()._receive_task_handler(report_error)
         await self._complete_active_utterance()
         if not self._disconnecting:
             await self.set_usable(False)
+
+    async def _reconnect_websocket(self, attempt_number: int) -> bool:
+        """Close out the active utterance before replacing the socket.
+
+        The new session starts with no knowledge of the old one's utterance, so
+        its ``vad.speech_end`` would never arrive.
+        """
+        await self._complete_active_utterance()
+        return await super()._reconnect_websocket(attempt_number)
 
     async def _receive_messages(self):
         """Receive Sarvam realtime server events."""
