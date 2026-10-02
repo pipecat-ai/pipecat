@@ -1,0 +1,4 @@
+- The Deepgram SageMaker services (`DeepgramSageMakerSTTService`, `DeepgramFluxSageMakerSTTService`, `DeepgramSageMakerTTSService`, `DeepgramFluxSageMakerTTSService`) now handle a throttled or failed session start:
+  - `SageMakerBidiClient.start_session()` retries throttling and transient server failures with jittered backoff (`max_connect_attempts`, default 4), and raises `SageMakerBidiSessionError` carrying the AWS error id and HTTP status.
+  - The error is classified (`RATE_LIMIT`, `SERVER`, `CONNECTIVITY` or `INVALID_REQUEST`) instead of `UNKNOWN`.
+  - A service that cannot start its session and has no way to reconnect is marked unusable, so failover and `ProcessorUnusablePolicy` act on it instead of the service dropping audio for the rest of the session.
