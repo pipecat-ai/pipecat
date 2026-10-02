@@ -1858,13 +1858,9 @@ class LLMAssistantAggregator(LLMContextAggregator):
 
     async def push_aggregation(self) -> str:
         """Push the current assistant aggregation with timestamp."""
-        if not self._aggregation:
+        aggregation = await self._add_aggregation_to_context()
+        if not aggregation:
             return ""
-
-        aggregation = self.aggregation_string()
-        await self.reset()
-
-        self._context.add_message({"role": "assistant", "content": aggregation})
 
         # Push context frame
         await self.push_context_frame()
@@ -1872,6 +1868,27 @@ class LLMAssistantAggregator(LLMContextAggregator):
         # Push timestamp frame with current time
         timestamp_frame = LLMContextAssistantTimestampFrame(timestamp=time_now_iso8601())
         await self.push_frame(timestamp_frame)
+
+        return aggregation
+
+    async def _add_aggregation_to_context(self) -> str:
+        """Commit the held assistant aggregation as a context message, pushing no frames.
+
+        For flushes in the middle of an open assistant turn (a user file or
+        image arriving mid-reply), where the downstream context and timestamp
+        frames — and push_context_frame()'s side effects — belong to the
+        turn's real end, not to this commit.
+
+        Returns:
+            The committed aggregation, or an empty string if none was held.
+        """
+        if not self._aggregation:
+            return ""
+
+        aggregation = self.aggregation_string()
+        await self.reset()
+
+        self._context.add_message({"role": "assistant", "content": aggregation})
 
         return aggregation
 
@@ -2163,8 +2180,9 @@ class LLMAssistantAggregator(LLMContextAggregator):
                 await frame.request.result_callback(None)
         else:
             # Commit any in-progress assistant aggregation before appending,
-            # so the image message lands after it in the context.
-            await self.push_aggregation()
+            # so the image message lands after it in the context. Context-only:
+            # the turn stays open and its frames fire at the turn's real end.
+            await self._add_aggregation_to_context()
             image_appended = await self._maybe_append_image_to_context(frame)
 
         if image_appended and frame.run_llm is not False:
@@ -2180,9 +2198,10 @@ class LLMAssistantAggregator(LLMContextAggregator):
         # beyond chronology: LLMContext.remove_invalid_file_message() only
         # considers messages after the last assistant message, so a file
         # message written before a later-committed assistant message could
-        # never be cleaned up if the provider rejects it. The assistant turn
-        # stays open; any remaining reply text commits at the turn's end.
-        await self.push_aggregation()
+        # never be cleaned up if the provider rejects it. Context-only: the
+        # assistant turn stays open, any remaining reply text commits at the
+        # turn's end, and the turn's frames fire there.
+        await self._add_aggregation_to_context()
 
         logger.debug(f"{self} Appending UserFileRawFrame to LLM context (format: {frame.format})")
         await self._context.add_file_frame_message(
