@@ -316,17 +316,18 @@ class UserTurnStoppedMessage:
             the finalized text should listen to ``on_user_turn_message_added``
             instead.
         timestamp: When the user turn started.
+        user_id: Optional identifier for the user.
         sequence: Monotonic emission order across the aggregator pair's
             turn-stopped messages. Assigned when the event is fired, so
             handlers can reorder transcript appends even if they await.
-        user_id: Optional identifier for the user.
+            Defaults to ``0`` so existing constructors keep working.
 
     """
 
     content: str | None
     timestamp: str
-    sequence: int
     user_id: str | None = None
+    sequence: int = 0
 
 
 @dataclass
@@ -367,13 +368,14 @@ class AssistantTurnStoppedMessage:
         sequence: Monotonic emission order across the aggregator pair's
             turn-stopped messages. Assigned when the event is fired, so
             handlers can reorder transcript appends even if they await.
+            Defaults to ``0`` so existing constructors keep working.
 
     """
 
     content: str
     interrupted: bool
     timestamp: str
-    sequence: int
+    sequence: int = 0
 
 
 @dataclass

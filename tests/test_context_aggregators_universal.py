@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import asyncio
 import io
 import json
 import unittest
@@ -2631,6 +2632,19 @@ class TestRealtimeServiceModeAggregator(unittest.IsolatedAsyncioTestCase):
 class TestTurnStoppedSequence(unittest.IsolatedAsyncioTestCase):
     """Turn-stopped messages carry a shared monotonic sequence across the pair."""
 
+    def test_sequence_defaults_for_existing_constructors(self):
+        user_msg = UserTurnStoppedMessage("hi", "now")
+        self.assertEqual(user_msg.sequence, 0)
+        self.assertIsNone(user_msg.user_id)
+
+        # Positional third arg remains user_id, not sequence.
+        user_with_id = UserTurnStoppedMessage("hi", "now", "alice")
+        self.assertEqual(user_with_id.user_id, "alice")
+        self.assertEqual(user_with_id.sequence, 0)
+
+        assistant_msg = AssistantTurnStoppedMessage("hello", False, "now")
+        self.assertEqual(assistant_msg.sequence, 0)
+
     async def test_pair_assigns_monotonic_sequence_across_aggregators(self):
         context = LLMContext()
         pair = LLMContextAggregatorPair(
@@ -2671,6 +2685,64 @@ class TestTurnStoppedSequence(unittest.IsolatedAsyncioTestCase):
         await run_test(Pipeline([user, assistant]), frames_to_send=frames_to_send)
 
         self.assertEqual(recorded, [("user", 1), ("assistant", 2)])
+
+    async def test_sequence_restores_order_when_earlier_assistant_handler_is_delayed(self):
+        """Emission order survives a slow earlier assistant handler.
+
+        The assistant turn stops first (sequence 1). Its handler awaits
+        before recording. The later user turn (sequence 2) finishes first,
+        so completion order is reversed — sorting by ``sequence`` restores
+        emission order.
+        """
+        context = LLMContext()
+        pair = LLMContextAggregatorPair(
+            context,
+            user_params=LLMUserAggregatorParams(
+                user_turn_strategies=UserTurnStrategies(
+                    stop=[
+                        SpeechTimeoutUserTurnStopStrategy(
+                            user_speech_timeout=TRANSCRIPTION_TIMEOUT,
+                        )
+                    ],
+                ),
+                user_turn_stop_timeout=USER_TURN_STOP_TIMEOUT,
+            ),
+        )
+        user, assistant = pair
+
+        completed: list[tuple[str, int]] = []
+
+        @assistant.event_handler("on_assistant_turn_stopped")
+        async def on_assistant_turn_stopped(aggregator, message: AssistantTurnStoppedMessage):
+            # Longer than the later user-turn path (SleepFrames + speech timeout)
+            # so this earlier handler finishes second.
+            await asyncio.sleep(0.6)
+            completed.append(("assistant", message.sequence))
+
+        @user.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(aggregator, strategy, message: UserTurnStoppedMessage):
+            completed.append(("user", message.sequence))
+
+        frames_to_send = [
+            # Earlier: assistant turn stopped (sequence 1).
+            LLMFullResponseStartFrame(),
+            LLMTextFrame("Hello there"),
+            LLMFullResponseEndFrame(),
+            SleepFrame(sleep=0.05),
+            # Later: user turn stopped (sequence 2) while assistant handler still awaits.
+            VADUserStartedSpeakingFrame(),
+            TranscriptionFrame(text="Hi again!", user_id="", timestamp="now"),
+            SleepFrame(),
+            VADUserStoppedSpeakingFrame(),
+            SleepFrame(sleep=TRANSCRIPTION_TIMEOUT + 0.1),
+        ]
+        await run_test(Pipeline([user, assistant]), frames_to_send=frames_to_send)
+
+        self.assertEqual([role for role, _ in completed], ["user", "assistant"])
+        self.assertEqual(
+            sorted(completed, key=lambda item: item[1]),
+            [("assistant", 1), ("user", 2)],
+        )
 
     async def test_pair_shares_one_sequence_counter(self):
         context = LLMContext()
