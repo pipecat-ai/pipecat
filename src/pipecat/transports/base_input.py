@@ -122,10 +122,21 @@ class BaseInputTransport(FrameProcessor):
         """The media this transport receives from the user.
 
         Returns:
-            The ``audio_in`` and ``video_in`` capabilities.
+            The ``audio_in``, ``video_in`` and ``screen_in`` capabilities.
+            ``screen_in`` is unknown when video input is enabled without
+            ``video_in_sources``, since the application then decides which
+            sources to capture.
         """
+        if not self._params.video_in_enabled:
+            screen_in = False
+        elif self._params.video_in_sources:
+            screen_in = "screenVideo" in self._params.video_in_sources
+        else:
+            screen_in = None
         return BotCapabilities(
-            audio_in=self._params.audio_in_enabled, video_in=self._params.video_in_enabled
+            audio_in=self._params.audio_in_enabled,
+            video_in=self._params.video_in_enabled,
+            screen_in=screen_in,
         )
 
     async def setup(self, setup: FrameProcessorSetup):
