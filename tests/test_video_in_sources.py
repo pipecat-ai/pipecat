@@ -5,10 +5,14 @@
 #
 
 import unittest
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from pydantic import ValidationError
 
+from pipecat.frames.frames import UserImageRawFrame, UserImageRequestFrame
 from pipecat.transports.base_transport import TransportParams, VideoInSourceParams
+from pipecat.transports.video_in_sampler import JITTER_TOLERANCE_SECS, _VideoInSampler
 
 
 class TestVideoInSourcesParams(unittest.TestCase):
@@ -46,6 +50,128 @@ class TestVideoInSourcesParams(unittest.TestCase):
             video_in_enabled=True, video_in_sources={"screenVideo": VideoInSourceParams()}
         )
         self.assertEqual(TransportParams(**params.model_dump()), params)
+
+
+class TestVideoInSampler(unittest.TestCase):
+    def _sample_at(self, sampler: _VideoInSampler, now: float):
+        with patch("pipecat.transports.video_in_sampler.time.time", return_value=now):
+            return sampler.sample()
+
+    def _passed(self, sampler: _VideoInSampler, times) -> list[float]:
+        return [t for t in times if self._sample_at(sampler, t)[0]]
+
+    def test_none_passes_every_frame(self):
+        sampler = _VideoInSampler(None)
+        self.assertEqual(self._passed(sampler, (1.0, 1.01, 1.02)), [1.0, 1.01, 1.02])
+
+    def test_zero_passes_only_requested_frames(self):
+        sampler = _VideoInSampler(0)
+        self.assertFalse(self._sample_at(sampler, 1.0)[0])
+        request = UserImageRequestFrame(user_id="u")
+        sampler.add_request(request)
+        self.assertEqual(self._sample_at(sampler, 1.1), (True, request))
+        self.assertFalse(self._sample_at(sampler, 1.2)[0])
+
+    def test_framerate_below_input_rate(self):
+        # A 30 fps stream sampled at 5 fps for ten seconds.
+        times = [10 + i / 30 for i in range(300)]
+        passed = self._passed(_VideoInSampler(5), times)
+        self.assertAlmostEqual(len(passed) / 10, 5, delta=0.1)
+        # Every gap after the first is within a stream frame of the interval.
+        gaps = [b - a for a, b in zip(passed[1:], passed[2:])]
+        self.assertTrue(all(abs(gap - 0.2) < 1 / 30 for gap in gaps), gaps)
+
+    def test_framerate_at_input_rate_passes_every_frame(self):
+        # A slightly slow 30 fps stream with jitter, sampled at 30 fps.
+        times, t = [], 10.0
+        for i in range(90):
+            t += (1 / 29.5) * (0.8 if i % 2 else 1.2)
+            times.append(t)
+        self.assertEqual(self._passed(_VideoInSampler(30), times), times)
+
+    def test_next_frame_one_interval_after_the_first(self):
+        times = [10 + i / 30 for i in range(45)]
+        passed = self._passed(_VideoInSampler(1), times)
+        self.assertGreaterEqual(passed[1] - passed[0], 1.0 - JITTER_TOLERANCE_SECS)
+
+    def test_no_close_frames_after_a_late_frame(self):
+        # At 1 fps, the stream pauses for 1.2 s after a frame is passed on, so
+        # the next frame arrives late but not long enough for a stall.
+        times = [10 + i / 30 for i in range(31)] + [11.2 + i / 30 for i in range(60)]
+        passed = self._passed(_VideoInSampler(1), times)
+        gaps = [b - a for a, b in zip(passed, passed[1:])]
+        self.assertTrue(all(gap >= 1.0 - JITTER_TOLERANCE_SECS for gap in gaps), gaps)
+
+    def test_request_answered_between_due_frames(self):
+        sampler = _VideoInSampler(1)
+        self._sample_at(sampler, 10.0)
+        request = UserImageRequestFrame(user_id="u")
+        sampler.add_request(request)
+        self.assertEqual(self._sample_at(sampler, 10.2), (True, request))
+        # The schedule restarts from the request: nothing until a second later.
+        self.assertFalse(self._sample_at(sampler, 11.0)[0])
+        self.assertTrue(self._sample_at(sampler, 11.2)[0])
+
+    def test_no_burst_after_a_stall(self):
+        sampler = _VideoInSampler(1)
+        times = [10 + i / 30 for i in range(30)] + [20 + i / 30 for i in range(30)]
+        passed = self._passed(sampler, times)
+        # One frame when the stream resumes, then the next an interval later.
+        self.assertEqual(len([t for t in passed if 20 <= t < 20.9]), 1)
+
+    def test_requests_answered_in_order(self):
+        sampler = _VideoInSampler(0)
+        first, second = UserImageRequestFrame(user_id="a"), UserImageRequestFrame(user_id="b")
+        sampler.add_request(first)
+        sampler.add_request(second)
+        self.assertIs(self._sample_at(sampler, 1.0)[1], first)
+        self.assertIs(self._sample_at(sampler, 1.1)[1], second)
+
+    def test_framerate_can_change(self):
+        sampler = _VideoInSampler(None)
+        sampler.framerate = 0
+        self.assertFalse(self._sample_at(sampler, 1.0)[0])
+
+
+def _image_frame() -> UserImageRawFrame:
+    return UserImageRawFrame(user_id="peer", image=b"", size=(1, 1), format="RGB")
+
+
+class TestDailyVideoInSampling(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        try:
+            from pipecat.transports.daily.transport import DailyInputTransport
+        except Exception as e:
+            self.skipTest(f"Daily transport unavailable: {e}")
+        self.transport_cls = DailyInputTransport
+
+    def _fake_input(self, framerate: int):
+        fake = MagicMock()
+        fake._video_samplers = {"p1": {"camera": _VideoInSampler(framerate)}}
+        fake.push_video_frame = AsyncMock()
+        return fake
+
+    async def test_request_answered_by_next_frame(self):
+        fake = self._fake_input(0)
+        video_frame = SimpleNamespace(buffer=b"", width=1, height=1, color_format="RGB")
+
+        await self.transport_cls._on_participant_video_frame(fake, "p1", video_frame, "camera")
+        fake.push_video_frame.assert_not_called()
+
+        request = UserImageRequestFrame(user_id="p1", text="what's this?")
+        await self.transport_cls.request_participant_image(fake, request)
+        await self.transport_cls._on_participant_video_frame(fake, "p1", video_frame, "camera")
+
+        frame = fake.push_video_frame.call_args[0][0]
+        self.assertIs(frame.request, request)
+        self.assertEqual(frame.text, "what's this?")
+        self.assertEqual(frame.transport_source, "camera")
+
+    async def test_request_for_uncaptured_source_is_ignored(self):
+        fake = self._fake_input(0)
+        request = UserImageRequestFrame(user_id="p1", video_source="screenVideo")
+        await self.transport_cls.request_participant_image(fake, request)
+        self.assertEqual(fake._video_samplers["p1"].keys(), {"camera"})
 
 
 if __name__ == "__main__":
