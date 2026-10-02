@@ -35,6 +35,7 @@ jobs:
             --extra aws \
             --extra aws-nova-sonic \
             --extra azure \
+            --extra clef \
             --extra cli \
             --extra daily \
             --extra deepgram \
