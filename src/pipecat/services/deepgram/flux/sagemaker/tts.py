@@ -21,12 +21,16 @@ except ModuleNotFoundError as e:
     )
     raise ImportError(f"Missing module: {e}") from e
 
-from pipecat.services.aws.sagemaker.bidi_client import SageMakerBidiClient
+from pipecat.services.aws.sagemaker.bidi_client import (
+    SageMakerBidiClient,
+    classify_sagemaker_bidi_error,
+)
 from pipecat.services.deepgram.flux.tts_base import (
     DeepgramFluxTTSBase,
     DeepgramFluxTTSSettings,
 )
 from pipecat.services.tts_service import TextAggregationMode
+from pipecat.utils.errors import ErrorCategory
 
 
 @dataclass
@@ -141,6 +145,10 @@ class DeepgramFluxSageMakerTTSService(DeepgramFluxTTSBase):
         ):  # should never happen — caller should gate on _transport_is_active()
             return
         await self._client.send_json(message)
+
+    def _classify_error(self, exception: Exception) -> ErrorCategory | None:
+        """Classify SageMaker session failures, which carry no HTTP status attribute."""
+        return classify_sagemaker_bidi_error(exception)
 
     def _transport_is_active(self) -> bool:
         return self._client is not None and self._client.is_active
