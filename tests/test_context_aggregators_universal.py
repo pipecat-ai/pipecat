@@ -1800,8 +1800,36 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
             expected_up_frames=[LLMContextFrame],
         )
 
-    async def test_an_append_asking_to_run_while_the_user_speaks_is_left_to_the_turn(self):
-        """The user's turn ending runs inference on the context as it stands."""
+    async def test_an_append_asking_to_run_while_the_user_speaks_is_settled_by_the_turns_run(self):
+        """The run the user's turn brings sees the context as it stands, so nothing is owed after it."""
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        await run_test(
+            aggregator,
+            frames_to_send=[
+                UserStartedSpeakingFrame(),
+                LLMMessagesAppendFrame(
+                    messages=[{"role": "developer", "content": "Backend: Done."}], run_llm=True
+                ),
+                SleepFrame(),
+                UserStoppedSpeakingFrame(),
+                LLMFullResponseStartFrame(),
+                LLMFullResponseEndFrame(),
+                LLMMessagesAppendFrame(
+                    messages=[{"role": "developer", "content": "Backend (thinking): ..."}],
+                    run_llm=False,
+                ),
+                SleepFrame(),
+            ],
+            # An empty response is not passed on; what matters is that no
+            # context frame goes upstream after the run has started.
+            expected_down_frames=[UserStartedSpeakingFrame, UserStoppedSpeakingFrame],
+            expected_up_frames=[],
+        )
+        assert len(context.get_messages()) == 2
+
+    async def test_an_append_owed_through_an_empty_user_turn_is_pushed_on_the_next_arrival(self):
+        """A turn with nothing in it brings no run, so the push is still owed."""
         context = LLMContext()
         aggregator = LLMAssistantAggregator(context)
         await run_test(
@@ -1820,7 +1848,7 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
                 SleepFrame(),
             ],
             expected_down_frames=[UserStartedSpeakingFrame, UserStoppedSpeakingFrame],
-            expected_up_frames=[],
+            expected_up_frames=[LLMContextFrame],
         )
         assert len(context.get_messages()) == 2
 

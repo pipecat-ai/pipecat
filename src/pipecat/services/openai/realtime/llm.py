@@ -1307,6 +1307,9 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
             self._llm_needs_conversation_setup = False
 
         logger.debug("Creating response")
+        # Active from the moment the create is sent, not from response.created: a
+        # second create in between would be refused by the API.
+        self._response_active = True
 
         await self.push_frame(LLMFullResponseStartFrame())
         await self.start_processing_metrics()

@@ -118,7 +118,7 @@ ERROR_UPDATE_TYPE = "error"
 SPOKEN_MARK = ">>"
 
 #: Where a message's spoken part starts: the first line that begins with the mark.
-_SPOKEN_MARK_LINE = re.compile(rf"(?m)^[ \t]*{re.escape(SPOKEN_MARK)}")
+_SPOKEN_MARK_LINE = re.compile(rf"(?m)^[ \t]*{re.escape(SPOKEN_MARK)}[ \t]*")
 
 #: How the backend's model works with the assistant, appended to its system
 #: instruction: who it is, which of what it writes the user hears, and how it
@@ -355,12 +355,15 @@ def _split_spoken(text: str) -> tuple[str, str]:
     Returns:
         The note (what precedes the first line that begins with the mark, or
         the whole message when no line does) and the spoken part (what follows
-        the mark, or empty), each stripped.
+        the mark, with any later mark removed, or empty), each stripped.
     """
     match = _SPOKEN_MARK_LINE.search(text)
     if match is None:
         return text, ""
-    return text[: match.start()].strip(), text[match.end() :].strip()
+    # From the first marked line on, the whole of it is spoken; a mark the
+    # model put on a later line is not meant for the user's ear.
+    spoken = _SPOKEN_MARK_LINE.sub("", text[match.end() :])
+    return text[: match.start()].strip(), spoken.strip()
 
 
 def _render_transcript_request(
@@ -562,6 +565,15 @@ class BackendLLMWorker(LLMContextWorker):
                     and len(frame.context.messages) > self._request_awaiting_run
                 ):
                     self._request_awaiting_run = None
+            elif isinstance(frame, InterruptionFrame):
+                # The run in progress, if any, is cancelled by this frame and
+                # ends as an interrupted turn, which is not counted as
+                # completed; a run queued behind it is dropped. A run that
+                # starts after the frame has passed is a new one, so the
+                # counters are reset here, as the LLM sees the interruption,
+                # and not later at the assistant aggregator, where a reset
+                # could erase a run that had just started.
+                self._runs_requested = self._runs_completed = 0
 
         @self.user_aggregator.event_handler("on_before_process_frame")
         async def on_before_user_aggregator_frame(aggregator, frame: Frame):
@@ -579,8 +591,6 @@ class BackendLLMWorker(LLMContextWorker):
         # aggregator, which every phase of a call reaches.
         @self.assistant_aggregator.event_handler("on_before_process_frame")
         async def on_before_assistant_aggregator_frame(aggregator, frame: Frame):
-            if isinstance(frame, InterruptionFrame):
-                self._runs_requested = self._runs_completed = 0
             await self._on_function_call_frame(frame)
 
         @self.assistant_aggregator.event_handler("on_after_process_frame")
@@ -726,8 +736,14 @@ class BackendLLMWorker(LLMContextWorker):
 
         An interruption stops the run in progress and the calls that opt into
         cancellation on interruption; the async ones, which an interruption
-        leaves running by design, are cancelled on their own.
+        leaves running by design, are cancelled on their own. A request not
+        yet taken up is dropped with the interruption, and one held for the
+        current step is let go of, so that neither runs the model on work the
+        frontend has abandoned: the cancellations that follow would otherwise
+        run a held request as they settle.
         """
+        self._requests_pending = 0
+        self._request_awaiting_run = None
         await self.queue_frame(InterruptionFrame())
         await self.llm.cancel_function_calls(reason=reason)
 
@@ -762,8 +778,8 @@ class BackendLLMWorker(LLMContextWorker):
 
     async def _on_assistant_turn_stopped(self, message: AssistantTurnStoppedMessage):
         if message.interrupted:
-            # Text from an interrupted turn is not sent, and the
-            # InterruptionFrame handler above already reset the run counters.
+            # Text from an interrupted turn is not sent, and the run counters
+            # were reset as the LLM saw the InterruptionFrame.
             return
         self._runs_completed += 1
         text = (message.content or "").strip()
