@@ -21,7 +21,9 @@ The sharing model, from the outside in:
   settings; the last to :meth:`~SIPConnection.disconnect` closes it
   (reference-counted).
 - **One user agent — one registration — per address-of-record.** Cached
-  and shared: any number of connections on the same account reuse it.
+  and shared: any number of connections on the same account reuse it, and
+  the last of them to disconnect unregisters it, so a closed bot leaves no
+  binding behind at the registrar.
 - **N connections per address-of-record, one call per connection.** A
   connection is a call slot. Each inbound INVITE is routed to the first
   idle connection bound to the account — the claim is synchronous, so
@@ -118,6 +120,11 @@ _STDLIB_LOG_LEVELS = {
 # hangup on the close, so the flag that requests a transfer need not be trusted
 # across the close race.
 _TRANSFER_CLOSE_REASON = "Call transfered"
+
+# How long a closing connection waits for the registrar to confirm the
+# unregister before giving up on it: a dead registrar must not hold up
+# shutdown, and the binding expires on its own anyway.
+_UNREGISTER_TIMEOUT = 2.0
 
 
 _JITTER_BUFFER_MODES = ("off", "fixed", "adaptive")
@@ -243,6 +250,7 @@ class _SharedRuntime:
         self._settings: _RuntimeSettings | None = None
         self._owners = 0
         self._uas: dict = {}
+        self._ua_users: dict = {}
         self._bindings: dict = {}
         self._pending_tasks: set = set()
 
@@ -326,16 +334,35 @@ class _SharedRuntime:
                     task.add_done_callback(pending.discard)
 
                 ua.on_incoming(route_incoming)
+            self._ua_users[aor] = self._ua_users.get(aor, 0) + 1
             if connection._route_inbound and connection not in connections:
                 connections.append(connection)
             return self._uas[aor]
 
     async def unbind(self, aor: str, connection: "SIPConnection"):
-        """Stop routing inbound calls to a connection."""
+        """Stop routing inbound calls to a connection.
+
+        The account's last connection also unregisters the user agent, so
+        the registrar stops forwarding calls to a bot that is gone. A
+        failed or unanswered unregister is logged and otherwise ignored:
+        the binding expires at the registrar on its own.
+        """
         async with self._lock:
             connections = self._bindings.get(aor)
             if connections and connection in connections:
                 connections.remove(connection)
+            remaining = self._ua_users.get(aor, 0) - 1
+            if remaining > 0:
+                self._ua_users[aor] = remaining
+                return
+            self._ua_users.pop(aor, None)
+            ua = self._uas.pop(aor, None)
+        if ua is None:
+            return
+        try:
+            await ua.unregister(timeout=_UNREGISTER_TIMEOUT)
+        except BaresipError as e:
+            logger.debug(f"SIP unregister of {aor} on disconnect: {e}")
 
 
 async def _reject_quietly(call: Call):
@@ -737,9 +764,9 @@ class SIPConnection(BaseObject):
     async def disconnect(self):
         """Detach from the SIP stack, ending any active call.
 
-        The last connection in the process closes the stack. Safe to call
-        from both transport halves: the work runs once, on the last
-        release.
+        The last connection on the account unregisters it; the last
+        connection in the process closes the stack. Safe to call from both
+        transport halves: the work runs once, on the last release.
         """
         self._connected = False
         # A still-ringing dial's establishment watcher must not fire
