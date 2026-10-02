@@ -125,5 +125,7 @@ class AzureRealtimeLLMService(OpenAIRealtimeLLMService):
             )
             self._receive_task = self.create_task(self._receive_task_handler())
         except Exception as e:
-            await self.push_error(error_msg=f"initialization error: {e}", exception=e)
             self._websocket = None
+            await self.push_error(
+                error_msg=f"initialization error: {e}", exception=e, force_treat_as_permanent=True
+            )

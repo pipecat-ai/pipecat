@@ -19,6 +19,7 @@ from loguru import logger
 from PIL import Image
 from typing_extensions import override
 from websockets.asyncio.client import connect as websocket_connect
+from websockets.exceptions import ConnectionClosed
 
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.adapters.services.open_ai_realtime_adapter import (
@@ -719,8 +720,10 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
             )
             self._receive_task = self.create_task(self._receive_task_handler())
         except Exception as e:
-            await self.push_error(error_msg=f"Error connecting: {e}", exception=e)
             self._websocket = None
+            await self.push_error(
+                error_msg=f"Error connecting: {e}", exception=e, force_treat_as_permanent=True
+            )
 
     async def _disconnect(self):
         try:
@@ -753,7 +756,11 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
             # it is to recover from a send-side error with proper state management, and that exponential
             # backoff for retries can have cost/stability implications for a service cluster, let's just
             # treat a send-side error as fatal.
-            await self.push_error(error_msg=f"Error sending client event: {e}", exception=e)
+            await self.push_error(
+                error_msg=f"Error sending client event: {e}",
+                exception=e,
+                force_treat_as_permanent=True,
+            )
 
     async def _update_settings(self, delta):
         """Apply a settings delta, sending a session update when needed."""
@@ -832,48 +839,53 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
 
     async def _receive_task_handler(self):
         assert self._websocket is not None
-
-        async for message in self._websocket:
-            evt = events.parse_server_event(message)
-            if evt.type == "session.created":
-                await self._handle_evt_session_created(evt)
-            elif evt.type == "session.updated":
-                await self._handle_evt_session_updated(evt)
-            elif evt.type == "response.output_audio.delta":
-                await self._handle_evt_audio_delta(evt)
-            elif evt.type == "conversation.item.added":
-                await self._handle_evt_conversation_item_added(evt)
-            elif evt.type == "conversation.item.done":
-                await self._handle_evt_conversation_item_done(evt)
-            elif evt.type == "conversation.item.input_audio_transcription.delta":
-                await self._handle_evt_input_audio_transcription_delta(evt)
-            elif evt.type == "conversation.item.input_audio_transcription.completed":
-                await self.handle_evt_input_audio_transcription_completed(evt)
-            elif evt.type == "conversation.item.retrieved":
-                await self._handle_conversation_item_retrieved(evt)
-            elif evt.type == "response.done":
-                await self._handle_evt_response_done(evt)
-            elif evt.type == "input_audio_buffer.speech_started":
-                await self._handle_evt_speech_started(evt)
-            elif evt.type == "input_audio_buffer.speech_stopped":
-                await self._handle_evt_speech_stopped(evt)
-            elif evt.type == "response.output_text.delta":
-                await self._handle_evt_text_delta(evt)
-            elif evt.type == "response.output_audio_transcript.delta":
-                await self._handle_evt_audio_transcript_delta(evt)
-            elif evt.type == "response.function_call_arguments.done":
-                await self._handle_evt_function_call_arguments_done(evt)
-            elif evt.type == "error":
-                if not await self._maybe_handle_evt_retrieve_conversation_item_error(evt):
-                    if evt.error.code in (
-                        "response_cancel_not_active",
-                        "conversation_already_has_active_response",
-                    ):
-                        logger.debug(f"{self} {evt.error.message}")
-                    else:
-                        await self._handle_evt_error(evt)
-                        # errors are fatal, so exit the receive loop
-                        return
+        try:
+            async for message in self._websocket:
+                evt = events.parse_server_event(message)
+                if evt.type == "session.created":
+                    await self._handle_evt_session_created(evt)
+                elif evt.type == "session.updated":
+                    await self._handle_evt_session_updated(evt)
+                elif evt.type == "response.output_audio.delta":
+                    await self._handle_evt_audio_delta(evt)
+                elif evt.type == "conversation.item.added":
+                    await self._handle_evt_conversation_item_added(evt)
+                elif evt.type == "conversation.item.done":
+                    await self._handle_evt_conversation_item_done(evt)
+                elif evt.type == "conversation.item.input_audio_transcription.delta":
+                    await self._handle_evt_input_audio_transcription_delta(evt)
+                elif evt.type == "conversation.item.input_audio_transcription.completed":
+                    await self.handle_evt_input_audio_transcription_completed(evt)
+                elif evt.type == "conversation.item.retrieved":
+                    await self._handle_conversation_item_retrieved(evt)
+                elif evt.type == "response.done":
+                    await self._handle_evt_response_done(evt)
+                elif evt.type == "input_audio_buffer.speech_started":
+                    await self._handle_evt_speech_started(evt)
+                elif evt.type == "input_audio_buffer.speech_stopped":
+                    await self._handle_evt_speech_stopped(evt)
+                elif evt.type == "response.output_text.delta":
+                    await self._handle_evt_text_delta(evt)
+                elif evt.type == "response.output_audio_transcript.delta":
+                    await self._handle_evt_audio_transcript_delta(evt)
+                elif evt.type == "response.function_call_arguments.done":
+                    await self._handle_evt_function_call_arguments_done(evt)
+                elif evt.type == "error":
+                    if not await self._maybe_handle_evt_retrieve_conversation_item_error(evt):
+                        if evt.error.code in (
+                            "response_cancel_not_active",
+                            "conversation_already_has_active_response",
+                        ):
+                            logger.debug(f"{self} {evt.error.message}")
+                        else:
+                            await self._handle_evt_error(evt)
+        except ConnectionClosed as e:
+            if not self._disconnecting:
+                await self.push_error(
+                    error_msg=f"Connection closed: {e}",
+                    exception=e,
+                    force_treat_as_permanent=True,
+                )
 
     @traced_openai_realtime(operation="llm_setup")
     async def _handle_evt_session_created(self, evt):
@@ -1149,7 +1161,7 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
         return False
 
     async def _handle_evt_error(self, evt):
-        # Errors are fatal to this connection. Send an ErrorFrame.
+        # The session stays open after an error event. Send an ErrorFrame.
         await self.push_error(error_msg=f"Error: {evt}")
 
     #
