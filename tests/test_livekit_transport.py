@@ -1078,3 +1078,59 @@ class TestLiveKitAudioOutQueueSize(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(call.args, (16000, 1))
         self.assertEqual(call.kwargs["queue_size_ms"], 200)
+
+
+@unittest.skipUnless(LIVEKIT_AVAILABLE, "livekit package not installed")
+class TestLiveKitRtcConfiguration(unittest.IsolatedAsyncioTestCase):
+    """RTC configuration is forwarded to LiveKit when connecting."""
+
+    async def _connect(self, params: LiveKitParams):
+        async def on_event(*args):
+            pass
+
+        callbacks = LiveKitCallbacks(**{name: on_event for name in LiveKitCallbacks.model_fields})
+        client = LiveKitTransportClient(
+            url="wss://test.livekit.cloud",
+            token="test-token",
+            room_name="test-room",
+            params=params,
+            callbacks=callbacks,
+            transport_name="test-transport",
+        )
+        room = MagicMock()
+        room.connect = AsyncMock()
+        room.disconnect = AsyncMock()
+        room.local_participant.identity = "bot"
+        room.local_participant.publish_track = AsyncMock()
+        room.remote_participants = {}
+        client._room = room
+        client._out_sample_rate = 16000
+        source = MagicMock()
+        source.aclose = AsyncMock()
+        with (
+            patch.object(rtc, "AudioSource", return_value=source),
+            patch.object(rtc.LocalAudioTrack, "create_audio_track"),
+        ):
+            try:
+                await client.connect()
+                room.connect.assert_awaited_once()
+                return room.connect.call_args.kwargs["options"]
+            finally:
+                await client.cleanup()
+
+    async def test_relay_only_ice_configuration_reaches_room_connection(self):
+        config = rtc.RtcConfiguration(
+            ice_transport_type=rtc.IceTransportType.TRANSPORT_RELAY,
+            ice_servers=[rtc.IceServer(urls=["turn:turn.example.com:3478"])],
+        )
+
+        options = await self._connect(LiveKitParams(rtc_config=config))
+
+        self.assertEqual(options.rtc_config, config)
+        self.assertTrue(options.auto_subscribe)
+
+    async def test_default_connection_uses_livekit_rtc_defaults(self):
+        options = await self._connect(LiveKitParams())
+
+        self.assertIsNone(options.rtc_config)
+        self.assertTrue(options.auto_subscribe)
