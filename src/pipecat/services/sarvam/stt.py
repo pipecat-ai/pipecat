@@ -16,6 +16,7 @@ server-side endpointing and in-band configuration updates.
 import asyncio
 import base64
 import json
+import time
 import warnings
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field, fields
@@ -49,6 +50,7 @@ from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.errors import ErrorCategory
+from pipecat.utils.network import QuickFailureTracker, exponential_backoff_time
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
@@ -381,9 +383,14 @@ class SarvamSTTService(STTService):
         # merged by the Sarvam SDK's client wrapper and consistently applied to
         # WebSocket handshake requests.
         self._sarvam_client = AsyncSarvamAI(api_subscription_key=api_key, headers=self._sdk_headers)
-        self._websocket_context = None
         self._socket_client = None
-        self._receive_task = None
+        self._connection_task: asyncio.Task | None = None
+        # Set once the first connection attempt has resolved, whether it
+        # connected or failed, so setting the service up waits for it.
+        self._connection_settled = asyncio.Event()
+        # Stops retrying a connection that keeps failing right after it opens
+        # (e.g. a handshake that is refused every time).
+        self._quick_failure_tracker = QuickFailureTracker()
         # Warn only once per unrecognized language code, so a session stuck
         # detecting one unmapped language doesn't spam a warning per turn.
         self._unmapped_language_codes_warned: set[str] = set()
@@ -562,144 +569,170 @@ class SarvamSTTService(STTService):
 
         yield None
 
-    async def _connect(self):
-        """Connect to Sarvam WebSocket API using the SDK."""
-        logger.debug("Connecting to Sarvam")
+    def _build_connect_kwargs(self) -> dict[str, Any]:
+        """Build the SDK ``connect()`` arguments from the current settings."""
+        connect_kwargs: dict[str, Any] = {
+            "model": self._settings.model,
+            "sample_rate": str(self.sample_rate),
+        }
+
+        # Enable flush signal when using Pipecat's VAD (not Sarvam's) so that
+        # the flush() call on user-stopped-speaking is honored by the server.
+        if not self._settings.vad_signals:
+            connect_kwargs["flush_signal"] = "true"
+
+        # Only send vad parameters when explicitly set (avoid overriding server defaults)
+        if self._settings.vad_signals is not None:
+            connect_kwargs["vad_signals"] = "true" if self._settings.vad_signals else "false"
+        if self._settings.high_vad_sensitivity is not None:
+            connect_kwargs["high_vad_sensitivity"] = (
+                "true" if self._settings.high_vad_sensitivity else "false"
+            )
+
+        # Fine-grained VAD parameters (sent as strings per SDK spec)
+        _vad_params = {
+            "positive_speech_threshold": self._settings.positive_speech_threshold,
+            "negative_speech_threshold": self._settings.negative_speech_threshold,
+            "min_speech_frames": self._settings.min_speech_frames,
+            "first_turn_min_speech_frames": self._settings.first_turn_min_speech_frames,
+            "negative_frames_count": self._settings.negative_frames_count,
+            "negative_frames_window": self._settings.negative_frames_window,
+            "start_speech_volume_threshold": self._settings.start_speech_volume_threshold,
+            "interrupt_min_speech_frames": self._settings.interrupt_min_speech_frames,
+            "pre_speech_pad_frames": self._settings.pre_speech_pad_frames,
+            "num_initial_ignored_frames": self._settings.num_initial_ignored_frames,
+        }
+        for k, v in _vad_params.items():
+            if v is not None:
+                connect_kwargs[k] = str(v)
+
+        # Add language_code for models that support it
+        language_string = self._get_language_string()
+        if language_string is not None:
+            connect_kwargs["language_code"] = language_string
+
+        # Add mode for models that support it
+        if self._config.supports_mode and self._mode is not None:
+            connect_kwargs["mode"] = self._mode
+
+        return connect_kwargs
+
+    def _open_socket(self):
+        """Return the SDK's async context manager for a new connection."""
+        connect_kwargs = self._build_connect_kwargs()
+
+        # Headers are supplied through request_options because this is a
+        # documented SDK parameter that survives SDK signature changes.
+        request_options: RequestOptions = {"additional_headers": self._sdk_headers}
+        if self._keyterms is not None:
+            request_options["additional_query_parameters"] = {
+                "keyterms": json.dumps(self._keyterms)
+            }
 
         try:
-            # Build common connection parameters
-            connect_kwargs = {
-                "model": self._settings.model,
-                "sample_rate": str(self.sample_rate),
-            }
-
-            # Enable flush signal when using Pipecat's VAD (not Sarvam's) so that
-            # the flush() call on user-stopped-speaking is honored by the server.
-            if not self._settings.vad_signals:
-                connect_kwargs["flush_signal"] = "true"
-
-            # Only send vad parameters when explicitly set (avoid overriding server defaults)
-            if self._settings.vad_signals is not None:
-                connect_kwargs["vad_signals"] = "true" if self._settings.vad_signals else "false"
-            if self._settings.high_vad_sensitivity is not None:
-                connect_kwargs["high_vad_sensitivity"] = (
-                    "true" if self._settings.high_vad_sensitivity else "false"
-                )
-
-            # Fine-grained VAD parameters (sent as strings per SDK spec)
-            _vad_params = {
-                "positive_speech_threshold": self._settings.positive_speech_threshold,
-                "negative_speech_threshold": self._settings.negative_speech_threshold,
-                "min_speech_frames": self._settings.min_speech_frames,
-                "first_turn_min_speech_frames": self._settings.first_turn_min_speech_frames,
-                "negative_frames_count": self._settings.negative_frames_count,
-                "negative_frames_window": self._settings.negative_frames_window,
-                "start_speech_volume_threshold": self._settings.start_speech_volume_threshold,
-                "interrupt_min_speech_frames": self._settings.interrupt_min_speech_frames,
-                "pre_speech_pad_frames": self._settings.pre_speech_pad_frames,
-                "num_initial_ignored_frames": self._settings.num_initial_ignored_frames,
-            }
-            for k, v in _vad_params.items():
-                if v is not None:
-                    connect_kwargs[k] = str(v)
-
-            # Add language_code for models that support it
-            language_string = self._get_language_string()
-            if language_string is not None:
-                connect_kwargs["language_code"] = language_string
-
-            # Add mode for models that support it
-            if self._config.supports_mode and self._mode is not None:
-                connect_kwargs["mode"] = self._mode
-
-            # Headers are supplied through request_options because this is a
-            # documented SDK parameter that survives SDK signature changes.
-            request_options: RequestOptions = {"additional_headers": self._sdk_headers}
+            return self._sarvam_client.speech_to_text_streaming.connect(
+                **connect_kwargs,
+                request_options=request_options,
+            )
+        except TypeError:
             if self._keyterms is not None:
-                request_options["additional_query_parameters"] = {
-                    "keyterms": json.dumps(self._keyterms)
-                }
+                raise
+            # Fallback for SDK builds that don't expose request_options.
+            return self._sarvam_client.speech_to_text_streaming.connect(**connect_kwargs)
 
-            try:
-                self._websocket_context = self._sarvam_client.speech_to_text_streaming.connect(
-                    **connect_kwargs,
-                    request_options=request_options,
-                )
-            except TypeError:
-                if self._keyterms is not None:
-                    raise
-                # Fallback for SDK builds that don't expose request_options.
-                self._websocket_context = self._sarvam_client.speech_to_text_streaming.connect(
-                    **connect_kwargs
-                )
-
-            # Enter the async context manager
-            self._socket_client = await self._websocket_context.__aenter__()
-
-            # Register event handler for incoming messages
-            def _message_handler(message):
-                """Wrapper to handle async response handler."""
-                # Use Pipecat's built-in task management
-                self.create_task(self._handle_message(message))
-
-            self._socket_client.on(EventType.MESSAGE, _message_handler)
-
-            # Start receive task using Pipecat's task management
-            self._receive_task = self.create_task(self._receive_task_handler())
-
-            self._create_keepalive_task()
-
-            logger.info("Connected to Sarvam successfully")
-
-        except ApiError as e:
-            self._socket_client = None
-            self._websocket_context = None
-            await self.push_error(error_msg=f"Sarvam API error: {e}", exception=e)
-        except Exception as e:
-            self._socket_client = None
-            self._websocket_context = None
-            await self.push_error(error_msg=f"Failed to connect to Sarvam: {e}", exception=e)
+    async def _connect(self):
+        """Start the connection task and wait until its first attempt resolves."""
+        logger.debug("Connecting to Sarvam")
+        self._quick_failure_tracker.reset()
+        self._connection_settled.clear()
+        self._connection_task = self.create_task(self._connection_handler())
+        self._create_keepalive_task()
+        await self._connection_settled.wait()
 
     async def _disconnect(self):
-        """Disconnect from Sarvam WebSocket API using SDK."""
+        """Stop the connection task, closing the socket."""
         await self._cancel_keepalive_task()
 
-        if self._receive_task:
-            await self.cancel_task(self._receive_task)
-            self._receive_task = None
-
-        # Clear references first to prevent run_stt from sending audio
-        # during the close handshake.
-        socket_client = self._socket_client
-        websocket_context = self._websocket_context
-        self._socket_client = None
-        self._websocket_context = None
-
-        if websocket_context and socket_client:
-            try:
-                await websocket_context.__aexit__(None, None, None)
-            except Exception as e:
-                await self.push_error(
-                    error_msg=f"Error closing WebSocket connection: {e}", exception=e
-                )
-            finally:
-                logger.debug("Disconnected from Sarvam WebSocket")
-
-    async def _receive_task_handler(self):
-        """Handle incoming messages from Sarvam WebSocket.
-
-        This task wraps the SDK's start_listening() method which processes
-        messages via the registered event handler callback.
-        """
-        if not self._socket_client:
+        if not self._connection_task:
             return
 
+        # Clear the client first to prevent run_stt from sending audio
+        # during the close handshake.
+        self._socket_client = None
+        await self.cancel_task(self._connection_task)
+        self._connection_task = None
+        logger.debug("Disconnected from Sarvam WebSocket")
+
+    async def _connection_handler(self):
+        """Own the socket for the life of the service, reconnecting when it drops.
+
+        The SDK's ``start_listening()`` returns, rather than raising, when the
+        socket closes, so its return outside of ``_disconnect()`` is a dropped
+        connection. A connection that had been up for a while is reopened at
+        once; quick failures back off exponentially, and enough of them in a row
+        give up. A 4xx ``ApiError`` (e.g. an invalid API key rejected at the
+        handshake) gives up at once. Giving up leaves the service unusable, so a
+        ``ServiceSwitcher`` can move off it.
+        """
         try:
-            # Start listening for messages from the Sarvam SDK
-            # Messages will be handled via the _message_handler callback
-            await self._socket_client.start_listening()
-        except Exception as e:
-            await self.push_error(error_msg=f"Sarvam receive task error: {e}", exception=e)
+            while True:
+                connected_at = None
+                close_errors: list[Exception] = []
+                try:
+                    async with self._open_socket() as socket_client:
+                        connected_at = time.monotonic()
+
+                        def _message_handler(message):
+                            self.create_task(self._handle_message(message))
+
+                        socket_client.on(EventType.MESSAGE, _message_handler)
+                        socket_client.on(EventType.ERROR, close_errors.append)
+
+                        self._socket_client = socket_client
+                        self._connection_settled.set()
+                        logger.info("Connected to Sarvam successfully")
+                        await self._call_event_handler("on_connected")
+
+                        await socket_client.start_listening()
+
+                    reason = close_errors[0] if close_errors else "closed by the server"
+                    logger.warning(f"{self}: connection lost ({reason}), reconnecting")
+                except ApiError as e:
+                    # ApiError's str() includes the request headers, which carry
+                    # the API key, so only the status and body are reported.
+                    msg = f"Sarvam rejected the connection (status {e.status_code}): {e.body}"
+                    await self._call_event_handler("on_connection_error", msg)
+                    if e.status_code is not None and 400 <= e.status_code < 500:
+                        await self.push_error(error_msg=msg, force_treat_as_permanent=True)
+                        return
+                    await self.push_error(error_msg=msg)
+                except Exception as e:
+                    await self._call_event_handler("on_connection_error", str(e))
+                    await self.push_error(error_msg=f"Sarvam connection error: {e}", exception=e)
+                finally:
+                    self._socket_client = None
+                    if connected_at is not None:
+                        await self._call_event_handler("on_disconnected")
+
+                # How long the connection lasted, which is nothing at all when
+                # the handshake never completed.
+                uptime = time.monotonic() - connected_at if connected_at is not None else 0.0
+                if self._quick_failure_tracker.record(uptime).should_give_up:
+                    msg = (
+                        "Sarvam connection failed to stay up "
+                        f"{self._quick_failure_tracker.max_consecutive_failures} times in a row"
+                    )
+                    await self.push_error(error_msg=msg, force_treat_as_permanent=True)
+                    return
+                # Retries happen in the background, so a failed first attempt
+                # doesn't hold up the pipeline start.
+                self._connection_settled.set()
+                if self._quick_failure_tracker.count:
+                    await asyncio.sleep(exponential_backoff_time(self._quick_failure_tracker.count))
+        finally:
+            # Nothing further will be attempted, so whoever is waiting for the
+            # service to connect can stop waiting.
+            self._connection_settled.set()
 
     async def _handle_message(self, message):
         """Handle incoming WebSocket message from Sarvam SDK.
