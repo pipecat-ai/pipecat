@@ -50,6 +50,8 @@ from pipecat.frames.frames import (
     TranslationFrame,
     TTSStartedFrame,
     TTSTextFrame,
+    UserFileRawFrame,
+    UserImageRawFrame,
     UserMuteStartedFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
@@ -2256,6 +2258,153 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
             expected_up_frames=expected_up_frames,
         )
         assert context.messages[0]["content"] == "Hi there!"
+
+    async def test_user_file_frame_run_llm_false_does_not_run(self):
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+
+        await run_test(
+            aggregator,
+            frames_to_send=[
+                UserFileRawFrame(
+                    file="data:application/pdf;base64,abc123",
+                    type="bytes",
+                    filename="doc.pdf",
+                    format="application/pdf",
+                    append_to_context=True,
+                    run_llm=False,
+                )
+            ],
+            frames_to_send_direction=FrameDirection.UPSTREAM,
+            expected_up_frames=[],  # no LLMContextFrame expected, run_llm=False
+        )
+        assert len(context.messages) == 1
+
+    async def test_user_file_frame_run_llm_default_runs(self):
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+
+        expected_up_frames = [LLMContextFrame]
+        await run_test(
+            aggregator,
+            frames_to_send=[
+                UserFileRawFrame(
+                    file="data:application/pdf;base64,abc123",
+                    type="bytes",
+                    filename="doc.pdf",
+                    format="application/pdf",
+                    append_to_context=True,
+                )
+            ],
+            frames_to_send_direction=FrameDirection.UPSTREAM,
+            expected_up_frames=expected_up_frames,
+        )
+        assert len(context.messages) == 1
+
+    async def test_user_file_frame_lands_after_in_progress_assistant_text(self):
+        """A file arriving mid-reply commits the partial assistant text first.
+
+        The order matters beyond chronology: remove_invalid_file_message()
+        only considers messages after the last assistant message, so a file
+        written before a later-committed assistant message could never be
+        cleaned up if the provider rejects it.
+        """
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+
+        await run_test(
+            aggregator,
+            frames_to_send=[
+                LLMFullResponseStartFrame(),
+                LLMTextFrame("I was saying..."),
+                # The file frame is a SystemFrame and would jump the priority
+                # queue; the sleep lets the text land first, as it would have
+                # in a real mid-reply arrival.
+                SleepFrame(),
+                UserFileRawFrame(
+                    file="data:application/pdf;base64,abc123",
+                    type="bytes",
+                    filename="doc.pdf",
+                    format="application/pdf",
+                    append_to_context=True,
+                    run_llm=False,
+                ),
+            ],
+        )
+
+        roles = [m["role"] for m in context.messages]
+        assert roles == ["assistant", "user"]
+        assert context.messages[0]["content"] == "I was saying..."
+        assert context.messages[1]["content"][0]["type"] == "file_base64"
+
+    async def test_mid_turn_flush_pushes_no_frames(self):
+        """Committing held text ahead of a file message is context-only: the
+        turn's context and timestamp frames belong to its real end, not to
+        the flush."""
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+
+        received_down, _ = await run_test(
+            aggregator,
+            frames_to_send=[
+                LLMFullResponseStartFrame(),
+                LLMTextFrame("I was saying..."),
+                SleepFrame(),
+                UserFileRawFrame(
+                    file="data:application/pdf;base64,abc123",
+                    type="bytes",
+                    filename="doc.pdf",
+                    format="application/pdf",
+                    append_to_context=True,
+                    run_llm=False,
+                ),
+            ],
+        )
+
+        assert not any(
+            isinstance(f, (LLMContextFrame, LLMContextAssistantTimestampFrame))
+            for f in received_down
+        )
+
+    async def test_user_image_frame_run_llm_false_does_not_run(self):
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+
+        await run_test(
+            aggregator,
+            frames_to_send=[
+                UserImageRawFrame(
+                    image=b"\x00" * 3,
+                    size=(1, 1),
+                    format="RGB",
+                    append_to_context=True,
+                    run_llm=False,
+                )
+            ],
+            frames_to_send_direction=FrameDirection.UPSTREAM,
+            expected_up_frames=[],  # no LLMContextFrame expected, run_llm=False
+        )
+        assert len(context.messages) == 1
+
+    async def test_user_image_frame_run_llm_default_runs(self):
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+
+        expected_up_frames = [LLMContextFrame]
+        await run_test(
+            aggregator,
+            frames_to_send=[
+                UserImageRawFrame(
+                    image=b"\x00" * 3,
+                    size=(1, 1),
+                    format="RGB",
+                    append_to_context=True,
+                )
+            ],
+            frames_to_send_direction=FrameDirection.UPSTREAM,
+            expected_up_frames=expected_up_frames,
+        )
+        assert len(context.messages) == 1
 
     async def test_llm_messages_update(self):
         context = LLMContext()

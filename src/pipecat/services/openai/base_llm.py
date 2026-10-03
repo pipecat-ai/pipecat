@@ -19,16 +19,20 @@ from openai import (
     NOT_GIVEN as OPENAI_NOT_GIVEN,
 )
 from openai import (
+    APIStatusError,
     APITimeoutError,
     AsyncOpenAI,
     AsyncStream,
+    BadRequestError,
     DefaultAsyncHttpxClient,
+    UnprocessableEntityError,
 )
 from openai._types import NotGiven as OpenAINotGiven
 from openai.types import CompletionUsage
 from openai.types.chat import ChatCompletionChunk
 from pydantic import BaseModel, Field
 
+from pipecat.adapters.base_llm_adapter import LLMContextConversionError
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter, OpenAILLMInvocationParams
 from pipecat.frames.frames import (
     Frame,
@@ -686,8 +690,28 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
             except TIMEOUT_EXCEPTIONS as e:
                 await self._call_event_handler("on_completion_timeout")
                 await self.push_error(error_msg="LLM completion timeout", exception=e)
+            except LLMContextConversionError as e:
+                await self.push_error(error_msg=str(e), exception=e)
+                # A conversion failure (e.g. an unsupported file MIME type, corrupt
+                # base64 data) can't reach the API at all, but is just as much
+                # evidence of an invalid file as a rejection from OpenAI itself, so
+                # it gets the same best-effort cleanup.
+                frame.context.remove_invalid_file_message()
             except Exception as e:
                 await self.push_error(error_msg=f"Error during completion: {e}", exception=e)
+                # Only the payload-shaped errors (bad request, unprocessable
+                # content, payload too large — the latter has no dedicated
+                # OpenAI exception class, so match its status code) are
+                # grounds to remove a pending file message on a best-effort
+                # basis. The rest of the 4xx range — auth, permissions,
+                # not-found, rate limiting — says nothing about whether our
+                # request (or its file) was bad, and removing the file there
+                # would discard it for no benefit: the file isn't what needs
+                # fixing before the next retry can succeed.
+                if isinstance(e, (BadRequestError, UnprocessableEntityError)) or (
+                    isinstance(e, APIStatusError) and e.status_code == 413
+                ):
+                    frame.context.remove_invalid_file_message()
             finally:
                 await self.stop_processing_metrics()
                 await self.push_frame(LLMFullResponseEndFrame())
