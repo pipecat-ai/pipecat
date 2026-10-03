@@ -398,7 +398,8 @@ class LatencyBreakdown(BaseModel):
 
     Collected between ``VADUserStoppedSpeakingFrame`` and
     ``BotStartedSpeakingFrame`` when ``enable_metrics=True`` in
-    :class:`~pipecat.pipeline.worker.PipelineParams`.
+    :class:`~pipecat.pipeline.worker.PipelineParams`. Also includes STT
+    metrics from the current user turn that arrive before VAD stop.
 
     Parameters:
         ttfb: Time-to-first-byte metrics from each service in the pipeline.
@@ -602,6 +603,13 @@ class UserBotLatencyObserver(BaseObserver):
         self._function_call_starts: dict[str, tuple[str, float]] = {}
         self._function_call_metrics: list[FunctionCallMetrics] = []
 
+        # Streaming STT can reach its own endpoint before VAD has accumulated
+        # enough silence to emit VADUserStoppedSpeakingFrame. Keep events from
+        # that current user turn until VAD opens the measurement window.
+        self._awaiting_vad_stop = False
+        self._pre_vad_stop_transcript_source: str | None = None
+        self._pre_vad_stop_ttfb: dict[str, TTFBBreakdownMetrics] = {}
+
         self._register_event_handler("on_latency_measured")
         self._register_event_handler("on_latency_breakdown")
         self._register_event_handler("on_first_bot_speech_latency")
@@ -644,6 +652,7 @@ class UserBotLatencyObserver(BaseObserver):
             self._user_turn_start_time = None
             self._user_turn = None
             self._reset_accumulators()
+            self._awaiting_vad_stop = True
             # If user speaks before the bot's first speech, abandon the
             # first-bot-speech measurement — it's only meaningful for greetings.
             self._first_bot_speech_measured = True
@@ -654,6 +663,8 @@ class UserBotLatencyObserver(BaseObserver):
             self._user_stopped_time = data.frame.timestamp - data.frame.stop_secs
             self._user_turn_start_time = self._user_stopped_time
             self._mark(_MomentKind.VAD_STOP, at=data.frame.timestamp)
+            self._flush_pre_vad_stop_events(data.frame.timestamp)
+            self._awaiting_vad_stop = False
         elif isinstance(data.frame, UserStoppedSpeakingFrame):
             # Measure the user turn duration: from actual user silence to
             # turn release. Includes VAD silence detection, STT finalization,
@@ -666,9 +677,16 @@ class UserBotLatencyObserver(BaseObserver):
             # service stops its own TTFB clock, so a later one replaces the
             # earlier until the LLM is asked.
             if not self._seen(_MomentKind.LLM_REQUEST):
-                self._moments = [m for m in self._moments if m.kind is not _MomentKind.TRANSCRIPT]
-                self._mark(_MomentKind.TRANSCRIPT, source=data.source.name)
+                if self._measuring:
+                    self._collect_pre_vad_stop_ttfb(data.source.name)
+                    self._moments = [
+                        m for m in self._moments if m.kind is not _MomentKind.TRANSCRIPT
+                    ]
+                    self._mark(_MomentKind.TRANSCRIPT, source=data.source.name)
+                elif self._awaiting_vad_stop:
+                    self._pre_vad_stop_transcript_source = data.source.name
         elif isinstance(data.frame, LLMFullResponseStartFrame):
+            self._pre_vad_stop_ttfb.clear()
             self._llm_request = self._mark(_MomentKind.LLM_REQUEST, source=data.source.name)
         elif isinstance(data.frame, LLMMarkerFrame):
             # A stand-alone marker holds the turn open; one that prefixes a
@@ -1011,6 +1029,19 @@ class UserBotLatencyObserver(BaseObserver):
             self._client_connected_time is not None and not self._first_bot_speech_measured
         )
         if self._user_stopped_time is None and not waiting_for_first_speech:
+            if self._awaiting_vad_stop:
+                # Keep at most one candidate per processor. A transcript
+                # identifies which processor's TTFB belongs to this turn;
+                # late LLM/TTS metrics from an interrupted reply do not.
+                now = self._now()
+                for metric in frame.data:
+                    if isinstance(metric, TTFBMetricsData) and metric.value > 0:
+                        self._pre_vad_stop_ttfb[metric.processor] = TTFBBreakdownMetrics(
+                            processor=metric.processor,
+                            model=metric.model,
+                            start_time=now - metric.value,
+                            duration_secs=metric.value,
+                        )
             return
 
         now = self._now()
@@ -1044,6 +1075,25 @@ class UserBotLatencyObserver(BaseObserver):
                         duration_secs=metrics_data.value,
                     )
 
+    def _flush_pre_vad_stop_events(self, vad_stop_time: float):
+        """Place an early transcript at VAD stop without adding latency.
+
+        Endpointing and streaming STT run concurrently. A transcript already
+        available at VAD stop adds no transcription wait to the critical path;
+        its service's TTFB retains the original measurement timestamp.
+        """
+        source = self._pre_vad_stop_transcript_source
+        if source is not None:
+            self._mark(_MomentKind.TRANSCRIPT, at=vad_stop_time, source=source)
+            self._collect_pre_vad_stop_ttfb(source)
+        self._pre_vad_stop_transcript_source = None
+
+    def _collect_pre_vad_stop_ttfb(self, source: str):
+        """Collect an early TTFB only for the processor supplying a transcript."""
+        metric = self._pre_vad_stop_ttfb.pop(source, None)
+        if metric is not None:
+            self._ttfb.append(metric)
+
     def _reset_accumulators(self):
         """Clear per-cycle metric accumulators."""
         self._moments = []
@@ -1054,3 +1104,5 @@ class UserBotLatencyObserver(BaseObserver):
         self._user_turn = None
         self._function_call_starts = {}
         self._function_call_metrics = []
+        self._pre_vad_stop_transcript_source = None
+        self._pre_vad_stop_ttfb = {}
