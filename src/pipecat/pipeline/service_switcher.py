@@ -16,6 +16,7 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     ManuallySwitchServiceFrame,
+    PipelineFlushFrame,
     ServiceMetadataFrame,
     ServiceSwitcherFrame,
     ServiceSwitcherRequestMetadataFrame,
@@ -252,11 +253,14 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
     `ServiceSwitcherFrame` frames and delegated to a pluggable
     `ServiceSwitcherStrategy`.
 
-    `ServiceUpdateSettingsFrame` is the exception to the gating. A settings
+    `ServiceUpdateSettingsFrame` can bypass the gating. A settings
     update addressed to a member service (``service=``) reaches it whether or
     not it is active, and one marked ``reach_inactive_services`` reaches every
     member, so whichever service becomes active later is already configured. Any
     other settings update applies to the active service alone.
+
+    `PipelineFlushFrame` visits every service so a drain also waits for work
+    queued before a service became inactive.
 
     Example::
 
@@ -370,8 +374,10 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
     def _make_pipeline_definition(
         service: FrameProcessor, strategy: ServiceSwitcherStrategy
     ) -> Any:
-        async def filter(_: Frame) -> bool:
-            return service == strategy.active_service
+        async def filter(frame: Frame) -> bool:
+            # A drain must visit every branch, including services with work
+            # queued before they became inactive.
+            return isinstance(frame, PipelineFlushFrame) or service == strategy.active_service
 
         # Layout: Filter → Service → Filter
         #
