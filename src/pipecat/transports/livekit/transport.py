@@ -1177,23 +1177,25 @@ class LiveKitInputTransport(BaseInputTransport):
         logger.info("Audio input task started")
         audio_iterator = self._client.get_next_audio_frame()
         async for audio_data in audio_iterator:
-            if audio_data:
-                audio_frame_event, participant_id = audio_data
-                pipecat_audio_frame = await self._convert_livekit_audio_to_pipecat(
-                    audio_frame_event, participant_id
-                )
+            if not audio_data:
+                continue
+            audio_frame_event, participant_id = audio_data
 
-                # Skip frames with no audio data
-                if len(pipecat_audio_frame.audio) == 0:
-                    continue
+            pipecat_audio_frame = await self._convert_livekit_audio_to_pipecat(
+                audio_frame_event, participant_id
+            )
 
-                input_audio_frame = UserAudioRawFrame(
-                    user_id=participant_id,
-                    audio=pipecat_audio_frame.audio,
-                    sample_rate=pipecat_audio_frame.sample_rate,
-                    num_channels=pipecat_audio_frame.num_channels,
-                )
-                await self.push_audio_frame(input_audio_frame)
+            # Skip frames with no audio data
+            if len(pipecat_audio_frame.audio) == 0:
+                continue
+
+            input_audio_frame = UserAudioRawFrame(
+                user_id=participant_id,
+                audio=pipecat_audio_frame.audio,
+                sample_rate=pipecat_audio_frame.sample_rate,
+                num_channels=pipecat_audio_frame.num_channels,
+            )
+            await self.push_audio_frame(input_audio_frame)
 
     async def _video_in_task_handler(self):
         """Handle incoming video frames from participants."""
