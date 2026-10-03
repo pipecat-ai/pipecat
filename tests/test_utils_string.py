@@ -277,6 +277,22 @@ class TestStartEndTags(unittest.IsolatedAsyncioTestCase):
             41,
         )
 
+    async def test_later_pair_detected_when_first_is_absent(self):
+        # Regression: the loop over the tag pairs used to return as soon as one
+        # pair did not appear in the text, so a tag from a later pair was never
+        # detected when an earlier pair was absent.
+        tags = [("<spell>", "</spell>"), ("<think>", "</think>")]
+
+        text = "Please think <think>about this"
+        assert parse_start_end_tags(text, tags, None, 0) == (
+            ("<think>", "</think>"),
+            len(text),
+        )
+
+        # A fully balanced later pair is consumed just like a first pair would be.
+        text = "Let me <think>think</think> now"
+        assert parse_start_end_tags(text, tags, None, 0) == (None, len(text))
+
 
 class TestLongestTrailingPartialMatch(unittest.IsolatedAsyncioTestCase):
     async def test_empty_and_no_match(self):
