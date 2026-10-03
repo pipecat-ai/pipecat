@@ -81,21 +81,18 @@ def test_token_provider_is_accepted_without_an_api_key():
     assert service.api_key is None
 
 
-def test_voice_shorthand_populates_session_properties():
-    service = _service(voice="en-US-Andrew:DragonHDLatestNeural")
+def test_the_default_session_speaks_with_an_azure_voice():
+    service = _service()
 
+    assert service._settings.model == "gpt-4o-mini"
     voice = service._settings.session_properties.voice
     assert isinstance(voice, events.AzureStandardVoice)
-    assert voice.name == "en-US-Andrew:DragonHDLatestNeural"
+    assert voice.name == "en-US-Ava:DragonHDLatestNeural"
 
 
-@pytest.mark.parametrize("model_in_settings", [False, True], ids=["model-argument", "settings"])
-def test_azure_realtime_is_left_to_pick_its_own_voice(model_in_settings):
+def test_azure_realtime_is_left_to_pick_its_own_voice():
     """`azure-realtime` rejects Azure standard voices and picks a native one when none is sent."""
-    if model_in_settings:
-        service = _service(settings=AzureVoiceLiveLLMService.Settings(model="azure-realtime"))
-    else:
-        service = _service(model="azure-realtime")
+    service = _service(settings=AzureVoiceLiveLLMService.Settings(model="azure-realtime"))
 
     assert service._settings.session_properties.voice is None
 
@@ -134,7 +131,7 @@ def test_manual_mode_matches_what_the_session_update_sends(session_kwargs, manua
 @pytest.mark.asyncio
 async def test_a_model_update_is_reported_as_unsupported():
     """The model is fixed by the connection URL, so an update can't take effect."""
-    service = _service(model="gpt-4o-mini")
+    service = _service()
     sent = []
 
     async def _record(event):
@@ -163,7 +160,7 @@ async def test_a_model_update_is_reported_as_unsupported():
 @pytest.mark.asyncio
 async def test_a_text_only_session_update_leaves_out_the_voice(modalities, sends_voice):
     """Voice Live rejects a repeated update naming a voice when audio is off."""
-    service = _service(voice="en-US-Ava:DragonHDLatestNeural")
+    service = _service()
     service._settings.session_properties.modalities = modalities
     sent = []
 
@@ -405,7 +402,7 @@ async def _noop(*args, **kwargs):
 
 def test_session_properties_in_an_update_set_the_top_level_fields():
     """``session_properties`` replaces the stored one, and its values reach the top level."""
-    service = _service(model="gpt-4o-mini")
+    service = _service()
     settings = service._settings
 
     changed = settings.apply_update(

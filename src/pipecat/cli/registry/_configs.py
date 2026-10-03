@@ -650,8 +650,8 @@ SERVICE_CONFIGS = {
         "llm = AzureVoiceLiveLLMService(\n"
         '    api_key=os.getenv("AZURE_VOICE_LIVE_API_KEY"),\n'
         '    endpoint=os.getenv("AZURE_VOICE_LIVE_ENDPOINT"),\n'
-        '    model="gpt-4o-mini",\n'
         "    settings=AzureVoiceLiveLLMService.Settings(\n"
+        '        model="gpt-4o-mini",\n'
         "        session_properties=session_properties,\n"
         '        system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can\'t be spoken. Respond to what the user said in a creative, helpful, and brief way.",\n'
         "    ),\n"

@@ -245,8 +245,7 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
         llm = AzureVoiceLiveLLMService(
             api_key=os.getenv("AZURE_VOICE_LIVE_API_KEY"),
             endpoint=os.getenv("AZURE_VOICE_LIVE_ENDPOINT"),
-            model="gpt-4o-mini",
-            voice="en-US-Ava:DragonHDLatestNeural",
+            settings=AzureVoiceLiveLLMService.Settings(model="gpt-4o-mini"),
         )
 
     For full control over session properties (note: ``session_properties``
@@ -290,8 +289,6 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
         endpoint: str,
         api_key: str | None = None,
         token_provider: AzureTokenProvider | None = None,
-        model: str = "gpt-4o-mini",
-        voice: str | None = None,
         api_version: str = DEFAULT_API_VERSION,
         settings: Settings | None = None,
         start_audio_paused: bool = False,
@@ -311,17 +308,14 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
                 token, used instead of ``api_key`` when given. Build one with
                 :func:`azure.identity.aio.get_bearer_token_provider` and the
                 ``https://ai.azure.com/.default`` scope.
-            model: Model backing the session, e.g. "gpt-4o-mini" or
-                "gpt-realtime". Sent as a query parameter on the connection.
-            voice: Azure text to speech voice for audio responses, e.g.
-                "en-US-Ava:DragonHDLatestNeural". Shorthand for
-                ``session_properties.voice``. Defaults to
-                "en-US-Ava:DragonHDLatestNeural", except for ``azure-realtime``,
-                which picks one of its own native voices.
             api_version: Voice Live API version to request.
-            settings: Full settings for fine-grained control. When
-                ``session_properties`` is provided in settings, it **replaces**
-                all defaults wholesale — provide a complete ``SessionProperties``
+            settings: Runtime-updatable settings. ``model`` defaults to
+                "gpt-4o-mini" and is sent as a query parameter on the
+                connection, so it is fixed for the session. The default voice
+                is "en-US-Ava:DragonHDLatestNeural", except for
+                ``azure-realtime``, which picks one of its own native voices.
+                When ``session_properties`` is provided, it **replaces** all
+                defaults wholesale — provide a complete ``SessionProperties``
                 in that case.
             start_audio_paused: Whether to start with audio input paused.
             **kwargs: Additional arguments passed to parent LLMService.
@@ -332,10 +326,11 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
         if api_key is None and token_provider is None:
             raise ValueError("Either `api_key` or `token_provider` is required.")
 
-        default_voice = events.AzureStandardVoice(name=voice or "en-US-Ava:DragonHDLatestNeural")
+        default_model = "gpt-4o-mini"
+        default_voice = events.AzureStandardVoice(name="en-US-Ava:DragonHDLatestNeural")
 
         default_settings = self.Settings(
-            model=model,
+            model=default_model,
             system_instruction=None,
             temperature=None,
             max_tokens=None,
@@ -347,7 +342,7 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
             filter_incomplete_user_turns=False,
             user_turn_completion_config=None,
             session_properties=events.SessionProperties(
-                model=model,
+                model=default_model,
                 modalities=["text", "audio"],
                 voice=default_voice,
                 input_audio_format="pcm16",
@@ -371,8 +366,7 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
         # native voices when the session names none.
         props = default_settings.session_properties
         if (
-            voice is None
-            and is_given(props)
+            is_given(props)
             and props.voice is default_voice
             and str(default_settings.model).startswith("azure-realtime")
         ):
@@ -390,9 +384,8 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
         self.base_url = base_url
         self._token_provider = token_provider
         self._api_version = api_version
-        # The connection URL selects the model, so take it after the settings
-        # delta has been applied: a model given only through `settings` wins.
-        self._model = assert_given(self._settings.model) or model
+        # The connection URL selects the model, so it is fixed for the session.
+        self._model = assert_given(self._settings.model) or default_model
 
         self._audio_input_paused = start_audio_paused
         self._audio_send_logged = False

@@ -97,8 +97,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm = AzureVoiceLiveLLMService(
         api_key=os.environ["AZURE_VOICE_LIVE_API_KEY"],
         endpoint=os.environ["AZURE_VOICE_LIVE_ENDPOINT"],
-        model="gpt-4o-mini",
         settings=AzureVoiceLiveLLMService.Settings(
+            model="gpt-4o-mini",
             system_instruction="""You are a helpful and friendly AI.
 
 Act like a human, but remember that you aren't a human and that you can't do human
