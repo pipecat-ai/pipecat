@@ -342,16 +342,9 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
             filter_incomplete_user_turns=False,
             user_turn_completion_config=None,
             session_properties=events.SessionProperties(
-                model=default_model,
                 modalities=["text", "audio"],
                 voice=default_voice,
-                input_audio_format="pcm16",
-                output_audio_format="pcm16",
-                turn_detection=events.TurnDetection(
-                    type="azure_semantic_vad",
-                    create_response=True,
-                    interrupt_response=True,
-                ),
+                turn_detection=events.TurnDetection(type="azure_semantic_vad"),
                 input_audio_transcription=events.InputAudioTranscription(model="azure-speech"),
                 input_audio_noise_reduction=events.InputAudioNoiseReduction(),
             ),
@@ -386,6 +379,7 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
         self._api_version = api_version
         # The connection URL selects the model, so it is fixed for the session.
         self._model = assert_given(self._settings.model) or default_model
+        self._warn_if_caller_is_not_transcribed()
 
         self._audio_input_paused = start_audio_paused
         self._audio_send_logged = False
@@ -569,12 +563,30 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
     # Standard AIService frame handling
     #
 
+    def _warn_if_caller_is_not_transcribed(self):
+        """Warn when the session properties leave out caller transcription.
+
+        The caller's turns reach the context as transcripts, so without
+        ``input_audio_transcription`` they are missing from the conversation
+        history, including the history ``reset_conversation`` sends to the new
+        session. Setting it to ``None`` explicitly opts out of the warning.
+        """
+        props = self._settings.session_properties
+        if is_given(props) and "input_audio_transcription" not in props.model_fields_set:
+            logger.warning(
+                f"{self}: session_properties has no input_audio_transcription, so the "
+                f"caller's turns won't be added to the context. Set it (e.g. "
+                f'InputAudioTranscription(model="azure-speech")), or set it to None '
+                f"to disable transcription without this warning."
+            )
+
     def _ensure_audio_config(self, input_sample_rate: int, output_sample_rate: int):
         """Sync the session's audio formats with the transport's sample rates.
 
-        Voice Live takes the input rate directly but selects the output rate
-        through the output format, so an unsupported output rate falls back to
-        the 24 kHz default.
+        Audio frames carry 16-bit PCM in both directions, so both formats are
+        PCM whatever the session properties name. Voice Live takes the input
+        rate directly but selects the output rate through the output format,
+        so an unsupported output rate falls back to the 24 kHz default.
 
         Args:
             input_sample_rate: Sample rate for audio input (Hz).
@@ -582,9 +594,14 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
         """
         self._input_sample_rate = input_sample_rate
         props = assert_given(self._settings.session_properties)
+        if props.input_audio_format in ("g711_ulaw", "g711_alaw"):
+            logger.warning(
+                f"{self}: input_audio_format {props.input_audio_format!r} is not supported; "
+                f"audio is sent as PCM at the transport's input sample rate."
+            )
+        props.input_audio_format = "pcm16"
         props.input_audio_sampling_rate = input_sample_rate
 
-        # Output frames carry PCM, so a G.711 output format can't be honored.
         if props.output_audio_format in ("g711_ulaw", "g711_alaw"):
             logger.warning(
                 f"{self}: output_audio_format {props.output_audio_format!r} is not supported; "
@@ -828,8 +845,10 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
 
         changed = await super()._update_settings(delta)
 
-        if "session_properties" in changed and input_rate and output_rate:
-            self._ensure_audio_config(input_rate, output_rate)
+        if "session_properties" in changed:
+            self._warn_if_caller_is_not_transcribed()
+            if input_rate and output_rate:
+                self._ensure_audio_config(input_rate, output_rate)
 
         # `model` is selected by the connection URL and rejected in the session
         # payload, so it stays unhandled and the base class reports the attempt.

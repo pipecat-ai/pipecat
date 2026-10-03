@@ -242,7 +242,85 @@ def test_input_sample_rate_is_sent_as_configured():
 
     service._ensure_audio_config(8000, 24000)
 
+    assert service._settings.session_properties.input_audio_format == "pcm16"
     assert service._settings.session_properties.input_audio_sampling_rate == 8000
+
+
+def test_a_g711_input_format_is_replaced_with_a_warning():
+    """Input frames carry PCM, whatever format the session properties name."""
+    service = _service(
+        settings=AzureVoiceLiveLLMService.Settings(
+            session_properties=events.SessionProperties(
+                input_audio_format="g711_ulaw", input_audio_transcription=None
+            )
+        )
+    )
+
+    sink = io.StringIO()
+    handler_id = logger.add(sink, level="WARNING", format="{message}")
+    try:
+        service._ensure_audio_config(8000, 8000)
+    finally:
+        logger.remove(handler_id)
+
+    assert "g711_ulaw" in sink.getvalue()
+    assert service._settings.session_properties.input_audio_format == "pcm16"
+
+
+@pytest.mark.parametrize(
+    "session_properties, warns",
+    [
+        (None, False),
+        (events.SessionProperties(voice=events.AzureStandardVoice(name="en-US-Andrew")), True),
+        (events.SessionProperties(input_audio_transcription=None), False),
+        (
+            events.SessionProperties(
+                input_audio_transcription=events.InputAudioTranscription(model="azure-speech")
+            ),
+            False,
+        ),
+    ],
+    ids=["defaults", "left-out", "explicitly-disabled", "configured"],
+)
+def test_session_properties_without_transcription_warn(session_properties, warns):
+    """The caller's turns reach the context only as transcripts."""
+    settings = (
+        AzureVoiceLiveLLMService.Settings(session_properties=session_properties)
+        if session_properties is not None
+        else None
+    )
+
+    sink = io.StringIO()
+    handler_id = logger.add(sink, level="WARNING", format="{message}")
+    try:
+        _service(settings=settings)
+    finally:
+        logger.remove(handler_id)
+
+    assert ("input_audio_transcription" in sink.getvalue()) is warns
+
+
+@pytest.mark.asyncio
+async def test_a_session_update_without_transcription_warns():
+    service = _service()
+
+    async def _record(event):
+        pass
+
+    service.send_client_event = _record
+
+    sink = io.StringIO()
+    handler_id = logger.add(sink, level="WARNING", format="{message}")
+    try:
+        await service._update_settings(
+            AzureVoiceLiveLLMService.Settings(
+                session_properties=events.SessionProperties(modalities=["text", "audio"])
+            )
+        )
+    finally:
+        logger.remove(handler_id)
+
+    assert "input_audio_transcription" in sink.getvalue()
 
 
 def test_settings_from_mapping_routes_session_keys():
