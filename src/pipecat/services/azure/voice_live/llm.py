@@ -521,8 +521,8 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
         while it streams. Metrics are started in ``_handle_evt_speech_stopped``
         in the server-VAD path.
         """
-        # No audio is sent before conversation setup, so there is nothing to commit.
-        if not self._is_manual_turn_detection() or self._llm_needs_conversation_setup:
+        # Before the first context there is no conversation to respond in.
+        if not self._is_manual_turn_detection() or self._context is None:
             return
         await self.send_client_event(events.InputAudioBufferCommitEvent())
         await self._create_response()
@@ -1406,9 +1406,6 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
 
     async def _send_user_audio(self, frame):
         """Send user audio to Voice Live."""
-        if self._llm_needs_conversation_setup:
-            return
-
         if not self._audio_send_logged:
             logger.debug(
                 f"Streaming audio to Voice Live: {frame.sample_rate}Hz, "

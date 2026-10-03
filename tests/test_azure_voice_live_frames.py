@@ -713,6 +713,40 @@ async def test_an_assistant_item_opens_the_response_only_once():
 
 
 @pytest.mark.asyncio
+async def test_caller_audio_streams_before_the_first_context():
+    """Server VAD can hear the caller before the app sends its first context."""
+    service = _make_service()
+    sent: list[Any] = []
+
+    async def record(event):
+        sent.append(event)
+
+    service.send_client_event = record
+
+    await service._send_user_audio(
+        InputAudioRawFrame(audio=b"\x00\x00" * 160, sample_rate=16000, num_channels=1)
+    )
+
+    assert [type(e) for e in sent] == [events.InputAudioBufferAppendEvent]
+
+
+@pytest.mark.asyncio
+async def test_a_manual_turn_before_the_first_context_creates_no_response():
+    service = _make_service()
+    service._settings.session_properties.turn_detection = None
+    sent: list[Any] = []
+
+    async def record(event):
+        sent.append(event)
+
+    service.send_client_event = record
+
+    await service._handle_user_stopped_speaking(None)
+
+    assert sent == []
+
+
+@pytest.mark.asyncio
 async def test_interruption_closes_the_turn_only_once():
     """A cancelled response still reports done after the turn was closed."""
     service = _make_service()
