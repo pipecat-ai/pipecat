@@ -622,6 +622,98 @@ class TestReceiveResponseEventsErrors:
         service.push_error.assert_called_once()
         assert "Internal server error" in service.push_error.call_args.kwargs["error_msg"]
 
+    @pytest.mark.parametrize(
+        "terminal_event",
+        [
+            {"type": "response.failed", "response": {"id": "resp_1"}},
+            {"type": "response.incomplete", "response": {"id": "resp_1"}},
+            {"type": "error", "error": {"code": "server_error", "message": "boom"}},
+        ],
+        ids=["failed", "incomplete", "error"],
+    )
+    @pytest.mark.asyncio
+    async def test_terminal_error_does_not_run_announced_function_call(self, terminal_event):
+        """A function call whose arguments never finished streaming before a
+        terminal error must not be executed with fabricated empty arguments."""
+        service = _make_service()
+        service.stop_ttfb_metrics = AsyncMock()
+        service.push_error = AsyncMock()
+        service.run_function_calls = AsyncMock()
+
+        ws = _ws_events(
+            {"type": "response.created", "response": {"id": "resp_1"}},
+            {
+                "type": "response.output_item.added",
+                "item": {
+                    "type": "function_call",
+                    "id": "item_1",
+                    "name": "get_weather",
+                    "call_id": "call_1",
+                },
+            },
+            {
+                "type": "response.function_call_arguments.delta",
+                "item_id": "item_1",
+                "delta": '{"city": "SF"',
+            },
+            terminal_event,
+        )
+        service._websocket = ws
+
+        context = MagicMock(spec=LLMContext)
+        await service._receive_response_events(context, [])
+
+        service.push_error.assert_called_once()
+        service.run_function_calls.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_terminal_error_still_runs_completed_function_calls(self):
+        """Parallel tool calls: a call whose arguments finished streaming before
+        the terminal error (e.g. a later item truncated by max_output_tokens)
+        must still run. Only the unfinished call is dropped."""
+        service = _make_service()
+        service.stop_ttfb_metrics = AsyncMock()
+        service.push_error = AsyncMock()
+        service.run_function_calls = AsyncMock()
+
+        def _tool_call_added(item_id, name, call_id):
+            return {
+                "type": "response.output_item.added",
+                "item": {
+                    "type": "function_call",
+                    "id": item_id,
+                    "name": name,
+                    "call_id": call_id,
+                },
+            }
+
+        ws = _ws_events(
+            {"type": "response.created", "response": {"id": "resp_1"}},
+            _tool_call_added("item_1", "get_weather", "call_1"),
+            {
+                "type": "response.function_call_arguments.done",
+                "item_id": "item_1",
+                "arguments": '{"city": "SF"}',
+            },
+            _tool_call_added("item_2", "get_time", "call_2"),
+            {
+                "type": "response.function_call_arguments.delta",
+                "item_id": "item_2",
+                "delta": '{"city": "NY',
+            },
+            {"type": "response.incomplete", "response": {"id": "resp_1"}},
+        )
+        service._websocket = ws
+
+        context = MagicMock(spec=LLMContext)
+        await service._receive_response_events(context, [])
+
+        service.push_error.assert_called_once()
+        service.run_function_calls.assert_called_once()
+        fc_list = service.run_function_calls.call_args.args[0]
+        assert [fc.function_name for fc in fc_list] == ["get_weather"]
+        assert fc_list[0].arguments == {"city": "SF"}
+
 
 class TestDrainCancelledResponse:
     @pytest.mark.asyncio
