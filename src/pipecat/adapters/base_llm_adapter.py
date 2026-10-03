@@ -10,10 +10,12 @@ This module provides the abstract base class for implementing LLM provider-speci
 adapters that handle tool format conversion and standardization.
 """
 
+import base64
 import warnings
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic, TypeVar, cast
+from urllib.parse import urlsplit
 
 from loguru import logger
 
@@ -25,6 +27,8 @@ from pipecat.processors.aggregators.llm_context import (
     LLMSpecificMessage,
     NotGiven,
 )
+from pipecat.utils.file_resolver import FileResolver
+from pipecat.utils.security.ssrf import UrlReachability
 
 # Should be a TypedDict
 TLLMInvocationParams = TypeVar("TLLMInvocationParams", bound=Mapping[str, Any])
@@ -73,6 +77,7 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
         self._warned_system_instruction = False
         self._warned_context_system_message = False
         self._builtin_tools: dict[str, FunctionSchema] = {}
+        self._file_resolver: FileResolver | None = None
 
     @property
     def builtin_tools(self) -> dict[str, FunctionSchema]:
@@ -135,6 +140,191 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
             provider.
         """
         pass
+
+    # Whether this provider's conversion consumes raw bytes (rather than the
+    # base64 payload of a data URL) for inline file content. Decides which
+    # form the resolution pass prepares in the resolver's cache, so conversion
+    # never re-decodes or re-encodes a file on later turns.
+    prefers_raw_file_bytes: bool = False
+
+    @property
+    def file_resolver(self) -> FileResolver | None:
+        """The resolver that fetches and caches file content for this adapter.
+
+        Set once by the owning LLM service. Every conversion this adapter
+        performs — invocation params and logging alike — reads the same
+        resolver caches. Without one, conversion still passes through URLs the
+        provider consumes directly, but fails on any file that would need
+        fetching.
+        """
+        return self._file_resolver
+
+    @file_resolver.setter
+    def file_resolver(self, resolver: FileResolver | None) -> None:
+        self._file_resolver = resolver
+
+    def supports_file_url(self, url: str, mime_type: str) -> bool:
+        """Whether the provider can be handed `url` to fetch itself.
+
+        This covers both URLs the provider fetches over the public internet
+        and cloud-storage URIs it resolves through its own IAM (e.g. Bedrock
+        reading ``s3://``). A URL the provider can't consume is instead
+        fetched into the file resolver's cache and inlined at conversion —
+        see :meth:`prepare_llm_invocation_params`.
+
+        Args:
+            url: The file URL from a ``file_url`` context content item.
+            mime_type: The file's MIME type.
+
+        Returns:
+            True if conversion can pass `url` through to the provider.
+        """
+        return False
+
+    async def prepare_llm_invocation_params(
+        self, context: LLMContext, **kwargs
+    ) -> TLLMInvocationParams:
+        """Resolve the context's file content, then convert it to provider invocation params.
+
+        The one entry point services call per LLM invocation: runs the async
+        file resolution (:meth:`prepare_file_content`) into the
+        :attr:`file_resolver`'s caches, then delegates to the synchronous
+        :meth:`get_llm_invocation_params`, whose conversion reads those caches.
+        The context itself is never modified.
+
+        Args:
+            context: The LLM context to resolve and convert.
+            **kwargs: Forwarded to :meth:`get_llm_invocation_params`.
+
+        Returns:
+            Provider-specific parameters for invoking the LLM.
+
+        Raises:
+            LLMContextConversionError: If a file can't be resolved or the
+                context can't be converted.
+        """
+        if self._file_resolver is not None:
+            await self.prepare_file_content(context)
+        return self.get_llm_invocation_params(context, **kwargs)
+
+    async def prepare_file_content(self, context: LLMContext) -> None:
+        """Fetch the file content this provider will need into the resolver's caches.
+
+        A ``file_url`` item whose URL the provider consumes directly
+        (:meth:`supports_file_url`, and — for ``http(s)`` — publicly routable)
+        needs nothing. Any other ``file_url`` item is fetched into the
+        :attr:`file_resolver`'s cache, in the form this provider's conversion
+        reads: raw bytes when ``prefers_raw_file_bytes``, a base64 data URL
+        otherwise. Inline ``file_base64`` items get their decoded bytes cached
+        for raw-bytes providers. The resolver caches by URL, so each file is
+        fetched once no matter how many turns — or how many adapters sharing
+        the resolver — consume it; only the per-provider pass-through decision
+        is re-evaluated here on every run.
+
+        Args:
+            context: The LLM context whose messages to resolve.
+
+        Raises:
+            LLMContextConversionError: If a file URL can't be resolved (refused
+                by the reachability policy, download failure, unresolvable
+                scheme, corrupt base64). The service handles it like any other
+                conversion failure, including invalid-file-message cleanup.
+        """
+        resolver = self._file_resolver
+        if resolver is None:
+            return
+        for message in context.get_messages():
+            if isinstance(message, LLMSpecificMessage):
+                continue
+            content = message.get("content")
+            if not isinstance(content, list):
+                continue
+            for raw_item in content:
+                if not isinstance(raw_item, dict):
+                    continue
+                item = cast("dict[str, Any]", raw_item)
+                try:
+                    if item.get("type") == "file_url":
+                        file_data = item["file"]
+                        url = file_data["url"]
+                        mime_type = file_data["mime_type"]
+                        if await self._can_pass_file_url(url, mime_type, resolver):
+                            continue
+                        if self.prefers_raw_file_bytes:
+                            await resolver.fetch(url)
+                        else:
+                            await resolver.ensure_data_url(url, mime_type)
+                    elif item.get("type") == "file_base64" and self.prefers_raw_file_bytes:
+                        await resolver.fetch(item["file"]["file_data"])
+                except Exception as e:
+                    raise LLMContextConversionError(e) from e
+
+    async def _can_pass_file_url(self, url: str, mime_type: str, resolver: FileResolver) -> bool:
+        """Whether `url` can be handed to the provider to fetch itself."""
+        if not self.supports_file_url(url, mime_type):
+            return False
+        if urlsplit(url).scheme not in ("http", "https"):
+            # A cloud-storage URI resolved via the provider's own IAM;
+            # reachability from here is irrelevant.
+            return True
+        return await resolver.classify(url) == UrlReachability.PUBLIC
+
+    def inlined_file_content(self, file_data: Mapping[str, Any]) -> bytes | str | None:
+        """Return the content to inline for a ``file_url`` item, or None when the URL passes through.
+
+        Args:
+            file_data: The item's ``file`` mapping (``url``, ``mime_type``, ...).
+
+        Returns:
+            None when the URL passes through for the provider to fetch itself;
+            otherwise the resolved content from the :attr:`file_resolver`'s
+            caches — raw bytes when ``prefers_raw_file_bytes``, a base64 data
+            URL otherwise.
+
+        Raises:
+            ValueError: If the provider can't consume the URL and no resolved
+                content is cached (wrapped as ``LLMContextConversionError`` by
+                the conversion routine's caller).
+        """
+        resolver = self._file_resolver
+        url = file_data["url"]
+        mime_type = file_data["mime_type"]
+        if self.supports_file_url(url, mime_type):
+            if urlsplit(url).scheme not in ("http", "https"):
+                return None
+            reachability = resolver.cached_reachability(url) if resolver is not None else None
+            # Unclassified (no resolver / resolution not run) keeps the
+            # conversion-only behavior: hand the URL to the provider.
+            if reachability is None or reachability == UrlReachability.PUBLIC:
+                return None
+        if resolver is not None:
+            resolved: bytes | str | None
+            if self.prefers_raw_file_bytes:
+                resolved = resolver.cached_bytes(url)
+            else:
+                resolved = resolver.cached_data_url(url)
+            if resolved is not None:
+                return resolved
+        raise ValueError(
+            f"Unresolved file URL for this provider: {url!r} (run resolution via "
+            "prepare_llm_invocation_params with a file resolver set)"
+        )
+
+    def decoded_file_bytes(self, file_data: Mapping[str, Any]) -> bytes:
+        """Return a ``file_base64`` item's decoded bytes, from the resolver's cache when prepared.
+
+        Falls back to decoding inline for conversion-only calls where no
+        resolution has run.
+
+        Args:
+            file_data: The item's ``file`` mapping (``file_data``, ...).
+        """
+        data_url = file_data["file_data"]
+        if self._file_resolver is not None:
+            cached = self._file_resolver.cached_bytes(data_url)
+            if cached is not None:
+                return cached
+        return base64.b64decode(data_url.split(",", 1)[1])
 
     def create_llm_specific_message(self, message: Any) -> LLMSpecificMessage:
         """Create an LLM-specific message (as opposed to a standard message) for use in an LLMContext.

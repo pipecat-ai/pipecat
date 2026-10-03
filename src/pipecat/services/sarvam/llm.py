@@ -145,7 +145,7 @@ class SarvamLLMService(OpenAILLMService):
         non-fatal error frames rather than raised, so an ``LLMSwitcher`` can
         fall back to another service at runtime.
         """
-        error = self._validate_request(self._invocation_params(context))
+        error = self._validate_request(await self._invocation_params(context))
         if error:
             await self.push_error(error)
             return
@@ -177,7 +177,7 @@ class SarvamLLMService(OpenAILLMService):
             no response.
         """
         error = self._validate_request(
-            self._invocation_params(context, system_instruction=system_instruction)
+            await self._invocation_params(context, system_instruction=system_instruction)
         )
         if error:
             await self.push_error(error)
@@ -190,12 +190,17 @@ class SarvamLLMService(OpenAILLMService):
             response_schema=response_schema,
         )
 
-    def _invocation_params(
+    async def _invocation_params(
         self, context: LLMContext, system_instruction: str | None = None
     ) -> OpenAILLMInvocationParams:
-        """Derive the invocation params the request will be built from."""
+        """Derive the invocation params the request will be built from.
+
+        Goes through prepare_llm_invocation_params so file content is resolved
+        before this pre-flight conversion; the actual completion's own
+        preparation then runs against warm caches.
+        """
         adapter = self.get_llm_adapter()
-        return adapter.get_llm_invocation_params(
+        return await adapter.prepare_llm_invocation_params(
             context,
             system_instruction=system_instruction
             or assert_given(self._settings.system_instruction),

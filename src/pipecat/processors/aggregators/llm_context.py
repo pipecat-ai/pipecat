@@ -202,8 +202,9 @@ class LLMContext:
             name: Optional name of the file.
             text: Optional text to include with the file.
         """
-        # Format is a public url. It is expected that the llm service will fetch the file from the url.
-        # The url is passed as is to the llm service.
+        # The URL is stored unresolved; at completion time the LLM service
+        # either passes it to the provider to fetch itself or downloads it via
+        # its FileResolver, depending on what the provider can consume.
         if type == "url":
             return LLMContext.create_file_url_message(
                 role=role, format=format, url=file, filename=name, text=text
@@ -380,6 +381,7 @@ class LLMContext:
                     elif item_type == "file_base64":
                         if "file" in item:
                             item["file"]["file_data"] = "..."
+                            item["file"].pop("_raw_bytes", None)
 
             if msg.get("mime_type", "").startswith("image/"):
                 msg["data"] = "..."

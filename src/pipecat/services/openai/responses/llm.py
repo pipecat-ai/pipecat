@@ -453,8 +453,9 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
         effective_instruction = system_instruction or assert_given(
             self._settings.system_instruction
         )
-        invocation_params = adapter.get_llm_invocation_params(
-            context, system_instruction=effective_instruction
+        invocation_params = await adapter.prepare_llm_invocation_params(
+            context,
+            system_instruction=effective_instruction,
         )
 
         params = self._build_response_params(invocation_params)
@@ -1007,8 +1008,9 @@ class OpenAIResponsesLLMService(
             f"{adapter.get_messages_for_logging(context)}"
         )
 
-        invocation_params = adapter.get_llm_invocation_params(
-            context, system_instruction=assert_given(self._settings.system_instruction)
+        invocation_params = await adapter.prepare_llm_invocation_params(
+            context,
+            system_instruction=assert_given(self._settings.system_instruction),
         )
 
         full_input = invocation_params["input"]
@@ -1329,8 +1331,9 @@ class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
             f"{adapter.get_messages_for_logging(context)}"
         )
 
-        invocation_params = adapter.get_llm_invocation_params(
-            context, system_instruction=assert_given(self._settings.system_instruction)
+        invocation_params = await adapter.prepare_llm_invocation_params(
+            context,
+            system_instruction=assert_given(self._settings.system_instruction),
         )
 
         params = self._build_response_params(invocation_params)

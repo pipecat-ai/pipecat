@@ -166,6 +166,12 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
             messages_for_logging.append(msg)
         return messages_for_logging
 
+    def supports_file_url(self, url: str, mime_type: str) -> bool:
+        """Anthropic fetches image and PDF URLs itself; other files must be inlined."""
+        return url.startswith(("http://", "https://")) and (
+            mime_type.startswith("image/") or mime_type == "application/pdf"
+        )
+
     @dataclass
     class ConvertedMessages:
         """Container for Anthropic-formatted messages converted from universal context."""
@@ -417,41 +423,50 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
                         continue
                 if item["type"] == "file_url":
                     f_data = item["file"]
-                    if f_data["mime_type"].startswith("image/"):
-                        item["type"] = "image"
-                        item["source"] = {
-                            "type": "url",
-                            "url": f_data["url"],
-                        }
-                        del item["file"]
-                    elif f_data["mime_type"] == "application/pdf":
-                        item["type"] = "document"
+                    # Raises for a URL the provider can't consume with nothing
+                    # resolved (wrapped as LLMContextConversionError by the
+                    # caller in _from_universal_context_messages).
+                    resolved = self.inlined_file_content(f_data)
+                    if resolved is None:
+                        # Pass-through: supports_file_url admits only images
+                        # and PDFs.
+                        item["type"] = (
+                            "image" if f_data["mime_type"].startswith("image/") else "document"
+                        )
                         item["source"] = {
                             "type": "url",
                             "url": f_data["url"],
                         }
                         del item["file"]
                     else:
-                        # Wrapped as LLMContextConversionError by the caller in
-                        # _from_universal_context_messages.
-                        raise ValueError(
-                            f"Unsupported 'file_url' MIME type: {f_data['mime_type']} "
-                            f"for URL: {f_data['url']}"
-                        )
+                        # Resolved content converts through the inline branch
+                        # below. Non-raw adapters always cache the data-URL form.
+                        item = {
+                            "type": "file_base64",
+                            "file": {**f_data, "file_data": cast(str, resolved)},
+                        }
                 if item["type"] == "file_base64":
                     f_data = item["file"]
-                    if f_data["mime_type"] != "application/pdf":
+                    if f_data["mime_type"].startswith("image/"):
+                        item["type"] = "image"
+                        item["source"] = {
+                            "type": "base64",
+                            "media_type": f_data["mime_type"],
+                            "data": f_data["file_data"].split(",")[1],
+                        }
+                        del item["file"]
+                    elif f_data["mime_type"] == "application/pdf":
+                        item["type"] = "document"
+                        item["source"] = {
+                            "type": "base64",
+                            "media_type": f_data["mime_type"],
+                            "data": f_data["file_data"].split(",")[1],
+                        }
+                        del item["file"]
+                    else:
                         # Wrapped as LLMContextConversionError by the caller in
                         # _from_universal_context_messages.
                         raise ValueError(f"Unsupported 'file' MIME type: {f_data['mime_type']}")
-
-                    item["type"] = "document"
-                    item["source"] = {
-                        "type": "base64",
-                        "media_type": f_data["mime_type"],
-                        "data": f_data["file_data"].split(",")[1],
-                    }
-                    del item["file"]
                 new_content.append(item)
             content = new_content
             msg["content"] = content
