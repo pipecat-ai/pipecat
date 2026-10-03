@@ -21,7 +21,6 @@ from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from typing import Any
 
-import websockets
 from loguru import logger
 from websockets.protocol import State
 
@@ -220,6 +219,7 @@ class SonioxTTSService(WebsocketTTSService):
             pause_frame_processing=False,
             sample_rate=sample_rate,
             settings=default_settings,
+            keepalive_interval=KEEPALIVE_INTERVAL_SECONDS,
             **kwargs,
         )
 
@@ -238,7 +238,6 @@ class SonioxTTSService(WebsocketTTSService):
         self._partials: dict[str, tuple[str, float]] = {}
 
         self._receive_task: asyncio.Task | None = None
-        self._keepalive_task: asyncio.Task | None = None
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -410,8 +409,8 @@ class SonioxTTSService(WebsocketTTSService):
         if self._websocket and not self._receive_task:
             self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
-        if self._websocket and not self._keepalive_task:
-            self._keepalive_task = self.create_task(self._keepalive_task_handler())
+        if self._websocket:
+            self._create_keepalive_task()
 
     async def _disconnect(self):
         await super()._disconnect()
@@ -420,9 +419,7 @@ class SonioxTTSService(WebsocketTTSService):
             await self.cancel_task(self._receive_task)
             self._receive_task = None
 
-        if self._keepalive_task:
-            await self.cancel_task(self._keepalive_task)
-            self._keepalive_task = None
+        await self._cancel_keepalive_task()
 
         await self._disconnect_websocket()
 
@@ -497,24 +494,10 @@ class SonioxTTSService(WebsocketTTSService):
         self._configured_contexts.add(context_id)
         logger.trace(f"{self}: opened Soniox stream {context_id}")
 
-    async def _keepalive_task_handler(self):
-        """Send periodic keepalive messages to prevent Soniox's idle timeout.
-
-        Soniox closes idle connections after 20-30s; sending ``{"keep_alive": true}``
-        resets the timer without triggering synthesis.
-        """
-        while True:
-            await asyncio.sleep(KEEPALIVE_INTERVAL_SECONDS)
-            try:
-                if self._websocket and self._websocket.state is State.OPEN:
-                    await self._websocket.send(json.dumps({"keep_alive": True}))
-                    logger.trace(f"{self}: sent Soniox keepalive")
-            except websockets.ConnectionClosed as e:
-                logger.warning(f"{self} keepalive error: {e}")
-                break
-            except Exception as e:
-                logger.warning(f"{self}: unexpected keepalive error: {e}")
-                break
+    async def _send_keepalive(self):
+        """Reset Soniox's idle timeout without triggering synthesis."""
+        await self._get_websocket().send(json.dumps({"keep_alive": True}))
+        logger.trace(f"{self}: sent Soniox keepalive")
 
     def _is_chinese_or_japanese_language(self) -> bool:
         """Whether the current language is written without spaces between words.
