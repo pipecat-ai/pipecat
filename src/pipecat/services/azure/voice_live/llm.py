@@ -953,8 +953,6 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
                 await self._handle_evt_response_created(evt)
             elif evt.type == "response.audio.delta":
                 await self._handle_evt_audio_delta(evt)
-            elif evt.type == "response.audio.done":
-                await self._handle_evt_audio_done(evt)
             elif evt.type == "response.output_item.added":
                 await self._handle_evt_conversation_item_added(evt)
             elif evt.type == "conversation.item.created":
@@ -1032,12 +1030,6 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
             num_channels=1,
         )
         await self.push_frame(frame)
-
-    async def _handle_evt_audio_done(self, evt):
-        """Handle audio done event."""
-        if self._tts_started:
-            self._tts_started = False
-            await self.push_frame(TTSStoppedFrame())
 
     async def _handle_evt_conversation_item_added(self, evt):
         """Handle conversation.item.created and response.output_item.added events."""
@@ -1120,8 +1112,13 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
         if self._interrupted_response_id == evt.response.get("id"):
             self._interrupted_response_id = None
 
-        # An interruption closes the turn before the cancelled response reports
-        # done, so only close a turn that is still open.
+        # Stopped here rather than on each item's response.audio.done, so a
+        # response with several audio items is bracketed by one TTS pair. An
+        # interruption closes both before the cancelled response reports done,
+        # so only close what is still open.
+        if self._tts_started:
+            self._tts_started = False
+            await self.push_frame(TTSStoppedFrame())
         if self._current_assistant_response:
             self._current_assistant_response = None
             await self.push_frame(LLMFullResponseEndFrame())

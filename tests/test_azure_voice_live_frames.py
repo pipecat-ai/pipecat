@@ -165,11 +165,41 @@ async def test_a_second_audio_item_stays_in_the_open_tts_turn():
     service.push_frame = recorder
 
     second_item = {**_audio_delta(), "item_id": "msg_2"}
-    await _drive(service, [_audio_delta(), second_item, {**_audio_done(), "item_id": "msg_2"}])
+    await _drive(
+        service,
+        [_audio_delta(), second_item, {**_audio_done(), "item_id": "msg_2"}, _response_done()],
+    )
 
     assert len(recorder.of_types(TTSStartedFrame)) == 1
     assert len(recorder.of_types(TTSStoppedFrame)) == 1
     assert service._current_audio_response.item_id == "msg_2"
+
+
+@pytest.mark.asyncio
+async def test_audio_items_in_one_response_share_one_tts_turn():
+    """An item that starts after the previous one reports done opens no second turn."""
+    service = _make_service()
+    recorder = _FrameRecorder()
+    service.push_frame = recorder
+
+    second_item = {**_audio_delta(), "item_id": "msg_2"}
+    await _drive(
+        service,
+        [
+            _audio_delta(),
+            _audio_done(),
+            second_item,
+            {**_audio_done(), "item_id": "msg_2"},
+            _response_done(),
+        ],
+    )
+
+    assert [type(f) for f in recorder.of_types(TTSStartedFrame, TTSStoppedFrame)] == [
+        TTSStartedFrame,
+        TTSStoppedFrame,
+    ]
+    stopped_idx = recorder.frames.index(recorder.of_types(TTSStoppedFrame)[0])
+    assert all(recorder.frames.index(f) < stopped_idx for f in recorder.of_types(TTSAudioRawFrame))
 
 
 @pytest.mark.asyncio
