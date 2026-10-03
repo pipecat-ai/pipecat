@@ -395,14 +395,15 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
 
         self._add_placeholder_thought_signatures(messages)
 
-        # Check if we only have function-related messages (no regular text)
+        # Check if we only have function-related messages (no regular content)
         effective_system = extracted_system or system_instruction
         has_regular_messages = any(
             msg.parts is not None
-            and len(msg.parts) == 1
-            and getattr(msg.parts[0], "text", None)
-            and not getattr(msg.parts[0], "function_call", None)
-            and not getattr(msg.parts[0], "function_response", None)
+            and any(
+                not getattr(part, "function_call", None)
+                and not getattr(part, "function_response", None)
+                for part in msg.parts
+            )
             for msg in messages
         )
 
