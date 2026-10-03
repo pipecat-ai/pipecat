@@ -766,8 +766,14 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
             self._websocket = await websocket_connect(uri=uri, additional_headers=headers)
             self._receive_task = self.create_task(self._run_receive_loop())
         except Exception as e:
-            await self.push_error(error_msg=f"Error connecting to Voice Live: {e}", exception=e)
             self._websocket = None
+            # Without a connection every later send is dropped, so the failure
+            # is permanent and the unusable policy decides what follows.
+            await self.push_error(
+                error_msg=f"Error connecting to Voice Live: {e}",
+                exception=e,
+                force_treat_as_permanent=True,
+            )
 
     async def _disconnect(self):
         """Close WebSocket connection."""

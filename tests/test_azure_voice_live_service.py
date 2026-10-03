@@ -320,6 +320,24 @@ async def test_a_lost_connection_is_reported_once_as_permanent(error):
 
 
 @pytest.mark.asyncio
+async def test_a_failed_connect_is_reported_as_permanent(monkeypatch):
+    """Without a connection the service can't respond; the unusable policy decides next."""
+    import pipecat.services.azure.voice_live.llm as llm_module
+
+    async def fail_connect(uri, additional_headers):
+        raise TimeoutError("timed out during opening handshake")
+
+    monkeypatch.setattr(llm_module, "websocket_connect", fail_connect)
+    service = _service()
+    reported = _record_errors(service)
+
+    await service._connect()
+
+    assert reported == [True]
+    assert service._websocket is None
+
+
+@pytest.mark.asyncio
 async def test_closing_the_connection_itself_reports_nothing():
     service = _service()
     reported = _record_errors(service)
