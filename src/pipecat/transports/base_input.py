@@ -26,6 +26,7 @@ from pipecat.frames.frames import (
     StopFrame,
     SystemFrame,
 )
+from pipecat.pipeline.capabilities import BotCapabilities
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 from pipecat.transports.base_transport import TransportParams
 from pipecat.utils.deprecation import deprecated
@@ -115,6 +116,17 @@ class BaseInputTransport(FrameProcessor):
             The sample rate in Hz.
         """
         return self._sample_rate
+
+    @property
+    def capabilities(self) -> BotCapabilities:
+        """The media this transport receives from the user.
+
+        Returns:
+            The ``audio_in`` and ``video_in`` capabilities.
+        """
+        return BotCapabilities(
+            audio_in=self._params.audio_in_enabled, video_in=self._params.video_in_enabled
+        )
 
     async def setup(self, setup: FrameProcessorSetup):
         """Set up the transport.
