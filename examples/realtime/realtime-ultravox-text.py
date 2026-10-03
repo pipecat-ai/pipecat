@@ -180,7 +180,7 @@ There is also a secret menu that changes daily. If the user asks about it, use t
     tts = InworldTTSService(
         api_key=os.getenv("INWORLD_API_KEY", ""),
         voice_id="Ashley",
-        model="inworld-tts-1",
+        model="inworld-tts-2",
         temperature=1.1,
     )
 
