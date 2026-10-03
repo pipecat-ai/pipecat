@@ -159,3 +159,13 @@ async def test_teardown_stops_a_retry_waiting_on_backoff():
 
     assert time.monotonic() - start < 5
     assert service.connect_attempts == 2
+
+
+@pytest.mark.asyncio
+async def test_unusable_service_does_not_retry_connect():
+    service = ConnectFailingSTTService(failures=0, sample_rate=SAMPLE_RATE)
+    await service.set_usable(False)
+
+    await service._connect_retry_handler()
+
+    assert service.connect_attempts == 0
