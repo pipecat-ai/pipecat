@@ -77,6 +77,50 @@ def openai_from_llm_context_tools(
     return tools
 
 
+def openai_strict_parameters(parameters: Any) -> Any:
+    """Add the constraints strict mode requires to a tool's parameters.
+
+    Strict mode needs ``additionalProperties: false`` on each object in a tool's
+    parameters. The root object is built by :class:`FunctionSchema` rather than
+    written by the tool's author, so the adapters supply it. An object that
+    declares ``additionalProperties`` itself keeps what it declares: replacing it
+    would change what the tool accepts, and OpenAI reports a schema strict mode
+    can't take. Keys under ``properties`` name the tool's parameters rather than
+    schema keywords, so a parameter called ``additionalProperties`` is left alone.
+
+    Args:
+        parameters: The tool's parameters, as a JSON schema.
+
+    Returns:
+        A copy carrying the added constraints. The original is left untouched,
+        since a ``FunctionSchema``'s properties are shared with its author.
+    """
+    if not isinstance(parameters, dict):
+        return parameters
+
+    result: dict[str, Any] = {}
+    for key, value in parameters.items():
+        if key == "properties" and isinstance(value, dict):
+            result[key] = {name: openai_strict_parameters(prop) for name, prop in value.items()}
+        elif isinstance(value, dict):
+            result[key] = openai_strict_parameters(value)
+        elif isinstance(value, list):
+            result[key] = [openai_strict_parameters(item) for item in value]
+        else:
+            result[key] = value
+
+    # A nullable object spells its type as a list, which is how strict mode keeps
+    # a parameter optional.
+    declared_type = result.get("type")
+    is_object = declared_type == "object" or (
+        isinstance(declared_type, list) and "object" in declared_type
+    )
+    if is_object and "additionalProperties" not in result:
+        result["additionalProperties"] = False
+
+    return result
+
+
 def openai_from_llm_standard_message(
     message: LLMStandardMessage,
 ) -> ChatCompletionMessageParam:
@@ -198,6 +242,9 @@ class OpenAILLMAdapter(BaseLLMAdapter[OpenAILLMInvocationParams]):
     def to_provider_tools_format(self, tools_schema: ToolsSchema) -> list[ChatCompletionToolParam]:
         """Convert function schemas to OpenAI's function-calling format.
 
+        A schema asking for ``strict`` carries it through, along with the
+        ``additionalProperties: false`` strict mode requires.
+
         Args:
             tools_schema: The Pipecat tools schema to convert.
 
@@ -206,13 +253,19 @@ class OpenAILLMAdapter(BaseLLMAdapter[OpenAILLMInvocationParams]):
             with ChatCompletion API.
         """
         functions_schema = tools_schema.standard_tools
-        # `function=...` expects a `FunctionDefinition` TypedDict; the dict
-        # produced by `to_default_dict()` is structurally compatible. Cast at
-        # the boundary.
-        formatted_standard_tools: list[ChatCompletionToolParam] = [
-            ChatCompletionToolParam(type="function", function=cast(Any, func.to_default_dict()))
-            for func in functions_schema
-        ]
+        formatted_standard_tools: list[ChatCompletionToolParam] = []
+        for func in functions_schema:
+            definition = func.to_default_dict()
+            if func.strict is not None:
+                definition["strict"] = func.strict
+                if func.strict:
+                    definition["parameters"] = openai_strict_parameters(definition["parameters"])
+            # `function=...` expects a `FunctionDefinition` TypedDict; the dict
+            # produced by `to_default_dict()` is structurally compatible. Cast at
+            # the boundary.
+            formatted_standard_tools.append(
+                ChatCompletionToolParam(type="function", function=cast(Any, definition))
+            )
         custom_openai_tools: list[ChatCompletionToolParam] = []
         if tools_schema.custom_tools:
             custom_openai_tools = cast(
