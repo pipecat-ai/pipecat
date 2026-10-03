@@ -178,14 +178,35 @@ def _is_o_series(model: str) -> bool:
     return bool(re.match(r"o\d", model.lower()))
 
 
-def _rejects_effort_none(model: str) -> bool:
-    """Whether a reasoning model rejects ``effort="none"`` with an API error.
+def _default_reasoning_effort(model: str) -> str | None:
+    """The effort to request for a model when ``reasoning`` isn't configured.
 
-    The reasoning-first o-series, ``gpt-6-astra`` and ``gpt-6.1-sol`` accept
-    only a positive effort level, so reasoning cannot be switched off for them.
+    ``"none"`` switches reasoning off on the mainline gpt series from gpt-5.1
+    onward. The original ``gpt-5``, ``gpt-5-mini`` and ``gpt-5-nano`` reject
+    ``"none"``, so they get their lowest effort, ``"minimal"``. Models that
+    accept neither are left at the provider default: the o-series, the ``-pro``
+    models, ``gpt-6-astra`` and ``gpt-6.1-sol``.
+
+    Args:
+        model: The model name, optionally with a snapshot date
+            (e.g. ``"gpt-5.4"``, ``"gpt-5-2025-08-07"``, ``"o3"``).
+
+    Returns:
+        The effort level, or ``None`` to leave the provider default, which is
+        also the case for models that don't reason or aren't recognized (see
+        :func:`_model_supports_reasoning`).
     """
+    if not _model_supports_reasoning(model):
+        return None
     model = model.lower()
-    return _is_o_series(model) or model.startswith(("gpt-6-astra", "gpt-6.1-sol"))
+    if _is_o_series(model) or model.startswith(("gpt-6-astra", "gpt-6.1-sol")):
+        return None
+    name = re.sub(r"-\d{4}-\d{2}-\d{2}$", "", model)
+    if name.endswith("-pro"):
+        return None
+    if name in ("gpt-5", "gpt-5-mini", "gpt-5-nano"):
+        return "minimal"
+    return "none"
 
 
 def _model_supports_reasoning(model: str) -> bool | None:
@@ -519,20 +540,21 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
         """Disable reasoning by default on the mainline gpt series for real-time voice.
 
         When the caller hasn't configured ``reasoning``, request ``effort="none"``
-        for whatever models possible. Note that this is a no-op for models like
-        ``gpt-5.4`` that already default to ``none``. Some models are left at the
-        provider default: those that reject ``effort="none"`` outright (see
-        :func:`_rejects_effort_none`), and gpt-4.x and earlier, which don't reason
-        at all. Mirrors Gemini's ``_maybe_unset_thinking_budget``, which disables
-        or minimizes thinking on its latency-sensitive models.
+        for whatever models possible, or ``"minimal"`` for models whose lowest
+        effort it is (see :func:`_default_reasoning_effort`). Note that this is a
+        no-op for models like ``gpt-5.4`` that already default to ``none``. Models
+        that accept neither are left at the provider default, as are gpt-4.x and
+        earlier, which don't reason at all. Mirrors Gemini's
+        ``_maybe_unset_thinking_budget``, which disables or minimizes thinking on
+        its latency-sensitive models.
 
         Args:
             params: The response params dict (modified in place).
         """
         model = assert_given(self._settings.model)
-        # Lower reasoning only for models that reason *and* accept effort="none".
-        if model and _model_supports_reasoning(model) and not _rejects_effort_none(model):
-            params["reasoning"] = {"effort": "none"}
+        effort = _default_reasoning_effort(model) if model else None
+        if effort:
+            params["reasoning"] = {"effort": effort}
 
     def _warn_if_reasoning_unsupported(self):
         """Log a clear error when reasoning is configured on a model that can't use it.
