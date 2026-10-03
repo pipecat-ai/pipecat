@@ -698,7 +698,13 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
             # known message count to detect new additions.
             messages = self._context.get_messages()
             current_count = len(messages)
-            if current_count > self._last_context_message_count:
+            if current_count < self._last_context_message_count:
+                # A shorter context replaced the old one (set_messages, a new
+                # LLMContext), so new messages are counted from its length. A
+                # transcript still awaited may not be in it.
+                self._last_context_message_count = current_count
+                self._transcript_awaiting_context = False
+            elif current_count > self._last_context_message_count:
                 new_messages = messages[self._last_context_message_count :]
                 last_msg = messages[-1]
                 self._last_context_message_count = current_count

@@ -228,6 +228,56 @@ async def test_an_empty_repeat_transcription_does_not_release_the_claim():
     assert "ResponseCreateEvent" not in recorder.kinds()
 
 
+def _shorten(context: LLMContext, replace_object: bool) -> LLMContext:
+    """Replace a long history with a short one, in place or with a new context."""
+    short = [{"role": "developer", "content": "Be brief."}]
+    if replace_object:
+        return LLMContext(short)
+    context.set_messages(short)
+    return context
+
+
+@pytest.mark.parametrize("replace_object", [False, True], ids=["set-messages", "new-context"])
+@pytest.mark.asyncio
+async def test_a_text_turn_after_the_context_shrinks_is_sent(replace_object):
+    """New messages are counted from a shorter context's length, not the old one's."""
+    service, recorder = _make_service()
+    context = LLMContext([{"role": "developer", "content": "Be brief."}])
+    await _start(service, context)
+    for i in range(5):
+        context.add_message({"role": "user", "content": f"Question {i}"})
+        context.add_message({"role": "assistant", "content": f"Answer {i}"})
+    await service._handle_context(context)
+
+    context = _shorten(context, replace_object)
+    await service._handle_context(context)
+    recorder.events.clear()
+
+    context.add_message({"role": "user", "content": "What is the capital of Spain?"})
+    await service._handle_context(context)
+
+    assert recorder.user_texts() == ["What is the capital of Spain?"]
+    assert "ResponseCreateEvent" in recorder.kinds()
+
+
+@pytest.mark.asyncio
+async def test_a_transcript_awaited_across_a_shrink_does_not_swallow_a_text_turn():
+    service, recorder = _make_service()
+    context = LLMContext([{"role": "developer", "content": "Be brief."}])
+    await _start(service, context)
+
+    # The caller's transcript is pushed, but the context is replaced before it lands.
+    await _transcription_completed(service, "What is the capital of France?")
+    context.set_messages([])
+    await service._handle_context(context)
+    recorder.events.clear()
+
+    context.add_message({"role": "user", "content": "What is the capital of Spain?"})
+    await service._handle_context(context)
+
+    assert recorder.user_texts() == ["What is the capital of Spain?"]
+
+
 @pytest.mark.asyncio
 async def test_list_content_is_flattened_to_text():
     service, recorder = _make_service()
