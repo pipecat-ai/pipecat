@@ -30,8 +30,14 @@ class ExotelFrameSerializer(FrameSerializer):
     """Serializer for Exotel Media Streams WebSocket protocol.
 
     This serializer handles converting between Pipecat frames and Exotel's WebSocket
-    media streams protocol. It supports audio conversion, DTMF events, and automatic
-    call termination.
+    media streams protocol. It supports audio conversion and DTMF events.
+
+    Unlike :class:`~pipecat.serializers.twilio.TwilioFrameSerializer`,
+    :class:`~pipecat.serializers.telnyx.TelnyxFrameSerializer` and
+    :class:`~pipecat.serializers.plivo.PlivoFrameSerializer`, this serializer does
+    not hang up the call itself: it has no ``auto_hang_up`` parameter and ignores
+    ``EndFrame`` and ``CancelFrame``. Call termination is left to the transport
+    closing the WebSocket, or to a Hangup applet in the Exotel call flow.
 
     Note: Ref docs for events:
         https://support.exotel.com/support/solutions/articles/3000108630-working-with-the-stream-and-voicebot-applet
