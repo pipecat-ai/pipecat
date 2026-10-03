@@ -1612,6 +1612,10 @@ class PipelineWorker(BaseWorker):
         if self._cancelled:
             return False
 
+        # An async handler may still be handling the previous idle event.
+        if any(name == "on_idle_timeout" and not task.done() for name, task in self._event_tasks):
+            return True
+
         logger.warning("Idle timeout detected.")
         await self._call_event_handler("on_idle_timeout")
         if not self._cancel_on_idle_timeout:
