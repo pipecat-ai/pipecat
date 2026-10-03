@@ -482,7 +482,7 @@ class WorkerRunner(BaseObject, BusSubscriber):
             # body), so exclude it from the check.
             if self._auto_end and worker.parent is None:
                 others_running = any(
-                    e.runner_task is not None and not e.runner_task.done()
+                    e.runner_task is None or not e.runner_task.done()
                     for e in self._entries.values()
                     if e.worker.parent is None and e.worker is not worker
                 )
