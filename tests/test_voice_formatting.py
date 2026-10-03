@@ -427,6 +427,22 @@ class TestExpandCurrency(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await expand_currency("$3.567", "*"), "three dollars and fifty-six cents")
         self.assertEqual(await expand_currency("£1.999", "*"), "one pound and ninety-nine pence")
 
+    async def test_scale_word_after_amount(self):
+        # "$2.5 billion" is two and a half billion dollars, not two dollars and
+        # fifty cents followed by a stray "billion".
+        self.assertEqual(
+            await expand_currency("Revenue hit $2.5 billion last year", "*"),
+            "Revenue hit two point five billion dollars last year",
+        )
+        self.assertEqual(
+            await expand_currency("We raised $5 million", "*"), "We raised five million dollars"
+        )
+        self.assertEqual(await expand_currency("$1 million", "*"), "one million dollars")
+        self.assertEqual(
+            await expand_currency("€3.25 Trillion", "*"), "three point two five trillion euros"
+        )
+        self.assertEqual(await expand_currency("¥40 thousand", "*"), "forty thousand yen")
+
 
 class TestNormalizeDates(unittest.IsolatedAsyncioTestCase):
     async def test_iso_date(self):
