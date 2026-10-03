@@ -20,7 +20,13 @@ import numpy as np
 try:
     from livekit import rtc
 
-    from pipecat.frames.frames import ImageRawFrame, OutputImageRawFrame, UserImageRequestFrame
+    from pipecat.frames.frames import (
+        ImageRawFrame,
+        InputAudioRawFrame,
+        OutputImageRawFrame,
+        UserAudioRawFrame,
+        UserImageRequestFrame,
+    )
     from pipecat.transports.base_transport import VideoInSourceParams
     from pipecat.transports.livekit.transport import (
         LiveKitCallbacks,
@@ -29,6 +35,7 @@ try:
         LiveKitParams,
         LiveKitTransport,
         LiveKitTransportClient,
+        _ParticipantAudioMixer,
     )
 
     LIVEKIT_AVAILABLE = True
@@ -1538,3 +1545,124 @@ class TestLiveKitAudioOutQueueSize(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(call.args, (16000, 1))
         self.assertEqual(call.kwargs["queue_size_ms"], 200)
+
+
+def _pcm(value: int, ms: int, sample_rate: int = 48000) -> bytes:
+    """Constant-valued 16-bit mono PCM."""
+    return np.full(sample_rate * ms // 1000, value, dtype=np.int16).tobytes()
+
+
+def _samples(audio: bytes) -> np.ndarray:
+    return np.frombuffer(audio, dtype=np.int16)
+
+
+@unittest.skipUnless(LIVEKIT_AVAILABLE, "livekit package not installed")
+class TestParticipantAudioMixer(unittest.TestCase):
+    """Participants' audio is mixed into one stream that keeps their pace."""
+
+    def _mixer(self, *participant_ids: str, **kwargs) -> _ParticipantAudioMixer:
+        """A mixer that has already heard from ``participant_ids``."""
+        mixer = _ParticipantAudioMixer(sample_rate=48000, num_channels=1, **kwargs)
+        for participant_id in participant_ids:
+            mixer.add(participant_id, b"")
+        return mixer
+
+    def test_a_single_participant_passes_through_in_chunks(self):
+        mixer = self._mixer()
+        chunks = mixer.add("alice", _pcm(100, 30))
+        self.assertEqual(len(chunks), 3)
+        for chunk in chunks:
+            self.assertEqual(len(chunk), 960)
+            self.assertTrue(np.all(_samples(chunk) == 100))
+
+    def test_partial_chunks_are_held_until_complete(self):
+        mixer = self._mixer()
+        self.assertEqual(mixer.add("alice", _pcm(100, 5)), [])
+        self.assertEqual(len(mixer.add("alice", _pcm(100, 5))), 1)
+
+    def test_participants_are_summed_and_keep_real_time(self):
+        mixer = self._mixer("alice", "bob")
+        chunks = []
+        for _ in range(100):  # one second of 10 ms frames from each participant
+            chunks += mixer.add("alice", _pcm(1000, 10))
+            chunks += mixer.add("bob", _pcm(2000, 10))
+        self.assertEqual(len(chunks), 100)
+        self.assertTrue(all(np.all(_samples(chunk) == 3000) for chunk in chunks))
+
+    def test_waits_for_every_participant_before_mixing(self):
+        mixer = self._mixer("alice", "bob")
+        self.assertEqual(mixer.add("alice", _pcm(1000, 30)), [])
+        chunks = mixer.add("bob", _pcm(2000, 30))
+        self.assertEqual(len(chunks), 3)
+        self.assertTrue(all(np.all(_samples(chunk) == 3000) for chunk in chunks))
+
+    def test_a_participant_who_stops_sending_is_left_out(self):
+        mixer = self._mixer("alice", "bob", max_wait_ms=50)
+
+        # Bob is quiet: alice's audio waits for him until 50 ms is buffered,
+        # then comes out on its own, and keeps pace without him after that.
+        self.assertEqual(mixer.add("alice", _pcm(1000, 40)), [])
+        chunks = mixer.add("alice", _pcm(1000, 10))
+        self.assertEqual(len(chunks), 5)
+        self.assertTrue(all(np.all(_samples(chunk) == 1000) for chunk in chunks))
+        self.assertEqual(len(mixer.add("alice", _pcm(1000, 10))), 1)
+
+        # Bob's audio is mixed in again as soon as it arrives.
+        self.assertEqual(mixer.add("bob", _pcm(2000, 10)), [])
+        chunks = mixer.add("alice", _pcm(1000, 10))
+        self.assertEqual(len(chunks), 1)
+        self.assertTrue(np.all(_samples(chunks[0]) == 3000))
+
+    def test_mixed_samples_are_clipped(self):
+        mixer = self._mixer("alice", "bob")
+        mixer.add("alice", _pcm(30000, 10))
+        (chunk,) = mixer.add("bob", _pcm(30000, 10))
+        self.assertTrue(np.all(_samples(chunk) == 32767))
+
+
+@unittest.skipUnless(LIVEKIT_AVAILABLE, "livekit package not installed")
+class TestLiveKitAudioInUserTracks(unittest.IsolatedAsyncioTestCase):
+    """How the input transport delivers several participants' audio."""
+
+    async def _push_audio_from_two_participants(self, audio_in_user_tracks: bool):
+        from pipecat.transports.livekit.transport import LiveKitTransport
+
+        transport = LiveKitTransport(
+            url="wss://test.livekit.cloud",
+            token="test-token",
+            room_name="test-room",
+            params=LiveKitParams(audio_in_enabled=True, audio_in_user_tracks=audio_in_user_tracks),
+        )
+        input_transport = transport.input()
+        input_transport._sample_rate = 16000
+        input_transport.push_audio_frame = AsyncMock()
+
+        async def frames():
+            for _ in range(100):  # one second of 10 ms frames from each participant
+                for participant_id, value in (("alice", 1000), ("bob", 2000)):
+                    frame = rtc.AudioFrame(_pcm(value, 10), 48000, 1, 480)
+                    yield rtc.AudioFrameEvent(frame=frame), participant_id
+
+        transport._client.get_next_audio_frame = frames
+        await input_transport._audio_in_task_handler()
+        return [call.args[0] for call in input_transport.push_audio_frame.await_args_list]
+
+    async def test_user_tracks_push_each_participants_audio(self):
+        frames = await self._push_audio_from_two_participants(audio_in_user_tracks=True)
+        self.assertTrue(all(isinstance(frame, UserAudioRawFrame) for frame in frames))
+        self.assertEqual({frame.user_id for frame in frames}, {"alice", "bob"})
+
+    async def test_mixed_audio_is_one_real_time_stream(self):
+        frames = await self._push_audio_from_two_participants(audio_in_user_tracks=False)
+        self.assertTrue(all(type(frame) is InputAudioRawFrame for frame in frames))
+        self.assertTrue(all(frame.sample_rate == 16000 for frame in frames))
+
+        # One second from each of two participants is one second of audio, not
+        # two (less what the resampler still holds).
+        seconds = sum(len(frame.audio) for frame in frames) / 2 / 16000
+        self.assertGreater(seconds, 0.9)
+        self.assertLessEqual(seconds, 1.0)
+
+        # The middle of the stream carries both participants' audio.
+        middle = _samples(b"".join(frame.audio for frame in frames))[4000:12000]
+        self.assertTrue(np.all(np.abs(middle - 3000) <= 3))
