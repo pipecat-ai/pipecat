@@ -31,6 +31,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
     TTSTextFrame,
 )
+from pipecat.services.rime import tts as rime_tts
 from pipecat.services.rime._websocket_v1 import (
     AudioEvent,
     CancelledEvent,
@@ -184,6 +185,127 @@ async def test_start_text_and_end_use_one_typed_context(protocol: str) -> None:
     assert requests[0].start.audio_parameters.sampling_rate == 24000
     assert requests[0].start.coda_parameters.text_lookahead_tokens == 3
     assert [request.text for request in requests[1:3]] == ["First. ", "Second. "]
+
+
+@pytest.mark.parametrize("protocol", ["binary", "json"])
+@pytest.mark.parametrize("payload", ["start", "text", "end", "cancel"])
+@pytest.mark.asyncio
+async def test_service_blocked_write_closes_connection_and_allows_reconnect(
+    protocol: str, payload: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(rime_tts, "_V1_START_TIMEOUT_S", 0.02)
+    monkeypatch.setattr(rime_tts, "_V1_TERMINAL_TIMEOUT_S", 0.02)
+    monkeypatch.setattr(rime_tts, "_V1_CANCEL_TIMEOUT_S", 0.02)
+    service = RimeTTSService(
+        api_key="key",
+        websocket_url="wss://api.rime.ai/coda/ws",
+        websocket_protocol=protocol,
+        sample_rate=24000,
+    )
+    client, socket = await _ready_client(protocol)
+    socket.state = State.OPEN
+    service._websocket = socket
+    service._v1_client = client
+    service._v1_receiving_client = client
+    service._turn_context_id = "turn"
+    service._audio_contexts["turn"] = asyncio.Queue()
+    if payload in ("end", "cancel"):
+        service._v1_options_by_context["turn"] = _options()
+        await client.send_text("turn", _options(), "Hello.")
+
+    write_cancelled = asyncio.Event()
+    original_send = socket.send
+
+    async def blocked_send(message: str | bytes) -> None:
+        if _request(message).WhichOneof("payload") == payload:
+            try:
+                await asyncio.Event().wait()
+            finally:
+                write_cancelled.set()
+        await original_send(message)
+
+    socket.send = blocked_send
+
+    async def send() -> None:
+        if payload == "end":
+            await service.flush_audio("turn")
+        elif payload == "cancel":
+            await service.on_audio_context_interrupted("turn")
+        else:
+            frames = [frame async for frame in service._run_tts_v1("Hello.", "turn")]
+            assert any(isinstance(frame, ErrorFrame) for frame in frames)
+
+    await asyncio.wait_for(send(), timeout=0.5)
+    assert write_cancelled.is_set()
+    assert socket.closed
+    assert not client.context_ids
+    with pytest.raises(RimeV1ConnectionError, match="closed"):
+        await client.send_text("later", _options(), "Too late.")
+    assert not service._v1_options_by_context
+    assert not service._v1_keepalive_tasks
+    assert not service._v1_start_watchdogs
+    assert not service._v1_terminal_watchdogs
+    assert not service._v1_cancel_watchdogs
+
+    _, replacement = await _ready_client(protocol)
+    replacement.state = State.OPEN
+    replacement.ping = AsyncMock()
+    await replacement.incoming.put(_response(protocol, ready={"protocol": 1}))
+    service._websocket_connect = AsyncMock(return_value=replacement)
+    assert await service._reconnect_websocket(1)
+    assert service._v1_client is not client
+    await service._v1_client.send_text("next-turn", _options(), "Recovered.")
+    assert [_request(message).WhichOneof("payload") for message in replacement.sent] == [
+        "start",
+        "text",
+    ]
+    await service._v1_client.close()
+
+
+@pytest.mark.parametrize("operation", ["send_text", "end", "cancel"])
+@pytest.mark.asyncio
+async def test_send_timeout_includes_lock_wait(operation: str) -> None:
+    client, socket = await _ready_client()
+    args = ("turn", _options(), "Hello.") if operation == "send_text" else ("turn",)
+    async with client._send_lock:
+        with pytest.raises(RimeV1ConnectionError, match="Timed out writing"):
+            await asyncio.wait_for(getattr(client, operation)(*args, timeout_s=0.02), timeout=0.5)
+
+    with pytest.raises(RimeV1ConnectionError, match="closed"):
+        await client.send_text("later", _options(), "Too late.")
+    assert socket.sent == []
+    await client.close()
+
+
+@pytest.mark.asyncio
+async def test_queued_send_rejects_connection_after_another_write_times_out() -> None:
+    client, socket = await _ready_client()
+    write_started = asyncio.Event()
+
+    async def blocked_send(message: str | bytes) -> None:
+        socket.sent.append(message)
+        write_started.set()
+        await asyncio.Event().wait()
+
+    socket.send = blocked_send
+    first = asyncio.create_task(client.send_text("first", _options(), "First.", timeout_s=0.02))
+    try:
+        await asyncio.wait_for(write_started.wait(), timeout=0.5)
+        second = asyncio.create_task(
+            client.send_text("second", _options(), "Second.", timeout_s=0.5)
+        )
+        results = await asyncio.wait_for(
+            asyncio.gather(first, second, return_exceptions=True), timeout=1.0
+        )
+        assert all(isinstance(result, RimeV1ConnectionError) for result in results)
+        assert "Timed out writing" in str(results[0])
+        assert "closed" in str(results[1])
+        assert len(socket.sent) == 1
+        assert _request(socket.sent[0]).context_id == "first"
+    finally:
+        first.cancel()
+        await asyncio.gather(first, return_exceptions=True)
+        await client.close()
 
 
 @pytest.mark.parametrize("protocol", ["binary", "json"])
@@ -954,7 +1076,9 @@ async def test_old_receive_loop_does_not_reconnect_over_replacement_connection()
 @pytest.mark.asyncio
 async def test_run_tts_does_not_start_tasks_for_a_finished_context() -> None:
     class FinishedContextClient:
-        async def send_text(self, context_id: str, options: SynthesisOptions, text: str) -> None:
+        async def send_text(
+            self, context_id: str, options: SynthesisOptions, text: str, *, timeout_s: float
+        ) -> None:
             pass
 
         def has_context(self, context_id: str) -> bool:
