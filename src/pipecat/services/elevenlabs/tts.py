@@ -468,9 +468,15 @@ class ElevenLabsTTSService(ElevenLabsTTSBase):
 
         self._alignment_started_context_ids: set[str | None] = set()
 
-        # Context IDs whose context-init has been sent, so the keepalive knows
-        # which contexts are safe to target.
+        # Context IDs whose context-init has been sent and that the server still
+        # holds open, so the keepalive knows which contexts it may target and
+        # the disconnect knows which ones to close.
         self._context_init_sent: set[str] = set()
+
+        # Whether a context-less keepalive has opened the connection's default
+        # context. ElevenLabs will not act on close_socket while it is open, so
+        # the disconnect closes it first.
+        self._default_context_open = False
 
     @classmethod
     def format_pronunciation(cls, word: str, ipa: str) -> str | None:
@@ -541,6 +547,7 @@ class ElevenLabsTTSService(ElevenLabsTTSBase):
 
     def _clear_connection_state(self):
         self._context_init_sent.clear()
+        self._default_context_open = False
 
     async def _close_context(self, context_id: str):
         # ElevenLabs requires that Pipecat explicitly closes contexts to free
@@ -559,6 +566,23 @@ class ElevenLabsTTSService(ElevenLabsTTSBase):
                 )
             except Exception as e:
                 await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
+        # The server no longer holds the context, so neither a keepalive nor the
+        # disconnect may name it again.
+        self._context_init_sent.discard(context_id)
+
+    async def _close_open_contexts(self):
+        if not self._websocket:
+            return
+        for context_id in self._context_init_sent:
+            logger.trace(f"{self}: Closing context {context_id}")
+            await self._websocket.send(
+                json.dumps({"context_id": context_id, "close_context": True})
+            )
+        self._context_init_sent.clear()
+        if self._default_context_open:
+            logger.trace(f"{self}: Closing the default context")
+            await self._websocket.send(json.dumps({"close_context": True}))
+            self._default_context_open = False
 
     def _reset_alignment_state(self, context_id: str):
         super()._reset_alignment_state(context_id)
@@ -653,10 +677,11 @@ class ElevenLabsTTSService(ElevenLabsTTSBase):
         """Send a single keepalive message to keep the WebSocket connection alive.
 
         Only stamps a ``context_id`` once its context-init (carrying
-        ``voice_settings``) has been sent. Otherwise the keepalive would be the
-        context's first message, with no ``voice_settings``, and ElevenLabs would
-        reject the later context-init with a 1008 policy violation. A context-less
-        keepalive is sufficient until the context-init is sent.
+        ``voice_settings``) has been sent and while the context is still open.
+        Otherwise the keepalive would be the context's first message, with no
+        ``voice_settings``, and ElevenLabs would reject the later context-init
+        with a 1008 policy violation. A context-less keepalive is sufficient
+        until the context-init is sent.
         """
         if not self._websocket or self._websocket.state is not State.OPEN:
             return
@@ -665,13 +690,14 @@ class ElevenLabsTTSService(ElevenLabsTTSBase):
         if context_id and context_id in self._context_init_sent:
             # The context's voice_settings context-init has been sent, so it's
             # safe to keep that context alive.
-            keepalive_message = {"text": "", "context_id": context_id}
+            await self._websocket.send(json.dumps({"text": "", "context_id": context_id}))
         else:
-            # No active context, or the active context's context-init hasn't been
+            # No open context, or the active context's context-init hasn't been
             # sent yet. A context-less keepalive keeps the connection alive without
-            # opening the context prematurely.
-            keepalive_message = {"text": ""}
-        await self._websocket.send(json.dumps(keepalive_message))
+            # opening the context prematurely; it opens the connection's default
+            # context instead, which the disconnect closes.
+            await self._websocket.send(json.dumps({"text": ""}))
+            self._default_context_open = True
 
     async def _send_context_init(self, context_id: str):
         """Open a context, carrying voice settings and pronunciation dictionaries."""
