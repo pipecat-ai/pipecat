@@ -67,6 +67,9 @@ from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 
 from . import events
 
+DEFAULT_MODEL = "gpt-4o-mini"
+"""Model backing the session when the settings name none."""
+
 DEFAULT_API_VERSION = "2026-07-15"
 """Voice Live API version this service speaks."""
 
@@ -320,11 +323,10 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
         if api_key is None and token_provider is None:
             raise ValueError("Either `api_key` or `token_provider` is required.")
 
-        default_model = "gpt-4o-mini"
         default_voice = events.AzureStandardVoice(name="en-US-Ava:DragonHDLatestNeural")
 
         default_settings = self.Settings(
-            model=default_model,
+            model=DEFAULT_MODEL,
             system_instruction=None,
             temperature=None,
             max_tokens=None,
@@ -372,7 +374,7 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
         self._token_provider = token_provider
         self._api_version = api_version
         # The connection URL selects the model, so it is fixed for the session.
-        self._model = assert_given(self._settings.model) or default_model
+        self._model = assert_given(self._settings.model) or DEFAULT_MODEL
         self._warn_if_caller_is_not_transcribed()
 
         self._audio_input_paused = start_audio_paused
