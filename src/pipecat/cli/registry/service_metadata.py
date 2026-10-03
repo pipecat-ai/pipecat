@@ -1078,7 +1078,7 @@ class ServiceRegistry:
             include_params=[],
             manual_config=True,
             additional_imports=[
-                "from pipecat.services.azure.voicelive.events import AzureStandardVoice, InputAudioTranscription, SessionProperties, TurnDetection"
+                "from pipecat.services.azure.voice_live.events import AzureStandardVoice, InputAudioTranscription, SessionProperties, TurnDetection"
             ],
         ),
         ServiceDefinition(

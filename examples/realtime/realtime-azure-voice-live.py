@@ -24,14 +24,14 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.azure.voicelive.events import (
+from pipecat.services.azure.voice_live.events import (
     AzureStandardVoice,
     InputAudioNoiseReduction,
     InputAudioTranscription,
     SessionProperties,
     TurnDetection,
 )
-from pipecat.services.azure.voicelive.llm import AzureVoiceLiveLLMService
+from pipecat.services.azure.voice_live.llm import AzureVoiceLiveLLMService
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams

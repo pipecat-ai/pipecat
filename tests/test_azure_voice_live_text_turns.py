@@ -17,8 +17,8 @@ from typing import Any
 import pytest
 
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.services.azure.voicelive import events
-from pipecat.services.azure.voicelive.llm import AzureVoiceLiveLLMService
+from pipecat.services.azure.voice_live import events
+from pipecat.services.azure.voice_live.llm import AzureVoiceLiveLLMService
 
 
 class _EventRecorder:

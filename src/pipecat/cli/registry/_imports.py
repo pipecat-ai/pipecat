@@ -166,8 +166,8 @@ IMPORTS = {
         "from pipecat.services.openai.realtime.events import SessionProperties, InputAudioTranscription",
     ],
     "azure_voice_live": [
-        "from pipecat.services.azure.voicelive.llm import AzureVoiceLiveLLMService",
-        "from pipecat.services.azure.voicelive.events import AzureStandardVoice, InputAudioTranscription, SessionProperties, TurnDetection",
+        "from pipecat.services.azure.voice_live.llm import AzureVoiceLiveLLMService",
+        "from pipecat.services.azure.voice_live.events import AzureStandardVoice, InputAudioTranscription, SessionProperties, TurnDetection",
     ],
     "gemini_live_realtime": [
         "from pipecat.services.google.gemini_live.llm import GeminiLiveLLMService"

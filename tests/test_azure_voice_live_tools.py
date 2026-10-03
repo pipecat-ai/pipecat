@@ -19,8 +19,8 @@ import pytest
 
 from pipecat.processors.aggregators import async_tool_messages
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.services.azure.voicelive import events
-from pipecat.services.azure.voicelive.llm import AzureVoiceLiveLLMService
+from pipecat.services.azure.voice_live import events
+from pipecat.services.azure.voice_live.llm import AzureVoiceLiveLLMService
 
 CALL_ID = "call_1"
 

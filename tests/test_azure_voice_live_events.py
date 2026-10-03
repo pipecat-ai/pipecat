@@ -12,7 +12,7 @@ The payloads below are captured from a live Voice Live session
 
 import json
 
-from pipecat.services.azure.voicelive import events
+from pipecat.services.azure.voice_live import events
 
 
 def _event(payload: dict) -> str:

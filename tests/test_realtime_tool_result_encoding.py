@@ -13,7 +13,7 @@ string through unchanged, not re-encode it with another `json.dumps()`
 import unittest
 from unittest.mock import AsyncMock
 
-from pipecat.services.azure.voicelive.llm import AzureVoiceLiveLLMService
+from pipecat.services.azure.voice_live.llm import AzureVoiceLiveLLMService
 from pipecat.services.inworld.realtime.llm import InworldRealtimeLLMService
 from pipecat.services.openai.realtime.llm import OpenAIRealtimeLLMService
 from pipecat.services.xai.realtime.llm import GrokRealtimeLLMService

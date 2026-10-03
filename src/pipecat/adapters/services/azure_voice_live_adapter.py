@@ -21,7 +21,7 @@ from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.processors.aggregators.llm_context import LLMContext, LLMContextMessage
-from pipecat.services.azure.voicelive import events
+from pipecat.services.azure.voice_live import events
 
 
 class AzureVoiceLiveLLMInvocationParams(TypedDict):
@@ -48,7 +48,7 @@ class AzureVoiceLiveLLMAdapter(BaseLLMAdapter):
     @property
     def id_for_llm_specific_messages(self) -> str:
         """Get the identifier used in LLMSpecificMessage instances for Voice Live."""
-        return "azure-voicelive"
+        return "azure-voice-live"
 
     def get_llm_invocation_params(
         self, context: LLMContext, *, system_instruction: str | None = None
@@ -229,7 +229,7 @@ class AzureVoiceLiveLLMAdapter(BaseLLMAdapter):
         raise ValueError(f"Unhandled message type in _from_universal_context_message: {msg}")
 
     @staticmethod
-    def _to_voicelive_function_format(function: FunctionSchema) -> dict[str, Any]:
+    def _to_voice_live_function_format(function: FunctionSchema) -> dict[str, Any]:
         """Convert a function schema to Voice Live function format.
 
         Args:
@@ -259,4 +259,4 @@ class AzureVoiceLiveLLMAdapter(BaseLLMAdapter):
             List of tool definitions in Voice Live format.
         """
         functions_schema = tools_schema.standard_tools
-        return [self._to_voicelive_function_format(func) for func in functions_schema]
+        return [self._to_voice_live_function_format(func) for func in functions_schema]

@@ -26,7 +26,7 @@ from websockets.asyncio.client import connect as websocket_connect
 from websockets.exceptions import ConnectionClosed
 
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
-from pipecat.adapters.services.azure_voicelive_adapter import AzureVoiceLiveLLMAdapter
+from pipecat.adapters.services.azure_voice_live_adapter import AzureVoiceLiveLLMAdapter
 from pipecat.frames.frames import (
     AggregationType,
     BotStoppedSpeakingFrame,
@@ -252,7 +252,7 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
     For full control over session properties (note: ``session_properties``
     **replaces** all defaults, so provide a complete config)::
 
-        from pipecat.services.azure.voicelive.events import (
+        from pipecat.services.azure.voice_live.events import (
             AzureStandardVoice,
             InputAudioNoiseReduction,
             InputAudioTranscription,

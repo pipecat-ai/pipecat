@@ -12,8 +12,8 @@ import pytest
 from loguru import logger
 from websockets.exceptions import ConnectionClosedError
 
-from pipecat.services.azure.voicelive import events
-from pipecat.services.azure.voicelive.llm import AzureVoiceLiveLLMService
+from pipecat.services.azure.voice_live import events
+from pipecat.services.azure.voice_live.llm import AzureVoiceLiveLLMService
 
 
 def _service(**kwargs) -> AzureVoiceLiveLLMService:
@@ -181,7 +181,7 @@ async def test_a_text_only_session_update_leaves_out_the_voice(modalities, sends
 @pytest.mark.asyncio
 async def test_a_model_given_in_settings_selects_the_connection_model(monkeypatch):
     """The connection URL picks the model, so a model set only in settings must reach it."""
-    import pipecat.services.azure.voicelive.llm as llm_module
+    import pipecat.services.azure.voice_live.llm as llm_module
 
     uris = []
 
@@ -446,7 +446,7 @@ async def test_a_response_asked_for_before_the_session_is_ready_waits_for_it():
 async def test_connect_authenticates_with_the_configured_credential(
     monkeypatch, use_token_provider
 ):
-    import pipecat.services.azure.voicelive.llm as llm_module
+    import pipecat.services.azure.voice_live.llm as llm_module
 
     headers = []
 

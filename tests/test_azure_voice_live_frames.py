@@ -35,8 +35,8 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.azure.voicelive import events
-from pipecat.services.azure.voicelive.llm import AzureVoiceLiveLLMService
+from pipecat.services.azure.voice_live import events
+from pipecat.services.azure.voice_live.llm import AzureVoiceLiveLLMService
 
 RESPONSE_ID = "resp_1"
 ITEM_ID = "msg_1"

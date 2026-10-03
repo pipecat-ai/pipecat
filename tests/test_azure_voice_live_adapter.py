@@ -16,7 +16,7 @@ import pytest
 
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
-from pipecat.adapters.services.azure_voicelive_adapter import AzureVoiceLiveLLMAdapter
+from pipecat.adapters.services.azure_voice_live_adapter import AzureVoiceLiveLLMAdapter
 from pipecat.processors.aggregators.llm_context import LLMContext
 
 WEATHER = FunctionSchema(
@@ -33,7 +33,7 @@ def adapter() -> AzureVoiceLiveLLMAdapter:
 
 
 def test_provider_id(adapter):
-    assert adapter.id_for_llm_specific_messages == "azure-voicelive"
+    assert adapter.id_for_llm_specific_messages == "azure-voice-live"
 
 
 def test_tools_convert_to_the_voice_live_shape(adapter):
