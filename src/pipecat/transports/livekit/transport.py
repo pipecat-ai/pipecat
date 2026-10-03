@@ -12,6 +12,7 @@ event handling for conversational AI applications.
 """
 
 import asyncio
+import functools
 import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -22,7 +23,7 @@ from pydantic import BaseModel
 
 from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.audio.resamplers.base_audio_resampler import BaseAudioResampler
-from pipecat.audio.utils import create_stream_resampler
+from pipecat.audio.utils import create_stream_resampler, mix_audio
 from pipecat.frames.frames import (
     AudioRawFrame,
     BotConnectedFrame,
@@ -31,6 +32,7 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     ImageRawFrame,
+    InputAudioRawFrame,
     InputDTMFFrame,
     InputTransportMessageFrame,
     InterruptionFrame,
@@ -136,6 +138,12 @@ class LiveKitParams(TransportParams):
     ``"VP9"``, ``"AV1"`` or ``"H265"``); LiveKit picks one when it is unset.
 
     Parameters:
+        audio_in_user_tracks: Receive each participant's audio as its own stream of
+            ``UserAudioRawFrame``s tagged with their identity (the default). All of
+            these streams enter the pipeline through the one input transport, so a
+            pipeline that runs a single STT and VAD should only receive one of them.
+            When False, the participants' audio is mixed into a single stream of
+            ``InputAudioRawFrame``s.
         audio_out_queue_size_ms: Buffer size of the outgoing audio source, in milliseconds
             (LiveKit's default is 1000).
         video_out_max_bitrate: Maximum bitrate of the published video track, in bits
@@ -143,6 +151,7 @@ class LiveKitParams(TransportParams):
             from the track resolution when unset.
     """
 
+    audio_in_user_tracks: bool = True
     audio_out_queue_size_ms: int = 1000
     video_out_max_bitrate: int | None = None
 
@@ -837,6 +846,62 @@ class LiveKitTransportClient:
         return f"{self._transport_name}::LiveKitTransportClient"
 
 
+class _ParticipantAudioMixer:
+    """Mixes participants' audio, as it arrives, into a single stream.
+
+    Each participant's audio is buffered and mixed in fixed-size chunks once
+    every participant has a chunk buffered, so the output keeps the pace of the
+    participants' streams. A participant who stops sending audio holds the mix
+    back until another participant has ``max_wait_ms`` buffered; then they are
+    left out of the mix until their audio arrives again.
+    """
+
+    def __init__(
+        self, *, sample_rate: int, num_channels: int, chunk_ms: int = 10, max_wait_ms: int = 50
+    ):
+        """Initialize the mixer.
+
+        Args:
+            sample_rate: Sample rate of the participants' audio.
+            num_channels: Number of channels of the participants' audio.
+            chunk_ms: Duration of each mixed chunk, in milliseconds.
+            max_wait_ms: How much audio another participant buffers before the
+                mix stops waiting for a participant with no audio buffered.
+        """
+        bytes_per_ms = sample_rate * num_channels * 2 // 1000
+        self._chunk_bytes = chunk_ms * bytes_per_ms
+        self._max_wait_bytes = max_wait_ms * bytes_per_ms
+        self._buffers: dict[str, bytearray] = {}
+
+    def add(self, participant_id: str, audio: bytes) -> list[bytes]:
+        """Add a participant's audio and return the chunks it completes.
+
+        Args:
+            participant_id: The participant the audio belongs to.
+            audio: 16-bit PCM audio.
+
+        Returns:
+            The mixed chunks that are ready, oldest first.
+        """
+        self._buffers.setdefault(participant_id, bytearray()).extend(audio)
+        chunks = []
+        while True:
+            if any(len(buffer) < self._chunk_bytes for buffer in self._buffers.values()):
+                if all(len(buffer) < self._max_wait_bytes for buffer in self._buffers.values()):
+                    break
+                for silent_id in [p for p, buffer in self._buffers.items() if not buffer]:
+                    del self._buffers[silent_id]
+            chunks.append(self._mix_chunk())
+        return chunks
+
+    def _mix_chunk(self) -> bytes:
+        parts = []
+        for buffer in self._buffers.values():
+            parts.append(bytes(buffer[: self._chunk_bytes]))
+            del buffer[: self._chunk_bytes]
+        return functools.reduce(mix_audio, parts)
+
+
 class LiveKitInputTransport(BaseInputTransport):
     """Handles incoming media streams and events from LiveKit rooms.
 
@@ -868,6 +933,9 @@ class LiveKitInputTransport(BaseInputTransport):
         # One resampler per participant: a stream resampler keeps state between
         # calls, so sharing one would mix the audio of participants who talk at once.
         self._resamplers: dict[str, BaseAudioResampler] = {}
+        self._audio_in_user_tracks = params.audio_in_user_tracks
+        self._mixer: _ParticipantAudioMixer | None = None
+        self._mixed_resampler = create_stream_resampler()
 
     async def setup(self, setup: FrameProcessorSetup):
         """Setup the input transport with shared client setup.
@@ -961,23 +1029,49 @@ class LiveKitInputTransport(BaseInputTransport):
         logger.info("Audio input task started")
         audio_iterator = self._client.get_next_audio_frame()
         async for audio_data in audio_iterator:
-            if audio_data:
-                audio_frame_event, participant_id = audio_data
-                pipecat_audio_frame = await self._convert_livekit_audio_to_pipecat(
-                    audio_frame_event, participant_id
-                )
+            if not audio_data:
+                continue
+            audio_frame_event, participant_id = audio_data
 
-                # Skip frames with no audio data
-                if len(pipecat_audio_frame.audio) == 0:
-                    continue
+            if not self._audio_in_user_tracks:
+                await self._push_mixed_audio(audio_frame_event.frame, participant_id)
+                continue
 
-                input_audio_frame = UserAudioRawFrame(
-                    user_id=participant_id,
-                    audio=pipecat_audio_frame.audio,
-                    sample_rate=pipecat_audio_frame.sample_rate,
-                    num_channels=pipecat_audio_frame.num_channels,
+            pipecat_audio_frame = await self._convert_livekit_audio_to_pipecat(
+                audio_frame_event, participant_id
+            )
+
+            # Skip frames with no audio data
+            if len(pipecat_audio_frame.audio) == 0:
+                continue
+
+            input_audio_frame = UserAudioRawFrame(
+                user_id=participant_id,
+                audio=pipecat_audio_frame.audio,
+                sample_rate=pipecat_audio_frame.sample_rate,
+                num_channels=pipecat_audio_frame.num_channels,
+            )
+            await self.push_audio_frame(input_audio_frame)
+
+    async def _push_mixed_audio(self, audio_frame: rtc.AudioFrame, participant_id: str):
+        """Mix a participant's audio into the room's stream and push what is ready."""
+        if not self._mixer:
+            self._mixer = _ParticipantAudioMixer(
+                sample_rate=audio_frame.sample_rate, num_channels=audio_frame.num_channels
+            )
+        for chunk in self._mixer.add(participant_id, audio_frame.data.tobytes()):
+            audio = await self._mixed_resampler.resample(
+                chunk, audio_frame.sample_rate, self.sample_rate
+            )
+            if not audio:
+                continue
+            await self.push_audio_frame(
+                InputAudioRawFrame(
+                    audio=audio,
+                    sample_rate=self.sample_rate,
+                    num_channels=audio_frame.num_channels,
                 )
-                await self.push_audio_frame(input_audio_frame)
+            )
 
     async def _video_in_task_handler(self):
         """Handle incoming video frames from participants."""
