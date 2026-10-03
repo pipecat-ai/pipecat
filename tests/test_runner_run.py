@@ -26,7 +26,7 @@ from pipecat.runner.run import (
     _parse_ice_servers,
     _print_startup_message,
     _setup_daily_routes,
-    _setup_file_uploads_route,
+    _setup_file_uploads_routes,
     _setup_telephony_routes,
     _setup_unified_start_route,
     _setup_webrtc_routes,
@@ -477,7 +477,7 @@ class TestFileUploadsRoute(unittest.TestCase):
     def test_registers_the_route_even_without_storage_configured(self):
         app = FastAPI()
         with patch("pipecat.runner.run.RUNNER_FILE_STORAGE", None):
-            _setup_file_uploads_route(app)
+            _setup_file_uploads_routes(app, {})
 
         paths = {route.path for route in app.routes}
         self.assertIn("/files", paths)
@@ -485,7 +485,7 @@ class TestFileUploadsRoute(unittest.TestCase):
     def test_returns_503_directly_when_storage_not_configured(self):
         app = FastAPI()
         with patch("pipecat.runner.run.RUNNER_FILE_STORAGE", None):
-            _setup_file_uploads_route(app)
+            _setup_file_uploads_routes(app, {})
             client = TestClient(app, follow_redirects=False)
 
             response = client.post("/files", files={"file": ("a.txt", b"hi")})
@@ -498,7 +498,7 @@ class TestFileUploadsRoute(unittest.TestCase):
         fake_storage.save = AsyncMock(return_value="pipecat:abc123")
 
         with patch("pipecat.runner.run.RUNNER_FILE_STORAGE", fake_storage):
-            _setup_file_uploads_route(app)
+            _setup_file_uploads_routes(app, {})
             client = TestClient(app)
 
             response = client.post("/files", files={"file": ("a.txt", b"hello")})
@@ -513,7 +513,7 @@ class TestFileUploadsRoute(unittest.TestCase):
         fake_storage.save = AsyncMock(side_effect=RuntimeError("AccessDenied: no PutObject"))
 
         with patch("pipecat.runner.run.RUNNER_FILE_STORAGE", fake_storage):
-            _setup_file_uploads_route(app)
+            _setup_file_uploads_routes(app, {})
             client = TestClient(app)
 
             response = client.post("/files", files={"file": ("a.txt", b"hello")})
@@ -529,6 +529,151 @@ class TestFileUploadsRoute(unittest.TestCase):
         with patch.object(run_module, "RUNNER_FILE_STORAGE", None):
             set_runner_file_storage(fake_storage)
             self.assertIs(runner_file_storage(), fake_storage)
+
+
+class TestSessionScopedUploads(unittest.TestCase):
+    """POST /sessions/{session_id}/files mirrors Pipecat Cloud's session-scoped
+    routes; a session's uploads are tracked and deleted when the session ends.
+    """
+
+    def _app(self, active_sessions):
+        app = FastAPI()
+        _setup_file_uploads_routes(app, active_sessions)
+        return app
+
+    def test_unknown_session_404s(self):
+        fake_storage = MagicMock()
+        with patch("pipecat.runner.run.RUNNER_FILE_STORAGE", fake_storage):
+            client = TestClient(self._app({}))
+            response = client.post("/sessions/nope/files", files={"file": ("a.txt", b"hi")})
+
+        self.assertEqual(response.status_code, 404)
+        fake_storage.save.assert_not_called()
+
+    def test_active_session_upload_is_saved_and_tracked(self):
+        fake_storage = MagicMock()
+        fake_storage.save = AsyncMock(return_value="pipecat:abc123")
+
+        with (
+            patch("pipecat.runner.run.RUNNER_FILE_STORAGE", fake_storage),
+            patch.dict("pipecat.runner.run._SESSION_UPLOAD_URLS", {}, clear=True),
+        ):
+            client = TestClient(self._app({"sess-1": {}}))
+            response = client.post("/sessions/sess-1/files", files={"file": ("a.txt", b"hi")})
+
+            from pipecat.runner.run import _SESSION_UPLOAD_URLS
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["source"], {"type": "url", "url": "pipecat:abc123"})
+            self.assertEqual(_SESSION_UPLOAD_URLS, {"sess-1": ["pipecat:abc123"]})
+
+    def test_sessionless_upload_is_not_tracked(self):
+        fake_storage = MagicMock()
+        fake_storage.save = AsyncMock(return_value="pipecat:abc123")
+
+        with (
+            patch("pipecat.runner.run.RUNNER_FILE_STORAGE", fake_storage),
+            patch.dict("pipecat.runner.run._SESSION_UPLOAD_URLS", {}, clear=True),
+        ):
+            client = TestClient(self._app({}))
+            response = client.post("/files", files={"file": ("a.txt", b"hi")})
+
+            from pipecat.runner.run import _SESSION_UPLOAD_URLS
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(_SESSION_UPLOAD_URLS, {})
+
+    def test_session_files_route_wins_over_webrtc_session_proxy(self):
+        """Registration order in _configure_server_app: the upload route must be
+        added before the catch-all /sessions/{session_id}/{path:path} proxy, or
+        uploads would get swallowed by the proxy's 200 stub."""
+        app = FastAPI()
+        active_sessions = {"sess-1": {}}
+        _setup_file_uploads_routes(app, active_sessions)
+        args = argparse.Namespace(
+            downloads_folder=None, esp32=False, host="localhost", ice_servers=[]
+        )
+        with (
+            patch("pipecat.runner.run._transport_routes_enabled", return_value=True),
+            patch.dict(sys.modules, _fake_smallwebrtc_modules()),
+        ):
+            _setup_webrtc_routes(app, args, active_sessions)
+
+        with patch("pipecat.runner.run.RUNNER_FILE_STORAGE", None):
+            client = TestClient(app)
+            response = client.post("/sessions/sess-1/files", files={"file": ("a.txt", b"hi")})
+
+        # The upload handler answers (503: storage unconfigured), not the proxy (200).
+        self.assertEqual(response.status_code, 503)
+
+
+class TestRunBotSessionCleanup(unittest.IsolatedAsyncioTestCase):
+    async def test_session_end_deletes_uploads_and_releases_session(self):
+        from pipecat.runner.run import _run_bot_session
+
+        fake_storage = MagicMock()
+        fake_storage.delete = AsyncMock()
+        active_sessions = {"sess-1": {}}
+
+        async def bot():
+            pass
+
+        with (
+            patch("pipecat.runner.run.RUNNER_FILE_STORAGE", fake_storage),
+            patch.dict(
+                "pipecat.runner.run._SESSION_UPLOAD_URLS",
+                {"sess-1": ["pipecat:aaa", "pipecat:bbb"]},
+                clear=True,
+            ),
+        ):
+            await _run_bot_session(bot(), "sess-1", active_sessions)
+
+            from pipecat.runner.run import _SESSION_UPLOAD_URLS
+
+            self.assertEqual(active_sessions, {})
+            self.assertEqual(_SESSION_UPLOAD_URLS, {})
+        fake_storage.delete.assert_any_await("pipecat:aaa")
+        fake_storage.delete.assert_any_await("pipecat:bbb")
+
+    async def test_cleanup_runs_even_when_the_bot_raises(self):
+        from pipecat.runner.run import _run_bot_session
+
+        fake_storage = MagicMock()
+        fake_storage.delete = AsyncMock()
+        active_sessions = {"sess-1": {}}
+
+        async def bot():
+            raise RuntimeError("boom")
+
+        with (
+            patch("pipecat.runner.run.RUNNER_FILE_STORAGE", fake_storage),
+            patch.dict(
+                "pipecat.runner.run._SESSION_UPLOAD_URLS", {"sess-1": ["pipecat:aaa"]}, clear=True
+            ),
+        ):
+            with self.assertRaises(RuntimeError):
+                await _run_bot_session(bot(), "sess-1", active_sessions)
+
+        self.assertEqual(active_sessions, {})
+        fake_storage.delete.assert_awaited_once_with("pipecat:aaa")
+
+    async def test_delete_failure_is_swallowed(self):
+        """A backend delete error must not propagate out of session teardown."""
+        from pipecat.runner.run import _run_bot_session
+
+        fake_storage = MagicMock()
+        fake_storage.delete = AsyncMock(side_effect=RuntimeError("AccessDenied"))
+
+        async def bot():
+            pass
+
+        with (
+            patch("pipecat.runner.run.RUNNER_FILE_STORAGE", fake_storage),
+            patch.dict(
+                "pipecat.runner.run._SESSION_UPLOAD_URLS", {"sess-1": ["pipecat:aaa"]}, clear=True
+            ),
+        ):
+            await _run_bot_session(bot(), "sess-1", {"sess-1": {}})
 
 
 @unittest.skipUnless(LIVEKIT_AVAILABLE, "livekit package not installed")
