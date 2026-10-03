@@ -697,10 +697,19 @@ async def test_an_assistant_item_opens_the_response_only_once():
         },
         _response_done(),
     ]
+    created: list[str] = []
+
+    async def record_event(event_name, *args):
+        if event_name == "on_conversation_item_created":
+            created.append(args[0])
+
+    service._call_event_handler = record_event
+
     await _drive(service, scripted)
 
     assert len(recorder.of_types(LLMFullResponseStartFrame)) == 1
     assert len(recorder.of_types(LLMFullResponseEndFrame)) == 1
+    assert created == [ITEM_ID]
 
 
 @pytest.mark.asyncio

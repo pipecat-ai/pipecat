@@ -954,9 +954,9 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
             elif evt.type == "response.audio.delta":
                 await self._handle_evt_audio_delta(evt)
             elif evt.type == "response.output_item.added":
-                await self._handle_evt_conversation_item_added(evt)
+                await self._handle_evt_output_item_added(evt)
             elif evt.type == "conversation.item.created":
-                await self._handle_evt_conversation_item_added(evt)
+                await self._handle_evt_conversation_item_created(evt)
             elif evt.type == "conversation.item.input_audio_transcription.delta":
                 await self._handle_evt_input_audio_transcription_delta(evt)
             elif evt.type == "conversation.item.input_audio_transcription.completed":
@@ -1031,25 +1031,33 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
         )
         await self.push_frame(frame)
 
-    async def _handle_evt_conversation_item_added(self, evt):
-        """Handle conversation.item.created and response.output_item.added events."""
-        if evt.item.type == "function_call":
-            if evt.item.call_id not in self._pending_function_calls:
-                self._pending_function_calls[evt.item.call_id] = evt.item
-            else:
-                logger.debug(f"Function call {evt.item.call_id} already tracked, skipping")
+    async def _handle_evt_output_item_added(self, evt):
+        """Handle response.output_item.added, the first announcement of a response item."""
+        await self._track_item(evt.item)
 
+    async def _handle_evt_conversation_item_created(self, evt):
+        """Handle conversation.item.created, sent once for every item in the conversation.
+
+        A response's items were already announced by response.output_item.added,
+        so tracking them again is a no-op; the event handler fires only here.
+        """
+        await self._track_item(evt.item)
         await self._call_event_handler("on_conversation_item_created", evt.item.id, evt.item)
 
-        if evt.item.role == "assistant":
-            # An assistant item is announced twice, by conversation.item.created
-            # and by response.output_item.added, so open the response only the
-            # first time this item is seen.
+    async def _track_item(self, item: events.ConversationItem):
+        """Track a function call or open the assistant response for a new item."""
+        if item.type == "function_call":
+            if item.call_id not in self._pending_function_calls:
+                self._pending_function_calls[item.call_id] = item
+            else:
+                logger.debug(f"Function call {item.call_id} already tracked, skipping")
+
+        if item.role == "assistant":
             already_open = (
                 self._current_assistant_response is not None
-                and self._current_assistant_response.id == evt.item.id
+                and self._current_assistant_response.id == item.id
             )
-            self._current_assistant_response = evt.item
+            self._current_assistant_response = item
             if not already_open:
                 await self.push_frame(LLMFullResponseStartFrame())
 
