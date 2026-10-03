@@ -415,6 +415,7 @@ class LLMContextAggregator(FrameProcessor):
         """
         super().__init__(**kwargs)
         self._context = context
+        self._pending_appended_messages: list[LLMContextMessage] = []
         self._role = role
         self._add_tool_change_messages = add_tool_change_messages
 
@@ -503,6 +504,8 @@ class LLMContextAggregator(FrameProcessor):
             direction: The direction to push the frame (upstream or downstream).
         """
         frame = self._get_context_frame()
+        frame.appended_messages = self._pending_appended_messages
+        self._pending_appended_messages = []
         await self.push_frame(frame, direction)
 
     def add_messages(self, messages):
@@ -512,6 +515,7 @@ class LLMContextAggregator(FrameProcessor):
             messages: Messages to add to the conversation context.
         """
         self._context.add_messages(messages)
+        self._pending_appended_messages.extend(messages)
 
     def set_messages(self, messages):
         """Set the context messages.
@@ -520,6 +524,7 @@ class LLMContextAggregator(FrameProcessor):
             messages: Messages to replace the current context messages.
         """
         self._context.set_messages(messages)
+        self._pending_appended_messages = []
 
     def transform_messages(
         self, transform: Callable[[list[LLMContextMessage]], list[LLMContextMessage]]
@@ -531,6 +536,7 @@ class LLMContextAggregator(FrameProcessor):
                 a modified list of messages to set in the context.
         """
         self._context.transform_messages(transform)
+        self._pending_appended_messages = []
 
     def set_tools(self, tools: ToolsSchema | NotGiven):
         """Set tools in the context.
