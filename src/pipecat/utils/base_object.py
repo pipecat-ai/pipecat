@@ -168,11 +168,15 @@ class BaseObject(ABC):
         """Clean up resources and wait for running event handlers to complete.
 
         This method should be called when the object is no longer needed.
-        It waits for all currently executing event handler tasks to finish
-        before returning.
+        It waits for other currently executing event handler tasks to finish
+        before returning. A handler initiating its own cleanup finishes normally.
         """
-        if self._event_tasks:
-            event_names, tasks = zip(*self._event_tasks)
+        # A handler may initiate its own cleanup; it cannot wait for itself.
+        event_tasks = [
+            (name, task) for name, task in self._event_tasks if task is not asyncio.current_task()
+        ]
+        if event_tasks:
+            event_names, tasks = zip(*event_tasks)
             logger.debug(f"{self}: waiting on event handlers to finish {list(event_names)}...")
             await asyncio.wait(tasks)
 
