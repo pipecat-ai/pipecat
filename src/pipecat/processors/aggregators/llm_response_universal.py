@@ -78,6 +78,10 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.aggregators import async_tool_messages
+from pipecat.processors.aggregators.function_call_limit import (
+    FunctionCallLimitConfig,
+    FunctionCallLimiter,
+)
 from pipecat.processors.aggregators.llm_context import (
     LLMContext,
     LLMContextMessage,
@@ -237,6 +241,8 @@ class LLMAssistantAggregatorParams:
             (LLM-specific) tools are ignored. When using
             ``LLMContextAggregatorPair``, prefer setting this via its
             ``add_tool_change_messages`` argument instead. Defaults to False.
+        function_call_limit: Limit on LLM responses in a row that call
+            functions. ``None`` (the default) sets no limit.
         enable_context_summarization: Legacy field name.
 
             .. deprecated:: 1.2.0
@@ -253,6 +259,7 @@ class LLMAssistantAggregatorParams:
     enable_auto_context_summarization: bool = False
     auto_context_summarization_config: LLMAutoContextSummarizationConfig | None = None
     add_tool_change_messages: bool = False
+    function_call_limit: FunctionCallLimitConfig | None = None
 
     # Deprecated field names — kept for backward compatibility. See the
     # ``.. deprecated::`` directives in the class docstring above.
@@ -1652,6 +1659,10 @@ class LLMAssistantAggregator(LLMContextAggregator):
         # arriving in the same speaking window are bundled into a single deferred push.
         self._push_context_on_bot_stopped_speaking: bool = False
 
+        self._function_call_limiter = FunctionCallLimiter(
+            self._context, self._params.function_call_limit
+        )
+
         self._assistant_turn_start_timestamp = ""
 
         self._thought_append_to_context = False
@@ -1796,7 +1807,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
             await self.push_frame(frame, direction)
             if self._push_context_on_bot_stopped_speaking and not self._user_speaking:
                 logger.debug(f"{self}: Bot stopped speaking — pushing deferred context frame!")
-                await self.push_context_frame(FrameDirection.UPSTREAM)
+                await self._run_llm_on_function_call_results()
         elif isinstance(frame, LLMServiceMetadataFrame):
             # Auto-configure realtime mode on the assistant half too — the
             # broadcast reaches both halves. The assistant only needs the flag
@@ -1902,6 +1913,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
     async def _handle_interruptions(self, frame: InterruptionFrame):
         await self._trigger_assistant_turn_stopped(interrupted=True)
         await self.reset()
+        self._function_call_limiter.end_chain()
 
     async def _handle_end_or_cancel(self, frame: Frame):
         await self._trigger_assistant_turn_stopped(interrupted=isinstance(frame, CancelFrame))
@@ -1922,6 +1934,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         logger.debug(f"{self} FunctionCallsStartedFrame: {function_names}")
         for function_call in frame.function_calls:
             self._function_calls_in_progress[function_call.tool_call_id] = None
+        self._function_call_limiter.function_calls_started()
 
     async def _handle_function_call_in_progress(self, frame: FunctionCallInProgressFrame):
         logger.debug(
@@ -2065,7 +2078,12 @@ class LLMAssistantAggregator(LLMContextAggregator):
             self._push_context_on_bot_stopped_speaking = True
         else:
             logger.debug(f"{self}: Pushing context frame!")
-            await self.push_context_frame(FrameDirection.UPSTREAM)
+            await self._run_llm_on_function_call_results()
+
+    async def _run_llm_on_function_call_results(self) -> None:
+        """Run the LLM on settled function call results, within the call limit."""
+        self._function_call_limiter.apply()
+        await self.push_context_frame(FrameDirection.UPSTREAM)
 
     async def _handle_function_call_intermediate_result(
         self, frame: FunctionCallResultFrame, in_progress_frame: FunctionCallInProgressFrame
@@ -2213,6 +2231,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         # context.
         if self._realtime_service_mode and self._paired_user_aggregator is not None:
             await self._paired_user_aggregator._realtime_handoff_flush_immediate()
+        self._function_call_limiter.response_ended()
         await self._trigger_assistant_turn_stopped()
 
     async def _handle_tts_started(self, frame: TTSStartedFrame):
