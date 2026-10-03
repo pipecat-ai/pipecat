@@ -291,73 +291,6 @@ class InputAudioTranscription(BaseModel):
 
 
 #
-# Animation and avatar
-#
-
-
-class Animation(BaseModel):
-    """Animation data emitted alongside audio.
-
-    Parameters:
-        model_name: Animation model to use.
-        outputs: Animation streams to emit.
-    """
-
-    model_name: str | None = None
-    outputs: list[Literal["blendshapes", "viseme_id"]] | None = None
-
-
-class AvatarVideoResolution(BaseModel):
-    """Pixel dimensions of the avatar video.
-
-    Parameters:
-        width: Width in pixels.
-        height: Height in pixels.
-    """
-
-    width: int
-    height: int
-
-
-class AvatarVideo(BaseModel):
-    """Encoding of the avatar video stream.
-
-    Parameters:
-        codec: Video codec, e.g. "h264".
-        bitrate: Target bitrate in bits per second.
-        resolution: Pixel dimensions of the video.
-        crop: Crop region applied to the rendered frame.
-        background_color: Background color behind the avatar, e.g. "#FFFFFFFF".
-        background_image_url: Public URL of a background image.
-    """
-
-    codec: str | None = None
-    bitrate: int | None = None
-    resolution: AvatarVideoResolution | None = None
-    crop: dict[str, Any] | None = None
-    background_color: str | None = None
-    background_image_url: str | None = None
-
-
-class Avatar(BaseModel):
-    """Avatar rendered alongside the audio response.
-
-    Parameters:
-        character: Avatar character to render, e.g. "lisa".
-        style: Character style, e.g. "casual-sitting".
-        customized: Whether ``character`` names a custom avatar.
-        video: Encoding of the avatar video stream.
-        ice_servers: ICE servers for the avatar's WebRTC connection.
-    """
-
-    character: str
-    style: str | None = None
-    customized: bool | None = None
-    video: AvatarVideo | None = None
-    ice_servers: list[dict[str, Any]] | None = None
-
-
-#
 # Tool definitions
 #
 
@@ -402,7 +335,6 @@ class SessionProperties(BaseModel):
         input_audio_format: Encoding of the audio sent to the service.
         output_audio_format: Encoding of the audio returned by the service.
         input_audio_sampling_rate: Sample rate of the audio sent to the service.
-        output_audio_timestamp_types: Timestamp streams to emit alongside audio.
         turn_detection: Turn detection settings, or None/False to disable the
             service's own turn detection.
         input_audio_transcription: Transcription settings for caller audio.
@@ -412,8 +344,6 @@ class SessionProperties(BaseModel):
         max_response_output_tokens: Output token ceiling per response, or "inf".
         tools: Tools the assistant may call.
         tool_choice: How the assistant picks among tools.
-        animation: Animation streams to emit alongside audio.
-        avatar: Avatar rendered alongside the audio response.
     """
 
     # Needed to support ToolsSchema in tools field.
@@ -426,7 +356,6 @@ class SessionProperties(BaseModel):
     input_audio_format: InputAudioFormat | None = None
     output_audio_format: OutputAudioFormat | None = None
     input_audio_sampling_rate: int | None = None
-    output_audio_timestamp_types: list[Literal["word"]] | None = None
     turn_detection: TurnDetection | bool | None = None
     input_audio_transcription: InputAudioTranscription | None = None
     input_audio_noise_reduction: InputAudioNoiseReduction | None = None
@@ -438,8 +367,6 @@ class SessionProperties(BaseModel):
     # provider-native VoiceLiveTool objects passes through.
     tools: ToolsSchema | list[FunctionSchema | DirectFunction] | list[VoiceLiveTool] | None = None
     tool_choice: str | None = None
-    animation: Animation | None = None
-    avatar: Avatar | None = None
 
     @field_validator("tools", mode="before")
     @classmethod
@@ -686,18 +613,6 @@ class ConversationItemTruncateEvent(ClientEvent):
     audio_end_ms: int = 0
 
 
-class ConversationItemDeleteEvent(ClientEvent):
-    """Event to remove an item from the conversation.
-
-    Parameters:
-        type: Event type, always "conversation.item.delete".
-        item_id: Item to remove.
-    """
-
-    type: Literal["conversation.item.delete"] = "conversation.item.delete"
-    item_id: str
-
-
 class ResponseCreateEvent(ClientEvent):
     """Event asking the model to respond.
 
@@ -775,34 +690,6 @@ class ConversationItemCreated(ServerEvent):
     previous_item_id: str | None = None
 
 
-class ConversationItemTruncated(ServerEvent):
-    """Event reporting that an assistant audio item was truncated.
-
-    Parameters:
-        type: Event type, always "conversation.item.truncated".
-        item_id: Item that was truncated.
-        content_index: Content part that was truncated.
-        audio_end_ms: Point, in milliseconds, the audio was truncated at.
-    """
-
-    type: Literal["conversation.item.truncated"]
-    item_id: str
-    content_index: int = 0
-    audio_end_ms: int = 0
-
-
-class ConversationItemDeleted(ServerEvent):
-    """Event reporting that an item was removed from the conversation.
-
-    Parameters:
-        type: Event type, always "conversation.item.deleted".
-        item_id: Item that was removed.
-    """
-
-    type: Literal["conversation.item.deleted"]
-    item_id: str
-
-
 class ConversationItemInputAudioTranscriptionDelta(ServerEvent):
     """Event carrying part of a caller transcript.
 
@@ -852,30 +739,6 @@ class ConversationItemInputAudioTranscriptionFailed(ServerEvent):
     item_id: str
     content_index: int = 0
     error: RealtimeError | None = None
-
-
-class InputAudioBufferCommitted(ServerEvent):
-    """Event reporting that the input buffer became a conversation item.
-
-    Parameters:
-        type: Event type, always "input_audio_buffer.committed".
-        item_id: Item the buffer became.
-        previous_item_id: Item it was inserted after.
-    """
-
-    type: Literal["input_audio_buffer.committed"]
-    item_id: str | None = None
-    previous_item_id: str | None = None
-
-
-class InputAudioBufferCleared(ServerEvent):
-    """Event reporting that the input buffer was discarded.
-
-    Parameters:
-        type: Event type, always "input_audio_buffer.cleared".
-    """
-
-    type: Literal["input_audio_buffer.cleared"]
 
 
 class InputAudioBufferSpeechStarted(ServerEvent):
@@ -957,62 +820,6 @@ class ResponseOutputItemAdded(ServerEvent):
     item: ConversationItem
 
 
-class ResponseOutputItemDone(ServerEvent):
-    """Event reporting that an output item is finished.
-
-    Parameters:
-        type: Event type, always "response.output_item.done".
-        response_id: Response the item belongs to.
-        output_index: Position of the item in the output.
-        item: The finished item.
-    """
-
-    type: Literal["response.output_item.done"]
-    response_id: str | None = None
-    output_index: int = 0
-    item: ConversationItem
-
-
-class ResponseContentPartAdded(ServerEvent):
-    """Event reporting that a content part was added to an output item.
-
-    Parameters:
-        type: Event type, always "response.content_part.added".
-        response_id: Response the part belongs to.
-        item_id: Item the part belongs to.
-        output_index: Position of the item in the output.
-        content_index: Position of the part within the item.
-        part: The part that was added.
-    """
-
-    type: Literal["response.content_part.added"]
-    response_id: str | None = None
-    item_id: str | None = None
-    output_index: int = 0
-    content_index: int = 0
-    part: dict[str, Any] | None = None
-
-
-class ResponseContentPartDone(ServerEvent):
-    """Event reporting that a content part is finished.
-
-    Parameters:
-        type: Event type, always "response.content_part.done".
-        response_id: Response the part belongs to.
-        item_id: Item the part belongs to.
-        output_index: Position of the item in the output.
-        content_index: Position of the part within the item.
-        part: The finished part.
-    """
-
-    type: Literal["response.content_part.done"]
-    response_id: str | None = None
-    item_id: str | None = None
-    output_index: int = 0
-    content_index: int = 0
-    part: dict[str, Any] | None = None
-
-
 class ResponseTextDelta(ServerEvent):
     """Event carrying part of a text response.
 
@@ -1031,26 +838,6 @@ class ResponseTextDelta(ServerEvent):
     output_index: int = 0
     content_index: int = 0
     delta: str = ""
-
-
-class ResponseTextDone(ServerEvent):
-    """Event carrying a finished text response.
-
-    Parameters:
-        type: Event type, always "response.text.done".
-        response_id: Response the text belongs to.
-        item_id: Item the text belongs to.
-        output_index: Position of the item in the output.
-        content_index: Position of the part within the item.
-        text: The finished text.
-    """
-
-    type: Literal["response.text.done"]
-    response_id: str | None = None
-    item_id: str | None = None
-    output_index: int = 0
-    content_index: int = 0
-    text: str = ""
 
 
 class ResponseAudioDelta(ServerEvent):
@@ -1111,92 +898,6 @@ class ResponseAudioTranscriptDelta(ServerEvent):
     delta: str = ""
 
 
-class ResponseAudioTranscriptDone(ServerEvent):
-    """Event carrying the finished transcript of an audio response.
-
-    Parameters:
-        type: Event type, always "response.audio_transcript.done".
-        response_id: Response the transcript belongs to.
-        item_id: Item the transcript belongs to.
-        output_index: Position of the item in the output.
-        content_index: Position of the part within the item.
-        transcript: The finished transcript.
-    """
-
-    type: Literal["response.audio_transcript.done"]
-    response_id: str | None = None
-    item_id: str | None = None
-    output_index: int = 0
-    content_index: int = 0
-    transcript: str = ""
-
-
-class ResponseAudioTimestampDelta(ServerEvent):
-    """Event carrying the timing of one spoken word.
-
-    Emitted when ``output_audio_timestamp_types`` includes "word".
-
-    Parameters:
-        type: Event type, always "response.audio_timestamp.delta".
-        response_id: Response the word belongs to.
-        item_id: Item the word belongs to.
-        output_index: Position of the item in the output.
-        content_index: Position of the part within the item.
-        audio_offset_ms: Where in the response audio the word begins.
-        audio_duration_ms: How long the word takes to speak.
-        text: The word itself.
-        timestamp_type: Granularity of the timestamp, always "word".
-    """
-
-    type: Literal["response.audio_timestamp.delta"]
-    response_id: str | None = None
-    item_id: str | None = None
-    output_index: int = 0
-    content_index: int = 0
-    audio_offset_ms: int = 0
-    audio_duration_ms: int = 0
-    text: str = ""
-    timestamp_type: Literal["word"] | None = None
-
-
-class ResponseAudioTimestampDone(ServerEvent):
-    """Event reporting that word timings for a response are finished.
-
-    Parameters:
-        type: Event type, always "response.audio_timestamp.done".
-        response_id: Response the timings belong to.
-        item_id: Item the timings belong to.
-        output_index: Position of the item in the output.
-        content_index: Position of the part within the item.
-    """
-
-    type: Literal["response.audio_timestamp.done"]
-    response_id: str | None = None
-    item_id: str | None = None
-    output_index: int = 0
-    content_index: int = 0
-
-
-class ResponseFunctionCallArgumentsDelta(ServerEvent):
-    """Event carrying part of a function call's arguments.
-
-    Parameters:
-        type: Event type, always "response.function_call_arguments.delta".
-        response_id: Response the call belongs to.
-        item_id: Item the call belongs to.
-        output_index: Position of the item in the output.
-        call_id: Identifier tying the call to its output.
-        delta: Argument text for this update.
-    """
-
-    type: Literal["response.function_call_arguments.delta"]
-    response_id: str | None = None
-    item_id: str | None = None
-    output_index: int = 0
-    call_id: str | None = None
-    delta: str = ""
-
-
 class ResponseFunctionCallArgumentsDone(ServerEvent):
     """Event carrying a function call's finished arguments.
 
@@ -1219,18 +920,6 @@ class ResponseFunctionCallArgumentsDone(ServerEvent):
     arguments: str = ""
 
 
-class RateLimitsUpdated(ServerEvent):
-    """Event reporting the caller's remaining rate limit allowance.
-
-    Parameters:
-        type: Event type, always "rate_limits.updated".
-        rate_limits: Remaining allowance per limit.
-    """
-
-    type: Literal["rate_limits.updated"]
-    rate_limits: list[dict[str, Any]] = Field(default_factory=list)
-
-
 class ErrorEvent(ServerEvent):
     """Event reporting that an error occurred.
 
@@ -1249,34 +938,21 @@ class ErrorEvent(ServerEvent):
 
 _server_event_types = {
     "error": ErrorEvent,
-    "rate_limits.updated": RateLimitsUpdated,
     "session.created": SessionCreatedEvent,
     "session.updated": SessionUpdatedEvent,
     "conversation.item.created": ConversationItemCreated,
-    "conversation.item.truncated": ConversationItemTruncated,
-    "conversation.item.deleted": ConversationItemDeleted,
     "conversation.item.input_audio_transcription.delta": ConversationItemInputAudioTranscriptionDelta,
     "conversation.item.input_audio_transcription.completed": ConversationItemInputAudioTranscriptionCompleted,
     "conversation.item.input_audio_transcription.failed": ConversationItemInputAudioTranscriptionFailed,
-    "input_audio_buffer.committed": InputAudioBufferCommitted,
-    "input_audio_buffer.cleared": InputAudioBufferCleared,
     "input_audio_buffer.speech_started": InputAudioBufferSpeechStarted,
     "input_audio_buffer.speech_stopped": InputAudioBufferSpeechStopped,
     "response.created": ResponseCreated,
     "response.done": ResponseDone,
     "response.output_item.added": ResponseOutputItemAdded,
-    "response.output_item.done": ResponseOutputItemDone,
-    "response.content_part.added": ResponseContentPartAdded,
-    "response.content_part.done": ResponseContentPartDone,
     "response.text.delta": ResponseTextDelta,
-    "response.text.done": ResponseTextDone,
     "response.audio.delta": ResponseAudioDelta,
     "response.audio.done": ResponseAudioDone,
     "response.audio_transcript.delta": ResponseAudioTranscriptDelta,
-    "response.audio_transcript.done": ResponseAudioTranscriptDone,
-    "response.audio_timestamp.delta": ResponseAudioTimestampDelta,
-    "response.audio_timestamp.done": ResponseAudioTimestampDone,
-    "response.function_call_arguments.delta": ResponseFunctionCallArgumentsDelta,
     "response.function_call_arguments.done": ResponseFunctionCallArgumentsDone,
 }
 

@@ -11,7 +11,6 @@ import io
 import pytest
 from loguru import logger
 from websockets.exceptions import ConnectionClosedError
-from websockets.protocol import State
 
 from pipecat.services.azure.voicelive import events
 from pipecat.services.azure.voicelive.llm import AzureVoiceLiveLLMService
@@ -276,10 +275,9 @@ async def test_a_failed_disconnect_still_clears_the_disconnecting_flag():
 
 
 class _EndedWebSocket:
-    """A connection whose event stream has ended, in the given state."""
+    """A connection whose event stream has ended, optionally with an error."""
 
-    def __init__(self, state: State, error: Exception | None = None):
-        self.state = state
+    def __init__(self, error: Exception | None = None):
         self._error = error
 
     def __aiter__(self):
@@ -312,7 +310,7 @@ async def test_a_lost_connection_is_reported_once_as_permanent(error):
     """Without its connection the service can't respond; the unusable policy decides next."""
     service = _service()
     reported = _record_errors(service)
-    service._websocket = _EndedWebSocket(State.CLOSED, error)
+    service._websocket = _EndedWebSocket(error)
 
     await service._run_receive_loop()
     await service.send_client_event(events.InputAudioBufferClearEvent())
@@ -321,18 +319,12 @@ async def test_a_lost_connection_is_reported_once_as_permanent(error):
     assert service._websocket is None
 
 
-@pytest.mark.parametrize(
-    "disconnecting, state",
-    [(True, State.CLOSED), (False, State.OPEN)],
-    ids=["own-disconnect", "stopped-after-error-event"],
-)
 @pytest.mark.asyncio
-async def test_an_expected_end_of_the_receive_loop_reports_nothing(disconnecting, state):
-    """Closing the connection itself, or stopping after an error event already reported."""
+async def test_closing_the_connection_itself_reports_nothing():
     service = _service()
     reported = _record_errors(service)
-    service._websocket = _EndedWebSocket(state)
-    service._disconnecting = disconnecting
+    service._websocket = _EndedWebSocket()
+    service._disconnecting = True
 
     await service._run_receive_loop()
 
@@ -344,7 +336,7 @@ async def test_sending_on_a_closed_connection_reports_nothing():
     """The receive loop reports the lost connection; each send would report it again."""
     service = _service()
     reported = _record_errors(service)
-    service._websocket = _EndedWebSocket(State.CLOSED)
+    service._websocket = _EndedWebSocket()
 
     await service.send_client_event(events.InputAudioBufferClearEvent())
 
@@ -391,3 +383,138 @@ async def test_reset_conversation_sends_the_history_to_the_new_session():
 
 async def _noop(*args, **kwargs):
     return None
+
+
+def test_session_properties_in_an_update_set_the_top_level_fields():
+    """``session_properties`` replaces the stored one, and its values reach the top level."""
+    service = _service(model="gpt-4o-mini")
+    settings = service._settings
+
+    changed = settings.apply_update(
+        AzureVoiceLiveLLMService.Settings(
+            session_properties=events.SessionProperties(
+                model="gpt-realtime", instructions="Be brief."
+            )
+        )
+    )
+
+    assert settings.model == "gpt-realtime"
+    assert settings.system_instruction == "Be brief."
+    assert {"model", "system_instruction"} <= changed.keys()
+
+
+def test_top_level_fields_win_over_session_properties_in_the_same_update():
+    service = _service()
+    settings = service._settings
+
+    settings.apply_update(
+        AzureVoiceLiveLLMService.Settings(
+            system_instruction="Top level.",
+            session_properties=events.SessionProperties(instructions="Session."),
+        )
+    )
+
+    assert settings.system_instruction == "Top level."
+    assert settings.session_properties.instructions == "Top level."
+
+
+@pytest.mark.asyncio
+async def test_a_response_asked_for_before_the_session_is_ready_waits_for_it():
+    """Voice Live applies the first session.update before it can answer."""
+    from pipecat.processors.aggregators.llm_context import LLMContext
+
+    service = _service()
+    service.start_processing_metrics = _noop
+    service.start_ttfb_metrics = _noop
+    sent = []
+
+    async def _record(event):
+        sent.append(type(event).__name__)
+
+    service.send_client_event = _record
+
+    await service._handle_context(LLMContext([{"role": "user", "content": "Hello"}]))
+    assert "ResponseCreateEvent" not in sent
+
+    await service._handle_evt_session_updated(None)
+
+    assert sent.count("ResponseCreateEvent") == 1
+
+
+@pytest.mark.parametrize("use_token_provider", [False, True], ids=["api-key", "token-provider"])
+@pytest.mark.asyncio
+async def test_connect_authenticates_with_the_configured_credential(
+    monkeypatch, use_token_provider
+):
+    import pipecat.services.azure.voicelive.llm as llm_module
+
+    headers = []
+
+    async def record_connect(uri, additional_headers):
+        headers.append(additional_headers)
+        raise ConnectionError("no network in tests")
+
+    async def token_provider():
+        return "entra-token"
+
+    monkeypatch.setattr(llm_module, "websocket_connect", record_connect)
+    if use_token_provider:
+        service = AzureVoiceLiveLLMService(
+            endpoint="https://my-resource.services.ai.azure.com", token_provider=token_provider
+        )
+    else:
+        service = _service()
+    service.push_error = _noop
+
+    await service._connect()
+
+    if use_token_provider:
+        assert headers == [{"Authorization": "Bearer entra-token"}]
+    else:
+        assert headers == [{"api-key": "test-key"}]
+
+
+@pytest.mark.asyncio
+async def test_frames_reach_voice_live_and_pass_through():
+    """Audio is streamed and a tools update is sent as a session update; every frame
+    continues downstream."""
+    from pipecat.adapters.schemas.function_schema import FunctionSchema
+    from pipecat.adapters.schemas.tools_schema import ToolsSchema
+    from pipecat.frames.frames import (
+        InputAudioRawFrame,
+        LLMServiceMetadataFrame,
+        LLMSetToolsFrame,
+    )
+    from pipecat.tests.utils import run_test
+
+    service = _service()
+    service._connect = _noop
+    service._disconnect = _noop
+    service._llm_needs_conversation_setup = False
+    sent = []
+
+    async def _record(event):
+        sent.append(type(event).__name__)
+
+    service.send_client_event = _record
+
+    tools = ToolsSchema(
+        standard_tools=[
+            FunctionSchema(
+                name="get_current_weather",
+                description="Get the weather.",
+                properties={},
+                required=[],
+            )
+        ]
+    )
+    audio = InputAudioRawFrame(audio=b"\x00\x00" * 1600, sample_rate=16000, num_channels=1)
+
+    await run_test(
+        service,
+        frames_to_send=[audio, LLMSetToolsFrame(tools=tools)],
+        expected_down_frames=[LLMServiceMetadataFrame, InputAudioRawFrame, LLMSetToolsFrame],
+    )
+
+    assert "InputAudioBufferAppendEvent" in sent
+    assert "SessionUpdateEvent" in sent

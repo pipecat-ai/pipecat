@@ -167,29 +167,6 @@ def test_parse_unmodeled_event_returns_none():
     assert events.parse_server_event(raw) is None
 
 
-def test_parse_word_timestamp_delta():
-    raw = _event(
-        {
-            "event_id": "event_10",
-            "type": "response.audio_timestamp.delta",
-            "response_id": "resp_1",
-            "item_id": "msg_1",
-            "output_index": 0,
-            "content_index": 0,
-            "audio_offset_ms": 120,
-            "audio_duration_ms": 220,
-            "text": "Hello",
-            "timestamp_type": "word",
-        }
-    )
-
-    evt = events.parse_server_event(raw)
-
-    assert isinstance(evt, events.ResponseAudioTimestampDelta)
-    assert evt.text == "Hello"
-    assert evt.audio_offset_ms == 120
-
-
 def test_session_update_serializes_flat():
     """Voice Live carries audio settings on the session, not under `audio`."""
     session = events.SessionProperties(

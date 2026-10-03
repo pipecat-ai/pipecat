@@ -24,7 +24,6 @@ from loguru import logger
 from typing_extensions import override
 from websockets.asyncio.client import connect as websocket_connect
 from websockets.exceptions import ConnectionClosed
-from websockets.protocol import State
 
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.adapters.services.azure_voicelive_adapter import AzureVoiceLiveLLMAdapter
@@ -115,10 +114,10 @@ class AzureVoiceLiveLLMSettings(LLMSettings):
 
     Parameters:
         session_properties: Voice Live session properties (voice, turn
-            detection, transcription, tools, etc.). ``model``,
-            ``instructions`` and ``temperature`` are synced bidirectionally
-            with the top-level ``model``, ``system_instruction`` and
-            ``temperature`` fields.
+            detection, transcription, tools, etc.). ``model`` and
+            ``instructions`` are synced bidirectionally with the top-level
+            ``model`` and ``system_instruction`` fields; a top-level
+            ``temperature`` is copied into it.
     """
 
     session_properties: events.SessionProperties | NotGiven = field(
@@ -214,14 +213,6 @@ _EXPECTED_ERROR_CODES = {
     "item_already_truncated",
 }
 
-# Error codes that reject a single request and leave the session usable, so they
-# are reported without ending the receive loop.
-_RECOVERABLE_ERROR_CODES = {
-    "input_audio_buffer_commit_empty",
-    "invalid_audio_end_time",
-    "item_not_found",
-}
-
 
 class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
     """Azure Voice Live LLM service for real-time audio and text communication.
@@ -292,9 +283,6 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
     _settings: Settings
 
     adapter_class = AzureVoiceLiveLLMAdapter
-
-    # Target ~60ms audio chunks when sending to Voice Live (16-bit mono).
-    _AUDIO_CHUNK_TARGET_MS = 60
 
     def __init__(
         self,
@@ -407,7 +395,6 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
         self._model = assert_given(self._settings.model) or model
 
         self._audio_input_paused = start_audio_paused
-        self._audio_buffer = b""
         self._audio_send_logged = False
         self._interim_transcription_text = ""
         self._websocket = None
@@ -436,10 +423,8 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
         self._user_audio_preroll = bytearray()
         self._user_audio_preroll_secs = _DEFAULT_USER_AUDIO_PREROLL_SECS
 
-        self._messages_added_manually = {}
         self._pending_function_calls = {}
         self._completed_tool_calls = set()
-        self._async_tool_warning_logged: bool = False
 
         self._register_event_handler("on_conversation_item_created")
         self._register_event_handler("on_conversation_item_updated")
@@ -800,8 +785,6 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
                 self._receive_task = None
 
             self._completed_tool_calls = set()
-            self._async_tool_warning_logged = False
-            self._audio_buffer = b""
             self._audio_send_logged = False
             self._interim_transcription_text = ""
             self._response_in_flight = False
@@ -816,7 +799,6 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
             self._interrupted_response_id = None
             self._cancel_announced_response = False
             self._pending_function_calls = {}
-            self._messages_added_manually = {}
         except Exception as e:
             await self.push_error(error_msg=f"Error disconnecting: {e}", exception=e)
         finally:
@@ -916,9 +898,7 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
         except ConnectionClosed as e:
             error = e
 
-        # A fatal error event ends the loop with the connection still open, and
-        # has been reported already.
-        if self._disconnecting or websocket.state is State.OPEN:
+        if self._disconnecting:
             return
 
         if self._websocket is websocket:
@@ -936,22 +916,13 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
 
         async for message in self._websocket:
             try:
-                raw = json.loads(message)
-                event_type = raw.get("type", "")
-            except Exception:
-                logger.warning(f"Failed to decode server message: {message[:200]}")
-                continue
-
-            try:
                 evt = events.parse_server_event(message)
             except Exception as e:
-                logger.warning(f"Failed to parse server event: {e}")
+                logger.warning(f"{self} failed to parse server event: {e}")
                 continue
 
-            # Unrecognized event type (e.g. an avatar or animation event this
-            # service doesn't model). Benign — log quietly and skip.
+            # Events this service doesn't act on aren't modelled and parse to None.
             if evt is None:
-                logger.debug(f"{self} ignoring unhandled server event: {event_type}")
                 continue
 
             if evt.type == "session.created":
@@ -964,20 +935,8 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
                 await self._handle_evt_audio_delta(evt)
             elif evt.type == "response.audio.done":
                 await self._handle_evt_audio_done(evt)
-            elif evt.type in (
-                "response.content_part.added",
-                "response.content_part.done",
-                "response.audio_transcript.done",
-                "response.text.done",
-                "response.audio_timestamp.delta",
-                "response.audio_timestamp.done",
-                "rate_limits.updated",
-            ):
-                pass
             elif evt.type == "response.output_item.added":
                 await self._handle_evt_conversation_item_added(evt)
-            elif evt.type == "response.output_item.done":
-                pass
             elif evt.type == "conversation.item.created":
                 await self._handle_evt_conversation_item_added(evt)
             elif evt.type == "conversation.item.input_audio_transcription.delta":
@@ -996,20 +955,10 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
                 await self._handle_evt_audio_transcript_delta(evt)
             elif evt.type == "response.text.delta":
                 await self._handle_evt_text_delta(evt)
-            elif evt.type == "response.function_call_arguments.delta":
-                pass
             elif evt.type == "response.function_call_arguments.done":
                 await self._handle_evt_function_call_arguments_done(evt)
             elif evt.type == "error":
-                if evt.error.code in _EXPECTED_ERROR_CODES:
-                    logger.debug(f"{self} {evt.error.message}")
-                elif evt.error.code in _RECOVERABLE_ERROR_CODES:
-                    await self._handle_evt_error(evt)
-                else:
-                    await self._handle_evt_error(evt, stops_receiving=True)
-                    return
-            else:
-                logger.debug(f"{self} received known but undispatched server event: {evt.type}")
+                await self._handle_evt_error(evt)
 
     async def _handle_evt_session_created(self, evt):
         """Handle session.created event — first event after connecting."""
@@ -1078,10 +1027,6 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
                 logger.debug(f"Function call {evt.item.call_id} already tracked, skipping")
 
         await self._call_event_handler("on_conversation_item_created", evt.item.id, evt.item)
-
-        if self._messages_added_manually.get(evt.item.id):
-            del self._messages_added_manually[evt.item.id]
-            return
 
         if evt.item.role == "assistant":
             # An assistant item is announced twice, by conversation.item.created
@@ -1253,18 +1198,17 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
         await self.start_processing_metrics()
         await self.broadcast_frame(ProposedUserStoppedSpeakingFrame)
 
-    async def _handle_evt_error(self, evt, *, stops_receiving: bool = False):
+    async def _handle_evt_error(self, evt):
         """Report an error event from Voice Live.
 
-        Args:
-            evt: The error event.
-            stops_receiving: Whether the service stops reading server events
-                after this error, leaving it unable to respond.
+        An error event rejects one request and the session stays usable. An
+        error that ends the session also closes the connection, which the
+        receive loop reports as permanent.
         """
-        await self.push_error(
-            error_msg=f"Azure Voice Live Error: {evt.error.message}",
-            force_treat_as_permanent=stops_receiving,
-        )
+        if evt.error.code in _EXPECTED_ERROR_CODES:
+            logger.debug(f"{self} {evt.error.message}")
+            return
+        await self.push_error(error_msg=f"Azure Voice Live Error: {evt.error.message}")
 
     #
     # Response creation
@@ -1324,10 +1268,7 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
             )
 
             for item in llm_invocation_params["messages"]:
-                evt = events.ConversationItemCreateEvent(item=item)
-                if evt.item.id:
-                    self._messages_added_manually[evt.item.id] = True
-                await self.send_client_event(evt)
+                await self.send_client_event(events.ConversationItemCreateEvent(item=item))
 
             await self._send_session_update()
             self._llm_needs_conversation_setup = False
@@ -1349,31 +1290,6 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
     async def _process_completed_function_calls(self, send_new_results: bool):
         """Process completed function calls and send results to the service."""
         assert self._context is not None
-
-        # If the user registered a function with cancel_on_interruption=False,
-        # the aggregator emits async-tool-style messages into the context.
-        # Voice Live has no channel for streamed intermediate results, so
-        # surface a one-time warning where the expectation is set.
-        if not self._async_tool_warning_logged:
-            for message in self._context.get_messages():
-                if isinstance(message, LLMSpecificMessage):
-                    continue
-                if async_tool_messages.parse_message(message) is not None:
-                    logger.error(
-                        f"{self}: cancel_on_interruption=False is not reliably "
-                        f"supported by Voice Live as of this writing. "
-                        f"Use cancel_on_interruption=True (the default), or "
-                        f"consider another LLM service if your tool needs the "
-                        f"async semantics."
-                    )
-                    await self.push_error(
-                        error_msg=(
-                            "cancel_on_interruption=False is not reliably supported "
-                            "by Voice Live as of this writing."
-                        ),
-                    )
-                    self._async_tool_warning_logged = True
-                    break
 
         sent_new_result = False
 
@@ -1438,7 +1354,7 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
             await self._create_response()
 
     async def _send_user_audio(self, frame):
-        """Send user audio to Voice Live, buffered to ~60ms chunks."""
+        """Send user audio to Voice Live."""
         if self._llm_needs_conversation_setup:
             return
 
@@ -1449,20 +1365,14 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
             )
             self._audio_send_logged = True
 
-        # Compute chunk size from actual sample rate (16-bit mono = 2 bytes/sample)
-        chunk_bytes = int(frame.sample_rate * 2 * self._AUDIO_CHUNK_TARGET_MS / 1000)
-
-        # Accumulate and send in chunks
-        self._audio_buffer += frame.audio
-        while len(self._audio_buffer) >= chunk_bytes:
-            chunk = self._audio_buffer[:chunk_bytes]
-            self._audio_buffer = self._audio_buffer[chunk_bytes:]
-            payload = base64.b64encode(chunk).decode("utf-8")
-            await self.send_client_event(events.InputAudioBufferAppendEvent(audio=payload))
-            if self._is_manual_turn_detection():
-                self._user_audio_preroll += chunk
-                preroll_bytes = int(frame.sample_rate * 2 * self._user_audio_preroll_secs)
-                del self._user_audio_preroll[:-preroll_bytes]
+        payload = base64.b64encode(frame.audio).decode("utf-8")
+        await self.send_client_event(events.InputAudioBufferAppendEvent(audio=payload))
+        if self._is_manual_turn_detection():
+            self._user_audio_preroll += frame.audio
+            preroll_bytes = int(
+                frame.sample_rate * frame.num_channels * 2 * self._user_audio_preroll_secs
+            )
+            del self._user_audio_preroll[:-preroll_bytes]
 
     def _handle_speech_control_params(self, frame: SpeechControlParamsFrame):
         """Size the replayed speech onset to the local VAD's start delay."""

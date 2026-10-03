@@ -465,9 +465,9 @@ async def test_a_manual_interruption_replays_the_speech_onset_after_clearing(man
         return
     assert kinds[:2] == ["InputAudioBufferClearEvent", "InputAudioBufferAppendEvent"]
     replayed = base64.b64decode(sent[1].audio)
-    # start_secs plus the margin, ending with the last full chunk sent.
+    # start_secs plus the margin, ending with the last frame sent.
     assert len(replayed) == int(16000 * 2 * 0.5)
-    assert replayed[-2:] == bytes([47, 0])
+    assert replayed[-2:] == bytes([49, 0])
 
 
 @pytest.mark.asyncio
@@ -598,24 +598,19 @@ async def test_manual_turn_detection_suppresses_proposed_turn_frames():
 
 
 @pytest.mark.parametrize(
-    "code, reported, permanent, keeps_receiving",
+    "code, reported",
     [
         # Routine during turn-taking, including re-truncating what `auto_truncate` cut.
-        ("response_cancel_not_active", False, False, True),
-        ("conversation_already_has_active_response", False, False, True),
-        ("item_already_truncated", False, False, True),
-        # Rejects one request; the session keeps working.
-        ("invalid_audio_end_time", True, False, True),
-        ("item_not_found", True, False, True),
-        ("input_audio_buffer_commit_empty", True, False, True),
-        # Anything else stops the service reading events.
-        ("invalid_voice", True, True, False),
+        ("response_cancel_not_active", False),
+        ("conversation_already_has_active_response", False),
+        ("item_already_truncated", False),
+        ("item_not_found", True),
+        ("invalid_value", True),
     ],
 )
 @pytest.mark.asyncio
-async def test_an_error_event_is_handled_by_its_effect_on_the_session(
-    code, reported, permanent, keeps_receiving
-):
+async def test_an_error_event_is_reported_and_the_session_continues(code, reported):
+    """An error event rejects one request; a session-ending error closes the connection."""
     service = _make_service()
     recorder = _FrameRecorder()
     service.push_frame = recorder
@@ -636,8 +631,8 @@ async def test_an_error_event_is_handled_by_its_effect_on_the_session(
     ]
     await _drive(service, scripted)
 
-    assert errors == ([permanent] if reported else [])
-    assert bool(recorder.of_types(TTSAudioRawFrame)) is keeps_receiving
+    assert errors == ([False] if reported else [])
+    assert recorder.of_types(TTSAudioRawFrame)
 
 
 @pytest.mark.asyncio
