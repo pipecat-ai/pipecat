@@ -1117,11 +1117,6 @@ class GoogleSTTService(STTService):
         """Process streaming recognition responses."""
         try:
             async for response in streaming_recognize:
-                # Check streaming limit
-                if (int(time.time() * 1000) - self._stream_start_time) > self.STREAMING_LIMIT:
-                    logger.debug("Stream timeout reached in response processing")
-                    break
-
                 if not response.results:
                     continue
 
