@@ -356,10 +356,10 @@ class ProjectGenerator:
         if self.config.enable_eval:
             extras.add("evals")
 
-        # Build the pipecat-ai dependency string. Floor at 1.4.0: generated bots use
-        # create_transport + the typed CallData/runner-args API, which land in 1.4.0.
+        # Build the pipecat-ai dependency string. The floor tracks the release the
+        # templates are written against, so new projects get the APIs they use.
         pipecat_extras = ",".join(sorted(extras))
-        pipecat_dependency = f"pipecat-ai[{pipecat_extras}]>=1.4.0"
+        pipecat_dependency = f"pipecat-ai[{pipecat_extras}]>=1.12.0"
 
         context = {
             "project_name": self.config.project_name,
@@ -442,7 +442,7 @@ class ProjectGenerator:
 
         # Categorize transports for the run instructions
         telephony_transports = {"twilio", "telnyx", "plivo", "exotel"}
-        webrtc_transports = {"smallwebrtc", "daily"}
+        webrtc_transports = {"smallwebrtc", "daily", "livekit"}
         has_telephony = any(t in telephony_transports for t in self.config.transports)
         has_webrtc = any(t in webrtc_transports for t in self.config.transports)
 

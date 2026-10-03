@@ -13,6 +13,7 @@ Source: scripts/cli/imports/import_generator.py
 IMPORTS = {
     # Transports - WebRTC
     "daily": ["from pipecat.transports.daily.transport import DailyParams"],
+    "livekit": ["from pipecat.transports.livekit.transport import LiveKitParams"],
     "smallwebrtc": ["from pipecat.transports.base_transport import TransportParams"],
     "websocket": [
         "from pipecat.serializers.protobuf import ProtobufFrameSerializer",
