@@ -15,6 +15,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.gradium import stt as gradium_stt
 from pipecat.services.gradium.stt import GradiumSTTService, _TurnPhase
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 
@@ -154,7 +155,8 @@ async def test_gradium_turn_detection_a_step_at_the_threshold_ends_an_open_turn_
 
 
 @pytest.mark.asyncio
-async def test_gradium_turn_detection_the_flush_ack_ends_the_ending_phase_and_starts_the_cooldown():
+async def test_gradium_turn_detection_the_flush_ack_starts_the_cooldown_and_holds_the_ending_phase():
+    # The turn's transcript is still aggregating, so no new turn may start yet.
     service = _service()
     service._turn_phase = _TurnPhase.ENDING
     service._handle_flushed = AsyncMock()
@@ -166,9 +168,115 @@ async def test_gradium_turn_detection_the_flush_ack_ends_the_ending_phase_and_st
 
     await service._receive_messages()
 
-    assert service._turn_phase is _TurnPhase.IDLE
+    assert service._turn_phase is _TurnPhase.ENDING
     assert service._flush_cooldown == 8
     service._handle_flushed.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_gradium_turn_detection_speech_continuing_through_a_flush_opens_a_turn(monkeypatch):
+    # After a flush the signal follows the audio: a user who keeps talking
+    # reads low straight away, without first reading inactive.
+    monkeypatch.setattr(gradium_stt, "TRANSCRIPT_AGGREGATION_DELAY", 0)
+    service = _service(settings=GradiumSTTService.Settings(post_flush_cooldown_frames=2))
+    service.emit_stt_usage_metrics = AsyncMock()
+    service._trace_transcription = AsyncMock()
+    service._handle_flushed = service._transcript_aggregation_handler
+    service._turn_phase = _TurnPhase.ENDING
+    service._accumulated_text = ["I'd like to book a"]
+
+    async def messages():
+        yield json.dumps({"type": "flushed"})
+        for _ in range(3):
+            yield json.dumps(_step(0.1))
+
+    service._get_websocket = messages
+
+    await service._receive_messages()
+
+    assert service.push_frame.await_args.args[0].text == "I'd like to book a"
+    service.broadcast_frame.assert_awaited_once_with(ProposedUserStartedSpeakingFrame)
+    assert service._turn_phase is _TurnPhase.OPEN
+
+
+@pytest.mark.asyncio
+async def test_gradium_turn_detection_an_empty_turn_still_arms_the_next_turn(monkeypatch):
+    monkeypatch.setattr(gradium_stt, "TRANSCRIPT_AGGREGATION_DELAY", 0)
+    service = _service()
+    service._turn_phase = _TurnPhase.ENDING
+
+    await service._transcript_aggregation_handler()
+
+    service.push_frame.assert_not_awaited()
+    assert service._turn_phase is _TurnPhase.ARMED
+
+
+@pytest.mark.asyncio
+async def test_gradium_turn_detection_no_start_before_the_previous_transcript_is_pushed(
+    monkeypatch,
+):
+    # With no cooldown, steps after the flush ack are read at once; the turn's
+    # transcript must still go out before the next start proposal.
+    monkeypatch.setattr(gradium_stt, "TRANSCRIPT_AGGREGATION_DELAY", 0)
+    service = _service(settings=GradiumSTTService.Settings(post_flush_cooldown_frames=0))
+    service.emit_stt_usage_metrics = AsyncMock()
+    service._trace_transcription = AsyncMock()
+    service._handle_flushed = AsyncMock()
+    service._turn_phase = _TurnPhase.ENDING
+    service._accumulated_text = ["first turn"]
+
+    async def messages():
+        yield json.dumps({"type": "flushed"})
+        yield json.dumps(_step(0.1))
+
+    service._get_websocket = messages
+    await service._receive_messages()
+
+    service.broadcast_frame.assert_not_awaited()
+
+    await service._transcript_aggregation_handler()
+    await service._handle_step(_step(0.1))
+
+    assert service.push_frame.await_args.args[0].text == "first turn"
+    service.broadcast_frame.assert_awaited_once_with(ProposedUserStartedSpeakingFrame)
+
+
+@pytest.mark.asyncio
+async def test_gradium_without_turn_detection_a_flush_ack_leaves_turns_alone(monkeypatch):
+    monkeypatch.setattr(gradium_stt, "TRANSCRIPT_AGGREGATION_DELAY", 0)
+    service = _service(enable_turn_detection=False)
+    service.emit_stt_usage_metrics = AsyncMock()
+    service._trace_transcription = AsyncMock()
+    service._handle_flushed = service._transcript_aggregation_handler
+    service._accumulated_text = ["hello"]
+
+    async def messages():
+        yield json.dumps({"type": "flushed"})
+        yield json.dumps(_step(0.9))
+        yield json.dumps(_step(0.1))
+
+    service._get_websocket = messages
+    await service._receive_messages()
+
+    assert service.push_frame.await_args.args[0].text == "hello"
+    service.broadcast_frame.assert_not_awaited()
+    assert service._turn_phase is _TurnPhase.IDLE
+    assert service._flush_cooldown == 0
+
+
+@pytest.mark.asyncio
+async def test_gradium_turn_detection_a_failed_transcript_push_still_arms_the_next_turn(
+    monkeypatch,
+):
+    monkeypatch.setattr(gradium_stt, "TRANSCRIPT_AGGREGATION_DELAY", 0)
+    service = _service()
+    service._turn_phase = _TurnPhase.ENDING
+    service._finalize_accumulated_text = AsyncMock(side_effect=RuntimeError("push failed"))
+
+    with pytest.raises(RuntimeError):
+        await service._transcript_aggregation_handler()
+
+    assert service._turn_phase is _TurnPhase.ARMED
 
 
 @pytest.mark.asyncio

@@ -66,8 +66,8 @@ class _TurnPhase(Enum):
 
     IDLE waits for the signal to read inactive, ARMED opens a turn on the next
     dip, OPEN is a turn in progress, and ENDING has proposed the stop and
-    flushed the server, and ignores the signal until the flush is
-    acknowledged.
+    flushed the server, and ignores the signal until the turn's transcript is
+    pushed, then hands over to ARMED.
     """
 
     IDLE = auto()
@@ -194,10 +194,14 @@ class GradiumSTTService(WebsocketSTTService):
         step(inactivity >= threshold) -> step(inactivity < threshold: turn opens)
             -> text* -> step(inactivity >= threshold: turn ends)
             -> ProposedUserStoppedSpeakingFrame -> flush -> TranscriptionFrame
+            -> step(inactivity < threshold: next turn opens)
 
-    A turn opens on the signal falling below the threshold, not on it being
-    there: the estimate starts low when the model has heard nothing yet, and
-    again after each flush resets it, then climbs as silence accumulates.
+    A connection's first turn opens on the signal falling below the
+    threshold, not on it being there: the estimate reads low on the first
+    steps, before the model has heard anything, then climbs as silence
+    accumulates. After a flush the signal follows the audio, so once a turn's
+    transcript is pushed the next step below the threshold opens a turn, and
+    speech that continues through the flush starts one.
 
     A turn start broadcasts a :class:`ProposedUserStartedSpeakingFrame`; a
     turn end broadcasts a :class:`ProposedUserStoppedSpeakingFrame` and
@@ -633,7 +637,6 @@ class GradiumSTTService(WebsocketSTTService):
                 await self._handle_text(msg["text"])
             elif type_ == "flushed":
                 if self._enable_turn_detection:
-                    self._turn_phase = _TurnPhase.IDLE
                     self._flush_cooldown = (
                         assert_given(self._settings.post_flush_cooldown_frames) or 0
                     )
@@ -679,7 +682,11 @@ class GradiumSTTService(WebsocketSTTService):
     async def _transcript_aggregation_handler(self):
         """Wait for trailing tokens then finalize the accumulated transcription."""
         await asyncio.sleep(TRANSCRIPT_AGGREGATION_DELAY)
-        await self._finalize_accumulated_text()
+        try:
+            await self._finalize_accumulated_text()
+        finally:
+            if self._turn_phase is _TurnPhase.ENDING:
+                self._turn_phase = _TurnPhase.ARMED
 
     async def _finalize_accumulated_text(self):
         """Join accumulated text, push TranscriptionFrame, and clear state."""
