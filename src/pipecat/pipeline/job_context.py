@@ -325,8 +325,8 @@ class JobGroupContext:
         self._group = await self._worker.create_job_group_and_request_job(
             list(self._worker_names),
             params=self._params,
+            collect_events=True,
         )
-        self._group.event_queue = asyncio.Queue()
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> bool:
@@ -416,8 +416,8 @@ class JobContext:
         self._group = await self._worker.create_job_group_and_request_job(
             [self._worker_name],
             params=JobGroupParams(**self._params.model_dump()),
+            collect_events=True,
         )
-        self._group.event_queue = asyncio.Queue()
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> bool:
