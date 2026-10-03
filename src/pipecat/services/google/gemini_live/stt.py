@@ -105,11 +105,14 @@ class GeminiSTTService(STTService):
     interim and final transcription frames as results arrive. Supports
     automatic language detection, language hints, and adaptation phrases.
 
-    The model detects utterance boundaries itself, and when the pipeline's VAD
-    signals end of speech the service additionally sends an audio-stream-end
-    signal to flush the utterance, so the final transcript is produced promptly
-    instead of waiting for the model to decide the utterance ended. Without an
-    upstream VAD the model finalizes on its own schedule.
+    The model detects utterance boundaries itself. By default, when the
+    pipeline's VAD signals end of speech, the service additionally sends an
+    audio-stream-end signal to flush the utterance, so the final transcript is
+    produced promptly instead of waiting for the model to decide the utterance
+    ended. Set ``vad_force_finalize=False`` to leave that decision entirely to
+    the model, which is the better choice when callers pause mid-utterance (see
+    ``__init__``). Without an upstream VAD the model finalizes on its own
+    schedule either way.
 
     Audio is sent at the pipeline's input sample rate; the model performs best
     with 16 kHz mono PCM.
@@ -126,6 +129,7 @@ class GeminiSTTService(STTService):
         sample_rate: int | None = None,
         settings: Settings | None = None,
         ttfs_p99_latency: float | None = GEMINI_TTFS_P99,
+        vad_force_finalize: bool = True,
         **kwargs,
     ):
         """Initialize the Gemini STT service.
@@ -142,6 +146,20 @@ class GeminiSTTService(STTService):
             ttfs_p99_latency: P99 latency from speech end to final transcript in
                 seconds. Override for your deployment. See
                 https://github.com/pipecat-ai/stt-benchmark
+            vad_force_finalize: Whether a VAD end-of-speech signal flushes the
+                utterance.
+
+                When True (default): every ``VADUserStoppedSpeakingFrame`` sends
+                ``audio_stream_end`` so the model finalizes now rather than on
+                its own schedule. Lowest time to a final transcript, but the
+                flush is unconditional — a caller who pauses longer than the
+                VAD's ``stop_secs`` mid-utterance has that utterance finalized
+                early, splitting it across transcripts.
+
+                When False: the model's own endpointing decides where the
+                utterance ends. Transcripts arrive later but cover the whole
+                utterance. Prefer this for speech with natural pauses, such as
+                a caller reciting a phone number or date.
             **kwargs: Additional arguments passed to the parent STTService.
 
         Raises:
@@ -173,6 +191,7 @@ class GeminiSTTService(STTService):
 
         self._api_key = api_key
         self._http_options = update_google_client_http_options(http_options)
+        self._vad_force_finalize = vad_force_finalize
         self._create_client()
 
         self._session: AsyncSession | None = None
@@ -282,7 +301,8 @@ class GeminiSTTService(STTService):
         if isinstance(frame, VADUserStartedSpeakingFrame):
             await self.start_processing_metrics()
         elif isinstance(frame, VADUserStoppedSpeakingFrame):
-            await self._send_finalization_signal()
+            if self._vad_force_finalize:
+                await self._send_finalization_signal()
 
     async def _send_finalization_signal(self):
         """Prompt a final transcript for the utterance that just ended.
@@ -291,6 +311,11 @@ class GeminiSTTService(STTService):
         signal flushes the utterance so it is finalized now instead of when the
         model decides it ended. The stream resumes when the next audio chunk is
         sent.
+
+        Because the flush ends the utterance wherever the VAD happened to stop,
+        a pause mid-utterance finalizes it early. Callers that need whole
+        utterances should construct the service with ``vad_force_finalize=False``
+        so this is never sent.
         """
         if not self._session:
             return
