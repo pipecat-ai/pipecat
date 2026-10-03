@@ -1083,7 +1083,7 @@ class RimeTTSService(WebsocketTTSService):
             if client and client.has_context(context_id):
                 self._v1_closed_contexts.add(context_id)
                 try:
-                    await client.cancel(context_id)
+                    await client.cancel(context_id, timeout_s=_V1_CANCEL_TIMEOUT_S)
                     self._start_v1_cancel_watchdog(context_id)
                 except Exception:
                     await self._invalidate_v1_connection(
@@ -1164,7 +1164,7 @@ class RimeTTSService(WebsocketTTSService):
             if not client or not client.has_context(flush_id):
                 return
             try:
-                await client.end(flush_id)
+                await client.end(flush_id, timeout_s=_V1_TERMINAL_TIMEOUT_S)
                 self._start_v1_terminal_watchdog(flush_id)
             except Exception:
                 await self._invalidate_v1_connection(
@@ -1369,7 +1369,7 @@ class RimeTTSService(WebsocketTTSService):
                 self._v1_options_by_context[context_id] = self._build_v1_options()
             options = self._v1_options_by_context[context_id]
             for sentence in await self._split_v1_sentences(text):
-                await client.send_text(context_id, options, sentence)
+                await client.send_text(context_id, options, sentence, timeout_s=_V1_START_TIMEOUT_S)
                 if not client.has_context(context_id):
                     return
                 if first_text:

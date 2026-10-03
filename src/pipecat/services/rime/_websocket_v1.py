@@ -14,6 +14,7 @@ import binascii
 import ipaddress
 import json
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Literal, Protocol, cast
@@ -542,14 +543,16 @@ class RimeWebSocketV1Client:
         context_id: str,
         options: SynthesisOptions,
         text: str,
+        *,
+        timeout_s: float = 10.0,
     ) -> None:
-        """Open a context if needed and append one complete text fragment."""
+        """Open a context and append text within timeout_s, including the lock wait."""
         self._require_ready()
         if not text:
             return
         self._validate_context_id(context_id)
 
-        async with self._send_lock:
+        async with self._send_operation(timeout_s):
             state = self._contexts.get(context_id)
             if state is None:
                 self._closed_contexts.discard(context_id)
@@ -570,10 +573,10 @@ class RimeWebSocketV1Client:
 
             await self._send_locked(_request(context_id, "text", text))
 
-    async def end(self, context_id: str) -> None:
-        """Declare the normal end of input for a context."""
+    async def end(self, context_id: str, *, timeout_s: float = 10.0) -> None:
+        """End context input within timeout_s, including the lock wait."""
         self._require_ready()
-        async with self._send_lock:
+        async with self._send_operation(timeout_s):
             state = self._contexts.get(context_id)
             if state is None or state.terminal_future.done():
                 return
@@ -584,10 +587,10 @@ class RimeWebSocketV1Client:
             state.input_state = InputState.ENDING
             await self._send_locked(_request(context_id, "end"))
 
-    async def cancel(self, context_id: str) -> None:
-        """Cancel an open context."""
+    async def cancel(self, context_id: str, *, timeout_s: float = 1.0) -> None:
+        """Cancel a context within timeout_s, including the lock wait."""
         self._require_ready()
-        async with self._send_lock:
+        async with self._send_operation(timeout_s):
             state = self._contexts.get(context_id)
             if state is None or state.terminal_future.done():
                 return
@@ -659,6 +662,19 @@ class RimeWebSocketV1Client:
                 state.terminal_future.cancel()
             state.activity_event.set()
             state.started_event.set()
+
+    @asynccontextmanager
+    async def _send_operation(self, timeout_s: float) -> AsyncIterator[None]:
+        """Bound the lock wait and writes by one deadline."""
+        try:
+            async with asyncio.timeout(timeout_s):
+                async with self._send_lock:
+                    self._require_ready()
+                    yield
+        except TimeoutError:
+            # Delivery is uncertain. Reject queued work until the service closes the socket.
+            self._closed = True
+            raise RimeV1ConnectionError("Timed out writing to the Rime v1 WebSocket") from None
 
     async def _send_locked(self, request: proto.WebSocketRequest) -> None:
         try:
