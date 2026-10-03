@@ -196,6 +196,34 @@ class TestExpandPercentages(unittest.IsolatedAsyncioTestCase):
         result = await expand_percentages(text, "*")
         self.assertNotEqual(alnum_only(result), alnum_only(text))
 
+    async def test_exact_output(self):
+        self.assertEqual(await expand_percentages("50% off", "*"), "fifty percent off")
+        self.assertEqual(
+            await expand_percentages("3.5% rate", "*"), "three point five percent rate"
+        )
+
+    async def test_thousands_separator(self):
+        # Regression: the separator split the number, so only the digits after the
+        # last comma were expanded ("1,two hundred percent").
+        result = await expand_percentages("Revenue grew 1,200% last year.", "*")
+        self.assertEqual(result, "Revenue grew one thousand, two hundred percent last year.")
+        result = await expand_percentages("1,000,000% gain", "*")
+        self.assertEqual(result, "one million percent gain")
+        result = await expand_percentages("1,200.5%", "*")
+        self.assertEqual(result, "one thousand, two hundred point five percent")
+
+    async def test_fraction_read_digit_by_digit(self):
+        # Fractional digits are read one at a time, as expand_numbers does, so a
+        # trailing zero is spoken instead of dropped.
+        self.assertEqual(await expand_percentages("1.10%", "*"), "one point one zero percent")
+        self.assertEqual(await expand_percentages("1.0%", "*"), "one point zero percent")
+        self.assertEqual(await expand_percentages("0.25%", "*"), "zero point two five percent")
+
+    async def test_voice_formatter_default(self):
+        formatter = VoiceFormatter()
+        result = await formatter("Revenue grew 1,200% last year.", "*")
+        self.assertEqual(result, "Revenue grew one thousand, two hundred percent last year.")
+
 
 class TestExpandUnits(unittest.IsolatedAsyncioTestCase):
     async def test_km(self):
