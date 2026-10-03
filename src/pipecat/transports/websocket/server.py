@@ -260,11 +260,13 @@ class SingleClientWebsocketServerInputTransport(BaseInputTransport):
         # Notify
         await self._callbacks.on_client_connected(websocket)
 
-        # Create a task to monitor the websocket connection
-        if not self._monitor_task and self._params.session_timeout:
-            self._monitor_task = self.create_task(
+        # Each accepted connection has its own session timeout.
+        monitor_task = None
+        if self._params.session_timeout:
+            monitor_task = self.create_task(
                 self._monitor_websocket(websocket, self._params.session_timeout)
             )
+            self._monitor_task = monitor_task
 
         # Handle incoming messages
         try:
@@ -289,6 +291,11 @@ class SingleClientWebsocketServerInputTransport(BaseInputTransport):
             logger.debug(f"{self}: client disconnected while receiving")
         except Exception as e:
             logger.error(f"{self} exception receiving data: {e.__class__.__name__} ({e})")
+        finally:
+            if monitor_task:
+                await self.cancel_task(monitor_task)
+                if self._monitor_task is monitor_task:
+                    self._monitor_task = None
 
         # Notify disconnection
         await self._callbacks.on_client_disconnected(websocket)
