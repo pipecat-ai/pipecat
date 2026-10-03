@@ -411,6 +411,7 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
         self._api_session_ready = False
         self._run_llm_when_api_session_ready = False
         self._response_in_flight = False
+        self._response_request_event_id: str | None = None
         self._run_llm_when_response_done = False
         self._current_response_id: str | None = None
         self._interrupted_response_id: str | None = None
@@ -794,6 +795,7 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
             self._audio_send_logged = False
             self._interim_transcription_text = ""
             self._response_in_flight = False
+            self._response_request_event_id = None
             self._run_llm_when_response_done = False
             self._run_llm_when_api_session_ready = False
             self._transcript_awaiting_context = False
@@ -980,6 +982,7 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
     async def _handle_evt_response_created(self, evt):
         """Handle response.created event."""
         self._response_in_flight = True
+        self._response_request_event_id = None
         self._current_response_id = evt.response.get("id")
         if self._cancel_announced_response:
             self._cancel_announced_response = False
@@ -1211,6 +1214,13 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
         error that ends the session also closes the connection, which the
         receive loop reports as permanent.
         """
+        if (
+            evt.error.event_id is not None
+            and evt.error.event_id == self._response_request_event_id
+            and evt.error.code != "conversation_already_has_active_response"
+        ):
+            await self._handle_rejected_response_request()
+
         if evt.error.code in _EXPECTED_ERROR_CODES:
             logger.debug(f"{self} {evt.error.message}")
             return
@@ -1287,11 +1297,29 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
         # Running from the request on: an interruption can arrive before Voice
         # Live announces the response, and a second request before then is
         # rejected. A request Voice Live rejects for an unannounced response of
-        # its own is cleared by that response's response.done.
+        # its own is cleared by that response's response.done; any other
+        # rejection names the request's event_id and is cleared in
+        # _handle_evt_error.
         self._response_in_flight = True
         # The response takes the session's modalities. Overriding them per response
         # is rejected for native-audio voices, which accept only ["text"] or ["audio"].
-        await self.send_client_event(events.ResponseCreateEvent())
+        request = events.ResponseCreateEvent()
+        self._response_request_event_id = request.event_id
+        await self.send_client_event(request)
+
+    async def _handle_rejected_response_request(self):
+        """Release a response request Voice Live rejected before announcing it.
+
+        No response.done follows a rejected request, so the in-flight state it
+        set is cleared here, and a response deferred behind it goes out now.
+        """
+        self._response_request_event_id = None
+        self._response_in_flight = False
+        self._cancel_announced_response = False
+        await self.stop_all_metrics()
+        if self._run_llm_when_response_done:
+            self._run_llm_when_response_done = False
+            await self._create_response()
 
     async def _process_completed_function_calls(self, send_new_results: bool):
         """Process completed function calls and send results to the service."""

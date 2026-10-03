@@ -788,6 +788,93 @@ async def test_a_deferred_response_survives_a_failed_response():
     assert service._run_llm_when_response_done is False
 
 
+def _error_for(event_id: str | None, code: str) -> dict[str, Any]:
+    return {
+        "type": "error",
+        "event_id": "server_evt",
+        "error": {
+            "type": "invalid_request_error",
+            "code": code,
+            "message": "rejected",
+            "event_id": event_id,
+        },
+    }
+
+
+def _response_service() -> tuple[AzureVoiceLiveLLMService, list[Any]]:
+    """A service ready to create responses, recording the client events it sends."""
+    service = _make_service()
+    service.push_frame = _FrameRecorder()
+    service.push_error = _noop_error
+    sent: list[Any] = []
+
+    async def record(event):
+        sent.append(event)
+
+    service.send_client_event = record
+    service._api_session_ready = True
+    service._llm_needs_conversation_setup = False
+    service._context = LLMContext([{"role": "user", "content": "hi"}])
+    return service, sent
+
+
+def _creates(sent: list[Any]) -> list[events.ResponseCreateEvent]:
+    return [e for e in sent if isinstance(e, events.ResponseCreateEvent)]
+
+
+@pytest.mark.asyncio
+async def test_a_rejected_response_request_frees_the_next_one():
+    """No response.done follows a rejected request, so the error itself clears it."""
+    service, sent = _response_service()
+
+    await service._create_response()
+    request = _creates(sent)[0]
+    await _drive(service, [_error_for(request.event_id, "invalid_value")])
+
+    assert service._response_in_flight is False
+    await service._create_response()
+    assert len(_creates(sent)) == 2
+
+
+@pytest.mark.asyncio
+async def test_a_rejected_response_request_releases_the_deferred_response():
+    service, sent = _response_service()
+
+    await service._create_response()
+    request = _creates(sent)[0]
+    # A tool result asks for a follow-up before the request is answered.
+    await service._create_response()
+    assert service._run_llm_when_response_done is True
+
+    await _drive(service, [_error_for(request.event_id, "invalid_value")])
+
+    assert len(_creates(sent)) == 2
+    assert service._run_llm_when_response_done is False
+
+
+@pytest.mark.parametrize(
+    "event_id, code",
+    [
+        # Voice Live is already running a response of its own; its response.done clears it.
+        ("request", "conversation_already_has_active_response"),
+        # The error is about some other client event.
+        ("other", "invalid_value"),
+        (None, "invalid_value"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_other_errors_leave_the_response_request_running(event_id, code):
+    service, sent = _response_service()
+
+    await service._create_response()
+    request = _creates(sent)[0]
+    if event_id == "request":
+        event_id = request.event_id
+    await _drive(service, [_error_for(event_id, code)])
+
+    assert service._response_in_flight is True
+
+
 @pytest.mark.asyncio
 async def test_text_deltas_push_llm_text_when_audio_is_off():
     """A text-only session reports its response through response.text.delta."""
