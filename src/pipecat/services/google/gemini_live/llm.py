@@ -387,6 +387,8 @@ class GeminiLiveLLMSettings(LLMSettings):
         vad: Voice activity detection parameters.
         turn_coverage: Which realtime input a user turn covers. Unset uses the
             model's own default.
+        input_transcription_languages: Languages hinting the user's speech for
+            input audio transcription. Unset auto-detects. Applied at connect.
         context_window_compression: Context window compression configuration.
         thinking: Thinking configuration. Live thinking models require a
             ``thinking_level``; when none is set, the service applies the
@@ -401,6 +403,9 @@ class GeminiLiveLLMSettings(LLMSettings):
     media_resolution: GeminiMediaResolution | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     vad: GeminiVADParams | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     turn_coverage: TurnCoverage | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    input_transcription_languages: list[Language | str] | None | NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
     context_window_compression: ContextWindowCompressionParams | dict | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
@@ -683,6 +688,7 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
             media_resolution=GeminiMediaResolution.UNSPECIFIED,
             vad=None,
             turn_coverage=None,
+            input_transcription_languages=None,
             context_window_compression={},
             thinking={},
             enable_affective_dialog=False,
@@ -1317,6 +1323,7 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
             modalities = assert_given(self._settings.modalities)
             media_resolution = assert_given(self._settings.media_resolution)
             language = assert_given(self._settings.language)
+            transcription_languages = assert_given(self._settings.input_transcription_languages)
             config = LiveConnectConfig(
                 generation_config=GenerationConfig(
                     frequency_penalty=assert_given(self._settings.frequency_penalty),
@@ -1337,7 +1344,14 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
                     ),
                     media_resolution=MediaResolution(media_resolution.value),
                 ),
-                input_audio_transcription=AudioTranscriptionConfig(),
+                input_audio_transcription=AudioTranscriptionConfig(
+                    language_codes=[
+                        lang if isinstance(lang, str) else language_to_gemini_language(lang)
+                        for lang in transcription_languages
+                    ]
+                    if transcription_languages
+                    else None
+                ),
                 output_audio_transcription=AudioTranscriptionConfig(),
                 session_resumption=SessionResumptionConfig(handle=session_resumption_handle),
             )
