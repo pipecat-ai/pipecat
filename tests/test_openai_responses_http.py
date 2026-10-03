@@ -267,6 +267,7 @@ class TestHttpReasoningCapture:
         item.summary = [summary_part]
         item.encrypted_content = "ENCRYPTED"
         done = MagicMock(spec=ResponseOutputItemDoneEvent)
+        done.output_index = 0
         done.item = item
 
         await _run(service, delta1, delta2, done)
@@ -437,6 +438,7 @@ class TestHttpStreamErrorEvents:
         item.name = "get_weather"
         item.call_id = "call_1"
         added = MagicMock(spec=ResponseOutputItemAddedEvent)
+        added.output_index = 0
         added.item = item
 
         delta = MagicMock(spec=ResponseFunctionCallArgumentsDeltaEvent)
@@ -460,12 +462,13 @@ class TestHttpStreamErrorEvents:
         service.push_error = AsyncMock()
         service.run_function_calls = AsyncMock()
 
-        def _tool_call_added(item_id, name, call_id):
+        def _tool_call_added(output_index, item_id, name, call_id):
             item = MagicMock(spec=ResponseFunctionToolCall)
             item.id = item_id
             item.name = name
             item.call_id = call_id
             event = MagicMock(spec=ResponseOutputItemAddedEvent)
+            event.output_index = output_index
             event.item = item
             return event
 
@@ -479,6 +482,7 @@ class TestHttpStreamErrorEvents:
         done_item.call_id = "call_1"
         done_item.arguments = '{"city": "SF"}'
         item_done = MagicMock(spec=ResponseOutputItemDoneEvent)
+        item_done.output_index = 0
         item_done.item = done_item
 
         partial_delta = MagicMock(spec=ResponseFunctionCallArgumentsDeltaEvent)
@@ -490,10 +494,10 @@ class TestHttpStreamErrorEvents:
 
         await _run(
             service,
-            _tool_call_added("item_1", "get_weather", "call_1"),
+            _tool_call_added(0, "item_1", "get_weather", "call_1"),
             args_done,
             item_done,
-            _tool_call_added("item_2", "get_time", "call_2"),
+            _tool_call_added(1, "item_2", "get_time", "call_2"),
             partial_delta,
             _incomplete_event(details),
         )
@@ -503,6 +507,48 @@ class TestHttpStreamErrorEvents:
         fc_list = service.run_function_calls.call_args.args[0]
         assert [fc.function_name for fc in fc_list] == ["get_weather"]
         assert fc_list[0].arguments == {"city": "SF"}
+
+    @pytest.mark.asyncio
+    async def test_server_run_tool_is_not_run_as_a_function_call(self):
+        """A server that runs a tool itself (Perplexity's web search) announces it
+        as a function call and completes it as another item at the same output
+        index; only real function calls run."""
+        service = _make_service()
+        service.run_function_calls = AsyncMock()
+
+        def _added(output_index, item_id, name, call_id):
+            item = MagicMock(spec=ResponseFunctionToolCall)
+            item.id = item_id
+            item.name = name
+            item.call_id = call_id
+            event = MagicMock(spec=ResponseOutputItemAddedEvent)
+            event.item = item
+            event.output_index = output_index
+            return event
+
+        search_done = MagicMock(spec=ResponseOutputItemDoneEvent)
+        search_done.item = MagicMock()  # a search_results item, with no id
+        search_done.output_index = 0
+
+        weather_item = MagicMock(spec=ResponseFunctionToolCall)
+        weather_item.id = "fc_2"
+        weather_item.name = "get_weather"
+        weather_item.call_id = "call_2"
+        weather_item.arguments = '{"city": "Paris"}'
+        weather_done = MagicMock(spec=ResponseOutputItemDoneEvent)
+        weather_done.item = weather_item
+        weather_done.output_index = 1
+
+        await _run(
+            service,
+            _added(0, "fc_1", "search_web", "call_1"),
+            search_done,
+            _added(1, "fc_2", "get_weather", "call_2"),
+            weather_done,
+        )
+
+        fc_list = service.run_function_calls.call_args.args[0]
+        assert [fc.function_name for fc in fc_list] == ["get_weather"]
 
     @pytest.mark.asyncio
     async def test_response_failed_reaches_pipeline_as_error_frame(self):

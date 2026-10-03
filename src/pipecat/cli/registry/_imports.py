@@ -109,7 +109,7 @@ IMPORTS = {
         "from pipecat.services.openai.responses.llm import OpenAIResponsesLLMService"
     ],
     "openrouter_llm": ["from pipecat.services.openrouter.llm import OpenRouterLLMService"],
-    "perplexity_llm": ["from pipecat.services.perplexity.llm import PerplexityLLMService"],
+    "perplexity_llm": ["from pipecat.services.perplexity.llm import PerplexityAgentLLMService"],
     "qwen_llm": ["from pipecat.services.qwen.llm import QwenLLMService"],
     "sambanova_llm": ["from pipecat.services.sambanova.llm import SambaNovaLLMService"],
     "sarvam_llm": ["from pipecat.services.sarvam.llm import SarvamLLMService"],
