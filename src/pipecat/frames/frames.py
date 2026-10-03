@@ -1479,11 +1479,16 @@ class FunctionCallCancelFrame(SystemFrame):
             cancelled by its own timeout sets this: an interruption must not
             trigger inference, and a cancellation the LLM asked for already
             runs inference through the result of the tool that requested it.
+        in_progress_frame_sent: Whether the matching in-progress frame was
+            sent before this cancellation. The assistant aggregator uses this
+            to preserve context ordering when a system cancellation overtakes
+            the ordinary in-progress frame.
     """
 
     function_name: str
     tool_call_id: str
     run_llm: bool = False
+    in_progress_frame_sent: bool = False
 
 
 @dataclass
