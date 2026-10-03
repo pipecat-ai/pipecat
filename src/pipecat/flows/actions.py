@@ -27,7 +27,7 @@ import asyncio
 import inspect
 import warnings
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from loguru import logger
@@ -50,10 +50,16 @@ if TYPE_CHECKING:
 class FunctionActionFrame(ControlFrame):
     """Frame containing a function action to be executed.
 
+    This is an uninterruptible frame: the action runs, and its ongoing action
+    ends, when the frame reaches the end of the pipeline, so an interruption
+    must not drop it.
+
     Parameters:
         action: Action configuration dictionary.
         function: Function handler to execute.
     """
+
+    interruptible: bool = field(default=False, init=False)
 
     action: dict
     function: FlowActionHandler
@@ -61,9 +67,13 @@ class FunctionActionFrame(ControlFrame):
 
 @dataclass
 class ActionFinishedFrame(ControlFrame):
-    """Frame indicating that an action has completed execution."""
+    """Frame indicating that an action has completed execution.
 
-    pass
+    This is an uninterruptible frame: the ongoing action it marks ends when the
+    frame reaches the end of the pipeline, so an interruption must not drop it.
+    """
+
+    interruptible: bool = field(default=False, init=False)
 
 
 class ActionManager:
@@ -113,9 +123,11 @@ class ActionManager:
         @worker.event_handler("on_frame_reached_downstream")
         async def on_frame_reached_downstream(worker, frame):
             if isinstance(frame, FunctionActionFrame):
-                # Run function action
-                await frame.function(frame.action, flow_manager)
-                self._decrement_ongoing_actions_count()
+                # Run function action. The action ends even if the function raises.
+                try:
+                    await frame.function(frame.action, flow_manager)
+                finally:
+                    self._decrement_ongoing_actions_count()
             elif isinstance(frame, BotStoppedSpeakingFrame):
                 # Execute deferred post-actions if the bot's turn is over.
                 # A BotStoppedSpeakingFrame only indicates that the bot's turn is over if there are
