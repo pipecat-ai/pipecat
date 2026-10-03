@@ -324,10 +324,8 @@ def _stub_job_group(worker, job_id="t1", worker_names=("w1",)):
     ``group_completed`` emission) is the production code too.
     """
 
-    async def _ready(names):
-        fut = asyncio.get_running_loop().create_future()
-        fut.set_result(True)
-        return fut
+    async def _ready(names, *, timeout=None):
+        return None
 
     async def _send(worker_name, jid, job_name=None, payload=None):
         pass
