@@ -15,14 +15,18 @@ import json
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import numpy as np
+
 try:
     from livekit import rtc
 
     from pipecat.frames.frames import OutputImageRawFrame
     from pipecat.transports.livekit.transport import (
         LiveKitCallbacks,
+        LiveKitInputTransport,
         LiveKitOutputTransport,
         LiveKitParams,
+        LiveKitTransport,
         LiveKitTransportClient,
     )
 
@@ -279,6 +283,62 @@ class TestLiveKitAudioStreamLeakOnUnsubscribe(unittest.IsolatedAsyncioTestCase):
         await client._async_on_track_unsubscribed(track, pub, participant)
         mock_stream.aclose.assert_awaited_once()
         self.assertNotIn(participant.identity, client._video_streams)
+
+
+@unittest.skipUnless(LIVEKIT_AVAILABLE, "livekit package not installed")
+class TestLiveKitInputResamplesEachParticipantSeparately(unittest.IsolatedAsyncioTestCase):
+    """Audio from participants speaking at the same time must not bleed together.
+
+    The bug: every participant's 48 kHz audio went through one shared stream
+    resampler. A stream resampler keeps filter state between calls, so when two
+    participants' frames are interleaved, each output frame is built partly from
+    the other participant's samples, and speech recognition hears both voices.
+    """
+
+    RATE_IN, RATE_OUT, TONES = 48000, 16000, {"alice": 440.0, "bob": 1000.0}
+
+    def _frame(self, hz: float, index: int) -> "rtc.AudioFrameEvent":
+        n = self.RATE_IN // 100  # 10 ms
+        t = (np.arange(n) + index * n) / self.RATE_IN
+        pcm = (8000 * np.sin(2 * np.pi * hz * t)).astype(np.int16).tobytes()
+        return rtc.AudioFrameEvent(frame=rtc.AudioFrame(pcm, self.RATE_IN, 1, n))
+
+    def _magnitude(self, pcm: bytes, hz: float) -> float:
+        samples = np.frombuffer(pcm, dtype=np.int16).astype(np.float64)
+        spectrum = np.abs(np.fft.rfft(samples * np.hanning(len(samples))))
+        return float(spectrum[int(round(hz * len(samples) / self.RATE_OUT))])
+
+    async def test_each_participant_keeps_only_their_own_audio(self):
+        frames = [(self._frame(hz, i), who) for i in range(100) for who, hz in self.TONES.items()]
+
+        async def interleaved():  # two participants talking at once, 1 s each
+            for frame in frames:
+                yield frame
+
+        client = MagicMock()
+        client.get_next_audio_frame = interleaved
+        transport = LiveKitInputTransport(MagicMock(), client, LiveKitParams())
+        transport._sample_rate = self.RATE_OUT
+        heard = {who: b"" for who in self.TONES}
+
+        async def collect(frame):
+            heard[frame.user_id] += frame.audio
+
+        transport.push_audio_frame = collect
+        await transport._audio_in_task_handler()
+
+        for who, other in (("alice", "bob"), ("bob", "alice")):
+            pcm = heard[who][len(heard[who]) // 4 :]  # past the resampler's start-up
+            leaked = self._magnitude(pcm, self.TONES[other]) / self._magnitude(pcm, self.TONES[who])
+            self.assertLess(leaked, 0.01, f"{who}'s audio carries {other}'s voice ({leaked:.0%})")
+
+    async def test_a_participant_whose_audio_track_is_gone_is_released(self):
+        transport = LiveKitTransport(url="wss://test.livekit.cloud", token="t", room_name="r")
+        transport.input()._resamplers["alice"] = MagicMock()
+
+        await transport._on_audio_track_unsubscribed("alice")
+
+        self.assertNotIn("alice", transport.input()._resamplers)
 
 
 @unittest.skipUnless(LIVEKIT_AVAILABLE, "livekit package not installed")
