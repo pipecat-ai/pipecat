@@ -252,6 +252,7 @@ def _scenario_record(run: "EvalRun", artifacts: dict) -> dict:
                 "event_name": f.event_name,
                 "kind": f.kind,
                 "reason": f.reason,
+                "confidence": f.confidence,
             }
             for f in (result.failures if result else [])
         ],
@@ -266,6 +267,7 @@ def _scenario_record(run: "EvalRun", artifacts: dict) -> dict:
                         "event_name": e.event_name,
                         "passed": e.passed,
                         "matched": e.matched,
+                        "confidence": e.confidence,
                     }
                     for e in t.expectations
                 ],
@@ -303,13 +305,20 @@ def _simulation_record(run: "EvalRun", artifacts: dict) -> dict:
                 "reason": m.reason,
                 "failure_kind": m.failure_kind,
                 "verdicts": [
-                    {"turn": v.turn, "passed": v.passed, "verdict": v.verdict, "reason": v.reason}
+                    {
+                        "turn": v.turn,
+                        "passed": v.passed,
+                        "verdict": v.verdict,
+                        "reason": v.reason,
+                        "confidence": v.confidence,
+                    }
                     for v in m.verdicts
                 ],
             }
             for m in (result.metrics if result else [])
         ],
         "reason": result.reason if result else "",
+        "confidence": result.confidence if result else None,
         "end_call": result.end_call if result else None,
         "duration_ms": run.duration_ms,
         "messages": result.messages if result else [],
@@ -341,6 +350,7 @@ def _simulation_result_from_dict(data: dict) -> EvalSimulationResult:
         duration_ms=data.get("duration_ms", 0),
         events_seen=data.get("events_seen", []),
         debug_log=data.get("debug_log", []),
+        confidence=data.get("confidence"),
     )
 
 

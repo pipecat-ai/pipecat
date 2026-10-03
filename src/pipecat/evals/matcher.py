@@ -56,6 +56,10 @@ class ExpectationMatcher:
         # a user transcript), surfaced to verbose progress. Empty for events with
         # no text (llm_started, function_call, speaking events).
         self.last_match_text: str = ""
+        # The judge's confidence in its verdict on the most recent expectation,
+        # pass or fail; None when it wasn't judged. For several judged function
+        # calls, the lowest.
+        self.last_match_confidence: float | None = None
         # When the most recent expectation matched, so an absence check can tell
         # a reply that began after it from the rest of the one it matched.
         self._last_match_at: float = 0.0
@@ -94,6 +98,7 @@ class ExpectationMatcher:
         """
         deadline = anchor + (budget_ms / 1000.0)
         self.last_match_text = ""
+        self.last_match_confidence = None
 
         if expectation.absent:
             return await self._match_absent(expectation, deadline, budget_ms, turn_idx, exp_idx)
@@ -152,6 +157,7 @@ class ExpectationMatcher:
         self._trace.log(f"match: waiting for {expectation.event!r} ({check})")
         aggregate = ""
         last_reason = ""
+        last_confidence: float | None = None
         seen_any = False
         pending: dict | None = None
         while True:
@@ -163,7 +169,9 @@ class ExpectationMatcher:
                 except TimeoutError:
                     if not seen_any:
                         raise  # no response at all: the caller reports the missing event
-                    return self._unsatisfied(expectation, turn_idx, exp_idx, budget_ms, last_reason)
+                    return self._unsatisfied(
+                        expectation, turn_idx, exp_idx, budget_ms, last_reason, last_confidence
+                    )
 
             seen_any = True
             delta = self._event_text(event)
@@ -176,8 +184,9 @@ class ExpectationMatcher:
             # `aggregate` is kept only for text_contains and the match summary).
             if expectation.eval is not None and self._judge is not None:
                 self._judge.add_assistant_message(delta)
-            status, reason = await self._evaluate_aggregate(aggregate, expectation)
+            status, reason, confidence = await self._evaluate_aggregate(aggregate, expectation)
             self._trace.log(f"eval: {status} (aggregate={aggregate.strip()!r}) {reason}")
+            self.last_match_confidence = confidence
             if status == "pass":
                 self.last_match_text = aggregate
                 self._last_match_at = time.monotonic()
@@ -189,12 +198,15 @@ class ExpectationMatcher:
                 # a "continue" that the next segment may turn into a "yes".
                 pending = await self._rest_of_reply(expectation.event, deadline)
                 if pending is None:
-                    return self._failure(expectation, turn_idx, exp_idx, reason, "judge_no")
+                    return self._failure(
+                        expectation, turn_idx, exp_idx, reason, "judge_no", confidence
+                    )
                 self._trace.log("eval: no, but the reply goes on: judging the rest")
             # "continue": wait for the next segment, separated by a space so
             # sentences don't run together (e.g. "...that. The weather...").
             aggregate += " "
             last_reason = reason
+            last_confidence = confidence
 
     async def _rest_of_reply(self, event_type: str, deadline: float) -> dict | None:
         """The next segment of a reply the judge rejected, or ``None`` when the reply is over.
@@ -219,11 +231,13 @@ class ExpectationMatcher:
         exp_idx: int,
         budget_ms: int,
         last_reason: str,
+        last_confidence: float | None,
     ) -> EvalAssertionFailure:
         """The failure of a reply that never satisfied its check within the budget.
 
-        With ``eval:`` the judge kept saying ``continue``; without it the only
-        way to be unsatisfied is a missing substring.
+        With ``eval:`` the judge kept saying ``continue``, and the failure
+        carries its confidence in the last one; without it the only way to be
+        unsatisfied is a missing substring.
         """
         self._trace.log(f"eval: timeout, not satisfied: {last_reason}")
         return self._failure(
@@ -232,6 +246,7 @@ class ExpectationMatcher:
             exp_idx,
             f"not satisfied within {budget_ms}ms: {last_reason}",
             "judge_continue" if expectation.eval is not None else "text_mismatch",
+            last_confidence,
         )
 
     async def _match_absent(
@@ -364,6 +379,10 @@ class ExpectationMatcher:
         with logger.contextualize(eval_pipeline="judge"):
             verdict = await self._judge.evaluate_call(name, args, expectation.eval)
         self._trace.log(f"eval: {verdict.verdict} ({self._match_summary(event)}) {verdict.reason}")
+        if verdict.confidence is not None and (
+            self.last_match_confidence is None or verdict.confidence < self.last_match_confidence
+        ):
+            self.last_match_confidence = verdict.confidence
         if verdict.passed:
             return None
         return self._failure(
@@ -373,6 +392,7 @@ class ExpectationMatcher:
             f"eval {expectation.eval!r} on {self._match_summary(event)}: "
             f"judge said {verdict.verdict} — {verdict.reason}",
             "judge_no",
+            verdict.confidence,
         )
 
     async def _next_function_call(
@@ -413,19 +433,20 @@ class ExpectationMatcher:
 
     async def _evaluate_aggregate(
         self, aggregate: str, expectation: EvalExpectation
-    ) -> tuple[str, str]:
+    ) -> tuple[str, str, float | None]:
         """Check the accumulated reply text: ``pass``, ``fail``, or ``continue`` for more text.
 
-        A missing substring is ``continue``; only the judge can ``fail``.
+        A missing substring is ``continue``; only the judge can ``fail``. The
+        third element is the judge's confidence, ``None`` when it wasn't asked.
         """
         if expectation.text_contains is not None and not self._text_contains(
             aggregate, expectation.text_contains
         ):
-            return ("continue", f"does not contain {expectation.text_contains!r}")
+            return ("continue", f"does not contain {expectation.text_contains!r}", None)
 
         if expectation.eval is not None:
             if not aggregate.strip():
-                return ("continue", "no response text yet")
+                return ("continue", "no response text yet", None)
             # match() guarantees a judge exists before aggregating eval:.
             assert self._judge is not None
             with logger.contextualize(eval_pipeline="judge"):
@@ -433,12 +454,12 @@ class ExpectationMatcher:
                 # aggregation loop; the judge evaluates that context, not `aggregate`.
                 verdict = await self._judge.evaluate(expectation.eval)
             if verdict.verdict == "no":
-                return ("fail", f"judge said no: {verdict.reason}")
+                return ("fail", f"judge said no: {verdict.reason}", verdict.confidence)
             if verdict.verdict == "continue":
-                return ("continue", f"judge said continue: {verdict.reason}")
-            return ("pass", f"judge said yes: {verdict.reason}")
+                return ("continue", f"judge said continue: {verdict.reason}", verdict.confidence)
+            return ("pass", f"judge said yes: {verdict.reason}", verdict.confidence)
 
-        return ("pass", "")
+        return ("pass", "", None)
 
     def _check_payload(
         self,
@@ -551,6 +572,7 @@ class ExpectationMatcher:
 
         self._judge.add_assistant_message(content)
         verdict = await self._judge.evaluate(expectation.eval)
+        self.last_match_confidence = verdict.confidence
         if not verdict.passed:
             return self._failure(
                 expectation,
@@ -558,15 +580,22 @@ class ExpectationMatcher:
                 exp_idx,
                 f"eval {expectation.eval!r}: judge said no — {verdict.reason}",
                 "judge_no",
+                verdict.confidence,
             )
 
         return None
 
     def _failure(
-        self, expectation: EvalExpectation, turn_idx: int, exp_idx: int, reason: str, kind: str
+        self,
+        expectation: EvalExpectation,
+        turn_idx: int,
+        exp_idx: int,
+        reason: str,
+        kind: str,
+        confidence: float | None = None,
     ) -> EvalAssertionFailure:
         """Build the failure record for ``expectation``."""
-        return EvalAssertionFailure(turn_idx, exp_idx, expectation.event, reason, kind)
+        return EvalAssertionFailure(turn_idx, exp_idx, expectation.event, reason, kind, confidence)
 
     def _match_summary(self, event: dict) -> str:
         """A short label for a matched event: the call signature, or the event's text."""

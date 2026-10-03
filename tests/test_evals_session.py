@@ -329,9 +329,12 @@ class TestFramesToEvents(unittest.TestCase):
 
 
 class _FakeJudge:
-    """Returns queued verdicts without calling a real LLM."""
+    """Returns queued verdicts without calling a real LLM.
 
-    def __init__(self, verdicts: list[str]):
+    Each verdict is a string, or a ``(verdict, confidence)`` pair.
+    """
+
+    def __init__(self, verdicts: list[str | tuple[str, float]]):
         self._verdicts = list(verdicts)
         self.calls: list[str] = []
         self.segments: list[str] = []
@@ -360,7 +363,8 @@ class _FakeJudge:
         from pipecat.evals.judge import JudgeVerdict
 
         v = self._verdicts.pop(0)
-        return JudgeVerdict(verdict=v, reason=f"({v})", raw_response="")
+        v, confidence = v if isinstance(v, tuple) else (v, None)
+        return JudgeVerdict(verdict=v, reason=f"({v})", raw_response="", confidence=confidence)
 
 
 class TestBotSpeaking(unittest.IsolatedAsyncioTestCase):
@@ -852,12 +856,14 @@ class TestEvaluateAggregate(unittest.IsolatedAsyncioTestCase):
     async def test_text_contains_present_passes(self):
         s = _matcher(bot_audio=False)
         exp = EvalExpectation(event="llm_response", text_contains="Paris")
-        self.assertEqual(await s._evaluate_aggregate("The capital is Paris.", exp), ("pass", ""))
+        self.assertEqual(
+            await s._evaluate_aggregate("The capital is Paris.", exp), ("pass", "", None)
+        )
 
     async def test_text_contains_absent_continues(self):
         s = _matcher()
         exp = EvalExpectation(event="llm_response", text_contains="Paris")
-        status, _ = await s._evaluate_aggregate("Let me check on that.", exp)
+        status, _, _ = await s._evaluate_aggregate("Let me check on that.", exp)
         self.assertEqual(status, "continue")
 
     async def test_text_excludes_fails_the_reply_as_soon_as_it_appears(self):
@@ -873,25 +879,27 @@ class TestEvaluateAggregate(unittest.IsolatedAsyncioTestCase):
 
     async def test_eval_yes_passes(self):
         s = _matcher()
-        s._judge = _FakeJudge(["yes"])
+        s._judge = _FakeJudge([("yes", 0.52)])
         exp = EvalExpectation(event="llm_response", eval="describes the weather")
-        status, reason = await s._evaluate_aggregate("It's 75 and sunny.", exp)
+        status, reason, confidence = await s._evaluate_aggregate("It's 75 and sunny.", exp)
         self.assertEqual(status, "pass")
         self.assertIn("judge said yes", reason)
+        self.assertEqual(confidence, 0.52)
 
     async def test_eval_no_fails(self):
         s = _matcher()
-        s._judge = _FakeJudge(["no"])
+        s._judge = _FakeJudge([("no", 0.99)])
         exp = EvalExpectation(event="llm_response", eval="describes the weather")
-        status, reason = await s._evaluate_aggregate("I like turtles.", exp)
+        status, reason, confidence = await s._evaluate_aggregate("I like turtles.", exp)
         self.assertEqual(status, "fail")
         self.assertIn("judge said no", reason)
+        self.assertEqual(confidence, 0.99)
 
     async def test_eval_continue_waits_for_more(self):
         s = _matcher()
         s._judge = _FakeJudge(["continue"])
         exp = EvalExpectation(event="llm_response", eval="describes the weather")
-        status, _ = await s._evaluate_aggregate("Let me check on that.", exp)
+        status, _, _ = await s._evaluate_aggregate("Let me check on that.", exp)
         self.assertEqual(status, "continue")
 
     async def test_eval_empty_aggregate_skips_judge(self):
@@ -899,9 +907,67 @@ class TestEvaluateAggregate(unittest.IsolatedAsyncioTestCase):
         judge = _FakeJudge([])  # would IndexError if the judge were called
         s._judge = judge
         exp = EvalExpectation(event="llm_response", eval="describes the weather")
-        status, _ = await s._evaluate_aggregate("   ", exp)
+        status, _, confidence = await s._evaluate_aggregate("   ", exp)
         self.assertEqual(status, "continue")
+        self.assertIsNone(confidence)
         self.assertEqual(judge.calls, [])
+
+
+class TestJudgeConfidence(unittest.IsolatedAsyncioTestCase):
+    """The judge's confidence in its verdict reaches the match result, pass or fail."""
+
+    CRITERION = "gives the weather"
+
+    async def _match(self, s: ExpectationMatcher, exp: EvalExpectation, budget_ms: int = 1000):
+        return await s.match(exp, time.monotonic(), budget_ms, 0, 0)
+
+    async def test_a_pass_records_the_confidence(self):
+        s = _matcher(_FakeJudge([("yes", 0.52)]))
+        await s._stream.append({"type": "response", "text": "It's 75 and sunny."})
+        exp = EvalExpectation(event="response", eval=self.CRITERION)
+        self.assertIsNone(await self._match(s, exp))
+        self.assertEqual(s.last_match_confidence, 0.52)
+
+    async def test_a_failure_carries_the_confidence(self):
+        from pipecat.evals import matcher as matcher_module
+
+        s = _matcher(_FakeJudge([("no", 0.99)]), bot_audio=True)
+        await s._stream.append({"type": "response", "text": "I like turtles."})
+        exp = EvalExpectation(event="response", eval=self.CRITERION)
+        with patch.object(matcher_module, "JUDGE_NO_GRACE_S", 0.1):
+            failure = await self._match(s, exp)
+        assert failure is not None
+        self.assertEqual(failure.kind, "judge_no")
+        self.assertEqual(failure.confidence, 0.99)
+
+    async def test_a_reply_never_satisfied_carries_the_last_continues_confidence(self):
+        s = _matcher(_FakeJudge([("continue", 0.7)]))
+        await s._stream.append({"type": "response", "text": "Let me check on that."})
+        exp = EvalExpectation(event="response", eval=self.CRITERION)
+        failure = await self._match(s, exp, budget_ms=200)
+        assert failure is not None
+        self.assertEqual(failure.kind, "judge_continue")
+        self.assertEqual(failure.confidence, 0.7)
+
+    async def test_an_unjudged_expectation_has_none(self):
+        s = _matcher(_FakeJudge([("yes", 0.9)]))
+        await s._stream.append({"type": "response", "text": "It's 75 and sunny."})
+        self.assertIsNone(await self._match(s, EvalExpectation(event="response", eval="x")))
+        await s._stream.append({"type": "response", "text": "Anything else?"})
+        self.assertIsNone(await self._match(s, EvalExpectation(event="response")))
+        self.assertIsNone(s.last_match_confidence)
+
+    async def test_judged_function_calls_record_the_lowest_confidence(self):
+        s = _matcher(_FakeJudge([("yes", 0.9), ("yes", 0.6)]))
+        await s._stream.append(_call("first", {}))
+        await s._stream.append(_call("second", {}))
+        exp = EvalExpectation(
+            event="function_call",
+            calls=[EvalFunctionCall(name="first"), EvalFunctionCall(name="second")],
+            eval="the calls make sense",
+        )
+        self.assertIsNone(await self._match(s, exp))
+        self.assertEqual(s.last_match_confidence, 0.6)
 
 
 class TestRequiredReportLevel(unittest.TestCase):
