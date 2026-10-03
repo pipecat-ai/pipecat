@@ -1269,3 +1269,67 @@ def test_chunk_text_keeps_cjk_within_the_token_budget():
     chunks = live_llm._chunk_text(text, 100)
     assert all(live_llm._estimated_tokens(c) <= 100 for c in chunks)
     assert "".join(chunks).count("天気") == 200
+
+
+# ---------------------------------------------------------------------------
+# Tool schema normalization
+# ---------------------------------------------------------------------------
+
+
+def _numeric_tool() -> FunctionSchema:
+    """A tool whose bounds are floats, as schema generators commonly emit."""
+    return FunctionSchema(
+        name="tv_remote",
+        description="Send a remote command.",
+        properties={
+            "channel": {"type": "number", "minimum": 1.0, "maximum": 9999.0},
+            "repeats": {"type": "number", "minimum": 1.0, "multipleOf": 0.5},
+            "mode": {"type": "string", "enum": ["tv", "hdmi"]},
+            "loud": {"type": "boolean", "default": True},
+        },
+        required=["channel"],
+    )
+
+
+def test_tool_schema_floats_are_normalized():
+    """Whole floats become ints and fractional values are dropped.
+
+    The Live API refuses to start a session when a tool schema carries a float
+    anywhere, answering ``Type is not JSON serializable: decimal.Decimal``.
+    """
+    adapter = OpenAILiveLLMService(api_key="test-key").get_llm_adapter()
+    tools = adapter.to_provider_tools_format(ToolsSchema(standard_tools=[_numeric_tool()]))
+
+    properties = tools[0]["parameters"]["properties"]
+    assert properties["channel"]["minimum"] == 1
+    assert properties["channel"]["maximum"] == 9999
+    assert isinstance(properties["channel"]["minimum"], int)
+    assert isinstance(properties["channel"]["maximum"], int)
+    # Fractional bounds cannot be represented, so they are dropped entirely.
+    assert "multipleOf" not in properties["repeats"]
+    assert properties["repeats"]["minimum"] == 1
+    # Booleans are ints in Python; they must survive untouched.
+    assert properties["loud"]["default"] is True
+    assert properties["mode"]["enum"] == ["tv", "hdmi"]
+
+
+def test_tool_schema_floats_normalized_inside_lists():
+    """A float inside a list is normalized too, not just dict values."""
+    tool = FunctionSchema(
+        name="pick_level",
+        description="Pick a level.",
+        properties={"level": {"type": "number", "enum": [1.0, 2.0, 2.5]}},
+        required=["level"],
+    )
+    adapter = OpenAILiveLLMService(api_key="test-key").get_llm_adapter()
+    tools = adapter.to_provider_tools_format(ToolsSchema(standard_tools=[tool]))
+
+    assert tools[0]["parameters"]["properties"]["level"]["enum"] == [1, 2]
+
+
+def test_tool_schema_without_floats_is_unchanged():
+    """The common case is untouched."""
+    adapter = OpenAILiveLLMService(api_key="test-key").get_llm_adapter()
+    tools = adapter.to_provider_tools_format(ToolsSchema(standard_tools=[_weather_tool()]))
+
+    assert tools[0]["parameters"]["properties"] == {"location": {"type": "string"}}
