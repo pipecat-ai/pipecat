@@ -63,6 +63,7 @@ class ExpectationMatcher:
     def reset_turn(self) -> None:
         """Forget the previous turn's unclaimed function calls."""
         self._pending_function_calls = []
+        self._stream.unclaimed_function_calls.clear()
 
     async def match(
         self,
@@ -399,6 +400,9 @@ class ExpectationMatcher:
             actual = ev.get("args") or {}
             return all(actual.get(k) == v for k, v in args.items())
 
+        # Calls popped while another expectation was waiting are the turn's too.
+        self._pending_function_calls.extend(self._stream.unclaimed_function_calls)
+        self._stream.unclaimed_function_calls.clear()
         for i, ev in enumerate(self._pending_function_calls):
             if matches(ev):
                 return self._pending_function_calls.pop(i)

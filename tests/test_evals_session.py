@@ -2693,3 +2693,68 @@ class TestBotImageEvent(unittest.TestCase):
             _stream().frame_to_event(InputTransportMessageFrame(message=message)),
             {"type": "image", "width": 64, "height": 32, "format": "RGB"},
         )
+
+
+class TestExternalFunctionCallEvents(unittest.TestCase):
+    """A call made outside the pipeline and reported into it is an event like the pipeline's own."""
+
+    def test_an_external_call_starts_and_stops_like_the_pipelines_own(self):
+        from pipecat.frames.frames import (
+            ExternalFunctionCallCancelFrame,
+            ExternalFunctionCallInProgressFrame,
+            ExternalFunctionCallResultFrame,
+        )
+
+        s = _stream()
+        started = s.frame_to_event(
+            ExternalFunctionCallInProgressFrame("run_tests", "toolu_1", arguments={"path": "x"})
+        )
+        progress = s.frame_to_event(
+            ExternalFunctionCallResultFrame(
+                "run_tests", "toolu_1", arguments={}, result="1 of 3", is_final=False
+            )
+        )
+        cancelled = s.frame_to_event(ExternalFunctionCallCancelFrame("run_tests", "toolu_1"))
+        done = s.frame_to_event(
+            ExternalFunctionCallResultFrame("run_tests", "toolu_2", arguments={}, result="ok")
+        )
+
+        self.assertEqual(
+            started, {"type": "function_call", "name": "run_tests", "args": {"path": "x"}}
+        )
+        self.assertIsNone(progress)
+        self.assertEqual(
+            cancelled,
+            {
+                "type": "function_call_stopped",
+                "name": "run_tests",
+                "args": {"tool_call_id": "toolu_1", "cancelled": True},
+            },
+        )
+        self.assertEqual(done["args"], {"tool_call_id": "toolu_2", "cancelled": False})
+
+
+class TestUnclaimedFunctionCalls(unittest.IsolatedAsyncioTestCase):
+    """A function-call event popped while waiting for another event is kept for the turn."""
+
+    async def test_a_call_seen_while_waiting_for_a_reply_is_kept(self):
+        s = _stream()
+        await s.append({"type": "function_call", "name": "run_tests", "args": {}})
+        await s.append(
+            {
+                "type": "function_call_stopped",
+                "name": "run_tests",
+                "args": {"tool_call_id": "t1", "cancelled": True},
+            }
+        )
+        await s.append({"type": "bot_started_speaking"})
+        await s.append({"type": "llm_response", "text": "Stopped."})
+
+        event = await s.next_event("llm_response", time.monotonic() + 1)
+
+        self.assertEqual(event["text"], "Stopped.")
+        # The calls are kept, the speaking event is not.
+        self.assertEqual(
+            [(e["type"], e["name"]) for e in s.unclaimed_function_calls],
+            [("function_call", "run_tests"), ("function_call_stopped", "run_tests")],
+        )
