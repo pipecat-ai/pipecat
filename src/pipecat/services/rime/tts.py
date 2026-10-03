@@ -43,7 +43,6 @@ from pipecat.services.rime._websocket_v1 import (
     RimeWebSocketV1Client,
     StartedEvent,
     SynthesisOptions,
-    TerminalEvent,
     WebSocketProtocol,
     model_from_websocket_url,
     subprotocol_for_protocol,
@@ -786,6 +785,7 @@ class RimeTTSService(WebsocketTTSService):
                 return True
 
             await self._disconnect_websocket_v1_locked()
+            await self._close_connection_contexts()
             await self._connect_websocket_v1_locked()
             if not await self._verify_connection():
                 raise ConnectionError(f"{self} websocket reconnection failed verification")

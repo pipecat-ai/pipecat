@@ -8,6 +8,7 @@
 
 import asyncio
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 import websockets
@@ -880,6 +881,43 @@ async def test_old_receive_failure_does_not_close_replacement_connection() -> No
 
 
 @pytest.mark.asyncio
+async def test_v1_reconnect_moves_an_active_turn_to_a_new_context() -> None:
+    service = RimeTTSService(
+        api_key="key",
+        websocket_url="wss://api.rime.ai/coda/ws",
+    )
+    old_client, old_socket = await _ready_client()
+    old_socket.state = State.CLOSED
+    service._websocket = old_socket
+    service._v1_client = old_client
+    service._v1_receiving_client = old_client
+    service._turn_context_id = "old-turn"
+    service._audio_contexts = {"old-turn": asyncio.Queue()}
+    service._v1_failed_contexts.add("old-turn")
+
+    new_socket = _ScriptedSocket("rime.v1.binary")
+    new_socket.state = State.OPEN
+    new_socket.ping = AsyncMock()
+    await new_socket.incoming.put(_response("binary", ready={"protocol": 1, "languages": ["eng"]}))
+
+    async def connect(*args: Any, **kwargs: Any) -> _ScriptedSocket:
+        return new_socket
+
+    service._websocket_connect = connect
+
+    assert await service._reconnect_websocket(1)
+
+    assert service._turn_context_id is not None
+    assert service._turn_context_id != "old-turn"
+    assert service.create_context_id() not in service._v1_failed_contexts
+    queue = service._audio_contexts["old-turn"]
+    assert isinstance(queue.get_nowait(), TTSStoppedFrame)
+    assert queue.get_nowait() is None
+    assert service._websocket is new_socket
+    assert old_socket.closed
+
+
+@pytest.mark.asyncio
 async def test_old_receive_loop_does_not_reconnect_over_replacement_connection() -> None:
     service = RimeTTSService(
         api_key="key",
@@ -894,6 +932,7 @@ async def test_old_receive_loop_does_not_reconnect_over_replacement_connection()
     new_socket.state = State.OPEN
     service._websocket = new_socket
     service._v1_client = new_client
+    service._turn_context_id = "new-turn"
 
     async def reject_connect(*args: Any, **kwargs: Any) -> _ScriptedSocket:
         raise ConnectionError("unexpected reconnect")
@@ -908,6 +947,7 @@ async def test_old_receive_loop_does_not_reconnect_over_replacement_connection()
 
     assert service._websocket is new_socket
     assert service._v1_client is new_client
+    assert service._turn_context_id == "new-turn"
     assert not new_socket.closed
 
 
