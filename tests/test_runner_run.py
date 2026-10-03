@@ -353,7 +353,8 @@ class TestRunnerRun(unittest.TestCase):
                 "   → Disabled transports: daily (install pipecat-ai[daily]), "
                 "livekit (install pipecat-ai[livekit]), "
                 "webrtc (install pipecat-ai[webrtc]), "
-                "moq (install pipecat-ai[moq])\n"
+                "moq (install pipecat-ai[moq]), "
+                "sip (install pipecat-ai[sip])\n"
                 "   → Allowed origins: all (no restriction)\n"
                 "\n"
             ),
@@ -373,7 +374,7 @@ class TestRunnerRun(unittest.TestCase):
                 "\n"
                 "🚀 Bot ready!\n"
                 "   → Open: http://localhost:7860\n"
-                "   → Enabled transports: daily, livekit, webrtc, telephony, websocket, moq\n"
+                "   → Enabled transports: daily, livekit, webrtc, telephony, websocket, moq, sip\n"
                 "   → Allowed origins: all (no restriction)\n"
                 "\n"
             ),
