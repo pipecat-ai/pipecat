@@ -84,6 +84,7 @@ from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.adapters.services.anthropic_adapter import AnthropicLLMAdapter
 from pipecat.adapters.services.aws_nova_sonic_adapter import AWSNovaSonicLLMAdapter
+from pipecat.adapters.services.azure_voice_live_adapter import AzureVoiceLiveLLMAdapter
 from pipecat.adapters.services.bedrock_adapter import AWSBedrockLLMAdapter
 from pipecat.adapters.services.deepseek_adapter import DeepSeekLLMAdapter
 from pipecat.adapters.services.gemini_adapter import GeminiLLMAdapter
@@ -3086,7 +3087,12 @@ class TestOpenAIRealtimeGetLLMInvocationParams(unittest.TestCase):
 class TestRealtimePackedHistoryKeepsNonAscii(unittest.TestCase):
     def test_packed_history_is_not_escaped(self):
         """Multi-message history packed into one text item keeps non-ASCII text readable."""
-        for cls in (OpenAIRealtimeLLMAdapter, GrokRealtimeLLMAdapter, InworldRealtimeLLMAdapter):
+        for cls in (
+            OpenAIRealtimeLLMAdapter,
+            GrokRealtimeLLMAdapter,
+            InworldRealtimeLLMAdapter,
+            AzureVoiceLiveLLMAdapter,
+        ):
             with self.subTest(adapter=cls.__name__):
                 messages: list[LLMStandardMessage] = [
                     {"role": "user", "content": "मेरा ऑर्डर कहाँ है?"},

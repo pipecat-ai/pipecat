@@ -57,6 +57,8 @@ class TestInventory:
             ("cartesia/tts", "CartesiaTTSService", True),
             ("deepgram/stt", "DeepgramSTTService", True),
             ("google/realtime", "GeminiLiveLLMService", True),
+            ("openai/live-realtime", "OpenAILiveLLMService", True),
+            ("azure/voice_live-realtime", "AzureVoiceLiveLLMService", True),
             ("groq/llm", "GroqLLMService", True),
             ("azure/tts", "AzureTTSService", False),
         ],
