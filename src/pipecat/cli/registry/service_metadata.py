@@ -160,6 +160,14 @@ class ServiceRegistry:
             client_package_version="^1.6.9",
         ),
         ServiceDefinition(
+            value="livekit",
+            label="LiveKit (WebRTC)",
+            package="pipecat-ai[livekit]",
+            class_name=["LiveKitParams"],
+            client_package="@pipecat-ai/livekit-transport",
+            client_package_version="^1.0.0",
+        ),
+        ServiceDefinition(
             value="smallwebrtc",
             label="SmallWebRTC",
             package="pipecat-ai[webrtc]",
