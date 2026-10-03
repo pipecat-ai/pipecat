@@ -7,21 +7,14 @@
 """Azure OpenAI service implementation for the Pipecat AI framework."""
 
 import warnings
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 from loguru import logger
 from openai import AsyncAzureOpenAI, AsyncOpenAI
 
+from pipecat.services.azure.common import AzureTokenProvider
 from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.openai.llm import OpenAILLMService
-
-AzureTokenProvider = Callable[[], Awaitable[str]]
-"""Async callable returning a Microsoft Entra ID bearer token.
-
-Matches :func:`azure.identity.aio.get_bearer_token_provider` used with the
-``https://ai.azure.com/.default`` scope.
-"""
 
 V1_ENDPOINT_PATH = "/openai/v1"
 """Endpoint path suffix identifying Azure's v1 API surface."""

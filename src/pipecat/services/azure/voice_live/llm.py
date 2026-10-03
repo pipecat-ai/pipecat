@@ -15,7 +15,7 @@ import json
 import re
 import time
 import urllib.parse
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from dataclasses import fields as dataclass_fields
 from typing import Any, Self, cast
@@ -58,6 +58,7 @@ from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators import async_tool_messages
 from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
+from pipecat.services.azure.common import AzureTokenProvider
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
@@ -65,13 +66,6 @@ from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 
 from . import events
-
-AzureTokenProvider = Callable[[], Awaitable[str]]
-"""Async callable supplying a Microsoft Entra ID bearer token.
-
-Matches :func:`azure.identity.aio.get_bearer_token_provider` used with the
-``https://ai.azure.com/.default`` scope.
-"""
 
 DEFAULT_API_VERSION = "2026-07-15"
 """Voice Live API version this service speaks."""
