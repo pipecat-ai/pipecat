@@ -571,9 +571,7 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
             ensure_last_message_is_user=self._should_inject_trailing_user_message(),
         )
 
-        logger.debug(
-            f"{self}: Generating chat from context {adapter.get_messages_for_logging(context)}"
-        )
+        self._log_llm_context(context)
 
         messages = params["messages"]
 

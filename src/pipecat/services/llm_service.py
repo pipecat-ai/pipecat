@@ -79,6 +79,7 @@ from pipecat.utils.context.llm_context_summarization import (
 )
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.errors import ErrorCategory
+from pipecat.utils.log_config import LLMContextLogMode, get_llm_context_log_mode
 from pipecat.utils.types import assert_given
 
 if TYPE_CHECKING:
@@ -447,6 +448,24 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             A LLMSpecificMessage instance.
         """
         return self.get_llm_adapter().create_llm_specific_message(message)
+
+    def _log_llm_context(self, context: LLMContext) -> None:
+        """Log the context sent to the model, in the configured log mode.
+
+        The line is built only if a sink accepts DEBUG, and is attributed to
+        the caller so loguru filters by module still apply.
+
+        Args:
+            context: The context being sent.
+        """
+        if get_llm_context_log_mode() == LLMContextLogMode.OFF:
+            return
+
+        def render() -> str:
+            messages = self.get_llm_adapter().get_messages_for_logging(context)
+            return f"{self}: Generating chat from context {messages}"
+
+        logger.opt(lazy=True, depth=1).debug("{}", render)
 
     async def run_inference(
         self,

@@ -545,10 +545,7 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
                     if not any("cachePoint" in t for t in tools_list):
                         tools_list.append({"cachePoint": {"type": "default"}})
 
-            # Log request params with messages redacted for logging
-            adapter = self.get_llm_adapter()
-            messages_for_logging = adapter.get_messages_for_logging(context)
-            logger.debug(f"{self}: Generating chat from context {messages_for_logging}")
+            self._log_llm_context(context)
 
             async with self._aws_session.create_client(
                 service_name="bedrock-runtime", **self._aws_params
