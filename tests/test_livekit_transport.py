@@ -444,6 +444,34 @@ class TestLiveKitSipDtmfInput(unittest.IsolatedAsyncioTestCase):
 
 
 @unittest.skipUnless(LIVEKIT_AVAILABLE, "livekit package not installed")
+class TestLiveKitActiveSpeakers(unittest.IsolatedAsyncioTestCase):
+    """Room active_speakers_changed events surface as on_active_speakers_changed."""
+
+    async def test_client_forwards_speaker_identities_loudest_first(self):
+        on_active_speakers_changed = AsyncMock()
+        client = TestLiveKitSipDtmfInput._create_client(self)
+        client._callbacks.on_active_speakers_changed = on_active_speakers_changed
+        loud, quiet = MagicMock(identity="alice"), MagicMock(identity="bob")
+
+        await client._async_on_active_speakers_changed([loud, quiet])
+
+        on_active_speakers_changed.assert_awaited_once_with(["alice", "bob"])
+
+    async def test_transport_exposes_the_event(self):
+        from pipecat.transports.livekit.transport import LiveKitTransport
+
+        transport = LiveKitTransport(
+            url="wss://test.livekit.cloud", token="test-token", room_name="test-room"
+        )
+        transport._call_event_handler = AsyncMock()
+
+        await transport._on_active_speakers_changed(["alice"])
+
+        transport._call_event_handler.assert_awaited_once_with(
+            "on_active_speakers_changed", ["alice"]
+        )
+
+
 class TestLiveKitAppMessageInput(unittest.IsolatedAsyncioTestCase):
     """Inbound JSON data messages (RTVI's wire channel) are parsed and
     broadcast both directions as an ``InputTransportMessageFrame`` so
