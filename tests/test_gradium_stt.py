@@ -12,6 +12,7 @@ import pytest
 from pipecat.frames.frames import (
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
+    TranscriptionFrame,
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
@@ -322,3 +323,47 @@ async def test_gradium_turn_detection_no_new_start_while_the_flush_is_unacknowle
 
     service.broadcast_frame.assert_not_awaited()
     assert service._turn_phase is not _TurnPhase.OPEN
+
+
+def _reconnectable(service: GradiumSTTService) -> GradiumSTTService:
+    service.emit_stt_usage_metrics = AsyncMock()
+    service._trace_transcription = AsyncMock()
+    service._disconnect_websocket = AsyncMock()
+    service._connect_websocket = AsyncMock()
+    service._verify_connection = AsyncMock(return_value=True)
+    return service
+
+
+@pytest.mark.asyncio
+async def test_gradium_a_reconnect_pushes_the_text_so_far_and_keeps_an_open_turn_open():
+    # The user may still be speaking; the new connection's signal ends the turn.
+    service = _reconnectable(_service())
+    service._turn_phase = _TurnPhase.OPEN
+    service._accumulated_text = ["book a table"]
+    service._flush_counter = 3
+    service._flush_cooldown = 2
+
+    assert await service._reconnect_websocket(1)
+
+    frame = service.push_frame.await_args.args[0]
+    assert isinstance(frame, TranscriptionFrame) and frame.text == "book a table"
+    service.broadcast_frame.assert_not_awaited()
+    assert service._turn_phase is _TurnPhase.OPEN
+    assert (service._accumulated_text, service._flush_counter, service._flush_cooldown) == (
+        [],
+        0,
+        0,
+    )
+
+
+@pytest.mark.asyncio
+async def test_gradium_a_reconnect_while_ending_pushes_the_transcript_without_a_second_stop():
+    service = _reconnectable(_service())
+    service._turn_phase = _TurnPhase.ENDING
+    service._accumulated_text = ["the tail"]
+
+    await service._reconnect_websocket(1)
+
+    assert service.push_frame.await_args.args[0].text == "the tail"
+    service.broadcast_frame.assert_not_awaited()
+    assert service._turn_phase is _TurnPhase.IDLE

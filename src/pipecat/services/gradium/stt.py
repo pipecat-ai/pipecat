@@ -590,14 +590,7 @@ class GradiumSTTService(WebsocketSTTService):
     async def _disconnect(self):
         await super()._disconnect()
 
-        if self._transcript_aggregation_task:
-            await self.cancel_task(self._transcript_aggregation_task)
-            self._transcript_aggregation_task = None
-
-        self._accumulated_text.clear()
-        self._flush_counter = 0
-        self._turn_phase = _TurnPhase.IDLE
-        self._flush_cooldown = 0
+        await self._reset_connection_state()
 
         if self._receive_task:
             await self.cancel_task(self._receive_task)
@@ -615,6 +608,41 @@ class GradiumSTTService(WebsocketSTTService):
         finally:
             self._websocket = None
             await self._call_event_handler("on_disconnected")
+
+    async def _reconnect_websocket(self, attempt_number: int) -> bool:
+        """Close out the dropped connection's transcript, then reconnect.
+
+        The server's decoder state goes with the connection, so the text
+        received so far is pushed as the transcript and the new connection
+        starts from a clean state. An open turn stays open: the user may still
+        be speaking, and the new connection's end-pointing signal ends it.
+
+        Args:
+            attempt_number: Current retry attempt number for logging.
+
+        Returns:
+            True if reconnection and verification succeeded.
+        """
+        if self._transcript_aggregation_task:
+            await self.cancel_task(self._transcript_aggregation_task)
+            self._transcript_aggregation_task = None
+        await self._finalize_accumulated_text()
+        turn_open = self._turn_phase is _TurnPhase.OPEN
+        await self._reset_connection_state()
+        if turn_open:
+            self._turn_phase = _TurnPhase.OPEN
+        return await super()._reconnect_websocket(attempt_number)
+
+    async def _reset_connection_state(self):
+        """Clear the transcript and turn state tied to the current connection."""
+        if self._transcript_aggregation_task:
+            await self.cancel_task(self._transcript_aggregation_task)
+            self._transcript_aggregation_task = None
+
+        self._accumulated_text.clear()
+        self._flush_counter = 0
+        self._turn_phase = _TurnPhase.IDLE
+        self._flush_cooldown = 0
 
     def _get_websocket(self):
         if self._websocket:
