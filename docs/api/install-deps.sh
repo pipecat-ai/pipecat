@@ -14,4 +14,5 @@ uv sync --group docs --all-extras \
     --no-extra local-smart-turn \
     --no-extra mlx-whisper \
     --no-extra moondream \
-    --no-extra pocket-tts
+    --no-extra pocket-tts \
+    --no-extra qwen-asr
