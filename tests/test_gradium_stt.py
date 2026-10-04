@@ -5,7 +5,7 @@
 #
 
 import json
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -367,3 +367,16 @@ async def test_gradium_a_reconnect_while_ending_pushes_the_transcript_without_a_
     assert service.push_frame.await_args.args[0].text == "the tail"
     service.broadcast_frame.assert_not_awaited()
     assert service._turn_phase is _TurnPhase.IDLE
+
+
+@pytest.mark.asyncio
+async def test_gradium_a_failed_first_connect_still_starts_the_receive_loop():
+    # The receive loop is what retries the connection.
+    service = _service()
+    service._connect_websocket = AsyncMock()
+    service.create_task = MagicMock(side_effect=lambda coro, *a, **kw: coro.close())
+
+    await service._connect()
+
+    assert service._websocket is None
+    service.create_task.assert_called_once()
