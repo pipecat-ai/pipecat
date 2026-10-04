@@ -457,6 +457,17 @@ class TestLiveKitActiveSpeakers(unittest.IsolatedAsyncioTestCase):
 
         on_active_speakers_changed.assert_awaited_once_with(["alice", "bob"])
 
+    async def test_room_event_is_scheduled_on_the_task_manager(self):
+        on_active_speakers_changed = AsyncMock()
+        client = TestLiveKitSipDtmfInput._create_client(self)
+        client._callbacks.on_active_speakers_changed = on_active_speakers_changed
+
+        client._on_active_speakers_changed_wrapper([MagicMock(identity="alice")])
+
+        coroutine = client._task_manager.create_task.call_args[0][0]
+        await coroutine
+        on_active_speakers_changed.assert_awaited_once_with(["alice"])
+
     async def test_transport_exposes_the_event(self):
         from pipecat.transports.livekit.transport import LiveKitTransport
 
