@@ -140,6 +140,15 @@ SERVICE_CONFIGS = {
         "        ),\n"
         "    )\n"
     ),
+    "cheaperinference_llm": (
+        "CheaperInferenceLLMService(\n"
+        '        api_key=os.getenv("CHEAPER_INFERENCE_API_KEY"),\n'
+        "        settings=CheaperInferenceLLMService.Settings(\n"
+        '            model=os.getenv("CHEAPER_INFERENCE_MODEL"),\n'
+        '            system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can\'t be spoken. Respond to what the user said in a creative, helpful, and brief way.",\n'
+        "        ),\n"
+        "    )\n"
+    ),
     "crusoe_llm": (
         "CrusoeLLMService(\n"
         '        api_key=os.getenv("CRUSOE_API_KEY"),\n'

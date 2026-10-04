@@ -92,6 +92,9 @@ IMPORTS = {
     "azure_llm": ["from pipecat.services.azure.llm import AzureLLMService"],
     "baseten_llm": ["from pipecat.services.baseten.llm import BasetenLLMService"],
     "cerebras_llm": ["from pipecat.services.cerebras.llm import CerebrasLLMService"],
+    "cheaperinference_llm": [
+        "from pipecat.services.cheaperinference.llm import CheaperInferenceLLMService"
+    ],
     "crusoe_llm": ["from pipecat.services.crusoe.llm import CrusoeLLMService"],
     "deepseek_llm": ["from pipecat.services.deepseek.llm import DeepSeekLLMService"],
     "fireworks_llm": ["from pipecat.services.fireworks.llm import FireworksLLMService"],

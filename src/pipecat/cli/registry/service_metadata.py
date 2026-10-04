@@ -536,6 +536,15 @@ class ServiceRegistry:
             settings_params=["model", "system_instruction"],
         ),
         ServiceDefinition(
+            value="cheaperinference_llm",
+            label="Cheaper Inference",
+            package="pipecat-ai[cheaperinference]",
+            class_name=["CheaperInferenceLLMService"],
+            env_prefix="CHEAPER_INFERENCE",
+            include_params=["api_key"],
+            settings_params=["model", "system_instruction"],
+        ),
+        ServiceDefinition(
             value="crusoe_llm",
             label="Crusoe",
             package="pipecat-ai[crusoe]",
