@@ -276,7 +276,7 @@ class EvalEventStream:
             if event.get("type") == event_type:
                 return event
 
-    def drop_pending_bot_output(self, why: str) -> None:
+    def drop_pending_bot_output(self, why: str, *, keep_user_started: bool = False) -> None:
         """Drop the bot's queued output, so a later turn cannot match it.
 
         A queued ``user_transcription`` stays: a DTMF keypress reports its
@@ -286,7 +286,15 @@ class EvalEventStream:
 
         Args:
             why: What prompted the drop, for the trace.
+            keep_user_started: Also keep a queued ``user_started_speaking``. The
+                bot reports it together with ``bot-interrupted`` when the user
+                talks over it, and it is that turn's start, not stale output.
         """
+        kept_types = (
+            ("user_transcription", "user_started_speaking")
+            if keep_user_started
+            else ("user_transcription",)
+        )
         self._text_buffer = []
         preserved: list[dict] = []
         dropped = 0
@@ -295,7 +303,7 @@ class EvalEventStream:
                 event = self._queue.get_nowait()
             except asyncio.QueueEmpty:
                 break
-            if event.get("type") == "user_transcription":
+            if event.get("type") in kept_types:
                 preserved.append(event)
             else:
                 dropped += 1
@@ -332,7 +340,7 @@ class EvalEventStream:
         if isinstance(frame, InputTransportMessageFrame):
             event = self._message_to_event(frame.message)
             if event is not None and event["type"] in _INTERRUPTION_EVENTS:
-                self._interrupted()
+                self._interrupted(keep_user_started=event["type"] == "bot_interrupted")
             return event
         elif isinstance(frame, LLMFullResponseStartFrame):
             self._awaiting_reply = False
@@ -434,9 +442,14 @@ class EvalEventStream:
         self._input_sent_at = time.monotonic()
         self._interrupting_send_at = self._input_sent_at if self.bot_speaking else None
 
-    def _interrupted(self) -> None:
-        """The bot reported an interruption: drop its pending output and wait for a fresh reply."""
-        self.drop_pending_bot_output("on interruption")
+    def _interrupted(self, *, keep_user_started: bool = False) -> None:
+        """The bot reported an interruption: drop its pending output and wait for a fresh reply.
+
+        Args:
+            keep_user_started: Keep a queued ``user_started_speaking``, for the
+                ``bot-interrupted`` report that follows the one that opened the turn.
+        """
+        self.drop_pending_bot_output("on interruption", keep_user_started=keep_user_started)
         self._awaiting_reply = True
         self._bot_quiet.set()
 
