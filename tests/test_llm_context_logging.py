@@ -45,9 +45,19 @@ def test_full_logs_every_message(captured):
     )
 
 
+def test_conversation_setup_logs_every_message(captured):
+    service = LLMService()
+    service._log_llm_conversation_setup(LLMContext(messages=MESSAGES))
+    assert captured.getvalue() == (
+        f"{__name__}|{service}: Setting up conversation from context {MESSAGES}\n"
+    )
+
+
 def test_off_logs_nothing(captured):
     configure_logging(llm_context="off")
-    LLMService()._log_llm_context(LLMContext(messages=MESSAGES))
+    service = LLMService()
+    service._log_llm_context(LLMContext(messages=MESSAGES))
+    service._log_llm_conversation_setup(LLMContext(messages=MESSAGES))
     assert captured.getvalue() == ""
 
 

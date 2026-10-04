@@ -450,22 +450,37 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         return self.get_llm_adapter().create_llm_specific_message(message)
 
     def _log_llm_context(self, context: LLMContext) -> None:
-        """Log the context sent to the model, in the configured log mode.
-
-        The line is built only if a sink accepts DEBUG, and is attributed to
-        the caller so loguru filters by module still apply.
+        """Log the context sent to the model with an inference.
 
         Args:
             context: The context being sent.
         """
+        self._debug_llm_context(context, "Generating chat from context")
+
+    def _log_llm_conversation_setup(self, context: LLMContext) -> None:
+        """Log the context a realtime service seeds its server-side conversation with.
+
+        Realtime services upload the context once per session (and again
+        after a reset), then send only new items, so this is logged in place
+        of :meth:`_log_llm_context` on each response.
+
+        Args:
+            context: The context being uploaded.
+        """
+        self._debug_llm_context(context, "Setting up conversation from context")
+
+    def _debug_llm_context(self, context: LLMContext, action: str) -> None:
+        # Built only if a sink accepts DEBUG. depth=2 attributes the line to
+        # the service that called the _log_* method, so loguru filters by
+        # module still apply.
         if get_llm_context_log_mode() == LLMContextLogMode.OFF:
             return
 
         def render() -> str:
             messages = self.get_llm_adapter().get_messages_for_logging(context)
-            return f"{self}: Generating chat from context {messages}"
+            return f"{self}: {action} {messages}"
 
-        logger.opt(lazy=True, depth=1).debug("{}", render)
+        logger.opt(lazy=True, depth=2).debug("{}", render)
 
     async def run_inference(
         self,

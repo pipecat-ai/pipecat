@@ -1071,10 +1071,7 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
         adapter = self.get_llm_adapter()
 
         if self._llm_needs_conversation_setup:
-            logger.debug(
-                f"Setting up Inworld conversation with initial messages: "
-                f"{adapter.get_messages_for_logging(self._context)}"
-            )
+            self._log_llm_conversation_setup(self._context)
 
             llm_invocation_params = adapter.get_llm_invocation_params(
                 self._context,
