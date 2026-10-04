@@ -79,6 +79,8 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
         self._stop_secs: float = 0.0  # VAD stop_secs from VADUserStoppedSpeakingFrame
 
         self._stop_secs_warned: bool = False
+        self._audio_received: bool = False
+        self._no_audio_warned: bool = False
 
         self._text = ""
         self._turn_complete = False
@@ -202,6 +204,7 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
 
     async def _handle_input_audio(self, frame: InputAudioRawFrame):
         """Handle input audio to check if the turn is completed."""
+        self._audio_received = True
         state = self._turn_analyzer.append_audio(frame.audio, self._vad_user_speaking)
 
         # Streaming analyzers (e.g. KrispVivaTurn) detect turn completion
@@ -227,6 +230,16 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
         self._vad_user_speaking = False
         self._stop_secs = frame.stop_secs
         self._vad_stopped = True
+
+        if not self._audio_received and not self._no_audio_warned:
+            self._no_audio_warned = True
+            logger.warning(
+                f"{self}: the user stopped speaking but no audio has reached the turn "
+                f"analyzer, so it can't detect the end of a turn and every turn waits "
+                f"for user_turn_stop_timeout. Make sure InputAudioRawFrames reach the "
+                f"user aggregator (e.g. the STT service passes audio through), or use "
+                f"SpeechTimeoutUserTurnStopStrategy."
+            )
 
         # The STT p99 budget is measured from when the user actually stopped
         # speaking, which VAD only reports stop_secs later. Anchoring the
