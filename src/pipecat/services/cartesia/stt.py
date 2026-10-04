@@ -340,12 +340,9 @@ class CartesiaSTTService(WebsocketSTTService):
         Yields:
             None - transcription results are handled via WebSocket responses.
         """
-        # If the connection is not open (closed or closing), reconnect
+        # The receive loop reconnects a dropped socket; audio arriving
+        # meanwhile is dropped.
         if not self._websocket or self._websocket.state is not State.OPEN:
-            await self._connect()
-
-        if self._websocket is None:
-            logger.warning(f"{self}: websocket unavailable after reconnect, dropping audio")
             yield None
             return
 
@@ -360,7 +357,9 @@ class CartesiaSTTService(WebsocketSTTService):
 
         await super()._connect()
 
-        if self._websocket and not self._receive_task:
+        # Started even when the connection failed: with no socket the receive
+        # loop goes straight to its reconnect path, which retries the connect.
+        if not self._receive_task:
             self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
     async def _disconnect(self):
