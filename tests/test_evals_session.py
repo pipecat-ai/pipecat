@@ -288,6 +288,35 @@ class TestFramesToEvents(unittest.TestCase):
         self.assertEqual(s._queue.get_nowait(), {"type": "user_transcription", "transcript": "hi"})
         self.assertTrue(s._queue.empty())
 
+    def test_bot_interrupted_keeps_the_user_started_speaking_it_follows(self):
+        # The bot reports user-started-speaking and bot-interrupted back to back when
+        # the user talks over it. The second must not drop the first's queued event.
+        s = _stream(bot_audio=True)
+        started = InputTransportMessageFrame(
+            message={"label": RTVI.MESSAGE_LABEL, "type": "user-started-speaking"}
+        )
+        interrupted = InputTransportMessageFrame(
+            message={"label": RTVI.MESSAGE_LABEL, "type": "bot-interrupted"}
+        )
+        s._queue.put_nowait(s.frame_to_event(started))
+        s._queue.put_nowait(s.frame_to_event(interrupted))
+        self.assertEqual(
+            [s._queue.get_nowait() for _ in range(s._queue.qsize())],
+            [{"type": "user_started_speaking"}, {"type": "bot_interrupted"}],
+        )
+
+    def test_a_new_user_started_speaking_drops_an_older_unread_one(self):
+        s = _stream(bot_audio=True)
+        started = InputTransportMessageFrame(
+            message={"label": RTVI.MESSAGE_LABEL, "type": "user-started-speaking"}
+        )
+        s._queue.put_nowait(s.frame_to_event(started))
+        s._queue.put_nowait(s.frame_to_event(started))
+        self.assertEqual(
+            [s._queue.get_nowait() for _ in range(s._queue.qsize())],
+            [{"type": "user_started_speaking"}],
+        )
+
     def test_function_call(self):
         s = _stream()
         event = self._bare(
