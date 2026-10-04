@@ -23,6 +23,7 @@ from loguru import logger
 from pydantic import BaseModel
 from websockets.protocol import State
 
+from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
@@ -80,6 +81,19 @@ class _TurnPhase(Enum):
 # grounded to one. It is not a Language enum member because it names a mode
 # rather than a language, so it is passed through as a plain string.
 _GRADIUM_ANY_LANGUAGE = "any"
+
+
+def _gradium_pcm_sample_rate(sample_rate: int) -> int:
+    """Pick the PCM sample rate to send audio at.
+
+    Args:
+        sample_rate: The pipeline's input sample rate in Hz.
+
+    Returns:
+        The lowest rate Gradium accepts at or above ``sample_rate``, or the
+        highest one it accepts.
+    """
+    return next((rate for rate in (8000, 16000, 24000) if rate >= sample_rate), 24000)
 
 
 def _input_format_from_encoding(encoding: str, sample_rate: int) -> str:
@@ -277,7 +291,8 @@ class GradiumSTTService(WebsocketSTTService):
             encoding: Base audio encoding type. One of "pcm", "wav", or "opus".
                 For PCM, the sample rate is appended automatically from the
                 pipeline's audio_in_sample_rate (e.g., "pcm" becomes "pcm_16000").
-                Defaults to "pcm".
+                Audio at a rate Gradium does not accept is resampled to one it
+                does. Defaults to "pcm".
             sample_rate: Audio sample rate in Hz. If None, uses the pipeline
                 sample rate.
             params: Configuration parameters for language and delay settings.
@@ -354,6 +369,8 @@ class GradiumSTTService(WebsocketSTTService):
         self._receive_task = None
 
         self._input_format = ""
+        self._send_sample_rate = 0
+        self._resampler = create_stream_resampler()
 
         self._audio_buffer = bytearray()
         self._chunk_size_ms = 80
@@ -436,8 +453,13 @@ class GradiumSTTService(WebsocketSTTService):
             setup: Configuration object containing setup parameters.
         """
         await super().setup(setup)
-        self._input_format = _input_format_from_encoding(self._encoding, self.sample_rate)
-        self._chunk_size_bytes = int(self._chunk_size_ms * self.sample_rate * 2 / 1000)
+        self._send_sample_rate = (
+            _gradium_pcm_sample_rate(self.sample_rate)
+            if self._encoding == "pcm"
+            else self.sample_rate
+        )
+        self._input_format = _input_format_from_encoding(self._encoding, self._send_sample_rate)
+        self._chunk_size_bytes = int(self._chunk_size_ms * self._send_sample_rate * 2 / 1000)
         await self._connect()
 
     async def stop(self, frame: EndFrame):
@@ -506,6 +528,7 @@ class GradiumSTTService(WebsocketSTTService):
         Yields:
             None (processing handled via WebSocket messages).
         """
+        audio = await self._resampler.resample(audio, self.sample_rate, self._send_sample_rate)
         self._audio_buffer.extend(audio)
 
         while len(self._audio_buffer) >= self._chunk_size_bytes:

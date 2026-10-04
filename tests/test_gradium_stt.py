@@ -380,3 +380,29 @@ async def test_gradium_a_failed_first_connect_still_starts_the_receive_loop():
 
     assert service._websocket is None
     service.create_task.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    "pipeline_rate, sent_rate",
+    [(8000, 8000), (16000, 16000), (24000, 24000), (11025, 16000), (22050, 24000), (48000, 24000)],
+)
+def test_gradium_pcm_input_is_sent_at_a_rate_gradium_accepts(pipeline_rate, sent_rate):
+    assert gradium_stt._gradium_pcm_sample_rate(pipeline_rate) == sent_rate
+
+
+@pytest.mark.asyncio
+async def test_gradium_audio_at_an_unsupported_rate_is_resampled_before_chunking():
+    service = _service(enable_turn_detection=False)
+    service._sample_rate = 48000
+    service._send_sample_rate = 24000
+    service._chunk_size_bytes = int(80 * 24000 * 2 / 1000)
+    websocket = MagicMock()
+    websocket.state = gradium_stt.State.OPEN
+    websocket.send = AsyncMock()
+    service._websocket = websocket
+
+    # One second at 48 kHz is one second at 24 kHz: about 12 chunks of 80 ms.
+    async for _ in service.run_stt(b"\x00\x00" * 48000):
+        pass
+
+    assert 11 <= websocket.send.await_count <= 12
