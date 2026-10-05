@@ -143,6 +143,18 @@ class _VideoInSamplers:
         else:
             self._samplers[(participant_id, video_source)] = _VideoInSampler(framerate)
 
+    def capturing(self, participant_id: str, video_source: str) -> bool:
+        """Whether a source is being sampled.
+
+        Args:
+            participant_id: The participant whose video this is.
+            video_source: The video source.
+
+        Returns:
+            Whether :meth:`capture` was called for the source.
+        """
+        return (participant_id, video_source) in self._samplers
+
     def add_request(
         self, participant_id: str, video_source: str, request: UserImageRequestFrame
     ) -> bool:

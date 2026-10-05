@@ -43,11 +43,13 @@ from pipecat.frames.frames import (
     StartFrame,
     UserAudioRawFrame,
     UserImageRawFrame,
+    UserImageRequestFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
+from pipecat.transports.video_in_sampler import _VideoInSamplers
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
 
 try:
@@ -148,6 +150,12 @@ class LiveKitParams(TransportParams):
 
     ``video_out_codec`` selects the published video codec (``"VP8"``, ``"H264"``,
     ``"VP9"``, ``"AV1"`` or ``"H265"``); LiveKit picks one when it is unset.
+
+    With ``video_in_enabled``, a user's camera (``"camera"``) and screen share
+    (``"screenVideo"``) are received separately. Without ``video_in_sources``,
+    every frame of every video track is passed on. With it, only the listed
+    sources are, each at its own framerate, plus any source captured with
+    ``LiveKitTransport.capture_participant_video()``.
 
     Parameters:
         audio_out_queue_size_ms: Buffer size of the outgoing audio source, in milliseconds
@@ -936,6 +944,18 @@ class LiveKitInputTransport(BaseInputTransport):
         # One resampler per participant: a stream resampler keeps state between
         # calls, so sharing one would mix the audio of participants who talk at once.
         self._resamplers: dict[str, BaseAudioResampler] = {}
+        self._video_samplers = _VideoInSamplers()
+
+    def _supports_video_in_source(self, video_source: str) -> bool:
+        """Whether this transport captures a video source listed in ``video_in_sources``.
+
+        Args:
+            video_source: The video source.
+
+        Returns:
+            Whether the source is the camera or the screen share.
+        """
+        return video_source in (CAM_VIDEO_SOURCE, SCREEN_VIDEO_SOURCE)
 
     async def setup(self, setup: FrameProcessorSetup):
         """Setup the input transport with shared client setup.
@@ -1024,6 +1044,74 @@ class LiveKitInputTransport(BaseInputTransport):
         """Drop a participant's resampler once their audio track is gone."""
         self._resamplers.pop(participant_id, None)
 
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process incoming frames, answering user image requests.
+
+        Args:
+            frame: The frame to process.
+            direction: The direction of frame flow in the pipeline.
+        """
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, UserImageRequestFrame):
+            await self.request_participant_image(frame)
+
+    async def capture_participant_video(
+        self, participant_id: str, framerate: int | None = 30, video_source: str = CAM_VIDEO_SOURCE
+    ):
+        """Capture a participant's video source at a framerate.
+
+        This takes precedence over ``video_in_sources`` for the source.
+
+        Args:
+            participant_id: The participant's identity.
+            framerate: Frames per second to pass on. ``0`` passes on frames only
+                to answer image requests, and ``None`` passes on every frame.
+            video_source: The video source, ``"camera"`` or ``"screenVideo"``.
+        """
+        self._video_samplers.capture(participant_id, video_source, framerate)
+
+    async def request_participant_image(self, frame: UserImageRequestFrame):
+        """Request a video frame from a specific participant.
+
+        Args:
+            frame: The user image request frame.
+        """
+        video_source = frame.video_source or CAM_VIDEO_SOURCE
+        if self._client.has_video_track(frame.user_id, video_source):
+            self._capture_configured_video(frame.user_id, video_source)
+        if self._video_samplers.add_request(frame.user_id, video_source, frame):
+            return
+
+        # Nothing will answer this request, so complete it with an error: the
+        # function call that made it would otherwise never finish.
+        error = f"No {video_source} video is being captured from {frame.user_id}."
+        logger.warning(f"{self}: {error}")
+        if frame.result_callback:
+            await frame.result_callback({"error": error})
+
+    def remove_participant_video(self, participant_id: str):
+        """Stop sampling video from a participant who left.
+
+        Args:
+            participant_id: The participant's identity.
+        """
+        self._video_samplers.remove_participant(participant_id)
+
+    def _capture_configured_video(self, participant_id: str, video_source: str):
+        """Capture a source as ``video_in_sources`` configures it, unless it already is.
+
+        Without ``video_in_sources``, every source is captured at every frame.
+        With it, only the listed sources are, each at its own framerate.
+        """
+        if self._video_samplers.capturing(participant_id, video_source):
+            return
+        if not self._params.video_in_sources:
+            self._video_samplers.capture(participant_id, video_source, None)
+        elif source_params := self._params.video_in_sources.get(video_source):
+            framerate = 0 if source_params.on_request_only else source_params.framerate
+            self._video_samplers.capture(participant_id, video_source, framerate)
+
     async def _audio_in_task_handler(self):
         """Handle incoming audio frames from participants."""
         logger.info("Audio input task started")
@@ -1054,6 +1142,11 @@ class LiveKitInputTransport(BaseInputTransport):
         async for video_data in video_iterator:
             if video_data:
                 video_frame_event, participant_id, video_source = video_data
+                self._capture_configured_video(participant_id, video_source)
+                due, request = self._video_samplers.sample(participant_id, video_source)
+                if not due:
+                    continue
+
                 pipecat_video_frame = await self._convert_livekit_video_to_pipecat(
                     video_frame_event=video_frame_event
                 )
@@ -1067,6 +1160,9 @@ class LiveKitInputTransport(BaseInputTransport):
                     image=pipecat_video_frame.image,
                     size=pipecat_video_frame.size,
                     format=pipecat_video_frame.format,
+                    text=request.text if request else None,
+                    append_to_context=request.append_to_context if request else None,
+                    request=request,
                 )
                 input_video_frame.transport_source = video_source
                 await self.push_video_frame(input_video_frame)
@@ -1517,6 +1613,25 @@ class LiveKitTransport(BaseTransport):
         """
         await self._client.set_participant_metadata(metadata)
 
+    async def capture_participant_video(
+        self,
+        participant_id: str,
+        framerate: int | None = 30,
+        video_source: str = CAM_VIDEO_SOURCE,
+    ):
+        """Capture a participant's video source at a framerate.
+
+        This takes precedence over ``video_in_sources`` for the source.
+
+        Args:
+            participant_id: The participant's identity.
+            framerate: Frames per second to pass on. ``0`` passes on frames only
+                to answer image requests, and ``None`` passes on every frame.
+            video_source: The video source, ``"camera"`` or ``"screenVideo"``.
+        """
+        if self._input:
+            await self._input.capture_participant_video(participant_id, framerate, video_source)
+
     async def mute_participant(self, participant_id: str):
         """Stop receiving a specific participant's audio.
 
@@ -1561,6 +1676,8 @@ class LiveKitTransport(BaseTransport):
 
     async def _on_participant_disconnected(self, participant_id: str):
         """Handle participant disconnected events."""
+        if self._input:
+            self._input.remove_participant_video(participant_id)
         await self._call_event_handler("on_participant_disconnected", participant_id)
         await self._call_event_handler("on_participant_left", participant_id, "disconnected")
         # Also call on_client_disconnected for compatibility with other transports

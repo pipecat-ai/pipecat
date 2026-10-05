@@ -153,6 +153,14 @@ class TestVideoInSamplers(unittest.TestCase):
         self.assertEqual(samplers.sample("p1", "screenVideo"), (False, None))
         self.assertEqual(samplers.sample("p2", "camera"), (False, None))
 
+    def test_capturing(self):
+        samplers = _VideoInSamplers()
+        samplers.capture("p1", "camera", 0)
+        self.assertTrue(samplers.capturing("p1", "camera"))
+        self.assertFalse(samplers.capturing("p1", "screenVideo"))
+        samplers.remove_participant("p1")
+        self.assertFalse(samplers.capturing("p1", "camera"))
+
     def test_request_for_unsampled_source_is_not_queued(self):
         samplers = _VideoInSamplers()
         samplers.capture("p1", "camera", 0)
