@@ -96,14 +96,19 @@ class BaseUserTurnStartStrategy(BaseObject):
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
-        # reset() is deprecated.
+        # reset() is deprecated. The warning is forced visible because the
+        # default filters hide a DeprecationWarning not attributed to __main__,
+        # and stacklevel=3 steps past ABCMeta.__new__ (which calls this hook)
+        # to the subclass's definition.
         if cls.reset is not BaseUserTurnStartStrategy.reset:
-            warnings.warn(
-                f"`{cls.__name__}` overrides `reset`, which is deprecated since 1.6.0 "
-                "and will be removed in 2.0.0. Override `handle_user_turn_started` instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn(
+                    f"`{cls.__name__}` overrides `reset`, which is deprecated since 1.6.0 "
+                    "and will be removed in 2.0.0. Override `handle_user_turn_started` instead.",
+                    DeprecationWarning,
+                    stacklevel=3,
+                )
 
     @property
     def resolves_proposed_turn_start_frames(self) -> bool:
