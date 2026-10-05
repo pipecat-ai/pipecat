@@ -7,8 +7,10 @@
 """Tests for a websocket STT service whose connect failed."""
 
 import asyncio
+import importlib
 import time
 from collections.abc import AsyncGenerator
+from unittest.mock import patch
 
 import pytest
 from websockets.protocol import State
@@ -172,3 +174,43 @@ async def test_teardown_stops_a_reconnect_waiting_on_backoff():
 
     assert time.monotonic() - start < 5
     assert service.connect_attempts == 2
+
+
+SERVICES = [
+    ("assemblyai.stt", "AssemblyAISTTService", {}),
+    ("aws.stt", "AWSTranscribeSTTService", {"region": "us-east-1"}),
+    ("gladia.stt", "GladiaSTTService", {}),
+    ("meta.stt", "MetaSTTService", {}),
+    ("openai.stt", "OpenAIRealtimeSTTService", {}),
+    ("soniox.stt", "SonioxSTTService", {}),
+    ("together.stt", "TogetherSTTService", {}),
+    ("xai.stt", "XAISTTService", {}),
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("module", "name", "kwargs"), SERVICES)
+async def test_failed_connect_starts_the_receive_loop(module, name, kwargs):
+    """The receive loop is what retries, so it starts even without a websocket."""
+    cls = getattr(importlib.import_module(f"pipecat.services.{module}"), name)
+    service = cls(api_key="test-key", **kwargs)
+    service._session_url = "wss://example.invalid"  # Gladia opens its session over HTTP first.
+    started = []
+
+    def create_task(coroutine, name=None):
+        started.append(coroutine.__name__)
+        coroutine.close()
+
+    async def push_error(*args, **kwargs):
+        pass
+
+    async def fail_connect(uri, **kwargs):
+        raise ConnectionRefusedError(111, "Connection refused")
+
+    service.create_task = create_task
+    service.push_error = push_error
+    with patch("pipecat.services.websocket_service.websocket_connect", fail_connect):
+        await service._connect()
+
+    assert service._websocket is None
+    assert "_receive_task_handler" in started
