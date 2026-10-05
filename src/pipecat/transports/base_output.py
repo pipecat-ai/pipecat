@@ -576,11 +576,11 @@ class BaseOutputTransport(FrameProcessor):
             finally:
                 self._executor.shutdown(wait=False)
 
-        async def handle_interruptions(self, _: InterruptionFrame):
+        async def handle_interruptions(self, frame: InterruptionFrame):
             """Handle interruption events by restarting tasks and clearing buffers.
 
             Args:
-                _: The start interruption frame (unused).
+                frame: The interruption that stopped playback.
             """
             # Cancel tasks.
             await self._cancel_clock_task()
@@ -603,7 +603,10 @@ class BaseOutputTransport(FrameProcessor):
             self._create_clock_task()
 
             # Let's send a bot stopped speaking if we have to.
-            await self._bot_stopped_speaking()
+            await self._bot_stopped_speaking(
+                interrupted=True,
+                interruption_id=frame.interruption_id,
+            )
 
         async def handle_audio_frame(self, frame: OutputAudioRawFrame):
             """Handle incoming audio frames by buffering and chunking.
@@ -803,7 +806,9 @@ class BaseOutputTransport(FrameProcessor):
             frame.interruptible = not uninterruptible
             await self._audio_queue.put(frame)
 
-        async def _bot_stopped_speaking(self):
+        async def _bot_stopped_speaking(
+            self, *, interrupted: bool = False, interruption_id: int | None = None
+        ):
             """Handle bot stopped speaking event."""
             if not self._bot_speaking:
                 return
@@ -822,9 +827,13 @@ class BaseOutputTransport(FrameProcessor):
                 f"Bot{f' [{self._destination}]' if self._destination else ''} stopped speaking"
             )
 
-            downstream_frame = BotStoppedSpeakingFrame()
+            downstream_frame = BotStoppedSpeakingFrame(
+                interrupted=interrupted, interruption_id=interruption_id
+            )
             downstream_frame.transport_destination = self._destination
-            upstream_frame = BotStoppedSpeakingFrame()
+            upstream_frame = BotStoppedSpeakingFrame(
+                interrupted=interrupted, interruption_id=interruption_id
+            )
             upstream_frame.transport_destination = self._destination
 
             # Setting the siblings id

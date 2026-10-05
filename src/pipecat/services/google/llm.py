@@ -324,9 +324,6 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
         self._retry_timeout_secs = retry_timeout_secs
         self._retry_on_timeout = retry_on_timeout
 
-        # Store pending function calls that need to be executed after TTS
-        self._pending_function_calls = []
-
         # Initialize the API client. Subclasses can override this if needed.
         self.create_client()
 
@@ -722,6 +719,7 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
 
     @traced_llm
     async def _process_context(self, context: LLMContext):
+        response_generation = self._begin_tool_response()
         await self.push_frame(LLMFullResponseStartFrame())
 
         prompt_tokens = 0
@@ -732,14 +730,6 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
 
         grounding_metadata = None
         accumulated_text = ""
-
-        # Reset pending function calls when processing a new context
-        if self._pending_function_calls:
-            logger.warning(
-                f"{self}: discarding {len(self._pending_function_calls)} "
-                "deferred calls never released by TTS"
-            )
-        self._pending_function_calls = []
 
         try:
             await self.start_ttfb_metrics()
@@ -767,22 +757,6 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
                 await self.stop_ttfb_metrics()
 
                 for candidate in chunk.candidates:
-                    if candidate.finish_reason:
-                        finish_reason = (
-                            candidate.finish_reason.value
-                            if hasattr(candidate.finish_reason, "value")
-                            else candidate.finish_reason
-                        )
-                        finish_message = (
-                            f" finish_message={candidate.finish_message!r}"
-                            if candidate.finish_message
-                            else ""
-                        )
-                        logger.debug(
-                            f"{self}: Google generation stopped with "
-                            f"finish_reason={finish_reason}{finish_message}"
-                        )
-
                     if candidate.content and candidate.content.parts:
                         for part in candidate.content.parts:
                             function_call_id = None
@@ -935,14 +909,11 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
                         f"{self}: no speakable content ({accumulated_text[:120]!r}); "
                         "running function calls without waiting for TTS"
                     )
-                if text_generated:
-                    self._pending_function_calls = function_calls
-                    logger.debug(
-                        f"{self}: Deferring {len(function_calls)} function calls until after TTS"
-                    )
-                else:
-                    logger.debug(f"{self}: Executing {len(function_calls)} function calls")
-                    await self.run_function_calls(function_calls)
+                await self._run_or_defer_function_calls(
+                    function_calls,
+                    text_generated=text_generated,
+                    response_generation=response_generation,
+                )
         except (TimeoutError, DeadlineExceeded) as e:
             await self._call_event_handler("on_completion_timeout")
             await self.push_error(error_msg="LLM completion timeout", exception=e)
@@ -981,12 +952,7 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
 
         # Handle BotStoppedSpeakingFrame to execute pending function calls
         if isinstance(frame, BotStoppedSpeakingFrame):
-            if self._pending_function_calls:
-                logger.debug(
-                    f"{self}: Executing {len(self._pending_function_calls)} deferred function calls after TTS"
-                )
-                await self.run_function_calls(self._pending_function_calls)
-                self._pending_function_calls = []
+            await self._run_pending_node_transition_function_calls(frame)
             await self.push_frame(frame, direction)
         elif isinstance(frame, LLMContextFrame):
             await self._process_context(frame.context)

@@ -114,7 +114,7 @@ async def test_node_transition_call_runs_immediately_without_generated_text():
 
 
 @pytest.mark.asyncio
-async def test_mixed_batch_with_node_transition_is_deferred_together():
+async def test_mixed_batch_with_node_transition_runs_together_immediately():
     service = _make_service()
     service.register_function(
         "transition_to_next_node",
@@ -132,8 +132,8 @@ async def test_mixed_batch_with_node_transition_is_deferred_together():
         text_generated=True,
     )
 
-    service.run_function_calls.assert_not_awaited()
-    assert service._pending_node_transition_function_calls == function_calls
+    service.run_function_calls.assert_awaited_once_with(function_calls)
+    assert service._pending_node_transition_function_calls == []
 
 
 @pytest.mark.asyncio

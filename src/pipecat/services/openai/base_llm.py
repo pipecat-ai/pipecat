@@ -266,9 +266,6 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
         if self._settings.system_instruction:
             logger.debug(f"{self}: Using system instruction: {self._settings.system_instruction}")
 
-        # Store node-transition calls that need to be executed after TTS.
-        self._pending_node_transition_function_calls: list[FunctionCallFromLLM] = []
-
     def create_client(
         self,
         api_key=None,
@@ -482,14 +479,7 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
         arguments = ""
         tool_call_id = ""
 
-        # Reset pending node-transition calls when processing a new context.
-        if self._pending_node_transition_function_calls:
-            logger.warning(
-                f"{self}: discarding "
-                f"{len(self._pending_node_transition_function_calls)} deferred "
-                "node-transition calls never released by TTS"
-            )
-        self._pending_node_transition_function_calls = []
+        response_generation = self._begin_tool_response()
 
         # Content generated in the current completion, accumulated so the
         # deferral decision below can ask whether any of it is speakable.
@@ -666,48 +656,8 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
             await self._run_or_defer_function_calls(
                 function_calls,
                 text_generated=text_generated,
+                response_generation=response_generation,
             )
-
-    async def _run_or_defer_function_calls(
-        self,
-        function_calls: list[FunctionCallFromLLM],
-        *,
-        text_generated: bool,
-    ) -> None:
-        """Defer node-transition batches until their preceding TTS completes."""
-        if self._speculation_gate.is_speculating:
-            # Speculative tools must be cancelled before they can wait for playback.
-            await self.run_function_calls(function_calls)
-            return
-
-        contains_node_transition = any(
-            self._function_is_node_transition(fc.function_name) for fc in function_calls
-        )
-        if text_generated and contains_node_transition:
-            # Keep a provider tool-call batch together. Splitting a mixed batch
-            # would discard Pipecat's shared function-call group and could run
-            # the LLM before every result from the original batch has arrived.
-            self._pending_node_transition_function_calls = function_calls
-            logger.debug(
-                f"{self}: Deferring {len(function_calls)} node-transition "
-                "function calls until after TTS"
-            )
-            return
-
-        logger.debug(f"{self}: Executing {len(function_calls)} function calls")
-        await self.run_function_calls(function_calls)
-
-    async def _run_pending_node_transition_function_calls(self) -> None:
-        if not self._pending_node_transition_function_calls:
-            return
-
-        function_calls = self._pending_node_transition_function_calls
-        self._pending_node_transition_function_calls = []
-        logger.debug(
-            f"{self}: Executing {len(function_calls)} deferred node-transition "
-            "function calls after TTS"
-        )
-        await self.run_function_calls(function_calls)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames for LLM completion requests.
@@ -722,7 +672,7 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
 
         # Handle BotStoppedSpeakingFrame to execute pending node-transition calls.
         if isinstance(frame, BotStoppedSpeakingFrame):
-            await self._run_pending_node_transition_function_calls()
+            await self._run_pending_node_transition_function_calls(frame)
             await self.push_frame(frame, direction)
         elif isinstance(frame, LLMContextFrame):
             try:

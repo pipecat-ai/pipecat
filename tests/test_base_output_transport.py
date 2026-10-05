@@ -138,6 +138,52 @@ async def _make_transport(
 
 
 class TestBaseOutputTransportInterruptions(unittest.IsolatedAsyncioTestCase):
+    async def test_interruption_marks_both_stop_frames_as_interrupted(self):
+        transport = await _make_transport()
+        started = asyncio.Event()
+
+        async def write(_frame):
+            started.set()
+            return True
+
+        transport.write_audio_frame = AsyncMock(side_effect=write)
+        try:
+            sender = transport._media_senders[None]
+            await transport.process_frame(
+                TTSAudioRawFrame(
+                    audio=b"\x01\x02" * (sender.audio_chunk_size // 2),
+                    sample_rate=sender.sample_rate,
+                    num_channels=1,
+                ),
+                FrameDirection.DOWNSTREAM,
+            )
+            await asyncio.wait_for(started.wait(), 1)
+            upstream, interruption = InterruptionFrame(), InterruptionFrame()
+            upstream.broadcast_sibling_id = interruption.id
+            interruption.broadcast_sibling_id = upstream.id
+            await transport.process_frame(interruption, FrameDirection.DOWNSTREAM)
+            stops = [
+                call
+                for call in transport.push_frame.call_args_list
+                if isinstance(call.args[0], BotStoppedSpeakingFrame)
+            ]
+            self.assertEqual(len(stops), 2)
+            self.assertEqual(
+                {
+                    call.args[1]
+                    if len(call.args) > 1
+                    else call.kwargs.get("direction", FrameDirection.DOWNSTREAM)
+                    for call in stops
+                },
+                set(FrameDirection),
+            )
+            self.assertTrue(all(call.args[0].interrupted for call in stops))
+            self.assertTrue(
+                all(getattr(call.args[0], "interruption_id", None) == upstream.id for call in stops)
+            )
+        finally:
+            await transport.cancel(CancelFrame())
+
     async def _make_transport(
         self, mixer: BaseAudioMixer | None = None, **param_kwargs
     ) -> BaseOutputTransport:
@@ -365,6 +411,13 @@ class TestBaseOutputTransportAudioBuffering(unittest.IsolatedAsyncioTestCase):
             pushed_types = [call.args[0].__class__ for call in transport.push_frame.call_args_list]
             self.assertIn(BotStartedSpeakingFrame, pushed_types)
             self.assertIn(BotStoppedSpeakingFrame, pushed_types)
+            self.assertTrue(
+                all(
+                    not call.args[0].interrupted
+                    for call in transport.push_frame.call_args_list
+                    if isinstance(call.args[0], BotStoppedSpeakingFrame)
+                )
+            )
         finally:
             await transport.cancel(CancelFrame())
 
