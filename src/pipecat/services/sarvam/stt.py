@@ -1310,6 +1310,7 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
         point would leave downstream turn aggregation waiting on a boundary
         that is never coming, and the service has no transcripts left to give,
         so it also stops being usable.
+
         Cancellation is left alone: that only happens during an intentional
         disconnect, where teardown is already under way.
         """
@@ -1326,11 +1327,14 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
         utterance is closed here. Under ``manual`` the pipeline's turn is still
         open, and Sarvam ignores a ``speech_end`` without a matching
         ``speech_start``, so the new session is told the turn has started.
+        Audio positions count from the start of the new session.
         """
         await self._complete_active_utterance()
         reconnected = await super()._reconnect_websocket(attempt_number)
-        if reconnected and self._manual_turn_open:
-            await self._send_json({"event": "speech_start"})
+        if reconnected:
+            self._audio_position_bytes = 0
+            if self._manual_turn_open:
+                await self._send_json({"event": "speech_start"})
         return reconnected
 
     async def _receive_messages(self):

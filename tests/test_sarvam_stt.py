@@ -1329,6 +1329,24 @@ async def test_reconnect_completes_the_turn(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_reconnect_restarts_the_audio_position(monkeypatch):
+    """A new session's speech-end position counts from its own start."""
+    service = SarvamRealtimeSTTService(api_key="test-key")
+    monkeypatch.setattr(service, "push_frame", _noop)
+    monkeypatch.setattr(service, "broadcast_frame", _noop)
+    monkeypatch.setattr(WebsocketSTTService, "_reconnect_websocket", AsyncMock(return_value=True))
+    service._sample_rate = 16000
+    service._audio_position_bytes = _seconds_to_bytes(3.0)
+
+    await service._reconnect_websocket(1)
+    service._audio_position_bytes += _seconds_to_bytes(0.5)
+    await service._handle_message({"event": "vad.speech_start"})
+    await service._handle_message({"event": "vad.speech_end"})
+
+    assert service._speech_end_audio_position_s == 0.5
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("boundaries", "resent"),
     [
