@@ -161,8 +161,8 @@ class LiveKitCallbacks(BaseModel):
             packets sent by a server SDK, which LiveKit delivers unattributed.
         on_first_participant_joined: Called when the first participant joins.
         on_dtmf_event: Called when a SIP DTMF tone is received.
-        on_active_speakers_changed: Called with the identities of the participants
-            currently speaking, loudest first (empty when no one is).
+        on_active_speaker_changed: Called with the identity of the room's loudest speaker
+            when it changes. The bot can be the speaker while it talks.
     """
 
     on_connected: Callable[[], Awaitable[None]]
@@ -177,7 +177,7 @@ class LiveKitCallbacks(BaseModel):
     on_data_received: Callable[[bytes, str | None], Awaitable[None]]
     on_first_participant_joined: Callable[[str], Awaitable[None]]
     on_dtmf_event: Callable[[Any], Awaitable[None]]
-    on_active_speakers_changed: Callable[[list[str]], Awaitable[None]] | None = None
+    on_active_speaker_changed: Callable[[str], Awaitable[None]]
 
 
 class LiveKitTransportClient:
@@ -232,6 +232,7 @@ class LiveKitTransportClient:
         self._video_streams: dict[str, tuple[rtc.VideoStream, asyncio.Task]] = {}
         self._other_participant_has_joined = False
         self._task_manager: BaseTaskManager | None = None
+        self._active_speaker_id: str | None = None
         self._async_lock = asyncio.Lock()
 
     @property
@@ -296,6 +297,7 @@ class LiveKitTransportClient:
                 return
 
             logger.info(f"Connecting to {self._room_name}")
+            self._active_speaker_id = None
 
             try:
                 await self.room.connect(
@@ -651,12 +653,23 @@ class LiveKitTransportClient:
         )
 
     def _on_active_speakers_changed_wrapper(self, speakers: list[rtc.Participant]):
-        """Wrapper for active speakers changed events."""
+        """Wrapper for active speakers changed events.
+
+        LiveKit lists only the speakers whose level changed, quietest first, so the last
+        entry is the loudest and an empty list doesn't mean silence: report the loudest
+        speaker only when it changes, and keep the current one through empty updates.
+        """
         assert self._task_manager is not None
 
+        if not speakers:
+            return
+        speaker_id = speakers[-1].identity
+        if speaker_id == self._active_speaker_id:
+            return
+        self._active_speaker_id = speaker_id
         self._task_manager.create_task(
-            self._async_on_active_speakers_changed(speakers),
-            f"{self}::_async_on_active_speakers_changed",
+            self._async_on_active_speaker_changed(speaker_id),
+            f"{self}::_async_on_active_speaker_changed",
         )
 
     # Async methods for event handling
@@ -815,10 +828,9 @@ class LiveKitTransportClient:
         logger.debug(f"{self} SIP DTMF event: {data}")
         await self._callbacks.on_dtmf_event(data)
 
-    async def _async_on_active_speakers_changed(self, speakers: list[rtc.Participant]):
-        """Handle active speakers changed events."""
-        if self._callbacks.on_active_speakers_changed:
-            await self._callbacks.on_active_speakers_changed([p.identity for p in speakers])
+    async def _async_on_active_speaker_changed(self, speaker_id: str):
+        """Handle a change of the room's loudest speaker."""
+        await self._callbacks.on_active_speaker_changed(speaker_id)
 
     async def _process_audio_stream(self, audio_stream: rtc.AudioStream, participant_id: str):
         """Process incoming audio stream from a participant."""
@@ -1316,11 +1328,12 @@ class LiveKitTransport(BaseTransport):
       for packets sent by a server SDK, which LiveKit delivers unattributed.
       Args: (data: bytes, participant_id: str | None)
     - on_dtmf_event: Called when a SIP DTMF tone is received from a participant.
-    - on_active_speakers_changed: Called with the identities of the participants
-      currently speaking, loudest first.
       Args: (data: dict) with keys ``tone``/``digit``, ``code``, and
       ``participant_id``. Also pushes an ``InputDTMFFrame`` so
       ``DTMFAggregator`` works on LiveKit SIP calls.
+    - on_active_speaker_changed: Called when the room's loudest speaker changes, as on
+      Daily. The bot can be the speaker while it talks.
+      Args: (participant: dict) with key ``id``, the speaker's identity.
 
     Example::
 
@@ -1367,7 +1380,7 @@ class LiveKitTransport(BaseTransport):
             on_data_received=self._on_data_received,
             on_first_participant_joined=self._on_first_participant_joined,
             on_dtmf_event=self._on_dtmf_event,
-            on_active_speakers_changed=self._on_active_speakers_changed,
+            on_active_speaker_changed=self._on_active_speaker_changed,
         )
         self._params = params or LiveKitParams()
 
@@ -1394,7 +1407,7 @@ class LiveKitTransport(BaseTransport):
         self._register_event_handler("on_call_state_updated")
         self._register_event_handler("on_before_disconnect", sync=True)
         self._register_event_handler("on_dtmf_event")
-        self._register_event_handler("on_active_speakers_changed")
+        self._register_event_handler("on_active_speaker_changed")
 
     def input(self) -> LiveKitInputTransport:
         """Get the input transport for receiving media and events.
@@ -1551,9 +1564,12 @@ class LiveKitTransport(BaseTransport):
         # Backwards compatibility with older transports that used on_data_received for app messages
         await self._call_event_handler("on_data_received", data, participant_id)
 
-    async def _on_active_speakers_changed(self, participant_ids: list[str]):
-        """Handle active speakers changed events."""
-        await self._call_event_handler("on_active_speakers_changed", participant_ids)
+    async def _on_active_speaker_changed(self, participant_id: str):
+        """Handle a change of the room's loudest speaker.
+
+        Wrapped as a dict, matching Daily's event and LiveKit's on_client_connected.
+        """
+        await self._call_event_handler("on_active_speaker_changed", {"id": participant_id})
 
     async def _on_dtmf_event(self, data: Any):
         """Handle inbound SIP DTMF events.
