@@ -823,6 +823,21 @@ class TestReasoningParams:
         params = self._params(service)
         assert "reasoning" not in params
 
+    def test_original_gpt_5_gets_minimal(self):
+        """The original gpt-5 models reject effort="none", so they get "minimal"."""
+        for model in ("gpt-5", "gpt-5-mini", "gpt-5-nano", "gpt-5-2025-08-07"):
+            service = _make_service(settings=OpenAIResponsesLLMService.Settings(model=model))
+            params = self._params(service)
+            assert params["reasoning"] == {"effort": "minimal"}, model
+            assert "include" not in params
+
+    def test_pro_models_left_untouched(self):
+        """The -pro models reject effort="none", so leave them at the default."""
+        for model in ("gpt-5-pro", "gpt-5.5-pro", "gpt-5.4-pro-2026-03-05"):
+            service = _make_service(settings=OpenAIResponsesLLMService.Settings(model=model))
+            params = self._params(service)
+            assert "reasoning" not in params, model
+
     def test_gpt_6_1_sol_explicit_effort_honored(self):
         """An explicit effort on gpt-6.1-sol reaches the request unchanged."""
         service = _make_service(
