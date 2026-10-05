@@ -72,7 +72,7 @@ class AWSNovaSonicLLMAdapter(BaseLLMAdapter[AWSNovaSonicLLMInvocationParams]):
         """Get the identifier used in LLMSpecificMessage instances for AWS Nova Sonic."""
         return "aws-nova-sonic"
 
-    def get_llm_invocation_params(
+    async def get_llm_invocation_params(
         self, context: LLMContext, *, system_instruction: str | None = None
     ) -> AWSNovaSonicLLMInvocationParams:
         """Get AWS Nova Sonic-specific LLM invocation parameters from a universal LLM context.

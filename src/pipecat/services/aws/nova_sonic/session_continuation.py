@@ -83,7 +83,7 @@ class NovaSonicSessionSender(Protocol):
         """Return the audio configuration (``AudioConfig`` instance)."""
         ...
 
-    def get_setup_params(self) -> "tuple[str | None, list]":
+    async def get_setup_params(self) -> "tuple[str | None, list]":
         """Return ``(system_instruction, tools)`` for the next session setup."""
         ...
 
@@ -692,7 +692,7 @@ class SessionContinuationHelper:
         await self._sender.send_event(self._sender.build_session_start_json(), ns.stream)
 
         # Get setup params: (system_instruction, tools)
-        system_instruction, tools = self._sender.get_setup_params()
+        system_instruction, tools = await self._sender.get_setup_params()
 
         # Send promptStart with tools
         await self._sender.send_prompt_start(tools, ns.prompt_name, ns.stream)

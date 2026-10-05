@@ -707,7 +707,7 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
         adapter = self.get_llm_adapter()
 
         if self._context:
-            llm_invocation_params = adapter.get_llm_invocation_params(
+            llm_invocation_params = await adapter.get_llm_invocation_params(
                 self._context,
                 system_instruction=assert_given(self._settings.system_instruction),
             )
@@ -1091,7 +1091,7 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
         if self._llm_needs_conversation_setup:
             self._log_llm_conversation_setup(self._context)
 
-            llm_invocation_params = adapter.get_llm_invocation_params(self._context)
+            llm_invocation_params = await adapter.get_llm_invocation_params(self._context)
             messages = llm_invocation_params["messages"]
 
             for item in messages:

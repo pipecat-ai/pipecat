@@ -21,13 +21,9 @@ from pipecat.utils.types import NotGiven
 
 
 def _mock_adapter() -> MagicMock:
-    """Adapter mock whose async prepare_llm_invocation_params delegates to the
-    sync get_llm_invocation_params mock, so tests keep configuring and
-    asserting against the sync method."""
+    """Adapter mock with an async get_llm_invocation_params."""
     adapter = MagicMock()
-    adapter.prepare_llm_invocation_params = AsyncMock(
-        side_effect=lambda context, **kwargs: adapter.get_llm_invocation_params(context, **kwargs)
-    )
+    adapter.get_llm_invocation_params = AsyncMock()
     return adapter
 
 

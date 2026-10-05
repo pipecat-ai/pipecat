@@ -801,7 +801,7 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
         adapter = self.get_llm_adapter()
 
         if self._context:
-            llm_invocation_params = adapter.get_llm_invocation_params(
+            llm_invocation_params = await adapter.get_llm_invocation_params(
                 self._context,
                 system_instruction=assert_given(self._settings.system_instruction),
             )
@@ -1187,7 +1187,7 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
             self._log_llm_conversation_setup(self._context)
 
             # Send initial messages
-            llm_invocation_params = adapter.get_llm_invocation_params(self._context)
+            llm_invocation_params = await adapter.get_llm_invocation_params(self._context)
             messages = llm_invocation_params["messages"]
             for item in messages:
                 evt = events.ConversationItemCreateEvent(item=item)
