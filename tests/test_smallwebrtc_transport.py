@@ -326,23 +326,27 @@ class TestReadVideoFrameMediaStreamError(unittest.IsolatedAsyncioTestCase):
         self.assertGreaterEqual(yielded, 2)
 
 
-if __name__ == "__main__":
-    unittest.main()
+def _browser_like_client():
+    """An aiortc peer whose offer is shaped like the browser client's.
+
+    Audio, camera and screen share transceivers plus a data channel, all
+    bundled onto one transport, as browsers do by default.
+    """
+    from aiortc import RTCBundlePolicy, RTCConfiguration, RTCPeerConnection
+
+    client = RTCPeerConnection(RTCConfiguration(bundlePolicy=RTCBundlePolicy.MAX_BUNDLE))
+    client.addTransceiver("audio", direction="sendrecv")
+    client.addTransceiver("video", direction="sendrecv")
+    screen = client.addTransceiver("video", direction="sendonly")
+    client.createDataChannel("chat")
+    return client, screen
 
 
 class TestBundledTransceivers(unittest.IsolatedAsyncioTestCase):
     """Every media section of a bundled offer shares one transport."""
 
     async def test_screen_share_transceiver_shares_the_transport(self):
-        from aiortc import RTCBundlePolicy, RTCConfiguration, RTCPeerConnection
-
-        # An offer shaped like the browser client's: audio, camera and screen
-        # share transceivers plus a data channel, all bundled.
-        client = RTCPeerConnection(RTCConfiguration(bundlePolicy=RTCBundlePolicy.MAX_BUNDLE))
-        client.addTransceiver("audio", direction="sendrecv")
-        client.addTransceiver("video", direction="sendrecv")
-        client.addTransceiver("video", direction="sendonly")
-        client.createDataChannel("chat")
+        client, _screen = _browser_like_client()
         await client.setLocalDescription(await client.createOffer())
 
         connection = SmallWebRTCConnection()
@@ -356,3 +360,47 @@ class TestBundledTransceivers(unittest.IsolatedAsyncioTestCase):
 
         await connection.disconnect()
         await client.close()
+
+
+class TestScreenShareDelivery(unittest.IsolatedAsyncioTestCase):
+    """A screen share started after connecting reaches the bot's screen track.
+
+    Both peers run in this process and connect over localhost, so the frames
+    go through real ICE, DTLS and RTP, and through aiortc's routing of packets
+    to receivers.
+    """
+
+    async def test_screen_share_frames_reach_the_screen_track(self):
+        from aiortc import RTCSessionDescription
+        from aiortc.mediastreams import VideoStreamTrack
+
+        client, screen = _browser_like_client()
+        await client.setLocalDescription(await client.createOffer())
+
+        connection = SmallWebRTCConnection()
+        try:
+            await connection.initialize(
+                sdp=client.localDescription.sdp, type=client.localDescription.type
+            )
+            answer = connection.get_answer()
+            await client.setRemoteDescription(
+                RTCSessionDescription(sdp=answer["sdp"], type=answer["type"])
+            )
+            for _ in range(100):
+                if connection.pc.connectionState == "connected":
+                    break
+                await asyncio.sleep(0.1)
+            self.assertEqual(connection.pc.connectionState, "connected")
+
+            # The user starts sharing their screen after the call connects.
+            screen.sender.replaceTrack(VideoStreamTrack())
+
+            frame = await asyncio.wait_for(connection.screen_video_input_track().recv(), 10)
+            self.assertIsInstance(frame, VideoFrame)
+        finally:
+            await connection.disconnect()
+            await client.close()
+
+
+if __name__ == "__main__":
+    unittest.main()
