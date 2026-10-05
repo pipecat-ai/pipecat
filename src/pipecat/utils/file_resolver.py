@@ -26,7 +26,7 @@ the per-provider question of whether a URL can be passed through.
 
 The resolver is configured on the LLM service (``file_resolver=...``), which
 resolves and converts in one step right before each completion — see
-:meth:`~pipecat.adapters.base_llm_adapter.BaseLLMAdapter.prepare_llm_invocation_params`.
+:meth:`~pipecat.adapters.base_llm_adapter.BaseLLMAdapter.get_llm_invocation_params`.
 """
 
 import asyncio

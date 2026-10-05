@@ -47,7 +47,7 @@ class OpenAIResponsesLLMAdapter(BaseLLMAdapter[OpenAIResponsesLLMInvocationParam
         """Get the identifier used in LLMSpecificMessage instances."""
         return "openai_responses"
 
-    def get_llm_invocation_params(
+    async def get_llm_invocation_params(
         self,
         context: LLMContext,
         *,
@@ -62,6 +62,7 @@ class OpenAIResponsesLLMAdapter(BaseLLMAdapter[OpenAIResponsesLLMInvocationParam
         Returns:
             Dictionary of parameters for the Responses API.
         """
+        await self.prepare_file_content(context)
         messages = self.get_messages(context)
 
         if messages:

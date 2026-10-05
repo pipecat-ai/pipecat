@@ -50,7 +50,7 @@ class GrokRealtimeLLMAdapter(BaseLLMAdapter):
         """Get the identifier used in LLMSpecificMessage instances for Grok Realtime."""
         return "grok-realtime"
 
-    def get_llm_invocation_params(
+    async def get_llm_invocation_params(
         self, context: LLMContext, *, system_instruction: str | None = None
     ) -> GrokRealtimeLLMInvocationParams:
         """Get Grok Realtime-specific LLM invocation parameters from a universal LLM context.

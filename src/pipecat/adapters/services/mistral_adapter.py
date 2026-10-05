@@ -43,7 +43,7 @@ class MistralLLMAdapter(OpenAILLMAdapter):
     rules before the request is built.
     """
 
-    def get_llm_invocation_params(
+    async def get_llm_invocation_params(
         self,
         context: LLMContext,
         *,
@@ -63,7 +63,7 @@ class MistralLLMAdapter(OpenAILLMAdapter):
             Dictionary of parameters for Mistral's ChatCompletion API, with
             messages transformed to satisfy Mistral's constraints.
         """
-        params = super().get_llm_invocation_params(
+        params = await super().get_llm_invocation_params(
             context,
             system_instruction=system_instruction,
             convert_developer_to_user=convert_developer_to_user,

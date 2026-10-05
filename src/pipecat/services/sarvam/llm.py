@@ -193,14 +193,9 @@ class SarvamLLMService(OpenAILLMService):
     async def _invocation_params(
         self, context: LLMContext, system_instruction: str | None = None
     ) -> OpenAILLMInvocationParams:
-        """Derive the invocation params the request will be built from.
-
-        Goes through prepare_llm_invocation_params so file content is resolved
-        before this pre-flight conversion; the actual completion's own
-        preparation then runs against warm caches.
-        """
+        """Derive the invocation params the request will be built from."""
         adapter = self.get_llm_adapter()
-        return await adapter.prepare_llm_invocation_params(
+        return await adapter.get_llm_invocation_params(
             context,
             system_instruction=system_instruction
             or assert_given(self._settings.system_instruction),

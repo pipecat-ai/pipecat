@@ -114,7 +114,7 @@ class AWSBedrockLLMAdapter(BaseLLMAdapter[AWSBedrockLLMInvocationParams]):
         """Get the identifier used in LLMSpecificMessage instances for AWS Bedrock."""
         return "aws"
 
-    def get_llm_invocation_params(
+    async def get_llm_invocation_params(
         self,
         context: LLMContext,
         *,
@@ -135,6 +135,7 @@ class AWSBedrockLLMAdapter(BaseLLMAdapter[AWSBedrockLLMInvocationParams]):
         Returns:
             Dictionary of parameters for invoking AWS Bedrock's LLM API.
         """
+        await self.prepare_file_content(context)
         converted = self._from_universal_context_messages(
             self.get_messages(context), system_instruction=system_instruction
         )

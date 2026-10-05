@@ -509,16 +509,16 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
     # session configuration
     #
 
-    def _invocation_params(self) -> OpenAILiveLLMInvocationParams:
+    async def _invocation_params(self) -> OpenAILiveLLMInvocationParams:
         assert self._context is not None
-        return self.get_llm_adapter().get_llm_invocation_params(
+        return await self.get_llm_adapter().get_llm_invocation_params(
             self._context,
             system_instruction=assert_given(self._settings.system_instruction),
         )
 
     async def _send_session_config(self):
         """Send ``session.start``, the first message on the socket."""
-        params = self._invocation_params()
+        params = await self._invocation_params()
         history = params["input"]
         # A trailing developer message is the app asking the bot to open the
         # conversation. The startup history is not the place for it: it is
@@ -570,7 +570,7 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
             and isinstance(self._delegation, ResponsesDelegation)
         ):
             return
-        params = self._invocation_params()
+        params = await self._invocation_params()
         snapshot = self._tools_snapshot(params)
         if snapshot == self._sent_tools_snapshot:
             return

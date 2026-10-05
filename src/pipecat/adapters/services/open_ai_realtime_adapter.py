@@ -43,7 +43,7 @@ class OpenAIRealtimeLLMAdapter(BaseLLMAdapter):
         """Get the identifier used in LLMSpecificMessage instances for OpenAI Realtime."""
         return "openai-realtime"
 
-    def get_llm_invocation_params(
+    async def get_llm_invocation_params(
         self, context: LLMContext, *, system_instruction: str | None = None
     ) -> OpenAIRealtimeLLMInvocationParams:
         """Get OpenAI Realtime-specific LLM invocation parameters from a universal LLM context.

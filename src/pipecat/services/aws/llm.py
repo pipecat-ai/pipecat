@@ -308,7 +308,7 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
             self._settings.system_instruction
         )
         adapter = self.get_llm_adapter()
-        params = await adapter.prepare_llm_invocation_params(
+        params = await adapter.get_llm_invocation_params(
             context,
             system_instruction=effective_instruction,
             ensure_last_message_is_user=self._should_inject_trailing_user_message(),
@@ -440,7 +440,7 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
         self, context: LLMContext
     ) -> AWSBedrockLLMInvocationParams:
         adapter = self.get_llm_adapter()
-        params = await adapter.prepare_llm_invocation_params(
+        params = await adapter.get_llm_invocation_params(
             context,
             system_instruction=assert_given(self._settings.system_instruction),
             ensure_last_message_is_user=self._should_inject_trailing_user_message(),

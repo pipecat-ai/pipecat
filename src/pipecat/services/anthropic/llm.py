@@ -435,7 +435,7 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
             self._settings.system_instruction
         )
         adapter = self.get_llm_adapter()
-        invocation_params = await adapter.prepare_llm_invocation_params(
+        invocation_params = await adapter.get_llm_invocation_params(
             context,
             enable_prompt_caching=assert_given(self._settings.enable_prompt_caching),
             system_instruction=effective_instruction,
@@ -504,7 +504,7 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
 
     async def _get_llm_invocation_params(self, context: LLMContext) -> AnthropicLLMInvocationParams:
         adapter = self.get_llm_adapter()
-        params = await adapter.prepare_llm_invocation_params(
+        params = await adapter.get_llm_invocation_params(
             context,
             enable_prompt_caching=assert_given(self._settings.enable_prompt_caching),
             system_instruction=assert_given(self._settings.system_instruction),

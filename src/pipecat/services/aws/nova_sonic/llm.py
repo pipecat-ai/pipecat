@@ -755,7 +755,7 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
 
         # Read context
         adapter = self.get_llm_adapter()
-        llm_connection_params = adapter.get_llm_invocation_params(
+        llm_connection_params = await adapter.get_llm_invocation_params(
             self._context, system_instruction=assert_given(self._settings.system_instruction)
         )
 
@@ -1240,12 +1240,12 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
         '''
         await self.send_event(event_json, stream)
 
-    def get_setup_params(self) -> tuple[str | None, list]:
+    async def get_setup_params(self) -> tuple[str | None, list]:
         """Return ``(system_instruction, tools)`` for the next session setup."""
         if not self._context:
             return None, []
         adapter = self.get_llm_adapter()
-        llm_params = adapter.get_llm_invocation_params(
+        llm_params = await adapter.get_llm_invocation_params(
             self._context, system_instruction=assert_given(self._settings.system_instruction)
         )
         tools = (

@@ -142,7 +142,7 @@ class OpenAILLMAdapter(BaseLLMAdapter[OpenAILLMInvocationParams]):
         """Get the identifier used in LLMSpecificMessage instances for OpenAI."""
         return "openai"
 
-    def get_llm_invocation_params(
+    async def get_llm_invocation_params(
         self,
         context: LLMContext,
         *,
@@ -162,6 +162,7 @@ class OpenAILLMAdapter(BaseLLMAdapter[OpenAILLMInvocationParams]):
         Returns:
             Dictionary of parameters for OpenAI's ChatCompletion API.
         """
+        await self.prepare_file_content(context)
         messages = self._from_universal_context_messages(
             self.get_messages(context), convert_developer_to_user=convert_developer_to_user
         )
