@@ -457,6 +457,20 @@ class TestLiveKitActiveSpeakers(unittest.IsolatedAsyncioTestCase):
 
         on_active_speakers_changed.assert_awaited_once_with(["alice", "bob"])
 
+    async def test_setup_listens_for_the_room_event(self):
+        client = TestLiveKitSipDtmfInput._create_client(self)
+        client._task_manager = None
+        setup = MagicMock(audio_out_sample_rate=16000)
+
+        with patch("pipecat.transports.livekit.transport.rtc.Room") as room_class:
+            await client.setup(setup)
+
+        on = room_class.return_value.on  # room.on(event)(handler)
+        i = [c.args[0] for c in on.call_args_list].index("active_speakers_changed")
+        self.assertEqual(
+            on.return_value.call_args_list[i].args[0], client._on_active_speakers_changed_wrapper
+        )
+
     async def test_room_event_is_scheduled_on_the_task_manager(self):
         on_active_speakers_changed = AsyncMock()
         client = TestLiveKitSipDtmfInput._create_client(self)
