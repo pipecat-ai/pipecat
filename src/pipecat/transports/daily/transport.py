@@ -2044,6 +2044,14 @@ class DailyInputTransport(BaseInputTransport):
         sampler = self._video_samplers.get(frame.user_id, {}).get(video_source)
         if sampler:
             sampler.add_request(frame)
+            return
+
+        # Nothing will answer this request, so complete it with an error: the
+        # function call that made it would otherwise never finish.
+        error = f"No {video_source} video is being captured from {frame.user_id}."
+        logger.warning(f"{self}: {error}")
+        if frame.result_callback:
+            await frame.result_callback({"error": error})
 
     async def _on_participant_video_frame(
         self, participant_id: str, video_frame: VideoFrame, video_source: str

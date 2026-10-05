@@ -167,11 +167,28 @@ class TestDailyVideoInSampling(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(frame.text, "what's this?")
         self.assertEqual(frame.transport_source, "camera")
 
-    async def test_request_for_uncaptured_source_is_ignored(self):
+    async def test_request_for_uncaptured_source_is_answered_with_an_error(self):
         fake = self._fake_input(0)
-        request = UserImageRequestFrame(user_id="p1", video_source="screenVideo")
+        result_callback = AsyncMock()
+        request = UserImageRequestFrame(
+            user_id="p1", video_source="screenVideo", result_callback=result_callback
+        )
+
         await self.transport_cls.request_participant_image(fake, request)
+
+        result_callback.assert_awaited_once()
+        self.assertIn("error", result_callback.await_args.args[0])
         self.assertEqual(fake._video_samplers["p1"].keys(), {"camera"})
+
+    async def test_request_for_uncaptured_participant_is_answered_with_an_error(self):
+        fake = self._fake_input(0)
+        result_callback = AsyncMock()
+        request = UserImageRequestFrame(user_id="p2", result_callback=result_callback)
+
+        await self.transport_cls.request_participant_image(fake, request)
+
+        result_callback.assert_awaited_once()
+        self.assertIn("error", result_callback.await_args.args[0])
 
 
 class TestDailyVideoInSourcesCapture(unittest.IsolatedAsyncioTestCase):
