@@ -59,6 +59,7 @@ if TYPE_CHECKING:
     from fastapi import WebSocket
 
     from pipecat.transports.daily.transport import DailyTransport
+    from pipecat.transports.livekit.transport import LiveKitTransport
     from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
     from pipecat.transports.vonage.video_connector import VonageVideoConnectorTransport
 
@@ -325,6 +326,10 @@ def _is_daily(transport: BaseTransport) -> "TypeGuard[DailyTransport]":
     return _transport_is(transport, "DailyTransport")
 
 
+def _is_livekit(transport: BaseTransport) -> "TypeGuard[LiveKitTransport]":
+    return _transport_is(transport, "LiveKitTransport")
+
+
 def _is_smallwebrtc(transport: BaseTransport) -> "TypeGuard[SmallWebRTCTransport]":
     return _transport_is(transport, "SmallWebRTCTransport")
 
@@ -346,6 +351,8 @@ def get_transport_client_id(transport: BaseTransport, client: Any) -> str:
     if _is_smallwebrtc(transport):
         return client.pc_id
     if _is_daily(transport):
+        return client["id"]
+    if _is_livekit(transport):
         return client["id"]
     if _is_vonage(transport):
         return client["streamId"]
