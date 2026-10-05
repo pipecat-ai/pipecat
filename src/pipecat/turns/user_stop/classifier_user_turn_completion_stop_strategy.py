@@ -7,11 +7,17 @@
 """User turn stop strategy that asks a classifier whether the turn is complete."""
 
 import asyncio
+import time
 
 from loguru import logger
 
 from pipecat.classifiers.base_classifier import BaseClassifier, ChoiceQuestion, ClassifierError
-from pipecat.frames.frames import Frame, MetricsFrame, TranscriptionFrame
+from pipecat.frames.frames import (
+    Frame,
+    MetricsFrame,
+    TranscriptionFrame,
+    VADUserStartedSpeakingFrame,
+)
 from pipecat.metrics.metrics import MetricsData
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
@@ -97,6 +103,7 @@ class ClassifierUserTurnCompletionStopStrategy(BaseUserTurnStopStrategy):
         short_timeout: float = 5.0,
         long_timeout: float = 10.0,
         classification_timeout: float = 1.0,
+        max_hold: float = 10.0,
         **kwargs,
     ):
         """Initialize the strategy.
@@ -114,6 +121,9 @@ class ClassifierUserTurnCompletionStopStrategy(BaseUserTurnStopStrategy):
             classification_timeout: Seconds to wait for the classifier before
                 ending the turn without it. The default fits Jev; an LLM
                 classifier usually needs more.
+            max_hold: Seconds a turn may be held open in all, counted from its
+                first ``short`` or ``long`` verdict. Past it, the detector's
+                next stop ends the turn without asking.
             **kwargs: Additional keyword arguments forwarded to the base class.
         """
         super().__init__(**kwargs)
@@ -123,11 +133,13 @@ class ClassifierUserTurnCompletionStopStrategy(BaseUserTurnStopStrategy):
         self._short_timeout = short_timeout
         self._long_timeout = long_timeout
         self._classification_timeout = classification_timeout
+        self._max_hold = max_hold
 
         self._text = ""
         self._params: UserTurnStoppedParams | None = None
         self._classify_task: asyncio.Task | None = None
         self._timeout_task: asyncio.Task | None = None
+        self._held_since: float | None = None
 
         self._inner.add_event_handler("on_user_turn_stopped", self._on_inner_stopped)
         self._classifier.add_event_handler("on_metrics", self._on_classifier_metrics)
@@ -185,6 +197,7 @@ class ClassifierUserTurnCompletionStopStrategy(BaseUserTurnStopStrategy):
         """Start a fresh turn: drop the text and any pending decision."""
         await self._cancel_pending()
         self._text = ""
+        self._held_since = None
         await self._inner.handle_user_turn_started()
 
     async def handle_user_turn_stopped(self):
@@ -196,12 +209,23 @@ class ClassifierUserTurnCompletionStopStrategy(BaseUserTurnStopStrategy):
         """Collect the turn's text and forward the frame to the inner strategy."""
         if isinstance(frame, TranscriptionFrame) and frame.text.strip():
             self._text = f"{self._text} {frame.text.strip()}".strip()
+        elif isinstance(frame, VADUserStartedSpeakingFrame):
+            # The user is talking again: a hold or a verdict still on its way
+            # is about words that are no longer the whole turn. The detector's
+            # next stop asks again, about everything they said.
+            await self._cancel_pending()
         return await self._inner.process_frame(frame)
 
     async def _on_inner_stopped(self, strategy, params: UserTurnStoppedParams):
         """The detector says the user stopped: ask the classifier."""
         self._params = params
         await self._cancel_pending()
+        # Speech that never reaches an end, such as a TV behind the caller,
+        # would otherwise hold the turn for as long as it plays.
+        if self._held_since is not None and time.monotonic() - self._held_since >= self._max_hold:
+            logger.debug(f"{self}: held {self._max_hold}s, ending the turn")
+            await self._end_turn()
+            return
         self._classify_task = self.task_manager.create_task(self._classify(), f"{self}::_classify")
 
     async def _on_classifier_metrics(self, classifier: BaseClassifier, data: list[MetricsData]):
@@ -224,6 +248,8 @@ class ClassifierUserTurnCompletionStopStrategy(BaseUserTurnStopStrategy):
             return
 
         logger.debug(f"{self}: {result.choice} ({result.confidence:.2f}) for [{self._text}]")
+        if result.choice != "complete" and self._held_since is None:
+            self._held_since = time.monotonic()
         if result.choice == "short":
             self._timeout_task = self.task_manager.create_task(
                 self._timeout(self._short_timeout), f"{self}::_short_timeout"
