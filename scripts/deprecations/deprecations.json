@@ -1169,6 +1169,28 @@
       "location": "pipecat/runner/types.py"
     },
     {
+      "subject": "maybe_capture_participant_camera",
+      "module": "pipecat.runner.utils",
+      "kind": "function",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "TransportParams.video_in_sources",
+      "message": "`maybe_capture_participant_camera` is deprecated since 1.13.0 and will be removed in 2.0.0. Use `TransportParams.video_in_sources` or `BaseTransport.capture_participant_video()` instead.",
+      "location": "pipecat/runner/utils.py"
+    },
+    {
+      "subject": "maybe_capture_participant_screen",
+      "module": "pipecat.runner.utils",
+      "kind": "function",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "TransportParams.video_in_sources",
+      "message": "`maybe_capture_participant_screen` is deprecated since 1.13.0 and will be removed in 2.0.0. Use `TransportParams.video_in_sources` or `BaseTransport.capture_participant_video()` instead.",
+      "location": "pipecat/runner/utils.py"
+    },
+    {
       "subject": "AnthropicLLMService.InputParams",
       "module": "pipecat.services.anthropic.llm",
       "kind": "class",

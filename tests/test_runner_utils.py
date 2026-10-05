@@ -18,6 +18,8 @@ from pipecat.runner.utils import (
     _maybe_apply_daily_dialin,
     create_transport,
     get_transport_client_id,
+    maybe_capture_participant_camera,
+    maybe_capture_participant_screen,
     parse_telephony_websocket,
 )
 
@@ -327,3 +329,14 @@ class TestGetTransportClientId(unittest.TestCase):
             pass
 
         self.assertEqual(get_transport_client_id(OtherTransport(), {"id": "User-1234"}), "")
+
+
+class TestMaybeCaptureParticipantVideo(unittest.IsolatedAsyncioTestCase):
+    async def test_is_deprecated(self):
+        class OtherTransport:
+            pass
+
+        with self.assertWarns(DeprecationWarning):
+            await maybe_capture_participant_camera(OtherTransport(), {"id": "User-1234"})
+        with self.assertWarns(DeprecationWarning):
+            await maybe_capture_participant_screen(OtherTransport(), {"id": "User-1234"})
