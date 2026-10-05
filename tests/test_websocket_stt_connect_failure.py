@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Tests for retrying a websocket STT connect that left no websocket."""
+"""Tests for a websocket STT service whose connect failed."""
 
 import asyncio
 import time
@@ -31,6 +31,9 @@ class Websocket:
     async def send(self, message):
         pass
 
+    async def ping(self):
+        pass
+
     async def close(self):
         self.state = State.CLOSED
 
@@ -44,16 +47,16 @@ class Websocket:
 class ConnectFailingSTTService(WebsocketSTTService):
     """Connects the way websocket STT services do, failing the first ``failures`` times.
 
-    A failed connect reports a non-permanent error and leaves no websocket,
-    and the receive loop only starts once a websocket is open.
+    A failed connect reports an error and leaves no websocket, and the receive
+    loop starts either way.
     """
 
     def __init__(self, *, failures: int, **kwargs):
         super().__init__(settings=STTSettings(model=None, language=None), **kwargs)
         self._failures = failures
         self.connect_attempts = 0
+        self.received_without_websocket = False
         self._receive_task: asyncio.Task | None = None
-        # Keep the retries fast.
         self._reconnect_backoff_min_wait = 0.05
         self._reconnect_backoff_max_wait = 0.05
 
@@ -67,7 +70,7 @@ class ConnectFailingSTTService(WebsocketSTTService):
     async def _connect(self):
         await super()._connect()
         await self._connect_websocket()
-        if self._websocket and not self._receive_task:
+        if not self._receive_task:
             self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
     async def _disconnect(self):
@@ -91,65 +94,75 @@ class ConnectFailingSTTService(WebsocketSTTService):
         self._websocket = None
 
     async def _receive_messages(self):
-        assert self._websocket is not None
+        if self._websocket is None:
+            self.received_without_websocket = True
+            raise ConnectionError("not connected")
         async for _ in self._websocket:
             pass
 
 
-def _audio(seconds: float) -> list[Frame]:
+async def _run(service: ConnectFailingSTTService, seconds: float = 0.5):
     frames: list[Frame] = []
     for _ in range(int(seconds * 50)):
         frames += [
             InputAudioRawFrame(audio=b"\0\0" * 320, sample_rate=SAMPLE_RATE, num_channels=1),
             SleepFrame(sleep=0.02),
         ]
-    return frames
-
-
-async def _run(service: ConnectFailingSTTService, seconds: float):
     return await run_test(
         service,
-        frames_to_send=_audio(seconds),
+        frames_to_send=frames,
         expected_up_frames=None,
         pipeline_params=PipelineParams(audio_in_sample_rate=SAMPLE_RATE),
     )
 
 
 @pytest.mark.asyncio
-async def test_failed_connect_is_retried_once_audio_arrives():
+async def test_failed_connect_is_retried_like_a_drop():
     service = ConnectFailingSTTService(failures=1, sample_rate=SAMPLE_RATE)
 
-    await _run(service, 0.5)
+    await _run(service)
 
     assert service.connect_attempts == 2
     assert service.is_usable is True
+    assert service.received_without_websocket is False
 
 
 @pytest.mark.asyncio
 async def test_connect_that_keeps_failing_gives_up_as_permanent():
-    """Unusable once the retries run out, so a `ServiceSwitcher` can fail over."""
+    """Unusable once the reconnect attempts run out, so a `ServiceSwitcher` can fail over."""
     service = ConnectFailingSTTService(failures=100, sample_rate=SAMPLE_RATE)
 
-    _, up = await _run(service, 0.5)
+    _, up = await _run(service)
 
-    assert service.connect_attempts == 1 + WebsocketSTTService._CONNECT_RETRY_ATTEMPTS
+    assert service.connect_attempts == 4
     assert service.is_usable is False
     errors = [frame for frame in up if isinstance(frame, ErrorFrame)]
-    assert "could not connect" in errors[-1].error
+    assert "failed to reconnect after 3 attempts" in errors[-1].error
 
 
 @pytest.mark.asyncio
-async def test_connected_service_is_not_retried():
+async def test_connected_service_is_not_reconnected():
     service = ConnectFailingSTTService(failures=0, sample_rate=SAMPLE_RATE)
 
-    await _run(service, 0.5)
+    await _run(service)
 
     assert service.connect_attempts == 1
     assert service.is_usable is True
 
 
 @pytest.mark.asyncio
-async def test_teardown_stops_a_retry_waiting_on_backoff():
+async def test_failed_connect_is_not_retried_without_reconnect_on_error():
+    service = ConnectFailingSTTService(
+        failures=100, sample_rate=SAMPLE_RATE, reconnect_on_error=False
+    )
+
+    await _run(service)
+
+    assert service.connect_attempts == 1
+
+
+@pytest.mark.asyncio
+async def test_teardown_stops_a_reconnect_waiting_on_backoff():
     service = ConnectFailingSTTService(failures=100, sample_rate=SAMPLE_RATE)
     service._reconnect_backoff_min_wait = 30
     service._reconnect_backoff_max_wait = 30
@@ -159,13 +172,3 @@ async def test_teardown_stops_a_retry_waiting_on_backoff():
 
     assert time.monotonic() - start < 5
     assert service.connect_attempts == 2
-
-
-@pytest.mark.asyncio
-async def test_unusable_service_does_not_retry_connect():
-    service = ConnectFailingSTTService(failures=0, sample_rate=SAMPLE_RATE)
-    await service.set_usable(False)
-
-    await service._connect_retry_handler()
-
-    assert service.connect_attempts == 0

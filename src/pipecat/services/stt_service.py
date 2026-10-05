@@ -40,10 +40,9 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSet
 from pipecat.services.ai_service import AIService
 from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import DEFAULT_TTFS_P99
-from pipecat.services.websocket_service import WebsocketService
+from pipecat.services.websocket_service import ReportErrorCallback, WebsocketService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.deprecation import deprecated
-from pipecat.utils.network import exponential_backoff_time
 from pipecat.utils.types import is_given
 
 # Duration in seconds of silent audio sent for WebSocket keepalive (100ms).
@@ -1017,14 +1016,9 @@ class WebsocketSTTService(STTService, WebsocketService):
     closing idle connections (e.g. when behind a ServiceSwitcher). Subclasses can
     override ``_send_keepalive()`` to wrap the silence in a service-specific protocol.
 
-    A connect that leaves no websocket is retried in the background, with
-    backoff, once audio arrives. If every retry fails, the service reports a
-    permanent error and stops being usable, so a ``ServiceSwitcher`` can fail
-    over.
+    A receive loop started without a websocket reconnects first, so a connect
+    that failed is retried like a dropped connection.
     """
-
-    # Retries of a connect that left no websocket before giving up.
-    _CONNECT_RETRY_ATTEMPTS = 3
 
     def __init__(
         self,
@@ -1041,7 +1035,6 @@ class WebsocketSTTService(STTService, WebsocketService):
         """
         STTService.__init__(self, **kwargs)
         WebsocketService.__init__(self, reconnect_on_error=reconnect_on_error, **kwargs)
-        self._connect_retry_task: asyncio.Task | None = None
 
     async def stop(self, frame: EndFrame):
         """Stop the websocket STT service on a graceful end.
@@ -1076,72 +1069,21 @@ class WebsocketSTTService(STTService, WebsocketService):
         self._create_keepalive_task()
 
     async def _disconnect(self):
-        """Disconnect and cancel keepalive and connect retry tasks."""
+        """Disconnect and cancel keepalive task."""
         await super()._disconnect()
         await self._cancel_keepalive_task()
-        # A retry can reach here through its own `_connect()`, and must keep
-        # its handle so audio doesn't start a second one.
-        if self._connect_retry_task and self._connect_retry_task is not asyncio.current_task():
-            await self.cancel_task(self._connect_retry_task)
-            self._connect_retry_task = None
 
-    async def process_audio_frame(self, frame: InputAudioRawFrame, direction: FrameDirection):
-        """Retry a failed connect, then process the audio frame.
+    async def _receive_task_handler(self, report_error: ReportErrorCallback):
+        """Receive messages, reconnecting first if the connect left no websocket.
 
         Args:
-            frame: The audio frame to process.
-            direction: The direction of frame processing.
+            report_error: Callback function to report connection errors.
         """
-        if self._needs_connect_retry():
-            self._connect_retry_task = self.create_task(
-                self._connect_retry_handler(), name="connect_retry"
-            )
-        await super().process_audio_frame(frame, direction)
-
-    def _needs_connect_retry(self) -> bool:
-        """Whether the service has no websocket and nothing is bringing one up.
-
-        A drop leaves the closed socket in place for the receive loop to
-        replace, so only a connect that never opened one matches here.
-        """
-        return (
-            self._websocket is None
-            and self.is_usable
-            and not self._disconnecting
-            and not self._reconnect_in_progress
-            and (self._connect_retry_task is None or self._connect_retry_task.done())
-        )
-
-    async def _connect_retry_handler(self):
-        """Retry ``_connect()`` with backoff until a websocket opens.
-
-        Runs the subclass's own ``_connect()``, so a successful retry also
-        starts its receive loop. Gives up with a permanent error, leaving the
-        service unusable.
-        """
-        attempts = self._CONNECT_RETRY_ATTEMPTS
-        for attempt in range(1, attempts + 1):
-            if attempt > 1:
-                await asyncio.sleep(
-                    exponential_backoff_time(
-                        attempt - 1,
-                        min_wait=self._reconnect_backoff_min_wait,
-                        max_wait=self._reconnect_backoff_max_wait,
-                    )
-                )
-            if self._disconnecting or not self.is_usable or self._websocket is not None:
+        if self._websocket is None:
+            message = f"{self} not connected"
+            if not await self._maybe_try_reconnect(message, report_error):
                 return
-            logger.warning(f"{self} retrying failed connect (attempt {attempt}/{attempts})")
-            # `_connect()` starts a keepalive task of its own.
-            await self._cancel_keepalive_task()
-            await self._connect()
-            if self._websocket is not None:
-                logger.info(f"{self} connected on retry {attempt}")
-                return
-        await self._report_error(
-            ErrorFrame(f"{self} could not connect after {attempts} retries"),
-            force_treat_as_permanent=True,
-        )
+        await super()._receive_task_handler(report_error)
 
     async def _do_reconnect(self):
         """Disconnect and reconnect the websocket.
