@@ -51,7 +51,9 @@ from aiortc.mediastreams import MediaStreamError  # noqa: E402
 from av import AudioFrame, VideoFrame  # noqa: E402
 
 from pipecat.frames.frames import OutputTransportMessageUrgentFrame  # noqa: E402
-from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection  # noqa: E402
+from pipecat.transports.smallwebrtc.connection import (  # noqa: E402
+    SmallWebRTCConnection,
+)
 from pipecat.transports.smallwebrtc.transport import (  # noqa: E402
     CAM_VIDEO_SOURCE,
     SCREEN_VIDEO_SOURCE,
@@ -400,6 +402,53 @@ class TestScreenShareDelivery(unittest.IsolatedAsyncioTestCase):
         finally:
             await connection.disconnect()
             await client.close()
+
+
+class TestVideoJitterBuffer(unittest.IsolatedAsyncioTestCase):
+    """The screen share receiver assembles frames larger than aiortc's default buffer."""
+
+    def _connection(self):
+        receivers = []
+        for kind in ("audio", "video", "video"):
+            receiver = MagicMock()
+            receiver.track.kind = kind
+            receiver._RTCRtpReceiver__jitter_buffer = default_buffer = object()
+            receivers.append((receiver, default_buffer))
+        connection = SmallWebRTCConnection()
+        connection._pc = MagicMock()
+        connection._pc.getTransceivers.return_value = [
+            MagicMock(receiver=receiver) for receiver, _ in receivers
+        ]
+        return connection, receivers
+
+    async def test_screen_share_frame_of_many_packets_is_assembled(self):
+        from aiortc.rtp import RtpPacket
+
+        connection, receivers = self._connection()
+        connection.screen_video_input_track()
+        jitter_buffer = receivers[2][0]._RTCRtpReceiver__jitter_buffer
+
+        # A keyframe of 300 packets, then the first packet of the next frame,
+        # which completes it.
+        frame = None
+        for seq in range(301):
+            packet = RtpPacket(
+                payload_type=96, sequence_number=seq, timestamp=0 if seq < 300 else 3000
+            )
+            packet._data = b"x"
+            pli, assembled = jitter_buffer.add(packet)
+            self.assertFalse(pli)
+            frame = assembled or frame
+
+        self.assertIsNotNone(frame)
+        self.assertEqual(len(frame.data), 300)
+
+    async def test_camera_keeps_the_default_buffer(self):
+        connection, receivers = self._connection()
+        connection.video_input_track()
+
+        receiver, default_buffer = receivers[1]
+        self.assertIs(receiver._RTCRtpReceiver__jitter_buffer, default_buffer)
 
 
 if __name__ == "__main__":
