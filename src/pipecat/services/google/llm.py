@@ -571,7 +571,7 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
             ensure_last_message_is_user=self._should_inject_trailing_user_message(),
         )
 
-        self._log_llm_context(context)
+        self._log_llm_response(context)
 
         messages = params["messages"]
 

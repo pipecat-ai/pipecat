@@ -39,26 +39,40 @@ def captured():
 
 def test_full_logs_every_message(captured):
     service = LLMService()
-    service._log_llm_context(LLMContext(messages=MESSAGES))
-    assert captured.getvalue() == (
-        f"{__name__}|{service}: Generating chat from context {MESSAGES}\n"
-    )
+    service._log_llm_response(LLMContext(messages=MESSAGES))
+    assert captured.getvalue() == (f"{__name__}|{service}: Generating LLM response {MESSAGES}\n")
 
 
 def test_conversation_setup_logs_every_message(captured):
     service = LLMService()
     service._log_llm_conversation_setup(LLMContext(messages=MESSAGES))
     assert captured.getvalue() == (
-        f"{__name__}|{service}: Setting up conversation from context {MESSAGES}\n"
+        f"{__name__}|{service}: Setting up LLM conversation {MESSAGES}\n"
     )
 
 
-def test_off_logs_nothing(captured):
+def test_off_logs_without_context(captured):
     configure_logging(llm_context="off")
     service = LLMService()
-    service._log_llm_context(LLMContext(messages=MESSAGES))
+    service._log_llm_response(LLMContext(messages=MESSAGES))
     service._log_llm_conversation_setup(LLMContext(messages=MESSAGES))
-    assert captured.getvalue() == ""
+    assert captured.getvalue().splitlines() == [
+        f"{__name__}|{service}: Generating LLM response",
+        f"{__name__}|{service}: Setting up LLM conversation",
+    ]
+
+
+def test_off_does_not_build_messages(captured, monkeypatch):
+    configure_logging(llm_context="off")
+    service = LLMService()
+    rendered = []
+    monkeypatch.setattr(
+        service.get_llm_adapter(),
+        "get_messages_for_logging",
+        lambda context: rendered.append(context) or [],
+    )
+    service._log_llm_response(LLMContext(messages=MESSAGES))
+    assert rendered == []
 
 
 def test_not_rendered_without_debug_sink(monkeypatch):
@@ -72,7 +86,7 @@ def test_not_rendered_without_debug_sink(monkeypatch):
     logger.remove()
     try:
         logger.add(io.StringIO(), level="INFO")
-        service._log_llm_context(LLMContext(messages=MESSAGES))
+        service._log_llm_response(LLMContext(messages=MESSAGES))
     finally:
         # Put loguru's default sink back so the rest of the session still logs.
         logger.remove()

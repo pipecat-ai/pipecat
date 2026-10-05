@@ -449,36 +449,37 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         """
         return self.get_llm_adapter().create_llm_specific_message(message)
 
-    def _log_llm_context(self, context: LLMContext) -> None:
-        """Log the context sent to the model with an inference.
+    def _log_llm_response(self, context: LLMContext) -> None:
+        """Log that the service is generating a response from the given context.
+
+        The context is included unless the LLM context log mode is ``off``.
 
         Args:
-            context: The context being sent.
+            context: The context sent with the request.
         """
-        self._debug_llm_context(context, "Generating chat from context")
+        self._log_llm_event("Generating LLM response", context)
 
     def _log_llm_conversation_setup(self, context: LLMContext) -> None:
-        """Log the context a realtime service seeds its server-side conversation with.
+        """Log that a realtime service is seeding its server-side conversation.
 
         Realtime services upload the context once per session (and again
-        after a reset), then send only new items, so this is logged in place
-        of :meth:`_log_llm_context` on each response.
+        after a reset), then send only new items. The context is included
+        unless the LLM context log mode is ``off``.
 
         Args:
             context: The context being uploaded.
         """
-        self._debug_llm_context(context, "Setting up conversation from context")
+        self._log_llm_event("Setting up LLM conversation", context)
 
-    def _debug_llm_context(self, context: LLMContext, action: str) -> None:
+    def _log_llm_event(self, event: str, context: LLMContext) -> None:
         # Built only if a sink accepts DEBUG. depth=2 attributes the line to
         # the service that called the _log_* method, so loguru filters by
         # module still apply.
-        if get_llm_context_log_mode() == LLMContextLogMode.OFF:
-            return
-
         def render() -> str:
+            if get_llm_context_log_mode() == LLMContextLogMode.OFF:
+                return f"{self}: {event}"
             messages = self.get_llm_adapter().get_messages_for_logging(context)
-            return f"{self}: {action} {messages}"
+            return f"{self}: {event} {messages}"
 
         logger.opt(lazy=True, depth=2).debug("{}", render)
 

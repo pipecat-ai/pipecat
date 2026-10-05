@@ -526,7 +526,7 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
 
             params_from_context = self._get_llm_invocation_params(context)
 
-            self._log_llm_context(context)
+            self._log_llm_response(context)
 
             await self.start_ttfb_metrics()
 

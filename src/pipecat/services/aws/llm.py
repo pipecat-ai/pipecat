@@ -545,7 +545,7 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
                     if not any("cachePoint" in t for t in tools_list):
                         tools_list.append({"cachePoint": {"type": "default"}})
 
-            self._log_llm_context(context)
+            self._log_llm_response(context)
 
             async with self._aws_session.create_client(
                 service_name="bedrock-runtime", **self._aws_params

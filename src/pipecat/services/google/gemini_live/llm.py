@@ -1909,7 +1909,7 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
         else:
             trigger_inference = self._inference_on_context_initialization
 
-        logger.debug(f"Creating initial response: {messages}")
+        self._log_llm_conversation_setup(self._context)
 
         # Enforce Gemini 2.5's "seed must end with user turn" requirement.
         seed_messages = messages

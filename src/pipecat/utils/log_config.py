@@ -34,14 +34,15 @@ LLM_CONTEXT_LOG_ENV_VAR = "PIPECAT_LOG_LLM_CONTEXT"
 
 
 class LLMContextLogMode(StrEnum):
-    """How LLM services log the context they send to the model.
+    """How much of the context LLM services include in their DEBUG log lines.
 
-    The context is logged at DEBUG level. Nothing is computed when DEBUG is
-    disabled, whichever mode is selected.
+    LLM services log a DEBUG line each time they generate a response, and
+    realtime services when they set up their server-side conversation. The
+    context is built only when DEBUG is enabled.
 
     Parameters:
-        FULL: Every message on every inference.
-        OFF: Nothing.
+        FULL: Every message of the context.
+        OFF: None of it; the line is logged without the context.
     """
 
     FULL = "full"
@@ -62,7 +63,7 @@ def configure_logging(*, llm_context: LLMContextLogMode | str | None = None) -> 
     Settings left as ``None`` keep their current value.
 
     Args:
-        llm_context: How LLM services log the context on each inference.
+        llm_context: How much of the context LLM services log.
             Overrides ``PIPECAT_LOG_LLM_CONTEXT``.
 
     Raises:

@@ -1002,7 +1002,7 @@ class OpenAIResponsesLLMService(
             await self._drain_cancelled_response()
 
         adapter = self.get_llm_adapter()
-        self._log_llm_context(context)
+        self._log_llm_response(context)
 
         invocation_params = adapter.get_llm_invocation_params(
             context, system_instruction=assert_given(self._settings.system_instruction)
@@ -1321,7 +1321,7 @@ class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
     @traced_llm
     async def _process_context(self, context: LLMContext):
         adapter = self.get_llm_adapter()
-        self._log_llm_context(context)
+        self._log_llm_response(context)
 
         invocation_params = adapter.get_llm_invocation_params(
             context, system_instruction=assert_given(self._settings.system_instruction)

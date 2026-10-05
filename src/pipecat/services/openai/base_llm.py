@@ -334,7 +334,7 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
             Async stream of chat completion chunks.
         """
         adapter = self.get_llm_adapter()
-        self._log_llm_context(context)
+        self._log_llm_response(context)
 
         params_from_context = adapter.get_llm_invocation_params(
             context,
