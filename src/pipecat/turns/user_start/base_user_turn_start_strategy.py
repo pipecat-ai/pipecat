@@ -96,10 +96,8 @@ class BaseUserTurnStartStrategy(BaseObject):
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
-        # reset() is deprecated. The warning is forced visible because the
-        # default filters hide a DeprecationWarning not attributed to __main__,
-        # and stacklevel=3 steps past ABCMeta.__new__ (which calls this hook)
-        # to the subclass's definition.
+        # reset() is deprecated. stacklevel=3 steps past ABCMeta.__new__, which
+        # calls this hook, so the warning points at the subclass's definition.
         if cls.reset is not BaseUserTurnStartStrategy.reset:
             with warnings.catch_warnings():
                 warnings.simplefilter("always")
