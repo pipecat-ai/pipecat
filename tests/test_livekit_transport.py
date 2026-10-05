@@ -1163,6 +1163,66 @@ class TestLiveKitOutputTransportWriteVideoFrame(unittest.IsolatedAsyncioTestCase
         output._client.publish_video.assert_not_awaited()
 
 
+@unittest.skipUnless(LIVEKIT_AVAILABLE, "livekit package not installed")
+class TestLiveKitParticipantsAlreadyInRoom(unittest.IsolatedAsyncioTestCase):
+    """Participants already in the room when the bot connects are reported."""
+
+    def _create_client(self, identities: list[str]) -> LiveKitTransportClient:
+        callbacks = LiveKitCallbacks(
+            **{name: AsyncMock() for name in LiveKitCallbacks.model_fields}
+        )
+        client = LiveKitTransportClient(
+            url="wss://test.livekit.cloud",
+            token="test-token",
+            room_name="test-room",
+            params=LiveKitParams(),
+            callbacks=callbacks,
+            transport_name="test-transport",
+        )
+        client._task_manager = MagicMock()
+        client._out_sample_rate = 16000
+
+        room = MagicMock()
+        room.connect = AsyncMock()
+        room.local_participant.publish_track = AsyncMock()
+        room.local_participant.identity = "bot"
+        room.remote_participants = {
+            identity: MagicMock(identity=identity) for identity in identities
+        }
+        client._room = room
+        return client
+
+    async def _connect(self, client):
+        with (
+            patch.object(rtc, "AudioSource", return_value=MagicMock()),
+            patch.object(rtc.LocalAudioTrack, "create_audio_track", return_value=MagicMock()),
+        ):
+            await client.connect()
+
+    async def test_each_participant_already_in_the_room_is_connected(self):
+        client = self._create_client(["alice", "bob"])
+
+        await self._connect(client)
+
+        callbacks = client._callbacks
+        self.assertEqual(
+            [c.args for c in callbacks.on_participant_connected.await_args_list],
+            [("alice",), ("bob",)],
+        )
+        callbacks.on_first_participant_joined.assert_awaited_once_with("alice")
+
+    async def test_participant_who_joins_later_is_not_first(self):
+        client = self._create_client(["alice"])
+        await self._connect(client)
+
+        participant = MagicMock()
+        participant.identity = "bob"
+        await client._async_on_participant_connected(participant)
+
+        client._callbacks.on_first_participant_joined.assert_awaited_once_with("alice")
+        client._callbacks.on_participant_connected.assert_awaited_with("bob")
+
+
 if __name__ == "__main__":
     unittest.main()
 

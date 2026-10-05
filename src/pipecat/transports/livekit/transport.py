@@ -344,11 +344,10 @@ class LiveKitTransportClient:
 
                 await self._callbacks.on_connected()
 
-                # Check if there are already participants in the room
-                participants = self.get_participants()
-                if participants and not self._other_participant_has_joined:
-                    self._other_participant_has_joined = True
-                    await self._callbacks.on_first_participant_joined(participants[0])
+                # Participants already in the room raise the same events as
+                # those who join later.
+                for participant_id in self.get_participants():
+                    await self._participant_connected(participant_id)
             except Exception as e:
                 logger.error(f"Error connecting to {self._room_name}: {e}")
                 if not self._connected:
@@ -675,11 +674,15 @@ class LiveKitTransportClient:
     # Async methods for event handling
     async def _async_on_participant_connected(self, participant: rtc.RemoteParticipant):
         """Handle participant connected events."""
-        logger.info(f"Participant connected: {participant.identity}")
-        await self._callbacks.on_participant_connected(participant.identity)
+        await self._participant_connected(participant.identity)
+
+    async def _participant_connected(self, participant_id: str):
+        """Report a participant in the room, and whether they're the first."""
+        logger.info(f"Participant connected: {participant_id}")
+        await self._callbacks.on_participant_connected(participant_id)
         if not self._other_participant_has_joined:
             self._other_participant_has_joined = True
-            await self._callbacks.on_first_participant_joined(participant.identity)
+            await self._callbacks.on_first_participant_joined(participant_id)
 
     async def _async_on_participant_disconnected(self, participant: rtc.RemoteParticipant):
         """Handle participant disconnected events."""
