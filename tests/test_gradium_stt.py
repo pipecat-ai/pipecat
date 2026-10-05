@@ -34,6 +34,20 @@ def _service(*, enable_turn_detection: bool = True, **kwargs) -> GradiumSTTServi
     return service
 
 
+def _record_order(service: GradiumSTTService) -> list[str]:
+    order = []
+
+    async def push(frame, *args, **kwargs):
+        order.append(type(frame).__name__)
+
+    async def broadcast(frame_cls, **kwargs):
+        order.append(frame_cls.__name__)
+
+    service.push_frame = AsyncMock(side_effect=push)
+    service.broadcast_frame = AsyncMock(side_effect=broadcast)
+    return order
+
+
 def _step(inactivity: float, horizon: float = 3.0) -> dict:
     return {"type": "step", "vad": [{"horizon_s": horizon, "inactivity_prob": inactivity}]}
 
@@ -151,8 +165,32 @@ async def test_gradium_turn_detection_a_step_at_the_threshold_ends_an_open_turn_
     await service._handle_step(_step(0.5))
 
     service._send_flush.assert_awaited_once()
-    assert service.broadcast_frame.await_args.args == (ProposedUserStoppedSpeakingFrame,)
+    # The stop is proposed once the flush's transcript is out.
+    service.broadcast_frame.assert_awaited_once_with(ProposedUserStartedSpeakingFrame)
     assert service._turn_phase is _TurnPhase.ENDING
+
+
+@pytest.mark.asyncio
+async def test_gradium_turn_detection_the_stop_is_proposed_after_the_transcript(monkeypatch):
+    # With the transcript already pushed, the turn strategies close the turn
+    # on the stop proposal instead of waiting out their hold.
+    monkeypatch.setattr(gradium_stt, "TRANSCRIPT_AGGREGATION_DELAY", 0)
+    service = _service()
+    service.emit_stt_usage_metrics = AsyncMock()
+    service._trace_transcription = AsyncMock()
+    order = _record_order(service)
+    service._handle_flushed = service._transcript_aggregation_handler
+    service._turn_phase = _TurnPhase.ENDING
+    service._accumulated_text = ["book a table"]
+
+    async def messages():
+        yield json.dumps({"type": "flushed"})
+
+    service._get_websocket = messages
+    await service._receive_messages()
+
+    assert order == ["TranscriptionFrame", "ProposedUserStoppedSpeakingFrame"]
+    assert service._turn_phase is _TurnPhase.ARMED
 
 
 @pytest.mark.asyncio
@@ -196,12 +234,15 @@ async def test_gradium_turn_detection_speech_continuing_through_a_flush_opens_a_
     await service._receive_messages()
 
     assert service.push_frame.await_args.args[0].text == "I'd like to book a"
-    service.broadcast_frame.assert_awaited_once_with(ProposedUserStartedSpeakingFrame)
+    assert [c.args[0] for c in service.broadcast_frame.await_args_list] == [
+        ProposedUserStoppedSpeakingFrame,
+        ProposedUserStartedSpeakingFrame,
+    ]
     assert service._turn_phase is _TurnPhase.OPEN
 
 
 @pytest.mark.asyncio
-async def test_gradium_turn_detection_an_empty_turn_still_arms_the_next_turn(monkeypatch):
+async def test_gradium_turn_detection_an_empty_turn_still_proposes_its_stop(monkeypatch):
     monkeypatch.setattr(gradium_stt, "TRANSCRIPT_AGGREGATION_DELAY", 0)
     service = _service()
     service._turn_phase = _TurnPhase.ENDING
@@ -209,6 +250,7 @@ async def test_gradium_turn_detection_an_empty_turn_still_arms_the_next_turn(mon
     await service._transcript_aggregation_handler()
 
     service.push_frame.assert_not_awaited()
+    service.broadcast_frame.assert_awaited_once_with(ProposedUserStoppedSpeakingFrame)
     assert service._turn_phase is _TurnPhase.ARMED
 
 
@@ -239,7 +281,10 @@ async def test_gradium_turn_detection_no_start_before_the_previous_transcript_is
     await service._handle_step(_step(0.1))
 
     assert service.push_frame.await_args.args[0].text == "first turn"
-    service.broadcast_frame.assert_awaited_once_with(ProposedUserStartedSpeakingFrame)
+    assert [c.args[0] for c in service.broadcast_frame.await_args_list] == [
+        ProposedUserStoppedSpeakingFrame,
+        ProposedUserStartedSpeakingFrame,
+    ]
 
 
 @pytest.mark.asyncio
@@ -286,6 +331,7 @@ async def test_gradium_turn_detection_the_transcript_finalizes_on_the_spot_when_
     service = _service()
     service.emit_stt_usage_metrics = AsyncMock()
     service._trace_transcription = AsyncMock()
+    order = _record_order(service)
     service._turn_phase = _TurnPhase.OPEN
     service._accumulated_text = ["so far"]
 
@@ -293,7 +339,7 @@ async def test_gradium_turn_detection_the_transcript_finalizes_on_the_spot_when_
 
     assert service._turn_phase is _TurnPhase.IDLE
     assert service.push_frame.await_args.args[0].text == "so far"
-    service.broadcast_frame.assert_awaited_once_with(ProposedUserStoppedSpeakingFrame)
+    assert order == ["TranscriptionFrame", "ProposedUserStoppedSpeakingFrame"]
 
 
 @pytest.mark.asyncio

@@ -66,9 +66,9 @@ class _TurnPhase(Enum):
     """Where turn detection is in a turn's lifecycle.
 
     IDLE waits for the signal to read inactive, ARMED opens a turn on the next
-    dip, OPEN is a turn in progress, and ENDING has proposed the stop and
-    flushed the server, and ignores the signal until the turn's transcript is
-    pushed, then hands over to ARMED.
+    dip, OPEN is a turn in progress, and ENDING has flushed the server and
+    ignores the signal until the turn's transcript is pushed and its stop
+    proposed, then hands over to ARMED.
     """
 
     IDLE = auto()
@@ -207,7 +207,7 @@ class GradiumSTTService(WebsocketSTTService):
 
         step(inactivity >= threshold) -> step(inactivity < threshold: turn opens)
             -> text* -> step(inactivity >= threshold: turn ends)
-            -> ProposedUserStoppedSpeakingFrame -> flush -> TranscriptionFrame
+            -> flush -> TranscriptionFrame -> ProposedUserStoppedSpeakingFrame
             -> step(inactivity < threshold: next turn opens)
 
     A connection's first turn opens on the signal falling below the
@@ -217,20 +217,23 @@ class GradiumSTTService(WebsocketSTTService):
     transcript is pushed the next step below the threshold opens a turn, and
     speech that continues through the flush starts one.
 
-    A turn start broadcasts a :class:`ProposedUserStartedSpeakingFrame`; a
-    turn end broadcasts a :class:`ProposedUserStoppedSpeakingFrame` and
-    flushes the server, and the final :class:`TranscriptionFrame` follows
-    once the flush is acknowledged. Local VAD frames are ignored, and
+    A turn start broadcasts a :class:`ProposedUserStartedSpeakingFrame`. A
+    turn end flushes the server; once the flush is acknowledged the final
+    :class:`TranscriptionFrame` is pushed and a
+    :class:`ProposedUserStoppedSpeakingFrame` follows it, even for a turn
+    that produced no text. Local VAD frames are ignored, and
     ``service_metadata_frame()`` recommends
     :class:`~pipecat.turns.user_turn_strategies.ExternalUserTurnStrategies`,
-    which resolve the proposals into the user turn frames, own the
-    interruption, and hold the turn open until that transcript arrives.
+    which resolve the proposals into the user turn frames and own the
+    interruption. With the transcript already in hand, they close the turn
+    on the stop proposal itself.
 
     Event handlers available (in addition to ``on_connected`` /
     ``on_disconnected``), fired only with turn detection on:
 
     - on_turn_start(service): the end-pointing signal opened a turn
-    - on_turn_end(service): the end-pointing signal closed the turn
+    - on_turn_end(service): the turn's transcript was pushed and its stop
+      proposed
 
     Example::
 
@@ -739,6 +742,7 @@ class GradiumSTTService(WebsocketSTTService):
             await self._finalize_accumulated_text()
         finally:
             if self._turn_phase is _TurnPhase.ENDING:
+                await self._propose_turn_stop()
                 self._turn_phase = _TurnPhase.ARMED
 
     async def _finalize_accumulated_text(self):
@@ -813,14 +817,17 @@ class GradiumSTTService(WebsocketSTTService):
     async def _end_turn(self):
         logger.debug("Gradium turn detection: end of turn")
         self._turn_phase = _TurnPhase.ENDING
-        await self.broadcast_frame(ProposedUserStoppedSpeakingFrame)
-        await self._call_event_handler("on_turn_end")
         # The flush pushes the decoder past its lookahead so the turn's tail
-        # tokens arrive and the transcript finalizes on the "flushed" ack.
-        # Without a flush no ack is coming, so the transcript finalizes on
-        # what has arrived.
+        # tokens arrive and the transcript finalizes on the "flushed" ack; the
+        # stop is proposed after it. Without a flush no ack is coming, so the
+        # transcript finalizes on what has arrived.
         self.request_finalize()
         if await self._send_flush():
             return
-        self._turn_phase = _TurnPhase.IDLE
         await self._finalize_accumulated_text()
+        await self._propose_turn_stop()
+        self._turn_phase = _TurnPhase.IDLE
+
+    async def _propose_turn_stop(self):
+        await self.broadcast_frame(ProposedUserStoppedSpeakingFrame)
+        await self._call_event_handler("on_turn_end")
