@@ -73,6 +73,8 @@ class TestLiveKitVideoStreamMemoryLeak(unittest.IsolatedAsyncioTestCase):
             transport_name="test-transport",
         )
         client._task_manager = MagicMock()
+        # Close the stream coroutines instead of running them.
+        client._task_manager.create_task.side_effect = lambda coro, name: coro.close()
         return client
 
     def _create_mock_video_track(self):
@@ -104,7 +106,7 @@ class TestLiveKitVideoStreamMemoryLeak(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(client._video_queue.qsize(), 0)
 
         # Track metadata should still be recorded
-        self.assertIn(participant.identity, client._video_tracks)
+        self.assertIn((participant.identity, "camera"), client._video_tracks)
 
         # Callback should still fire for user code
         client._callbacks.on_video_track_subscribed.assert_called_once()
@@ -123,7 +125,7 @@ class TestLiveKitVideoStreamMemoryLeak(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(video_tasks), 1, "Video processing task should be started")
 
         # Track metadata should be recorded
-        self.assertIn(participant.identity, client._video_tracks)
+        self.assertIn((participant.identity, "camera"), client._video_tracks)
 
         # Callback should fire
         client._callbacks.on_video_track_subscribed.assert_called_once()
@@ -280,11 +282,11 @@ class TestLiveKitAudioStreamLeakOnUnsubscribe(unittest.IsolatedAsyncioTestCase):
         mock_stream.aclose = AsyncMock()
         with patch.object(rtc, "VideoStream", return_value=mock_stream):
             await client._async_on_track_subscribed(track, pub, participant)
-        self.assertIn(participant.identity, client._video_streams)
+        self.assertIn((participant.identity, "camera"), client._video_streams)
 
         await client._async_on_track_unsubscribed(track, pub, participant)
         mock_stream.aclose.assert_awaited_once()
-        self.assertNotIn(participant.identity, client._video_streams)
+        self.assertNotIn((participant.identity, "camera"), client._video_streams)
 
 
 @unittest.skipUnless(LIVEKIT_AVAILABLE, "livekit package not installed")
@@ -1221,6 +1223,74 @@ class TestLiveKitParticipantsAlreadyInRoom(unittest.IsolatedAsyncioTestCase):
 
         client._callbacks.on_first_participant_joined.assert_awaited_once_with("alice")
         client._callbacks.on_participant_connected.assert_awaited_with("bob")
+
+
+def _video_publication(source: "rtc.TrackSource.ValueType") -> MagicMock:
+    publication = MagicMock()
+    publication.sid = f"video-{source}"
+    publication.source = source
+    return publication
+
+
+@unittest.skipUnless(LIVEKIT_AVAILABLE, "livekit package not installed")
+class TestLiveKitVideoSources(unittest.IsolatedAsyncioTestCase):
+    """A user's camera and screen share are received side by side."""
+
+    def _create_client(self) -> LiveKitTransportClient:
+        callbacks = LiveKitCallbacks(
+            **{name: AsyncMock() for name in LiveKitCallbacks.model_fields},
+        )
+        client = LiveKitTransportClient(
+            url="wss://test.livekit.cloud",
+            token="test-token",
+            room_name="test-room",
+            params=LiveKitParams(video_in_enabled=True),
+            callbacks=callbacks,
+            transport_name="test-transport",
+        )
+        client._task_manager = MagicMock()
+        # Close the stream coroutines instead of running them.
+        client._task_manager.create_task.side_effect = lambda coro, name: coro.close()
+        return client
+
+    async def _subscribe(self, client, source):
+        track = MagicMock()
+        track.kind = rtc.TrackKind.KIND_VIDEO
+        participant = MagicMock()
+        participant.identity = "alice"
+        publication = _video_publication(source)
+        stream = MagicMock()
+        stream.aclose = AsyncMock()
+        with patch.object(rtc, "VideoStream", return_value=stream):
+            await client._async_on_track_subscribed(track, publication, participant)
+        return track, publication, participant, stream
+
+    async def test_camera_and_screen_share_are_received_side_by_side(self):
+        client = self._create_client()
+        await self._subscribe(client, rtc.TrackSource.SOURCE_CAMERA)
+        await self._subscribe(client, rtc.TrackSource.SOURCE_SCREENSHARE)
+
+        self.assertEqual(
+            set(client._video_streams), {("alice", "camera"), ("alice", "screenVideo")}
+        )
+        self.assertTrue(client.has_video_track("alice", "screenVideo"))
+
+    async def test_stopping_the_screen_share_keeps_the_camera(self):
+        client = self._create_client()
+        _, _, _, camera_stream = await self._subscribe(client, rtc.TrackSource.SOURCE_CAMERA)
+        screen = await self._subscribe(client, rtc.TrackSource.SOURCE_SCREENSHARE)
+
+        await client._async_on_track_unsubscribed(*screen[:3])
+
+        camera_stream.aclose.assert_not_awaited()
+        self.assertEqual(set(client._video_streams), {("alice", "camera")})
+        self.assertFalse(client.has_video_track("alice", "screenVideo"))
+
+    async def test_video_without_a_source_is_the_camera(self):
+        client = self._create_client()
+        await self._subscribe(client, rtc.TrackSource.SOURCE_UNKNOWN)
+
+        self.assertTrue(client.has_video_track("alice", "camera"))
 
 
 if __name__ == "__main__":
