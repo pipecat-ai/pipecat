@@ -7,8 +7,8 @@
 """A bot that can look at the user's camera or screen share when asked.
 
 The transport captures both video sources as the client connects, listed in
-``video_in_sources``. Each is captured at ``framerate=0``, so no frames flow
-until the bot asks for one: the LLM has a tool per source,
+``video_in_sources``. Each is captured with ``on_request_only=True``, so no
+frames flow until the bot asks for one: the LLM has a tool per source,
 ``fetch_camera_image`` and ``fetch_screen_share_image``, and each pushes a
 ``UserImageRequestFrame`` for its source. The transport answers with the next
 frame from that source, which is added to the LLM context so the LLM can
@@ -108,8 +108,8 @@ transport_params = {
         audio_out_enabled=True,
         video_in_enabled=True,
         video_in_sources={
-            "camera": VideoInSourceParams(framerate=0),
-            "screenVideo": VideoInSourceParams(framerate=0),
+            "camera": VideoInSourceParams(on_request_only=True),
+            "screenVideo": VideoInSourceParams(on_request_only=True),
         },
     ),
     "webrtc": lambda: TransportParams(
@@ -117,8 +117,8 @@ transport_params = {
         audio_out_enabled=True,
         video_in_enabled=True,
         video_in_sources={
-            "camera": VideoInSourceParams(framerate=0),
-            "screenVideo": VideoInSourceParams(framerate=0),
+            "camera": VideoInSourceParams(on_request_only=True),
+            "screenVideo": VideoInSourceParams(on_request_only=True),
         },
     ),
 }

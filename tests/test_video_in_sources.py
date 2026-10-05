@@ -23,11 +23,11 @@ class TestVideoInSourcesParams(unittest.TestCase):
         params = TransportParams(
             video_in_enabled=True,
             video_in_sources={
-                "camera": VideoInSourceParams(framerate=0),
+                "camera": VideoInSourceParams(on_request_only=True),
                 "screenVideo": VideoInSourceParams(framerate=1),
             },
         )
-        self.assertEqual(params.video_in_sources["camera"].framerate, 0)
+        self.assertTrue(params.video_in_sources["camera"].on_request_only)
         self.assertEqual(params.video_in_sources["screenVideo"].framerate, 1)
 
     def test_source_params_from_dict(self):
@@ -37,9 +37,17 @@ class TestVideoInSourcesParams(unittest.TestCase):
     def test_default_framerate(self):
         self.assertEqual(VideoInSourceParams().framerate, 30)
 
-    def test_negative_framerate_rejected(self):
+    def test_framerate_below_one_rejected(self):
         with self.assertRaises(ValidationError):
             VideoInSourceParams(framerate=-1)
+
+    def test_zero_framerate_points_to_on_request_only(self):
+        with self.assertRaisesRegex(ValidationError, "on_request_only=True"):
+            VideoInSourceParams(framerate=0)
+
+    def test_framerate_with_on_request_only_rejected(self):
+        with self.assertRaises(ValidationError):
+            VideoInSourceParams(framerate=5, on_request_only=True)
 
     def test_sources_require_video_in_enabled(self):
         with self.assertRaises(ValidationError):
@@ -217,7 +225,7 @@ class TestDailyVideoInSourcesCapture(unittest.IsolatedAsyncioTestCase):
         params = self.params_cls(
             video_in_enabled=True,
             video_in_sources={
-                "camera": VideoInSourceParams(framerate=0),
+                "camera": VideoInSourceParams(on_request_only=True),
                 "screenVideo": VideoInSourceParams(framerate=1),
             },
         )
@@ -355,7 +363,7 @@ class TestSmallWebRTCVideoInSourcesCapture(unittest.IsolatedAsyncioTestCase):
         params = TransportParams(
             video_in_enabled=True,
             video_in_sources={
-                "camera": VideoInSourceParams(framerate=0),
+                "camera": VideoInSourceParams(on_request_only=True),
                 "screenVideo": VideoInSourceParams(framerate=1),
             },
         )

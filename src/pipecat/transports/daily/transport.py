@@ -2968,9 +2968,8 @@ class DailyTransport(BaseTransport):
         # a handler that captures a source itself takes precedence.
         if self._input:
             for video_source, source_params in self._params.video_in_sources.items():
-                await self._input.capture_participant_video(
-                    id, source_params.framerate, video_source
-                )
+                framerate = 0 if source_params.on_request_only else source_params.framerate
+                await self._input.capture_participant_video(id, framerate, video_source)
 
         if not self._other_participant_has_joined:
             self._other_participant_has_joined = True

@@ -1067,8 +1067,9 @@ class SmallWebRTCTransport(BaseTransport):
         if self._input:
             for video_source, source_params in self._params.video_in_sources.items():
                 if video_source in (CAM_VIDEO_SOURCE, SCREEN_VIDEO_SOURCE):
+                    framerate = 0 if source_params.on_request_only else source_params.framerate
                     await self._input.capture_participant_media(
-                        source=video_source, framerate=source_params.framerate
+                        source=video_source, framerate=framerate
                     )
 
         await self._call_event_handler("on_client_connected", webrtc_connection)

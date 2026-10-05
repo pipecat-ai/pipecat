@@ -79,7 +79,7 @@ transport_params = {
         audio_out_enabled=True,
         video_in_enabled=True,
         video_in_sources={
-            "camera": VideoInSourceParams(framerate=0),
+            "camera": VideoInSourceParams(on_request_only=True),
         },
     ),
     "webrtc": lambda: TransportParams(
@@ -87,7 +87,7 @@ transport_params = {
         audio_out_enabled=True,
         video_in_enabled=True,
         video_in_sources={
-            "camera": VideoInSourceParams(framerate=0),
+            "camera": VideoInSourceParams(on_request_only=True),
         },
     ),
 }

@@ -13,8 +13,9 @@ functionality.
 
 from abc import abstractmethod
 from collections.abc import Mapping
+from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from pipecat.audio.filters.base_audio_filter import BaseAudioFilter
 from pipecat.audio.mixers.base_audio_mixer import BaseAudioMixer
@@ -26,11 +27,29 @@ class VideoInSourceParams(BaseModel):
     """How a transport captures one video source from the user.
 
     Parameters:
-        framerate: Frames per second to pass on from this source. ``0`` passes on
-            a frame only when one is requested with a ``UserImageRequestFrame``.
+        framerate: Frames per second to pass on from this source.
+        on_request_only: Pass on frames only to answer a ``UserImageRequestFrame``,
+            rather than continuously at ``framerate``.
     """
 
-    framerate: int = Field(default=30, ge=0)
+    framerate: int = Field(default=30, ge=1)
+    on_request_only: bool = False
+
+    @field_validator("framerate", mode="before")
+    @classmethod
+    def _check_framerate(cls, framerate: Any) -> Any:
+        if framerate == 0:
+            raise ValueError(
+                "a framerate of 0 isn't a rate; use on_request_only=True to pass on "
+                "frames only to answer image requests"
+            )
+        return framerate
+
+    @model_validator(mode="after")
+    def _check_on_request_only(self) -> "VideoInSourceParams":
+        if self.on_request_only and "framerate" in self.model_fields_set:
+            raise ValueError("framerate doesn't apply when on_request_only=True")
+        return self
 
 
 class TransportParams(BaseModel):
