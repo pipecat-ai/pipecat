@@ -6,7 +6,7 @@
 
 import unittest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, patch
 
 import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.pipeline.capabilities import BotCapabilities
@@ -14,6 +14,7 @@ from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.frameworks.rtvi.processor import RTVIProcessor
+from pipecat.transports import base_input
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import TransportParams, VideoInSourceParams
@@ -37,9 +38,16 @@ class TestBotCapabilities(unittest.TestCase):
         self.assertEqual(result, BotCapabilities(audio_in=True, video_out=True, metrics=True))
 
 
+class _SourcesInputTransport(BaseInputTransport):
+    """An input transport that captures the camera and screen share from ``video_in_sources``."""
+
+    def _supports_video_in_source(self, video_source: str) -> bool:
+        return video_source in ("camera", "screenVideo")
+
+
 def _transport(**params) -> tuple[BaseInputTransport, BaseOutputTransport]:
     transport_params = TransportParams(**params)
-    return BaseInputTransport(transport_params), BaseOutputTransport(transport_params)
+    return _SourcesInputTransport(transport_params), BaseOutputTransport(transport_params)
 
 
 class TestPipelineWorkerCapabilities(unittest.TestCase):
@@ -81,6 +89,23 @@ class TestPipelineWorkerCapabilities(unittest.TestCase):
         worker = PipelineWorker(Pipeline([input, output]))
         self.assertTrue(worker.capabilities.video_in)
         self.assertIsNone(worker.capabilities.screen_in)
+
+    def test_unsupported_sources_warned_and_screen_in_unknown(self):
+        params = TransportParams(
+            video_in_enabled=True, video_in_sources={"screenVideo": VideoInSourceParams()}
+        )
+        with patch.object(base_input, "logger") as logger:
+            input = BaseInputTransport(params)
+        logger.warning.assert_called_once()
+        self.assertIn("screenVideo", logger.warning.call_args.args[0])
+
+        worker = PipelineWorker(Pipeline([input, BaseOutputTransport(params)]))
+        self.assertIsNone(worker.capabilities.screen_in)
+
+    def test_supported_sources_not_warned(self):
+        with patch.object(base_input, "logger") as logger:
+            _transport(video_in_enabled=True, video_in_sources={"camera": VideoInSourceParams()})
+        logger.warning.assert_not_called()
 
     def test_metrics_from_pipeline_params(self):
         input, output = _transport()

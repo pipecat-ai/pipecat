@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, call, patch
 from pydantic import ValidationError
 
 from pipecat.frames.frames import UserImageRawFrame, UserImageRequestFrame
+from pipecat.transports import base_input
 from pipecat.transports.base_transport import TransportParams, VideoInSourceParams
 from pipecat.transports.video_in_sampler import (
     JITTER_TOLERANCE_SECS,
@@ -410,6 +411,9 @@ class TestSmallWebRTCVideoInSourcesCapture(unittest.IsolatedAsyncioTestCase):
         fake = MagicMock()
         fake._params = params
         fake._input.capture_participant_media = calls.capture
+        fake._input._supports_video_in_source = lambda source: (
+            self.module.SmallWebRTCInputTransport._supports_video_in_source(None, source)
+        )
         fake._input.push_frame = AsyncMock()
         fake._call_event_handler = calls.event
         return fake, calls
@@ -439,8 +443,8 @@ class TestSmallWebRTCVideoInSourcesCapture(unittest.IsolatedAsyncioTestCase):
             video_in_enabled=True,
             video_in_sources={"camera": VideoInSourceParams(), "microphone": VideoInSourceParams()},
         )
-        with patch.object(self.module, "logger") as logger:
-            self.module.SmallWebRTCTransport(webrtc_connection=MagicMock(), params=params)
+        with patch.object(base_input, "logger") as logger:
+            self.module.SmallWebRTCInputTransport(client=MagicMock(), params=params)
         logger.warning.assert_called_once()
         self.assertIn("microphone", logger.warning.call_args.args[0])
 

@@ -76,6 +76,12 @@ class BaseInputTransport(FrameProcessor):
         # them downstream until we get another `StartFrame`.
         self._paused = False
 
+        unsupported = [s for s in params.video_in_sources if not self._supports_video_in_source(s)]
+        if unsupported:
+            logger.warning(
+                f"{self}: video_in_sources {unsupported} aren't supported and will be ignored."
+            )
+
     def enable_audio_in_stream_on_start(self, enabled: bool) -> None:
         """Enable or disable audio streaming on transport start.
 
@@ -117,6 +123,20 @@ class BaseInputTransport(FrameProcessor):
         """
         return self._sample_rate
 
+    def _supports_video_in_source(self, video_source: str) -> bool:
+        """Whether this transport captures a video source listed in ``video_in_sources``.
+
+        Transports that support ``video_in_sources`` override this. A listed
+        source this returns ``False`` for is ignored, with a warning.
+
+        Args:
+            video_source: The video source, e.g. ``"camera"`` or ``"screenVideo"``.
+
+        Returns:
+            Whether the source is captured as its user connects.
+        """
+        return False
+
     @property
     def capabilities(self) -> BotCapabilities:
         """The media this transport receives from the user.
@@ -125,11 +145,12 @@ class BaseInputTransport(FrameProcessor):
             The ``audio_in``, ``video_in`` and ``screen_in`` capabilities.
             ``screen_in`` is unknown when video input is enabled without
             ``video_in_sources``, since the application then decides which
-            sources to capture.
+            sources to capture, and when the transport doesn't capture screen
+            shares through ``video_in_sources``.
         """
         if not self._params.video_in_enabled:
             screen_in = False
-        elif self._params.video_in_sources:
+        elif self._supports_video_in_source("screenVideo") and self._params.video_in_sources:
             screen_in = "screenVideo" in self._params.video_in_sources
         else:
             screen_in = None
