@@ -1155,7 +1155,7 @@ class LiveKitInputTransport(BaseInputTransport):
         Without ``video_in_sources``, every source is captured at every frame.
         With it, only the listed sources are, each at its own framerate.
         """
-        if self._video_samplers.capturing(participant_id, video_source):
+        if self._video_samplers.is_capturing(participant_id, video_source):
             return
         if not self._params.video_in_sources:
             self._video_samplers.capture(participant_id, video_source, None)

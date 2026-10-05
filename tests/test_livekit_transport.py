@@ -1407,7 +1407,7 @@ class TestLiveKitInputVideoSampling(unittest.IsolatedAsyncioTestCase):
 
         await transport._on_participant_disconnected("alice")
 
-        self.assertFalse(transport.input()._video_samplers.capturing("alice", "camera"))
+        self.assertFalse(transport.input()._video_samplers.is_capturing("alice", "camera"))
 
     async def _waiting_request(self, input, video_source="camera"):
         result_callback = AsyncMock()
@@ -1440,7 +1440,7 @@ class TestLiveKitInputVideoSampling(unittest.IsolatedAsyncioTestCase):
         await input.stop_participant_video("alice", "screenVideo")
 
         self.assertIn("stopped", result_callback.await_args.args[0]["error"])
-        self.assertTrue(input._video_samplers.capturing("alice", "screenVideo"))
+        self.assertTrue(input._video_samplers.is_capturing("alice", "screenVideo"))
 
     async def test_waiting_request_is_answered_when_the_participant_leaves(self):
         input = self._input([])

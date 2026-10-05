@@ -153,13 +153,13 @@ class TestVideoInSamplers(unittest.TestCase):
         self.assertEqual(samplers.sample("p1", "screenVideo"), (False, None))
         self.assertEqual(samplers.sample("p2", "camera"), (False, None))
 
-    def test_capturing(self):
+    def test_is_capturing(self):
         samplers = _VideoInSamplers()
         samplers.capture("p1", "camera", 0)
-        self.assertTrue(samplers.capturing("p1", "camera"))
-        self.assertFalse(samplers.capturing("p1", "screenVideo"))
+        self.assertTrue(samplers.is_capturing("p1", "camera"))
+        self.assertFalse(samplers.is_capturing("p1", "screenVideo"))
         samplers.remove_participant("p1")
-        self.assertFalse(samplers.capturing("p1", "camera"))
+        self.assertFalse(samplers.is_capturing("p1", "camera"))
 
     def test_take_requests_keeps_the_samplers(self):
         samplers = _VideoInSamplers()
@@ -172,7 +172,7 @@ class TestVideoInSamplers(unittest.TestCase):
 
         self.assertEqual(samplers.take_requests("p1", "screenVideo"), [screen])
         self.assertEqual(samplers.take_requests("p1"), [camera])
-        self.assertTrue(samplers.capturing("p1", "screenVideo"))
+        self.assertTrue(samplers.is_capturing("p1", "screenVideo"))
 
     def test_remove_participant_and_clear_return_waiting_requests(self):
         samplers = _VideoInSamplers()
@@ -185,7 +185,7 @@ class TestVideoInSamplers(unittest.TestCase):
 
         self.assertEqual(samplers.remove_participant("p1"), [first])
         self.assertEqual(samplers.clear(), [second])
-        self.assertFalse(samplers.capturing("p2", "camera"))
+        self.assertFalse(samplers.is_capturing("p2", "camera"))
 
     def test_request_for_unsampled_source_is_not_queued(self):
         samplers = _VideoInSamplers()
@@ -540,7 +540,7 @@ class TestImageRequestsWithoutVideo(unittest.IsolatedAsyncioTestCase):
         await cls.update_participant_video(input, participant)
 
         self.assertIn("stopped", result_callback.await_args.args[0]["error"])
-        self.assertTrue(input._video_samplers.capturing("p1", "camera"))
+        self.assertTrue(input._video_samplers.is_capturing("p1", "camera"))
 
     async def test_daily_waiting_request_when_the_participant_leaves(self):
         input, cls, _ = self._daily_input()

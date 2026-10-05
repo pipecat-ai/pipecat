@@ -152,7 +152,7 @@ class _VideoInSamplers:
         else:
             self._samplers[(participant_id, video_source)] = _VideoInSampler(framerate)
 
-    def capturing(self, participant_id: str, video_source: str) -> bool:
+    def is_capturing(self, participant_id: str, video_source: str) -> bool:
         """Whether a source is being sampled.
 
         Args:
