@@ -96,9 +96,11 @@ class FlowConfig(BaseModel):
     for YAML text, :meth:`from_json` for JSON text, or Pydantic's
     ``model_validate`` for a dict that is already parsed.
 
-    A config loaded from a file is trusted: ``!include`` reads any path the
-    process can read. Load a config from an untrusted source, such as a request
-    body, with :meth:`from_yaml` and no ``base_dir``, or with :meth:`from_json`.
+    ``!include`` resolves paths on the application's file system and can read
+    any file the process can read, so it belongs only in configs the
+    application ships. Load a config from another source, such as a request
+    body, with :meth:`from_yaml` and no ``base_dir``, which rejects
+    ``!include``, or with :meth:`from_json`.
 
     Prompt text may refer to the manager's state with ``{{ key }}``
     placeholders: a node's ``role_message``, the ``content`` of its
@@ -372,7 +374,9 @@ class FlowConfig(BaseModel):
 
         YAML files may use ``!include`` with paths relative to the file's
         directory. Included paths are not confined to that directory, so load
-        only files you control.
+        only files you control. For a config from another source, such as a
+        request body, use :meth:`from_yaml` without ``base_dir`` or
+        :meth:`from_json`.
 
         Args:
             path: Path to the file.
