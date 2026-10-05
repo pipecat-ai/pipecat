@@ -44,7 +44,7 @@ from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection, SmallWebRTCTrack
-from pipecat.transports.video_in_sampler import _VideoInSampler
+from pipecat.transports.video_in_sampler import _capture_framerate, _VideoInSampler
 from pipecat.utils.shared import acquires, releases
 from pipecat.utils.types import NOT_GIVEN, NotGiven, is_given
 
@@ -1130,6 +1130,8 @@ class SmallWebRTCTransport(BaseTransport):
         participant_id: str | None = None,
         framerate: int | None | NotGiven = NOT_GIVEN,
         video_source: str = CAM_VIDEO_SOURCE,
+        *,
+        on_request_only: bool = False,
     ):
         """Capture the peer's camera or screen share at a framerate.
 
@@ -1144,10 +1146,10 @@ class SmallWebRTCTransport(BaseTransport):
                     meaning, passing on every frame unless ``framerate`` is given.
                     Will be removed in 2.0.0.
 
-            framerate: Frames per second to pass on, 30 if not given. ``0`` passes
-                on only the frames that answer image requests, and ``None`` passes
-                on every frame.
+            framerate: Frames per second to pass on, 30 if not given, or ``None``
+                for every frame. It doesn't apply with ``on_request_only``.
             video_source: Video source to capture from ("camera" or "screenVideo").
+            on_request_only: Pass on only the frames that answer image requests.
         """
         if participant_id is None or participant_id in (CAM_VIDEO_SOURCE, SCREEN_VIDEO_SOURCE):
             warnings.warn(
@@ -1164,6 +1166,9 @@ class SmallWebRTCTransport(BaseTransport):
             framerate = framerate if is_given(framerate) else None
         elif not is_given(framerate):
             framerate = 30
+        framerate = _capture_framerate(
+            framerate, on_request_only, "SmallWebRTCTransport.capture_participant_video"
+        )
 
         if self._input:
             await self._input.capture_participant_media(source=video_source, framerate=framerate)

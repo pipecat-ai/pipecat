@@ -191,6 +191,8 @@ class BaseTransport(BaseObject):
         participant_id: str,
         framerate: int | None = 30,
         video_source: str = "camera",
+        *,
+        on_request_only: bool = False,
     ):
         """Capture a participant's video source at a framerate.
 
@@ -201,9 +203,15 @@ class BaseTransport(BaseObject):
 
         Args:
             participant_id: The participant to capture, as from :meth:`get_client_id`.
-            framerate: Frames per second to pass on. ``0`` passes on only the frames
-                that answer image requests, and ``None`` passes on every frame.
+            framerate: Frames per second to pass on, or ``None`` for every frame. It
+                doesn't apply with ``on_request_only``.
+
+                .. deprecated:: 1.13.0
+                    Use ``on_request_only=True`` instead of a ``framerate`` of ``0``.
+                    Will be removed in 2.0.0.
+
             video_source: The video source, e.g. ``"camera"`` or ``"screenVideo"``.
+            on_request_only: Pass on only the frames that answer image requests.
         """
         logger.warning(f"{self}: capturing participant video isn't supported.")
 

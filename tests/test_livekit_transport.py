@@ -1362,7 +1362,7 @@ class TestLiveKitInputVideoSampling(unittest.IsolatedAsyncioTestCase):
     async def test_explicit_capture_takes_precedence(self):
         frames = [(MagicMock(), "alice", "camera")] * 3
         input = self._input(frames, video_in_sources={"camera": VideoInSourceParams()})
-        await input.capture_participant_video("alice", 0, "camera")
+        await input.capture_participant_video("alice", video_source="camera", on_request_only=True)
 
         await input._video_in_task_handler()
 

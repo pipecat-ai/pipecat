@@ -321,7 +321,10 @@ class TestDailyVideoInSourcesCapture(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             calls.capture.await_args_list,
-            [call("p1", 0, "camera"), call("p1", 1, "screenVideo")],
+            [
+                call("p1", 30, "camera", on_request_only=True),
+                call("p1", 1, "screenVideo", on_request_only=False),
+            ],
         )
 
     async def test_captures_before_event_handlers(self):
@@ -636,6 +639,41 @@ class TestCaptureParticipantVideo(unittest.IsolatedAsyncioTestCase):
                 call(source="camera", framerate=1),
             ],
         )
+
+    async def test_on_request_only_and_deprecated_framerate_zero(self):
+        transport, capture = self._smallwebrtc()
+
+        await transport.capture_participant_video("pc-1", on_request_only=True)
+        with self.assertWarns(DeprecationWarning):
+            await transport.capture_participant_video("pc-1", 0, "screenVideo")
+
+        self.assertEqual(
+            capture.await_args_list,
+            [
+                call(source="camera", framerate=0),
+                call(source="screenVideo", framerate=0),
+            ],
+        )
+
+    async def test_daily_and_livekit_on_request_only(self):
+        for module, name in (
+            ("pipecat.transports.daily.transport", "DailyInputTransport"),
+            ("pipecat.transports.livekit.transport", "LiveKitInputTransport"),
+        ):
+            try:
+                cls = getattr(__import__(module, fromlist=[name]), name)
+            except Exception as e:
+                self.skipTest(f"{name} unavailable: {e}")
+            input = MagicMock(_video_samplers=_VideoInSamplers())
+            input._client.capture_participant_video = AsyncMock()
+
+            await cls.capture_participant_video(input, "p1", on_request_only=True)
+            with self.assertWarns(DeprecationWarning):
+                await cls.capture_participant_video(input, "p2", 0)
+
+            for participant in ("p1", "p2"):
+                sampler = input._video_samplers._samplers[(participant, "camera")]
+                self.assertEqual(sampler.framerate, 0)
 
     async def test_smallwebrtc_calls_without_a_participant_keep_their_meaning(self):
         transport, capture = self._smallwebrtc()

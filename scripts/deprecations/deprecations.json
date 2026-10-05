@@ -4480,6 +4480,17 @@
       "location": "pipecat/transports/base_input.py"
     },
     {
+      "subject": "BaseTransport.capture_participant_video.framerate",
+      "module": "pipecat.transports.base_transport",
+      "kind": "parameter",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "on_request_only=True",
+      "message": "Use ``on_request_only=True`` instead of a ``framerate`` of ``0``. Will be removed in 2.0.0.",
+      "location": "pipecat/transports/base_transport.py"
+    },
+    {
       "subject": "TransportParams.video_out_bitrate",
       "module": "pipecat.transports.base_transport",
       "kind": "parameter",

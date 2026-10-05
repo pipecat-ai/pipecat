@@ -382,7 +382,7 @@ async def maybe_capture_participant_camera(
     """
     if _is_daily(transport):
         await transport.capture_participant_video(
-            client["id"], framerate=framerate, video_source="camera"
+            client["id"], framerate=framerate, video_source="camera", on_request_only=framerate == 0
         )
     elif _is_smallwebrtc(transport):
         await transport.capture_participant_video(client.pc_id, None, "camera")
@@ -425,7 +425,10 @@ async def maybe_capture_participant_screen(
     """
     if _is_daily(transport):
         await transport.capture_participant_video(
-            client["id"], framerate=framerate, video_source="screenVideo"
+            client["id"],
+            framerate=framerate,
+            video_source="screenVideo",
+            on_request_only=framerate == 0,
         )
     elif _is_smallwebrtc(transport):
         await transport.capture_participant_video(client.pc_id, None, "screenVideo")

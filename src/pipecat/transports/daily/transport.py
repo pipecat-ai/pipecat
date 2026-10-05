@@ -54,7 +54,7 @@ from pipecat.transcriptions.language import Language
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.transports.video_in_sampler import _VideoInSamplers
+from pipecat.transports.video_in_sampler import _capture_framerate, _VideoInSamplers
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
 from pipecat.utils.shared import acquires, releases
 
@@ -2042,16 +2042,22 @@ class DailyInputTransport(BaseInputTransport):
         framerate: int | None = 30,
         video_source: str = "camera",
         color_format: str = "RGB",
+        *,
+        on_request_only: bool = False,
     ):
         """Capture video from a specific participant.
 
         Args:
             participant_id: ID of the participant to capture video from.
-            framerate: Frames per second to pass on. ``0`` passes on only the frames
-                that answer image requests, and ``None`` passes on every frame.
+            framerate: Frames per second to pass on, or ``None`` for every frame. It
+                doesn't apply with ``on_request_only``.
             video_source: Video source to capture from.
             color_format: Color format for video frames.
+            on_request_only: Pass on only the frames that answer image requests.
         """
+        framerate = _capture_framerate(
+            framerate, on_request_only, "DailyTransport.capture_participant_video"
+        )
         self._video_samplers.capture(participant_id, video_source, framerate)
 
         await self._client.capture_participant_video(
@@ -2774,19 +2780,29 @@ class DailyTransport(BaseTransport):
         framerate: int | None = 30,
         video_source: str = "camera",
         color_format: str = "RGB",
+        *,
+        on_request_only: bool = False,
     ):
         """Capture video from a specific participant.
 
         Args:
             participant_id: ID of the participant to capture video from.
-            framerate: Frames per second to pass on. ``0`` passes on only the frames
-                that answer image requests, and ``None`` passes on every frame.
+            framerate: Frames per second to pass on, or ``None`` for every frame. It
+                doesn't apply with ``on_request_only``.
             video_source: Video source to capture from.
             color_format: Color format for video frames.
+            on_request_only: Pass on only the frames that answer image requests.
         """
+        framerate = _capture_framerate(
+            framerate, on_request_only, "DailyTransport.capture_participant_video"
+        )
         if self._input:
             await self._input.capture_participant_video(
-                participant_id, framerate, video_source, color_format
+                participant_id,
+                framerate,
+                video_source,
+                color_format,
+                on_request_only=framerate == 0,
             )
 
     async def update_publishing(
@@ -3034,8 +3050,12 @@ class DailyTransport(BaseTransport):
         # a handler that captures a source itself takes precedence.
         if self._input:
             for video_source, source_params in self._params.video_in_sources.items():
-                framerate = 0 if source_params.on_request_only else source_params.framerate
-                await self._input.capture_participant_video(id, framerate, video_source)
+                await self._input.capture_participant_video(
+                    id,
+                    source_params.framerate,
+                    video_source,
+                    on_request_only=source_params.on_request_only,
+                )
 
         if not self._other_participant_has_joined:
             self._other_participant_has_joined = True
