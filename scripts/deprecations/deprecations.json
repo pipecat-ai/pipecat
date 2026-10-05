@@ -4469,6 +4469,17 @@
       "location": "pipecat/transports/moq/transport.py"
     },
     {
+      "subject": "SmallWebRTCTransport.capture_participant_video.participant_id",
+      "module": "pipecat.transports.smallwebrtc.transport",
+      "kind": "parameter",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "participant_id",
+      "message": "Pass ``participant_id`` first, as on other transports. Calls without it, ``capture_participant_video(video_source=...)`` or ``capture_participant_video(\"camera\")``, keep their old meaning, passing on every frame unless ``framerate`` is given. Will be removed in 2.0.0.",
+      "location": "pipecat/transports/smallwebrtc/transport.py"
+    },
+    {
       "subject": "WebsocketServerCallbacks",
       "module": "pipecat.transports.websocket.server",
       "kind": "class",

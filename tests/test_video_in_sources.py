@@ -592,5 +592,67 @@ class TestImageRequestsWithoutVideo(unittest.IsolatedAsyncioTestCase):
         self.assertIn("disconnected", result_callback.await_args.args[0]["error"])
 
 
+class TestCaptureParticipantVideo(unittest.IsolatedAsyncioTestCase):
+    """capture_participant_video() takes the same arguments on every transport."""
+
+    def setUp(self):
+        try:
+            from pipecat.transports.smallwebrtc import transport
+        except Exception as e:
+            self.skipTest(f"SmallWebRTC transport unavailable: {e}")
+        self.module = transport
+
+    def _smallwebrtc(self):
+        transport = self.module.SmallWebRTCTransport(
+            webrtc_connection=MagicMock(), params=TransportParams(video_in_enabled=True)
+        )
+        transport._input = MagicMock(capture_participant_media=AsyncMock())
+        return transport, transport._input.capture_participant_media
+
+    async def test_unsupported_transport_warns(self):
+        from pipecat.transports import base_transport
+
+        class AudioOnlyTransport(base_transport.BaseTransport):
+            def input(self):
+                return MagicMock()
+
+            def output(self):
+                return MagicMock()
+
+        with patch.object(base_transport, "logger") as logger:
+            await AudioOnlyTransport().capture_participant_video("p1")
+        logger.warning.assert_called_once()
+
+    async def test_smallwebrtc_takes_the_standard_arguments(self):
+        transport, capture = self._smallwebrtc()
+
+        await transport.capture_participant_video("pc-1", video_source="screenVideo")
+        await transport.capture_participant_video("pc-1", 1, "camera")
+
+        self.assertEqual(
+            capture.await_args_list,
+            [
+                call(source="screenVideo", framerate=30),
+                call(source="camera", framerate=1),
+            ],
+        )
+
+    async def test_smallwebrtc_calls_without_a_participant_keep_their_meaning(self):
+        transport, capture = self._smallwebrtc()
+
+        with self.assertWarns(DeprecationWarning):
+            await transport.capture_participant_video(video_source="screenVideo")
+        with self.assertWarns(DeprecationWarning):
+            await transport.capture_participant_video("camera", 1)
+
+        self.assertEqual(
+            capture.await_args_list,
+            [
+                call(source="screenVideo", framerate=None),
+                call(source="camera", framerate=1),
+            ],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -14,6 +14,7 @@ streaming, application messaging, and client connection management.
 import asyncio
 import fractions
 import time
+import warnings
 from collections import deque
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -45,6 +46,7 @@ from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection, SmallWebRTCTrack
 from pipecat.transports.video_in_sampler import _VideoInSampler
 from pipecat.utils.shared import acquires, releases
+from pipecat.utils.types import NOT_GIVEN, NotGiven, is_given
 
 try:
     from aiortc import VideoStreamTrack
@@ -1114,16 +1116,44 @@ class SmallWebRTCTransport(BaseTransport):
 
     async def capture_participant_video(
         self,
+        participant_id: str | None = None,
+        framerate: int | None | NotGiven = NOT_GIVEN,
         video_source: str = CAM_VIDEO_SOURCE,
-        framerate: int | None = None,
     ):
-        """Capture video from a specific participant.
+        """Capture the peer's camera or screen share at a framerate.
 
         Args:
+            participant_id: The peer's id, as from ``get_transport_client_id()``.
+                SmallWebRTC has one peer, so the id isn't used to select it.
+
+                .. deprecated:: 1.13.0
+                    Pass ``participant_id`` first, as on other transports. Calls
+                    without it, ``capture_participant_video(video_source=...)``
+                    or ``capture_participant_video("camera")``, keep their old
+                    meaning, passing on every frame unless ``framerate`` is given.
+                    Will be removed in 2.0.0.
+
+            framerate: Frames per second to pass on, 30 if not given. ``0`` passes
+                on only the frames that answer image requests, and ``None`` passes
+                on every frame.
             video_source: Video source to capture from ("camera" or "screenVideo").
-            framerate: Frames per second to pass on. ``0`` passes on only the frames
-                that answer image requests, and ``None`` passes on every frame.
         """
+        if participant_id is None or participant_id in (CAM_VIDEO_SOURCE, SCREEN_VIDEO_SOURCE):
+            warnings.warn(
+                "Calling `SmallWebRTCTransport.capture_participant_video` without a "
+                "`participant_id` is deprecated since 1.13.0 and will be removed in 2.0.0. "
+                "Use `capture_participant_video(participant_id, framerate, video_source)` "
+                "instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            # The deprecated form is (video_source, framerate=None).
+            if participant_id is not None:
+                video_source = participant_id
+            framerate = framerate if is_given(framerate) else None
+        elif not is_given(framerate):
+            framerate = 30
+
         if self._input:
             await self._input.capture_participant_media(source=video_source, framerate=framerate)
 

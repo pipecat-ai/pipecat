@@ -1209,7 +1209,7 @@ class DailyTransportClient(EventHandler):
         self,
         participant_id: str,
         callback: Callable,
-        framerate: int = 30,
+        framerate: int | None = 30,
         video_source: str = "camera",
         color_format: str = "RGB",
     ):
@@ -2039,7 +2039,7 @@ class DailyInputTransport(BaseInputTransport):
     async def capture_participant_video(
         self,
         participant_id: str,
-        framerate: int = 30,
+        framerate: int | None = 30,
         video_source: str = "camera",
         color_format: str = "RGB",
     ):
@@ -2047,7 +2047,8 @@ class DailyInputTransport(BaseInputTransport):
 
         Args:
             participant_id: ID of the participant to capture video from.
-            framerate: Desired framerate for video capture.
+            framerate: Frames per second to pass on. ``0`` passes on only the frames
+                that answer image requests, and ``None`` passes on every frame.
             video_source: Video source to capture from.
             color_format: Color format for video frames.
         """
@@ -2759,7 +2760,7 @@ class DailyTransport(BaseTransport):
     async def capture_participant_video(
         self,
         participant_id: str,
-        framerate: int = 30,
+        framerate: int | None = 30,
         video_source: str = "camera",
         color_format: str = "RGB",
     ):
@@ -2767,7 +2768,8 @@ class DailyTransport(BaseTransport):
 
         Args:
             participant_id: ID of the participant to capture video from.
-            framerate: Desired framerate for video capture.
+            framerate: Frames per second to pass on. ``0`` passes on only the frames
+                that answer image requests, and ``None`` passes on every frame.
             video_source: Video source to capture from.
             color_format: Color format for video frames.
         """

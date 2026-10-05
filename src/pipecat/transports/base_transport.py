@@ -15,6 +15,7 @@ from abc import abstractmethod
 from collections.abc import Mapping
 from typing import Any
 
+from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from pipecat.audio.filters.base_audio_filter import BaseAudioFilter
@@ -184,3 +185,25 @@ class BaseTransport(BaseObject):
             The frame processor that handles outgoing frames.
         """
         pass
+
+    async def capture_participant_video(
+        self,
+        participant_id: str,
+        framerate: int | None = 30,
+        video_source: str = "camera",
+    ):
+        """Capture a participant's video source at a framerate.
+
+        This captures a source on demand, where ``TransportParams.video_in_sources``
+        captures the listed sources as each user connects, and takes precedence
+        over it for the source. Transports that receive user video implement this;
+        the others log a warning.
+
+        Args:
+            participant_id: The participant to capture, as given by the transport's
+                client events.
+            framerate: Frames per second to pass on. ``0`` passes on only the frames
+                that answer image requests, and ``None`` passes on every frame.
+            video_source: The video source, e.g. ``"camera"`` or ``"screenVideo"``.
+        """
+        logger.warning(f"{self}: capturing participant video isn't supported.")
