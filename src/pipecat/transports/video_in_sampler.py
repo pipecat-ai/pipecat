@@ -116,3 +116,73 @@ class _VideoInSampler:
             self._next_time = max(self._next_time, now - tolerance) + interval
 
         return True, request
+
+
+class _VideoInSamplers:
+    """An input transport's video samplers, by participant and video source."""
+
+    def __init__(self):
+        """Initialize with no sources being sampled."""
+        self._samplers: dict[tuple[str, str], _VideoInSampler] = {}
+
+    def capture(self, participant_id: str, video_source: str, framerate: int | None):
+        """Start sampling a source, or change its framerate.
+
+        Changing the framerate keeps the source's sampler, so image requests
+        already waiting on it are still answered.
+
+        Args:
+            participant_id: The participant whose video this is.
+            video_source: The video source, e.g. ``"camera"`` or ``"screenVideo"``.
+            framerate: Frames per second to pass on. ``0`` passes on frames only
+                to answer requests, and ``None`` passes on every frame.
+        """
+        sampler = self._samplers.get((participant_id, video_source))
+        if sampler:
+            sampler.framerate = framerate
+        else:
+            self._samplers[(participant_id, video_source)] = _VideoInSampler(framerate)
+
+    def add_request(
+        self, participant_id: str, video_source: str, request: UserImageRequestFrame
+    ) -> bool:
+        """Queue an image request for the next frame of a source to answer.
+
+        Args:
+            participant_id: The participant whose video is requested.
+            video_source: The video source requested.
+            request: The image request to answer.
+
+        Returns:
+            Whether the request was queued; ``False`` if the source isn't being
+            sampled, so nothing would answer it.
+        """
+        sampler = self._samplers.get((participant_id, video_source))
+        if sampler:
+            sampler.add_request(request)
+        return sampler is not None
+
+    def sample(
+        self, participant_id: str, video_source: str
+    ) -> tuple[bool, UserImageRequestFrame | None]:
+        """Decide whether to pass on the frame that just arrived from a source.
+
+        Args:
+            participant_id: The participant the frame came from.
+            video_source: The video source the frame came from.
+
+        Returns:
+            A tuple of ``(due, request)``, as from :meth:`_VideoInSampler.sample`.
+            A frame from a source that isn't being sampled is never due.
+        """
+        sampler = self._samplers.get((participant_id, video_source))
+        return sampler.sample() if sampler else (False, None)
+
+    def remove_participant(self, participant_id: str):
+        """Stop sampling every video source of a participant.
+
+        Args:
+            participant_id: The participant to forget, e.g. one who left.
+        """
+        for key in [key for key in self._samplers if key[0] == participant_id]:
+            del self._samplers[key]

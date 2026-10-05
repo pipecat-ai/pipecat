@@ -12,7 +12,11 @@ from pydantic import ValidationError
 
 from pipecat.frames.frames import UserImageRawFrame, UserImageRequestFrame
 from pipecat.transports.base_transport import TransportParams, VideoInSourceParams
-from pipecat.transports.video_in_sampler import JITTER_TOLERANCE_SECS, _VideoInSampler
+from pipecat.transports.video_in_sampler import (
+    JITTER_TOLERANCE_SECS,
+    _VideoInSampler,
+    _VideoInSamplers,
+)
 
 
 class TestVideoInSourcesParams(unittest.TestCase):
@@ -141,6 +145,49 @@ class TestVideoInSampler(unittest.TestCase):
         self.assertFalse(self._sample_at(sampler, 1.0)[0])
 
 
+class TestVideoInSamplers(unittest.TestCase):
+    def test_unsampled_source_is_never_due(self):
+        samplers = _VideoInSamplers()
+        samplers.capture("p1", "camera", None)
+        self.assertEqual(samplers.sample("p1", "screenVideo"), (False, None))
+        self.assertEqual(samplers.sample("p2", "camera"), (False, None))
+
+    def test_request_for_unsampled_source_is_not_queued(self):
+        samplers = _VideoInSamplers()
+        samplers.capture("p1", "camera", 0)
+        request = UserImageRequestFrame(user_id="p1", video_source="screenVideo")
+        self.assertFalse(samplers.add_request("p1", "screenVideo", request))
+
+    def test_request_answered_by_its_source(self):
+        samplers = _VideoInSamplers()
+        samplers.capture("p1", "camera", 0)
+        request = UserImageRequestFrame(user_id="p1")
+        self.assertTrue(samplers.add_request("p1", "camera", request))
+        self.assertEqual(samplers.sample("p1", "camera"), (True, request))
+
+    def test_capturing_again_keeps_waiting_requests(self):
+        samplers = _VideoInSamplers()
+        samplers.capture("p1", "camera", 0)
+        request = UserImageRequestFrame(user_id="p1")
+        samplers.add_request("p1", "camera", request)
+
+        samplers.capture("p1", "camera", 1)
+
+        self.assertEqual(samplers.sample("p1", "camera"), (True, request))
+
+    def test_removing_a_participant_stops_sampling_their_sources(self):
+        samplers = _VideoInSamplers()
+        samplers.capture("p1", "camera", None)
+        samplers.capture("p1", "screenVideo", None)
+        samplers.capture("p2", "camera", None)
+
+        samplers.remove_participant("p1")
+
+        self.assertEqual(samplers.sample("p1", "camera"), (False, None))
+        self.assertEqual(samplers.sample("p1", "screenVideo"), (False, None))
+        self.assertTrue(samplers.sample("p2", "camera")[0])
+
+
 def _image_frame() -> UserImageRawFrame:
     return UserImageRawFrame(user_id="peer", image=b"", size=(1, 1), format="RGB")
 
@@ -155,7 +202,8 @@ class TestDailyVideoInSampling(unittest.IsolatedAsyncioTestCase):
 
     def _fake_input(self, framerate: int):
         fake = MagicMock()
-        fake._video_samplers = {"p1": {"camera": _VideoInSampler(framerate)}}
+        fake._video_samplers = _VideoInSamplers()
+        fake._video_samplers.capture("p1", "camera", framerate)
         fake.push_video_frame = AsyncMock()
         return fake
 
@@ -186,7 +234,6 @@ class TestDailyVideoInSampling(unittest.IsolatedAsyncioTestCase):
 
         result_callback.assert_awaited_once()
         self.assertIn("error", result_callback.await_args.args[0])
-        self.assertEqual(fake._video_samplers["p1"].keys(), {"camera"})
 
     async def test_request_for_uncaptured_participant_is_answered_with_an_error(self):
         fake = self._fake_input(0)
@@ -256,6 +303,14 @@ class TestDailyVideoInSourcesCapture(unittest.IsolatedAsyncioTestCase):
         await self.transport_cls._on_participant_joined(fake, {"id": "p1"})
 
         calls.capture.assert_not_awaited()
+
+    async def test_participant_leaving_stops_sampling_their_video(self):
+        fake, _calls = self._fake_transport(self.params_cls(video_in_enabled=True))
+        fake._input.remove_participant_video = MagicMock()
+
+        await self.transport_cls._on_participant_left(fake, {"id": "p1"}, "leftCall")
+
+        fake._input.remove_participant_video.assert_called_once_with("p1")
 
 
 class TestSmallWebRTCVideoInSampling(unittest.IsolatedAsyncioTestCase):

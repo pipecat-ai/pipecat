@@ -54,7 +54,7 @@ from pipecat.transcriptions.language import Language
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.transports.video_in_sampler import _VideoInSampler
+from pipecat.transports.video_in_sampler import _VideoInSamplers
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
 from pipecat.utils.shared import acquires, releases
 
@@ -1812,8 +1812,7 @@ class DailyInputTransport(BaseInputTransport):
         self._client = client
         self._params = params
 
-        # Video samplers by participant and video source.
-        self._video_samplers: dict[str, dict[str, _VideoInSampler]] = {}
+        self._video_samplers = _VideoInSamplers()
 
         # Whether we have started audio streaming.
         self._streaming_started = False
@@ -2026,9 +2025,7 @@ class DailyInputTransport(BaseInputTransport):
             video_source: Video source to capture from.
             color_format: Color format for video frames.
         """
-        self._video_samplers.setdefault(participant_id, {})[video_source] = _VideoInSampler(
-            framerate
-        )
+        self._video_samplers.capture(participant_id, video_source, framerate)
 
         await self._client.capture_participant_video(
             participant_id, self._on_participant_video_frame, framerate, video_source, color_format
@@ -2041,9 +2038,7 @@ class DailyInputTransport(BaseInputTransport):
             frame: The user image request frame.
         """
         video_source = frame.video_source if frame.video_source else "camera"
-        sampler = self._video_samplers.get(frame.user_id, {}).get(video_source)
-        if sampler:
-            sampler.add_request(frame)
+        if self._video_samplers.add_request(frame.user_id, video_source, frame):
             return
 
         # Nothing will answer this request, so complete it with an error: the
@@ -2053,12 +2048,19 @@ class DailyInputTransport(BaseInputTransport):
         if frame.result_callback:
             await frame.result_callback({"error": error})
 
+    def remove_participant_video(self, participant_id: str):
+        """Stop sampling video from a participant who left.
+
+        Args:
+            participant_id: ID of the participant who left.
+        """
+        self._video_samplers.remove_participant(participant_id)
+
     async def _on_participant_video_frame(
         self, participant_id: str, video_frame: VideoFrame, video_source: str
     ):
         """Handle received participant video frames."""
-        sampler = self._video_samplers[participant_id][video_source]
-        render_frame, request_frame = sampler.sample()
+        render_frame, request_frame = self._video_samplers.sample(participant_id, video_source)
 
         if render_frame:
             frame = UserImageRawFrame(
@@ -2985,6 +2987,8 @@ class DailyTransport(BaseTransport):
         """Handle participant left events."""
         id = participant["id"]
         logger.info(f"Participant left {id}")
+        if self._input:
+            self._input.remove_participant_video(id)
         await self._call_event_handler("on_participant_left", participant, reason)
         # Also call on_client_disconnected for compatibility with other transports
         await self._call_event_handler("on_client_disconnected", participant)
