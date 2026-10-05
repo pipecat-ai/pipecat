@@ -49,7 +49,7 @@ from pipecat.services.websocket_service import ReportErrorCallback
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.deprecation import deprecated
-from pipecat.utils.errors import ErrorCategory
+from pipecat.utils.errors import ErrorCategory, classify_http_status_code
 from pipecat.utils.network import QuickFailureTracker, exponential_backoff_time
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
@@ -670,9 +670,9 @@ class SarvamSTTService(STTService):
         socket closes, so its return outside of ``_disconnect()`` is a dropped
         connection. A connection that had been up for a while is reopened at
         once; quick failures back off exponentially, and enough of them in a row
-        give up. A 4xx ``ApiError`` (e.g. an invalid API key rejected at the
-        handshake) gives up at once. Giving up leaves the service unusable, so a
-        ``ServiceSwitcher`` can move off it.
+        give up. An ``ApiError`` whose status marks a permanent failure (e.g. an
+        invalid API key rejected at the handshake) gives up at once. Giving up
+        leaves the service unusable, so a ``ServiceSwitcher`` can move off it.
         """
         try:
             while True:
@@ -701,11 +701,15 @@ class SarvamSTTService(STTService):
                     # ApiError's str() includes the request headers, which carry
                     # the API key, so only the status and body are reported.
                     msg = f"Sarvam rejected the connection (status {e.status_code}): {e.body}"
+                    category = (
+                        classify_http_status_code(e.status_code)
+                        if e.status_code is not None
+                        else None
+                    )
                     await self._call_event_handler("on_connection_error", msg)
-                    if e.status_code is not None and 400 <= e.status_code < 500:
-                        await self.push_error(error_msg=msg, force_treat_as_permanent=True)
+                    await self.push_error(error_msg=msg, category=category)
+                    if category and category.is_permanent:
                         return
-                    await self.push_error(error_msg=msg)
                 except Exception as e:
                     await self._call_event_handler("on_connection_error", str(e))
                     await self.push_error(error_msg=f"Sarvam connection error: {e}", exception=e)

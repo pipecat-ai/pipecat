@@ -1403,8 +1403,13 @@ def _legacy_service_for(port: int) -> SarvamSTTService:
 
 
 def _capture_errors(errors):
-    async def inner(error_msg, exception=None, fatal=False, force_treat_as_permanent=False):
-        errors.append((error_msg, force_treat_as_permanent))
+    """Record each error as (message, permanent, category), as push_error would judge it."""
+
+    async def inner(
+        error_msg, exception=None, fatal=False, category=None, force_treat_as_permanent=False
+    ):
+        permanent = force_treat_as_permanent or bool(category and category.is_permanent)
+        errors.append((error_msg, permanent, category))
 
     return inner
 
@@ -1481,16 +1486,19 @@ async def test_legacy_rejected_key_gives_up_without_reporting_the_key(monkeypatc
     assert len(handshakes) == 1
     assert len(errors) == 1
     assert connection_errors == [errors[0][0]]
-    message, permanent = errors[0]
+    message, permanent, category = errors[0]
     assert permanent
+    assert category is ErrorCategory.AUTHENTICATION
     assert "401" in message
     assert "secret-key" not in message
 
 
 @pytest.mark.asyncio
-async def test_legacy_gives_up_after_repeated_failed_connects(monkeypatch):
+@pytest.mark.parametrize("status", [HTTPStatus.SERVICE_UNAVAILABLE, HTTPStatus.TOO_MANY_REQUESTS])
+async def test_legacy_gives_up_after_repeated_failed_connects(monkeypatch, status):
+    """A refusal that may clear on its own, such as a rate limit, is retried before giving up."""
     monkeypatch.setattr("pipecat.services.sarvam.stt.exponential_backoff_time", lambda _: 0)
-    process_request, handshakes = _refuse(HTTPStatus.SERVICE_UNAVAILABLE, None)
+    process_request, handshakes = _refuse(status, None)
     errors = []
     async with serve(AsyncMock(), "127.0.0.1", 0, process_request=process_request) as server:
         service = _legacy_service_for(server.sockets[0].getsockname()[1])
@@ -1503,7 +1511,7 @@ async def test_legacy_gives_up_after_repeated_failed_connects(monkeypatch):
             await service.cleanup()
 
     assert len(handshakes) == service._quick_failure_tracker.max_consecutive_failures
-    assert [permanent for _, permanent in errors] == [False] * len(handshakes) + [True]
+    assert [permanent for _, permanent, _ in errors] == [False] * len(handshakes) + [True]
 
 
 @pytest.mark.asyncio
@@ -1528,4 +1536,4 @@ async def test_legacy_failed_first_connect_is_retried_in_the_background(monkeypa
             await service.cleanup()
 
     assert len(handshakes) == 2
-    assert [permanent for _, permanent in errors] == [False]
+    assert [permanent for _, permanent, _ in errors] == [False]
