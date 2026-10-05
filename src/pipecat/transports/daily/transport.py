@@ -347,6 +347,20 @@ class DailyParams(TransportParams):
     transcription_settings: DailyTranscriptionSettings = DailyTranscriptionSettings()
 
 
+# A video track in one of these states sends no frames until it changes again.
+_STOPPED_VIDEO_STATES = ("off", "blocked")
+
+
+def _video_state(participant: Mapping[str, Any], video_source: str) -> str | None:
+    """The state of a participant's video track, e.g. ``"playable"`` or ``"off"``."""
+    media = participant.get("media", {})
+    if video_source in ("camera", "screenVideo"):
+        track = media.get(video_source)
+    else:
+        track = media.get("customVideo", {}).get(video_source)
+    return track.get("state") if track else None
+
+
 class DailyCallbacks(BaseModel):
     """Callback handlers for Daily events.
 
@@ -2050,23 +2064,46 @@ class DailyInputTransport(BaseInputTransport):
             frame: The user image request frame.
         """
         video_source = frame.video_source if frame.video_source else "camera"
-        if self._video_samplers.add_request(frame.user_id, video_source, frame):
+        participant = self._client.participants().get(frame.user_id)
+        if participant and _video_state(participant, video_source) in _STOPPED_VIDEO_STATES:
+            error = f"{frame.user_id} isn't sending {video_source} video."
+            await self._answer_image_requests([frame], error)
             return
 
-        # Nothing will answer this request, so complete it with an error: the
-        # function call that made it would otherwise never finish.
-        error = f"No {video_source} video is being captured from {frame.user_id}."
-        logger.warning(f"{self}: {error}")
-        if frame.result_callback:
-            await frame.result_callback({"error": error})
+        if not self._video_samplers.add_request(frame.user_id, video_source, frame):
+            error = f"No {video_source} video is being captured from {frame.user_id}."
+            await self._answer_image_requests([frame], error)
 
-    def remove_participant_video(self, participant_id: str):
+    async def update_participant_video(self, participant: Mapping[str, Any]):
+        """Answer the image requests waiting on a participant's video that stopped.
+
+        The sources stay captured, so their frames are sampled again if they restart.
+
+        Args:
+            participant: The participant, as in a participant-updated event.
+        """
+        participant_id = participant["id"]
+        media = participant.get("media", {})
+        video_sources = ["camera", "screenVideo", *media.get("customVideo", {})]
+        for video_source in video_sources:
+            if _video_state(participant, video_source) in _STOPPED_VIDEO_STATES:
+                requests = self._video_samplers.take_requests(participant_id, video_source)
+                error = f"{participant_id} stopped sending {video_source} video."
+                await self._answer_image_requests(requests, error)
+
+    async def remove_participant_video(self, participant_id: str):
         """Stop sampling video from a participant who left.
 
         Args:
             participant_id: ID of the participant who left.
         """
-        self._video_samplers.remove_participant(participant_id)
+        requests = self._video_samplers.remove_participant(participant_id)
+        await self._answer_image_requests(requests, f"{participant_id} left.")
+
+    async def remove_all_video(self):
+        """Stop sampling video from every participant, e.g. after leaving the room."""
+        requests = self._video_samplers.clear()
+        await self._answer_image_requests(requests, "The bot left the room.")
 
     async def _on_participant_video_frame(
         self, participant_id: str, video_frame: VideoFrame, video_source: str
@@ -2862,6 +2899,8 @@ class DailyTransport(BaseTransport):
 
     async def _on_call_state_updated(self, state: str):
         """Handle call state update events."""
+        if state == "left" and self._input:
+            await self._input.remove_all_video()
         await self._call_event_handler("on_call_state_updated", state)
 
     async def _on_client_connected(self, participant: Any):
@@ -3000,7 +3039,7 @@ class DailyTransport(BaseTransport):
         id = participant["id"]
         logger.info(f"Participant left {id}")
         if self._input:
-            self._input.remove_participant_video(id)
+            await self._input.remove_participant_video(id)
         await self._call_event_handler("on_participant_left", participant, reason)
         # Also call on_client_disconnected for compatibility with other transports
         await self._call_event_handler("on_client_disconnected", participant)
@@ -3008,6 +3047,8 @@ class DailyTransport(BaseTransport):
     async def _on_participant_updated(self, participant):
         """Handle participant updated events."""
         logger.trace(f"{self} participant updated: {participant}")
+        if self._input:
+            await self._input.update_participant_video(participant)
         await self._call_event_handler("on_participant_updated", participant)
 
     async def _on_transcription_message(self, message: Mapping[str, Any]) -> None:

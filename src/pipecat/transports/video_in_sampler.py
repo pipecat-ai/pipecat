@@ -83,6 +83,15 @@ class _VideoInSampler:
         """
         self._requests.append(request)
 
+    def take_requests(self) -> list[UserImageRequestFrame]:
+        """Remove and return the image requests waiting for a frame.
+
+        Returns:
+            The waiting requests, oldest first.
+        """
+        requests, self._requests = self._requests, []
+        return requests
+
     def sample(self) -> tuple[bool, UserImageRequestFrame | None]:
         """Decide whether to pass on the frame that just arrived.
 
@@ -190,11 +199,45 @@ class _VideoInSamplers:
         sampler = self._samplers.get((participant_id, video_source))
         return sampler.sample() if sampler else (False, None)
 
-    def remove_participant(self, participant_id: str):
+    def take_requests(
+        self, participant_id: str, video_source: str | None = None
+    ) -> list[UserImageRequestFrame]:
+        """Remove and return image requests waiting for a frame, keeping the samplers.
+
+        Args:
+            participant_id: The participant whose requests to take.
+            video_source: The video source whose requests to take, or ``None`` for
+                all of the participant's sources.
+
+        Returns:
+            The waiting requests.
+        """
+        requests = []
+        for (participant, source), sampler in self._samplers.items():
+            if participant == participant_id and video_source in (None, source):
+                requests.extend(sampler.take_requests())
+        return requests
+
+    def remove_participant(self, participant_id: str) -> list[UserImageRequestFrame]:
         """Stop sampling every video source of a participant.
 
         Args:
             participant_id: The participant to forget, e.g. one who left.
+
+        Returns:
+            The image requests that were waiting on the participant's video.
         """
+        requests = self.take_requests(participant_id)
         for key in [key for key in self._samplers if key[0] == participant_id]:
             del self._samplers[key]
+        return requests
+
+    def clear(self) -> list[UserImageRequestFrame]:
+        """Stop sampling every video source.
+
+        Returns:
+            The image requests that were waiting on any of them.
+        """
+        requests = [r for sampler in self._samplers.values() for r in sampler.take_requests()]
+        self._samplers.clear()
+        return requests

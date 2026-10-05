@@ -161,6 +161,32 @@ class TestVideoInSamplers(unittest.TestCase):
         samplers.remove_participant("p1")
         self.assertFalse(samplers.capturing("p1", "camera"))
 
+    def test_take_requests_keeps_the_samplers(self):
+        samplers = _VideoInSamplers()
+        samplers.capture("p1", "camera", 0)
+        samplers.capture("p1", "screenVideo", 0)
+        camera = UserImageRequestFrame(user_id="p1")
+        screen = UserImageRequestFrame(user_id="p1", video_source="screenVideo")
+        samplers.add_request("p1", "camera", camera)
+        samplers.add_request("p1", "screenVideo", screen)
+
+        self.assertEqual(samplers.take_requests("p1", "screenVideo"), [screen])
+        self.assertEqual(samplers.take_requests("p1"), [camera])
+        self.assertTrue(samplers.capturing("p1", "screenVideo"))
+
+    def test_remove_participant_and_clear_return_waiting_requests(self):
+        samplers = _VideoInSamplers()
+        samplers.capture("p1", "camera", 0)
+        samplers.capture("p2", "camera", 0)
+        first = UserImageRequestFrame(user_id="p1")
+        second = UserImageRequestFrame(user_id="p2")
+        samplers.add_request("p1", "camera", first)
+        samplers.add_request("p2", "camera", second)
+
+        self.assertEqual(samplers.remove_participant("p1"), [first])
+        self.assertEqual(samplers.clear(), [second])
+        self.assertFalse(samplers.capturing("p2", "camera"))
+
     def test_request_for_unsampled_source_is_not_queued(self):
         samplers = _VideoInSamplers()
         samplers.capture("p1", "camera", 0)
@@ -209,10 +235,14 @@ class TestDailyVideoInSampling(unittest.IsolatedAsyncioTestCase):
             self.skipTest(f"Daily transport unavailable: {e}")
         self.transport_cls = DailyInputTransport
 
-    def _fake_input(self, framerate: int):
+    def _fake_input(self, framerate: int, participants: dict | None = None):
         fake = MagicMock()
         fake._video_samplers = _VideoInSamplers()
         fake._video_samplers.capture("p1", "camera", framerate)
+        fake._client.participants.return_value = participants or {}
+        fake._answer_image_requests = lambda requests, error: (
+            base_input.BaseInputTransport._answer_image_requests(fake, requests, error)
+        )
         fake.push_video_frame = AsyncMock()
         return fake
 
@@ -315,11 +345,11 @@ class TestDailyVideoInSourcesCapture(unittest.IsolatedAsyncioTestCase):
 
     async def test_participant_leaving_stops_sampling_their_video(self):
         fake, _calls = self._fake_transport(self.params_cls(video_in_enabled=True))
-        fake._input.remove_participant_video = MagicMock()
+        fake._input.remove_participant_video = AsyncMock()
 
         await self.transport_cls._on_participant_left(fake, {"id": "p1"}, "leftCall")
 
-        fake._input.remove_participant_video.assert_called_once_with("p1")
+        fake._input.remove_participant_video.assert_awaited_once_with("p1")
 
 
 class TestSmallWebRTCVideoInSampling(unittest.IsolatedAsyncioTestCase):
@@ -466,6 +496,109 @@ class TestSmallWebRTCVideoInSourcesCapture(unittest.IsolatedAsyncioTestCase):
         await self.module.SmallWebRTCTransport._on_client_connected(fake, MagicMock())
 
         calls.capture.assert_not_awaited()
+
+
+class TestImageRequestsWithoutVideo(unittest.IsolatedAsyncioTestCase):
+    """Image requests that no frame will answer are answered with an error."""
+
+    async def _waiting_request(self, input, transport_cls, user_id="p1", video_source="camera"):
+        result_callback = AsyncMock()
+        request = UserImageRequestFrame(
+            user_id=user_id, video_source=video_source, result_callback=result_callback
+        )
+        await transport_cls.request_participant_image(input, request)
+        return result_callback
+
+    def _daily_input(self, camera_state="playable"):
+        try:
+            from pipecat.transports.daily.transport import DailyInputTransport
+        except Exception as e:
+            self.skipTest(f"Daily transport unavailable: {e}")
+        participant = {"id": "p1", "media": {"camera": {"state": camera_state}}}
+        input = MagicMock()
+        input._video_samplers = _VideoInSamplers()
+        input._video_samplers.capture("p1", "camera", 0)
+        input._client.participants.return_value = {"p1": participant}
+        input._answer_image_requests = lambda requests, error: (
+            base_input.BaseInputTransport._answer_image_requests(input, requests, error)
+        )
+        return input, DailyInputTransport, participant
+
+    async def test_daily_request_for_a_camera_that_is_off(self):
+        input, cls, _ = self._daily_input(camera_state="off")
+
+        result_callback = await self._waiting_request(input, cls)
+
+        self.assertIn("isn't sending", result_callback.await_args.args[0]["error"])
+
+    async def test_daily_waiting_request_when_the_camera_turns_off(self):
+        input, cls, participant = self._daily_input()
+        result_callback = await self._waiting_request(input, cls)
+        result_callback.assert_not_awaited()
+
+        participant["media"]["camera"]["state"] = "off"
+        await cls.update_participant_video(input, participant)
+
+        self.assertIn("stopped", result_callback.await_args.args[0]["error"])
+        self.assertTrue(input._video_samplers.capturing("p1", "camera"))
+
+    async def test_daily_waiting_request_when_the_participant_leaves(self):
+        input, cls, _ = self._daily_input()
+        result_callback = await self._waiting_request(input, cls)
+
+        await cls.remove_participant_video(input, "p1")
+
+        self.assertIn("left", result_callback.await_args.args[0]["error"])
+
+    async def test_daily_waiting_requests_when_the_bot_leaves(self):
+        try:
+            from pipecat.transports.daily.transport import DailyTransport
+        except Exception as e:
+            self.skipTest(f"Daily transport unavailable: {e}")
+        transport = MagicMock()
+        transport._input.remove_all_video = AsyncMock()
+        transport._call_event_handler = AsyncMock()
+
+        await DailyTransport._on_call_state_updated(transport, "left")
+
+        transport._input.remove_all_video.assert_awaited_once()
+
+    def _smallwebrtc_input(self, enabled=True):
+        try:
+            from pipecat.transports.smallwebrtc.transport import SmallWebRTCInputTransport
+        except Exception as e:
+            self.skipTest(f"SmallWebRTC transport unavailable: {e}")
+        client = MagicMock()
+        client.video_source_enabled = lambda video_source: enabled
+        input = SmallWebRTCInputTransport(
+            client=client, params=TransportParams(video_in_enabled=True)
+        )
+        input.create_task = MagicMock(side_effect=lambda coro, *args: coro.close())
+        return input, SmallWebRTCInputTransport
+
+    async def test_smallwebrtc_request_for_a_source_that_is_off(self):
+        input, cls = self._smallwebrtc_input(enabled=False)
+
+        result_callback = await self._waiting_request(input, cls, video_source="screenVideo")
+
+        self.assertIn("isn't sending", result_callback.await_args.args[0]["error"])
+
+    async def test_smallwebrtc_waiting_request_when_the_source_stops(self):
+        input, cls = self._smallwebrtc_input()
+        result_callback = await self._waiting_request(input, cls, video_source="screenVideo")
+        result_callback.assert_not_awaited()
+
+        await input.stop_video("screenVideo")
+
+        self.assertIn("stopped", result_callback.await_args.args[0]["error"])
+
+    async def test_smallwebrtc_waiting_requests_when_the_peer_disconnects(self):
+        input, cls = self._smallwebrtc_input()
+        result_callback = await self._waiting_request(input, cls)
+
+        await input.remove_all_video()
+
+        self.assertIn("disconnected", result_callback.await_args.args[0]["error"])
 
 
 if __name__ == "__main__":

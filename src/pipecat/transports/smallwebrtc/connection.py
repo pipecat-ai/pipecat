@@ -300,6 +300,7 @@ class SmallWebRTCConnection(BaseObject):
         self._register_event_handler("app-message")
         self._register_event_handler("track-started")
         self._register_event_handler("track-ended")
+        self._register_event_handler("track-status")
         # connection states
         self._register_event_handler("connecting")
         self._register_event_handler("connected")
@@ -377,7 +378,7 @@ class SmallWebRTCConnection(BaseObject):
                     else:
                         json_message = json.loads(message)
                         if json_message["type"] == SIGNALLING_TYPE and json_message.get("message"):
-                            self._handle_signalling_message(json_message["message"])
+                            await self._handle_signalling_message(json_message["message"])
                         else:
                             if self.is_connected():
                                 await self._call_event_handler("app-message", json_message)
@@ -831,7 +832,7 @@ class SmallWebRTCConnection(BaseObject):
             {"type": SIGNALLING_TYPE, "message": RenegotiateMessage().model_dump()}
         )
 
-    def _handle_signalling_message(self, message):
+    async def _handle_signalling_message(self, message):
         """Handle incoming signaling messages."""
         logger.debug(f"Signalling message received: {message}")
         inbound_adapter = TypeAdapter(SignallingMessage.Inbound)
@@ -843,6 +844,9 @@ class SmallWebRTCConnection(BaseObject):
                 )()
                 if track:
                     track.set_enabled(signalling_message.enabled)
+                await self._call_event_handler(
+                    "track-status", signalling_message.receiver_index, signalling_message.enabled
+                )
 
     async def add_ice_candidate(self, candidate):
         """Handle incoming ICE candidates."""
