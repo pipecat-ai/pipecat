@@ -733,6 +733,10 @@ class LLMUserAggregator(LLMContextAggregator):
         self._user_turn_interrupted_bot = False
         self._consecutive_empty_user_turn_recoveries = 0
 
+        # An LLM run requested while a user turn is open, held until the turn
+        # ends. Any context push in the meantime runs the LLM and clears it.
+        self._llm_run_pending = False
+
         self._user_turn_controller = UserTurnController(
             user_turn_strategies=user_turn_strategies,
             user_turn_stop_timeout=self._params.user_turn_stop_timeout,
@@ -892,6 +896,15 @@ class LLMUserAggregator(LLMContextAggregator):
         await self._user_turn_controller.process_frame(frame)
 
         await self._user_idle_controller.process_frame(frame)
+
+    async def push_context_frame(self, direction: FrameDirection = FrameDirection.DOWNSTREAM):
+        """Push a context frame in the specified direction.
+
+        Args:
+            direction: The direction to push the frame (upstream or downstream).
+        """
+        self._llm_run_pending = False
+        await super().push_context_frame(direction)
 
     async def push_aggregation(self) -> str:
         """Push the current aggregation."""
@@ -1251,23 +1264,33 @@ class LLMUserAggregator(LLMContextAggregator):
 
         return should_mute_frame
 
+    async def _run_llm(self):
+        # While a user turn is open, the inference that ends it runs on this
+        # same context, so running now as well would answer twice (e.g. a
+        # Flows node transition landing mid-turn). Realtime mode doesn't run
+        # inference at turn end, so it runs now.
+        if self._user_turn_controller.user_turn_active and not self._realtime_service_mode:
+            self._llm_run_pending = True
+        else:
+            await self.push_context_frame()
+
     async def _handle_llm_run(self, frame: LLMRunFrame):
-        await self.push_context_frame()
+        await self._run_llm()
 
     async def _handle_llm_messages_append(self, frame: LLMMessagesAppendFrame):
         self.add_messages(frame.messages)
         if frame.run_llm:
-            await self.push_context_frame()
+            await self._run_llm()
 
     async def _handle_llm_messages_update(self, frame: LLMMessagesUpdateFrame):
         self.set_messages(frame.messages)
         if frame.run_llm:
-            await self.push_context_frame()
+            await self._run_llm()
 
     async def _handle_llm_messages_transform(self, frame: LLMMessagesTransformFrame):
         self.transform_messages(frame.transform)
         if frame.run_llm:
-            await self.push_context_frame()
+            await self._run_llm()
 
     async def _handle_transcription(self, frame: TranscriptionFrame):
         text = frame.text
@@ -1495,6 +1518,14 @@ class LLMUserAggregator(LLMContextAggregator):
             run_llm: Whether the context write should run inference.
         """
         segment = await self._push_aggregation(run_llm=run_llm)
+
+        # A run requested during the turn that no inference has covered yet.
+        # At session end there is nothing left to answer, so it's dropped.
+        run_pending_llm = self._llm_run_pending and not on_session_end
+        self._llm_run_pending = False
+        if run_pending_llm:
+            await self.push_context_frame()
+
         full_aggregation = self._full_user_turn_aggregation
         self._full_user_turn_aggregation = None
 
@@ -1515,7 +1546,7 @@ class LLMUserAggregator(LLMContextAggregator):
 
         if content:
             self._consecutive_empty_user_turn_recoveries = 0
-        elif not on_session_end:
+        elif not on_session_end and not run_pending_llm:
             # An empty turn doesn't run the LLM, so the bot stays silent unless
             # a recovery runs it. Without one, restart the idle timer, which
             # this turn's start cancelled.
