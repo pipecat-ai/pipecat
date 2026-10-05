@@ -49,6 +49,7 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
     TTSStoppedFrame,
 )
+from pipecat.pipeline.capabilities import BotCapabilities
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 from pipecat.transports.base_transport import TransportParams
 from pipecat.utils.frame_queue import FrameQueue
@@ -121,6 +122,17 @@ class BaseOutputTransport(FrameProcessor):
             The size of audio chunks in bytes.
         """
         return self._audio_chunk_size
+
+    @property
+    def capabilities(self) -> BotCapabilities:
+        """The media this transport sends to the user.
+
+        Returns:
+            The ``audio_out`` and ``video_out`` capabilities.
+        """
+        return BotCapabilities(
+            audio_out=self._params.audio_out_enabled, video_out=self._params.video_out_enabled
+        )
 
     async def setup(self, setup: FrameProcessorSetup):
         """Set up the transport.
