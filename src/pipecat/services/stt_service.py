@@ -40,7 +40,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSet
 from pipecat.services.ai_service import AIService
 from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import DEFAULT_TTFS_P99
-from pipecat.services.websocket_service import ReportErrorCallback, WebsocketService
+from pipecat.services.websocket_service import WebsocketService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.types import is_given
@@ -1015,9 +1015,6 @@ class WebsocketSTTService(STTService, WebsocketService):
     real audio has been sent for a configurable timeout, preventing servers from
     closing idle connections (e.g. when behind a ServiceSwitcher). Subclasses can
     override ``_send_keepalive()`` to wrap the silence in a service-specific protocol.
-
-    A receive loop started without a websocket reconnects first, so a connect
-    that failed is retried like a dropped connection.
     """
 
     def __init__(
@@ -1072,18 +1069,6 @@ class WebsocketSTTService(STTService, WebsocketService):
         """Disconnect and cancel keepalive task."""
         await super()._disconnect()
         await self._cancel_keepalive_task()
-
-    async def _receive_task_handler(self, report_error: ReportErrorCallback):
-        """Receive messages, reconnecting first if the connect left no websocket.
-
-        Args:
-            report_error: Callback function to report connection errors.
-        """
-        if self._websocket is None:
-            message = f"{self} not connected"
-            if not await self._maybe_try_reconnect(message, report_error):
-                return
-        await super()._receive_task_handler(report_error)
 
     async def _do_reconnect(self):
         """Disconnect and reconnect the websocket.

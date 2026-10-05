@@ -57,7 +57,6 @@ class ConnectFailingSTTService(WebsocketSTTService):
         super().__init__(settings=STTSettings(model=None, language=None), **kwargs)
         self._failures = failures
         self.connect_attempts = 0
-        self.received_without_websocket = False
         self._receive_task: asyncio.Task | None = None
         self._reconnect_backoff_min_wait = 0.05
         self._reconnect_backoff_max_wait = 0.05
@@ -97,7 +96,6 @@ class ConnectFailingSTTService(WebsocketSTTService):
 
     async def _receive_messages(self):
         if self._websocket is None:
-            self.received_without_websocket = True
             raise ConnectionError("not connected")
         async for _ in self._websocket:
             pass
@@ -126,7 +124,6 @@ async def test_failed_connect_is_retried_like_a_drop():
 
     assert service.connect_attempts == 2
     assert service.is_usable is True
-    assert service.received_without_websocket is False
 
 
 @pytest.mark.asyncio

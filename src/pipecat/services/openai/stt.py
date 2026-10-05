@@ -701,10 +701,8 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
         Called by ``WebsocketService._receive_task_handler`` which wraps
         this method with automatic reconnection on connection errors.
         """
-        # The receive loop reconnects before calling this when there is no
-        # websocket, and reconnects re-establish it before the next iteration,
-        # so this invariant should always hold when this method runs.
-        assert self._websocket is not None
+        if not self._websocket:
+            raise Exception("Websocket not connected")
         async for message in self._websocket:
             try:
                 evt = json.loads(message)
