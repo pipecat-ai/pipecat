@@ -13,13 +13,43 @@ functionality.
 
 from abc import abstractmethod
 from collections.abc import Mapping
+from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from pipecat.audio.filters.base_audio_filter import BaseAudioFilter
 from pipecat.audio.mixers.base_audio_mixer import BaseAudioMixer
 from pipecat.processors.frame_processor import FrameProcessor
 from pipecat.utils.base_object import BaseObject
+
+
+class VideoInSourceParams(BaseModel):
+    """How a transport captures one video source from the user.
+
+    Parameters:
+        framerate: Frames per second to pass on from this source.
+        on_request_only: Pass on frames only to answer a ``UserImageRequestFrame``,
+            rather than continuously at ``framerate``.
+    """
+
+    framerate: int = Field(default=30, ge=1)
+    on_request_only: bool = False
+
+    @field_validator("framerate", mode="before")
+    @classmethod
+    def _check_framerate(cls, framerate: Any) -> Any:
+        if framerate == 0:
+            raise ValueError(
+                "a framerate of 0 isn't a rate; use on_request_only=True to pass on "
+                "frames only to answer image requests"
+            )
+        return framerate
+
+    @model_validator(mode="after")
+    def _check_on_request_only(self) -> "VideoInSourceParams":
+        if self.on_request_only and "framerate" in self.model_fields_set:
+            raise ValueError("framerate doesn't apply when on_request_only=True")
+        return self
 
 
 class TransportParams(BaseModel):
@@ -49,6 +79,11 @@ class TransportParams(BaseModel):
         audio_in_stream_on_start: Start audio streaming immediately on transport start.
         audio_in_passthrough: Pass through input audio frames downstream.
         video_in_enabled: Enable video input streaming.
+        video_in_sources: Video sources to capture from each user as they connect,
+            keyed by source (``"camera"``, ``"screenVideo"``, or a transport-specific
+            custom source). Sources not listed here are captured only when the
+            application asks for them, e.g. with the transport's
+            ``capture_participant_video()``. Requires ``video_in_enabled``.
         video_out_enabled: Enable video output streaming.
         video_out_is_live: Enable real-time video output streaming.
         video_out_width: Video output width in pixels.
@@ -86,6 +121,7 @@ class TransportParams(BaseModel):
     audio_in_stream_on_start: bool = True
     audio_in_passthrough: bool = True
     video_in_enabled: bool = False
+    video_in_sources: dict[str, VideoInSourceParams] = Field(default_factory=dict)
     video_out_enabled: bool = False
     video_out_is_live: bool = False
     video_out_width: int = 1024
@@ -95,6 +131,12 @@ class TransportParams(BaseModel):
     video_out_color_format: str = "RGB"
     video_out_codec: str | None = None
     video_out_destinations: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _check_video_in_sources(self) -> "TransportParams":
+        if self.video_in_sources and not self.video_in_enabled:
+            raise ValueError("video_in_sources requires video_in_enabled=True")
+        return self
 
 
 class BaseTransport(BaseObject):

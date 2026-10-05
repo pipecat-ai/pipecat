@@ -288,6 +288,9 @@ class ProjectGenerator:
             "transcription": self.config.transcription,
             "observability": self.config.enable_observability,
             "eval": self.config.enable_eval,
+            # Only the Daily and SmallWebRTC transport entries list video sources.
+            "video_in_sources": self.config.video_input
+            and bool({"daily", "daily_pstn_dialin", "smallwebrtc"} & set(self.config.transports)),
         }
 
         # Get imports

@@ -26,17 +26,30 @@ from pipecat.utils.base_object import BaseObject
 try:
     import aiortc.rtcsctptransport as _sctp_transport
     from aiortc import (
+        RTCBundlePolicy,
         RTCConfiguration,
         RTCIceServer,
         RTCPeerConnection,
         RTCSessionDescription,
     )
+    from aiortc.jitterbuffer import JitterBuffer
     from aiortc.rtcrtpreceiver import RemoteStreamTrack
     from av.frame import Frame
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error('In order to use the SmallWebRTC, you need to `uv add "pipecat-ai[webrtc]"`.')
     raise ImportError(f"Missing module: {e}") from e
+
+# Packets the screen share receiver's jitter buffer holds, which bounds the
+# size of a frame it can assemble. aiortc's 128 packets (about 150 KB) is
+# smaller than a keyframe of a detailed, high-resolution screen share, so such
+# a keyframe is dropped, the next keyframe requested is as large, and no frame
+# ever decodes. 512 packets, libwebrtc's initial packet buffer size, fit frames
+# of about 600 KB. The capacity doesn't delay frames, but it is how many packets
+# arrive before a lost one is given up on, so the camera keeps aiortc's default.
+# aiortc has no setting for this, so the buffer is replaced as the track is
+# wrapped.
+SCREEN_VIDEO_JITTER_BUFFER_CAPACITY = 512
 
 # Clamp aiortc's SCTP DATA-chunk payload size so the on-wire UDP packet fits
 # inside the smallest-MTU path we're likely to see (IPv6 minimum 1280,
@@ -130,15 +143,21 @@ class SmallWebRTCTrack:
     enable/disable control and frame discarding for audio and video streams.
     """
 
-    def __init__(self, receiver):
+    def __init__(self, receiver, jitter_buffer_capacity: int | None = None):
         """Initialize the WebRTC track wrapper.
 
         Args:
             receiver: The RemoteStreamTrack receiver instance.
+            jitter_buffer_capacity: Packets the video receiver's jitter buffer
+                holds, or ``None`` for aiortc's default.
         """
         self._receiver = receiver
         # Configuring the receiver for not consuming the track by default to prevent memory grow
         self._receiver._enabled = False
+        if jitter_buffer_capacity is not None:
+            receiver._RTCRtpReceiver__jitter_buffer = JitterBuffer(
+                capacity=jitter_buffer_capacity, is_video=True
+            )
         self._track = receiver.track
         self._enabled = True
         self._last_recv_time: float = 0.0
@@ -310,7 +329,11 @@ class SmallWebRTCConnection(BaseObject):
     def _initialize(self):
         """Initialize the peer connection and associated components."""
         logger.debug("Initializing new peer connection")
-        rtc_config = RTCConfiguration(iceServers=self.ice_servers)
+        # With aiortc's default (balanced) policy, the screen share's transceiver is
+        # left off the bundled transport, so its packets never reach it.
+        rtc_config = RTCConfiguration(
+            iceServers=self.ice_servers, bundlePolicy=RTCBundlePolicy.MAX_BUNDLE
+        )
 
         self._answer: RTCSessionDescription | None = None
         self._pc = RTCPeerConnection(rtc_config)
@@ -745,7 +768,9 @@ class SmallWebRTCConnection(BaseObject):
             return None
 
         receiver = transceivers[SCREEN_VIDEO_TRANSCEIVER_INDEX].receiver
-        video_track = SmallWebRTCTrack(receiver) if receiver else None
+        video_track = (
+            SmallWebRTCTrack(receiver, SCREEN_VIDEO_JITTER_BUFFER_CAPACITY) if receiver else None
+        )
         self._track_map[SCREEN_VIDEO_TRANSCEIVER_INDEX] = video_track
         return video_track
 
