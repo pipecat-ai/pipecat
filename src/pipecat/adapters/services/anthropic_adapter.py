@@ -76,7 +76,7 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
         """Get the identifier used in LLMSpecificMessage instances for Anthropic."""
         return "anthropic"
 
-    def get_llm_invocation_params(
+    async def get_llm_invocation_params(
         self,
         context: LLMContext,
         enable_prompt_caching: bool,
@@ -102,6 +102,7 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
         Returns:
             Dictionary of parameters for invoking Anthropic's LLM API.
         """
+        await self.prepare_file_content(context)
         converted = self._from_universal_context_messages(
             self.get_messages(context), system_instruction=system_instruction
         )

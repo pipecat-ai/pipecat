@@ -53,7 +53,7 @@ class OpenAILiveLLMAdapter(BaseLLMAdapter[OpenAILiveLLMInvocationParams]):
         """Get the identifier used in LLMSpecificMessage instances for OpenAI Live."""
         return "openai-live"
 
-    def get_llm_invocation_params(
+    async def get_llm_invocation_params(
         self, context: LLMContext, *, system_instruction: str | None = None
     ) -> OpenAILiveLLMInvocationParams:
         """Derive session configuration from a universal LLM context.

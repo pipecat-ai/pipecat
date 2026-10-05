@@ -15,6 +15,7 @@ from pipecat.adapters.services.anthropic_adapter import AnthropicLLMAdapter
 from pipecat.adapters.services.bedrock_adapter import AWSBedrockLLMAdapter
 from pipecat.adapters.services.gemini_adapter import GeminiLLMAdapter, GeminiVertexLLMAdapter
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter
+from pipecat.adapters.services.open_ai_realtime_adapter import OpenAIRealtimeLLMAdapter
 from pipecat.adapters.services.open_ai_responses_adapter import OpenAIResponsesLLMAdapter
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.utils.file_resolver import FileResolver, FileResolverError
@@ -356,9 +357,7 @@ class TestResolveFileItems(unittest.IsolatedAsyncioTestCase):
 
         adapter = OpenAILLMAdapter()
         adapter.file_resolver = resolver
-        params = await adapter.prepare_llm_invocation_params(
-            context, convert_developer_to_user=False
-        )
+        params = await adapter.get_llm_invocation_params(context, convert_developer_to_user=False)
 
         resolver._fetch_uncached.assert_called_once_with("https://example.com/a.pdf")
         # The provider request carries the inlined bytes...
@@ -485,7 +484,7 @@ class TestResolveFileItems(unittest.IsolatedAsyncioTestCase):
 
         adapter = AWSBedrockLLMAdapter()
         adapter.file_resolver = resolver
-        await adapter.prepare_llm_invocation_params(context)
+        await adapter.get_llm_invocation_params(context)
 
         messages = adapter.get_messages_for_logging(context)
         self.assertEqual(len(messages), 1)
@@ -500,21 +499,15 @@ class TestResolveFileItems(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(LLMContextConversionError):
             await adapter.prepare_file_content(context)
 
-    async def test_prepare_without_resolver_skips_resolution_and_kwarg(self):
-        """Adapters that don't take a file_resolver kwarg (e.g. the realtime
-        family) stay callable through prepare when no resolver is configured."""
+    async def test_adapter_for_provider_without_files_fetches_nothing(self):
+        context = self._file_url_context("https://example.com/a.pdf")
+        resolver = self._resolver()
 
-        class KwargIntolerantAdapter(OpenAILLMAdapter):
-            def get_llm_invocation_params(self, context, *, convert_developer_to_user):  # type: ignore[override]
-                return super().get_llm_invocation_params(
-                    context, convert_developer_to_user=convert_developer_to_user
-                )
+        adapter = OpenAIRealtimeLLMAdapter()
+        adapter.file_resolver = resolver
+        await adapter.get_llm_invocation_params(context)
 
-        context = LLMContext(messages=[{"role": "user", "content": "hello"}])
-        params = await KwargIntolerantAdapter().prepare_llm_invocation_params(
-            context, convert_developer_to_user=False
-        )
-        self.assertEqual(params["messages"][0]["content"], "hello")
+        resolver._fetch_uncached.assert_not_called()
 
     async def test_text_only_context_is_untouched(self):
         context = LLMContext(messages=[{"role": "user", "content": "hello"}])

@@ -1081,7 +1081,7 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
             # system instruction is delegated to the adapter, which still
             # chooses the init-provided value if there is one.
             adapter = self.get_llm_adapter()
-            params = adapter.get_llm_invocation_params(
+            params = await adapter.get_llm_invocation_params(
                 self._context, system_instruction=assert_given(self._system_instruction_from_init)
             )
             system_instruction = params["system_instruction"]
@@ -1430,7 +1430,7 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
             system_instruction = None
             tools = None
             if self._context:
-                params = adapter.get_llm_invocation_params(
+                params = await adapter.get_llm_invocation_params(
                     self._context,
                     system_instruction=assert_given(self._system_instruction_from_init),
                 )
@@ -1893,7 +1893,7 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
         adapter = self.get_llm_adapter()
         messages = cast(
             "list[Content | ContentDict]",
-            adapter.get_llm_invocation_params(self._context).get("messages", []),
+            (await adapter.get_llm_invocation_params(self._context)).get("messages", []),
         )
         if not messages:
             # No messages to seed convo with, so we're ready for realtime input right away
@@ -1955,7 +1955,7 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
         adapter = self.get_llm_adapter()
         messages = cast(
             "list[Content | ContentDict]",
-            adapter.get_llm_invocation_params(context).get("messages", []),
+            (await adapter.get_llm_invocation_params(context)).get("messages", []),
         )
 
         if not messages:

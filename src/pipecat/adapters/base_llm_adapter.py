@@ -11,6 +11,7 @@ adapters that handle tool format conversion and standardization.
 """
 
 import base64
+import inspect
 import warnings
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
@@ -79,6 +80,22 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
         self._builtin_tools: dict[str, FunctionSchema] = {}
         self._file_resolver: FileResolver | None = None
 
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        method = cls.__dict__.get("get_llm_invocation_params")
+        if method is not None and not inspect.iscoroutinefunction(method):
+            # stacklevel=3 steps past ABCMeta.__new__, which calls this hook,
+            # so the warning points at the subclass's definition.
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn(
+                    f"`{cls.__name__}` defines `get_llm_invocation_params` as a sync method, "
+                    "but it is async. Define it with `async def`, and `await` it where you "
+                    "call it.",
+                    DeprecationWarning,
+                    stacklevel=3,
+                )
+
     @property
     def builtin_tools(self) -> dict[str, FunctionSchema]:
         """Built-in tools automatically merged into every inference request.
@@ -104,8 +121,14 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
         pass
 
     @abstractmethod
-    def get_llm_invocation_params(self, context: LLMContext, **kwargs) -> TLLMInvocationParams:
+    async def get_llm_invocation_params(
+        self, context: LLMContext, **kwargs
+    ) -> TLLMInvocationParams:
         """Get provider-specific LLM invocation parameters from a universal LLM context.
+
+        An adapter whose provider takes files awaits
+        :meth:`prepare_file_content` first, so the files its conversion inlines
+        are in the :attr:`file_resolver`'s caches.
 
         Args:
             context: The LLM context containing messages, tools, etc.
@@ -170,7 +193,7 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
         and cloud-storage URIs it resolves through its own IAM (e.g. Bedrock
         reading ``s3://``). A URL the provider can't consume is instead
         fetched into the file resolver's cache and inlined at conversion —
-        see :meth:`prepare_llm_invocation_params`.
+        see :meth:`prepare_file_content`.
 
         Args:
             url: The file URL from a ``file_url`` context content item.
@@ -180,32 +203,6 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
             True if conversion can pass `url` through to the provider.
         """
         return False
-
-    async def prepare_llm_invocation_params(
-        self, context: LLMContext, **kwargs
-    ) -> TLLMInvocationParams:
-        """Resolve the context's file content, then convert it to provider invocation params.
-
-        The one entry point services call per LLM invocation: runs the async
-        file resolution (:meth:`prepare_file_content`) into the
-        :attr:`file_resolver`'s caches, then delegates to the synchronous
-        :meth:`get_llm_invocation_params`, whose conversion reads those caches.
-        The context itself is never modified.
-
-        Args:
-            context: The LLM context to resolve and convert.
-            **kwargs: Forwarded to :meth:`get_llm_invocation_params`.
-
-        Returns:
-            Provider-specific parameters for invoking the LLM.
-
-        Raises:
-            LLMContextConversionError: If a file can't be resolved or the
-                context can't be converted.
-        """
-        if self._file_resolver is not None:
-            await self.prepare_file_content(context)
-        return self.get_llm_invocation_params(context, **kwargs)
 
     async def prepare_file_content(self, context: LLMContext) -> None:
         """Fetch the file content this provider will need into the resolver's caches.
@@ -220,6 +217,12 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
         fetched once no matter how many turns — or how many adapters sharing
         the resolver — consume it; only the per-provider pass-through decision
         is re-evaluated here on every run.
+
+        An adapter whose conversion inlines files (through
+        :meth:`inlined_file_content` or :meth:`decoded_file_bytes`) awaits this
+        at the start of :meth:`get_llm_invocation_params`. An adapter for a
+        provider that doesn't take files doesn't call it, so nothing is fetched
+        for that provider.
 
         Args:
             context: The LLM context whose messages to resolve.
@@ -306,8 +309,8 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
             if resolved is not None:
                 return resolved
         raise ValueError(
-            f"Unresolved file URL for this provider: {url!r} (run resolution via "
-            "prepare_llm_invocation_params with a file resolver set)"
+            f"Unresolved file URL for this provider: {url!r} (await prepare_file_content "
+            "in get_llm_invocation_params, with a file resolver set)"
         )
 
     def decoded_file_bytes(self, file_data: Mapping[str, Any]) -> bytes:

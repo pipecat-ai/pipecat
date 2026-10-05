@@ -50,7 +50,7 @@ class InworldRealtimeLLMAdapter(BaseLLMAdapter):
         """Get the identifier used in LLMSpecificMessage instances for Inworld Realtime."""
         return "inworld-realtime"
 
-    def get_llm_invocation_params(
+    async def get_llm_invocation_params(
         self, context: LLMContext, *, system_instruction: str | None = None
     ) -> InworldRealtimeLLMInvocationParams:
         """Get Inworld Realtime-specific LLM invocation parameters from a universal LLM context.
