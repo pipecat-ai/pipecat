@@ -33,6 +33,7 @@ from pipecat.frames.frames import (
     OutputTransportMessageUrgentFrame,
     StartFrame,
 )
+from pipecat.pipeline.capabilities import BotCapabilities
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
@@ -588,6 +589,18 @@ class LemonSliceOutputTransport(BaseOutputTransport):
 
         # This is the custom track destination expected by LemonSlice
         self._transport_destination: str | None = "stream"
+
+    @property
+    def capabilities(self) -> BotCapabilities:
+        """The media this transport sends to the user.
+
+        The LemonSlice avatar publishes its video to the room itself, so the user
+        receives bot video even though this transport sends none.
+
+        Returns:
+            The ``audio_out`` capability, with ``video_out`` set.
+        """
+        return super().capabilities.override(BotCapabilities(video_out=True))
 
     async def setup(self, setup: FrameProcessorSetup):
         """Setup the output transport.

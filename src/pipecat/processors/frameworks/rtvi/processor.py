@@ -539,7 +539,11 @@ class RTVIProcessor(FrameProcessor):
             version = RTVI.PROTOCOL_VERSION
         message = RTVI.BotReady(
             id=self._client_ready_id,
-            data=RTVI.BotReadyData(version=version, about=about),
+            data=RTVI.BotReadyData(
+                version=version,
+                about=about,
+                capabilities=self.pipeline_worker.capabilities,
+            ),
         )
         await self.push_transport_message(message)
 

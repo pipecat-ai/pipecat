@@ -26,10 +26,11 @@ from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.frames.frames import (
     AggregationType,
 )
+from pipecat.pipeline.capabilities import BotCapabilities
 from pipecat.utils.deprecation import deprecated
 
 # -- Constants --
-PROTOCOL_VERSION = "2.1.0"
+PROTOCOL_VERSION = "2.2.0"
 
 # -- Version compatibility --
 # Any 1.x client is deprecated but still supported with the old bot-output format.
@@ -166,10 +167,18 @@ class BotReadyData(BaseModel):
     """Data for bot ready notification.
 
     Contains protocol version and initial configuration.
+
+    Parameters:
+        version: The RTVI protocol version the bot speaks with this client.
+        about: Information about the bot, such as the Pipecat library and version.
+        capabilities: What the bot does in this session (media sent and received,
+            metrics), so the client can show only the UI that applies. Added in
+            protocol 2.2.0.
     """
 
     version: str
     about: Mapping[str, Any] | None = None
+    capabilities: BotCapabilities | None = None
 
 
 class BotReady(BaseModel):
