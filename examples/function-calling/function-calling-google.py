@@ -24,7 +24,6 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import (
     create_transport,
-    get_transport_client_id,
 )
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
@@ -191,7 +190,7 @@ indicate you should use the get_image tool are:
     async def on_client_connected(transport, client):
         logger.info(f"Client connected: {client}")
 
-        client_id = get_transport_client_id(transport, client)
+        client_id = transport.get_client_id(client)
 
         # Kick off the conversation.
         context.add_message(

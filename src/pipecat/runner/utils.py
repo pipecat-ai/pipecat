@@ -60,7 +60,6 @@ if TYPE_CHECKING:
     from fastapi import WebSocket
 
     from pipecat.transports.daily.transport import DailyTransport
-    from pipecat.transports.livekit.transport import LiveKitTransport
     from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
     from pipecat.transports.vonage.video_connector import VonageVideoConnectorTransport
 
@@ -327,10 +326,6 @@ def _is_daily(transport: BaseTransport) -> "TypeGuard[DailyTransport]":
     return _transport_is(transport, "DailyTransport")
 
 
-def _is_livekit(transport: BaseTransport) -> "TypeGuard[LiveKitTransport]":
-    return _transport_is(transport, "LiveKitTransport")
-
-
 def _is_smallwebrtc(transport: BaseTransport) -> "TypeGuard[SmallWebRTCTransport]":
     return _transport_is(transport, "SmallWebRTCTransport")
 
@@ -339,8 +334,17 @@ def _is_vonage(transport: BaseTransport) -> "TypeGuard[VonageVideoConnectorTrans
     return _transport_is(transport, "VonageVideoConnectorTransport")
 
 
+@deprecated(
+    "`get_transport_client_id` is deprecated since 1.13.0 and will be removed in 2.0.0. "
+    "Use `BaseTransport.get_client_id()` instead."
+)
 def get_transport_client_id(transport: BaseTransport, client: Any) -> str:
     """Get client identifier from transport-specific client object.
+
+    .. deprecated:: 1.13.0
+        Use :meth:`~pipecat.transports.base_transport.BaseTransport.get_client_id`
+        instead: ``transport.get_client_id(client)``.
+        Will be removed in 2.0.0.
 
     Args:
         transport: The transport instance.
@@ -349,17 +353,7 @@ def get_transport_client_id(transport: BaseTransport, client: Any) -> str:
     Returns:
         Client identifier string, empty if transport not supported.
     """
-    if _is_smallwebrtc(transport):
-        return client.pc_id
-    if _is_daily(transport):
-        return client["id"]
-    if _is_livekit(transport):
-        return client["id"]
-    if _is_vonage(transport):
-        return client["streamId"]
-
-    logger.warning(f"Unable to get client id from unsupported transport {type(transport)}")
-    return ""
+    return transport.get_client_id(client)
 
 
 @deprecated(

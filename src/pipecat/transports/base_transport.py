@@ -200,10 +200,25 @@ class BaseTransport(BaseObject):
         the others log a warning.
 
         Args:
-            participant_id: The participant to capture, as given by the transport's
-                client events.
+            participant_id: The participant to capture, as from :meth:`get_client_id`.
             framerate: Frames per second to pass on. ``0`` passes on only the frames
                 that answer image requests, and ``None`` passes on every frame.
             video_source: The video source, e.g. ``"camera"`` or ``"screenVideo"``.
         """
         logger.warning(f"{self}: capturing participant video isn't supported.")
+
+    def get_client_id(self, client: Any) -> str:
+        """The id of a client, as passed to ``on_client_connected``.
+
+        This is the ``participant_id`` that :meth:`capture_participant_video` and
+        image requests take. Transports with client events implement this; the
+        others log a warning and return an empty string.
+
+        Args:
+            client: The client, as passed to the transport's client events.
+
+        Returns:
+            The client's id.
+        """
+        logger.warning(f"{self}: getting a client id isn't supported.")
+        return ""

@@ -316,19 +316,15 @@ if __name__ == "__main__":
 
 
 class TestGetTransportClientId(unittest.TestCase):
-    def test_livekit_client_id_is_the_participant_identity(self):
-        class LiveKitTransport:
-            pass
+    def test_is_deprecated_and_asks_the_transport(self):
+        transport = MagicMock()
+        transport.get_client_id.return_value = "User-1234"
 
-        client_id = get_transport_client_id(LiveKitTransport(), {"id": "User-1234"})
+        with self.assertWarns(DeprecationWarning):
+            client_id = get_transport_client_id(transport, {"id": "User-1234"})
 
         self.assertEqual(client_id, "User-1234")
-
-    def test_unsupported_transport_has_no_client_id(self):
-        class OtherTransport:
-            pass
-
-        self.assertEqual(get_transport_client_id(OtherTransport(), {"id": "User-1234"}), "")
+        transport.get_client_id.assert_called_once_with({"id": "User-1234"})
 
 
 class TestMaybeCaptureParticipantVideo(unittest.IsolatedAsyncioTestCase):

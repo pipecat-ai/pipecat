@@ -1044,6 +1044,17 @@ class SmallWebRTCTransport(BaseTransport):
         self._register_event_handler("on_client_connected")
         self._register_event_handler("on_client_disconnected")
 
+    def get_client_id(self, client: Any) -> str:
+        """The id of a client, as passed to ``on_client_connected``.
+
+        Args:
+            client: The client, as passed to the transport's client events.
+
+        Returns:
+            The peer connection's id.
+        """
+        return client.pc_id
+
     def input(self) -> SmallWebRTCInputTransport:
         """Get the input transport processor.
 
@@ -1123,7 +1134,7 @@ class SmallWebRTCTransport(BaseTransport):
         """Capture the peer's camera or screen share at a framerate.
 
         Args:
-            participant_id: The peer's id, as from ``get_transport_client_id()``.
+            participant_id: The peer's id, as from :meth:`get_client_id`.
                 SmallWebRTC has one peer, so the id isn't used to select it.
 
                 .. deprecated:: 1.13.0

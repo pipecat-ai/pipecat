@@ -2477,6 +2477,17 @@ class DailyTransport(BaseTransport):
     # BaseTransport
     #
 
+    def get_client_id(self, client: Any) -> str:
+        """The id of a client, as passed to ``on_client_connected``.
+
+        Args:
+            client: The client, as passed to the transport's client events.
+
+        Returns:
+            The participant's id.
+        """
+        return client["id"]
+
     def input(self) -> DailyInputTransport:
         """Get the input transport for receiving media and events.
 

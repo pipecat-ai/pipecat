@@ -1596,6 +1596,17 @@ class LiveKitTransport(BaseTransport):
         self._register_event_handler("on_dtmf_event")
         self._register_event_handler("on_active_speaker_changed")
 
+    def get_client_id(self, client: Any) -> str:
+        """The id of a client, as passed to ``on_client_connected``.
+
+        Args:
+            client: The client, as passed to the transport's client events.
+
+        Returns:
+            The participant's identity.
+        """
+        return client["id"]
+
     def input(self) -> LiveKitInputTransport:
         """Get the input transport for receiving media and events.
 

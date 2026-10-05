@@ -654,5 +654,51 @@ class TestCaptureParticipantVideo(unittest.IsolatedAsyncioTestCase):
         )
 
 
+class TestGetClientId(unittest.TestCase):
+    """Each transport gets a client's id from the client its events pass."""
+
+    def _transport_cls(self, module, name):
+        try:
+            return getattr(__import__(module, fromlist=[name]), name)
+        except Exception as e:
+            self.skipTest(f"{name} unavailable: {e}")
+
+    def test_daily_and_livekit_use_the_client_id(self):
+        for module, name in (
+            ("pipecat.transports.daily.transport", "DailyTransport"),
+            ("pipecat.transports.livekit.transport", "LiveKitTransport"),
+        ):
+            cls = self._transport_cls(module, name)
+            self.assertEqual(cls.get_client_id(MagicMock(), {"id": "User-1234"}), "User-1234")
+
+    def test_smallwebrtc_uses_the_peer_connection_id(self):
+        cls = self._transport_cls(
+            "pipecat.transports.smallwebrtc.transport", "SmallWebRTCTransport"
+        )
+        client = SimpleNamespace(pc_id="SmallWebRTCConnection#0-1234")
+        self.assertEqual(cls.get_client_id(MagicMock(), client), "SmallWebRTCConnection#0-1234")
+
+    def test_vonage_uses_the_stream_id(self):
+        cls = self._transport_cls(
+            "pipecat.transports.vonage.video_connector", "VonageVideoConnectorTransport"
+        )
+        self.assertEqual(cls.get_client_id(MagicMock(), {"streamId": "stream-1"}), "stream-1")
+
+    def test_unsupported_transport_warns(self):
+        from pipecat.transports import base_transport
+
+        class AudioOnlyTransport(base_transport.BaseTransport):
+            def input(self):
+                return MagicMock()
+
+            def output(self):
+                return MagicMock()
+
+        with patch.object(base_transport, "logger") as logger:
+            client_id = AudioOnlyTransport().get_client_id({"id": "User-1234"})
+        self.assertEqual(client_id, "")
+        logger.warning.assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main()
