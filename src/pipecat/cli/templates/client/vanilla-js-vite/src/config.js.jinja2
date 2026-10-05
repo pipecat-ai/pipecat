@@ -38,6 +38,19 @@ if (botStartPublicApiKey) {
   });
 }
 
+const liveKitConfig = {
+  endpoint: botStartUrl,
+  requestData: {
+    transport: "livekit",
+  },
+};
+
+if (botStartPublicApiKey) {
+  liveKitConfig.headers = new Headers({
+    Authorization: `Bearer ${botStartPublicApiKey}`,
+  });
+}
+
 const smallWebRTCConfig = {
   endpoint: botStartUrl,
   requestData: {
@@ -68,6 +81,7 @@ if (botStartPublicApiKey) {
 
 export const TRANSPORT_CONFIG = {
   daily: dailyConfig,
+  livekit: liveKitConfig,
   smallwebrtc: smallWebRTCConfig,
   websocket: websocketConfig,
 };
@@ -83,6 +97,11 @@ export async function createTransport(transportType) {
     case 'daily': {
       const { DailyTransport } = await import('@pipecat-ai/daily-transport');
       return new DailyTransport();
+    }
+{% elif transport.value == 'livekit' %}
+    case 'livekit': {
+      const { LiveKitTransport } = await import('@pipecat-ai/livekit-transport');
+      return new LiveKitTransport();
     }
 {% elif transport.value == 'smallwebrtc' %}
     case 'smallwebrtc': {
