@@ -1824,6 +1824,18 @@ class DailyInputTransport(BaseInputTransport):
         # Audio task when using a virtual speaker (i.e. no user tracks).
         self._audio_in_task: asyncio.Task | None = None
 
+    def _supports_video_in_source(self, video_source: str) -> bool:
+        """Whether this transport captures a video source listed in ``video_in_sources``.
+
+        Args:
+            video_source: The video source.
+
+        Returns:
+            Always ``True``: Daily captures the camera, the screen share and
+            custom tracks.
+        """
+        return True
+
     async def setup(self, setup: FrameProcessorSetup):
         """Setup the input transport with shared client setup.
 

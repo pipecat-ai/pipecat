@@ -630,6 +630,17 @@ class SmallWebRTCInputTransport(BaseInputTransport):
         # Video samplers by video source.
         self._video_samplers: dict[str, _VideoInSampler] = {}
 
+    def _supports_video_in_source(self, video_source: str) -> bool:
+        """Whether this transport captures a video source listed in ``video_in_sources``.
+
+        Args:
+            video_source: The video source.
+
+        Returns:
+            Whether the source is the camera or the screen share.
+        """
+        return video_source in (CAM_VIDEO_SOURCE, SCREEN_VIDEO_SOURCE)
+
     async def setup(self, setup: FrameProcessorSetup):
         """Set up the transport and establish the WebRTC connection.
 
@@ -987,14 +998,6 @@ class SmallWebRTCTransport(BaseTransport):
         super().__init__(input_name=input_name, output_name=output_name)
         self._params = params
 
-        unsupported = set(params.video_in_sources) - {CAM_VIDEO_SOURCE, SCREEN_VIDEO_SOURCE}
-        if unsupported:
-            logger.warning(
-                f"{self}: video_in_sources {sorted(unsupported)} are not supported and will "
-                f"not be captured; SmallWebRTC supports {CAM_VIDEO_SOURCE!r} and "
-                f"{SCREEN_VIDEO_SOURCE!r}."
-            )
-
         self._callbacks = SmallWebRTCCallbacks(
             on_app_message=self._on_app_message,
             on_client_connected=self._on_client_connected,
@@ -1066,7 +1069,7 @@ class SmallWebRTCTransport(BaseTransport):
         # a handler that captures a source itself takes precedence.
         if self._input:
             for video_source, source_params in self._params.video_in_sources.items():
-                if video_source in (CAM_VIDEO_SOURCE, SCREEN_VIDEO_SOURCE):
+                if self._input._supports_video_in_source(video_source):
                     framerate = 0 if source_params.on_request_only else source_params.framerate
                     await self._input.capture_participant_media(
                         source=video_source, framerate=framerate
