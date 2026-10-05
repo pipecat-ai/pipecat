@@ -983,6 +983,8 @@ class AssemblyAISTTService(WebsocketSTTService):
 
         await self._connect_websocket()
 
+        # Started even when the connection failed: with no socket the receive
+        # loop goes straight to its reconnect path, which retries the connect.
         if not self._receive_task:
             self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
