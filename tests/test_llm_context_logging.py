@@ -15,6 +15,7 @@ from loguru import logger
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.services.llm_service import LLMService
 from pipecat.utils import log_config
+from pipecat.utils.env import InvalidEnvVarValueError
 from pipecat.utils.log_config import _LLM_CONTEXT_LOG_ENV_VAR
 
 MESSAGES = [
@@ -35,6 +36,12 @@ def captured():
     handler_id = logger.add(sink, level="DEBUG", format="{name}|{message}")
     yield sink
     logger.remove(handler_id)
+
+
+def test_invalid_mode_raises_at_construction(monkeypatch):
+    monkeypatch.setenv(_LLM_CONTEXT_LOG_ENV_VAR, "of")
+    with pytest.raises(InvalidEnvVarValueError):
+        LLMService()
 
 
 def test_full_logs_every_message(captured):
