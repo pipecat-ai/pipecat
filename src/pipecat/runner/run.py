@@ -574,14 +574,27 @@ def _get_bot_module():
     )
 
 
+def _runner_body(args: argparse.Namespace) -> Any:
+    """The ``--runner-body`` file's contents, or ``None`` when none was given.
+
+    A WebSocket session has no ``/start`` request to carry a body, so a bot that
+    needs session data (e.g. a vision bot's image path, under an eval) reads it
+    from this file instead.
+    """
+    if not args.runner_body:
+        return None
+    return yaml.safe_load(Path(args.runner_body).read_text())
+
+
 async def _run_telephony_bot(websocket: WebSocket, args: argparse.Namespace):
-    """Run a bot for telephony transports."""
+    """Run a bot for telephony transports, or for an eval harness."""
     bot_module = _get_bot_module()
 
     # Just pass the WebSocket - let the bot handle parsing
     runner_args = WebSocketRunnerArguments(
         websocket=websocket,
         session_id=str(uuid.uuid4()),
+        body=_runner_body(args),
         file_storage=RUNNER_FILE_STORAGE,
     )
     runner_args.cli_args = args
@@ -598,6 +611,7 @@ async def _run_websocket_bot(websocket: WebSocket, args: argparse.Namespace):
         websocket=websocket,
         transport_type="websocket",
         session_id=str(uuid.uuid4()),
+        body=_runner_body(args),
     )
     runner_args.cli_args = args
 
@@ -1916,6 +1930,7 @@ def main(parser: argparse.ArgumentParser | None = None):
        - -u/--uploads-folder: Path to folder for client uploads (short-lived; default:
          the PIPECAT_UPLOADS_FOLDER env var)
        - --uploads-folder-max-files: Max files in uploads folder (default: 10)
+       - --runner-body: YAML or JSON file read as the body of each WebSocket session
        - --dialin/--no-dialin: Mount the Daily PSTN dial-in webhook for -t daily
          (on by default; --no-dialin disables it)
        - --esp32: Enable SDP munging for ESP32 compatibility (requires --host with IP address)
@@ -2001,7 +2016,7 @@ def main(parser: argparse.ArgumentParser | None = None):
         "--runner-body",
         type=str,
         default=None,
-        help="Path to a YAML or JSON file with the runner args body (e.g. a vision bot's image path under -t eval)",
+        help="Path to a YAML or JSON file with the runner args body for WebSocket sessions (e.g. a vision bot's image path under an eval)",
     )
     parser.add_argument(
         "-v", "--verbose", action="count", default=0, help="Increase logging verbosity"
