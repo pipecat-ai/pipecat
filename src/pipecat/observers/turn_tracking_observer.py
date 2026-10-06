@@ -102,6 +102,16 @@ class TurnTrackingObserver(BaseObserver):
         elif isinstance(data.frame, (EndFrame, CancelFrame)):
             await self._handle_pipeline_end(data)
 
+    async def cleanup(self):
+        """Cancel the pending turn end timer.
+
+        The pipeline can be torn down before this observer receives its
+        EndFrame or CancelFrame, and the timer's callback holds the pipeline
+        until it fires.
+        """
+        self._cancel_turn_end_timer()
+        await super().cleanup()
+
     def _schedule_turn_end(self, data: FramePushed):
         """Schedule turn end with a timeout."""
         # Cancel any existing timer
@@ -164,10 +174,8 @@ class TurnTrackingObserver(BaseObserver):
 
     async def _handle_pipeline_end(self, data: FramePushed):
         """Handle pipeline end or cancellation by flushing any active turn."""
+        self._cancel_turn_end_timer()
         if self._is_turn_active:
-            # Cancel any pending turn end timer
-            self._cancel_turn_end_timer()
-            # End the current turn
             await self._end_turn(data, was_interrupted=True)
 
     async def _start_turn(self, data: FramePushed):
