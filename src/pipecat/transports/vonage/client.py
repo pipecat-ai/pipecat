@@ -82,6 +82,19 @@ except ModuleNotFoundError as e:
     raise ImportError(f"Missing module: {e}") from e
 
 
+class AudioInFrameSource(StrEnum):
+    """Select which incoming audio source frames the transport emits.
+
+    - ``INDIVIDUAL`` emits a ``UserAudioRawFrame`` for each subscribed participant.
+    - ``MIXED`` emits the session-wide mixed ``InputAudioRawFrame``.
+    - ``BOTH`` emits individual and mixed audio frames.
+    """
+
+    INDIVIDUAL = "individual"
+    MIXED = "mixed"
+    BOTH = "both"
+
+
 class VonageVideoConnectorTransportParams(TransportParams):
     """Parameters for the Vonage Video Connector transport.
 
@@ -90,6 +103,8 @@ class VonageVideoConnectorTransportParams(TransportParams):
         publisher_enable_opus_dtx: Whether to enable OPUS DTX for publisher audio.
         session_enable_migration: Whether to enable session migration.
         audio_in_auto_subscribe: Whether to automatically subscribe to audio streams.
+        audio_in_frame_source: Audio source frames to emit: individual, mixed, or both.
+            Defaults to mixed.
         video_in_auto_subscribe: Whether to automatically subscribe to video streams.
         captions_in_auto_subscribe: Whether to automatically subscribe to captions streams.
         video_in_preferred_width: Preferred width for video input capture.
@@ -103,6 +118,7 @@ class VonageVideoConnectorTransportParams(TransportParams):
     publisher_enable_opus_dtx: bool = False
     session_enable_migration: bool = False
     audio_in_auto_subscribe: bool = True
+    audio_in_frame_source: AudioInFrameSource = AudioInFrameSource.MIXED
     video_in_auto_subscribe: bool = False
     video_connector_log_level: str = "INFO"
     video_in_preferred_resolution: tuple[int, int] | None = None
@@ -322,6 +338,22 @@ class VonageClient:
         self._video_out_color_format: ImageFormat = VONAGE_TO_STANDARD_FORMAT_MAP[
             self._video_out_color_format_vonage
         ]
+
+    @property
+    def _wants_mixed_audio(self) -> bool:
+        """Whether the session mixed audio callback should be registered."""
+        return self._params.audio_in_enabled and self._params.audio_in_frame_source in (
+            AudioInFrameSource.MIXED,
+            AudioInFrameSource.BOTH,
+        )
+
+    @property
+    def _wants_individual_audio(self) -> bool:
+        """Whether the per-subscriber audio callback should be registered."""
+        return self._params.audio_in_enabled and self._params.audio_in_frame_source in (
+            AudioInFrameSource.INDIVIDUAL,
+            AudioInFrameSource.BOTH,
+        )
 
     @acquires("client")
     async def setup(self, setup: FrameProcessorSetup) -> None:
@@ -678,6 +710,12 @@ class VonageClient:
             self._sdk_event_cb_to_loop(async_cb())
 
         def connect_proc() -> None:
+            # the connector rejects None, so the callback is left out entirely when unused
+            session_audio_kwargs: dict[str, Any] = (
+                {"on_audio_data_cb": self._on_session_audio_data_cb}
+                if self._wants_mixed_audio
+                else {}
+            )
             if not self._client.connect(
                 application_id=self._application_id,
                 session_id=self._session_id,
@@ -709,8 +747,8 @@ class VonageClient:
                 on_disconnected_cb=on_session_disconnected_cb,
                 on_stream_received_cb=self._on_stream_received_cb,
                 on_stream_dropped_cb=self._on_stream_dropped_cb,
-                on_audio_data_cb=self._on_session_audio_data_cb,
                 on_ready_for_audio_cb=audio_ready_cb,
+                **session_audio_kwargs,
             ):
                 logger.error(f"Could not connect to {self._session_id}")
                 raise VonageException("Could not connect to session")
@@ -797,6 +835,11 @@ class VonageClient:
             self._sdk_event_cb_to_loop(async_cb())
 
         async def process() -> None:
+            subscriber_audio_kwargs: dict[str, Any] = (
+                {"on_audio_data_cb": self._on_subscriber_audio_data_cb}
+                if self._wants_individual_audio
+                else {}
+            )
             logger.info(
                 f"Subscribing to stream {stream.id} audio={params.subscribe_to_audio} "
                 f"video={params.subscribe_to_video} captions={params.subscribe_to_captions} "
@@ -823,8 +866,8 @@ class VonageClient:
                 on_connected_cb=on_connected_cb,
                 on_disconnected_cb=on_subscriber_disconnected_cb,
                 on_render_frame_cb=self._on_subscriber_video_data_cb,
-                on_audio_data_cb=self._on_subscriber_audio_data_cb,
                 on_caption_text_cb=self._on_subscriber_caption_text_cb,
+                **subscriber_audio_kwargs,
             ):
                 subscribed_future.cancel()
                 raise VonageException(f"Could not subscribe to stream {stream.id}")

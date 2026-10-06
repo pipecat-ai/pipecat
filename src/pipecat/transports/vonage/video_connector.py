@@ -25,6 +25,12 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, F
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport
+
+# the following "as" imports help to re-export these types and avoid type checking warnings
+# when importing these types from the main transport module
+from pipecat.transports.vonage.client import (
+    AudioInFrameSource as AudioInFrameSource,
+)
 from pipecat.transports.vonage.client import (
     Session,  # type: ignore[attr-defined]
     Stream,  # type: ignore[attr-defined]
@@ -32,9 +38,6 @@ from pipecat.transports.vonage.client import (
     VonageClient,
     VonageClientListener,
 )
-
-# the following "as" imports help to re-export these types and avoid type checking warnings
-# when importing these types from the main transport module
 from pipecat.transports.vonage.client import (
     SubscribeSettings as SubscribeSettings,
 )
