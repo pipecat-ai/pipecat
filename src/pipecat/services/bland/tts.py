@@ -40,7 +40,7 @@ _SAMPLE_RATES = (8000, 16000, 24000, 44100, 48000)
 # generates natively, so it is the shortest path to audio.
 _DEFAULT_SAMPLE_RATE = 48000
 
-_DEFAULT_VOICE_ID = "2f29fdbb-c55e-4add-9c7c-93437ebf379d"
+_DEFAULT_VOICE_ID = "29158307-9893-4149-8a75-bc9ce313d64e"
 _READY_TIMEOUT_SECONDS = 10.0
 _CLOSE_TIMEOUT_SECONDS = 5.0
 
@@ -132,7 +132,7 @@ class BlandTTSService(WebsocketTTSService):
         tts = BlandTTSService(
             api_key=os.getenv("BLAND_API_KEY"),
             settings=BlandTTSService.Settings(
-                voice="2f29fdbb-c55e-4add-9c7c-93437ebf379d"
+                voice="29158307-9893-4149-8a75-bc9ce313d64e"
             ),
         )
     """

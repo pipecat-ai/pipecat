@@ -775,7 +775,7 @@ class ServiceRegistry:
             env_prefix="BLAND",
             include_params=["api_key"],
             settings_params=["voice"],
-            param_defaults={"voice": "2f29fdbb-c55e-4add-9c7c-93437ebf379d"},
+            param_defaults={"voice": "29158307-9893-4149-8a75-bc9ce313d64e"},
         ),
         ServiceDefinition(
             value="cartesia_tts",

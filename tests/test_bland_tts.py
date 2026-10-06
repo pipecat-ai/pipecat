@@ -35,7 +35,7 @@ from pipecat.services.bland.tts import BlandHttpTTSService, BlandTTSService
 from pipecat.services.tts_service import TextAggregationMode
 from pipecat.tests.utils import SleepFrame, run_test
 
-DEFAULT_VOICE_ID = "2f29fdbb-c55e-4add-9c7c-93437ebf379d"
+DEFAULT_VOICE_ID = "29158307-9893-4149-8a75-bc9ce313d64e"
 OTHER_VOICE_ID = "c18a1cd5-91ef-4b06-841a-e58b8b487e8c"
 
 AUDIO_CHUNK_1 = b"\x00\x01" * 512
