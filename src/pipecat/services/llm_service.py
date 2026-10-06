@@ -349,8 +349,8 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 can't fetch itself (see
                 :class:`~pipecat.utils.file_resolver.FileResolver`). Pass one
                 configured with a ``file_storage`` to resolve uploaded-file
-                URLs (e.g. ``FileResolver(file_storage=runner_file_storage())``
-                with the development runner), and share one instance across
+                URLs (``FileResolver(file_storage=runner_args.file_storage)``
+                when a runner hosts the bot), and share one instance across
                 services that may consume the same files (e.g. services
                 switched between mid-session) so downloads are reused.
                 Defaults to a resolver that

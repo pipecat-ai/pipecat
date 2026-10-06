@@ -25,6 +25,7 @@ from pipecat.runner.run import (
     _generate_ws_token,
     _parse_ice_servers,
     _print_startup_message,
+    _resolve_file_storage,
     _setup_daily_routes,
     _setup_file_uploads_routes,
     _setup_telephony_routes,
@@ -521,14 +522,56 @@ class TestFileUploadsRoute(unittest.TestCase):
         self.assertEqual(response.status_code, 500)
         self.assertEqual(response.json()["detail"], "Failed to save file")
 
-    def test_set_runner_file_storage_installs_custom_backend(self):
-        import pipecat.runner.run as run_module
-        from pipecat.runner.run import runner_file_storage, set_runner_file_storage
 
+class TestResolveFileStorage(unittest.TestCase):
+    """The uploads backend comes from the bot module's ``create_file_storage()``
+    when it defines one, falling back to ``-u/--uploads-folder`` local storage."""
+
+    @staticmethod
+    def _args(uploads_folder=None):
+        return argparse.Namespace(uploads_folder=uploads_folder, uploads_folder_max_files=10)
+
+    def test_bot_module_factory_wins_over_the_uploads_folder_flag(self):
         fake_storage = MagicMock()
-        with patch.object(run_module, "RUNNER_FILE_STORAGE", None):
-            set_runner_file_storage(fake_storage)
-            self.assertIs(runner_file_storage(), fake_storage)
+        bot_module = types.SimpleNamespace(create_file_storage=lambda: fake_storage)
+
+        with patch("pipecat.runner.run._get_bot_module", return_value=bot_module):
+            resolved = _resolve_file_storage(self._args(uploads_folder="/tmp/uploads"))
+
+        self.assertIs(resolved, fake_storage)
+
+    def test_factory_returning_none_disables_uploads_despite_the_flag(self):
+        bot_module = types.SimpleNamespace(create_file_storage=lambda: None)
+
+        with patch("pipecat.runner.run._get_bot_module", return_value=bot_module):
+            resolved = _resolve_file_storage(self._args(uploads_folder="/tmp/uploads"))
+
+        self.assertIsNone(resolved)
+
+    def test_uploads_folder_flag_backs_uploads_with_local_storage(self):
+        from pipecat.utils.file_storage import LocalFileStorage
+
+        bot_module = types.SimpleNamespace()
+        with (
+            patch("pipecat.runner.run._get_bot_module", return_value=bot_module),
+            tempfile.TemporaryDirectory() as uploads_folder,
+        ):
+            resolved = _resolve_file_storage(self._args(uploads_folder=uploads_folder))
+
+        self.assertIsInstance(resolved, LocalFileStorage)
+
+    def test_no_factory_and_no_flag_disables_uploads(self):
+        with patch("pipecat.runner.run._get_bot_module", side_effect=ImportError("no bot")):
+            self.assertIsNone(_resolve_file_storage(self._args()))
+
+    def test_async_factory_is_rejected_loudly(self):
+        async def create_file_storage():
+            return MagicMock()
+
+        bot_module = types.SimpleNamespace(create_file_storage=create_file_storage)
+        with patch("pipecat.runner.run._get_bot_module", return_value=bot_module):
+            with self.assertRaises(TypeError):
+                _resolve_file_storage(self._args())
 
 
 class TestSessionScopedUploads(unittest.TestCase):
