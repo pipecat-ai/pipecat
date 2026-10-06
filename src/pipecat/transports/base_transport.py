@@ -84,9 +84,9 @@ class TransportParams(BaseModel):
             custom source). Sources not listed here are captured only when the
             application asks for them, e.g. with the transport's
             ``capture_participant_video()``. Requires ``video_in_enabled``.
-            Supported by ``DailyTransport`` and ``SmallWebRTCTransport``; other
-            transports log a warning and ignore it, so check the logs if video
-            doesn't arrive as configured.
+            Supported by ``DailyTransport``, ``LiveKitTransport`` and
+            ``SmallWebRTCTransport``; other transports log a warning and ignore
+            it, so check the logs if video doesn't arrive as configured.
         video_out_enabled: Enable video output streaming.
         video_out_is_live: Enable real-time video output streaming.
         video_out_width: Video output width in pixels.

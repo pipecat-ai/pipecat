@@ -43,11 +43,13 @@ from pipecat.frames.frames import (
     StartFrame,
     UserAudioRawFrame,
     UserImageRawFrame,
+    UserImageRequestFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
+from pipecat.transports.video_in_sampler import _VideoInSamplers
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
 
 try:
@@ -84,6 +86,20 @@ LIVEKIT_VIDEO_BUFFER_TYPES = {
     "BGRA": (proto_video_frame.VideoBufferType.BGRA, 4),
     "ARGB": (proto_video_frame.VideoBufferType.ARGB, 4),
 }
+
+CAM_VIDEO_SOURCE = "camera"
+SCREEN_VIDEO_SOURCE = "screenVideo"
+
+
+def _video_source(publication: rtc.RemoteTrackPublication) -> str:
+    """The Pipecat video source of a published video track.
+
+    A screen share is ``"screenVideo"``. Any other video, including a track
+    published without a source, is ``"camera"``.
+    """
+    if publication.source == rtc.TrackSource.SOURCE_SCREENSHARE:
+        return SCREEN_VIDEO_SOURCE
+    return CAM_VIDEO_SOURCE
 
 
 @dataclass
@@ -135,6 +151,12 @@ class LiveKitParams(TransportParams):
     ``video_out_codec`` selects the published video codec (``"VP8"``, ``"H264"``,
     ``"VP9"``, ``"AV1"`` or ``"H265"``); LiveKit picks one when it is unset.
 
+    With ``video_in_enabled``, a user's camera (``"camera"``) and screen share
+    (``"screenVideo"``) are received separately. Without ``video_in_sources``,
+    every frame of every video track is passed on. With it, only the listed
+    sources are, each at its own framerate, plus any source captured with
+    ``LiveKitTransport.capture_participant_video()``.
+
     Parameters:
         audio_out_queue_size_ms: Buffer size of the outgoing audio source, in milliseconds
             (LiveKit's default is 1000).
@@ -163,6 +185,8 @@ class LiveKitCallbacks(BaseModel):
         on_dtmf_event: Called when a SIP DTMF tone is received.
         on_active_speaker_changed: Called with the identity of the room's loudest speaker
             when it changes. The bot can be the speaker while it talks.
+        on_video_track_muted: Called with the participant and video source when a
+            participant mutes a video track, e.g. turns their camera off.
     """
 
     on_connected: Callable[[], Awaitable[None]]
@@ -173,11 +197,12 @@ class LiveKitCallbacks(BaseModel):
     on_audio_track_subscribed: Callable[[str], Awaitable[None]]
     on_audio_track_unsubscribed: Callable[[str], Awaitable[None]]
     on_video_track_subscribed: Callable[[str], Awaitable[None]]
-    on_video_track_unsubscribed: Callable[[str], Awaitable[None]]
+    on_video_track_unsubscribed: Callable[[str, str], Awaitable[None]]
     on_data_received: Callable[[bytes, str | None], Awaitable[None]]
     on_first_participant_joined: Callable[[str], Awaitable[None]]
     on_dtmf_event: Callable[[Any], Awaitable[None]]
     on_active_speaker_changed: Callable[[str], Awaitable[None]]
+    on_video_track_muted: Callable[[str, str], Awaitable[None]]
 
 
 class LiveKitTransportClient:
@@ -226,10 +251,12 @@ class LiveKitTransportClient:
         self._audio_streams: dict[str, tuple[rtc.AudioStream, asyncio.Task]] = {}
         self._video_source: rtc.VideoSource | None = None
         self._video_track: rtc.LocalVideoTrack | None = None
-        self._video_tracks = {}
+        # Video tracks and streams by participant and video source, so a user's
+        # camera and screen share are received side by side.
+        self._video_tracks: dict[tuple[str, str], rtc.Track] = {}
+        self._video_publications: dict[tuple[str, str], rtc.RemoteTrackPublication] = {}
         self._video_queue = asyncio.Queue()
-        # Symmetric registry for video streams.
-        self._video_streams: dict[str, tuple[rtc.VideoStream, asyncio.Task]] = {}
+        self._video_streams: dict[tuple[str, str], tuple[rtc.VideoStream, asyncio.Task]] = {}
         self._other_participant_has_joined = False
         self._task_manager: BaseTaskManager | None = None
         self._active_speaker_id: str | None = None
@@ -277,6 +304,7 @@ class LiveKitTransportClient:
         self.room.on("participant_disconnected")(self._on_participant_disconnected_wrapper)
         self.room.on("track_subscribed")(self._on_track_subscribed_wrapper)
         self.room.on("track_unsubscribed")(self._on_track_unsubscribed_wrapper)
+        self.room.on("track_muted")(self._on_track_muted_wrapper)
         self.room.on("data_received")(self._on_data_received_wrapper)
         self.room.on("connected")(self._on_connected_wrapper)
         self.room.on("disconnected")(self._on_disconnected_wrapper)
@@ -344,11 +372,10 @@ class LiveKitTransportClient:
 
                 await self._callbacks.on_connected()
 
-                # Check if there are already participants in the room
-                participants = self.get_participants()
-                if participants and not self._other_participant_has_joined:
-                    self._other_participant_has_joined = True
-                    await self._callbacks.on_first_participant_joined(participants[0])
+                # Participants already in the room raise the same events as
+                # those who join later.
+                for participant_id in self.get_participants():
+                    await self._participant_connected(participant_id)
             except Exception as e:
                 logger.error(f"Error connecting to {self._room_name}: {e}")
                 if not self._connected:
@@ -620,6 +647,28 @@ class LiveKitTransportClient:
             f"{self}::_async_on_track_unsubscribed",
         )
 
+    def _on_track_muted_wrapper(
+        self,
+        participant: rtc.RemoteParticipant,
+        publication: rtc.RemoteTrackPublication,
+    ):
+        """Wrapper for track muted events."""
+        assert self._task_manager is not None
+
+        self._task_manager.create_task(
+            self._async_on_track_muted(participant, publication),
+            f"{self}::_async_on_track_muted",
+        )
+
+    async def _async_on_track_muted(
+        self, participant: rtc.RemoteParticipant, publication: rtc.RemoteTrackPublication
+    ):
+        """Handle track muted events."""
+        if publication.kind == rtc.TrackKind.KIND_VIDEO:
+            video_source = _video_source(publication)
+            logger.info(f"Video track muted: {video_source} from {participant.identity}")
+            await self._callbacks.on_video_track_muted(participant.identity, video_source)
+
     def _on_data_received_wrapper(self, data: rtc.DataPacket):
         """Wrapper for data received events."""
         assert self._task_manager is not None
@@ -675,11 +724,15 @@ class LiveKitTransportClient:
     # Async methods for event handling
     async def _async_on_participant_connected(self, participant: rtc.RemoteParticipant):
         """Handle participant connected events."""
-        logger.info(f"Participant connected: {participant.identity}")
-        await self._callbacks.on_participant_connected(participant.identity)
+        await self._participant_connected(participant.identity)
+
+    async def _participant_connected(self, participant_id: str):
+        """Report a participant in the room, and whether they're the first."""
+        logger.info(f"Participant connected: {participant_id}")
+        await self._callbacks.on_participant_connected(participant_id)
         if not self._other_participant_has_joined:
             self._other_participant_has_joined = True
-            await self._callbacks.on_first_participant_joined(participant.identity)
+            await self._callbacks.on_first_participant_joined(participant_id)
 
     async def _async_on_participant_disconnected(self, participant: rtc.RemoteParticipant):
         """Handle participant disconnected events."""
@@ -715,22 +768,25 @@ class LiveKitTransportClient:
             self._audio_streams[participant.identity] = (audio_stream, task)
             await self._callbacks.on_audio_track_subscribed(participant.identity)
         elif track.kind == rtc.TrackKind.KIND_VIDEO:
+            video_source = _video_source(publication)
             logger.info(
-                f"Video track subscribed: {track.sid} from participant {participant.identity}"
+                f"Video track subscribed: {track.sid} ({video_source}) from participant "
+                f"{participant.identity}"
             )
-            # Symmetric: clean up any prior video stream/task for the same
-            # participant before replacing.
-            await self._close_video_stream(participant.identity)
-            self._video_tracks[participant.identity] = track
+            # Clean up any prior video stream/task for the same participant and
+            # source before replacing.
+            await self._close_video_stream(participant.identity, video_source)
+            self._video_tracks[(participant.identity, video_source)] = track
+            self._video_publications[(participant.identity, video_source)] = publication
             # Only process video stream if video input is enabled to prevent
             # unbounded queue growth when there is no consumer for video frames.
             if self._params.video_in_enabled:
                 video_stream = rtc.VideoStream(track)
                 task = self._task_manager.create_task(
-                    self._process_video_stream(video_stream, participant.identity),
+                    self._process_video_stream(video_stream, participant.identity, video_source),
                     f"{self}::_process_video_stream",
                 )
-                self._video_streams[participant.identity] = (video_stream, task)
+                self._video_streams[(participant.identity, video_source)] = (video_stream, task)
             await self._callbacks.on_video_track_subscribed(participant.identity)
 
     async def _async_on_track_unsubscribed(
@@ -745,8 +801,11 @@ class LiveKitTransportClient:
             await self._close_audio_stream(participant.identity)
             await self._callbacks.on_audio_track_unsubscribed(participant.identity)
         elif track.kind == rtc.TrackKind.KIND_VIDEO:
-            await self._close_video_stream(participant.identity)
-            await self._callbacks.on_video_track_unsubscribed(participant.identity)
+            video_source = _video_source(publication)
+            self._video_tracks.pop((participant.identity, video_source), None)
+            self._video_publications.pop((participant.identity, video_source), None)
+            await self._close_video_stream(participant.identity, video_source)
+            await self._callbacks.on_video_track_unsubscribed(participant.identity, video_source)
 
     async def _close_audio_stream(self, participant_id: str) -> None:
         """Close a participant's owned audio stream and cancel its producer task.
@@ -765,20 +824,20 @@ class LiveKitTransportClient:
         if task is not None and not task.done():
             task.cancel()
 
-    async def _close_video_stream(self, participant_id: str) -> None:
+    async def _close_video_stream(self, participant_id: str, video_source: str) -> None:
         """Close a participant's owned video stream and cancel its producer task.
 
         Idempotent: no-op when there is no registered stream for the
-        participant.
+        participant and video source.
         """
-        entry = self._video_streams.pop(participant_id, None)
+        entry = self._video_streams.pop((participant_id, video_source), None)
         if entry is None:
             return
         stream, task = entry
         try:
             await asyncio.wait_for(stream.aclose(), timeout=2.0)
         except Exception as e:
-            logger.warning(f"VideoStream.aclose failed for {participant_id}: {e}")
+            logger.warning(f"VideoStream.aclose failed for {participant_id} ({video_source}): {e}")
         if task is not None and not task.done():
             task.cancel()
 
@@ -789,8 +848,8 @@ class LiveKitTransportClient:
         """
         for participant_id in list(self._audio_streams.keys()):
             await self._close_audio_stream(participant_id)
-        for participant_id in list(self._video_streams.keys()):
-            await self._close_video_stream(participant_id)
+        for participant_id, video_source in list(self._video_streams.keys()):
+            await self._close_video_stream(participant_id, video_source)
 
     async def _async_on_data_received(self, data: rtc.DataPacket):
         """Handle data received events."""
@@ -847,20 +906,40 @@ class LiveKitTransportClient:
             frame, participant_id = await self._audio_queue.get()
             yield frame, participant_id
 
-    async def _process_video_stream(self, video_stream: rtc.VideoStream, participant_id: str):
+    def video_source_enabled(self, participant_id: str, video_source: str) -> bool:
+        """Whether a participant is sending a video source.
+
+        A participant who turns their camera off usually mutes the track rather
+        than unpublishing it, so a subscribed track can still send nothing.
+
+        Args:
+            participant_id: The participant's identity.
+            video_source: The video source, ``"camera"`` or ``"screenVideo"``.
+
+        Returns:
+            Whether the source's track is subscribed and not muted.
+        """
+        publication = self._video_publications.get((participant_id, video_source))
+        return publication is not None and not publication.muted
+
+    async def _process_video_stream(
+        self, video_stream: rtc.VideoStream, participant_id: str, video_source: str
+    ):
         """Process incoming video stream from a participant."""
-        logger.info(f"Started processing video stream for participant {participant_id}")
+        logger.info(
+            f"Started processing {video_source} video stream for participant {participant_id}"
+        )
         async for event in video_stream:
             if isinstance(event, rtc.VideoFrameEvent):
-                await self._video_queue.put((event, participant_id))
+                await self._video_queue.put((event, participant_id, video_source))
             else:
                 logger.warning(f"Received unexpected event type: {type(event)}")
 
     async def get_next_video_frame(self):
         """Get the next video frame from the queue."""
         while True:
-            frame, participant_id = await self._video_queue.get()
-            yield frame, participant_id
+            frame, participant_id, video_source = await self._video_queue.get()
+            yield frame, participant_id, video_source
 
     def __str__(self):
         """String representation of the LiveKit transport client."""
@@ -898,6 +977,18 @@ class LiveKitInputTransport(BaseInputTransport):
         # One resampler per participant: a stream resampler keeps state between
         # calls, so sharing one would mix the audio of participants who talk at once.
         self._resamplers: dict[str, BaseAudioResampler] = {}
+        self._video_samplers = _VideoInSamplers()
+
+    def _supports_video_in_source(self, video_source: str) -> bool:
+        """Whether this transport captures a video source listed in ``video_in_sources``.
+
+        Args:
+            video_source: The video source.
+
+        Returns:
+            Whether the source is the camera or the screen share.
+        """
+        return video_source in (CAM_VIDEO_SOURCE, SCREEN_VIDEO_SOURCE)
 
     async def setup(self, setup: FrameProcessorSetup):
         """Setup the input transport with shared client setup.
@@ -966,6 +1057,7 @@ class LiveKitInputTransport(BaseInputTransport):
         if self._video_in_task:
             await self.cancel_task(self._video_in_task)
             self._video_in_task = None
+        self._video_samplers.clear()
 
     async def push_app_message(self, message: Any, sender: str | None):
         """Push an application message as an urgent transport frame.
@@ -985,6 +1077,91 @@ class LiveKitInputTransport(BaseInputTransport):
     def release_participant(self, participant_id: str):
         """Drop a participant's resampler once their audio track is gone."""
         self._resamplers.pop(participant_id, None)
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process incoming frames, answering user image requests.
+
+        Args:
+            frame: The frame to process.
+            direction: The direction of frame flow in the pipeline.
+        """
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, UserImageRequestFrame):
+            await self.request_participant_image(frame)
+
+    async def capture_participant_video(
+        self, participant_id: str, framerate: int | None = 30, video_source: str = CAM_VIDEO_SOURCE
+    ):
+        """Capture a participant's video source at a framerate.
+
+        This takes precedence over ``video_in_sources`` for the source.
+
+        Args:
+            participant_id: The participant's identity.
+            framerate: Frames per second to pass on. ``0`` passes on frames only
+                to answer image requests, and ``None`` passes on every frame.
+            video_source: The video source, ``"camera"`` or ``"screenVideo"``.
+        """
+        self._video_samplers.capture(participant_id, video_source, framerate)
+
+    async def request_participant_image(self, frame: UserImageRequestFrame):
+        """Request a video frame from a specific participant.
+
+        Args:
+            frame: The user image request frame.
+        """
+        video_source = frame.video_source or CAM_VIDEO_SOURCE
+        if not self._client.video_source_enabled(frame.user_id, video_source):
+            error = f"{frame.user_id} isn't sending {video_source} video."
+            await self._answer_image_requests([frame], error)
+            return
+
+        self._capture_configured_video(frame.user_id, video_source)
+        if not self._video_samplers.add_request(frame.user_id, video_source, frame):
+            error = f"No {video_source} video is being captured from {frame.user_id}."
+            await self._answer_image_requests([frame], error)
+
+    async def stop_participant_video(self, participant_id: str, video_source: str):
+        """Answer the image requests waiting on a video source that stopped.
+
+        The source stays captured, so its frames are sampled again if it restarts.
+
+        Args:
+            participant_id: The participant's identity.
+            video_source: The video source that stopped.
+        """
+        requests = self._video_samplers.take_requests(participant_id, video_source)
+        error = f"{participant_id} stopped sending {video_source} video."
+        await self._answer_image_requests(requests, error)
+
+    async def remove_participant_video(self, participant_id: str):
+        """Stop sampling video from a participant who left.
+
+        Args:
+            participant_id: The participant's identity.
+        """
+        requests = self._video_samplers.remove_participant(participant_id)
+        await self._answer_image_requests(requests, f"{participant_id} left.")
+
+    async def remove_all_video(self):
+        """Stop sampling video from every participant, e.g. after leaving the room."""
+        requests = self._video_samplers.clear()
+        await self._answer_image_requests(requests, "The bot left the room.")
+
+    def _capture_configured_video(self, participant_id: str, video_source: str):
+        """Capture a source as ``video_in_sources`` configures it, unless it already is.
+
+        Without ``video_in_sources``, every source is captured at every frame.
+        With it, only the listed sources are, each at its own framerate.
+        """
+        if self._video_samplers.is_capturing(participant_id, video_source):
+            return
+        if not self._params.video_in_sources:
+            self._video_samplers.capture(participant_id, video_source, None)
+        elif source_params := self._params.video_in_sources.get(video_source):
+            framerate = 0 if source_params.on_request_only else source_params.framerate
+            self._video_samplers.capture(participant_id, video_source, framerate)
 
     async def _audio_in_task_handler(self):
         """Handle incoming audio frames from participants."""
@@ -1015,7 +1192,12 @@ class LiveKitInputTransport(BaseInputTransport):
         video_iterator = self._client.get_next_video_frame()
         async for video_data in video_iterator:
             if video_data:
-                video_frame_event, participant_id = video_data
+                video_frame_event, participant_id, video_source = video_data
+                self._capture_configured_video(participant_id, video_source)
+                due, request = self._video_samplers.sample(participant_id, video_source)
+                if not due:
+                    continue
+
                 pipecat_video_frame = await self._convert_livekit_video_to_pipecat(
                     video_frame_event=video_frame_event
                 )
@@ -1029,7 +1211,11 @@ class LiveKitInputTransport(BaseInputTransport):
                     image=pipecat_video_frame.image,
                     size=pipecat_video_frame.size,
                     format=pipecat_video_frame.format,
+                    text=request.text if request else None,
+                    append_to_context=request.append_to_context if request else None,
+                    request=request,
                 )
+                input_video_frame.transport_source = video_source
                 await self.push_video_frame(input_video_frame)
 
     async def _convert_livekit_audio_to_pipecat(
@@ -1377,6 +1563,7 @@ class LiveKitTransport(BaseTransport):
             on_audio_track_unsubscribed=self._on_audio_track_unsubscribed,
             on_video_track_subscribed=self._on_video_track_subscribed,
             on_video_track_unsubscribed=self._on_video_track_unsubscribed,
+            on_video_track_muted=self._on_video_track_muted,
             on_data_received=self._on_data_received,
             on_first_participant_joined=self._on_first_participant_joined,
             on_dtmf_event=self._on_dtmf_event,
@@ -1478,6 +1665,25 @@ class LiveKitTransport(BaseTransport):
         """
         await self._client.set_participant_metadata(metadata)
 
+    async def capture_participant_video(
+        self,
+        participant_id: str,
+        framerate: int | None = 30,
+        video_source: str = CAM_VIDEO_SOURCE,
+    ):
+        """Capture a participant's video source at a framerate.
+
+        This takes precedence over ``video_in_sources`` for the source.
+
+        Args:
+            participant_id: The participant's identity.
+            framerate: Frames per second to pass on. ``0`` passes on frames only
+                to answer image requests, and ``None`` passes on every frame.
+            video_source: The video source, ``"camera"`` or ``"screenVideo"``.
+        """
+        if self._input:
+            await self._input.capture_participant_video(participant_id, framerate, video_source)
+
     async def mute_participant(self, participant_id: str):
         """Stop receiving a specific participant's audio.
 
@@ -1504,6 +1710,8 @@ class LiveKitTransport(BaseTransport):
 
     async def _on_disconnected(self):
         """Handle room disconnected events."""
+        if self._input:
+            await self._input.remove_all_video()
         await self._call_event_handler("on_disconnected")
 
     async def _on_before_disconnect(self):
@@ -1522,6 +1730,8 @@ class LiveKitTransport(BaseTransport):
 
     async def _on_participant_disconnected(self, participant_id: str):
         """Handle participant disconnected events."""
+        if self._input:
+            await self._input.remove_participant_video(participant_id)
         await self._call_event_handler("on_participant_disconnected", participant_id)
         await self._call_event_handler("on_participant_left", participant_id, "disconnected")
         # Also call on_client_disconnected for compatibility with other transports
@@ -1541,8 +1751,15 @@ class LiveKitTransport(BaseTransport):
         """Handle video track subscribed events."""
         await self._call_event_handler("on_video_track_subscribed", participant_id)
 
-    async def _on_video_track_unsubscribed(self, participant_id: str):
+    async def _on_video_track_muted(self, participant_id: str, video_source: str):
+        """Handle video track muted events."""
+        if self._input:
+            await self._input.stop_participant_video(participant_id, video_source)
+
+    async def _on_video_track_unsubscribed(self, participant_id: str, video_source: str):
         """Handle video track unsubscribed events."""
+        if self._input:
+            await self._input.stop_participant_video(participant_id, video_source)
         await self._call_event_handler("on_video_track_unsubscribed", participant_id)
 
     async def _on_data_received(self, data: bytes, participant_id: str | None):

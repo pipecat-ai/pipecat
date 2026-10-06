@@ -95,7 +95,9 @@ async def _noop(*args):
 def _make_client():
     connection = SmallWebRTCConnection()
     callbacks = SmallWebRTCCallbacks(
-        on_app_message=_noop, on_client_connected=_noop, on_client_disconnected=_noop
+        on_app_message=_noop,
+        on_client_connected=_noop,
+        on_client_disconnected=_noop,
     )
     return SmallWebRTCClient(connection, callbacks), connection
 

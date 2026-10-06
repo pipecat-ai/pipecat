@@ -301,6 +301,22 @@ class SmallWebRTCClient:
 
         return cv2.cvtColor(frame_array, conversion_code)
 
+    def video_source_enabled(self, video_source: str) -> bool:
+        """Whether the peer is sending a video source.
+
+        Args:
+            video_source: ``"camera"`` or ``"screenVideo"``.
+
+        Returns:
+            Whether the source's track is present and the peer hasn't turned it off.
+        """
+        track = (
+            self._video_input_track
+            if video_source == CAM_VIDEO_SOURCE
+            else self._screen_video_track
+        )
+        return track is not None and track.is_enabled()
+
     async def read_video_frame(self, video_source: str):
         """Read video frames from the WebRTC connection.
 
@@ -785,6 +801,11 @@ class SmallWebRTCInputTransport(BaseInputTransport):
         if frame.video_source is None:
             frame.video_source = CAM_VIDEO_SOURCE
 
+        if not self._client.video_source_enabled(frame.video_source):
+            error = f"The peer isn't sending {frame.video_source} video."
+            await self._answer_image_requests([frame], error)
+            return
+
         # A request for a source that isn't being captured starts receiving it,
         # passing on every frame.
         sampler = self._video_samplers.setdefault(frame.video_source, _VideoInSampler(None))
@@ -806,6 +827,12 @@ class SmallWebRTCInputTransport(BaseInputTransport):
             self._receive_screen_video_task = self.create_task(
                 self._receive_video(SCREEN_VIDEO_SOURCE)
             )
+
+    async def remove_all_video(self):
+        """Stop sampling video and answer the waiting image requests, e.g. on disconnect."""
+        requests = [r for s in self._video_samplers.values() for r in s.take_requests()]
+        self._video_samplers.clear()
+        await self._answer_image_requests(requests, "The peer disconnected.")
 
     async def capture_participant_media(
         self,
@@ -1081,6 +1108,8 @@ class SmallWebRTCTransport(BaseTransport):
 
     async def _on_client_disconnected(self, webrtc_connection):
         """Handle client disconnection events."""
+        if self._input:
+            await self._input.remove_all_video()
         await self._call_event_handler("on_client_disconnected", webrtc_connection)
 
     async def capture_participant_video(

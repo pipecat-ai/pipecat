@@ -20,7 +20,8 @@ import numpy as np
 try:
     from livekit import rtc
 
-    from pipecat.frames.frames import OutputImageRawFrame
+    from pipecat.frames.frames import ImageRawFrame, OutputImageRawFrame, UserImageRequestFrame
+    from pipecat.transports.base_transport import VideoInSourceParams
     from pipecat.transports.livekit.transport import (
         LiveKitCallbacks,
         LiveKitInputTransport,
@@ -63,6 +64,7 @@ class TestLiveKitVideoStreamMemoryLeak(unittest.IsolatedAsyncioTestCase):
             on_first_participant_joined=AsyncMock(),
             on_dtmf_event=AsyncMock(),
             on_active_speaker_changed=AsyncMock(),
+            on_video_track_muted=AsyncMock(),
         )
         client = LiveKitTransportClient(
             url="wss://test.livekit.cloud",
@@ -73,6 +75,8 @@ class TestLiveKitVideoStreamMemoryLeak(unittest.IsolatedAsyncioTestCase):
             transport_name="test-transport",
         )
         client._task_manager = MagicMock()
+        # Close the stream coroutines instead of running them.
+        client._task_manager.create_task.side_effect = lambda coro, name: coro.close()
         return client
 
     def _create_mock_video_track(self):
@@ -104,7 +108,7 @@ class TestLiveKitVideoStreamMemoryLeak(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(client._video_queue.qsize(), 0)
 
         # Track metadata should still be recorded
-        self.assertIn(participant.identity, client._video_tracks)
+        self.assertIn((participant.identity, "camera"), client._video_tracks)
 
         # Callback should still fire for user code
         client._callbacks.on_video_track_subscribed.assert_called_once()
@@ -123,7 +127,7 @@ class TestLiveKitVideoStreamMemoryLeak(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(video_tasks), 1, "Video processing task should be started")
 
         # Track metadata should be recorded
-        self.assertIn(participant.identity, client._video_tracks)
+        self.assertIn((participant.identity, "camera"), client._video_tracks)
 
         # Callback should fire
         client._callbacks.on_video_track_subscribed.assert_called_once()
@@ -165,6 +169,7 @@ class TestLiveKitAudioStreamLeakOnUnsubscribe(unittest.IsolatedAsyncioTestCase):
             on_first_participant_joined=AsyncMock(),
             on_dtmf_event=AsyncMock(),
             on_active_speaker_changed=AsyncMock(),
+            on_video_track_muted=AsyncMock(),
         )
         client = LiveKitTransportClient(
             url="wss://test.livekit.cloud",
@@ -280,11 +285,11 @@ class TestLiveKitAudioStreamLeakOnUnsubscribe(unittest.IsolatedAsyncioTestCase):
         mock_stream.aclose = AsyncMock()
         with patch.object(rtc, "VideoStream", return_value=mock_stream):
             await client._async_on_track_subscribed(track, pub, participant)
-        self.assertIn(participant.identity, client._video_streams)
+        self.assertIn((participant.identity, "camera"), client._video_streams)
 
         await client._async_on_track_unsubscribed(track, pub, participant)
         mock_stream.aclose.assert_awaited_once()
-        self.assertNotIn(participant.identity, client._video_streams)
+        self.assertNotIn((participant.identity, "camera"), client._video_streams)
 
 
 @unittest.skipUnless(LIVEKIT_AVAILABLE, "livekit package not installed")
@@ -363,6 +368,7 @@ class TestLiveKitSipDtmfInput(unittest.IsolatedAsyncioTestCase):
             on_first_participant_joined=AsyncMock(),
             on_dtmf_event=AsyncMock(),
             on_active_speaker_changed=AsyncMock(),
+            on_video_track_muted=AsyncMock(),
         )
         client = LiveKitTransportClient(
             url="wss://test.livekit.cloud",
@@ -620,6 +626,7 @@ class TestLiveKitClientConnectedAlias(unittest.IsolatedAsyncioTestCase):
         )
         transport._input = MagicMock()
         transport._input.push_frame = AsyncMock()
+        transport._input.remove_participant_video = AsyncMock()
         transport._call_event_handler = AsyncMock()
         return transport
 
@@ -672,6 +679,7 @@ class TestLiveKitParticipantIdentity(unittest.IsolatedAsyncioTestCase):
             on_first_participant_joined=AsyncMock(),
             on_dtmf_event=AsyncMock(),
             on_active_speaker_changed=AsyncMock(),
+            on_video_track_muted=AsyncMock(),
         )
         client = LiveKitTransportClient(
             url="wss://test.livekit.cloud",
@@ -829,6 +837,7 @@ class TestLiveKitVideoOutputPublish(unittest.IsolatedAsyncioTestCase):
             on_first_participant_joined=AsyncMock(),
             on_dtmf_event=AsyncMock(),
             on_active_speaker_changed=AsyncMock(),
+            on_video_track_muted=AsyncMock(),
         )
         client = LiveKitTransportClient(
             url="wss://test.livekit.cloud",
@@ -1163,6 +1172,310 @@ class TestLiveKitOutputTransportWriteVideoFrame(unittest.IsolatedAsyncioTestCase
         output._client.publish_video.assert_not_awaited()
 
 
+@unittest.skipUnless(LIVEKIT_AVAILABLE, "livekit package not installed")
+class TestLiveKitParticipantsAlreadyInRoom(unittest.IsolatedAsyncioTestCase):
+    """Participants already in the room when the bot connects are reported."""
+
+    def _create_client(self, identities: list[str]) -> LiveKitTransportClient:
+        callbacks = LiveKitCallbacks(
+            **{name: AsyncMock() for name in LiveKitCallbacks.model_fields}
+        )
+        client = LiveKitTransportClient(
+            url="wss://test.livekit.cloud",
+            token="test-token",
+            room_name="test-room",
+            params=LiveKitParams(),
+            callbacks=callbacks,
+            transport_name="test-transport",
+        )
+        client._task_manager = MagicMock()
+        client._out_sample_rate = 16000
+
+        room = MagicMock()
+        room.connect = AsyncMock()
+        room.local_participant.publish_track = AsyncMock()
+        room.local_participant.identity = "bot"
+        room.remote_participants = {
+            identity: MagicMock(identity=identity) for identity in identities
+        }
+        client._room = room
+        return client
+
+    async def _connect(self, client):
+        with (
+            patch.object(rtc, "AudioSource", return_value=MagicMock()),
+            patch.object(rtc.LocalAudioTrack, "create_audio_track", return_value=MagicMock()),
+        ):
+            await client.connect()
+
+    async def test_each_participant_already_in_the_room_is_connected(self):
+        client = self._create_client(["alice", "bob"])
+
+        await self._connect(client)
+
+        callbacks = client._callbacks
+        self.assertEqual(
+            [c.args for c in callbacks.on_participant_connected.await_args_list],
+            [("alice",), ("bob",)],
+        )
+        callbacks.on_first_participant_joined.assert_awaited_once_with("alice")
+
+    async def test_participant_who_joins_later_is_not_first(self):
+        client = self._create_client(["alice"])
+        await self._connect(client)
+
+        participant = MagicMock()
+        participant.identity = "bob"
+        await client._async_on_participant_connected(participant)
+
+        client._callbacks.on_first_participant_joined.assert_awaited_once_with("alice")
+        client._callbacks.on_participant_connected.assert_awaited_with("bob")
+
+
+def _video_publication(source: "rtc.TrackSource.ValueType") -> MagicMock:
+    publication = MagicMock()
+    publication.sid = f"video-{source}"
+    publication.source = source
+    publication.kind = rtc.TrackKind.KIND_VIDEO
+    publication.muted = False
+    return publication
+
+
+@unittest.skipUnless(LIVEKIT_AVAILABLE, "livekit package not installed")
+class TestLiveKitVideoSources(unittest.IsolatedAsyncioTestCase):
+    """A user's camera and screen share are received side by side."""
+
+    def _create_client(self) -> LiveKitTransportClient:
+        callbacks = LiveKitCallbacks(
+            **{name: AsyncMock() for name in LiveKitCallbacks.model_fields},
+        )
+        client = LiveKitTransportClient(
+            url="wss://test.livekit.cloud",
+            token="test-token",
+            room_name="test-room",
+            params=LiveKitParams(video_in_enabled=True),
+            callbacks=callbacks,
+            transport_name="test-transport",
+        )
+        client._task_manager = MagicMock()
+        # Close the stream coroutines instead of running them.
+        client._task_manager.create_task.side_effect = lambda coro, name: coro.close()
+        return client
+
+    async def _subscribe(self, client, source):
+        track = MagicMock()
+        track.kind = rtc.TrackKind.KIND_VIDEO
+        participant = MagicMock()
+        participant.identity = "alice"
+        publication = _video_publication(source)
+        stream = MagicMock()
+        stream.aclose = AsyncMock()
+        with patch.object(rtc, "VideoStream", return_value=stream):
+            await client._async_on_track_subscribed(track, publication, participant)
+        return track, publication, participant, stream
+
+    async def test_camera_and_screen_share_are_received_side_by_side(self):
+        client = self._create_client()
+        await self._subscribe(client, rtc.TrackSource.SOURCE_CAMERA)
+        await self._subscribe(client, rtc.TrackSource.SOURCE_SCREENSHARE)
+
+        self.assertEqual(
+            set(client._video_streams), {("alice", "camera"), ("alice", "screenVideo")}
+        )
+        self.assertTrue(client.video_source_enabled("alice", "screenVideo"))
+
+    async def test_stopping_the_screen_share_keeps_the_camera(self):
+        client = self._create_client()
+        _, _, _, camera_stream = await self._subscribe(client, rtc.TrackSource.SOURCE_CAMERA)
+        screen = await self._subscribe(client, rtc.TrackSource.SOURCE_SCREENSHARE)
+
+        await client._async_on_track_unsubscribed(*screen[:3])
+
+        camera_stream.aclose.assert_not_awaited()
+        self.assertEqual(set(client._video_streams), {("alice", "camera")})
+        self.assertFalse(client.video_source_enabled("alice", "screenVideo"))
+
+    async def test_a_muted_track_sends_no_video(self):
+        client = self._create_client()
+        _, publication, participant, _ = await self._subscribe(
+            client, rtc.TrackSource.SOURCE_CAMERA
+        )
+
+        publication.muted = True
+        await client._async_on_track_muted(participant, publication)
+
+        self.assertFalse(client.video_source_enabled("alice", "camera"))
+        client._callbacks.on_video_track_muted.assert_awaited_once_with("alice", "camera")
+
+    async def test_video_without_a_source_is_the_camera(self):
+        client = self._create_client()
+        await self._subscribe(client, rtc.TrackSource.SOURCE_UNKNOWN)
+
+        self.assertTrue(client.video_source_enabled("alice", "camera"))
+
+
+@unittest.skipUnless(LIVEKIT_AVAILABLE, "livekit package not installed")
+class TestLiveKitInputVideoSampling(unittest.IsolatedAsyncioTestCase):
+    """Which incoming video frames the input transport passes on."""
+
+    def _input(self, frames, **params):
+        async def next_frames():
+            for frame in frames:
+                yield frame
+
+        client = MagicMock()
+        client.get_next_video_frame = next_frames
+        client.video_source_enabled = lambda participant_id, video_source: True
+        input = LiveKitInputTransport(
+            MagicMock(), client, LiveKitParams(video_in_enabled=True, **params)
+        )
+        input._convert_livekit_video_to_pipecat = AsyncMock(
+            return_value=ImageRawFrame(image=b"\x00\x00\x00", size=(1, 1), format="RGB")
+        )
+        input.pushed = []
+
+        async def collect(frame):
+            input.pushed.append(frame)
+
+        input.push_video_frame = collect
+        return input
+
+    async def test_every_frame_of_every_source_without_video_in_sources(self):
+        frames = [(MagicMock(), "alice", "camera"), (MagicMock(), "alice", "screenVideo")] * 3
+        input = self._input(frames)
+
+        await input._video_in_task_handler()
+
+        self.assertEqual(
+            [frame.transport_source for frame in input.pushed],
+            ["camera", "screenVideo"] * 3,
+        )
+
+    async def test_only_listed_sources_with_video_in_sources(self):
+        frames = [(MagicMock(), "alice", "camera"), (MagicMock(), "alice", "screenVideo")]
+        input = self._input(frames, video_in_sources={"screenVideo": VideoInSourceParams()})
+
+        await input._video_in_task_handler()
+
+        self.assertEqual([frame.transport_source for frame in input.pushed], ["screenVideo"])
+
+    async def test_explicit_capture_takes_precedence(self):
+        frames = [(MagicMock(), "alice", "camera")] * 3
+        input = self._input(frames, video_in_sources={"camera": VideoInSourceParams()})
+        await input.capture_participant_video("alice", 0, "camera")
+
+        await input._video_in_task_handler()
+
+        self.assertEqual(input.pushed, [])
+
+    async def test_request_answered_by_the_next_frame(self):
+        frames = [(MagicMock(), "alice", "camera")] * 2
+        input = self._input(
+            frames, video_in_sources={"camera": VideoInSourceParams(on_request_only=True)}
+        )
+        request = UserImageRequestFrame(user_id="alice", text="What is this?")
+        await input.request_participant_image(request)
+
+        await input._video_in_task_handler()
+
+        self.assertEqual(len(input.pushed), 1)
+        self.assertIs(input.pushed[0].request, request)
+        self.assertEqual(input.pushed[0].text, "What is this?")
+
+    async def test_request_without_a_track_completes_with_an_error(self):
+        input = self._input([])
+        input._client.video_source_enabled = lambda participant_id, video_source: False
+        result_callback = AsyncMock()
+
+        await input.request_participant_image(
+            UserImageRequestFrame(
+                user_id="alice", video_source="screenVideo", result_callback=result_callback
+            )
+        )
+
+        result_callback.assert_awaited_once()
+        self.assertIn("screenVideo", result_callback.await_args.args[0]["error"])
+
+    async def test_a_participant_who_leaves_is_forgotten(self):
+        transport = LiveKitTransport(
+            url="wss://test.livekit.cloud",
+            token="t",
+            room_name="r",
+            params=LiveKitParams(video_in_enabled=True),
+        )
+        await transport.input().capture_participant_video("alice", 1, "camera")
+
+        await transport._on_participant_disconnected("alice")
+
+        self.assertFalse(transport.input()._video_samplers.is_capturing("alice", "camera"))
+
+    async def _waiting_request(self, input, video_source="camera"):
+        result_callback = AsyncMock()
+        await input.request_participant_image(
+            UserImageRequestFrame(
+                user_id="alice", video_source=video_source, result_callback=result_callback
+            )
+        )
+        result_callback.assert_not_awaited()
+        return result_callback
+
+    async def test_request_after_the_track_stopped_is_answered_with_an_error(self):
+        input = self._input([], video_in_sources={"screenVideo": VideoInSourceParams()})
+        input._capture_configured_video("alice", "screenVideo")
+        input._client.video_source_enabled = lambda participant_id, video_source: False
+        result_callback = AsyncMock()
+
+        await input.request_participant_image(
+            UserImageRequestFrame(
+                user_id="alice", video_source="screenVideo", result_callback=result_callback
+            )
+        )
+
+        self.assertIn("error", result_callback.await_args.args[0])
+
+    async def test_waiting_request_is_answered_when_its_track_stops(self):
+        input = self._input([], video_in_sources={"screenVideo": VideoInSourceParams()})
+        result_callback = await self._waiting_request(input, "screenVideo")
+
+        await input.stop_participant_video("alice", "screenVideo")
+
+        self.assertIn("stopped", result_callback.await_args.args[0]["error"])
+        self.assertTrue(input._video_samplers.is_capturing("alice", "screenVideo"))
+
+    async def test_waiting_request_is_answered_when_the_participant_leaves(self):
+        input = self._input([])
+        result_callback = await self._waiting_request(input)
+
+        await input.remove_participant_video("alice")
+
+        self.assertIn("left", result_callback.await_args.args[0]["error"])
+
+    async def test_waiting_requests_are_answered_when_the_room_disconnects(self):
+        transport = LiveKitTransport(
+            url="wss://test.livekit.cloud",
+            token="t",
+            room_name="r",
+            params=LiveKitParams(video_in_enabled=True),
+        )
+        input = transport.input()
+        input._client = MagicMock(video_source_enabled=lambda participant_id, video_source: True)
+        result_callback = await self._waiting_request(input)
+
+        await transport._on_disconnected()
+
+        self.assertIn("error", result_callback.await_args.args[0])
+
+    def test_screen_in_capability(self):
+        input = LiveKitInputTransport(
+            MagicMock(),
+            MagicMock(),
+            LiveKitParams(
+                video_in_enabled=True, video_in_sources={"screenVideo": VideoInSourceParams()}
+            ),
+        )
+        self.assertTrue(input.capabilities.screen_in)
+
+
 if __name__ == "__main__":
     unittest.main()
 
@@ -1186,6 +1499,7 @@ class TestLiveKitAudioOutQueueSize(unittest.IsolatedAsyncioTestCase):
             on_first_participant_joined=AsyncMock(),
             on_dtmf_event=AsyncMock(),
             on_active_speaker_changed=AsyncMock(),
+            on_video_track_muted=AsyncMock(),
         )
         client = LiveKitTransportClient(
             url="wss://test.livekit.cloud",

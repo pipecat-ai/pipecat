@@ -17,6 +17,7 @@ from pipecat.runner.types import (
 from pipecat.runner.utils import (
     _maybe_apply_daily_dialin,
     create_transport,
+    get_transport_client_id,
     parse_telephony_websocket,
 )
 
@@ -310,3 +311,19 @@ class TestMaybeApplyDailyDialin(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestGetTransportClientId(unittest.TestCase):
+    def test_livekit_client_id_is_the_participant_identity(self):
+        class LiveKitTransport:
+            pass
+
+        client_id = get_transport_client_id(LiveKitTransport(), {"id": "User-1234"})
+
+        self.assertEqual(client_id, "User-1234")
+
+    def test_unsupported_transport_has_no_client_id(self):
+        class OtherTransport:
+            pass
+
+        self.assertEqual(get_transport_client_id(OtherTransport(), {"id": "User-1234"}), "")

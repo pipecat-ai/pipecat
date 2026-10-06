@@ -25,6 +25,7 @@ from pipecat.frames.frames import (
     StartFrame,
     StopFrame,
     SystemFrame,
+    UserImageRequestFrame,
 )
 from pipecat.pipeline.capabilities import BotCapabilities
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
@@ -122,6 +123,22 @@ class BaseInputTransport(FrameProcessor):
             The sample rate in Hz.
         """
         return self._sample_rate
+
+    async def _answer_image_requests(self, requests: list[UserImageRequestFrame], error: str):
+        """Complete image requests that no frame will answer, with an error.
+
+        The function call that made each request would otherwise never finish.
+
+        Args:
+            requests: The image requests to complete.
+            error: Why no frame will answer them.
+        """
+        if not requests:
+            return
+        logger.warning(f"{self}: {error}")
+        for request in requests:
+            if request.result_callback:
+                await request.result_callback({"error": error})
 
     def _supports_video_in_source(self, video_source: str) -> bool:
         """Whether this transport captures a video source listed in ``video_in_sources``.
