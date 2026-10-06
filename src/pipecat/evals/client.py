@@ -45,7 +45,7 @@ from pipecat.evals.serializer import (
     EvalClientSerializer,
     EvalConnectionFlags,
 )
-from pipecat.evals.session import EvalSessionParams
+from pipecat.evals.session import DEFAULT_BOT_READY_TIMEOUT_S, EvalSessionParams
 from pipecat.evals.tts import CachingTTSService, tts_sample_rate
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
@@ -89,7 +89,8 @@ from pipecat.services.stt_service import SegmentedSTTService, STTService
 from pipecat.transports.websocket.client import WebsocketClientParams
 from pipecat.workers.runner import WorkerRunner
 
-BOT_READY_TIMEOUT_S = 10.0
+# The default, at the name the deprecated ``pipecat.evals.harness`` re-exports.
+BOT_READY_TIMEOUT_S = DEFAULT_BOT_READY_TIMEOUT_S
 
 
 # Frames the bot produced: the sink turns them into events and stops them here.
@@ -565,12 +566,11 @@ class EvalClient:
         """
         # The transport sends client-ready on connect and fires on_bot_ready when
         # the bot answers; our handler sets _bot_ready_event.
+        timeout_s = self._session_params.bot_ready_timeout_s
         try:
-            await asyncio.wait_for(self._bot_ready_event.wait(), timeout=BOT_READY_TIMEOUT_S)
+            await asyncio.wait_for(self._bot_ready_event.wait(), timeout=timeout_s)
         except TimeoutError:
-            raise TimeoutError(
-                f"bot-ready not received within {int(BOT_READY_TIMEOUT_S * 1000)}ms"
-            ) from None
+            raise TimeoutError(f"bot-ready not received within {int(timeout_s * 1000)}ms") from None
 
         # Ask the bot's RTVIObserver to expose what this scenario needs, for the
         # duration of this eval only (bots keep their defaults; only the eval

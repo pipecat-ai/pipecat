@@ -59,6 +59,10 @@ R = TypeVar("R")
 # than failing on latency. Set ``within_ms`` explicitly to assert on timing.
 DEFAULT_EVENT_TIMEOUT_MS = 60000
 
+# A bot builds its pipeline when the harness connects, so the wait covers its
+# startup: connecting its services and loading any local models.
+DEFAULT_BOT_READY_TIMEOUT_S = 60.0
+
 
 class EvalSessionParams(BaseModel):
     """How a run behaves, whichever kind of scenario it is: timeouts, recording, caching, teardown.
@@ -69,6 +73,8 @@ class EvalSessionParams(BaseModel):
     Parameters:
         connect_timeout_s: How long to wait for the bot to accept the WS
             connection before giving up.
+        bot_ready_timeout_s: How long to wait, once connected, for the bot to
+            answer the RTVI handshake with ``bot-ready``.
         default_timeout_ms: Scripted scenarios only: the latency budget for
             expectations without their own ``within_ms`` (the turn's expectations
             share one deadline anchored at the send). Defaults to 60s.
@@ -88,6 +94,7 @@ class EvalSessionParams(BaseModel):
     """
 
     connect_timeout_s: float = 5.0
+    bot_ready_timeout_s: float = DEFAULT_BOT_READY_TIMEOUT_S
     default_timeout_ms: int = DEFAULT_EVENT_TIMEOUT_MS
     record_path: str | None = None
     cache_dir: str | None = None

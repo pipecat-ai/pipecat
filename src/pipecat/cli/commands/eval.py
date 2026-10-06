@@ -44,7 +44,7 @@ from pipecat.evals.scenario import (
     describe_simulation,
     is_scenario_file,
 )
-from pipecat.evals.session import EvalSession, EvalSessionParams
+from pipecat.evals.session import DEFAULT_BOT_READY_TIMEOUT_S, EvalSession, EvalSessionParams
 from pipecat.evals.suite import (
     SCENARIO_SUFFIXES,
     EvalManifest,
@@ -451,6 +451,12 @@ def run(
         "disconnects. Bots often cancel their pipeline there, so it's off by "
         "default. A scenario's 'trigger_disconnect:' field opts in on its own.",
     ),
+    bot_ready_timeout: float = typer.Option(
+        DEFAULT_BOT_READY_TIMEOUT_S,
+        "--bot-ready-timeout",
+        help="Seconds to wait, once connected, for the bot's RTVI bot-ready, which "
+        "covers the bot's startup.",
+    ),
 ) -> None:
     """Run one or more scenarios, scripted or simulations, against an already-running bot.
 
@@ -477,6 +483,7 @@ def run(
         use_cache=not no_cache,
         stop_bot=stop_bot,
         trigger_disconnect=trigger_disconnect,
+        bot_ready_timeout_s=bot_ready_timeout,
     )
     started = time.monotonic()
     asyncio.run(
