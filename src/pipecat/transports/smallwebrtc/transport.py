@@ -50,7 +50,7 @@ from pipecat.transports.smallwebrtc.connection import (
     SmallWebRTCConnection,
     SmallWebRTCTrack,
 )
-from pipecat.transports.video_in_sampler import _capture_framerate, _VideoInSampler
+from pipecat.transports.video_in_sampler import _capture_framerate, _VideoInSamplers
 from pipecat.utils.shared import acquires, releases
 from pipecat.utils.types import NOT_GIVEN, NotGiven, is_given
 
@@ -66,6 +66,9 @@ except ModuleNotFoundError as e:
 CAM_VIDEO_SOURCE = "camera"
 SCREEN_VIDEO_SOURCE = "screenVideo"
 MIC_AUDIO_SOURCE = "microphone"
+
+# SmallWebRTC has one peer, so all its video samplers are kept under one id.
+_PEER_ID = "peer"
 
 # The source each of the connection's receivers carries.
 _SOURCES_BY_RECEIVER = {
@@ -670,8 +673,7 @@ class SmallWebRTCInputTransport(BaseInputTransport):
         self._receive_audio_task = None
         self._receive_video_task = None
         self._receive_screen_video_task = None
-        # Video samplers by video source.
-        self._video_samplers: dict[str, _VideoInSampler] = {}
+        self._video_samplers = _VideoInSamplers()
 
     def _supports_video_in_source(self, video_source: str) -> bool:
         """Whether this transport captures a video source listed in ``video_in_sources``.
@@ -788,10 +790,7 @@ class SmallWebRTCInputTransport(BaseInputTransport):
             async for video_frame in video_iterator:
                 if not video_frame:
                     continue
-                sampler = self._video_samplers.get(video_source)
-                if not sampler:
-                    continue
-                due, request_frame = sampler.sample()
+                due, request_frame = self._video_samplers.sample(_PEER_ID, video_source)
                 if not due:
                     continue
                 if request_frame:
@@ -835,8 +834,9 @@ class SmallWebRTCInputTransport(BaseInputTransport):
 
         # A request for a source that isn't being captured starts receiving it,
         # passing on every frame.
-        sampler = self._video_samplers.setdefault(frame.video_source, _VideoInSampler(None))
-        sampler.add_request(frame)
+        if not self._video_samplers.is_capturing(_PEER_ID, frame.video_source):
+            self._video_samplers.capture(_PEER_ID, frame.video_source, None)
+        self._video_samplers.add_request(_PEER_ID, frame.video_source, frame)
         # If we're not already receiving video, try to get a frame now
         if (
             frame.video_source == CAM_VIDEO_SOURCE
@@ -864,15 +864,13 @@ class SmallWebRTCInputTransport(BaseInputTransport):
         Args:
             video_source: ``"camera"`` or ``"screenVideo"``.
         """
-        sampler = self._video_samplers.get(video_source)
-        requests = sampler.take_requests() if sampler else []
+        requests = self._video_samplers.take_requests(_PEER_ID, video_source)
         error = f"The peer turned off its {video_source} video."
         await self._answer_image_requests(requests, error)
 
     async def remove_all_video(self):
         """Stop sampling video and answer the waiting image requests, e.g. on disconnect."""
-        requests = [r for s in self._video_samplers.values() for r in s.take_requests()]
-        self._video_samplers.clear()
+        requests = self._video_samplers.clear()
         await self._answer_image_requests(requests, "The peer disconnected.")
 
     async def capture_participant_media(
@@ -889,10 +887,7 @@ class SmallWebRTCInputTransport(BaseInputTransport):
                 every frame.
         """
         if source in (CAM_VIDEO_SOURCE, SCREEN_VIDEO_SOURCE):
-            # Keep an existing sampler so image requests already waiting on it
-            # are still answered.
-            sampler = self._video_samplers.setdefault(source, _VideoInSampler(framerate))
-            sampler.framerate = framerate
+            self._video_samplers.capture(_PEER_ID, source, framerate)
 
         # If we're not already receiving video, try to get a frame now
         if (

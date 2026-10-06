@@ -358,10 +358,11 @@ class TestDailyVideoInSourcesCapture(unittest.IsolatedAsyncioTestCase):
 class TestSmallWebRTCVideoInSampling(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         try:
-            from pipecat.transports.smallwebrtc.transport import SmallWebRTCInputTransport
+            from pipecat.transports.smallwebrtc import transport
         except Exception as e:
             self.skipTest(f"SmallWebRTC transport unavailable: {e}")
-        self.transport_cls = SmallWebRTCInputTransport
+        self.transport_cls = transport.SmallWebRTCInputTransport
+        self.peer_id = transport._PEER_ID
 
     def _fake_input(self, frames: list[UserImageRawFrame], samplers: dict):
         async def read_video_frame(_source):
@@ -370,10 +371,15 @@ class TestSmallWebRTCVideoInSampling(unittest.IsolatedAsyncioTestCase):
 
         fake = MagicMock()
         fake._client.read_video_frame = read_video_frame
-        fake._video_samplers = samplers
+        fake._video_samplers = _VideoInSamplers()
+        for video_source, sampler in samplers.items():
+            fake._video_samplers._samplers[(self.peer_id, video_source)] = sampler
         fake._params = TransportParams(video_in_enabled=True)
         fake.push_video_frame = AsyncMock()
         return fake
+
+    def _sampler(self, fake, video_source: str) -> _VideoInSampler:
+        return fake._video_samplers._samplers[(self.peer_id, video_source)]
 
     def _pushed(self, fake) -> list[UserImageRawFrame]:
         return [awaited.args[0] for awaited in fake.push_video_frame.await_args_list]
@@ -419,7 +425,7 @@ class TestSmallWebRTCVideoInSampling(unittest.IsolatedAsyncioTestCase):
 
         await self.transport_cls.request_participant_image(fake, request)
 
-        sampler = fake._video_samplers["camera"]
+        sampler = self._sampler(fake, "camera")
         self.assertIsNone(sampler.framerate)
         self.assertIs(sampler.sample()[1], request)
         fake.create_task.assert_called_once()
@@ -432,7 +438,7 @@ class TestSmallWebRTCVideoInSampling(unittest.IsolatedAsyncioTestCase):
         await self.transport_cls.request_participant_image(fake, request)
         await self.transport_cls.capture_participant_media(fake, source="camera", framerate=1)
 
-        sampler = fake._video_samplers["camera"]
+        sampler = self._sampler(fake, "camera")
         self.assertEqual(sampler.framerate, 1)
         self.assertIs(sampler.sample()[1], request)
 
@@ -594,7 +600,7 @@ class TestImageRequestsWithoutVideo(unittest.IsolatedAsyncioTestCase):
         await input.stop_video("screenVideo")
 
         self.assertIn("turned off", result_callback.await_args.args[0]["error"])
-        self.assertIn("screenVideo", input._video_samplers)
+        self.assertTrue(input._video_samplers.is_capturing("peer", "screenVideo"))
 
     async def test_smallwebrtc_transport_answers_only_when_video_turns_off(self):
         try:
