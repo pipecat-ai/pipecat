@@ -583,15 +583,6 @@ class TestImageRequestsWithoutVideo(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("isn't sending", result_callback.await_args.args[0]["error"])
 
-    async def test_smallwebrtc_waiting_request_when_the_source_stops(self):
-        input, cls = self._smallwebrtc_input()
-        result_callback = await self._waiting_request(input, cls, video_source="screenVideo")
-        result_callback.assert_not_awaited()
-
-        await input.stop_video("screenVideo")
-
-        self.assertIn("stopped", result_callback.await_args.args[0]["error"])
-
     async def test_smallwebrtc_waiting_requests_when_the_peer_disconnects(self):
         input, cls = self._smallwebrtc_input()
         result_callback = await self._waiting_request(input, cls)

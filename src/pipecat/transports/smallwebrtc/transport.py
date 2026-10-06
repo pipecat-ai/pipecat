@@ -42,12 +42,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSet
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.transports.smallwebrtc.connection import (
-    SCREEN_VIDEO_TRANSCEIVER_INDEX,
-    VIDEO_TRANSCEIVER_INDEX,
-    SmallWebRTCConnection,
-    SmallWebRTCTrack,
-)
+from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection, SmallWebRTCTrack
 from pipecat.transports.video_in_sampler import _VideoInSampler
 from pipecat.utils.shared import acquires, releases
 
@@ -64,12 +59,6 @@ CAM_VIDEO_SOURCE = "camera"
 SCREEN_VIDEO_SOURCE = "screenVideo"
 MIC_AUDIO_SOURCE = "microphone"
 
-# The video source each of the connection's video receivers carries.
-_VIDEO_SOURCES_BY_RECEIVER = {
-    VIDEO_TRANSCEIVER_INDEX: CAM_VIDEO_SOURCE,
-    SCREEN_VIDEO_TRANSCEIVER_INDEX: SCREEN_VIDEO_SOURCE,
-}
-
 
 class SmallWebRTCCallbacks(BaseModel):
     """Callback handlers for SmallWebRTC events.
@@ -78,14 +67,11 @@ class SmallWebRTCCallbacks(BaseModel):
         on_app_message: Called when an application message is received.
         on_client_connected: Called when a client establishes connection.
         on_client_disconnected: Called when a client disconnects.
-        on_video_stopped: Called with the video source when the peer stops
-            sending its camera (``"camera"``) or screen share (``"screenVideo"``).
     """
 
     on_app_message: Callable[[Any, str], Awaitable[None]]
     on_client_connected: Callable[[SmallWebRTCConnection], Awaitable[None]]
     on_client_disconnected: Callable[[SmallWebRTCConnection], Awaitable[None]]
-    on_video_stopped: Callable[[str], Awaitable[None]]
 
 
 class RawAudioTrack(AudioStreamTrack):
@@ -275,14 +261,6 @@ class SmallWebRTCClient:
         @self._webrtc_connection.event_handler("app-message")
         async def on_app_message(connection: SmallWebRTCConnection, message: Any):
             await self._handle_app_message(message, connection.pc_id)
-
-        @self._webrtc_connection.event_handler("track-status")
-        async def on_track_status(
-            connection: SmallWebRTCConnection, receiver_index: int, enabled: bool
-        ):
-            video_source = _VIDEO_SOURCES_BY_RECEIVER.get(receiver_index)
-            if video_source and not enabled:
-                await self._callbacks.on_video_stopped(video_source)
 
     def _convert_frame(self, frame_array: np.ndarray, format_name: str) -> np.ndarray:
         """Convert a video frame to RGB format based on the input format.
@@ -850,19 +828,6 @@ class SmallWebRTCInputTransport(BaseInputTransport):
                 self._receive_video(SCREEN_VIDEO_SOURCE)
             )
 
-    async def stop_video(self, video_source: str):
-        """Answer the image requests waiting on a video source the peer stopped sending.
-
-        The source stays captured, so its frames are sampled again if it restarts.
-
-        Args:
-            video_source: ``"camera"`` or ``"screenVideo"``.
-        """
-        sampler = self._video_samplers.get(video_source)
-        requests = sampler.take_requests() if sampler else []
-        error = f"The peer stopped sending {video_source} video."
-        await self._answer_image_requests(requests, error)
-
     async def remove_all_video(self):
         """Stop sampling video and answer the waiting image requests, e.g. on disconnect."""
         requests = [r for s in self._video_samplers.values() for r in s.take_requests()]
@@ -1064,7 +1029,6 @@ class SmallWebRTCTransport(BaseTransport):
             on_app_message=self._on_app_message,
             on_client_connected=self._on_client_connected,
             on_client_disconnected=self._on_client_disconnected,
-            on_video_stopped=self._on_video_stopped,
         )
 
         self._client = SmallWebRTCClient(webrtc_connection, self._callbacks)
@@ -1147,11 +1111,6 @@ class SmallWebRTCTransport(BaseTransport):
         if self._input:
             await self._input.remove_all_video()
         await self._call_event_handler("on_client_disconnected", webrtc_connection)
-
-    async def _on_video_stopped(self, video_source: str):
-        """Handle the peer stopping a video source."""
-        if self._input:
-            await self._input.stop_video(video_source)
 
     async def capture_participant_video(
         self,

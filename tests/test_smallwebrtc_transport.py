@@ -98,7 +98,6 @@ def _make_client():
         on_app_message=_noop,
         on_client_connected=_noop,
         on_client_disconnected=_noop,
-        on_video_stopped=_noop,
     )
     return SmallWebRTCClient(connection, callbacks), connection
 
@@ -452,31 +451,6 @@ class TestVideoJitterBuffer(unittest.IsolatedAsyncioTestCase):
 
         receiver, default_buffer = receivers[1]
         self.assertIs(receiver._RTCRtpReceiver__jitter_buffer, default_buffer)
-
-
-class TestTrackStatus(unittest.IsolatedAsyncioTestCase):
-    """The peer turning a video source off is reported with the source."""
-
-    async def test_turning_off_the_screen_share_reports_it(self):
-        stopped = AsyncMock()
-        connection = SmallWebRTCConnection()
-        callbacks = SmallWebRTCCallbacks(
-            on_app_message=_noop,
-            on_client_connected=_noop,
-            on_client_disconnected=_noop,
-            on_video_stopped=stopped,
-        )
-        SmallWebRTCClient(connection, callbacks)
-
-        await connection._handle_signalling_message(
-            {"type": "trackStatus", "receiver_index": 2, "enabled": True}
-        )
-        await connection._handle_signalling_message(
-            {"type": "trackStatus", "receiver_index": 2, "enabled": False}
-        )
-        await asyncio.sleep(0.05)
-
-        stopped.assert_awaited_once_with("screenVideo")
 
 
 if __name__ == "__main__":
