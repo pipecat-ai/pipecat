@@ -26,6 +26,7 @@ from pipecat.runner.utils import create_transport
 from pipecat.services.google.gemini_live.llm import GeminiLiveLLMService
 from pipecat.transports.base_transport import TransportParams, VideoInSourceParams
 from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.livekit.transport import LiveKitParams
 from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
@@ -36,6 +37,17 @@ transport_params = {
         audio_out_enabled=True,
     ),
     "daily": lambda: DailyParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+        audio_out_10ms_chunks=2,
+        video_in_enabled=True,
+        video_in_sources={
+            "camera": VideoInSourceParams(framerate=30),
+        },
+        video_out_enabled=True,
+        video_out_is_live=True,
+    ),
+    "livekit": lambda: LiveKitParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
         audio_out_10ms_chunks=2,

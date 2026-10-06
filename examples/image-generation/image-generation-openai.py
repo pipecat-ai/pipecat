@@ -19,6 +19,7 @@ from pipecat.runner.utils import create_transport
 from pipecat.services.openai.image import OpenAIImageGenService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.livekit.transport import LiveKitParams
 from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
@@ -30,6 +31,11 @@ PROMPT = "a cat in the style of picasso"
 transport_params = {
     "eval": lambda: EvalTransportParams(),
     "daily": lambda: DailyParams(
+        video_out_enabled=True,
+        video_out_width=1024,
+        video_out_height=1024,
+    ),
+    "livekit": lambda: LiveKitParams(
         video_out_enabled=True,
         video_out_width=1024,
         video_out_height=1024,

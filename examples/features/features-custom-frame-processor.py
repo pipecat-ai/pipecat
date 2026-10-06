@@ -31,6 +31,7 @@ from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.livekit.transport import LiveKitParams
 from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
@@ -84,6 +85,11 @@ transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
+    ),
+    "livekit": lambda: LiveKitParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+        video_out_enabled=True,
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,

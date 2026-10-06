@@ -29,6 +29,7 @@ from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.livekit.transport import LiveKitParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 from pipecat.workers.runner import WorkerRunner
 
@@ -46,6 +47,15 @@ transport_params = {
         audio_out_enabled=True,
     ),
     "daily": lambda: DailyParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+        audio_out_mixer=SoundfileMixer(
+            sound_files={"office": OFFICE_SOUND_FILE},
+            default_sound="office",
+            volume=2.0,
+        ),
+    ),
+    "livekit": lambda: LiveKitParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
         audio_out_mixer=SoundfileMixer(

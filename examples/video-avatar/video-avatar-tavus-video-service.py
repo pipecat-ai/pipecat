@@ -29,6 +29,7 @@ from pipecat.services.google.llm import GoogleLLMService
 from pipecat.services.tavus.video import TavusVideoService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.livekit.transport import LiveKitParams
 from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
@@ -41,6 +42,15 @@ transport_params = {
         audio_out_enabled=True,
     ),
     "daily": lambda: DailyParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+        video_out_enabled=True,
+        video_out_is_live=True,
+        video_out_width=1280,
+        video_out_height=720,
+        audio_out_auto_silence=False,
+    ),
+    "livekit": lambda: LiveKitParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
         video_out_enabled=True,
