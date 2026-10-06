@@ -79,7 +79,7 @@ from pipecat.utils.context.llm_context_summarization import (
 )
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.errors import ErrorCategory
-from pipecat.utils.log_config import LLMContextLogMode, get_llm_context_log_mode
+from pipecat.utils.log_config import _get_llm_context_log_mode, _LLMContextLogMode
 from pipecat.utils.types import assert_given
 
 if TYPE_CHECKING:
@@ -476,7 +476,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         # the service that called the _log_* method, so loguru filters by
         # module still apply.
         def render() -> str:
-            if get_llm_context_log_mode() == LLMContextLogMode.OFF:
+            if _get_llm_context_log_mode() == _LLMContextLogMode.OFF:
                 return f"{self}: {event}"
             messages = self.get_llm_adapter().get_messages_for_logging(context)
             return f"{self}: {event} {messages}"

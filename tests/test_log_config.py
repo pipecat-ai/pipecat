@@ -11,73 +11,50 @@ import pytest
 from pipecat.utils import log_config
 from pipecat.utils.env import InvalidEnvVarValueError
 from pipecat.utils.log_config import (
-    LLM_CONTEXT_LOG_ENV_VAR,
-    LLMContextLogMode,
-    configure_logging,
-    get_llm_context_log_mode,
+    _LLM_CONTEXT_LOG_ENV_VAR,
+    _get_llm_context_log_mode,
+    _LLMContextLogMode,
 )
 
 
 @pytest.fixture(autouse=True)
 def _reset(monkeypatch):
-    monkeypatch.setattr(log_config, "_config", log_config._LogConfig())
-    monkeypatch.delenv(LLM_CONTEXT_LOG_ENV_VAR, raising=False)
+    monkeypatch.setattr(log_config, "_llm_context_log_mode", None)
+    monkeypatch.delenv(_LLM_CONTEXT_LOG_ENV_VAR, raising=False)
 
 
 def test_defaults_to_full():
-    assert get_llm_context_log_mode() == LLMContextLogMode.FULL
+    assert _get_llm_context_log_mode() == _LLMContextLogMode.FULL
 
 
 @pytest.mark.parametrize("raw", ["", "   "])
 def test_empty_env_var_defaults_to_full(monkeypatch, raw):
-    monkeypatch.setenv(LLM_CONTEXT_LOG_ENV_VAR, raw)
-    assert get_llm_context_log_mode() == LLMContextLogMode.FULL
+    monkeypatch.setenv(_LLM_CONTEXT_LOG_ENV_VAR, raw)
+    assert _get_llm_context_log_mode() == _LLMContextLogMode.FULL
 
 
 @pytest.mark.parametrize(
     "raw, expected",
     [
-        (" Off ", LLMContextLogMode.OFF),
-        ("FULL", LLMContextLogMode.FULL),
+        (" Off ", _LLMContextLogMode.OFF),
+        ("FULL", _LLMContextLogMode.FULL),
     ],
 )
 def test_reads_env_var(monkeypatch, raw, expected):
-    monkeypatch.setenv(LLM_CONTEXT_LOG_ENV_VAR, raw)
-    assert get_llm_context_log_mode() == expected
+    monkeypatch.setenv(_LLM_CONTEXT_LOG_ENV_VAR, raw)
+    assert _get_llm_context_log_mode() == expected
 
 
 def test_invalid_env_var_raises(monkeypatch):
-    monkeypatch.setenv(LLM_CONTEXT_LOG_ENV_VAR, "verbose")
+    monkeypatch.setenv(_LLM_CONTEXT_LOG_ENV_VAR, "verbose")
     with pytest.raises(InvalidEnvVarValueError) as exc_info:
-        get_llm_context_log_mode()
-    assert exc_info.value.name == LLM_CONTEXT_LOG_ENV_VAR
+        _get_llm_context_log_mode()
+    assert exc_info.value.name == _LLM_CONTEXT_LOG_ENV_VAR
     assert exc_info.value.value == "verbose"
 
 
 def test_env_var_read_once(monkeypatch):
-    monkeypatch.setenv(LLM_CONTEXT_LOG_ENV_VAR, "off")
-    assert get_llm_context_log_mode() == LLMContextLogMode.OFF
-    monkeypatch.setenv(LLM_CONTEXT_LOG_ENV_VAR, "full")
-    assert get_llm_context_log_mode() == LLMContextLogMode.OFF
-
-
-def test_configure_overrides_env_var(monkeypatch):
-    monkeypatch.setenv(LLM_CONTEXT_LOG_ENV_VAR, "off")
-    configure_logging(llm_context=LLMContextLogMode.FULL)
-    assert get_llm_context_log_mode() == LLMContextLogMode.FULL
-
-
-def test_configure_accepts_strings():
-    configure_logging(llm_context="off")
-    assert get_llm_context_log_mode() == LLMContextLogMode.OFF
-
-
-def test_configure_none_keeps_current_value():
-    configure_logging(llm_context="off")
-    configure_logging()
-    assert get_llm_context_log_mode() == LLMContextLogMode.OFF
-
-
-def test_configure_invalid_value_raises():
-    with pytest.raises(ValueError):
-        configure_logging(llm_context="verbose")
+    monkeypatch.setenv(_LLM_CONTEXT_LOG_ENV_VAR, "off")
+    assert _get_llm_context_log_mode() == _LLMContextLogMode.OFF
+    monkeypatch.setenv(_LLM_CONTEXT_LOG_ENV_VAR, "full")
+    assert _get_llm_context_log_mode() == _LLMContextLogMode.OFF
