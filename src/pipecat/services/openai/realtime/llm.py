@@ -1184,9 +1184,7 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
 
         # Configure the LLM for this session if needed
         if self._llm_needs_conversation_setup:
-            logger.debug(
-                f"Setting up conversation on OpenAI Realtime LLM service with initial messages: {adapter.get_messages_for_logging(self._context)}"
-            )
+            self._log_llm_conversation_setup(self._context)
 
             # Send initial messages
             llm_invocation_params = adapter.get_llm_invocation_params(self._context)

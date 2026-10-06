@@ -1024,10 +1024,7 @@ class OpenAIResponsesLLMService(
             await self._drain_cancelled_response()
 
         adapter = self.get_llm_adapter()
-        logger.debug(
-            f"{self}: Generating response from universal context "
-            f"{adapter.get_messages_for_logging(context)}"
-        )
+        self._log_llm_response(context)
 
         invocation_params = adapter.get_llm_invocation_params(
             context, system_instruction=assert_given(self._settings.system_instruction)
@@ -1346,10 +1343,7 @@ class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
     @traced_llm
     async def _process_context(self, context: LLMContext):
         adapter = self.get_llm_adapter()
-        logger.debug(
-            f"{self}: Generating response from universal context "
-            f"{adapter.get_messages_for_logging(context)}"
-        )
+        self._log_llm_response(context)
 
         invocation_params = adapter.get_llm_invocation_params(
             context, system_instruction=assert_given(self._settings.system_instruction)
