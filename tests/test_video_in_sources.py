@@ -586,6 +586,30 @@ class TestImageRequestsWithoutVideo(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("isn't sending", result_callback.await_args.args[0]["error"])
 
+    async def test_smallwebrtc_waiting_request_when_the_source_turns_off(self):
+        input, cls = self._smallwebrtc_input()
+        result_callback = await self._waiting_request(input, cls, video_source="screenVideo")
+        result_callback.assert_not_awaited()
+
+        await input.stop_video("screenVideo")
+
+        self.assertIn("turned off", result_callback.await_args.args[0]["error"])
+        self.assertIn("screenVideo", input._video_samplers)
+
+    async def test_smallwebrtc_transport_answers_only_when_video_turns_off(self):
+        try:
+            from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
+        except Exception as e:
+            self.skipTest(f"SmallWebRTC transport unavailable: {e}")
+        transport = MagicMock()
+        transport._input.stop_video = AsyncMock()
+
+        await SmallWebRTCTransport._on_track_status(transport, "camera", True)
+        await SmallWebRTCTransport._on_track_status(transport, "microphone", False)
+        await SmallWebRTCTransport._on_track_status(transport, "screenVideo", False)
+
+        transport._input.stop_video.assert_awaited_once_with("screenVideo")
+
     async def test_smallwebrtc_waiting_requests_when_the_peer_disconnects(self):
         input, cls = self._smallwebrtc_input()
         result_callback = await self._waiting_request(input, cls)
