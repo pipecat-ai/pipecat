@@ -62,6 +62,7 @@ class TestLiveKitVideoStreamMemoryLeak(unittest.IsolatedAsyncioTestCase):
             on_data_received=AsyncMock(),
             on_first_participant_joined=AsyncMock(),
             on_dtmf_event=AsyncMock(),
+            on_active_speaker_changed=AsyncMock(),
         )
         client = LiveKitTransportClient(
             url="wss://test.livekit.cloud",
@@ -163,6 +164,7 @@ class TestLiveKitAudioStreamLeakOnUnsubscribe(unittest.IsolatedAsyncioTestCase):
             on_data_received=AsyncMock(),
             on_first_participant_joined=AsyncMock(),
             on_dtmf_event=AsyncMock(),
+            on_active_speaker_changed=AsyncMock(),
         )
         client = LiveKitTransportClient(
             url="wss://test.livekit.cloud",
@@ -360,6 +362,7 @@ class TestLiveKitSipDtmfInput(unittest.IsolatedAsyncioTestCase):
             on_data_received=AsyncMock(),
             on_first_participant_joined=AsyncMock(),
             on_dtmf_event=AsyncMock(),
+            on_active_speaker_changed=AsyncMock(),
         )
         client = LiveKitTransportClient(
             url="wss://test.livekit.cloud",
@@ -441,6 +444,86 @@ class TestLiveKitSipDtmfInput(unittest.IsolatedAsyncioTestCase):
 
         transport._call_event_handler.assert_awaited_once()
         transport._input.push_frame.assert_not_awaited()
+
+
+@unittest.skipUnless(LIVEKIT_AVAILABLE, "livekit package not installed")
+class TestLiveKitActiveSpeaker(unittest.IsolatedAsyncioTestCase):
+    """The room's loudest speaker surfaces as on_active_speaker_changed, as on Daily.
+
+    LiveKit's active_speakers_changed lists only speakers whose level changed, quietest
+    first, so an empty list doesn't mean silence.
+    """
+
+    def _client(self):
+        client = TestLiveKitSipDtmfInput._create_client(self)
+        client._callbacks.on_active_speaker_changed = AsyncMock()
+        return client
+
+    async def _run_scheduled(self, client):
+        for call in client._task_manager.create_task.call_args_list:
+            await call.args[0]
+
+    async def test_the_loudest_speaker_is_reported(self):
+        client = self._client()
+        client._on_active_speakers_changed_wrapper(
+            [MagicMock(identity="bob"), MagicMock(identity="alice")]
+        )
+        await self._run_scheduled(client)
+        client._callbacks.on_active_speaker_changed.assert_awaited_once_with("alice")
+
+    async def test_only_a_change_of_speaker_is_reported(self):
+        client = self._client()
+        alice, bob = MagicMock(identity="alice"), MagicMock(identity="bob")
+        for speakers in ([alice], [bob, alice], [], [alice], [bob]):
+            client._on_active_speakers_changed_wrapper(speakers)
+        await self._run_scheduled(client)
+        self.assertEqual(
+            [c.args[0] for c in client._callbacks.on_active_speaker_changed.await_args_list],
+            ["alice", "bob"],
+        )
+
+    async def test_connect_forgets_the_last_speaker(self):
+        client = self._client()
+        client._active_speaker_id = "alice"
+        client._out_sample_rate = 16000
+        client._room = MagicMock()
+        client._room.connect = AsyncMock()
+        client._room.remote_participants = {}
+        client._room.local_participant.publish_track = AsyncMock()
+        with (
+            patch("pipecat.transports.livekit.transport.rtc.AudioSource"),
+            patch("pipecat.transports.livekit.transport.rtc.LocalAudioTrack"),
+        ):
+            await client.connect()
+        self.assertIsNone(client._active_speaker_id)
+
+    async def test_setup_listens_for_the_room_event(self):
+        client = TestLiveKitSipDtmfInput._create_client(self)
+        client._task_manager = None
+        setup = MagicMock(audio_out_sample_rate=16000)
+
+        with patch("pipecat.transports.livekit.transport.rtc.Room") as room_class:
+            await client.setup(setup)
+
+        on = room_class.return_value.on  # room.on(event)(handler)
+        i = [c.args[0] for c in on.call_args_list].index("active_speakers_changed")
+        self.assertEqual(
+            on.return_value.call_args_list[i].args[0], client._on_active_speakers_changed_wrapper
+        )
+
+    async def test_transport_emits_dailys_event(self):
+        from pipecat.transports.livekit.transport import LiveKitTransport
+
+        transport = LiveKitTransport(
+            url="wss://test.livekit.cloud", token="test-token", room_name="test-room"
+        )
+        transport._call_event_handler = AsyncMock()
+
+        await transport._on_active_speaker_changed("alice")
+
+        transport._call_event_handler.assert_awaited_once_with(
+            "on_active_speaker_changed", {"id": "alice"}
+        )
 
 
 @unittest.skipUnless(LIVEKIT_AVAILABLE, "livekit package not installed")
@@ -588,6 +671,7 @@ class TestLiveKitParticipantIdentity(unittest.IsolatedAsyncioTestCase):
             on_data_received=AsyncMock(),
             on_first_participant_joined=AsyncMock(),
             on_dtmf_event=AsyncMock(),
+            on_active_speaker_changed=AsyncMock(),
         )
         client = LiveKitTransportClient(
             url="wss://test.livekit.cloud",
@@ -744,6 +828,7 @@ class TestLiveKitVideoOutputPublish(unittest.IsolatedAsyncioTestCase):
             on_data_received=AsyncMock(),
             on_first_participant_joined=AsyncMock(),
             on_dtmf_event=AsyncMock(),
+            on_active_speaker_changed=AsyncMock(),
         )
         client = LiveKitTransportClient(
             url="wss://test.livekit.cloud",
@@ -1100,6 +1185,7 @@ class TestLiveKitAudioOutQueueSize(unittest.IsolatedAsyncioTestCase):
             on_data_received=AsyncMock(),
             on_first_participant_joined=AsyncMock(),
             on_dtmf_event=AsyncMock(),
+            on_active_speaker_changed=AsyncMock(),
         )
         client = LiveKitTransportClient(
             url="wss://test.livekit.cloud",
