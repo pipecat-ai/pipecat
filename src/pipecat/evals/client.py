@@ -396,10 +396,10 @@ class EvalClientParams(BaseModel):
             emits.
         context: Messages the bot's context starts from, sent right after the
             handshake; empty sends nothing.
-        trigger_disconnect: Whether the scenario itself asks for the bot's
-            ``on_client_disconnected`` handler to fire when this connection
-            ends; the run's :class:`~pipecat.evals.session.EvalSessionParams`
-            can ask too.
+        trigger_disconnect: Whether the scenario itself asks a bot serving the
+            server :class:`~pipecat.evals.transport.EvalTransport` to fire its
+            ``on_client_disconnected`` handler when this connection ends; the
+            run's :class:`~pipecat.evals.session.EvalSessionParams` can ask too.
     """
 
     bot_audio: bool = False
@@ -595,17 +595,15 @@ class EvalClient:
             await self._send_eval(EVAL_CONTEXT_MESSAGE_TYPE, {"messages": self._params.context})
 
     async def stop(self) -> None:
-        """Save the recording, optionally cancel the bot, and end the pipeline."""
+        """Save the recording, end the bot's session, and end the pipeline."""
         self._stopping = True
         # Write the recording first: the recorder is harness-owned and fed raw
         # audio by the transport, so nothing below clears it, but writing here
         # lands it even if the teardown raises.
         await self._write_recording()
-        # Optionally ask the bot to tear its pipeline down gracefully so it exits
-        # on its own (best-effort; skipped by default so it stays up for more
-        # scenarios).
-        if self._session_params.stop_bot:
-            await self._send_cancel()
+        # End the bot's session whatever its disconnect handler does, so it
+        # doesn't wait out its pipeline's idle timeout.
+        await self._send_cancel()
         if self._worker is None or self._run_task is None:
             return
         # End the worker (which disconnects the transport), falling back to
@@ -909,7 +907,7 @@ class EvalClient:
         return self._message("send-text", data.model_dump()).model_dump()
 
     async def _send_cancel(self) -> None:
-        """Ask the bot to cancel its pipeline and exit.
+        """Ask the bot to cancel its pipeline, ending its session.
 
         Best-effort: the connection may already be gone.
         """

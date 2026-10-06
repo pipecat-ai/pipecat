@@ -190,6 +190,17 @@
       "location": "pipecat/evals/script.py"
     },
     {
+      "subject": "EvalScriptScenario.trigger_disconnect",
+      "module": "pipecat.evals.script",
+      "kind": "parameter",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "No replacement. A bot fires ``on_client_disconnected`` whenever the harness disconnects. Will be removed in 2.0.0.",
+      "location": "pipecat/evals/script.py"
+    },
+    {
       "subject": "EvalTurn",
       "module": "pipecat.evals.script",
       "kind": "class",
@@ -443,6 +454,28 @@
       "location": "pipecat/evals/session.py"
     },
     {
+      "subject": "EvalSessionParams.stop_bot",
+      "module": "pipecat.evals.session",
+      "kind": "parameter",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "No replacement. The harness always ends the bot's session. Will be removed in 2.0.0.",
+      "location": "pipecat/evals/session.py"
+    },
+    {
+      "subject": "EvalSessionParams.trigger_disconnect",
+      "module": "pipecat.evals.session",
+      "kind": "parameter",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "No replacement. A bot fires ``on_client_disconnected`` whenever the harness disconnects. Will be removed in 2.0.0.",
+      "location": "pipecat/evals/session.py"
+    },
+    {
       "subject": "EvalSimulationScenario.load",
       "module": "pipecat.evals.simulation",
       "kind": "method",
@@ -451,6 +484,17 @@
       "relation": "use_existing",
       "replacement": "EvalScenarioFile.load",
       "message": "`EvalSimulationScenario.load` is deprecated since 1.11.0 and will be removed in 2.0.0. Use `EvalScenarioFile.load` instead.",
+      "location": "pipecat/evals/simulation.py"
+    },
+    {
+      "subject": "EvalSimulationScenario.trigger_disconnect",
+      "module": "pipecat.evals.simulation",
+      "kind": "parameter",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "No replacement. A bot fires ``on_client_disconnected`` whenever the harness disconnects. Will be removed in 2.0.0.",
       "location": "pipecat/evals/simulation.py"
     },
     {

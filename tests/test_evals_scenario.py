@@ -6,6 +6,7 @@
 
 import tempfile
 import unittest
+import warnings
 from pathlib import Path
 
 from loguru import logger
@@ -971,6 +972,23 @@ class TestTurnAudioFile(unittest.TestCase):
                 )
             )
         self.assertIn("turn(s) [1]", str(cm.exception))
+
+
+class TestDeprecatedTriggerDisconnect(unittest.TestCase):
+    def test_the_field_is_deprecated_and_still_read(self):
+        path = _write("name: t\ntrigger_disconnect: true\nturns: [{user: hi}]\n")
+        with self.assertWarns(DeprecationWarning) as cm:
+            scenario = _script(path)
+        self.assertTrue(scenario.trigger_disconnect)
+        self.assertIn("`trigger_disconnect:`", str(cm.warning))
+
+    def test_a_scenario_without_it_does_not_warn(self):
+        path = _write("name: t\nturns: [{user: hi}]\n")
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            scenario = _script(path)
+        self.assertFalse(scenario.trigger_disconnect)
+        self.assertEqual([w for w in caught if "trigger_disconnect" in str(w.message)], [])
 
 
 if __name__ == "__main__":

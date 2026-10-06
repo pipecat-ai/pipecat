@@ -296,7 +296,12 @@ from typing import Any
 from loguru import logger
 
 from pipecat.audio.dtmf.types import KeypadEntry
-from pipecat.evals.scenario_config import _DEFAULT_JUDGE, _parse_judge_block, _parse_user_block
+from pipecat.evals.scenario_config import (
+    _DEFAULT_JUDGE,
+    _parse_judge_block,
+    _parse_trigger_disconnect,
+    _parse_user_block,
+)
 from pipecat.utils.deprecation import deprecated
 
 # Events whose payloads carry bot-generated text the judge can sensibly
@@ -542,12 +547,15 @@ class EvalScriptScenario:
             Mapping with ``service``, ``voice``, and optional ``model`` /
             ``language`` / ``speed`` / ``sample_rate`` / ``api_key``. Set ``language`` (a
             code like ``zh``) to synthesize non-English user turns.
-        trigger_disconnect: Whether the harness fires the bot's
+        trigger_disconnect: Whether a bot serving the server
+            :class:`~pipecat.evals.transport.EvalTransport` fires its
             ``on_client_disconnected`` handler when this scenario's connection
-            ends. Bots often cancel their pipeline there, so this is False by
-            default to avoid that between scenarios; set True to exercise the
-            bot's disconnect path. Independent of ``--stop-bot``, which tears the
-            bot down via ``eval-cancel`` regardless of the handler.
+            ends.
+
+            .. deprecated:: 1.13.0
+                No replacement. A bot fires ``on_client_disconnected`` whenever
+                the harness disconnects. Will be removed in 2.0.0.
+
         stop_on_failure: Whether the first failed turn ends the scenario
             (default True). A failed turn leaves the conversation in an unknown
             state, so continuing usually costs one timeout per remaining turn.
@@ -697,7 +705,7 @@ def _parse_script(data: dict, path: Path) -> EvalScriptScenario:
         transcriber=transcriber,
         user_audio=user_audio,
         user_speech=user_speech,
-        trigger_disconnect=bool(data.get("trigger_disconnect", False)),
+        trigger_disconnect=_parse_trigger_disconnect(data, path),
         stop_on_failure=bool(data.get("stop_on_failure", True)),
         source_path=path,
     )

@@ -29,7 +29,7 @@ import warnings
 from collections import deque
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import websockets
 
@@ -2404,6 +2404,32 @@ class TestProgressEvent(unittest.IsolatedAsyncioTestCase):
         )
 
 
+class TestSessionTeardown(unittest.IsolatedAsyncioTestCase):
+    async def test_stop_ends_the_bots_session(self):
+        client = _client()
+        client._send_cancel = AsyncMock()
+
+        await client.stop()
+
+        client._send_cancel.assert_awaited_once()
+
+
+class TestDeprecatedTeardownParams(unittest.TestCase):
+    def test_asking_for_a_deprecated_field_warns(self):
+        for field in ("stop_bot", "trigger_disconnect"):
+            with self.subTest(field=field):
+                with self.assertWarns(DeprecationWarning) as cm:
+                    EvalSessionParams(**{field: True})
+                self.assertIn(f"`EvalSessionParams.{field}`", str(cm.warning))
+
+    def test_defaults_and_a_round_trip_do_not_warn(self):
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            params = EvalSessionParams()
+            EvalSessionParams.model_validate(params.model_dump())
+        self.assertEqual(caught, [])
+
+
 if __name__ == "__main__":
     unittest.main()
 
@@ -2626,7 +2652,8 @@ class TestSessionFromScenario(unittest.TestCase):
         self.assertIsInstance(session, EvalSimulationSession)
 
     def test_params_reach_the_driver_and_the_client(self):
-        params = EvalSessionParams(default_timeout_ms=1234, trigger_disconnect=True)
+        with self.assertWarns(DeprecationWarning):
+            params = EvalSessionParams(default_timeout_ms=1234, trigger_disconnect=True)
         session = EvalSession.from_scenario(self._script(), "ws://localhost:0", params=params)
         self.assertEqual(session._driver._default_timeout_ms, 1234)
         self.assertIn("trigger_disconnect=true", session._client._connect_url())

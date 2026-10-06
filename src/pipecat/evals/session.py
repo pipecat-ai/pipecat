@@ -15,7 +15,7 @@ session kinds build the client and the driver for their kind of scenario;
 
 Example::
 
-    params = EvalSessionParams(stop_bot=True)
+    params = EvalSessionParams(default_timeout_ms=30000)
     for scenario in EvalScenarioFile.load("scenarios/greeting.yaml"):
         session = EvalSession.from_scenario(scenario, "ws://localhost:7860/ws", params=params)
         result = await session.run()
@@ -29,7 +29,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Generic, TypeVar, overload
 
 from loguru import logger
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 from pipecat.evals.results import (
     EvalAssertionFailure,
@@ -84,13 +84,20 @@ class EvalSessionParams(BaseModel):
             the default (``<user-cache-dir>/pipecat/evals/tts``).
         use_cache: When False, ignore cached user audio and force fresh
             synthesis, with no cache reads or writes.
-        stop_bot: When True, ask the bot to cancel its pipeline, and exit, on
-            teardown. Leave False to keep it running for more scenarios.
-        trigger_disconnect: When True, fire the bot's ``on_client_disconnected``
-            handler when the connection ends. A scenario's own
-            ``trigger_disconnect`` field also opts in. Bots often cancel their
-            pipeline there, so it is off by default to avoid that between
-            scenarios.
+        stop_bot: No effect: the harness ends the bot's session when a run
+            finishes.
+
+            .. deprecated:: 1.13.0
+                No replacement. The harness always ends the bot's session.
+                Will be removed in 2.0.0.
+
+        trigger_disconnect: When True, a bot serving the server
+            :class:`~pipecat.evals.transport.EvalTransport` fires its
+            ``on_client_disconnected`` handler when the connection ends.
+
+            .. deprecated:: 1.13.0
+                No replacement. A bot fires ``on_client_disconnected`` whenever
+                the harness disconnects. Will be removed in 2.0.0.
     """
 
     connect_timeout_s: float = 5.0
@@ -101,6 +108,23 @@ class EvalSessionParams(BaseModel):
     use_cache: bool = True
     stop_bot: bool = False
     trigger_disconnect: bool = False
+
+    @model_validator(mode="after")
+    def _warn_deprecated_fields(self) -> "EvalSessionParams":
+        """Warn when a deprecated field asks for something."""
+        if self.stop_bot:
+            warn_deprecated(
+                "`EvalSessionParams.stop_bot` is deprecated since 1.13.0 and will be removed "
+                "in 2.0.0. No replacement.",
+                stacklevel=2,
+            )
+        if self.trigger_disconnect:
+            warn_deprecated(
+                "`EvalSessionParams.trigger_disconnect` is deprecated since 1.13.0 and will be "
+                "removed in 2.0.0. No replacement.",
+                stacklevel=2,
+            )
+        return self
 
 
 def _params_with_deprecated_knobs(
