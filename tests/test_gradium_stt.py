@@ -175,19 +175,21 @@ async def test_gradium_turn_detection_the_stop_is_proposed_after_the_transcript(
     # With the transcript already pushed, the turn strategies close the turn
     # on the stop proposal instead of waiting out their hold.
     monkeypatch.setattr(gradium_stt, "TRANSCRIPT_AGGREGATION_DELAY", 0)
-    service = _service()
+    service = _service(settings=GradiumSTTService.Settings(post_flush_cooldown_frames=0))
     service.emit_stt_usage_metrics = AsyncMock()
     service._trace_transcription = AsyncMock()
     order = _record_order(service)
-    service._handle_flushed = service._transcript_aggregation_handler
+    service._handle_flushed = AsyncMock()
     service._turn_phase = _TurnPhase.ENDING
     service._accumulated_text = ["book a table"]
 
     async def messages():
         yield json.dumps({"type": "flushed"})
+        yield json.dumps(_step(0.9))
 
     service._get_websocket = messages
     await service._receive_messages()
+    await service._transcript_aggregation_handler()
 
     assert order == ["TranscriptionFrame", "ProposedUserStoppedSpeakingFrame"]
     assert service._turn_phase is _TurnPhase.ARMED
@@ -213,14 +215,18 @@ async def test_gradium_turn_detection_the_flush_ack_starts_the_cooldown_and_hold
 
 
 @pytest.mark.asyncio
-async def test_gradium_turn_detection_speech_continuing_through_a_flush_opens_a_turn(monkeypatch):
+async def test_gradium_turn_detection_speech_continuing_through_a_flush_keeps_the_turn_open(
+    monkeypatch,
+):
     # After a flush the signal follows the audio: a user who keeps talking
-    # reads low straight away, without first reading inactive.
+    # reads low, so the turn reopens instead of closing and the continuation
+    # lands in the same user turn.
     monkeypatch.setattr(gradium_stt, "TRANSCRIPT_AGGREGATION_DELAY", 0)
     service = _service(settings=GradiumSTTService.Settings(post_flush_cooldown_frames=2))
     service.emit_stt_usage_metrics = AsyncMock()
     service._trace_transcription = AsyncMock()
-    service._handle_flushed = service._transcript_aggregation_handler
+    service._send_flush = AsyncMock(return_value=True)
+    service._handle_flushed = AsyncMock()
     service._turn_phase = _TurnPhase.ENDING
     service._accumulated_text = ["I'd like to book a"]
 
@@ -230,15 +236,18 @@ async def test_gradium_turn_detection_speech_continuing_through_a_flush_opens_a_
             yield json.dumps(_step(0.1))
 
     service._get_websocket = messages
-
     await service._receive_messages()
+    await service._transcript_aggregation_handler()
 
     assert service.push_frame.await_args.args[0].text == "I'd like to book a"
-    assert [c.args[0] for c in service.broadcast_frame.await_args_list] == [
-        ProposedUserStoppedSpeakingFrame,
-        ProposedUserStartedSpeakingFrame,
-    ]
+    service.broadcast_frame.assert_not_awaited()
     assert service._turn_phase is _TurnPhase.OPEN
+
+    # The reopened turn ends on the signal like any other.
+    await service._handle_step(_step(0.9))
+
+    service._send_flush.assert_awaited_once()
+    assert service._turn_phase is _TurnPhase.ENDING
 
 
 @pytest.mark.asyncio
@@ -246,6 +255,8 @@ async def test_gradium_turn_detection_an_empty_turn_still_proposes_its_stop(monk
     monkeypatch.setattr(gradium_stt, "TRANSCRIPT_AGGREGATION_DELAY", 0)
     service = _service()
     service._turn_phase = _TurnPhase.ENDING
+    service._steps_since_flush = 9
+    service._last_inactive = True  # a quiet reading after the post-flush cooldown
 
     await service._transcript_aggregation_handler()
 
@@ -259,7 +270,7 @@ async def test_gradium_turn_detection_no_start_before_the_previous_transcript_is
     monkeypatch,
 ):
     # With no cooldown, steps after the flush ack are read at once; the turn's
-    # transcript must still go out before the next start proposal.
+    # transcript and stop must still go out before the next start proposal.
     monkeypatch.setattr(gradium_stt, "TRANSCRIPT_AGGREGATION_DELAY", 0)
     service = _service(settings=GradiumSTTService.Settings(post_flush_cooldown_frames=0))
     service.emit_stt_usage_metrics = AsyncMock()
@@ -270,7 +281,7 @@ async def test_gradium_turn_detection_no_start_before_the_previous_transcript_is
 
     async def messages():
         yield json.dumps({"type": "flushed"})
-        yield json.dumps(_step(0.1))
+        yield json.dumps(_step(0.9))
 
     service._get_websocket = messages
     await service._receive_messages()
@@ -317,11 +328,79 @@ async def test_gradium_turn_detection_a_failed_transcript_push_still_arms_the_ne
     monkeypatch.setattr(gradium_stt, "TRANSCRIPT_AGGREGATION_DELAY", 0)
     service = _service()
     service._turn_phase = _TurnPhase.ENDING
+    service._steps_since_flush = 9
+    service._last_inactive = True  # a quiet reading after the post-flush cooldown
     service._finalize_accumulated_text = AsyncMock(side_effect=RuntimeError("push failed"))
 
     with pytest.raises(RuntimeError):
         await service._transcript_aggregation_handler()
 
+    assert service._turn_phase is _TurnPhase.ARMED
+
+
+def _without_task_manager(service: GradiumSTTService):
+    """Let SETTLING start its timeout without a pipeline's task manager."""
+
+    def create_task(coro, name=None):
+        coro.close()
+        return None
+
+    service.create_task = create_task
+    service.cancel_task = AsyncMock()
+
+
+@pytest.mark.asyncio
+async def test_gradium_turn_detection_settling_waits_for_a_reading_after_the_flush(monkeypatch):
+    monkeypatch.setattr(gradium_stt, "TRANSCRIPT_AGGREGATION_DELAY", 0)
+    service = _service(settings=GradiumSTTService.Settings(post_flush_cooldown_frames=0))
+    _without_task_manager(service)
+    service._turn_phase = _TurnPhase.ENDING
+
+    await service._transcript_aggregation_handler()
+
+    assert service._turn_phase is _TurnPhase.SETTLING
+    service.broadcast_frame.assert_not_awaited()
+
+    await service._handle_step(_step(0.9))
+
+    service.broadcast_frame.assert_awaited_once_with(ProposedUserStoppedSpeakingFrame)
+    assert service._turn_phase is _TurnPhase.ARMED
+
+
+@pytest.mark.asyncio
+async def test_gradium_turn_detection_settling_proposes_the_stop_when_no_reading_comes(
+    monkeypatch,
+):
+    monkeypatch.setattr(gradium_stt, "STOP_SETTLE_TIMEOUT_S", 0)
+    service = _service()
+    service._turn_phase = _TurnPhase.SETTLING
+
+    await service._settle_timeout_handler()
+
+    service.broadcast_frame.assert_awaited_once_with(ProposedUserStoppedSpeakingFrame)
+    assert service._turn_phase is _TurnPhase.ARMED
+
+
+@pytest.mark.asyncio
+async def test_gradium_turn_detection_settling_decides_after_the_post_flush_cooldown(
+    monkeypatch,
+):
+    # Readings inside the cooldown do not decide: a user who starts again a
+    # moment after the flush still lands in the same turn.
+    monkeypatch.setattr(gradium_stt, "TRANSCRIPT_AGGREGATION_DELAY", 0)
+    service = _service(settings=GradiumSTTService.Settings(post_flush_cooldown_frames=2))
+    _without_task_manager(service)
+    service._turn_phase = _TurnPhase.ENDING
+
+    await service._transcript_aggregation_handler()
+    await service._handle_step(_step(0.1))
+    await service._handle_step(_step(0.1))
+
+    assert service._turn_phase is _TurnPhase.SETTLING
+
+    await service._handle_step(_step(0.9))
+
+    service.broadcast_frame.assert_awaited_once_with(ProposedUserStoppedSpeakingFrame)
     assert service._turn_phase is _TurnPhase.ARMED
 
 
@@ -403,16 +482,47 @@ async def test_gradium_a_reconnect_pushes_the_text_so_far_and_keeps_an_open_turn
 
 
 @pytest.mark.asyncio
-async def test_gradium_a_reconnect_while_ending_pushes_the_transcript_without_a_second_stop():
+async def test_gradium_a_reconnect_while_ending_pushes_the_transcript_then_the_stop():
     service = _reconnectable(_service())
+    order = _record_order(service)
     service._turn_phase = _TurnPhase.ENDING
     service._accumulated_text = ["the tail"]
 
     await service._reconnect_websocket(1)
 
-    assert service.push_frame.await_args.args[0].text == "the tail"
-    service.broadcast_frame.assert_not_awaited()
+    assert order == ["TranscriptionFrame", "ProposedUserStoppedSpeakingFrame"]
     assert service._turn_phase is _TurnPhase.IDLE
+
+
+@pytest.mark.asyncio
+async def test_gradium_a_reconnect_while_settling_proposes_the_stop():
+    # The transcript is already out; only the stop was waiting on the signal.
+    service = _reconnectable(_service())
+    service._turn_phase = _TurnPhase.SETTLING
+
+    await service._reconnect_websocket(1)
+
+    service.push_frame.assert_not_awaited()
+    service.broadcast_frame.assert_awaited_once_with(ProposedUserStoppedSpeakingFrame)
+    assert service._turn_phase is _TurnPhase.IDLE
+
+
+@pytest.mark.asyncio
+async def test_gradium_a_settings_reconnect_while_settling_proposes_the_stop_first():
+    service = _service()
+    order = _record_order(service)
+    service._websocket = object()
+
+    async def disconnect():
+        order.append("disconnect")
+
+    service._disconnect = disconnect
+    service._connect = AsyncMock()
+    service._turn_phase = _TurnPhase.SETTLING
+
+    await service._update_settings(GradiumSTTService.Settings(delay_in_frames=8))
+
+    assert order == ["ProposedUserStoppedSpeakingFrame", "disconnect"]
 
 
 @pytest.mark.asyncio
