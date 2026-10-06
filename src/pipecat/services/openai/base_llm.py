@@ -47,6 +47,7 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.utils.deprecation import deprecated
+from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.http import TIMEOUT_EXCEPTIONS, connection_limits
 from pipecat.utils.tracing.service_decorators import traced_llm
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
@@ -696,7 +697,6 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
                 # it gets the same best-effort cleanup.
                 frame.context.remove_invalid_file_message()
             except Exception as e:
-                await self.push_error(error_msg=f"Error during completion: {e}", exception=e)
                 # Only the payload-shaped errors (bad request, unprocessable
                 # content, payload too large — the latter has no dedicated
                 # OpenAI exception class, so match its status code) are
@@ -705,11 +705,21 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
                 # not-found, rate limiting — says nothing about whether our
                 # request (or its file) was bad, and removing the file there
                 # would discard it for no benefit: the file isn't what needs
-                # fixing before the next retry can succeed.
-                if isinstance(e, (BadRequestError, UnprocessableEntityError)) or (
-                    isinstance(e, APIStatusError) and e.status_code == 413
-                ):
-                    frame.context.remove_invalid_file_message()
+                # fixing before the next retry can succeed. When a message is
+                # removed as a result of this error, the fault lay in
+                # application-supplied content and the context is repaired, so
+                # the error is pushed as APPLICATION instead of letting the
+                # rejection classify as permanent and cost the service its
+                # usability.
+                removed = (
+                    isinstance(e, (BadRequestError, UnprocessableEntityError))
+                    or (isinstance(e, APIStatusError) and e.status_code == 413)
+                ) and frame.context.remove_invalid_file_message()
+                await self.push_error(
+                    error_msg=f"Error during completion: {e}",
+                    exception=e,
+                    category=ErrorCategory.APPLICATION if removed else None,
+                )
             finally:
                 await self.stop_processing_metrics()
                 await self.push_frame(LLMFullResponseEndFrame())

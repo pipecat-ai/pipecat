@@ -45,6 +45,7 @@ from pipecat.services.google.utils import update_google_client_http_options
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.utils.deprecation import deprecated
+from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.tracing.service_decorators import traced_llm
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 
@@ -905,16 +906,27 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
             # cleanup.
             context.remove_invalid_file_message()
         except Exception as e:
-            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
             # Gemini doesn't say which field was invalid, but ClientError.status
             # carries the gRPC-style code, and INVALID_ARGUMENT (unsupported MIME
             # type, corrupt bytes, etc.) is grounds to remove a pending file
             # message on a best-effort basis. The rest of the 4xx range —
             # UNAUTHENTICATED, PERMISSION_DENIED, NOT_FOUND, RESOURCE_EXHAUSTED —
             # says nothing about whether our request (or its file) was bad, and
-            # removing the file there would discard it for no benefit.
-            if isinstance(e, ClientError) and e.status == "INVALID_ARGUMENT":
-                context.remove_invalid_file_message()
+            # removing the file there would discard it for no benefit. When a
+            # message is removed as a result of this error, the fault lay in
+            # application-supplied content and the context is repaired, so the
+            # error is pushed as APPLICATION instead of letting the rejection
+            # classify as permanent and cost the service its usability.
+            removed = (
+                isinstance(e, ClientError)
+                and e.status == "INVALID_ARGUMENT"
+                and context.remove_invalid_file_message()
+            )
+            await self.push_error(
+                error_msg=f"Unknown error occurred: {e}",
+                exception=e,
+                category=ErrorCategory.APPLICATION if removed else None,
+            )
         finally:
             if grounding_metadata and isinstance(grounding_metadata, dict):
                 llm_search_frame = LLMSearchResponseFrame(

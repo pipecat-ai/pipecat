@@ -42,6 +42,7 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.utils.deprecation import deprecated
+from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.http import TIMEOUT_EXCEPTIONS
 from pipecat.utils.tracing.service_decorators import traced_llm
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
@@ -661,16 +662,26 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
             # it gets the same best-effort cleanup.
             context.remove_invalid_file_message()
         except APIStatusError as e:
-            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
             # Only the payload-shaped errors (bad request, payload too large,
             # unprocessable content) are grounds to remove a pending file
             # message on a best-effort basis. The rest of the 4xx range —
             # auth, permissions, not-found, rate limiting — says nothing
             # about whether our request (or its file) was bad, and removing
             # the file there would discard it for no benefit: the file isn't
-            # what needs fixing before the next retry can succeed.
-            if isinstance(e, (BadRequestError, RequestTooLargeError, UnprocessableEntityError)):
-                context.remove_invalid_file_message()
+            # what needs fixing before the next retry can succeed. When a
+            # message is removed as a result of this error, the fault lay in
+            # application-supplied content and the context is repaired, so the
+            # error is pushed as APPLICATION instead of letting the rejection
+            # classify as permanent and cost the service its usability.
+            removed = (
+                isinstance(e, (BadRequestError, RequestTooLargeError, UnprocessableEntityError))
+                and context.remove_invalid_file_message()
+            )
+            await self.push_error(
+                error_msg=f"Unknown error occurred: {e}",
+                exception=e,
+                category=ErrorCategory.APPLICATION if removed else None,
+            )
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:

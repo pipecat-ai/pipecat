@@ -956,7 +956,11 @@ class FrameProcessor(BaseObject):
         else:
             await self.push_error_frame(error=error_frame)
 
-    async def push_error_frame(self, error: ErrorFrame, force_treat_as_permanent: bool = False):
+    async def push_error_frame(
+        self,
+        error: ErrorFrame,
+        force_treat_as_permanent: bool = False,
+    ):
         """Push an error frame upstream.
 
         Args:

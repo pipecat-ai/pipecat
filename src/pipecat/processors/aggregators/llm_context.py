@@ -555,13 +555,19 @@ class LLMContext:
         self.add_message(message)
 
     def remove_invalid_file_message(self) -> bool:
-        """Remove the oldest file message added since the model's last successful reply.
+        """Remove the oldest file or image message added since the model's last successful reply.
 
         Best-effort cleanup for an LLM service to call once it's determined
         (from a provider-specific error) that a request was rejected due to
-        unsupported or malformed file content — e.g. an unsupported MIME type
-        or corrupt bytes. Removing it prevents the context from getting
-        permanently stuck retrying the same failure.
+        unsupported or malformed file content — e.g. an unsupported MIME type,
+        corrupt bytes, or an image whose bytes don't match its declared media
+        type. Removing it prevents the context from getting permanently stuck
+        retrying the same failure. Images count as files here: both are
+        discrete client-supplied attachments a provider can reject the same
+        way. Audio content deliberately doesn't — audio-in-context flows
+        append audio as ordinary conversation every turn, so removing the
+        oldest audio message on an unrelated rejection would discard real
+        conversation rather than a bad attachment.
 
         Providers don't say which message or content item triggered the
         rejection, so there's no way to identify the exact culprit — this is
@@ -577,7 +583,7 @@ class LLMContext:
         a few retries without ever knowing which one the provider meant.
 
         Returns:
-            True if a file message was found and removed.
+            True if a file or image message was found and removed.
         """
         since_index = 0
         for i in range(len(self._messages) - 1, -1, -1):
@@ -592,11 +598,13 @@ class LLMContext:
                 continue
             content = message.get("content")
             if isinstance(content, list) and any(
-                isinstance(item, dict) and item.get("type") in ("file_base64", "file_url")
+                isinstance(item, dict)
+                and item.get("type") in ("file_base64", "file_url", "image_url")
                 for item in content
             ):
                 logger.warning(
-                    "Removing message with file content from context due to invalid response."
+                    "Removing message with file or image content from context due to "
+                    "invalid response."
                 )
                 self._messages.pop(i)
                 return True

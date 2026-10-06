@@ -61,7 +61,7 @@ async def test_openai_llm_emits_error_frame_on_timeout(timeout_exception):
             pushed_frames.append(frame)
             await original_push_frame(frame, direction)
 
-        async def mock_push_error(error_msg, exception=None):
+        async def mock_push_error(error_msg, exception=None, **kwargs):
             pushed_errors.append({"error_msg": error_msg, "exception": exception})
 
         async def mock_timeout_handler(event_name, *args):
@@ -216,7 +216,7 @@ async def test_openai_llm_emits_error_frame_on_exception():
 
         pushed_errors = []
 
-        async def mock_push_error(error_msg, exception=None):
+        async def mock_push_error(error_msg, exception=None, **kwargs):
             pushed_errors.append({"error_msg": error_msg, "exception": exception})
 
         service.push_frame = AsyncMock()

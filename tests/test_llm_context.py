@@ -472,6 +472,56 @@ class TestRemoveInvalidFileMessage(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(removed)
         self.assertEqual(len(context.get_messages()), 0)
 
+    async def test_removes_an_image_message(self):
+        """Images count as files here: a provider rejecting a bad image (e.g.
+        bytes that don't match the declared media type) would otherwise leave
+        the context permanently stuck resending it."""
+        context = LLMContext()
+        context.add_message({"role": "user", "content": "hello"})
+        await context.add_image_frame_message(
+            format="image/png", size=(2, 2), image=b"\x89PNG fake"
+        )
+
+        removed = context.remove_invalid_file_message()
+
+        self.assertTrue(removed)
+        messages = context.get_messages()
+        self.assertEqual(len(messages), 1)
+        self.assertEqual(messages[0]["content"], "hello")
+
+    async def test_does_not_remove_an_image_already_confirmed_by_an_assistant_reply(self):
+        context = LLMContext()
+        await context.add_image_frame_message(
+            format="image/png", size=(2, 2), image=b"\x89PNG fake"
+        )
+        context.add_message({"role": "assistant", "content": "Nice photo."})
+        context.add_message({"role": "user", "content": "thanks"})
+
+        removed = context.remove_invalid_file_message()
+
+        self.assertFalse(removed)
+        self.assertEqual(len(context.get_messages()), 3)
+
+    async def test_does_not_remove_an_audio_message(self):
+        """Audio-in-context is ordinary conversation appended every turn, not a
+        discrete attachment — removing it on an unrelated rejection would
+        discard real conversation."""
+        context = LLMContext(
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "input_audio", "input_audio": {"data": "aGk=", "format": "wav"}}
+                    ],
+                }
+            ]
+        )
+
+        removed = context.remove_invalid_file_message()
+
+        self.assertFalse(removed)
+        self.assertEqual(len(context.get_messages()), 1)
+
     async def test_removes_oldest_of_several_pending_files(self):
         """Several files sent before either went through a completion.
 

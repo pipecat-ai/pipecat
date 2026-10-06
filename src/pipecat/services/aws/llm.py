@@ -40,6 +40,7 @@ from pipecat.services.aws.utils import resolve_credentials
 from pipecat.services.llm_service import LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.utils.deprecation import deprecated
+from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.tracing.service_decorators import traced_llm
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
@@ -652,7 +653,6 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
             # it gets the same best-effort cleanup.
             context.remove_invalid_file_message()
         except ClientError as e:
-            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
             # botocore uses a single exception class for the whole 4xx/5xx
             # range, so check the error code directly rather than the status
             # code: ValidationException (bad document name, unsupported
@@ -660,10 +660,25 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
             # best-effort basis, but AccessDeniedException, ThrottlingException,
             # and the rest say nothing about whether our request (or its
             # file) was bad, and removing the file there would discard it
-            # for no benefit.
-            error_code = e.response.get("Error", {}).get("Code")
-            if error_code == "ValidationException":
-                context.remove_invalid_file_message()
+            # for no benefit. When a message is removed as a result of this
+            # error, the fault lay in application-supplied content and the
+            # context is repaired, so the error is pushed as APPLICATION
+            # instead of letting the rejection classify as permanent and cost
+            # the service its usability.
+            # Compared case-insensitively: an up-front request rejection
+            # reports ValidationException, but a rejection arriving mid-stream
+            # (an EventStreamError, e.g. the model refusing a file's content)
+            # reports the event stream's modeled code, validationException.
+            error_code = e.response.get("Error", {}).get("Code") or ""
+            removed = (
+                error_code.lower() == "validationexception"
+                and context.remove_invalid_file_message()
+            )
+            await self.push_error(
+                error_msg=f"Unknown error occurred: {e}",
+                exception=e,
+                category=ErrorCategory.APPLICATION if removed else None,
+            )
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
