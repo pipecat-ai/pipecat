@@ -102,9 +102,9 @@ class FileResolver:
 
         Args:
             file_storage: Storage backend used to resolve URLs it minted (e.g.
-                ``pipecat:<id>`` from the development runner's ``POST /files``
-                endpoint — pass ``runner_file_storage()`` there). Without it,
-                only ``data:`` and ``http(s)`` URLs can be resolved.
+                ``pipecat:<id>`` from the development runner's upload
+                endpoints — pass ``runner_args.file_storage`` there). Without
+                it, only ``data:`` and ``http(s)`` URLs can be resolved.
             allowed_url_networks: CIDR ranges (e.g. ``["10.0.0.0/8"]``) this
                 server is trusted to fetch from, in addition to the public
                 internet. An ``http(s)`` URL that resolves outside both is
