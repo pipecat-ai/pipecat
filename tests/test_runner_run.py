@@ -1057,6 +1057,24 @@ class TestRunnerBody(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(bot_module.bot.await_args.args[0].body)
 
 
+class TestDeprecatedEvalTransportOption(unittest.TestCase):
+    """``-t eval`` runs the dev runner's server like a run without ``-t``."""
+
+    def test_eval_transport_runs_the_server(self):
+        from pipecat.runner import run
+
+        with (
+            patch.object(sys, "argv", ["bot.py", "-t", "eval"]),
+            patch.object(run, "_configure_server_app") as configure,
+            patch.object(run.uvicorn, "run") as uvicorn_run,
+            redirect_stdout(io.StringIO()),
+        ):
+            run.main()
+
+        uvicorn_run.assert_called_once()
+        self.assertIsNone(configure.call_args.args[0].transport)
+
+
 class TestAllowedOriginsUtil(unittest.TestCase):
     """Unit tests for the is_origin_allowed utility."""
 

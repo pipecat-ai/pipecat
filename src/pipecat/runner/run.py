@@ -132,7 +132,6 @@ from pipecat.runner.moq import (
 )
 from pipecat.runner.types import (
     DailyRunnerArguments,
-    EvalRunnerArguments,
     LiveKitRunnerArguments,
     MOQRunnerArguments,
     RunnerArguments,
@@ -1536,9 +1535,10 @@ def _setup_telephony_routes(app: FastAPI, args: argparse.Namespace, ws_used_toke
     """Set up telephony-specific routes.
 
     The WebSocket endpoint (``/ws``) is always registered so providers can
-    connect directly. The XML webhook (``POST /``) is only registered when a
-    specific telephony transport is chosen via ``-t`` because the XML template
-    is provider-specific and requires a proxy hostname (``--proxy``).
+    connect directly; an eval harness connects there too. The XML webhook
+    (``POST /``) is only registered when a specific telephony transport is
+    chosen via ``-t`` because the XML template is provider-specific and requires
+    a proxy hostname (``--proxy``).
 
     When ``args.ws_auth == "token"``, connections must present a valid HMAC
     session token obtained via ``POST /start``. The token may be supplied as:
@@ -1707,36 +1707,6 @@ async def _run_daily_direct(args: argparse.Namespace):
         print()
 
         await bot_module.bot(runner_args)
-
-
-async def _run_eval(args: argparse.Namespace):
-    """Run a bot with the eval transport (no FastAPI server).
-
-    The eval transport is a ``SingleClientWebsocketServerTransport`` speaking RTVI that
-    hosts its own local WebSocket server for the harness to connect to. The
-    dev runner here just constructs ``EvalRunnerArguments`` and invokes the bot
-    function directly — no FastAPI routes are needed.
-    """
-    logger.info("Running with eval transport...")
-
-    runner_args = EvalRunnerArguments(
-        host=args.host,
-        port=args.port,
-        session_id=str(uuid.uuid4()),
-        file_storage=RUNNER_FILE_STORAGE,
-    )
-    runner_args.handle_sigint = True
-    runner_args.cli_args = args
-
-    # A bot may need session data it would normally receive in the /start request
-    # body (e.g. a vision bot's image path). The eval transport has no such
-    # endpoint, so the body is read from a YAML or JSON file passed with
-    # --runner-body.
-    if args.runner_body:
-        runner_args.body = yaml.safe_load(Path(args.runner_body).read_text())
-
-    bot_module = _get_bot_module()
-    await bot_module.bot(runner_args)
 
 
 async def _run_vonage():
@@ -1924,6 +1894,8 @@ def main(parser: argparse.ArgumentParser | None = None):
        - -t/--transport: Restrict to a single transport and set as default for /start
          (daily, livekit, webrtc, websocket, twilio, telnyx, plivo, exotel). Omit to support
          all transports.
+         ``-t eval`` is deprecated and ignored: an eval harness connects to the
+         server's ``/ws`` route.
        - -x/--proxy: Public proxy hostname for telephony webhooks
        - -d/--direct: Connect directly to Daily room (automatically sets transport to daily)
        - -f/--downloads-folder: Path to folder for files available for download
@@ -2203,6 +2175,14 @@ def main(parser: argparse.ArgumentParser | None = None):
         logger.error(f"Invalid ICE server configuration: {e}")
         return
 
+    # An eval harness connects to the WebSocket routes the server always has.
+    if args.transport == "eval":
+        logger.warning(
+            "`-t eval` is deprecated since 1.13.0 and will be removed in 2.0.0. "
+            "Run the bot without `-t`; the eval harness connects to ws://<host>:<port>/ws."
+        )
+        args.transport = None
+
     # --direct implies Daily transport
     if args.direct:
         if args.transport is None or args.transport == "daily":
@@ -2246,15 +2226,6 @@ def main(parser: argparse.ArgumentParser | None = None):
 
         # Run direct Daily connection
         asyncio.run(_run_daily_direct(args))
-        return
-
-    # Handle eval transport (no FastAPI server — the WebSocket server transport
-    # runs its own WS server)
-    if args.transport == "eval":
-        print()
-        print(f"🚀 Bot ready! (eval transport on ws://{args.host}:{args.port})")
-        print()
-        asyncio.run(_run_eval(args))
         return
 
     # Print startup message

@@ -20,8 +20,10 @@ The input transport also serves the harness's image to a vision bot, which
 has no camera under eval. The user's audio arrives as a continuous stream,
 so nothing else is special on the way in.
 
+The server, :class:`EvalTransport`, is deprecated:
 :class:`~pipecat.evals.fastapi_transport.EvalFastAPIWebsocketTransport` is the
-same transport over a WebSocket the bot accepted itself, as on Pipecat Cloud.
+same transport over a WebSocket the bot accepted itself, which the dev runner
+and Pipecat Cloud both hand it. This module keeps the parameters both use.
 """
 
 from urllib.parse import parse_qs, urlsplit
@@ -42,6 +44,7 @@ from pipecat.transports.websocket.server import (
     SingleClientWebsocketServerParams,
     SingleClientWebsocketServerTransport,
 )
+from pipecat.utils.deprecation import deprecated
 
 SKIP_TTS_QUERY_PARAM = "skip_tts"
 CAPTURE_AUDIO_QUERY_PARAM = "capture_bot_audio"
@@ -111,8 +114,18 @@ class EvalOutputTransport(SingleClientWebsocketServerOutputTransport):
             await self._write_frame(frame)
 
 
+@deprecated(
+    "`EvalTransport` is deprecated since 1.13.0 and will be removed in 2.0.0. "
+    "Use `EvalFastAPIWebsocketTransport` instead."
+)
 class EvalTransport(SingleClientWebsocketServerTransport):
-    """WebSocket server transport used by the eval harness (see the module docstring)."""
+    """WebSocket server transport used by the eval harness (see the module docstring).
+
+    .. deprecated:: 1.13.0
+        Use :class:`~pipecat.evals.fastapi_transport.EvalFastAPIWebsocketTransport`
+        instead, which ``create_transport`` builds when an eval harness connects
+        to the dev runner. Will be removed in 2.0.0.
+    """
 
     def input(self) -> SingleClientWebsocketServerInputTransport:
         """Return an input transport that can serve harness-provided images."""

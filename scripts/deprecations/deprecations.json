@@ -509,6 +509,17 @@
       "location": "pipecat/evals/suite.py"
     },
     {
+      "subject": "EvalTransport",
+      "module": "pipecat.evals.transport",
+      "kind": "class",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "EvalFastAPIWebsocketTransport",
+      "message": "`EvalTransport` is deprecated since 1.13.0 and will be removed in 2.0.0. Use `EvalFastAPIWebsocketTransport` instead.",
+      "location": "pipecat/evals/transport.py"
+    },
+    {
       "subject": "VoicemailDetector.custom_system_prompt",
       "module": "pipecat.extensions.voicemail.voicemail_detector",
       "kind": "parameter",
@@ -1156,6 +1167,17 @@
       "replacement": null,
       "message": "No replacement; the parameter is ignored. Will be removed in 2.0.0. The processor no longer needs a transport reference — audio input and audio-streaming start are driven by frames (:class:`InputAudioRawFrame` and :class:`InputTransportStartAudioStreamingFrame`) pushed downstream. For client-ready audio gating, set ``audio_in_stream_on_start=False`` on the transport params.",
       "location": "pipecat/processors/frameworks/rtvi/processor.py"
+    },
+    {
+      "subject": "EvalRunnerArguments",
+      "module": "pipecat.runner.types",
+      "kind": "class",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "WebSocketRunnerArguments",
+      "message": "`EvalRunnerArguments` is deprecated since 1.13.0 and will be removed in 2.0.0. Use `WebSocketRunnerArguments` instead.",
+      "location": "pipecat/runner/types.py"
     },
     {
       "subject": "MOQRunnerArguments.serve_bind",

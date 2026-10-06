@@ -10,7 +10,7 @@ scenarios_dir: scenarios
 concurrency: 32                  # models at once; each runs its scenarios one at a time
 runs_dir: test-runs
 record: false
-spawn: "{python} {bot} -t eval --port {port}"
+spawn: "{python} {bot} --port {port}"
 
 # The tool scenarios need a model whose endpoint accepts tools; an entry whose
 # body sets tools: false runs the other files instead.

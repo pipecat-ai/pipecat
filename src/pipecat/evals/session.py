@@ -17,7 +17,7 @@ Example::
 
     params = EvalSessionParams(stop_bot=True)
     for scenario in EvalScenarioFile.load("scenarios/greeting.yaml"):
-        session = EvalSession.from_scenario(scenario, "ws://localhost:7860", params=params)
+        session = EvalSession.from_scenario(scenario, "ws://localhost:7860/ws", params=params)
         result = await session.run()
         print(scenario.name, "PASS" if result.passed else "FAIL")
 """
@@ -269,7 +269,7 @@ class EvalSession(BaseObject, Generic[R]):
         ``judge``, ``user_tts``, or ``bot_stt`` to use your own. Then await
         :meth:`run`::
 
-            session = EvalSession.from_scenario(scenario, "ws://localhost:7860")
+            session = EvalSession.from_scenario(scenario, "ws://localhost:7860/ws")
             result = await session.run()
 
         Args:

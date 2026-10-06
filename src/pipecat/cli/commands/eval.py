@@ -388,9 +388,9 @@ def run(
         help="One or more scenario YAML files (scripted, or simulations), or directories of them.",
     ),
     bot_url: str = typer.Option(
-        "ws://localhost:7860",
+        "ws://localhost:7860/ws",
         "--bot-url",
-        help="WebSocket URL of the bot's eval transport.",
+        help="WebSocket URL of the bot: the dev runner's /ws route, or a Pipecat Cloud session's.",
     ),
     verbose: bool = typer.Option(
         False,

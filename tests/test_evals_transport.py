@@ -78,7 +78,8 @@ class TestConnectionOutputSettings(unittest.IsolatedAsyncioTestCase):
         await self._assert_tts_resets_between_connections("/?skip_tts=false")
 
     async def _assert_tts_resets_between_connections(self, audio_path: str):
-        transport = EvalTransport(params=EvalTransportParams())
+        with self.assertWarns(DeprecationWarning):
+            transport = EvalTransport(params=EvalTransportParams())
         self.addAsyncCleanup(transport.cleanup)
         input_transport = transport.input()
         push_frame = AsyncMock()
