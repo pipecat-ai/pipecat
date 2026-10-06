@@ -19,6 +19,9 @@ scenarios in a row.
 The input transport also serves the harness's image to a vision bot, which
 has no camera under eval. The user's audio arrives as a continuous stream,
 so nothing else is special on the way in.
+
+:class:`~pipecat.evals.fastapi_transport.EvalFastAPIWebsocketTransport` is the
+same transport over a WebSocket the bot accepted itself, as on Pipecat Cloud.
 """
 
 from urllib.parse import parse_qs, urlsplit

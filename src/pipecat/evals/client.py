@@ -43,6 +43,7 @@ from pipecat.evals.serializer import (
     EVAL_IMAGE_MESSAGE_TYPE,
     EVAL_STT_SAMPLE_RATE,
     EvalClientSerializer,
+    EvalConnectionFlags,
 )
 from pipecat.evals.session import EvalSessionParams
 from pipecat.evals.tts import CachingTTSService, tts_sample_rate
@@ -732,21 +733,34 @@ class EvalClient:
         assert self._persona is not None
         self._persona.hang_up()
 
-    def _connect_url(self) -> str:
-        """The bot's URL with this connection's eval flags.
+    def _connection_flags(self) -> EvalConnectionFlags:
+        """What this connection asks of the bot.
 
         ``skip_tts`` in text mode, ``capture_bot_audio`` when the harness needs
-        the bot's audio, ``capture_bot_images`` when it needs the bot's images,
-        ``trigger_disconnect`` when the run asks for it.
+        the bot's audio, ``capture_bot_images`` when it needs the bot's images.
         """
+        return EvalConnectionFlags(
+            skip_tts=not self._params.bot_audio,
+            # Forward the bot's audio when something listens to it (the response
+            # transcription, a persona) or when recording an audio run.
+            capture_bot_audio=self._params.capture_bot_audio
+            or bool(self._record_path and self._params.bot_audio),
+            capture_bot_images=self._params.capture_bot_images,
+        )
+
+    def _connect_url(self) -> str:
+        """The bot's URL with this connection's eval flags as query params.
+
+        The flags, and ``trigger_disconnect`` when the run asks for it, for a
+        bot serving the eval transport's WebSocket server.
+        """
+        connection = self._connection_flags()
         flags = []
-        if not self._params.bot_audio:
+        if connection.skip_tts:
             flags.append("skip_tts=true")
-        # Forward the bot's audio when something listens to it (the response
-        # transcription, a persona) or when recording an audio run.
-        if self._params.capture_bot_audio or (self._record_path and self._params.bot_audio):
+        if connection.capture_bot_audio:
             flags.append("capture_bot_audio=true")
-        if self._params.capture_bot_images:
+        if connection.capture_bot_images:
             flags.append("capture_bot_images=true")
         if self._session_params.trigger_disconnect or self._params.trigger_disconnect:
             flags.append("trigger_disconnect=true")
@@ -778,7 +792,9 @@ class EvalClient:
         # would make the recording stutter.
         if self._record_path and self._params.bot_audio:
             self._recorder = EvalClientRecorder(self._user_audio_rate or EVAL_STT_SAMPLE_RATE)
-        transport = EvalClientTransport(self._connect_url(), params, recorder=self._recorder)
+        transport = EvalClientTransport(
+            self._connect_url(), params, flags=self._connection_flags(), recorder=self._recorder
+        )
 
         @transport.event_handler("on_bot_ready")
         async def _on_bot_ready(_transport):

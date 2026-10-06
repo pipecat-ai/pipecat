@@ -21,7 +21,10 @@ from pipecat.evals.serializer import (
     EVAL_CONTEXT_MESSAGE_TYPE,
     EVAL_IMAGE_MESSAGE_TYPE,
     EvalClientSerializer,
+    EvalConnectionFlags,
     EvalSerializer,
+    eval_connect_message,
+    parse_eval_connect,
 )
 from pipecat.frames.frames import (
     InputAudioRawFrame,
@@ -147,6 +150,10 @@ class TestEvalSerializerDeserialize(unittest.IsolatedAsyncioTestCase):
         # eval-image is consumed (not forwarded) and kept for a later image request.
         self.assertIsNone(await self.serializer.deserialize(json.dumps(msg)))
         self.assertEqual(self.serializer.get_user_image(), (img, "image/png"))
+
+    async def test_eval_connect_consumed_and_not_forwarded(self):
+        message = eval_connect_message(EvalConnectionFlags(skip_tts=True))
+        self.assertIsNone(await self.serializer.deserialize(message))
 
     async def test_user_image_frame_decodes_the_registered_image(self):
         buffer = io.BytesIO()
@@ -328,3 +335,34 @@ class TestEvalClientSerializerBotImages(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIsInstance(frame, InputTransportMessageFrame)
         self.assertEqual(frame.message["type"], EVAL_BOT_IMAGE_TYPE)
+
+
+class TestEvalConnectMessage(unittest.TestCase):
+    def test_round_trips_its_flags(self):
+        flags = EvalConnectionFlags(skip_tts=True, capture_bot_images=True)
+        parsed = parse_eval_connect(json.loads(eval_connect_message(flags)))
+        self.assertEqual(parsed, flags)
+
+    def test_is_an_rtvi_client_message(self):
+        message = json.loads(eval_connect_message(EvalConnectionFlags()))
+        self.assertEqual(message["label"], RTVI.MESSAGE_LABEL)
+        self.assertEqual(message["type"], "client-message")
+
+    def test_missing_flags_default_off(self):
+        message = json.loads(eval_connect_message(EvalConnectionFlags()))
+        del message["data"]["d"]
+        self.assertEqual(parse_eval_connect(message), EvalConnectionFlags())
+
+    def test_other_messages_are_not_eval_connect(self):
+        self.assertIsNone(parse_eval_connect({"label": RTVI.MESSAGE_LABEL, "type": "client-ready"}))
+        self.assertIsNone(
+            parse_eval_connect(
+                {
+                    "label": RTVI.MESSAGE_LABEL,
+                    "type": "client-message",
+                    "data": {"t": EVAL_CONTEXT_MESSAGE_TYPE, "d": {}},
+                }
+            )
+        )
+        self.assertIsNone(parse_eval_connect({"event": "start"}))
+        self.assertIsNone(parse_eval_connect("not a dict"))
