@@ -62,7 +62,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     tts = BlandTTSService(
         api_key=os.environ["BLAND_API_KEY"],
         settings=BlandTTSService.Settings(
-            voice="2f29fdbb-c55e-4add-9c7c-93437ebf379d",  # River
+            voice="29158307-9893-4149-8a75-bc9ce313d64e",  # Karen
         ),
     )
 
