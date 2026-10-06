@@ -1169,6 +1169,39 @@
       "location": "pipecat/runner/types.py"
     },
     {
+      "subject": "get_transport_client_id",
+      "module": "pipecat.runner.utils",
+      "kind": "function",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "BaseTransport.get_client_id()",
+      "message": "`get_transport_client_id` is deprecated since 1.13.0 and will be removed in 2.0.0. Use `BaseTransport.get_client_id()` instead.",
+      "location": "pipecat/runner/utils.py"
+    },
+    {
+      "subject": "maybe_capture_participant_camera",
+      "module": "pipecat.runner.utils",
+      "kind": "function",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "TransportParams.video_in_sources",
+      "message": "`maybe_capture_participant_camera` is deprecated since 1.13.0 and will be removed in 2.0.0. Use `TransportParams.video_in_sources` or `BaseTransport.capture_participant_video()` instead.",
+      "location": "pipecat/runner/utils.py"
+    },
+    {
+      "subject": "maybe_capture_participant_screen",
+      "module": "pipecat.runner.utils",
+      "kind": "function",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "TransportParams.video_in_sources",
+      "message": "`maybe_capture_participant_screen` is deprecated since 1.13.0 and will be removed in 2.0.0. Use `TransportParams.video_in_sources` or `BaseTransport.capture_participant_video()` instead.",
+      "location": "pipecat/runner/utils.py"
+    },
+    {
       "subject": "AnthropicLLMService.InputParams",
       "module": "pipecat.services.anthropic.llm",
       "kind": "class",
@@ -4447,6 +4480,17 @@
       "location": "pipecat/transports/base_input.py"
     },
     {
+      "subject": "BaseTransport.capture_participant_video.framerate",
+      "module": "pipecat.transports.base_transport",
+      "kind": "parameter",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "on_request_only=True",
+      "message": "Use ``on_request_only=True`` instead of a ``framerate`` of ``0``. Will be removed in 2.0.0.",
+      "location": "pipecat/transports/base_transport.py"
+    },
+    {
       "subject": "TransportParams.video_out_bitrate",
       "module": "pipecat.transports.base_transport",
       "kind": "parameter",
@@ -4467,6 +4511,17 @@
       "replacement": "bind",
       "message": "Use ``bind`` instead, which also covers client mode. Will be removed in 2.0.0.",
       "location": "pipecat/transports/moq/transport.py"
+    },
+    {
+      "subject": "SmallWebRTCTransport.capture_participant_video.participant_id",
+      "module": "pipecat.transports.smallwebrtc.transport",
+      "kind": "parameter",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "participant_id",
+      "message": "Pass ``participant_id`` first, as on other transports. Calls without it, ``capture_participant_video(video_source=...)`` or ``capture_participant_video(\"camera\")``, keep their old meaning, passing on every frame unless ``framerate`` is given. Will be removed in 2.0.0.",
+      "location": "pipecat/transports/smallwebrtc/transport.py"
     },
     {
       "subject": "WebsocketServerCallbacks",

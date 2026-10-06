@@ -321,7 +321,10 @@ class TestDailyVideoInSourcesCapture(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             calls.capture.await_args_list,
-            [call("p1", 0, "camera"), call("p1", 1, "screenVideo")],
+            [
+                call("p1", 30, "camera", on_request_only=True),
+                call("p1", 1, "screenVideo", on_request_only=False),
+            ],
         )
 
     async def test_captures_before_event_handlers(self):
@@ -590,6 +593,149 @@ class TestImageRequestsWithoutVideo(unittest.IsolatedAsyncioTestCase):
         await input.remove_all_video()
 
         self.assertIn("disconnected", result_callback.await_args.args[0]["error"])
+
+
+class TestCaptureParticipantVideo(unittest.IsolatedAsyncioTestCase):
+    """capture_participant_video() takes the same arguments on every transport."""
+
+    def setUp(self):
+        try:
+            from pipecat.transports.smallwebrtc import transport
+        except Exception as e:
+            self.skipTest(f"SmallWebRTC transport unavailable: {e}")
+        self.module = transport
+
+    def _smallwebrtc(self):
+        transport = self.module.SmallWebRTCTransport(
+            webrtc_connection=MagicMock(), params=TransportParams(video_in_enabled=True)
+        )
+        transport._input = MagicMock(capture_participant_media=AsyncMock())
+        return transport, transport._input.capture_participant_media
+
+    async def test_unsupported_transport_warns(self):
+        from pipecat.transports import base_transport
+
+        class AudioOnlyTransport(base_transport.BaseTransport):
+            def input(self):
+                return MagicMock()
+
+            def output(self):
+                return MagicMock()
+
+        with patch.object(base_transport, "logger") as logger:
+            await AudioOnlyTransport().capture_participant_video("p1")
+        logger.warning.assert_called_once()
+
+    async def test_smallwebrtc_takes_the_standard_arguments(self):
+        transport, capture = self._smallwebrtc()
+
+        await transport.capture_participant_video("pc-1", video_source="screenVideo")
+        await transport.capture_participant_video("pc-1", 1, "camera")
+
+        self.assertEqual(
+            capture.await_args_list,
+            [
+                call(source="screenVideo", framerate=30),
+                call(source="camera", framerate=1),
+            ],
+        )
+
+    async def test_on_request_only_and_deprecated_framerate_zero(self):
+        transport, capture = self._smallwebrtc()
+
+        await transport.capture_participant_video("pc-1", on_request_only=True)
+        with self.assertWarns(DeprecationWarning):
+            await transport.capture_participant_video("pc-1", 0, "screenVideo")
+
+        self.assertEqual(
+            capture.await_args_list,
+            [
+                call(source="camera", framerate=0),
+                call(source="screenVideo", framerate=0),
+            ],
+        )
+
+    async def test_daily_and_livekit_on_request_only(self):
+        for module, name in (
+            ("pipecat.transports.daily.transport", "DailyInputTransport"),
+            ("pipecat.transports.livekit.transport", "LiveKitInputTransport"),
+        ):
+            try:
+                cls = getattr(__import__(module, fromlist=[name]), name)
+            except Exception as e:
+                self.skipTest(f"{name} unavailable: {e}")
+            input = MagicMock(_video_samplers=_VideoInSamplers())
+            input._client.capture_participant_video = AsyncMock()
+
+            await cls.capture_participant_video(input, "p1", on_request_only=True)
+            with self.assertWarns(DeprecationWarning):
+                await cls.capture_participant_video(input, "p2", 0)
+
+            for participant in ("p1", "p2"):
+                sampler = input._video_samplers._samplers[(participant, "camera")]
+                self.assertEqual(sampler.framerate, 0)
+
+    async def test_smallwebrtc_calls_without_a_participant_keep_their_meaning(self):
+        transport, capture = self._smallwebrtc()
+
+        with self.assertWarns(DeprecationWarning):
+            await transport.capture_participant_video(video_source="screenVideo")
+        with self.assertWarns(DeprecationWarning):
+            await transport.capture_participant_video("camera", 1)
+
+        self.assertEqual(
+            capture.await_args_list,
+            [
+                call(source="screenVideo", framerate=None),
+                call(source="camera", framerate=1),
+            ],
+        )
+
+
+class TestGetClientId(unittest.TestCase):
+    """Each transport gets a client's id from the client its events pass."""
+
+    def _transport_cls(self, module, name):
+        try:
+            return getattr(__import__(module, fromlist=[name]), name)
+        except Exception as e:
+            self.skipTest(f"{name} unavailable: {e}")
+
+    def test_daily_and_livekit_use_the_client_id(self):
+        for module, name in (
+            ("pipecat.transports.daily.transport", "DailyTransport"),
+            ("pipecat.transports.livekit.transport", "LiveKitTransport"),
+        ):
+            cls = self._transport_cls(module, name)
+            self.assertEqual(cls.get_client_id(MagicMock(), {"id": "User-1234"}), "User-1234")
+
+    def test_smallwebrtc_uses_the_peer_connection_id(self):
+        cls = self._transport_cls(
+            "pipecat.transports.smallwebrtc.transport", "SmallWebRTCTransport"
+        )
+        client = SimpleNamespace(pc_id="SmallWebRTCConnection#0-1234")
+        self.assertEqual(cls.get_client_id(MagicMock(), client), "SmallWebRTCConnection#0-1234")
+
+    def test_vonage_uses_the_stream_id(self):
+        cls = self._transport_cls(
+            "pipecat.transports.vonage.video_connector", "VonageVideoConnectorTransport"
+        )
+        self.assertEqual(cls.get_client_id(MagicMock(), {"streamId": "stream-1"}), "stream-1")
+
+    def test_unsupported_transport_warns(self):
+        from pipecat.transports import base_transport
+
+        class AudioOnlyTransport(base_transport.BaseTransport):
+            def input(self):
+                return MagicMock()
+
+            def output(self):
+                return MagicMock()
+
+        with patch.object(base_transport, "logger") as logger:
+            client_id = AudioOnlyTransport().get_client_id({"id": "User-1234"})
+        self.assertEqual(client_id, "")
+        logger.warning.assert_called_once()
 
 
 if __name__ == "__main__":

@@ -49,7 +49,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSet
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.transports.video_in_sampler import _VideoInSamplers
+from pipecat.transports.video_in_sampler import _capture_framerate, _VideoInSamplers
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
 
 try:
@@ -1091,7 +1091,12 @@ class LiveKitInputTransport(BaseInputTransport):
             await self.request_participant_image(frame)
 
     async def capture_participant_video(
-        self, participant_id: str, framerate: int | None = 30, video_source: str = CAM_VIDEO_SOURCE
+        self,
+        participant_id: str,
+        framerate: int | None = 30,
+        video_source: str = CAM_VIDEO_SOURCE,
+        *,
+        on_request_only: bool = False,
     ):
         """Capture a participant's video source at a framerate.
 
@@ -1099,10 +1104,14 @@ class LiveKitInputTransport(BaseInputTransport):
 
         Args:
             participant_id: The participant's identity.
-            framerate: Frames per second to pass on. ``0`` passes on frames only
-                to answer image requests, and ``None`` passes on every frame.
+            framerate: Frames per second to pass on, or ``None`` for every frame. It
+                doesn't apply with ``on_request_only``.
             video_source: The video source, ``"camera"`` or ``"screenVideo"``.
+            on_request_only: Pass on only the frames that answer image requests.
         """
+        framerate = _capture_framerate(
+            framerate, on_request_only, "LiveKitTransport.capture_participant_video"
+        )
         self._video_samplers.capture(participant_id, video_source, framerate)
 
     async def request_participant_image(self, frame: UserImageRequestFrame):
@@ -1596,6 +1605,17 @@ class LiveKitTransport(BaseTransport):
         self._register_event_handler("on_dtmf_event")
         self._register_event_handler("on_active_speaker_changed")
 
+    def get_client_id(self, client: Any) -> str:
+        """The id of a client, as passed to ``on_client_connected``.
+
+        Args:
+            client: The client, as passed to the transport's client events.
+
+        Returns:
+            The participant's identity.
+        """
+        return client["id"]
+
     def input(self) -> LiveKitInputTransport:
         """Get the input transport for receiving media and events.
 
@@ -1670,6 +1690,8 @@ class LiveKitTransport(BaseTransport):
         participant_id: str,
         framerate: int | None = 30,
         video_source: str = CAM_VIDEO_SOURCE,
+        *,
+        on_request_only: bool = False,
     ):
         """Capture a participant's video source at a framerate.
 
@@ -1677,12 +1699,18 @@ class LiveKitTransport(BaseTransport):
 
         Args:
             participant_id: The participant's identity.
-            framerate: Frames per second to pass on. ``0`` passes on frames only
-                to answer image requests, and ``None`` passes on every frame.
+            framerate: Frames per second to pass on, or ``None`` for every frame. It
+                doesn't apply with ``on_request_only``.
             video_source: The video source, ``"camera"`` or ``"screenVideo"``.
+            on_request_only: Pass on only the frames that answer image requests.
         """
+        framerate = _capture_framerate(
+            framerate, on_request_only, "LiveKitTransport.capture_participant_video"
+        )
         if self._input:
-            await self._input.capture_participant_video(participant_id, framerate, video_source)
+            await self._input.capture_participant_video(
+                participant_id, framerate, video_source, on_request_only=framerate == 0
+            )
 
     async def mute_participant(self, participant_id: str):
         """Stop receiving a specific participant's audio.

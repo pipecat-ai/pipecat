@@ -15,6 +15,7 @@ from abc import abstractmethod
 from collections.abc import Mapping
 from typing import Any
 
+from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from pipecat.audio.filters.base_audio_filter import BaseAudioFilter
@@ -184,3 +185,48 @@ class BaseTransport(BaseObject):
             The frame processor that handles outgoing frames.
         """
         pass
+
+    async def capture_participant_video(
+        self,
+        participant_id: str,
+        framerate: int | None = 30,
+        video_source: str = "camera",
+        *,
+        on_request_only: bool = False,
+    ):
+        """Capture a participant's video source at a framerate.
+
+        This captures a source on demand, where ``TransportParams.video_in_sources``
+        captures the listed sources as each user connects, and takes precedence
+        over it for the source. Transports that receive user video implement this;
+        the others log a warning.
+
+        Args:
+            participant_id: The participant to capture, as from :meth:`get_client_id`.
+            framerate: Frames per second to pass on, or ``None`` for every frame. It
+                doesn't apply with ``on_request_only``.
+
+                .. deprecated:: 1.13.0
+                    Use ``on_request_only=True`` instead of a ``framerate`` of ``0``.
+                    Will be removed in 2.0.0.
+
+            video_source: The video source, e.g. ``"camera"`` or ``"screenVideo"``.
+            on_request_only: Pass on only the frames that answer image requests.
+        """
+        logger.warning(f"{self}: capturing participant video isn't supported.")
+
+    def get_client_id(self, client: Any) -> str:
+        """The id of a client, as passed to ``on_client_connected``.
+
+        This is the ``participant_id`` that :meth:`capture_participant_video` and
+        image requests take. Transports with client events implement this; the
+        others log a warning and return an empty string.
+
+        Args:
+            client: The client, as passed to the transport's client events.
+
+        Returns:
+            The client's id.
+        """
+        logger.warning(f"{self}: getting a client id isn't supported.")
+        return ""

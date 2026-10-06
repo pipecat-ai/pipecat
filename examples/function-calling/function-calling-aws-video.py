@@ -23,7 +23,6 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import (
     create_transport,
-    get_transport_client_id,
 )
 from pipecat.services.aws.llm import AWSBedrockLLMService
 from pipecat.services.cartesia.tts import CartesiaTTSService
@@ -168,7 +167,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         logger.info(f"Client connected: {client}")
 
         # Set the participant ID in the image requester
-        client_id = get_transport_client_id(transport, client)
+        client_id = transport.get_client_id(client)
 
         # Kick off the conversation.
         context.add_message(

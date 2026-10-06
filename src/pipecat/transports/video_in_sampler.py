@@ -7,12 +7,31 @@
 """Selection of the incoming video frames an input transport passes on."""
 
 import time
+import warnings
 
 from pipecat.frames.frames import UserImageRequestFrame
 
 # How early a frame may arrive and still count as due, at most half an interval.
 # It covers jitter in the incoming stream, which is about the same at any framerate.
 JITTER_TOLERANCE_SECS = 0.05
+
+
+def _capture_framerate(framerate: int | None, on_request_only: bool, method: str) -> int | None:
+    """The sampler framerate for a ``capture_participant_video()`` call's arguments.
+
+    A sampler passes on only the frames that answer image requests at a
+    framerate of ``0``, which is how ``on_request_only`` is applied.
+    """
+    if on_request_only:
+        return 0
+    if framerate == 0:
+        warnings.warn(
+            f"`framerate=0` in `{method}` is deprecated since 1.13.0 and will be removed "
+            "in 2.0.0. Use `on_request_only=True` instead.",
+            DeprecationWarning,
+            stacklevel=3,
+        )
+    return framerate
 
 
 class _VideoInSampler:
