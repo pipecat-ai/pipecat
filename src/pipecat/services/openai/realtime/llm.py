@@ -870,6 +870,13 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
                         "conversation_already_has_active_response",
                     ):
                         logger.debug(f"{self} {evt.error.message}")
+                    elif evt.error.code == "session_expired":
+                        # The session hit OpenAI's maximum duration. Carry the
+                        # conversation over to a new one; that disconnects, so
+                        # it can't run on this task.
+                        logger.warning(f"{self} {evt.error.message} Reconnecting.")
+                        self.create_task(self._handle_session_expired())
+                        return
                     else:
                         await self._handle_evt_error(evt)
                         # errors are fatal, so exit the receive loop
@@ -882,6 +889,11 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
         await self._send_session_update()
 
     async def _handle_evt_session_updated(self, evt):
+        # A reconnected session starts empty. Seed it before marking the
+        # session ready, since with server turn detection the next response may
+        # come from the user speaking rather than from _create_response().
+        if self._context:
+            await self._setup_conversation_if_needed()
         # If this is our first context frame, run the LLM
         self._api_session_ready = True
         # Now that we've configured the session, we can run the LLM if we need to.
@@ -1172,6 +1184,38 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
 
         await self._connect()
 
+    async def _handle_session_expired(self):
+        # The expired session will never finish the response in progress.
+        if self._current_audio_response:
+            self._current_audio_response = None
+            await self.push_frame(TTSStoppedFrame())
+        if self._current_assistant_response:
+            self._current_assistant_response = None
+            await self.push_frame(LLMFullResponseEndFrame())
+        await self.reset_conversation()
+
+    async def _setup_conversation_if_needed(self):
+        if not self._llm_needs_conversation_setup:
+            return
+
+        assert self._context is not None
+
+        self._log_llm_conversation_setup(self._context)
+
+        # Send initial messages
+        llm_invocation_params = self.get_llm_adapter().get_llm_invocation_params(self._context)
+        messages = llm_invocation_params["messages"]
+        for item in messages:
+            evt = events.ConversationItemCreateEvent(item=item)
+            self._messages_added_manually[evt.item.id] = True
+            await self.send_client_event(evt)
+
+        # Send new settings if needed
+        await self._send_session_update()
+
+        # We're done configuring the LLM for this session
+        self._llm_needs_conversation_setup = False
+
     @traced_openai_realtime(operation="llm_request")
     async def _create_response(self):
         if not self._api_session_ready:
@@ -1180,25 +1224,8 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
 
         assert self._context is not None
 
-        adapter = self.get_llm_adapter()
-
         # Configure the LLM for this session if needed
-        if self._llm_needs_conversation_setup:
-            self._log_llm_conversation_setup(self._context)
-
-            # Send initial messages
-            llm_invocation_params = adapter.get_llm_invocation_params(self._context)
-            messages = llm_invocation_params["messages"]
-            for item in messages:
-                evt = events.ConversationItemCreateEvent(item=item)
-                self._messages_added_manually[evt.item.id] = True
-                await self.send_client_event(evt)
-
-            # Send new settings if needed
-            await self._send_session_update()
-
-            # We're done configuring the LLM for this session
-            self._llm_needs_conversation_setup = False
+        await self._setup_conversation_if_needed()
 
         logger.debug("Creating response")
 
