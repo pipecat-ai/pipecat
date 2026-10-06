@@ -158,6 +158,8 @@ class LiveKitParams(TransportParams):
     ``LiveKitTransport.capture_participant_video()``.
 
     Parameters:
+        rtc_config: Optional LiveKit RTC configuration, including ICE transport
+            policy and ICE servers. Uses LiveKit defaults when unset.
         audio_out_queue_size_ms: Buffer size of the outgoing audio source, in milliseconds
             (LiveKit's default is 1000).
         video_out_max_bitrate: Maximum bitrate of the published video track, in bits
@@ -165,6 +167,7 @@ class LiveKitParams(TransportParams):
             from the track resolution when unset.
     """
 
+    rtc_config: rtc.RtcConfiguration | None = None
     audio_out_queue_size_ms: int = 1000
     video_out_max_bitrate: int | None = None
 
@@ -331,7 +334,9 @@ class LiveKitTransportClient:
                 await self.room.connect(
                     self._url,
                     self._token,
-                    options=rtc.RoomOptions(auto_subscribe=True),
+                    options=rtc.RoomOptions(
+                        auto_subscribe=True, rtc_config=self._params.rtc_config
+                    ),
                 )
                 self._participant_id = self.room.local_participant.identity
                 logger.info(f"Connected to {self._room_name} as {self._participant_id}")
