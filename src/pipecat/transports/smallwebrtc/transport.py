@@ -43,8 +43,14 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSet
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection, SmallWebRTCTrack
-from pipecat.transports.video_in_sampler import _capture_framerate, _VideoInSampler
+from pipecat.transports.smallwebrtc.connection import (
+    AUDIO_TRANSCEIVER_INDEX,
+    SCREEN_VIDEO_TRANSCEIVER_INDEX,
+    VIDEO_TRANSCEIVER_INDEX,
+    SmallWebRTCConnection,
+    SmallWebRTCTrack,
+)
+from pipecat.transports.video_in_sampler import _capture_framerate, _VideoInSamplers
 from pipecat.utils.shared import acquires, releases
 from pipecat.utils.types import NOT_GIVEN, NotGiven, is_given
 
@@ -61,6 +67,16 @@ CAM_VIDEO_SOURCE = "camera"
 SCREEN_VIDEO_SOURCE = "screenVideo"
 MIC_AUDIO_SOURCE = "microphone"
 
+# SmallWebRTC has one peer, so all its video samplers are kept under one id.
+_PEER_ID = "peer"
+
+# The source each of the connection's receivers carries.
+_SOURCES_BY_RECEIVER = {
+    AUDIO_TRANSCEIVER_INDEX: MIC_AUDIO_SOURCE,
+    VIDEO_TRANSCEIVER_INDEX: CAM_VIDEO_SOURCE,
+    SCREEN_VIDEO_TRANSCEIVER_INDEX: SCREEN_VIDEO_SOURCE,
+}
+
 
 class SmallWebRTCCallbacks(BaseModel):
     """Callback handlers for SmallWebRTC events.
@@ -69,11 +85,15 @@ class SmallWebRTCCallbacks(BaseModel):
         on_app_message: Called when an application message is received.
         on_client_connected: Called when a client establishes connection.
         on_client_disconnected: Called when a client disconnects.
+        on_track_status: Called with the source (``"microphone"``, ``"camera"`` or
+            ``"screenVideo"``) and whether the peer is sending it, when the peer
+            turns a source on or off.
     """
 
     on_app_message: Callable[[Any, str], Awaitable[None]]
     on_client_connected: Callable[[SmallWebRTCConnection], Awaitable[None]]
     on_client_disconnected: Callable[[SmallWebRTCConnection], Awaitable[None]]
+    on_track_status: Callable[[str, bool], Awaitable[None]]
 
 
 class RawAudioTrack(AudioStreamTrack):
@@ -263,6 +283,14 @@ class SmallWebRTCClient:
         @self._webrtc_connection.event_handler("app-message")
         async def on_app_message(connection: SmallWebRTCConnection, message: Any):
             await self._handle_app_message(message, connection.pc_id)
+
+        @self._webrtc_connection.event_handler("track-status")
+        async def on_track_status(
+            connection: SmallWebRTCConnection, receiver_index: int, enabled: bool
+        ):
+            source = _SOURCES_BY_RECEIVER.get(receiver_index)
+            if source:
+                await self._callbacks.on_track_status(source, enabled)
 
     def _convert_frame(self, frame_array: np.ndarray, format_name: str) -> np.ndarray:
         """Convert a video frame to RGB format based on the input format.
@@ -645,8 +673,7 @@ class SmallWebRTCInputTransport(BaseInputTransport):
         self._receive_audio_task = None
         self._receive_video_task = None
         self._receive_screen_video_task = None
-        # Video samplers by video source.
-        self._video_samplers: dict[str, _VideoInSampler] = {}
+        self._video_samplers = _VideoInSamplers()
 
     def _supports_video_in_source(self, video_source: str) -> bool:
         """Whether this transport captures a video source listed in ``video_in_sources``.
@@ -763,10 +790,7 @@ class SmallWebRTCInputTransport(BaseInputTransport):
             async for video_frame in video_iterator:
                 if not video_frame:
                     continue
-                sampler = self._video_samplers.get(video_source)
-                if not sampler:
-                    continue
-                due, request_frame = sampler.sample()
+                due, request_frame = self._video_samplers.sample(_PEER_ID, video_source)
                 if not due:
                     continue
                 if request_frame:
@@ -810,8 +834,9 @@ class SmallWebRTCInputTransport(BaseInputTransport):
 
         # A request for a source that isn't being captured starts receiving it,
         # passing on every frame.
-        sampler = self._video_samplers.setdefault(frame.video_source, _VideoInSampler(None))
-        sampler.add_request(frame)
+        if not self._video_samplers.is_capturing(_PEER_ID, frame.video_source):
+            self._video_samplers.capture(_PEER_ID, frame.video_source, None)
+        self._video_samplers.add_request(_PEER_ID, frame.video_source, frame)
         # If we're not already receiving video, try to get a frame now
         if (
             frame.video_source == CAM_VIDEO_SOURCE
@@ -830,10 +855,22 @@ class SmallWebRTCInputTransport(BaseInputTransport):
                 self._receive_video(SCREEN_VIDEO_SOURCE)
             )
 
+    async def stop_video(self, video_source: str):
+        """Answer the image requests waiting on a video source the peer turned off.
+
+        The source stays captured, so its frames are sampled again if it's turned
+        back on.
+
+        Args:
+            video_source: ``"camera"`` or ``"screenVideo"``.
+        """
+        requests = self._video_samplers.take_requests(_PEER_ID, video_source)
+        error = f"The peer turned off its {video_source} video."
+        await self._answer_image_requests(requests, error)
+
     async def remove_all_video(self):
         """Stop sampling video and answer the waiting image requests, e.g. on disconnect."""
-        requests = [r for s in self._video_samplers.values() for r in s.take_requests()]
-        self._video_samplers.clear()
+        requests = self._video_samplers.clear()
         await self._answer_image_requests(requests, "The peer disconnected.")
 
     async def capture_participant_media(
@@ -850,10 +887,7 @@ class SmallWebRTCInputTransport(BaseInputTransport):
                 every frame.
         """
         if source in (CAM_VIDEO_SOURCE, SCREEN_VIDEO_SOURCE):
-            # Keep an existing sampler so image requests already waiting on it
-            # are still answered.
-            sampler = self._video_samplers.setdefault(source, _VideoInSampler(framerate))
-            sampler.framerate = framerate
+            self._video_samplers.capture(_PEER_ID, source, framerate)
 
         # If we're not already receiving video, try to get a frame now
         if (
@@ -1031,6 +1065,7 @@ class SmallWebRTCTransport(BaseTransport):
             on_app_message=self._on_app_message,
             on_client_connected=self._on_client_connected,
             on_client_disconnected=self._on_client_disconnected,
+            on_track_status=self._on_track_status,
         )
 
         self._client = SmallWebRTCClient(webrtc_connection, self._callbacks)
@@ -1124,6 +1159,11 @@ class SmallWebRTCTransport(BaseTransport):
         if self._input:
             await self._input.remove_all_video()
         await self._call_event_handler("on_client_disconnected", webrtc_connection)
+
+    async def _on_track_status(self, source: str, enabled: bool):
+        """Handle the peer turning a source on or off."""
+        if self._input and source != MIC_AUDIO_SOURCE and not enabled:
+            await self._input.stop_video(source)
 
     async def capture_participant_video(
         self,
