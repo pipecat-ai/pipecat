@@ -52,10 +52,15 @@ class BlandTTSSettings(TTSSettings):
     Parameters:
         expressiveness: 0.0-1.0. Higher values produce more varied intonation.
         stability: 0.0-1.0. Higher values produce more consistent delivery.
+        auto_formatting: Rewrite numbers into the form the voice reads best
+            before synthesis. Phone numbers and SSNs, spelled out ("seven three
+            two...") or written as bare digits ("7327412065"), are read digit
+            by digit in groups. Off unless set.
     """
 
     expressiveness: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     stability: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    auto_formatting: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 def _default_settings(settings: BlandTTSSettings | None) -> BlandTTSSettings:
@@ -65,6 +70,7 @@ def _default_settings(settings: BlandTTSSettings | None) -> BlandTTSSettings:
         language=None,
         expressiveness=None,
         stability=None,
+        auto_formatting=None,
     )
     if settings is not None:
         defaults.apply_update(settings)
@@ -103,6 +109,15 @@ def _controls(settings: BlandTTSSettings) -> dict[str, float]:
     if stability is not None:
         controls["stability"] = stability
     return controls
+
+
+def _apply_request_options(request: dict[str, Any], settings: BlandTTSSettings) -> None:
+    """Add the settings Bland reads from a session's ``init`` or a ``/v2/tts`` body."""
+    if controls := _controls(settings):
+        request["controls"] = controls
+    auto_formatting = assert_given(settings.auto_formatting)
+    if auto_formatting is not None:
+        request["auto_formatting"] = auto_formatting
 
 
 class BlandTTSService(WebsocketTTSService):
@@ -240,8 +255,7 @@ class BlandTTSService(WebsocketTTSService):
                 "voice": self._settings.voice,
                 "audio": {"encoding": "pcm_s16le", "sample_rate": self._bland_sample_rate},
             }
-            if controls := _controls(self._settings):
-                init["controls"] = controls
+            _apply_request_options(init, self._settings)
             await websocket.send(json.dumps(init))
 
             # `ready` confirms wallet and concurrency admission, so a
@@ -338,9 +352,10 @@ class BlandTTSService(WebsocketTTSService):
         """
         changed = await super()._update_settings(delta)
 
-        # `init` fixes the voice and controls for the life of a session. Nothing
-        # else in TTSSettings reaches Bland, so nothing else earns a reconnect.
-        if changed.keys() & {"voice", "expressiveness", "stability"}:
+        # `init` fixes the voice, controls and formatting for the life of a
+        # session. Nothing else in TTSSettings reaches Bland, so nothing else
+        # earns a reconnect.
+        if changed.keys() & {"voice", "expressiveness", "stability", "auto_formatting"}:
             await self._disconnect()
             await self._connect()
 
@@ -580,8 +595,7 @@ class BlandHttpTTSService(TTSService):
                 "container": "raw",
             },
         }
-        if controls := _controls(self._settings):
-            payload["controls"] = controls
+        _apply_request_options(payload, self._settings)
 
         headers = {
             "Authorization": f"Bearer {self._api_key}",

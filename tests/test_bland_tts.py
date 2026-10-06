@@ -30,6 +30,7 @@ from pipecat.frames.frames import (
     TTSSpeakFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
+    TTSUpdateSettingsFrame,
 )
 from pipecat.services.bland.tts import BlandHttpTTSService, BlandTTSService
 from pipecat.services.tts_service import TextAggregationMode
@@ -180,6 +181,7 @@ async def test_bland_tts_protocol_roundtrip():
     assert init["voice"] == DEFAULT_VOICE_ID
     assert init["audio"] == {"encoding": "pcm_s16le", "sample_rate": 24000}
     assert "controls" not in init
+    assert "auto_formatting" not in init
 
     speak = _of_type(captured, "speak")[0]
     end_of_turn = _of_type(captured, "end_of_turn")[0]
@@ -296,6 +298,56 @@ async def test_bland_tts_partial_controls():
         await run_test(tts, frames_to_send=[])
 
     assert _of_type(captured, "init")[0]["controls"] == {"stability": 0.4}
+
+
+@pytest.mark.asyncio
+async def test_bland_tts_init_carries_auto_formatting():
+    """auto_formatting is fixed at init, like the controls."""
+    captured: dict = {"messages": []}
+
+    async with serve(_ws_server_handler(captured), "127.0.0.1", 0) as server:
+        host, port = next(iter(server.sockets)).getsockname()[:2]
+
+        tts = BlandTTSService(
+            api_key="test-key",
+            url=f"ws://{host}:{port}/v2/tts/ws",
+            sample_rate=24000,
+            settings=BlandTTSService.Settings(auto_formatting=True),
+        )
+
+        await run_test(tts, frames_to_send=[])
+
+    init = _of_type(captured, "init")[0]
+    assert init["auto_formatting"] is True
+    assert "controls" not in init
+
+
+@pytest.mark.asyncio
+async def test_bland_tts_auto_formatting_update_reconnects():
+    """Changing auto_formatting opens a new session, since init fixes it."""
+    captured: dict = {"messages": []}
+
+    async with serve(_ws_server_handler(captured), "127.0.0.1", 0) as server:
+        host, port = next(iter(server.sockets)).getsockname()[:2]
+
+        tts = BlandTTSService(
+            api_key="test-key",
+            url=f"ws://{host}:{port}/v2/tts/ws",
+            sample_rate=24000,
+        )
+
+        await run_test(
+            tts,
+            frames_to_send=[
+                TTSUpdateSettingsFrame(delta=BlandTTSService.Settings(auto_formatting=True)),
+                SleepFrame(sleep=0.3),
+            ],
+        )
+
+    inits = _of_type(captured, "init")
+    assert len(inits) == 2
+    assert "auto_formatting" not in inits[0]
+    assert inits[1]["auto_formatting"] is True
 
 
 @pytest.mark.asyncio
@@ -623,6 +675,7 @@ async def test_run_bland_http_tts_success(aiohttp_client):
         "container": "raw",
     }
     assert "controls" not in body
+    assert "auto_formatting" not in body
     # fields the request shape does not define
     assert "language" not in body
     assert "output_format" not in body
@@ -632,6 +685,31 @@ async def test_run_bland_http_tts_success(aiohttp_client):
     assert audio == payload
     assert not audio.startswith(b"RIFF")
     assert {f.sample_rate for f in down_frames if isinstance(f, TTSAudioRawFrame)} == {24000}
+
+
+@pytest.mark.asyncio
+async def test_bland_http_tts_sends_auto_formatting(aiohttp_client):
+    """auto_formatting reaches the /v2/tts body when set."""
+    requests = []
+
+    async def handler(request):
+        requests.append(await request.json())
+        return web.Response(body=_pcm_bytes(), content_type="audio/pcm")
+
+    client = await aiohttp_client(await _serve(handler))
+    base_url = str(client.make_url("/v2"))
+
+    async with aiohttp.ClientSession() as session:
+        tts = BlandHttpTTSService(
+            api_key="test-key",
+            base_url=f"{base_url}/",
+            aiohttp_session=session,
+            sample_rate=24000,
+            settings=BlandHttpTTSService.Settings(auto_formatting=True),
+        )
+        await run_test(tts, frames_to_send=[TTSSpeakFrame(text="Call 7327412065.")])
+
+    assert requests[0]["auto_formatting"] is True
 
 
 @pytest.mark.asyncio
