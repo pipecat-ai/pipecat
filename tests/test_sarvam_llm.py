@@ -945,7 +945,7 @@ async def test_sarvam_llm_process_frame_surfaces_raw_server_error():
 
         pushed_errors = []
 
-        async def mock_push_error(error_msg, exception=None):
+        async def mock_push_error(error_msg, exception=None, **kwargs):
             pushed_errors.append({"error_msg": error_msg, "exception": exception})
 
         service.push_error = mock_push_error

@@ -9,7 +9,7 @@
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from botocore.exceptions import ClientError
+from botocore.exceptions import ClientError, EventStreamError
 
 from pipecat.adapters.base_llm_adapter import LLMContextConversionError
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -73,6 +73,37 @@ async def test_aws_bedrock_llm_removes_file_message_on_client_error():
         {
             "Error": {"Code": "ValidationException", "Message": "bad document name"},
             "ResponseMetadata": {"HTTPStatusCode": 400},
+        },
+        "ConverseStream",
+    )
+    with patch.object(service, "_get_llm_invocation_params", side_effect=error):
+        await service._process_context(context)
+
+    messages = context.get_messages()
+    assert len(messages) == 1
+    assert messages[0]["content"] == "hello"
+
+
+@pytest.mark.asyncio
+async def test_aws_bedrock_llm_removes_file_message_on_mid_stream_validation_error():
+    """A rejection arriving mid-stream triggers cleanup too.
+
+    When the model rejects content after ConverseStream has started (e.g. file
+    bytes not matching the declared format), botocore raises an
+    EventStreamError whose code is the event stream's modeled
+    ``validationException`` — lowercase, unlike the up-front rejection's
+    ``ValidationException``.
+    """
+    service = _make_service()
+    context = await _context_with_file_message()
+
+    error = EventStreamError(
+        {
+            "Error": {
+                "Code": "validationException",
+                "Message": "The detected file MIME type image/webp does not match "
+                "the expected type image/png.",
+            },
         },
         "ConverseStream",
     )
