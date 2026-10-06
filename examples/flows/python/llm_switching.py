@@ -82,7 +82,6 @@ transport_params = {
         audio_in_enabled=True,
         audio_out_enabled=True,
     ),
-    # Behavioral evals: run with `-t eval` to drive this bot via `pipecat eval`.
     "eval": lambda: EvalTransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,

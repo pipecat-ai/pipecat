@@ -6,9 +6,9 @@ evals run each example for us.
 
 ## How it works
 
-Each example is a Pipecat **bot**. We run it with its eval transport
-(`-t eval`). The **eval harness** (`pipecat.evals`) connects to it as an RTVI
-client, plays the user's side of a conversation, listens to what the bot says,
+Each example is a Pipecat **bot**. We run it with the dev runner, as for any
+local run. The **eval harness** (`pipecat.evals`) connects to its eval transport
+as an RTVI client, plays the user's side of a conversation, listens to what the bot says,
 and judges it.
 
 A **scenario** is one check: a conversation to have with the bot and how to
@@ -192,12 +192,12 @@ runs on the CPU by default and takes `device: cuda` if you have room.
 
 ## One scenario against a running bot
 
-If a bot is already running with `-t eval`, run a scenario against it
+If a bot is already running (`python bot.py`), run a scenario against it
 directly. This is handy while working on a scenario or a bot:
 
 ```sh
-pipecat eval run scenarios/scripted/capital_question.yaml --bot-url ws://localhost:7860
-pipecat eval run scenarios/simulated/capital_curious.yaml --bot-url ws://localhost:7860 -v
+pipecat eval run scenarios/scripted/capital_question.yaml --bot-url ws://localhost:7860/ws
+pipecat eval run scenarios/simulated/capital_curious.yaml --bot-url ws://localhost:7860/ws -v
 ```
 
 ## Scripted scenarios
@@ -368,7 +368,7 @@ scripted audio scenario, so `capital_curious/audio` exercises the bot's STT,
 TTS and turn taking against a caller of its own. The file format is in the
 [`pipecat.evals.simulation`](../../src/pipecat/evals/simulation.py) module
 docstring. Run one by hand with `pipecat eval run
-scenarios/simulated/<name>.yaml --bot-url ws://localhost:7860 -v`, which prints
+scenarios/simulated/<name>.yaml --bot-url ws://localhost:7860/ws -v`, which prints
 the conversation as it happens.
 
 ## Adding coverage

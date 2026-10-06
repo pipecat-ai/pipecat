@@ -118,8 +118,8 @@ FEATURE_DEFINITIONS: dict[str, list[str]] = {
     # Imported on the standard (non-PSTN/SIP) transport path: the collapsed bot()
     # calls create_transport. Dial-out and SIP construct their transports by hand.
     "create_transport": ["create_transport"],
-    # The "eval" transport entry (pc create --eval) needs EvalTransportParams so the
-    # generated bot is runnable with `-t eval` for behavioral evals.
+    # The "eval" transport entry (pc create --eval) needs EvalTransportParams so
+    # `pipecat eval` can drive the generated bot for behavioral evals.
     "eval": ["EvalTransportParams"],
     # Video input on a Daily or SmallWebRTC transport captures its sources from
     # video_in_sources.
