@@ -688,6 +688,19 @@ def _configure_server_app(args: argparse.Namespace):
         _setup_whatsapp_routes(app, args)
 
 
+def _advertised_file_upload_url(session_id: str | None = None) -> str | None:
+    """Determine the uploads route a /start response should advertise.
+
+    The uploads route a /start response should advertise, or None when
+    uploads are disabled. Returned as a path relative to the /start endpoint
+    so clients resolve it against whatever public origin they reached the
+    runner on — the runner can't know its public hostname behind a proxy.
+    """
+    if RUNNER_FILE_STORAGE is None:
+        return None
+    return f"/sessions/{session_id}/files" if session_id else "/files"
+
+
 def _setup_unified_start_route(
     app: FastAPI, args: argparse.Namespace, active_sessions: dict[str, dict[str, Any]]
 ):
@@ -716,6 +729,11 @@ def _setup_unified_start_route(
 
     class StartBotResult(TypedDict, total=False):
         sessionId: str
+        # Where to POST file uploads for this session, when uploads are
+        # enabled. A path relative to the /start endpoint's origin (or an
+        # absolute URL from backends that know theirs). Omitted when uploads
+        # are disabled.
+        fileUploadUrl: str
         iceConfig: IceConfig | None
         dailyRoom: str | None
         dailyToken: str | None
@@ -751,6 +769,12 @@ def _setup_unified_start_route(
         was started with (``--ice-servers`` or ``PIPECAT_ICE_SERVERS``). When the
         runner has none, ``enableDefaultIceServers`` returns a public STUN server
         instead.
+
+        When file uploads are enabled (``-u/--uploads-folder`` or a custom
+        storage backend), ``fileUploadUrl`` in the response carries the route
+        to POST uploads to, relative to this endpoint's origin — the
+        session-scoped route for flows that register their session, the flat
+        ``/files`` route otherwise. Omitted when uploads are disabled.
         """
         try:
             request_data = await request.json()
@@ -793,6 +817,8 @@ def _setup_unified_start_route(
             result = StartBotResult(
                 sessionId=session_id,
             )
+            if upload_url := _advertised_file_upload_url(session_id):
+                result["fileUploadUrl"] = upload_url
             # Servers configured on the runner are handed to the client too, so
             # both peers negotiate against the same STUN and TURN servers. They
             # take precedence over the Google STUN fallback.
@@ -862,6 +888,8 @@ def _setup_unified_start_route(
                         dailyToken=token,
                         sessionId=session_id,
                     )
+                    if upload_url := _advertised_file_upload_url(session_id):
+                        result["fileUploadUrl"] = upload_url
             else:
                 runner_args = RunnerArguments(body=body, session_id=session_id)
 
@@ -898,11 +926,14 @@ def _setup_unified_start_route(
                 _run_bot_session(bot_module.bot(runner_args), session_id, active_sessions)
             )
 
-            return StartBotResult(
+            result = StartBotResult(
                 url=livekit_url,
                 token=user_token,
                 sessionId=session_id,
             )
+            if upload_url := _advertised_file_upload_url(session_id):
+                result["fileUploadUrl"] = upload_url
+            return result
 
         elif transport in TELEPHONY_TRANSPORTS:
             # Telephony: the bot starts when the provider connects to /ws.
@@ -918,11 +949,17 @@ def _setup_unified_start_route(
             scheme = "wss" if args.host != "localhost" else "ws"
             session_id = str(uuid.uuid4())
             token = _generate_ws_token() if args.ws_auth == "token" else None
-            return StartBotResult(
+            result = StartBotResult(
                 wsUrl=f"{scheme}://{args.host}:{args.port}/ws-client",
                 sessionId=session_id,
                 token=token,
             )
+            # The flat route: this session_id is never registered — the bot
+            # mints its own at connect time — so the session-scoped uploads
+            # route would reject it.
+            if upload_url := _advertised_file_upload_url(None):
+                result["fileUploadUrl"] = upload_url
+            return result
 
         elif transport == "moq":
             # MoQ: spawn the bot and wait for it to finish MoQ bring-up
@@ -972,10 +1009,13 @@ def _setup_unified_start_route(
                     detail="Bot did not become ready within 15s",
                 )
 
-            return StartBotResult(
+            result = StartBotResult(
                 sessionId=session_id,
                 moq=_build_moq_client_config(args, namespace, runner_args.cert_fingerprints),
             )
+            if upload_url := _advertised_file_upload_url(session_id):
+                result["fileUploadUrl"] = upload_url
+            return result
 
         else:
             raise HTTPException(

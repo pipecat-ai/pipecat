@@ -1187,5 +1187,47 @@ class TestStartIceConfig(unittest.TestCase):
         self.assertEqual(result["iceConfig"], {"iceServers": configured})
 
 
+class TestStartFileUploadUrl(unittest.TestCase):
+    """Tests for the fileUploadUrl the /start response advertises so clients
+    never have to reconstruct the uploads route themselves.
+    """
+
+    def _post_start(self, body: dict, storage) -> dict:
+        app = FastAPI()
+        args = argparse.Namespace(
+            transport=None,
+            ice_servers=[],
+            ws_auth="none",
+            host="localhost",
+            port=7860,
+        )
+        _setup_unified_start_route(app, args, {})
+        with (
+            patch("pipecat.runner.run._transport_routes_enabled", return_value=True),
+            patch("pipecat.runner.run.RUNNER_FILE_STORAGE", storage),
+        ):
+            response = TestClient(app).post("/start", json=body)
+        self.assertEqual(response.status_code, 200)
+        return response.json()
+
+    def test_webrtc_advertises_the_session_scoped_route(self):
+        result = self._post_start({"transport": "webrtc"}, MagicMock())
+        self.assertEqual(result["fileUploadUrl"], f"/sessions/{result['sessionId']}/files")
+
+    def test_webrtc_omits_the_url_when_uploads_are_disabled(self):
+        result = self._post_start({"transport": "webrtc"}, None)
+        self.assertNotIn("fileUploadUrl", result)
+
+    def test_websocket_advertises_the_flat_route(self):
+        # The websocket /start sessionId is never registered (the bot mints
+        # its own at connect time), so the session-scoped route would 404.
+        result = self._post_start({"transport": "websocket"}, MagicMock())
+        self.assertEqual(result["fileUploadUrl"], "/files")
+
+    def test_telephony_advertises_nothing(self):
+        result = self._post_start({"transport": "twilio"}, MagicMock())
+        self.assertNotIn("fileUploadUrl", result)
+
+
 if __name__ == "__main__":
     unittest.main()
