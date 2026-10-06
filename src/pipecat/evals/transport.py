@@ -21,18 +21,15 @@ has no camera under eval. The user's audio arrives as a continuous stream,
 so nothing else is special on the way in.
 """
 
-import asyncio
-import io
 from urllib.parse import parse_qs, urlsplit
 
 from loguru import logger
-from PIL import Image
 
+from pipecat.evals.serializer import EvalSerializer
 from pipecat.frames.frames import (
     Frame,
     LLMConfigureOutputFrame,
     OutputImageRawFrame,
-    UserImageRawFrame,
     UserImageRequestFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
@@ -86,31 +83,14 @@ class EvalInputTransport(SingleClientWebsocketServerInputTransport):
             await self._serve_user_image(frame)
 
     async def _serve_user_image(self, request: UserImageRequestFrame) -> None:
-        serializer = getattr(self._params, "serializer", None)
+        serializer = self._params.serializer
         image = None
-        if serializer is not None and hasattr(serializer, "get_user_image"):
-            image = serializer.get_user_image()
+        if isinstance(serializer, EvalSerializer):
+            image = await serializer.user_image_frame(request)
         if image is None:
             logger.warning(f"{self}: UserImageRequestFrame but no eval image registered")
             return
-        data, _fmt = image
-        # The harness sends the image encoded over the wire, but a real camera
-        # transport pushes raw frames -- so decode it to raw RGB here and serve a
-        # genuine ``UserImageRawFrame``. The LLM context re-encodes raw frames to
-        # JPEG anyway, and consumers that decode directly (e.g. a local vision
-        # model doing ``Image.frombytes``) need the raw pixels and real size.
-        decoded = await asyncio.to_thread(lambda: Image.open(io.BytesIO(data)).convert("RGB"))
-        await self.push_frame(
-            UserImageRawFrame(
-                image=decoded.tobytes(),
-                size=decoded.size,
-                format="RGB",
-                user_id=request.user_id,
-                text=request.text,
-                append_to_context=request.append_to_context,
-                request=request,
-            )
-        )
+        await self.push_frame(image)
 
 
 class EvalOutputTransport(SingleClientWebsocketServerOutputTransport):

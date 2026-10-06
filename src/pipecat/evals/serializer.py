@@ -15,11 +15,14 @@ Both speak RTVI. The eval adds messages of its own on top: ``eval-configure``,
 them.
 """
 
+import asyncio
 import base64
+import io
 import json
 from typing import Any
 
 from loguru import logger
+from PIL import Image
 
 import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.frames.frames import (
@@ -32,6 +35,8 @@ from pipecat.frames.frames import (
     OutputImageRawFrame,
     OutputTransportMessageFrame,
     OutputTransportMessageUrgentFrame,
+    UserImageRawFrame,
+    UserImageRequestFrame,
 )
 from pipecat.processors.frameworks.rtvi.frames import RTVIConfigureObserverFrame
 from pipecat.processors.frameworks.rtvi.observer import RTVIFunctionCallReportLevel
@@ -121,6 +126,28 @@ class EvalSerializer(FrameSerializer):
     def get_user_image(self) -> tuple[bytes, str] | None:
         """The image registered for the current turn as ``(bytes, mime)``, or None."""
         return self._user_image
+
+    async def user_image_frame(self, request: UserImageRequestFrame) -> UserImageRawFrame | None:
+        """The registered image as the frame answering ``request``, or ``None`` if none is registered.
+
+        The harness sends the image encoded, but a real camera transport pushes
+        raw frames, so it is decoded to raw RGB. The LLM context re-encodes raw
+        frames to JPEG anyway, and consumers that decode directly (e.g. a local
+        vision model doing ``Image.frombytes``) need the raw pixels and real size.
+        """
+        if self._user_image is None:
+            return None
+        data, _fmt = self._user_image
+        decoded = await asyncio.to_thread(lambda: Image.open(io.BytesIO(data)).convert("RGB"))
+        return UserImageRawFrame(
+            image=decoded.tobytes(),
+            size=decoded.size,
+            format="RGB",
+            user_id=request.user_id,
+            text=request.text,
+            append_to_context=request.append_to_context,
+            request=request,
+        )
 
     async def serialize(self, frame: Frame) -> str | bytes | None:
         """Serialize an outbound frame for the harness; only RTVI server messages go out.

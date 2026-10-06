@@ -7,8 +7,11 @@
 """Tests for :class:`pipecat.evals.serializer.EvalSerializer`."""
 
 import base64
+import io
 import json
 import unittest
+
+from PIL import Image
 
 import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.evals.serializer import (
@@ -29,6 +32,8 @@ from pipecat.frames.frames import (
     OutputImageRawFrame,
     OutputTransportMessageUrgentFrame,
     TranscriptionFrame,
+    UserImageRawFrame,
+    UserImageRequestFrame,
 )
 from pipecat.processors.frameworks.rtvi.frames import RTVIConfigureObserverFrame
 from pipecat.processors.frameworks.rtvi.observer import RTVIFunctionCallReportLevel
@@ -142,6 +147,36 @@ class TestEvalSerializerDeserialize(unittest.IsolatedAsyncioTestCase):
         # eval-image is consumed (not forwarded) and kept for a later image request.
         self.assertIsNone(await self.serializer.deserialize(json.dumps(msg)))
         self.assertEqual(self.serializer.get_user_image(), (img, "image/png"))
+
+    async def test_user_image_frame_decodes_the_registered_image(self):
+        buffer = io.BytesIO()
+        Image.new("RGB", (4, 3), (255, 0, 0)).save(buffer, format="PNG")
+        msg = {
+            "label": RTVI.MESSAGE_LABEL,
+            "type": "client-message",
+            "id": "7",
+            "data": {
+                "t": EVAL_IMAGE_MESSAGE_TYPE,
+                "d": {
+                    "image": base64.b64encode(buffer.getvalue()).decode("ascii"),
+                    "format": "image/png",
+                },
+            },
+        }
+        await self.serializer.deserialize(json.dumps(msg))
+        request = UserImageRequestFrame(user_id="user", text="what is this?")
+
+        frame = await self.serializer.user_image_frame(request)
+
+        self.assertIsInstance(frame, UserImageRawFrame)
+        self.assertEqual(frame.size, (4, 3))
+        self.assertEqual(frame.format, "RGB")
+        self.assertEqual(frame.image[:3], bytes([255, 0, 0]))
+        self.assertIs(frame.request, request)
+
+    async def test_user_image_frame_without_an_image_is_none(self):
+        request = UserImageRequestFrame(user_id="user")
+        self.assertIsNone(await self.serializer.user_image_frame(request))
 
     async def test_dtmf_message_forwarded_to_processor(self):
         # DTMF is now a first-class RTVI message handled by the RTVIProcessor, so
