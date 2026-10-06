@@ -94,6 +94,19 @@ def _get_turn_context(self):
     return tracing_ctx.get_turn_context() if tracing_ctx else None
 
 
+def _get_additional_span_attributes(self) -> dict | None:
+    """Get the pipeline's additional span attributes if available.
+
+    Args:
+        self: The service instance.
+
+    Returns:
+        The attributes to add to the service span, or None if unavailable.
+    """
+    tracing_ctx = getattr(self, "_tracing_context", None)
+    return tracing_ctx.additional_span_attributes if tracing_ctx else None
+
+
 def _get_parent_service_context(self):
     """Get the parent service span context (internal use only).
 
@@ -366,7 +379,11 @@ def traced_tts(func: Callable | None = None, *, name: str | None = None) -> Call
                     try:
                         parent = _get_turn_context(service) or _get_parent_service_context(service)
                         tracer = trace.get_tracer("pipecat")
-                        span = tracer.start_span("tts", context=parent)
+                        span = tracer.start_span(
+                            "tts",
+                            context=parent,
+                            attributes=_get_additional_span_attributes(service),
+                        )
                         service._tts_spans[context_id] = {"span": span, "ttfb_recorded": False}
 
                         settings = getattr(service, "_settings", None)
@@ -637,7 +654,12 @@ def traced_stt(func: Callable | None = None, *, name: str | None = None) -> Call
                     if state["segment_start_time"] is not None
                     else None
                 )
-                span = tracer.start_span("stt", context=parent, start_time=start_time_ns)
+                span = tracer.start_span(
+                    "stt",
+                    context=parent,
+                    start_time=start_time_ns,
+                    attributes=_get_additional_span_attributes(service),
+                )
                 try:
                     settings = getattr(service, "_settings", None)
                     add_stt_span_attributes(
@@ -939,7 +961,9 @@ def traced_llm(func: Callable | None = None, *, name: str | None = None) -> Call
                 # Create a new span as child of the turn span or service span
                 tracer = trace.get_tracer("pipecat")
                 with tracer.start_as_current_span(
-                    span_name, context=parent_context
+                    span_name,
+                    context=parent_context,
+                    attributes=_get_additional_span_attributes(self),
                 ) as current_span:
                     try:
                         # Store original method and output aggregator
@@ -1156,7 +1180,9 @@ def traced_gemini_live(operation: str) -> Callable:
                 # Create a new span as child of the turn span or service span
                 tracer = trace.get_tracer("pipecat")
                 with tracer.start_as_current_span(
-                    span_name, context=parent_context
+                    span_name,
+                    context=parent_context,
+                    attributes=_get_additional_span_attributes(self),
                 ) as current_span:
                     try:
                         # Base service attributes
@@ -1445,7 +1471,9 @@ def traced_openai_realtime(operation: str) -> Callable:
                 # Create a new span as child of the turn span or service span
                 tracer = trace.get_tracer("pipecat")
                 with tracer.start_as_current_span(
-                    span_name, context=parent_context
+                    span_name,
+                    context=parent_context,
+                    attributes=_get_additional_span_attributes(self),
                 ) as current_span:
                     try:
                         # Base service attributes

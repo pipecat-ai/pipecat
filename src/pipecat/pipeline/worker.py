@@ -319,8 +319,8 @@ class PipelineWorker(BaseWorker):
             pipeline: The pipeline to execute.
             active: Whether the worker starts active. Forwarded to
                 :class:`BaseWorker`.
-            additional_span_attributes: Optional dictionary of attributes to propagate as
-                OpenTelemetry conversation span attributes.
+            additional_span_attributes: Optional dictionary of attributes added to every
+                OpenTelemetry span in the pipeline (conversation, turn and service spans).
             app_resources: Optional application-defined bag of anything your
                 application code may want to share across this session (DB
                 handles, HTTP clients, etc.), passed by reference. Pipecat
@@ -469,7 +469,9 @@ class PipelineWorker(BaseWorker):
             observers.append(self._turn_tracking_observer)
         if self._enable_tracing and self._turn_tracking_observer:
             # Create pipeline-scoped tracing context
-            self._tracing_context = TracingContext()
+            self._tracing_context = TracingContext(
+                additional_span_attributes=self._additional_span_attributes
+            )
             # Create latency observer for tracing
             self._user_bot_latency_observer = UserBotLatencyObserver()
             observers.append(self._user_bot_latency_observer)
