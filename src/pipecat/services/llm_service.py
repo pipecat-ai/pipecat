@@ -79,7 +79,7 @@ from pipecat.utils.context.llm_context_summarization import (
 )
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.errors import ErrorCategory
-from pipecat.utils.log_config import LLMContextLogMode, get_llm_context_log_mode
+from pipecat.utils.log_config import _get_llm_context_log_mode, _LLMContextLogMode
 from pipecat.utils.types import assert_given
 
 if TYPE_CHECKING:
@@ -345,6 +345,9 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             settings: The runtime-updatable settings for the LLM service.
             **kwargs: Additional arguments passed to the parent AIService.
 
+        Raises:
+            InvalidEnvVarValueError: If ``PIPECAT_LOG_LLM_CONTEXT`` is set to an
+                unknown mode.
         """
         super().__init__(
             settings=settings
@@ -353,6 +356,9 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             or LLMSettings(),
             **kwargs,
         )
+        # Validated here so a bad value stops the bot at startup; otherwise it
+        # would surface on the first inference, and only with DEBUG enabled.
+        _get_llm_context_log_mode()
         self._run_in_parallel = run_in_parallel
         self._group_parallel_tools = group_parallel_tools
         self._function_call_timeout_secs = function_call_timeout_secs
@@ -476,7 +482,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         # the service that called the _log_* method, so loguru filters by
         # module still apply.
         def render() -> str:
-            if get_llm_context_log_mode() == LLMContextLogMode.OFF:
+            if _get_llm_context_log_mode() == _LLMContextLogMode.OFF:
                 return f"{self}: {event}"
             messages = self.get_llm_adapter().get_messages_for_logging(context)
             return f"{self}: {event} {messages}"
