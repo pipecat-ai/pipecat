@@ -43,6 +43,10 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
     Supports configurable models, VAD events, and various audio processing options
     including advanced turn detection and EagerEndOfTurn events for improved conversational AI performance.
 
+    The transcript of a turn in progress is pushed as an ``InterimTranscriptionFrame``
+    on every Flux update, and the final transcript as a ``TranscriptionFrame`` at the
+    end of the turn.
+
     For multilingual use, set ``model="flux-general-multi"`` and pass
     ``language_hints`` to bias detection toward specific languages. Hints can
     be updated mid-stream via ``STTUpdateSettingsFrame`` (e.g. to implement a
