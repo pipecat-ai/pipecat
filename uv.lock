@@ -5973,7 +5973,7 @@ requires-dist = [
     { name = "pyaudio", marker = "extra == 'local'", specifier = "~=0.2.14" },
     { name = "pydantic", specifier = ">=2.10.6,<3" },
     { name = "pydantic", marker = "python_full_version >= '3.14'", specifier = ">=2.13" },
-    { name = "pygobject", marker = "extra == 'gstreamer'", specifier = ">=3.58.0,<4" },
+    { name = "pygobject", marker = "extra == 'gstreamer'", specifier = ">=3.52.0,<4" },
     { name = "pyjwt", marker = "extra == 'livekit'", specifier = ">=2.12.0,<3" },
     { name = "pyrnnoise", marker = "extra == 'rnnoise'", specifier = "~=0.4.5" },
     { name = "python-dotenv", specifier = ">=1.0.0,<2.0.0" },
