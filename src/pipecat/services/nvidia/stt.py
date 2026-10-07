@@ -722,7 +722,9 @@ class NvidiaSTTService(STTService):
                     language,
                     result=result,
                 )
-            frame.includes_inter_frame_spaces = True
+            # Split runs are slices of one provider transcript, so their spacing is
+            # already in the text. Separate results still need joining spaces.
+            frame.includes_inter_frame_spaces = len(transcripts) > 1
             await self.push_frame(frame)
 
     async def _handle_response(self, response, *, speaker_diarization: bool = False):

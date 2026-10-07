@@ -300,6 +300,23 @@ async def test_mixed_speakers_emit_contiguous_run_frames(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_separate_results_keep_joining_spaces(monkeypatch):
+    """Only split runs carry their own spacing; separate results are still spaced."""
+    service = _make_service(settings=NvidiaSTTService.Settings(speaker_diarization=True))
+    split = _streaming_response(
+        "Hi there hello",
+        words=[_word("Hi", 0), _word("there", 0), _word("hello", 1)],
+    )
+    single = _streaming_response("Again", words=[_word("Again", 1)])
+
+    frames = await _capture_response_frames(monkeypatch, service, split)
+    frames += await _capture_response_frames(monkeypatch, service, single)
+
+    assert [frame.includes_inter_frame_spaces for frame in frames] == [True, True, False]
+    assert _aggregate(frames) == "Hi there hello Again"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("transcript", "words", "expected"),
     [
