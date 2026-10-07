@@ -2544,6 +2544,44 @@ class MixerEnableFrame(MixerControlFrame):
 
 
 @dataclass
+class VolumeFrame(ControlFrame):
+    """Frame that sets the volume of the output transport's audio.
+
+    The volume holds until the next ``VolumeFrame``, and starts at the
+    transport's ``audio_out_volume``. Audio plays at the volume times the gain
+    set by :class:`VolumeGainFrame`. The frame takes effect in order with the
+    audio before it, and an interruption doesn't drop it.
+
+    Parameters:
+        volume: The volume, as a multiplier on the audio's samples: 1.0 leaves
+            it unchanged, 0.5 halves it.
+    """
+
+    volume: float
+    interruptible: bool = field(default=False, init=False)
+
+
+@dataclass
+class VolumeGainFrame(ControlFrame):
+    """Frame that sets a gain on the output transport's volume.
+
+    A gain adjusts the volume for some audio and is reset afterwards, for
+    example ``VolumeGainFrame(0.5)`` before a ``TTSSpeakFrame`` and
+    ``VolumeGainFrame(1.0)`` after it, which plays that utterance at half the
+    volume without changing the volume set by :class:`VolumeFrame`. The frame
+    takes effect in order with the audio before it, and an interruption
+    doesn't drop it.
+
+    Parameters:
+        gain: The gain, as a multiplier on the volume: 1.0 leaves it
+            unchanged, 0.5 halves it.
+    """
+
+    gain: float
+    interruptible: bool = field(default=False, init=False)
+
+
+@dataclass
 class ServiceSwitcherFrame(ControlFrame):
     """A base class for frames that affect ServiceSwitcher behavior."""
 

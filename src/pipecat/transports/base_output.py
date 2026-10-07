@@ -23,7 +23,7 @@ from PIL import Image
 
 from pipecat.audio.dtmf.utils import load_dtmf_audio
 from pipecat.audio.mixers.base_audio_mixer import BaseAudioMixer
-from pipecat.audio.utils import create_stream_resampler, is_silence
+from pipecat.audio.utils import create_stream_resampler, is_silence, scale_audio
 from pipecat.frames.frames import (
     AssistantImageRawFrame,
     BotSpeakingFrame,
@@ -48,6 +48,8 @@ from pipecat.frames.frames import (
     SystemFrame,
     TTSAudioRawFrame,
     TTSStoppedFrame,
+    VolumeFrame,
+    VolumeGainFrame,
 )
 from pipecat.pipeline.capabilities import BotCapabilities
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
@@ -483,6 +485,11 @@ class BaseOutputTransport(FrameProcessor):
             # single mixer.
             self._filter = None if destination else params.audio_out_filter
 
+            # The output volume (VolumeFrame) and the gain on it (VolumeGainFrame),
+            # updated in order with the audio.
+            self._volume = params.audio_out_volume
+            self._volume_gain = 1.0
+
             # These are the images that we should send at our desired framerate.
             self._video_images = None
 
@@ -908,6 +915,10 @@ class BaseOutputTransport(FrameProcessor):
                     await self._bot_stopped_speaking()
             elif isinstance(frame, FilterControlFrame) and self._filter:
                 await self._filter.process_frame(frame)
+            elif isinstance(frame, VolumeFrame):
+                self._volume = frame.volume
+            elif isinstance(frame, VolumeGainFrame):
+                self._volume_gain = frame.gain
             else:
                 await self._transport.write_transport_frame(frame)
 
@@ -919,6 +930,12 @@ class BaseOutputTransport(FrameProcessor):
             """
             if self._filter and isinstance(frame, OutputAudioRawFrame):
                 frame.audio = await self._filter.filter(frame.audio)
+
+        def _apply_volume(self, frame: Frame):
+            """Scale an audio frame taken from the audio queue by the volume and its gain."""
+            volume = self._volume * self._volume_gain
+            if volume != 1.0 and isinstance(frame, OutputAudioRawFrame):
+                frame.audio = scale_audio(frame.audio, volume)
 
         def _next_frame(self) -> AsyncGenerator[Frame, None]:
             """Generate the next frame for audio processing.
@@ -934,6 +951,7 @@ class BaseOutputTransport(FrameProcessor):
                             self._audio_queue.get(), timeout=vad_stop_secs
                         )
                         await self._filter_audio(frame)
+                        self._apply_volume(frame)
                         yield frame
                         self._audio_queue.task_done()
                     except TimeoutError:
@@ -950,6 +968,7 @@ class BaseOutputTransport(FrameProcessor):
                     try:
                         frame = self._audio_queue.get_nowait()
                         await self._filter_audio(frame)
+                        self._apply_volume(frame)
                         if isinstance(frame, OutputAudioRawFrame):
                             frame.audio = await mixer.mix(frame.audio)
                             last_frame_time = time.time()
