@@ -579,7 +579,7 @@ class BackendConnector:
         An output becomes a message appended to the frontend's conversation,
         which runs the frontend when the output asks to be spoken. A function
         call phase is reported as the
-        :class:`~pipecat.frames.frames.ExternalFunctionCallFrame` for it, which
+        ``ExternalFunctionCall*Frame`` for it, which
         the RTVI observer turns into function-call events. An error becomes a
         spoken message, so the user hears the work stopped. The appended
         messages are uninterruptible: one queued while the bot speaks waits
