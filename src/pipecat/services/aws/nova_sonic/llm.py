@@ -291,7 +291,7 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
         access_key_id: str,
         session_token: str | None = None,
         region: str,
-        model: str = "amazon.nova-2-sonic-v1:0",
+        model: str = "amazon.nova-2-5-sonic",
         voice_id: str = "matthew",
         params: Params | None = None,
         audio_config: AudioConfig | None = None,
@@ -309,7 +309,7 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
             session_token: AWS session token for authentication.
             region: AWS region where the service is hosted. Supported regions:
                 "us-east-1", "us-west-2", "eu-north-1", "ap-northeast-1".
-            model: Model identifier. Defaults to "amazon.nova-2-sonic-v1:0".
+            model: Model identifier. Defaults to "amazon.nova-2-5-sonic".
 
                 .. deprecated:: 0.0.105
                     Use ``settings=AWSNovaSonicLLMService.Settings(model=...)`` instead.
@@ -353,7 +353,7 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
         """
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
-            model="amazon.nova-2-sonic-v1:0",
+            model="amazon.nova-2-5-sonic",
             system_instruction=None,
             voice="matthew",
             temperature=0.7,
@@ -369,7 +369,7 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
         )
 
         # 2. Apply direct init arg overrides (deprecated)
-        if model != "amazon.nova-2-sonic-v1:0":
+        if model != "amazon.nova-2-5-sonic":
             self._warn_init_param_moved_to_settings("model", "model")
             default_settings.model = model
         if voice_id != "matthew":
@@ -433,7 +433,7 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
         ):
             logger.warning(
                 f"endpointing_sensitivity is not supported for model '{self._settings.model}' and will be ignored. "
-                "This parameter is only supported starting with Nova 2 Sonic (amazon.nova-2-sonic-v1:0)."
+                "This parameter is supported starting with Nova 2 Sonic (amazon.nova-2-sonic-v1:0) and later models such as Nova 2.5 Sonic."
             )
             self._settings.endpointing_sensitivity = None
 

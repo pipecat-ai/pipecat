@@ -96,8 +96,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm = AWSNovaSonicLLMService(
         secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"],
         access_key_id=os.environ["AWS_ACCESS_KEY_ID"],
-        # as of 2026-09-28, the supported regions are us-east-1, us-west-2, eu-north-1
-        # and ap-northeast-1
+        # as of 2026-10-08, the supported regions for the default model (Nova 2.5
+        # Sonic) are us-east-1, us-west-2, eu-north-1, and ap-northeast-1
         region=os.environ["AWS_REGION"],
         session_token=os.getenv("AWS_SESSION_TOKEN"),
         settings=AWSNovaSonicLLMService.Settings(
