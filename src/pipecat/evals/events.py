@@ -73,6 +73,7 @@ from pipecat.frames.frames import (
 # its reply to what comes next.
 _INTERRUPTION_EVENTS = ("user_started_speaking", "bot_interrupted")
 _FUNCTION_CALL_EVENTS = ("function_call", "function_call_stopped")
+_RESPONSE_EVENTS = ("response", "llm_response")
 
 
 class EvalEventStream:
@@ -100,6 +101,10 @@ class EvalEventStream:
         # Function-call events popped while waiting for another event, kept so
         # a later call expectation in the same turn can still claim them.
         self.unclaimed_function_calls: list[dict] = []
+        # Response events popped the same way, served first by the next wait for
+        # their type: a model that writes its reply before it calls a tool has
+        # the reply arrive while a turn is waiting on the call.
+        self.unclaimed_responses: list[dict] = []
         # Every event in arrival order, for the result's diagnostics.
         self.events_seen: list[dict] = []
         # When each event type last arrived, for send_after anchoring.
@@ -272,7 +277,9 @@ class EvalEventStream:
         list every event the bot emits; they stay in :attr:`events_seen`. A
         function-call event among them is kept in
         :attr:`unclaimed_function_calls`, so a call expectation later in the
-        turn can still claim it.
+        turn can still claim it, and a response event in
+        :attr:`unclaimed_responses`, which the next wait for its type takes
+        before the queue.
 
         Args:
             event_type: The event type to wait for.
@@ -284,12 +291,29 @@ class EvalEventStream:
         Raises:
             TimeoutError: If none arrives before ``deadline``.
         """
+        if event_type in _RESPONSE_EVENTS:
+            for i, kept in enumerate(self.unclaimed_responses):
+                if kept.get("type") == event_type:
+                    return self.unclaimed_responses.pop(i)
         while True:
             event = await self.next_any(deadline)
             if event.get("type") == event_type:
                 return event
-            if event.get("type") in _FUNCTION_CALL_EVENTS:
-                self.unclaimed_function_calls.append(event)
+            self.keep_unclaimed(event)
+
+    def keep_unclaimed(self, event: dict) -> None:
+        """Keep an event popped while waiting for another, if a later expectation may claim it.
+
+        A function-call event goes to :attr:`unclaimed_function_calls`, a
+        response event to :attr:`unclaimed_responses`; anything else is let go.
+
+        Args:
+            event: The event popped.
+        """
+        if event.get("type") in _FUNCTION_CALL_EVENTS:
+            self.unclaimed_function_calls.append(event)
+        elif event.get("type") in _RESPONSE_EVENTS:
+            self.unclaimed_responses.append(event)
 
     def drop_pending_bot_output(self, why: str) -> None:
         """Drop the bot's queued output, so a later turn cannot match it.
@@ -303,6 +327,7 @@ class EvalEventStream:
             why: What prompted the drop, for the trace.
         """
         self._text_buffer = []
+        self.unclaimed_responses.clear()
         preserved: list[dict] = []
         dropped = 0
         while not self._queue.empty():

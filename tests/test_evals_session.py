@@ -718,6 +718,7 @@ class TestMatchAbsent(unittest.IsolatedAsyncioTestCase):
         import time
 
         s = _matcher()
+        await s._stream.append({"type": "llm_started"})
         s._stream._queue.put_nowait({"type": "llm_response", "text": "I repeat myself"})
         expectation = EvalExpectation(event="llm_response", absent=True)
         failure = await s.match(expectation, time.monotonic(), 100, 3, 2)
@@ -737,6 +738,21 @@ class TestMatchAbsent(unittest.IsolatedAsyncioTestCase):
         s._last_match_at = time.monotonic()
         s._stream._queue.put_nowait({"type": "response", "text": "second sentence"})
         expectation = EvalExpectation(event="response", absent=True)
+        failure = await s.match(expectation, time.monotonic(), 100, 0, 1)
+        self.assertIsNone(failure)
+
+    async def test_absent_ignores_a_text_reply_whose_run_began_before_the_match(self):
+        import time
+
+        s = _matcher()
+        # In text mode a reply is an llm_response and a run an llm_started: the
+        # frontend's run on a delegate result begins before the ack it also
+        # wrote is judged, so its reply is not a new one either.
+        await s._stream.append({"type": "llm_started"})
+        s.last_match_text = "Got it, handing that over."
+        s._last_match_at = time.monotonic()
+        s._stream._queue.put_nowait({"type": "llm_response", "text": "I've passed that along."})
+        expectation = EvalExpectation(event="llm_response", absent=True)
         failure = await s.match(expectation, time.monotonic(), 100, 0, 1)
         self.assertIsNone(failure)
 
@@ -2732,6 +2748,65 @@ class TestExternalFunctionCallEvents(unittest.TestCase):
             },
         )
         self.assertEqual(done["args"], {"tool_call_id": "toolu_2", "cancelled": False})
+
+
+class TestUnclaimedResponses(unittest.IsolatedAsyncioTestCase):
+    """A response popped while waiting for another event is served by the next wait for its type."""
+
+    async def test_a_reply_seen_while_waiting_for_a_call_is_served_next(self):
+        """A model may write its reply before it calls the tool the turn waits on."""
+        s = _stream()
+        await s.append({"type": "llm_response", "text": "Here's one: why did the duck cross?"})
+        await s.append({"type": "function_call", "name": "delegate", "args": {}})
+        await s.append({"type": "llm_response", "text": "I'll let you know."})
+
+        call = await s.next_event("function_call", time.monotonic() + 1)
+        reply = await s.next_event("llm_response", time.monotonic() + 1)
+        later = await s.next_event("llm_response", time.monotonic() + 1)
+
+        self.assertEqual(call["name"], "delegate")
+        self.assertEqual(reply["text"], "Here's one: why did the duck cross?")
+        self.assertEqual(later["text"], "I'll let you know.")
+        self.assertEqual(s.unclaimed_responses, [])
+
+    async def test_dropped_bot_output_takes_the_kept_replies_with_it(self):
+        s = _stream()
+        await s.append({"type": "llm_response", "text": "Stale."})
+        await s.append({"type": "function_call", "name": "delegate", "args": {}})
+        await s.next_event("function_call", time.monotonic() + 1)
+        self.assertEqual(len(s.unclaimed_responses), 1)
+
+        s.drop_pending_bot_output("new turn")
+
+        self.assertEqual(s.unclaimed_responses, [])
+
+
+class TestReplyBeforeTheCallItWaitsOn(unittest.IsolatedAsyncioTestCase):
+    """A reply written before the call a turn expects first is still the turn's reply."""
+
+    async def test_the_reply_popped_while_waiting_on_the_call_is_matched_after_it(self):
+        import time
+
+        m = _matcher()
+        m._stream._queue.put_nowait({"type": "llm_response", "text": "Why did the duck cross?"})
+        m._stream._queue.put_nowait({"type": "function_call", "name": "delegate", "args": {}})
+        m._stream._queue.put_nowait({"type": "llm_response", "text": "I'll let you know."})
+        deadline = time.monotonic() + 1
+
+        call = await m.match(
+            EvalExpectation(event="function_call", calls=[EvalFunctionCall(name="delegate")]),
+            deadline,
+            1000,
+            0,
+            0,
+        )
+        reply = await m.match(
+            EvalExpectation(event="llm_response", text_contains="duck"), deadline, 1000, 0, 1
+        )
+
+        self.assertIsNone(call)
+        self.assertIsNone(reply)
+        self.assertIn("duck", m.last_match_text)
 
 
 class TestUnclaimedFunctionCalls(unittest.IsolatedAsyncioTestCase):

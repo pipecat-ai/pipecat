@@ -18,6 +18,9 @@ import time
 from loguru import logger
 
 from pipecat.evals.events import EvalEventStream
+
+#: The event a reply arrives as: ``response`` in audio mode, ``llm_response`` in text mode.
+_REPLY_EVENTS = ("response", "llm_response")
 from pipecat.evals.judge import EvalJudge
 from pipecat.evals.results import EvalAssertionFailure, EvalTrace
 from pipecat.evals.script import FUNCTION_CALL_EVENTS, EvalExpectation
@@ -61,9 +64,10 @@ class ExpectationMatcher:
         self._last_match_at: float = 0.0
 
     def reset_turn(self) -> None:
-        """Forget the previous turn's unclaimed function calls."""
+        """Forget the previous turn's unclaimed function calls and responses."""
         self._pending_function_calls = []
         self._stream.unclaimed_function_calls.clear()
+        self._stream.unclaimed_responses.clear()
 
     async def match(
         self,
@@ -258,7 +262,7 @@ class ExpectationMatcher:
                 # The quiet window held: absence confirmed.
                 self.last_match_text = f"no {expectation.event!r} for {budget_ms}ms"
                 return None
-            if expectation.event == "response" and not self._reply_began_after_last_match():
+            if expectation.event in _REPLY_EVENTS and not self._reply_began_after_last_match():
                 self._trace.log(
                     f"absent: the matched reply goes on, not a new one: "
                     f"{self._match_summary(event)!r}"
@@ -410,6 +414,9 @@ class ExpectationMatcher:
         while True:
             event = await self._stream.next_any(deadline)
             if event.get("type") not in FUNCTION_CALL_EVENTS:
+                # A reply popped here is the turn's too: a model may write it
+                # before it makes the call this expectation waits on.
+                self._stream.keep_unclaimed(event)
                 continue
             if matches(event):
                 return event
