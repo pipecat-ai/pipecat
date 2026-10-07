@@ -53,7 +53,9 @@ class SarvamLLMService(OpenAILLMService):
     _VISION_MODELS = frozenset({"gemma4"})
     _REASONING_MODELS = frozenset({"deepseekv4-flash", "gemma4", "glm5.2", "sarvam-105b"})
     _WIKI_GROUNDING_MODELS = frozenset({"gemma4", "sarvam-105b"})
-    _V1_MODELS = frozenset({"sarvam-105b-conversations"})
+    # Sarvam serves its own models on /v1. /v2 hosts the open-weight models and
+    # is a beta that Sarvam enables per API key, so other keys get a 400 there.
+    _V1_MODELS = frozenset({"sarvam-105b", "sarvam-105b-conversations"})
     Settings = SarvamLLMSettings
     _settings: Settings
 
@@ -73,8 +75,9 @@ class SarvamLLMService(OpenAILLMService):
         Args:
             api_key: Sarvam API key used for both OpenAI auth and Sarvam subscription header.
             base_url: Sarvam OpenAI-compatible base URL. When ``None``, resolved
-                from the model: ``/v1`` for ``sarvam-105b-conversations``,
-                ``/v2`` for all other models.
+                from the model: ``/v1`` for ``sarvam-105b`` and
+                ``sarvam-105b-conversations``, ``/v2`` for the open-weight
+                models.
             settings: Runtime-updatable settings.
             default_headers: Additional HTTP headers to include in requests.
             **kwargs: Additional keyword arguments passed to ``OpenAILLMService``.
