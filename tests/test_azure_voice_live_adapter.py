@@ -53,10 +53,11 @@ def test_tools_convert_to_the_voice_live_shape(adapter):
     ]
 
 
-def test_a_single_user_message_is_sent_as_one_item(adapter):
+@pytest.mark.asyncio
+async def test_a_single_user_message_is_sent_as_one_item(adapter):
     context = LLMContext([{"role": "user", "content": "Hello there."}])
 
-    params = adapter.get_llm_invocation_params(context)
+    params = await adapter.get_llm_invocation_params(context)
 
     assert len(params["messages"]) == 1
     item = params["messages"][0]
@@ -66,43 +67,48 @@ def test_a_single_user_message_is_sent_as_one_item(adapter):
     assert item.content[0].text == "Hello there."
 
 
-def test_a_leading_system_message_becomes_the_session_instruction(adapter):
+@pytest.mark.asyncio
+async def test_a_leading_system_message_becomes_the_session_instruction(adapter):
     context = LLMContext(
         [{"role": "system", "content": "Be brief."}, {"role": "user", "content": "Hi."}]
     )
 
-    params = adapter.get_llm_invocation_params(context)
+    params = await adapter.get_llm_invocation_params(context)
 
     assert params["system_instruction"] == "Be brief."
     assert len(params["messages"]) == 1
     assert params["messages"][0].content[0].text == "Hi."
 
 
-def test_an_init_system_instruction_wins_over_the_context(adapter):
+@pytest.mark.asyncio
+async def test_an_init_system_instruction_wins_over_the_context(adapter):
     context = LLMContext([{"role": "system", "content": "From context."}])
 
-    params = adapter.get_llm_invocation_params(context, system_instruction="From init.")
+    params = await adapter.get_llm_invocation_params(context, system_instruction="From init.")
 
     assert params["system_instruction"] == "From init."
 
 
-def test_a_system_only_context_sends_no_messages(adapter):
+@pytest.mark.asyncio
+async def test_a_system_only_context_sends_no_messages(adapter):
     context = LLMContext([{"role": "system", "content": "Be brief."}])
 
-    params = adapter.get_llm_invocation_params(context)
+    params = await adapter.get_llm_invocation_params(context)
 
     assert params["messages"] == []
     assert params["system_instruction"] == "Be brief."
 
 
-def test_an_empty_context_sends_nothing(adapter):
-    params = adapter.get_llm_invocation_params(LLMContext([]))
+@pytest.mark.asyncio
+async def test_an_empty_context_sends_nothing(adapter):
+    params = await adapter.get_llm_invocation_params(LLMContext([]))
 
     assert params["messages"] == []
     assert params["system_instruction"] is None
 
 
-def test_a_history_is_packed_into_one_user_message(adapter):
+@pytest.mark.asyncio
+async def test_a_history_is_packed_into_one_user_message(adapter):
     """The realtime API has no way to load a long history."""
     context = LLMContext(
         [
@@ -112,7 +118,7 @@ def test_a_history_is_packed_into_one_user_message(adapter):
         ]
     )
 
-    params = adapter.get_llm_invocation_params(context)
+    params = await adapter.get_llm_invocation_params(context)
 
     assert len(params["messages"]) == 1
     packed = params["messages"][0]
@@ -124,7 +130,8 @@ def test_a_history_is_packed_into_one_user_message(adapter):
     assert "And of Spain?" in text
 
 
-def test_list_content_is_flattened_to_text(adapter):
+@pytest.mark.asyncio
+async def test_list_content_is_flattened_to_text(adapter):
     context = LLMContext(
         [
             {
@@ -137,7 +144,7 @@ def test_list_content_is_flattened_to_text(adapter):
         ]
     )
 
-    params = adapter.get_llm_invocation_params(context)
+    params = await adapter.get_llm_invocation_params(context)
 
     assert params["messages"][0].content[0].text == "What is the time?"
 
@@ -166,9 +173,10 @@ def test_an_unhandled_message_role_raises(adapter):
         adapter._from_universal_context_message({"role": "tool", "content": "result"})
 
 
-def test_context_tools_reach_the_invocation_params(adapter):
+@pytest.mark.asyncio
+async def test_context_tools_reach_the_invocation_params(adapter):
     context = LLMContext([{"role": "user", "content": "Weather?"}], [WEATHER])
 
-    params = adapter.get_llm_invocation_params(context)
+    params = await adapter.get_llm_invocation_params(context)
 
     assert [t["name"] for t in params["tools"]] == ["get_current_weather"]
