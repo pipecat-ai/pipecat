@@ -211,6 +211,16 @@ class ConnectorContext:
 
 # ---------------------------------------------------------------------------
 # Request strategies: frontend → backend
+#
+# Two ways for a delegate call to become the backend's request, chosen by
+# frontend kind when the app gives none. TranscriptBackendRequestStrategy
+# hands over the conversation since the previous delegation: the default
+# for a text frontend, whose context is current when the tool runs.
+# ExplicitBackendRequestStrategy has the frontend model word the request
+# itself: the default for a speech-to-speech frontend, which responds to
+# audio before the transcript of that audio reaches its context, so the
+# turns that prompted a handoff may not be in the context yet, and a
+# transcript taken then would miss them.
 # ---------------------------------------------------------------------------
 
 
