@@ -139,9 +139,13 @@ class NvidiaSTTSettings(_NvidiaBaseSTTSettings):
 
     Parameters:
         interim_results: Whether to return interim (partial) results.
+        speaker_format: Optional format string for diarized speaker runs. Use
+            ``{speaker}`` for the speaker tag and ``{text}`` for the transcript text.
+            If ``None``, transcript text is not modified.
     """
 
     interim_results: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speaker_format: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 @dataclass
@@ -231,7 +235,8 @@ class NvidiaSTTService(STTService):
 
     Provides real-time transcription capabilities using NVIDIA's Nemotron Speech ASR models
     through streaming recognition. Supports interim results and continuous audio
-    processing for low-latency applications.
+    processing for low-latency applications. When speaker diarization is enabled, each
+    contiguous speaker run is emitted as a separate frame with its speaker tag in ``user_id``.
     """
 
     Settings = NvidiaSTTSettings
@@ -327,6 +332,7 @@ class NvidiaSTTService(STTService):
             word_time_offsets=False,
             speaker_diarization=False,
             diarization_max_speakers=0,
+            speaker_format=None,
         )
 
         # 2. (no deprecated direct args for this service)
@@ -382,6 +388,14 @@ class NvidiaSTTService(STTService):
     def _create_recognition_config(self):
         """Create the NVIDIA Nemotron Speech ASR recognition configuration."""
         s = self._settings
+        speaker_diarization = assert_given(s.speaker_diarization)
+        word_time_offsets = assert_given(s.word_time_offsets)
+        if speaker_diarization and not word_time_offsets:
+            logger.warning(
+                "NVIDIA speaker diarization requires word time offsets; enabling word_time_offsets"
+            )
+            word_time_offsets = True
+
         config = riva.client.StreamingRecognitionConfig(
             config=riva.client.RecognitionConfig(
                 encoding=riva.client.AudioEncoding.LINEAR_PCM,
@@ -393,7 +407,7 @@ class NvidiaSTTService(STTService):
                 verbatim_transcripts=s.verbatim_transcripts,
                 sample_rate_hertz=self.sample_rate,
                 audio_channel_count=self._audio_channel_count,
-                enable_word_time_offsets=s.word_time_offsets,
+                enable_word_time_offsets=word_time_offsets,
             ),
             interim_results=s.interim_results,
         )
@@ -417,7 +431,6 @@ class NvidiaSTTService(STTService):
         if self._custom_configuration:
             riva.client.add_custom_configuration_to_config(config, self._custom_configuration)
 
-        speaker_diarization = assert_given(s.speaker_diarization)
         if speaker_diarization:
             riva.client.add_speaker_diarization_to_config(
                 config, speaker_diarization, assert_given(s.diarization_max_speakers)
@@ -447,14 +460,16 @@ class NvidiaSTTService(STTService):
         if not changed:
             return changed
 
-        if self._config is not None:
+        server_settings_changed = changed.keys() - {"speaker_format"}
+        if self._config is not None and server_settings_changed:
             self._config = self._create_recognition_config()
 
         # streaming_response_generator() receives streaming_config once, when the
         # gRPC stream is opened, so rebuilding the config alone leaves the running
         # stream transcribing with the previous settings. _request_reconnect()
         # defers until the user stops speaking, so this cannot cut into a turn.
-        await self._request_reconnect()
+        if server_settings_changed:
+            await self._request_reconnect()
 
         return changed
 
@@ -565,20 +580,27 @@ class NvidiaSTTService(STTService):
         logger.warning(f"{self} stream dropped: {reason}")
         await self._request_reconnect()
 
-    def _response_handler(self, iterator: AudioChunkIterator):
+    def _response_handler(self, iterator: AudioChunkIterator, config):
         drop_reason = None
         try:
             asr_service = self._asr_service
             assert asr_service is not None, "ASR service not initialized"
+            speaker_diarization = bool(
+                config and config.config.diarization_config.enable_speaker_diarization
+            )
             responses = asr_service.streaming_response_generator(
                 audio_chunks=iterator,
-                streaming_config=self._config,
+                streaming_config=config,
             )
             for response in responses:
                 if not response.results:
                     continue
                 asyncio.run_coroutine_threadsafe(
-                    self._handle_response(response), self.get_event_loop()
+                    self._handle_response(
+                        response,
+                        speaker_diarization=speaker_diarization,
+                    ),
+                    self.get_event_loop(),
                 )
             drop_reason = "server closed the gRPC stream"
         except grpc.RpcError as e:
@@ -600,8 +622,9 @@ class NvidiaSTTService(STTService):
         if iterator is None:
             return
 
+        config = self._config
         try:
-            await asyncio.to_thread(self._response_handler, iterator)
+            await asyncio.to_thread(self._response_handler, iterator, config)
         except asyncio.CancelledError:
             raise
 
@@ -623,7 +646,90 @@ class NvidiaSTTService(STTService):
         """Handle a transcription result with tracing."""
         pass
 
-    async def _handle_response(self, response):
+    @staticmethod
+    def _speaker_runs(alternative) -> list[tuple[int, str]]:
+        """Split a transcript into contiguous speaker runs without changing its text."""
+        transcript = getattr(alternative, "transcript", "")
+        words = getattr(alternative, "words", None)
+        if not transcript or not words:
+            return []
+
+        tagged_spans: list[tuple[int, int]] = []
+        cursor = 0
+        for word in words:
+            # Riva uses a proto3 scalar here, so zero is a valid speaker tag.
+            speaker_tag = getattr(word, "speaker_tag", None)
+            text = getattr(word, "word", "")
+            if speaker_tag is None or not text:
+                return []
+            start = transcript.find(text, cursor)
+            if start < 0:
+                return []
+            tagged_spans.append((speaker_tag, start))
+            cursor = start + len(text)
+
+        runs: list[tuple[int, str]] = []
+        run_tag = tagged_spans[0][0]
+        run_start = 0
+        for speaker_tag, start in tagged_spans[1:]:
+            if speaker_tag != run_tag:
+                runs.append((run_tag, transcript[run_start:start]))
+                run_tag = speaker_tag
+                run_start = start
+        runs.append((run_tag, transcript[run_start:]))
+        return runs
+
+    def _format_speaker_text(self, speaker_tag: int | None, text: str) -> str:
+        """Apply the configured speaker format to a tagged transcript."""
+        speaker_format = assert_given(self._settings.speaker_format)
+        if speaker_format and speaker_tag is not None:
+            leading = text[: len(text) - len(text.lstrip())]
+            trailing = text[len(text.rstrip()) :]
+            content_end = len(text) - len(trailing) if trailing else len(text)
+            content = text[len(leading) : content_end]
+            return leading + speaker_format.format(speaker=speaker_tag, text=content) + trailing
+        return text
+
+    async def _push_result_frames(
+        self,
+        result,
+        language: Language | None,
+        *,
+        speaker_diarization: bool,
+    ) -> None:
+        """Push one frame per speaker run, or one frame for the full result."""
+        alternative = result.alternatives[0]
+        transcripts = self._speaker_runs(alternative) if speaker_diarization else []
+        if not transcripts:
+            transcripts = [(None, alternative.transcript)]
+
+        timestamp = time_now_iso8601()
+        for index, (speaker_tag, transcript) in enumerate(transcripts):
+            if not transcript:
+                continue
+            text = self._format_speaker_text(speaker_tag, transcript)
+            user_id = str(speaker_tag) if speaker_tag is not None else self._user_id
+            if result.is_final:
+                frame = TranscriptionFrame(
+                    text,
+                    user_id,
+                    timestamp,
+                    language,
+                    result=result,
+                    finalized=index == len(transcripts) - 1,
+                )
+            else:
+                frame = InterimTranscriptionFrame(
+                    text,
+                    user_id,
+                    timestamp,
+                    language,
+                    result=result,
+                )
+            frame.includes_inter_frame_spaces = True
+            await self.push_frame(frame)
+
+    async def _handle_response(self, response, *, speaker_diarization: bool = False):
         for result in response.results:
             if result and not result.alternatives:
                 continue
@@ -638,15 +744,10 @@ class NvidiaSTTService(STTService):
                     # Report usage before the transcription frame so tracing
                     # can attach it to the STT span the frame closes.
                     await self.emit_stt_usage_metrics()
-                    await self.push_frame(
-                        TranscriptionFrame(
-                            transcript,
-                            self._user_id,
-                            time_now_iso8601(),
-                            language,
-                            result=result,
-                            finalized=True,
-                        )
+                    await self._push_result_frames(
+                        result,
+                        language,
+                        speaker_diarization=speaker_diarization,
                     )
                     await self._handle_transcription(
                         transcript=transcript,
@@ -654,14 +755,10 @@ class NvidiaSTTService(STTService):
                         language=language,
                     )
                 else:
-                    await self.push_frame(
-                        InterimTranscriptionFrame(
-                            transcript,
-                            self._user_id,
-                            time_now_iso8601(),
-                            language,
-                            result=result,
-                        )
+                    await self._push_result_frames(
+                        result,
+                        language,
+                        speaker_diarization=speaker_diarization,
                     )
                     logger.trace(f"Interim Transcription: [{transcript}]")
 
