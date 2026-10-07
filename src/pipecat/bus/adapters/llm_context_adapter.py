@@ -83,6 +83,7 @@ class LLMContextAdapter(TypeAdapter):
                 "__specific__": True,
                 "llm": msg.llm,
                 "message": serialize_value(msg.message),
+                "is_metadata": msg.is_metadata,
             }
         return serialize_value(msg)
 
@@ -91,5 +92,6 @@ class LLMContextAdapter(TypeAdapter):
             return LLMSpecificMessage(
                 llm=data["llm"],
                 message=deserialize_value(data["message"]),
+                is_metadata=data.get("is_metadata", False),
             )
         return deserialize_value(data)

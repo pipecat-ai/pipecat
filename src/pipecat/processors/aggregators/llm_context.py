@@ -19,7 +19,7 @@ import base64
 import copy
 import io
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, TypeAlias, cast, overload
 
 from loguru import logger
@@ -71,10 +71,17 @@ class LLMSpecificMessage:
 
     Enables the use of service-specific message types while maintaining
     compatibility with the universal LLM context format.
+
+    Parameters:
+        llm: Identifier of the LLM adapter that understands this message.
+        message: Provider-specific content.
+        is_metadata: Auxiliary data that is quietly omitted for other LLMs
+            without losing conversation content. The owning LLM still receives it.
     """
 
     llm: str
     message: Any
+    is_metadata: bool = field(default=False, kw_only=True)
 
 
 LLMContextMessage: TypeAlias = LLMStandardMessage | LLMSpecificMessage
@@ -233,9 +240,9 @@ class LLMContext:
         Args:
             llm_specific_filter: Optional filter to return LLM-specific
                 messages for the given LLM, in addition to the standard
-                messages. If messages end up being filtered, an error will be
-                logged; this is intended to catch accidental use of
-                incompatible LLM-specific messages.
+                messages. Other LLMs' metadata is quietly omitted; filtering
+                incompatible conversation content logs an error. The stored
+                history is never changed.
             truncate_large_values: If True, return deep copies of messages with
                 large values shortened. For standard messages, known binary
                 data (base64-encoded images, audio) is replaced with short
@@ -253,7 +260,12 @@ class LLMContext:
                 for msg in self._messages
                 if not isinstance(msg, LLMSpecificMessage) or msg.llm == llm_specific_filter
             ]
-            if len(messages) < len(self._messages):
+            if any(
+                isinstance(msg, LLMSpecificMessage)
+                and msg.llm != llm_specific_filter
+                and not msg.is_metadata
+                for msg in self._messages
+            ):
                 logger.error(
                     f"Attempted to use incompatible LLMSpecificMessages with LLM '{llm_specific_filter}'."
                 )

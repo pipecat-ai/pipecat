@@ -158,7 +158,9 @@ def standardize_tools_to_chatml(tools: Any) -> Any:
                     "function": {
                         "name": declaration.get("name", ""),
                         "description": declaration.get("description", ""),
-                        "parameters": declaration.get("parameters", {}),
+                        "parameters": declaration.get(
+                            "parameters_json_schema", declaration.get("parameters", {})
+                        ),
                     },
                 }
             )
@@ -187,12 +189,27 @@ def build_llm_output_payload(
     text_output: str,
     function_calls: list[dict[str, Any]],
 ) -> str | None:
-    """Build a single output payload that preserves text and tool calls."""
+    """Render tool calls as assistant messages recognized by Langfuse's tool parser."""
     if function_calls:
-        payload: dict[str, Any] = {"tool_calls": function_calls}
-        if text_output:
-            payload["content"] = text_output
-        return json.dumps(payload, default=str)
+        tool_calls = []
+        for call in function_calls:
+            arguments = call.get("arguments")
+            tool_calls.append(
+                {
+                    "id": call.get("tool_call_id"),
+                    "type": "function",
+                    "function": {
+                        "name": call.get("function_name"),
+                        "arguments": arguments
+                        if isinstance(arguments, str)
+                        else json.dumps(arguments if arguments is not None else {}, default=str),
+                    },
+                }
+            )
+        return json.dumps(
+            [{"role": "assistant", "content": text_output or None, "tool_calls": tool_calls}],
+            default=str,
+        )
 
     if text_output:
         return text_output

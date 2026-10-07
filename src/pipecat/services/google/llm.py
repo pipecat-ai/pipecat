@@ -843,7 +843,8 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
                                                         "type": "thought_signature",
                                                         "signature": part.thought_signature,
                                                         "bookmark": bookmark,
-                                                    }
+                                                    },
+                                                    is_metadata=True,
                                                 )
                                             ]
                                         )

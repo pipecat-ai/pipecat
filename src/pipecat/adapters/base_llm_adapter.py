@@ -136,16 +136,22 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
         """
         pass
 
-    def create_llm_specific_message(self, message: Any) -> LLMSpecificMessage:
+    def create_llm_specific_message(
+        self, message: Any, *, is_metadata: bool = False
+    ) -> LLMSpecificMessage:
         """Create an LLM-specific message (as opposed to a standard message) for use in an LLMContext.
 
         Args:
             message: The message content.
+            is_metadata: Whether other LLMs can omit this data without losing
+                conversation content.
 
         Returns:
             A LLMSpecificMessage instance.
         """
-        return LLMSpecificMessage(llm=self.id_for_llm_specific_messages, message=message)
+        return LLMSpecificMessage(
+            llm=self.id_for_llm_specific_messages, message=message, is_metadata=is_metadata
+        )
 
     def get_messages(
         self, context: LLMContext, *, truncate_large_values: bool = False

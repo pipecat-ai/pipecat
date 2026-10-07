@@ -4,13 +4,16 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import json
 import os
 import unittest
 from unittest.mock import patch
 
 from pipecat.utils.tracing.langfuse_helpers import (
+    build_llm_output_payload,
     mark_trace_public,
     set_trace_public_resolver,
+    standardize_tools_to_chatml,
 )
 
 
@@ -92,6 +95,53 @@ class TestTracePublicResolver(unittest.TestCase):
         set_trace_public_resolver(None)
         span = self._mark({"LANGFUSE_TRACES_PUBLIC": "true"})
         self.assertIs(span.attributes.get("langfuse.trace.public"), True)
+
+
+class TestToolPayloads(unittest.TestCase):
+    def test_native_and_json_schema_parameters_survive_normalization(self):
+        parameters = {
+            "type": "object",
+            "properties": {"mode": {"const": "report"}},
+            "required": ["mode"],
+            "additionalProperties": False,
+        }
+        for field in ("parameters", "parameters_json_schema"):
+            with self.subTest(field=field):
+                tools = [
+                    {
+                        "function_declarations": [
+                            {"name": "fetch_report", "description": "Fetch", field: parameters}
+                        ]
+                    }
+                ]
+                formatted = standardize_tools_to_chatml(tools)
+                self.assertEqual(formatted[0]["function"]["parameters"], parameters)
+                self.assertIn(field, tools[0]["function_declarations"][0])
+
+    def test_parallel_calls_keep_text_and_json_arguments(self):
+        output = build_llm_output_payload(
+            "Fetching both reports.",
+            [
+                {
+                    "tool_call_id": "call-1",
+                    "function_name": "fetch_report",
+                    "arguments": {"name": "Ada"},
+                },
+                {
+                    "tool_call_id": "call-2",
+                    "function_name": "fetch_report",
+                    "arguments": '{"name": "Grace"}',
+                },
+            ],
+        )
+        (message,) = json.loads(output)
+        self.assertEqual(message["role"], "assistant")
+        self.assertEqual(message["content"], "Fetching both reports.")
+        self.assertEqual([call["id"] for call in message["tool_calls"]], ["call-1", "call-2"])
+        self.assertEqual(
+            [json.loads(call["function"]["arguments"]) for call in message["tool_calls"]],
+            [{"name": "Ada"}, {"name": "Grace"}],
+        )
 
 
 if __name__ == "__main__":

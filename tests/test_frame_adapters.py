@@ -149,6 +149,23 @@ class TestLLMContextFrameRoundTrip(unittest.TestCase):
         self.assertEqual(restored.tools.standard_tools[0].name, "get_weather")
         self.assertEqual(restored.tools.standard_tools[0].required, ["location"])
 
+    def test_round_trip_preserves_metadata_classification(self):
+        metadata = LLMSpecificMessage("google", {"signature": b"test"}, is_metadata=True)
+        restored = self._round_trip_context(LLMContext([metadata]))
+
+        self.assertEqual(restored.messages, [metadata])
+        self.assertTrue(restored.messages[0].is_metadata)
+
+    def test_legacy_specific_message_defaults_to_content(self):
+        from pipecat.bus.adapters.llm_context_adapter import LLMContextAdapter
+
+        restored = LLMContextAdapter().deserialize(
+            {"messages": [{"__specific__": True, "llm": "google", "message": {"text": "Hi"}}]},
+            lambda value: value,
+        )
+
+        self.assertFalse(restored.messages[0].is_metadata)
+
     def test_round_trip_with_tool_choice(self):
         ctx = LLMContext(
             messages=[{"role": "user", "content": "hi"}],

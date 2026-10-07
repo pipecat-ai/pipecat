@@ -7,12 +7,58 @@
 """Unit tests for LLMContext core functionality."""
 
 import unittest
+from unittest.mock import patch
 
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter
 from pipecat.processors.aggregators.llm_context import (
     LLMContext,
     LLMSpecificMessage,
 )
+
+
+class TestLLMSpecificMetadataFiltering(unittest.TestCase):
+    """Mixed-provider filtering preserves history and diagnoses content loss."""
+
+    def test_foreign_metadata_is_filtered_without_mutating_history(self):
+        metadata = LLMSpecificMessage("google", {"signature": b"test"}, is_metadata=True)
+        messages = [{"role": "user", "content": "Hello"}, metadata]
+        context = LLMContext(messages)
+        adapter = OpenAILLMAdapter()
+
+        with patch("pipecat.processors.aggregators.llm_context.logger.error") as error:
+            self.assertEqual(adapter.get_messages(context), messages[:1])
+            self.assertEqual(adapter.get_messages_for_logging(context), messages[:1])
+            error.assert_not_called()
+
+        self.assertIs(context.messages, messages)
+        self.assertIs(context.messages[1], metadata)
+
+    def test_foreign_content_still_logs_alongside_metadata(self):
+        context = LLMContext(
+            [
+                LLMSpecificMessage("google", {"signature": b"test"}, is_metadata=True),
+                LLMSpecificMessage("google", {"role": "model", "parts": [{"text": "Hello"}]}),
+            ]
+        )
+        adapter = OpenAILLMAdapter()
+
+        with patch("pipecat.processors.aggregators.llm_context.logger.error") as error:
+            self.assertEqual(adapter.get_messages(context), [])
+            error.assert_called_once()
+
+    def test_own_metadata_is_retained_in_both_views(self):
+        adapter = OpenAILLMAdapter()
+        metadata = adapter.create_llm_specific_message({"signature": "a" * 500}, is_metadata=True)
+        context = LLMContext([metadata])
+
+        with patch("pipecat.processors.aggregators.llm_context.logger.error") as error:
+            self.assertIs(adapter.get_messages(context)[0], metadata)
+            logged = adapter.get_messages(context, truncate_large_values=True)[0]
+            self.assertTrue(logged.is_metadata)
+            self.assertNotEqual(logged.message["signature"], metadata.message["signature"])
+            error.assert_not_called()
+
+        self.assertEqual(metadata.message["signature"], "a" * 500)
 
 
 class TestGetMessagesTruncateLargeValues(unittest.TestCase):
