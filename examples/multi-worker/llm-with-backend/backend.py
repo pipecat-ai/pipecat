@@ -108,6 +108,19 @@ _FILES = {
         "    # Report one retry delay, so the retry dashboard can chart them.\n"
         "    _backoffs.append((attempt, delay))\n"
     ),
+    "tests/integration/test_http_client_live.py": (
+        "import time\n\n"
+        "from src.http_client import HttpClient\n"
+        "from tests.integration.stack import live_upstream\n\n\n"
+        "DEADLINE_SECS = 2\n\n\n"
+        "def test_retry_on_timeout():\n"
+        "    # The live upstream drops the first two requests on the floor; the\n"
+        "    # client must get through on a retry before the deadline is up.\n"
+        "    with live_upstream(drop_first=2) as upstream:\n"
+        "        started = time.monotonic()\n"
+        "        HttpClient(upstream.transport).get(upstream.url('/health'))\n"
+        "        assert time.monotonic() - started < DEADLINE_SECS\n"
+    ),
     "tests/test_retry_metrics.py": (
         "import time\n\n"
         "from src import metrics\n"
