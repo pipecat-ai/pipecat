@@ -33,10 +33,9 @@ from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     ExternalFunctionCallCancelFrame,
-    ExternalFunctionCallFrame,
     ExternalFunctionCallInProgressFrame,
     ExternalFunctionCallResultFrame,
-    ExternalFunctionCallStartedFrame,
+    ExternalFunctionCallsStartedFrame,
     Frame,
     FunctionCallCancelFrame,
     FunctionCallInProgressFrame,
@@ -451,8 +450,9 @@ class RTVIObserver(BaseObserver):
                 await self._report_function_call(
                     "stopped", frame.function_name, frame.tool_call_id, result=frame.result
                 )
-        elif isinstance(frame, ExternalFunctionCallStartedFrame):
-            await self._report_function_call("started", frame.function_name, frame.tool_call_id)
+        elif isinstance(frame, ExternalFunctionCallsStartedFrame):
+            for call in frame.function_calls:
+                await self._report_function_call("started", call.function_name, call.tool_call_id)
         elif isinstance(frame, ExternalFunctionCallInProgressFrame):
             await self._report_function_call(
                 "in_progress", frame.function_name, frame.tool_call_id, arguments=frame.arguments
@@ -625,7 +625,10 @@ class RTVIObserver(BaseObserver):
                 FunctionCallInProgressFrame,
                 FunctionCallCancelFrame,
                 FunctionCallResultFrame,
-                ExternalFunctionCallFrame,
+                ExternalFunctionCallsStartedFrame,
+                ExternalFunctionCallInProgressFrame,
+                ExternalFunctionCallCancelFrame,
+                ExternalFunctionCallResultFrame,
             ),
         ):
             await self._report_function_call_frame(frame)

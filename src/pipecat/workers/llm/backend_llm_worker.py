@@ -43,11 +43,11 @@ from loguru import logger
 from pipecat.bus.messages import BusJobCancelMessage, BusJobRequestMessage
 from pipecat.frames.frames import (
     ErrorFrame,
+    ExternalFunctionCall,
     ExternalFunctionCallCancelFrame,
-    ExternalFunctionCallFrame,
     ExternalFunctionCallInProgressFrame,
     ExternalFunctionCallResultFrame,
-    ExternalFunctionCallStartedFrame,
+    ExternalFunctionCallsStartedFrame,
     Frame,
     FunctionCallCancelFrame,
     FunctionCallInProgressFrame,
@@ -205,8 +205,8 @@ class BackendToolCall:
     """One phase of a function call the backend made while working, on its way to the frontend.
 
     The call ran in the backend's own pipeline; the frontend reports it to
-    clients, as the :class:`~pipecat.frames.frames.ExternalFunctionCallFrame`
-    :meth:`to_frame` builds, and does nothing else with it. The phases mirror
+    clients, as the ``ExternalFunctionCall*Frame`` :meth:`to_frame` builds, and
+    does nothing else with it. The phases mirror
     the pipeline's own function-call frames.
 
     Parameters:
@@ -261,14 +261,19 @@ class BackendToolCall:
             is_final=bool(payload.get("is_final", True)),
         )
 
-    def to_frame(self) -> ExternalFunctionCallFrame:
+    def to_frame(self) -> Frame:
         """Build the frame that reports this phase in the frontend's pipeline.
 
         Returns:
             The frame for the phase.
         """
         if self.phase == "started":
-            return ExternalFunctionCallStartedFrame(self.function_name, self.tool_call_id)
+            # The frame can announce several calls at once, as the pipeline's
+            # own FunctionCallsStartedFrame does; a backend reports its calls
+            # one at a time, so here it carries one.
+            return ExternalFunctionCallsStartedFrame(
+                [ExternalFunctionCall(self.function_name, self.tool_call_id)]
+            )
         if self.phase == "in_progress":
             return ExternalFunctionCallInProgressFrame(
                 self.function_name, self.tool_call_id, arguments=self.arguments
