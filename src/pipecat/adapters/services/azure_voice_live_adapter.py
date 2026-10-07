@@ -50,7 +50,7 @@ class AzureVoiceLiveLLMAdapter(BaseLLMAdapter):
         """Get the identifier used in LLMSpecificMessage instances for Voice Live."""
         return "azure-voice-live"
 
-    def get_llm_invocation_params(
+    async def get_llm_invocation_params(
         self, context: LLMContext, *, system_instruction: str | None = None
     ) -> AzureVoiceLiveLLMInvocationParams:
         """Get Voice Live-specific LLM invocation parameters from a universal LLM context.
