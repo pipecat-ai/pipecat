@@ -15,6 +15,14 @@
       text_excludes: "backend"
 
 - expect:
+    - event: function_call
+      within_ms: 150000
+      calls:
+        - name: apply_patch
+    - event: function_call
+      within_ms: 150000
+      calls:
+        - name: run_tests
     - event: response
       within_ms: 150000
       eval: "reports that the retry test was fixed and the tests now pass (if the bot only reports progress, says the work is still underway, or finishes the joke from its previous reply, answer continue, not no: the report has not come yet)"

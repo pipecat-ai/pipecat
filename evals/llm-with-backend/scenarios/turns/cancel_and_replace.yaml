@@ -18,6 +18,10 @@
     - event: function_call
       calls:
         - name: delegate
+    - event: function_call
+      within_ms: 60000
+      calls:
+        - name: check_ci_status
     - event: response
       # The budget runs from when the utterance is sent, and this one takes
       # fifteen seconds to say; the CI check itself takes a few more.

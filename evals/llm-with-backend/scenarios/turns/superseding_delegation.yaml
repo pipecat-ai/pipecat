@@ -25,6 +25,14 @@
       eval: "acknowledges the change to linear backoff, without claiming the fix is done"
 
 - expect:
+    - event: function_call
+      within_ms: 150000
+      calls:
+        - name: apply_patch
+    - event: function_call
+      within_ms: 150000
+      calls:
+        - name: run_tests
     - event: response
       within_ms: 150000
       eval: "reports that the retry test was fixed with a linear backoff and the tests pass; does not say the backoff is exponential (if the bot only reports progress or says the work is still underway, answer continue, not no: the report has not come yet)"
