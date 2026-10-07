@@ -10,11 +10,12 @@ import unittest
 from unittest.mock import AsyncMock
 
 from pipecat.frames.frames import (
+    ExternalFunctionCall,
     ExternalFunctionCallCancelFrame,
-    ExternalFunctionCallFrame,
     ExternalFunctionCallInProgressFrame,
     ExternalFunctionCallResultFrame,
-    ExternalFunctionCallStartedFrame,
+    ExternalFunctionCallsStartedFrame,
+    Frame,
     FunctionCallResultFrame,
     FunctionCallResultProperties,
 )
@@ -32,10 +33,10 @@ def _observer(levels: dict[str, RTVIFunctionCallReportLevel]) -> tuple[RTVIObser
     return observer, sent
 
 
-def _external(phase: str) -> ExternalFunctionCallFrame:
+def _external(phase: str) -> Frame:
     arguments = {"location": "Seattle"}
     if phase == "started":
-        return ExternalFunctionCallStartedFrame("get_weather", "toolu_1")
+        return ExternalFunctionCallsStartedFrame([ExternalFunctionCall("get_weather", "toolu_1")])
     if phase == "in_progress":
         return ExternalFunctionCallInProgressFrame("get_weather", "toolu_1", arguments=arguments)
     return ExternalFunctionCallResultFrame(
@@ -61,6 +62,22 @@ class TestExternalFunctionCalls(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sent[0].data.function_name, "get_weather")
         self.assertEqual(sent[1].data.arguments, {"location": "Seattle"})
         self.assertEqual(sent[2].data.result, {"temp": 62})
+
+    async def test_external_calls_announced_together_are_each_reported_started(self):
+        """The started frame carries every call announced at once, as the pipeline's own does."""
+        observer, sent = _observer({"*": RTVIFunctionCallReportLevel.FULL})
+
+        await observer._report_function_call_frame(
+            ExternalFunctionCallsStartedFrame(
+                [
+                    ExternalFunctionCall("get_weather", "toolu_1"),
+                    ExternalFunctionCall("get_time", "toolu_2"),
+                ]
+            )
+        )
+
+        self.assertEqual([m.type for m in sent], ["llm-function-call-started"] * 2)
+        self.assertEqual([m.data.function_name for m in sent], ["get_weather", "get_time"])
 
     async def test_an_intermediate_result_leaves_the_call_running(self):
         """Only a final result stops a call, the pipeline's own or an external one."""

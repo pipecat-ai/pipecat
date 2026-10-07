@@ -1488,14 +1488,10 @@ class FunctionCallsStartedFrame(SystemFrame):
 
 
 @dataclass
-class ExternalFunctionCallFrame(SystemFrame):
-    """A phase of a function call that ran outside this pipeline, for observers to report.
+class ExternalFunctionCall:
+    """A function call made outside this pipeline, as announced to it.
 
-    Nothing in the pipeline acts on one. The call ran elsewhere, e.g. in a
-    backend worker's pipeline on behalf of a tool here, and belongs to that
-    pipeline's conversation, not this one. The subclasses mirror the
-    pipeline's own function-call frames, one per phase, and observers report
-    them as they report those.
+    What :class:`ExternalFunctionCallsStartedFrame` carries, one per call.
 
     Parameters:
         function_name: Name of the function called.
@@ -1507,40 +1503,81 @@ class ExternalFunctionCallFrame(SystemFrame):
 
 
 @dataclass
-class ExternalFunctionCallStartedFrame(ExternalFunctionCallFrame):
-    """An external function call has been made: ``FunctionCallsStartedFrame``'s counterpart, for one call."""
+class ExternalFunctionCallsStartedFrame(SystemFrame):
+    """Function calls were made outside this pipeline: ``FunctionCallsStartedFrame``'s counterpart.
+
+    Nothing in the pipeline acts on one; observers report it as they report
+    the pipeline's own. The calls ran elsewhere, e.g. in a backend worker's
+    pipeline on behalf of a tool here, and belong to that pipeline's
+    conversation, not this one. Like its counterpart it carries every call
+    announced together, which may be one. Each call's later phases come as
+    ``ExternalFunctionCallInProgressFrame``, ``ExternalFunctionCallResultFrame``
+    and ``ExternalFunctionCallCancelFrame``.
+
+    Parameters:
+        function_calls: The calls made.
+    """
+
+    function_calls: Sequence[ExternalFunctionCall]
 
 
 @dataclass
-class ExternalFunctionCallInProgressFrame(ExternalFunctionCallFrame):
+class ExternalFunctionCallInProgressFrame(SystemFrame):
     """An external function call is running: ``FunctionCallInProgressFrame``'s counterpart.
 
+    Nothing in the pipeline acts on one; observers report it as they report
+    the pipeline's own. The call ran elsewhere, e.g. in a backend worker's
+    pipeline on behalf of a tool here, and belongs to that pipeline's
+    conversation, not this one.
+
     Parameters:
+        function_name: Name of the function called.
+        tool_call_id: Unique identifier of the call.
         arguments: Arguments passed to the function.
     """
 
+    function_name: str
+    tool_call_id: str
     arguments: Any
 
 
 @dataclass
-class ExternalFunctionCallResultFrame(ExternalFunctionCallFrame):
+class ExternalFunctionCallResultFrame(SystemFrame):
     """An external function call produced a result: ``FunctionCallResultFrame``'s counterpart.
 
+    Nothing in the pipeline acts on one; observers report it as they report
+    the pipeline's own.
+
     Parameters:
+        function_name: Name of the function called.
+        tool_call_id: Unique identifier of the call.
         arguments: Arguments passed to the function.
         result: The result.
         is_final: Whether this result completes the call, or is one of a stream
             of intermediate results before the final one.
     """
 
+    function_name: str
+    tool_call_id: str
     arguments: Any
     result: Any
     is_final: bool = True
 
 
 @dataclass
-class ExternalFunctionCallCancelFrame(ExternalFunctionCallFrame):
-    """An external function call was cancelled: ``FunctionCallCancelFrame``'s counterpart."""
+class ExternalFunctionCallCancelFrame(SystemFrame):
+    """An external function call was cancelled: ``FunctionCallCancelFrame``'s counterpart.
+
+    Nothing in the pipeline acts on one; observers report it as they report
+    the pipeline's own.
+
+    Parameters:
+        function_name: Name of the function called.
+        tool_call_id: Unique identifier of the call.
+    """
+
+    function_name: str
+    tool_call_id: str
 
 
 @dataclass

@@ -19,10 +19,9 @@ from unittest.mock import AsyncMock, call
 import pytest
 
 from pipecat.frames.frames import (
-    ExternalFunctionCallFrame,
     ExternalFunctionCallInProgressFrame,
     ExternalFunctionCallResultFrame,
-    ExternalFunctionCallStartedFrame,
+    ExternalFunctionCallsStartedFrame,
     Frame,
     FunctionCallResultFrame,
     FunctionCallResultProperties,
@@ -568,9 +567,14 @@ async def test_a_local_backend_is_heard_through_the_frontends_conversation():
     # interruption must not drop it on the way to the aggregator.
     assert all(not f.interruptible for f in appended)
     # The backend's own call reached the frontend's pipeline as a report only.
-    reported = [f for f in down if isinstance(f, ExternalFunctionCallFrame)]
+    (started,) = [f for f in down if isinstance(f, ExternalFunctionCallsStartedFrame)]
+    assert [c.function_name for c in started.function_calls] == ["get_weather"]
+    reported = [
+        f
+        for f in down
+        if isinstance(f, (ExternalFunctionCallInProgressFrame, ExternalFunctionCallResultFrame))
+    ]
     assert [(type(f), f.function_name) for f in reported] == [
-        (ExternalFunctionCallStartedFrame, "get_weather"),
         (ExternalFunctionCallInProgressFrame, "get_weather"),
         (ExternalFunctionCallResultFrame, "get_weather"),
     ]

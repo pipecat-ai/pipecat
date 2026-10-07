@@ -22,7 +22,7 @@ import pytest
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.frames.frames import (
-    ExternalFunctionCallFrame,
+    ExternalFunctionCallInProgressFrame,
     FunctionCallCancelFrame,
     FunctionCallResultFrame,
     FunctionCallResultProperties,
@@ -1363,7 +1363,7 @@ async def test_the_backends_calls_are_reported_without_a_parent(monkeypatch):
     )
 
     (pushed,) = [c.args[0] for c in service.push_frame.await_args_list]
-    assert isinstance(pushed, ExternalFunctionCallFrame)
+    assert isinstance(pushed, ExternalFunctionCallInProgressFrame)
     assert (pushed.function_name, pushed.tool_call_id) == ("get_weather", "toolu_1")
 
 
