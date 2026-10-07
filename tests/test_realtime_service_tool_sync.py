@@ -98,10 +98,10 @@ class _ServiceToolSyncTests:
         self.assertEqual(list(service._functions), [])
 
 
-class TestRealtimeSessionTools(unittest.TestCase):
+class TestRealtimeSessionTools(unittest.IsolatedAsyncioTestCase):
     """The tool set a realtime adapter settles for a session."""
 
-    def test_the_contexts_own_tools_win_and_built_ins_ride_along(self):
+    async def test_the_contexts_own_tools_win_and_built_ins_ride_along(self):
         mod = pytest.importorskip("pipecat.adapters.services.open_ai_realtime_adapter")
         adapter = mod.OpenAIRealtimeLLMAdapter()
         adapter.builtin_tools["delegate"] = FunctionSchema(
@@ -114,16 +114,17 @@ class TestRealtimeSessionTools(unittest.TestCase):
         )
         service_tools = _tools(sample_handler)
 
-        def tools(context, service_tools):
-            params = adapter.get_llm_invocation_params(context, service_tools=service_tools)
+        async def tools(context, service_tools):
+            params = await adapter.get_llm_invocation_params(context, service_tools=service_tools)
             return _names(params["tools"])
 
         self.assertEqual(
-            tools(LLMContext(tools=from_context), service_tools), {"from_context", "delegate"}
+            await tools(LLMContext(tools=from_context), service_tools),
+            {"from_context", "delegate"},
         )
-        self.assertEqual(tools(LLMContext(), service_tools), {"sample", "delegate"})
-        self.assertEqual(tools(LLMContext(), None), {"delegate"})
-        bare = mod.OpenAIRealtimeLLMAdapter().get_llm_invocation_params(LLMContext())
+        self.assertEqual(await tools(LLMContext(), service_tools), {"sample", "delegate"})
+        self.assertEqual(await tools(LLMContext(), None), {"delegate"})
+        bare = await mod.OpenAIRealtimeLLMAdapter().get_llm_invocation_params(LLMContext())
         self.assertEqual(bare["tools"], [])
 
 
