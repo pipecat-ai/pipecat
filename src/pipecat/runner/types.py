@@ -137,6 +137,18 @@ class ExotelCallData(CallData):
     custom_parameters: str | dict | None = None
 
 
+class DidlogicCallData(CallData):
+    """DIDLogic-specific parsed telephony handshake data.
+
+    Parameters:
+        direction: ``"inbound"`` or ``"outbound"``, sent on both. What tells a bot
+            whether an ``answered`` event is coming: only an outbound call has one,
+            because only there is the leg answered before the far end picks up.
+    """
+
+    direction: str | None = None
+
+
 @dataclass
 class RunnerArguments:
     """Base class for runner session arguments.

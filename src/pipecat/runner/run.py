@@ -162,7 +162,7 @@ except ImportError as e:
 load_dotenv(override=True)
 os.environ["ENV"] = "local"
 
-TELEPHONY_TRANSPORTS = ["twilio", "telnyx", "plivo", "exotel"]
+TELEPHONY_TRANSPORTS = ["twilio", "telnyx", "plivo", "exotel", "didlogic"]
 TRANSPORT_ROUTE_DEPENDENCIES = {
     "daily": ("daily",),
     "livekit": ("livekit.api",),
@@ -1451,6 +1451,14 @@ def _setup_telephony_routes(app: FastAPI, args: argparse.Namespace, ws_used_toke
                     "error": "Exotel doesn't use POST webhooks",
                     "websocket_url": f"wss://{args.proxy}/ws",
                     "note": "Configure the WebSocket URL above in your Exotel App Bazaar Voicebot Applet",
+                }
+            elif args.transport == "didlogic":
+                # DIDLogic doesn't use POST webhooks either
+                logger.debug("POST DIDLogic endpoint - not used")
+                return {
+                    "error": "DIDLogic doesn't use POST webhooks",
+                    "websocket_url": f"wss://{args.proxy}/ws",
+                    "note": "Set the WebSocket URL above as a destination on your number, or send it as a_endpoint when placing a Click2Call call",
                 }
             else:
                 logger.debug(f"POST {args.transport.upper()} XML")

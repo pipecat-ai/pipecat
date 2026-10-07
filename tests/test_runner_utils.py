@@ -30,6 +30,13 @@ try:
 except ImportError:
     DAILY_AVAILABLE = False
 
+try:
+    import fastapi  # noqa: F401
+
+    WEBSOCKET_AVAILABLE = True
+except ImportError:
+    WEBSOCKET_AVAILABLE = False
+
 
 class TestCallData(unittest.TestCase):
     """CallData gives typed attribute access while staying dict-compatible."""
@@ -280,6 +287,62 @@ class TestCreateTransportExposesCallData(unittest.IsolatedAsyncioTestCase):
         # Both styles work: typed attribute access and dict-style subscript.
         self.assertEqual(args.call_data.call_id, "CA9")
         self.assertEqual(args.call_data["call_id"], "CA9")
+
+
+class TestParseDidlogic(unittest.IsolatedAsyncioTestCase):
+    def _websocket(self, **overrides):
+        message = {
+            "event": "start",
+            "call_id": "01K5ZQJ3M8N7P0R2T4V6W8X9Y0",
+            "from": "442071234567",
+            "to": "447700900000",
+            "codec": "pcm16",
+            "sample_rate": 24000,
+            "frame_bytes": 480,
+            "ptime": 10,
+        }
+        message.update(overrides)
+        ws = MagicMock()
+        # `start` then the first audio frame: the platform answers the leg and
+        # streams, so the second message is media rather than a second handshake.
+        ws.iter_text.return_value = MockAsyncIterator(
+            [json.dumps(message), json.dumps({"event": "media", "payload": "AAAA"})]
+        )
+        return ws
+
+    async def test_the_flat_start_identifies_the_provider(self):
+        transport_type, call_data = await parse_telephony_websocket(self._websocket())
+
+        self.assertEqual(transport_type, "didlogic")
+        self.assertEqual(call_data["call_id"], "01K5ZQJ3M8N7P0R2T4V6W8X9Y0")
+        self.assertEqual(call_data.from_number, "442071234567")
+        self.assertEqual(call_data.to_number, "447700900000")
+
+    async def test_the_direction_is_typed(self):
+        _, call_data = await parse_telephony_websocket(self._websocket(direction="outbound"))
+
+        self.assertEqual(call_data.direction, "outbound")
+
+    async def test_an_inbound_call_carries_no_direction(self):
+        _, call_data = await parse_telephony_websocket(self._websocket())
+
+        self.assertIsNone(call_data.direction)
+
+    @unittest.skipUnless(WEBSOCKET_AVAILABLE, "requires the websocket extra")
+    async def test_the_serializer_is_built_from_the_handshake(self):
+        from pipecat.serializers.didlogic import DidlogicFrameSerializer
+        from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
+
+        params = FastAPIWebsocketParams(audio_in_enabled=True, audio_out_enabled=True)
+        args = WebSocketRunnerArguments(websocket=self._websocket(direction="outbound"))
+
+        with patch("pipecat.transports.websocket.fastapi.FastAPIWebsocketTransport"):
+            await create_transport(args, {"didlogic": lambda: params})
+
+        self.assertIsInstance(params.serializer, DidlogicFrameSerializer)
+        self.assertEqual(params.serializer.call_id, "01K5ZQJ3M8N7P0R2T4V6W8X9Y0")
+        self.assertTrue(params.serializer.is_outbound)
+        self.assertFalse(params.add_wav_header)
 
 
 @unittest.skipUnless(DAILY_AVAILABLE, "requires the daily-python SDK")

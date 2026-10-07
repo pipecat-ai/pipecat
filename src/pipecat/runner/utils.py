@@ -40,6 +40,7 @@ from loguru import logger
 from pipecat.runner.types import (
     CallData,
     DailyRunnerArguments,
+    DidlogicCallData,
     EvalRunnerArguments,
     ExotelCallData,
     LiveKitRunnerArguments,
@@ -106,6 +107,15 @@ def _detect_transport_type_from_message(message_data: dict) -> str:
     ):
         logger.trace("Auto-detected: EXOTEL")
         return "exotel"
+
+    # DIDLogic detection
+    if (
+        message_data.get("event") == "start"
+        and "start" not in message_data
+        and "call_id" in message_data
+    ):
+        logger.trace("Auto-detected: DIDLOGIC")
+        return "didlogic"
 
     logger.trace("Auto-detection failed - unknown format")
     return "unknown"
@@ -273,6 +283,14 @@ async def parse_telephony_websocket(websocket: "WebSocket"):
                 "custom_parameters": start_data.get("custom_parameters", ""),
             }
 
+        elif transport_type == "didlogic":
+            call_data = {
+                "call_id": call_data_raw.get("call_id"),
+                "from": call_data_raw.get("from", ""),
+                "to": call_data_raw.get("to", ""),
+                "direction": call_data_raw.get("direction"),
+            }
+
         else:
             call_data = {}
 
@@ -281,9 +299,11 @@ async def parse_telephony_websocket(websocket: "WebSocket"):
         # code; subscript/.get for existing dict-style code). model_validate maps the
         # wire keys (e.g. "from"/"to") onto the aliased fields. Providers with extra
         # fields get a specific subclass so those fields are typed, not just extras.
-        call_data_type = {"telnyx": TelnyxCallData, "exotel": ExotelCallData}.get(
-            transport_type, CallData
-        )
+        call_data_type = {
+            "telnyx": TelnyxCallData,
+            "exotel": ExotelCallData,
+            "didlogic": DidlogicCallData,
+        }.get(transport_type, CallData)
         result = (transport_type, call_data_type.model_validate(call_data))
         # Cache on the websocket so subsequent calls don't re-consume the stream.
         # Only successful parses are cached; the raising paths stay retryable.
@@ -576,10 +596,19 @@ async def _create_telephony_transport(
             stream_sid=call_data["stream_id"],
             call_sid=call_data["call_id"],
         )
+    elif transport_type == "didlogic":
+        from pipecat.serializers.didlogic import DidlogicFrameSerializer
+
+        params.serializer = DidlogicFrameSerializer(
+            call_id=call_data["call_id"],
+            from_number=call_data["from"],
+            to_number=call_data["to"],
+            direction=call_data.get("direction"),
+        )
     else:
         raise ValueError(
             f"Unsupported telephony provider: {transport_type}. "
-            f"Supported providers: twilio, telnyx, plivo, exotel"
+            f"Supported providers: twilio, telnyx, plivo, exotel, didlogic"
         )
 
     return FastAPIWebsocketTransport(websocket=websocket, params=params)
@@ -637,7 +666,8 @@ async def create_transport(
     Args:
         runner_args: Arguments from the runner.
         transport_params: Dict mapping transport names to parameter factory functions.
-            Keys should be: "daily", "webrtc", "twilio", "telnyx", "plivo", "exotel"
+            Keys should be: "daily", "webrtc", "twilio", "telnyx", "plivo", "exotel",
+            "didlogic"
             Values should be functions that return transport parameters when called.
 
     Returns:
@@ -674,6 +704,11 @@ async def create_transport(
                 # add_wav_header and serializer will be set automatically
             ),
             "exotel": lambda: FastAPIWebsocketParams(
+                audio_in_enabled=True,
+                audio_out_enabled=True,
+                # add_wav_header and serializer will be set automatically
+            ),
+            "didlogic": lambda: FastAPIWebsocketParams(
                 audio_in_enabled=True,
                 audio_out_enabled=True,
                 # add_wav_header and serializer will be set automatically
