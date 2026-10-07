@@ -16,7 +16,7 @@ import asyncio
 from collections.abc import AsyncGenerator, Mapping
 from concurrent.futures import CancelledError as FuturesCancelledError
 from dataclasses import dataclass, field
-from typing import Any, cast
+from typing import Any, ClassVar, cast
 
 from loguru import logger
 from pydantic import BaseModel
@@ -146,6 +146,9 @@ class NvidiaSTTSettings(_NvidiaBaseSTTSettings):
 
     interim_results: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     speaker_format: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+    #: Fields that are purely local (formatting templates) — no reconnect needed.
+    LOCAL_FIELDS: ClassVar[frozenset[str]] = frozenset({"speaker_format"})
 
 
 @dataclass
@@ -388,14 +391,6 @@ class NvidiaSTTService(STTService):
     def _create_recognition_config(self):
         """Create the NVIDIA Nemotron Speech ASR recognition configuration."""
         s = self._settings
-        speaker_diarization = assert_given(s.speaker_diarization)
-        word_time_offsets = assert_given(s.word_time_offsets)
-        if speaker_diarization and not word_time_offsets:
-            logger.warning(
-                "NVIDIA speaker diarization requires word time offsets; enabling word_time_offsets"
-            )
-            word_time_offsets = True
-
         config = riva.client.StreamingRecognitionConfig(
             config=riva.client.RecognitionConfig(
                 encoding=riva.client.AudioEncoding.LINEAR_PCM,
@@ -407,7 +402,7 @@ class NvidiaSTTService(STTService):
                 verbatim_transcripts=s.verbatim_transcripts,
                 sample_rate_hertz=self.sample_rate,
                 audio_channel_count=self._audio_channel_count,
-                enable_word_time_offsets=word_time_offsets,
+                enable_word_time_offsets=s.word_time_offsets,
             ),
             interim_results=s.interim_results,
         )
@@ -431,6 +426,7 @@ class NvidiaSTTService(STTService):
         if self._custom_configuration:
             riva.client.add_custom_configuration_to_config(config, self._custom_configuration)
 
+        speaker_diarization = assert_given(s.speaker_diarization)
         if speaker_diarization:
             riva.client.add_speaker_diarization_to_config(
                 config, speaker_diarization, assert_given(s.diarization_max_speakers)
@@ -460,7 +456,7 @@ class NvidiaSTTService(STTService):
         if not changed:
             return changed
 
-        server_settings_changed = changed.keys() - {"speaker_format"}
+        server_settings_changed = changed.keys() - self.Settings.LOCAL_FIELDS
         if self._config is not None and server_settings_changed:
             self._config = self._create_recognition_config()
 

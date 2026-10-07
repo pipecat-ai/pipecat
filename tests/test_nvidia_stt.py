@@ -6,14 +6,13 @@
 
 import asyncio
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 
 pytest.importorskip("riva.client")
 
 from pipecat.frames.frames import InterimTranscriptionFrame, TranscriptionFrame
-from pipecat.services.nvidia import stt as nvidia_stt
 from pipecat.services.nvidia.stt import AudioChunkIterator, NvidiaSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.string import TextPartForConcatenation, concatenate_aggregated_text
@@ -206,10 +205,8 @@ async def test_speaker_format_update_does_not_reconnect(monkeypatch):
     reconnect.assert_not_awaited()
 
 
-def test_diarization_enables_word_time_offsets(monkeypatch):
-    """Diarization requests the word metadata needed to map speaker runs."""
-    warning = MagicMock()
-    monkeypatch.setattr(nvidia_stt.logger, "warning", warning)
+def test_diarization_does_not_change_word_time_offsets():
+    """Diarization leaves the word time offset setting as configured."""
     service = _make_service(
         settings=NvidiaSTTService.Settings(
             speaker_diarization=True,
@@ -219,9 +216,8 @@ def test_diarization_enables_word_time_offsets(monkeypatch):
 
     config = service._create_recognition_config()
 
-    assert service._settings.word_time_offsets is False
-    assert config.config.enable_word_time_offsets is True
-    warning.assert_called_once()
+    assert config.config.enable_word_time_offsets is False
+    assert config.config.diarization_config.enable_speaker_diarization
 
 
 @pytest.mark.asyncio
