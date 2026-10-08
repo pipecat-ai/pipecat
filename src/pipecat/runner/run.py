@@ -136,6 +136,7 @@ from pipecat.runner.types import (
     LiveKitRunnerArguments,
     MOQRunnerArguments,
     RunnerArguments,
+    SIPRunnerArguments,
     SmallWebRTCRunnerArguments,
     VonageRunnerArguments,
     WebSocketRunnerArguments,
@@ -180,6 +181,7 @@ TRANSPORT_ROUTE_DEPENDENCIES = {
     "telephony": ("fastapi", "websockets"),
     "websocket": ("fastapi", "websockets"),
     "moq": ("moq", "cryptography"),
+    "sip": ("baresip",),
 }
 TRANSPORT_INSTALL_HINTS = {
     "daily": "install pipecat-ai[daily]",
@@ -188,6 +190,7 @@ TRANSPORT_INSTALL_HINTS = {
     "telephony": "install pipecat-ai[websocket]",
     "websocket": "install pipecat-ai[websocket]",
     "moq": "install pipecat-ai[moq]",
+    "sip": "install pipecat-ai[sip]",
 }
 
 # Mirror Pipecat Cloud's 4-hour max session limit so dev rooms get cleaned up.
@@ -312,7 +315,7 @@ def _runner_url(args: argparse.Namespace) -> str:
 
 def _transport_status_lists() -> tuple[list[str], list[str]]:
     """Return enabled and disabled transport labels for the startup banner."""
-    transports = ["daily", "livekit", "webrtc", "telephony", "websocket", "moq"]
+    transports = ["daily", "livekit", "webrtc", "telephony", "websocket", "moq", "sip"]
     enabled = []
     disabled = []
 
@@ -1725,6 +1728,114 @@ async def _run_eval(args: argparse.Namespace):
     await bot_module.bot(runner_args)
 
 
+async def _run_sip(args: argparse.Namespace):
+    """Run a bot with the SIP transport (no FastAPI server).
+
+    baresip registers with the SIP server itself, so there is no HTTP
+    signaling route. The account is read from the ``SIP_USER``, ``SIP_PASS``,
+    ``SIP_DOMAIN``, and ``SIP_TRANSPORT`` environment variables — plus
+    ``SIP_AUDIO_CODECS`` (comma-separated codec preference list),
+    ``SIP_AUTH_USER`` (credential-list digest username),
+    ``SIP_EXTRA_PARAMS`` (comma-separated ``key=value`` account parameters
+    passed verbatim to the baresip account, e.g.
+    ``medianat=stun,stunserver=stun:HOST:PORT``, or
+    ``medianat=turn,stunserver=turn:HOST:3478,stunuser=USER,stunpass=PASS``
+    behind a symmetric NAT),
+    ``SIP_STUN_SERVER`` (STUN server for the default media-NAT traversal — when
+    ``SIP_EXTRA_PARAMS`` is not set, the runner adds ``medianat=stun`` with this
+    server, default stun.l.google.com; the address it advertises reaches the bot
+    through an endpoint-independent NAT but not a symmetric one; set to ``off``
+    to disable),
+    ``SIP_REG_INTERVAL`` (0 for registration-less trunk mode),
+    ``SIP_RTP_TIMEOUT`` (dead-call detection, seconds; 0 disables),
+    ``SIP_INSTANCE_ID`` (a stable UUID for RFC 5626 ``+sip.instance``),
+    ``SIP_NET_INTERFACE`` (restrict the stack to one local interface, e.g.
+    ``127.0.0.1`` for a registrar on loopback), ``SIP_JITTER_BUFFER`` (the
+    receive jitter buffer: ``off``, ``fixed:MIN-MAX`` or ``adaptive:MIN-MAX``
+    in milliseconds; unset selects the transport's default, a fixed
+    40–60 ms), ``SIP_NATIVE_LOG_LEVEL``
+    (native stack log capture), and ``SIP_TRACE`` (verbatim SIP message
+    trace) — and the bot function is invoked directly. Without a configured
+    account, a temporary SIP client is provisioned on the Daily domain
+    (``DAILY_API_KEY``) and deleted again when the bot exits.
+    """
+    logger.info("Running with SIP transport...")
+
+    from pipecat.runner.sip import (
+        cleanup,
+        configure,
+        parse_jitter_buffer,
+        resolve_media_nat_params,
+    )
+
+    async with aiohttp.ClientSession() as session:
+        try:
+            config = await configure(session)
+        except Exception as e:
+            logger.error(f"SIP transport: {e}")
+            raise SystemExit(1)
+
+        try:
+            reg_interval = int(os.getenv("SIP_REG_INTERVAL", "600"))
+            rtp_timeout = int(os.getenv("SIP_RTP_TIMEOUT", "0"))
+        except ValueError:
+            logger.error("SIP_REG_INTERVAL and SIP_RTP_TIMEOUT must be integers (seconds).")
+            raise SystemExit(1)
+        try:
+            jitter_buffer_mode, jitter_buffer_ms = parse_jitter_buffer(
+                os.getenv("SIP_JITTER_BUFFER")
+            )
+        except ValueError as e:
+            logger.error(f"SIP_JITTER_BUFFER: {e}")
+            raise SystemExit(1)
+
+        codecs = os.getenv("SIP_AUDIO_CODECS")
+        # SIP_EXTRA_PARAMS wins verbatim; otherwise medianat=stun is enabled by
+        # default for NAT traversal. See runner.sip.resolve_media_nat_params.
+        extra_params = resolve_media_nat_params(os.getenv("SIP_EXTRA_PARAMS"))
+        runner_args = SIPRunnerArguments(
+            user=config.user,
+            domain=config.domain,
+            password=config.password,
+            transport=config.transport,
+            audio_codecs=tuple(c.strip() for c in codecs.split(",") if c.strip())
+            if codecs
+            else None,
+            auth_user=os.getenv("SIP_AUTH_USER"),
+            extra_params=extra_params,
+            reg_interval=reg_interval,
+            rtp_timeout=rtp_timeout,
+            instance_id=os.getenv("SIP_INSTANCE_ID"),
+            native_log_level=os.getenv("SIP_NATIVE_LOG_LEVEL", "warning"),
+            sip_trace=os.getenv("SIP_TRACE", "").lower() in ("1", "true", "yes"),
+            net_interface=os.getenv("SIP_NET_INTERFACE") or None,
+            jitter_buffer_mode=jitter_buffer_mode,
+            jitter_buffer_ms=jitter_buffer_ms,
+            session_id=str(uuid.uuid4()),
+        )
+        runner_args.handle_sigint = True
+        runner_args.cli_args = args
+
+        # A bot may need session data it would normally receive in the /start
+        # request body (e.g. a dial-out destination). The SIP transport has no
+        # such endpoint, so the body is read from a YAML or JSON file passed
+        # with --runner-body.
+        if args.runner_body:
+            runner_args.body = yaml.safe_load(Path(args.runner_body).read_text())
+
+        bot_module = _get_bot_module()
+
+        print(f"📞 SIP account: {config.user}@{config.domain}")
+        if config.sip_uri:
+            print(f"📞 Dial-in URI: {config.sip_uri}")
+        print()
+
+        try:
+            await bot_module.bot(runner_args)
+        finally:
+            await cleanup(session, config)
+
+
 async def _run_vonage():
     """Run Vonage bot (no FastAPI server)."""
     logger.info("Running Vonage transport...")
@@ -1946,6 +2057,7 @@ def main(parser: argparse.ArgumentParser | None = None):
             "eval",
             "livekit",
             "moq",
+            "sip",
             "vonage",
             "webrtc",
             "websocket",
@@ -2240,6 +2352,13 @@ def main(parser: argparse.ArgumentParser | None = None):
         print(f"🚀 Bot ready! (eval transport on ws://{args.host}:{args.port})")
         print()
         asyncio.run(_run_eval(args))
+        return
+
+    # Handle SIP transport (no FastAPI server — baresip registers with the
+    # SIP server itself)
+    if args.transport == "sip":
+        print()
+        asyncio.run(_run_sip(args))
         return
 
     # Print startup message
