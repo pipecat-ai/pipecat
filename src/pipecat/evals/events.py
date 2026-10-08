@@ -100,7 +100,7 @@ class EvalEventStream:
         # The events popped during the current turn, in order, and which of them
         # an expectation has claimed. An expectation looks for its event from
         # the point the turn had reached when it began, or from the start of the
-        # turn (``any_time_after: turn_start``), so an event popped on the way to
+        # turn (``look_back_to: turn_start``), so an event popped on the way to
         # another expectation's is not lost to one that may look back for it.
         self._turn_log: list[dict] = []
         self._claimed: set[int] = set()

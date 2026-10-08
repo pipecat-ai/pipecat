@@ -181,7 +181,9 @@ Supported expectation fields (per event):
 ``look_back_to: turn_start``
     Expectations are met in order: each is looked for only once the one
     above it has been met, and an event of another type that arrives in the
-    meantime is passed over. ``look_back_to: turn_start`` lets an expectation run against events since the beginning of the turn that were not used by the expectations above it. The default, ``previous``, looks only from
+    meantime is passed over. ``look_back_to: turn_start`` lets an expectation
+    run against events since the beginning of the turn that were not used by
+    the expectations above it. The default, ``previous``, looks only from
     where the expectation above it was met. Use it for an event whose timing
     the bot does not control, such as a call a backend makes at its own pace,
     or a reply some models give before the tool call that others give after::
