@@ -333,6 +333,92 @@ class TestCreateTransportSIP(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(transport._connection._settings.sip_trace)
 
 
+BODY_CLIENT = {
+    "username": "trunk-0a1b2c3d-9f8e7d6c5b4a3f2e",
+    "password": "per-call-secret",
+    "domain": "acme.sip-us.daily.co",
+    "transport": "tcp",
+}
+
+
+def _sip_params():
+    from pipecat.transports.sip.transport import SIPParams
+
+    return SIPParams(audio_in_enabled=True, audio_out_enabled=True)
+
+
+SIP_PARAMS = {"sip": _sip_params}
+
+
+class TestCreateTransportPlainArguments(unittest.IsolatedAsyncioTestCase):
+    """create_transport resolves a SIP account from plain runner arguments (the normal layer)."""
+
+    @unittest.skipUnless(BARESIP_AVAILABLE, "requires baresip-python")
+    async def test_body_sip_client_builds_sip_transport(self):
+        from pipecat.runner.types import RunnerArguments
+        from pipecat.transports.sip.transport import SIPTransport
+
+        args = RunnerArguments(
+            body={"sip_client": BODY_CLIENT, "call": {"From": "+1"}}, session_id="call-1"
+        )
+        with (
+            patch.dict("os.environ", {}, clear=True),
+            patch("pipecat.runner.sip.DailyRESTHelper") as helper_cls,
+        ):
+            transport = await create_transport(args, SIP_PARAMS)
+
+        helper_cls.assert_not_called()
+        self.assertIsInstance(transport, SIPTransport)
+        self.assertEqual(
+            transport._connection.aor, "sip:trunk-0a1b2c3d-9f8e7d6c5b4a3f2e@acme.sip-us.daily.co"
+        )
+        self.assertEqual(transport._connection._account.transport, "tcp")
+
+    @unittest.skipUnless(BARESIP_AVAILABLE, "requires baresip-python")
+    async def test_environment_account_builds_sip_transport(self):
+        from pipecat.runner.types import RunnerArguments
+
+        env = {"SIP_USER": "1001", "SIP_PASS": "secret", "SIP_DOMAIN": "sip.example.com"}
+        with (
+            patch.dict("os.environ", env, clear=True),
+            patch("pipecat.runner.sip.DailyRESTHelper") as helper_cls,
+        ):
+            transport = await create_transport(RunnerArguments(), SIP_PARAMS)
+
+        helper_cls.assert_not_called()
+        self.assertEqual(transport._connection.aor, "sip:1001@sip.example.com")
+
+    async def test_never_provisions(self):
+        from pipecat.runner.types import RunnerArguments
+
+        with (
+            patch.dict("os.environ", {"DAILY_API_KEY": "test-key"}, clear=True),
+            patch("pipecat.runner.sip.DailyRESTHelper") as helper_cls,
+        ):
+            with self.assertRaises(ValueError):
+                await create_transport(RunnerArguments(), SIP_PARAMS)
+            with self.assertRaises(ValueError):
+                await create_transport(RunnerArguments(body={"transport": "sip"}), SIP_PARAMS)
+
+        helper_cls.assert_not_called()
+
+    @unittest.skipUnless(DAILY_AVAILABLE, "requires the daily-python SDK")
+    async def test_daily_arguments_keep_the_daily_branch(self):
+        from pipecat.runner.types import DailyRunnerArguments
+
+        args = DailyRunnerArguments(
+            room_url="https://x.daily.co/r", token="t", body={"sip_client": BODY_CLIENT}
+        )
+        with (
+            patch.dict("os.environ", {}, clear=True),
+            patch("pipecat.transports.daily.transport.DailyTransport") as daily_cls,
+        ):
+            await create_transport(args, {"daily": lambda: MagicMock(), **SIP_PARAMS})
+
+        daily_cls.assert_called_once()
+        self.assertEqual(daily_cls.call_args.args[0], "https://x.daily.co/r")
+
+
 @unittest.skipUnless(DAILY_AVAILABLE, "requires the daily-python SDK")
 class TestMaybeApplyDailyDialin(unittest.IsolatedAsyncioTestCase):
     def _params(self):

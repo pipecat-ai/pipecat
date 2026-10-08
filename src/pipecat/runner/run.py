@@ -65,7 +65,7 @@ The ``/start`` endpoint accepts::
 
     {
         "transport": "webrtc",        // "webrtc" | "daily" | "livekit" | "twilio" |
-                                      // "telnyx" | "plivo" | "exotel" — default: "webrtc"
+                                      // "telnyx" | "plivo" | "exotel" | "sip" — default: "webrtc"
 
         // WebRTC-specific
         "enableDefaultIceServers": false,
@@ -93,6 +93,9 @@ To run locally:
   ``--moq-tls-generate localhost`` are the defaults)
 - MOQ (bot and browser both dial a relay): ``python bot.py -t moq --moq-connect
   https://cdn.moq.dev/anon``
+- SIP (server: ``/start`` with transport ``sip`` and the Daily SIP-trunk webhook at
+  ``/daily-sip-trunk-webhook``): ``python bot.py -t sip``
+- SIP (direct, one bot registers at once, no server): ``python bot.py -t sip -d``
 - Telephony: ``python bot.py -t twilio -x your_username.ngrok.io``
 - WebRTC only: ``python bot.py -t webrtc``
 - WhatsApp: ``python bot.py --whatsapp``
@@ -448,6 +451,17 @@ def _print_startup_message(args: argparse.Namespace):
                     f"http://{args.host}:{args.port}/daily-dialin-webhook"
                 )
                 print("   → Configure this URL in your Daily phone number settings")
+    elif args.transport == "sip":
+        print("🚀 Bot ready! (SIP)")
+        if not _transport_routes_enabled("sip"):
+            print(f"   → SIP disabled ({TRANSPORT_INSTALL_HINTS['sip']})")
+        else:
+            print(f"   → Start a session: POST http://{args.host}:{args.port}/start")
+            print(
+                f"   → Daily SIP-trunk webhook: "
+                f"http://{args.host}:{args.port}/daily-sip-trunk-webhook"
+            )
+            print("   → Point the trunk's notification webhook_url at it (through a tunnel)")
     elif args.transport == "livekit":
         print("🚀 Bot ready! (LiveKit)")
         if not _transport_routes_enabled("livekit"):
@@ -636,6 +650,7 @@ def _configure_server_app(args: argparse.Namespace):
     _setup_frontend_routes(app)
     _setup_webrtc_routes(app, args, active_sessions)
     _setup_daily_routes(app, args)
+    _setup_sip_routes(app, args)
     _setup_telephony_routes(app, args, ws_used_tokens)
     _setup_websocket_routes(app, args, ws_used_tokens)
     _setup_unified_start_route(app, args, active_sessions)
@@ -654,7 +669,15 @@ def _setup_unified_start_route(
     When ``-t`` was passed on the command line, requests for any other transport
     are rejected with HTTP 400.
     """
-    ALL_TRANSPORTS = ["webrtc", "daily", "livekit", *TELEPHONY_TRANSPORTS, "websocket", "moq"]
+    ALL_TRANSPORTS = [
+        "webrtc",
+        "daily",
+        "livekit",
+        *TELEPHONY_TRANSPORTS,
+        "websocket",
+        "moq",
+        "sip",
+    ]
 
     @app.get("/status")
     async def status():
@@ -690,7 +713,7 @@ def _setup_unified_start_route(
 
             {
                 "transport": "webrtc",        // "webrtc" | "daily" | "livekit" | "twilio" |
-                                              // "telnyx" | "plivo" | "exotel" — default: "webrtc"
+                                              // "telnyx" | "plivo" | "exotel" | "sip" — default: "webrtc"
 
                 // WebRTC-specific
                 "enableDefaultIceServers": false,
@@ -707,6 +730,10 @@ def _setup_unified_start_route(
         was started with (``--ice-servers`` or ``PIPECAT_ICE_SERVERS``). When the
         runner has none, ``enableDefaultIceServers`` returns a public STUN server
         instead.
+
+        For SIP, the account comes from ``body.sip_client`` (what a Daily SIP
+        trunk sends per call), else the environment, else a provisioned Daily
+        SIP client; see :mod:`pipecat.runner.sip`. The bot registers at once.
         """
         try:
             request_data = await request.json()
@@ -853,6 +880,30 @@ def _setup_unified_start_route(
                 token=user_token,
                 sessionId=session_id,
             )
+
+        elif transport == "sip":
+            # SIP: the body is what Pipecat Cloud would pass through to the bot; the account
+            # is resolved from it (or the environment, or by provisioning) and the bot
+            # registers at once and waits for its call.
+            from pipecat.runner.sip import configure, sip_runner_arguments
+
+            body = request_data.get("body", {})
+            session_id = str(uuid.uuid4())
+            async with aiohttp.ClientSession() as session:
+                try:
+                    config = await configure(session, body=body)
+                except Exception as e:
+                    raise HTTPException(status_code=400, detail=f"SIP account: {e}")
+            base = RunnerArguments(body=body, session_id=session_id)
+            base.cli_args = args
+            try:
+                runner_args = sip_runner_arguments(config, base)
+            except ValueError as e:
+                raise HTTPException(status_code=500, detail=str(e))
+
+            bot_module = _get_bot_module()
+            _start_bot_session(bot_module.bot(runner_args))
+            return StartBotResult(sessionId=session_id)
 
         elif transport in TELEPHONY_TRANSPORTS:
             # Telephony: the bot starts when the provider connects to /ws.
@@ -1403,6 +1454,90 @@ def _setup_daily_routes(app: FastAPI, args: argparse.Namespace):
             }
 
 
+def _setup_sip_routes(app: FastAPI, args: argparse.Namespace):
+    """Set up the Daily SIP-trunk webhook at ``POST /daily-sip-trunk-webhook``.
+
+    A local stand-in for Pipecat Cloud's handler of Daily SIP-trunk
+    notifications, the way ``/daily-dialin-webhook`` stands in for the PSTN
+    dial-in one. A ``sip_client`` trunk provisions a SIP client for each call
+    and POSTs it to the trunk's ``webhook_url``; this route starts the bot on
+    that account and answers at once, while the registrar holds the caller
+    until the bot's REGISTER lands. Like the dial-in route it does not verify
+    the notification's signature; the cloud handler does.
+
+    Expected notification::
+
+        {
+            "event": "sip_trunk.incoming",
+            "sip_client": {"username": ..., "password": ..., "domain": ..., "transport": ...},
+            "call": {"sipCallIdHeader": ..., "From": ..., "To": ..., ...},
+            ...
+        }
+
+    The create-time ``sip_trunk.test`` probe is acknowledged and starts
+    nothing. A notification without a usable ``sip_client`` is refused rather
+    than served from the environment: the caller is addressed to the
+    per-call credential, so no other account could take the call. The whole
+    notification reaches the bot as ``runner_args.body``.
+    """
+    if not _transport_routes_enabled("sip"):
+        return
+
+    @app.post("/daily-sip-trunk-webhook")
+    async def handle_sip_trunk_webhook(request: Request):
+        try:
+            data = await request.json()
+        except Exception as e:
+            logger.error(f"Failed to parse SIP-trunk notification: {e}")
+            raise HTTPException(status_code=400, detail="Invalid JSON payload")
+        if not isinstance(data, dict):
+            raise HTTPException(status_code=400, detail="Invalid JSON payload")
+
+        if data.get("event") == "sip_trunk.test":
+            logger.debug("SIP-trunk webhook test received")
+            return {"status": "OK"}
+
+        sip_client = data.get("sip_client")
+        call = data.get("call")
+        if not (
+            isinstance(sip_client, dict)
+            and all(sip_client.get(key) for key in ("username", "password", "domain"))
+            and isinstance(call, dict)
+            and call.get("sipCallIdHeader")
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Missing required fields: sip_client.username, sip_client.password, "
+                    "sip_client.domain, call.sipCallIdHeader"
+                ),
+            )
+
+        session_id = call["sipCallIdHeader"]
+        signed = "x-siptrunk-signature" in request.headers
+        logger.info(
+            f"SIP-trunk call {session_id} from {call.get('From')} to {call.get('To')}"
+            f"{' (duplicate)' if call.get('duplicate') else ''}: "
+            f"{'signed' if signed else 'unsigned'} notification, "
+            f"registrar hint {sip_client.get('preferred_registrar_ip')}"
+        )
+
+        from pipecat.runner.sip import configure, sip_runner_arguments
+
+        async with aiohttp.ClientSession() as session:
+            config = await configure(session, body=data)
+        base = RunnerArguments(body=data, session_id=session_id)
+        base.cli_args = args
+        try:
+            runner_args = sip_runner_arguments(config, base)
+        except ValueError as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
+        bot_module = _get_bot_module()
+        _start_bot_session(bot_module.bot(runner_args))
+        return {"status": "OK", "sessionId": session_id}
+
+
 def _setup_telephony_routes(app: FastAPI, args: argparse.Namespace, ws_used_tokens: set[str]):
     """Set up telephony-specific routes.
 
@@ -1543,99 +1678,40 @@ async def _run_eval(args: argparse.Namespace):
 
 
 async def _run_sip(args: argparse.Namespace):
-    """Run a bot with the SIP transport (no FastAPI server).
+    """Run a bot with the SIP transport immediately (no FastAPI server).
 
     baresip registers with the SIP server itself, so there is no HTTP
-    signaling route. The account is read from the ``SIP_USER``, ``SIP_PASS``,
-    ``SIP_DOMAIN``, and ``SIP_TRANSPORT`` environment variables — plus
-    ``SIP_AUDIO_CODECS`` (comma-separated codec preference list),
-    ``SIP_AUTH_USER`` (credential-list digest username),
-    ``SIP_EXTRA_PARAMS`` (comma-separated ``key=value`` account parameters
-    passed verbatim to the baresip account, e.g.
-    ``medianat=stun,stunserver=stun:HOST:PORT``, or
-    ``medianat=turn,stunserver=turn:HOST:3478,stunuser=USER,stunpass=PASS``
-    behind a symmetric NAT),
-    ``SIP_STUN_SERVER`` (STUN server for the default media-NAT traversal — when
-    ``SIP_EXTRA_PARAMS`` is not set, the runner adds ``medianat=stun`` with this
-    server, default stun.l.google.com; the address it advertises reaches the bot
-    through an endpoint-independent NAT but not a symmetric one; set to ``off``
-    to disable),
-    ``SIP_REG_INTERVAL`` (0 for registration-less trunk mode),
-    ``SIP_RTP_TIMEOUT`` (dead-call detection, seconds; 0 disables),
-    ``SIP_INSTANCE_ID`` (a stable UUID for RFC 5626 ``+sip.instance``),
-    ``SIP_NET_INTERFACE`` (restrict the stack to one local interface, e.g.
-    ``127.0.0.1`` for a registrar on loopback), ``SIP_JITTER_BUFFER`` (the
-    receive jitter buffer: ``off``, ``fixed:MIN-MAX`` or ``adaptive:MIN-MAX``
-    in milliseconds; unset selects the transport's default, a fixed
-    40–60 ms), ``SIP_NATIVE_LOG_LEVEL``
-    (native stack log capture), and ``SIP_TRACE`` (verbatim SIP message
-    trace) — and the bot function is invoked directly. Without a configured
-    account, a temporary SIP client is provisioned on the Daily domain
-    (``DAILY_API_KEY``) and deleted again when the bot exits.
+    signaling route. The account comes from ``--runner-body`` (a YAML or JSON
+    file whose ``sip_client`` block names it), else the environment, else a
+    temporary Daily SIP client provisioned on the Daily domain and deleted
+    again when the bot exits. The environment's SIP settings are applied by
+    :func:`pipecat.runner.sip.sip_runner_arguments`, which lists them. The
+    body file is also what the bot receives as ``runner_args.body`` (e.g. a
+    dial-out destination), since this mode has no ``/start`` request.
     """
     logger.info("Running with SIP transport...")
 
-    from pipecat.runner.sip import (
-        cleanup,
-        configure,
-        parse_jitter_buffer,
-        resolve_media_nat_params,
-    )
+    from pipecat.runner.sip import cleanup, configure, sip_runner_arguments
+
+    body = yaml.safe_load(Path(args.runner_body).read_text()) if args.runner_body else None
+    if body is None:
+        body = {}
 
     async with aiohttp.ClientSession() as session:
         try:
-            config = await configure(session)
+            config = await configure(session, body=body)
         except Exception as e:
             logger.error(f"SIP transport: {e}")
             raise SystemExit(1)
 
+        base = RunnerArguments(body=body, session_id=str(uuid.uuid4()))
+        base.handle_sigint = True
+        base.cli_args = args
         try:
-            reg_interval = int(os.getenv("SIP_REG_INTERVAL", "600"))
-            rtp_timeout = int(os.getenv("SIP_RTP_TIMEOUT", "0"))
-        except ValueError:
-            logger.error("SIP_REG_INTERVAL and SIP_RTP_TIMEOUT must be integers (seconds).")
-            raise SystemExit(1)
-        try:
-            jitter_buffer_mode, jitter_buffer_ms = parse_jitter_buffer(
-                os.getenv("SIP_JITTER_BUFFER")
-            )
+            runner_args = sip_runner_arguments(config, base)
         except ValueError as e:
-            logger.error(f"SIP_JITTER_BUFFER: {e}")
+            logger.error(f"SIP transport: {e}")
             raise SystemExit(1)
-
-        codecs = os.getenv("SIP_AUDIO_CODECS")
-        # SIP_EXTRA_PARAMS wins verbatim; otherwise medianat=stun is enabled by
-        # default for NAT traversal. See runner.sip.resolve_media_nat_params.
-        extra_params = resolve_media_nat_params(os.getenv("SIP_EXTRA_PARAMS"))
-        runner_args = SIPRunnerArguments(
-            user=config.user,
-            domain=config.domain,
-            password=config.password,
-            transport=config.transport,
-            audio_codecs=tuple(c.strip() for c in codecs.split(",") if c.strip())
-            if codecs
-            else None,
-            auth_user=os.getenv("SIP_AUTH_USER"),
-            extra_params=extra_params,
-            reg_interval=reg_interval,
-            rtp_timeout=rtp_timeout,
-            instance_id=os.getenv("SIP_INSTANCE_ID"),
-            native_log_level=os.getenv("SIP_NATIVE_LOG_LEVEL", "warning"),
-            sip_trace=os.getenv("SIP_TRACE", "").lower() in ("1", "true", "yes"),
-            net_interface=os.getenv("SIP_NET_INTERFACE") or None,
-            jitter_buffer_mode=jitter_buffer_mode,
-            jitter_buffer_ms=jitter_buffer_ms,
-            session_id=str(uuid.uuid4()),
-        )
-        runner_args.handle_sigint = True
-        runner_args.cli_args = args
-
-        # A bot may need session data it would normally receive in the /start
-        # request body (e.g. a dial-out destination). The SIP transport has no
-        # such endpoint, so the body is read from a YAML or JSON file passed
-        # with --runner-body.
-        if args.runner_body:
-            runner_args.body = yaml.safe_load(Path(args.runner_body).read_text())
 
         bot_module = _get_bot_module()
 
@@ -1798,10 +1874,11 @@ def main(parser: argparse.ArgumentParser | None = None):
        - --host: Server host address (default: localhost)
        - --port: Server port (default: 7860)
        - -t/--transport: Restrict to a single transport and set as default for /start
-         (daily, livekit, webrtc, websocket, twilio, telnyx, plivo, exotel). Omit to support
+         (daily, livekit, sip, webrtc, websocket, twilio, telnyx, plivo, exotel). Omit to support
          all transports.
        - -x/--proxy: Public proxy hostname for telephony webhooks
-       - -d/--direct: Connect directly to Daily room (automatically sets transport to daily)
+       - -d/--direct: Run the bot immediately with no HTTP server: join the Daily room
+         (the default, sets transport to daily) or register the SIP account (-t sip)
        - -f/--folder: Path to downloads folder
        - --dialin/--no-dialin: Mount the Daily PSTN dial-in webhook for -t daily
          (on by default; --no-dialin disables it)
@@ -1851,7 +1928,10 @@ def main(parser: argparse.ArgumentParser | None = None):
         "--direct",
         action="store_true",
         default=False,
-        help="Connect directly to Daily room (automatically sets transport to daily)",
+        help=(
+            "Run the bot immediately with no HTTP server: join the Daily room (default, "
+            "sets transport to daily) or register the SIP account (-t sip)"
+        ),
     )
     parser.add_argument("-f", "--folder", type=str, help="Path to downloads folder")
     parser.add_argument(
@@ -2045,12 +2125,14 @@ def main(parser: argparse.ArgumentParser | None = None):
         logger.error(f"Invalid ICE server configuration: {e}")
         return
 
-    # --direct implies Daily transport
+    # --direct implies Daily transport unless SIP was asked for
     if args.direct:
         if args.transport is None or args.transport == "daily":
             args.transport = "daily"
-        else:
-            logger.error("--direct flag only works with Daily transport (-t daily)")
+        elif args.transport != "sip":
+            logger.error(
+                "--direct works with the Daily (-t daily) and SIP (-t sip) transports only"
+            )
             return
 
     # Resolve MoQ args (parses --moq-connect, applies serve-mode defaults,
@@ -2076,9 +2158,13 @@ def main(parser: argparse.ArgumentParser | None = None):
     # Print overall dev runner banner
     _print_dev_runner_banner()
 
-    # Handle direct Daily connection (no FastAPI server)
+    # Handle direct connections (no FastAPI server): the SIP account registers at
+    # once, or the Daily room is joined
     if args.direct:
         print()
+        if args.transport == "sip":
+            asyncio.run(_run_sip(args))
+            return
         print("🚀 Connecting directly to Daily room...")
         print()
 
@@ -2093,13 +2179,6 @@ def main(parser: argparse.ArgumentParser | None = None):
         print(f"🚀 Bot ready! (eval transport on ws://{args.host}:{args.port})")
         print()
         asyncio.run(_run_eval(args))
-        return
-
-    # Handle SIP transport (no FastAPI server — baresip registers with the
-    # SIP server itself)
-    if args.transport == "sip":
-        print()
-        asyncio.run(_run_sip(args))
         return
 
     # Print startup message

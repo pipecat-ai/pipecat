@@ -281,7 +281,13 @@ class SIPRunnerArguments(RunnerArguments):
     ``SIP_DOMAIN``, the runner provisions a temporary SIP client on the Daily
     domain instead (``DAILY_API_KEY``) and deletes it when the bot exits.
     For debugging, ``SIP_NATIVE_LOG_LEVEL`` and ``SIP_TRACE`` control the
-    native stack's logging.
+    native stack's logging. The account may also arrive in the request body
+    as ``body["sip_client"]`` (a Daily SIP-trunk notification), which
+    :func:`pipecat.runner.sip.configure` reads first. Building this type by
+    hand is the advanced layer: :func:`pipecat.runner.sip.sip_runner_arguments`
+    builds it from an account and the environment, and
+    :func:`pipecat.runner.utils.create_transport` does so itself for plain
+    ``RunnerArguments`` whose body or environment holds the account.
 
     Parameters:
         user: The user part of ``sip:user@domain``.

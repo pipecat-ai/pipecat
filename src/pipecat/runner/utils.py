@@ -596,6 +596,48 @@ def _maybe_apply_daily_dialin(params: Any, body: Any) -> None:
     params.api_url = request.daily_api_url
 
 
+def _sip_account_available(runner_args: Any) -> bool:
+    """Whether plain runner arguments can be served by the SIP transport.
+
+    True when the body carries a ``sip_client`` block (a Daily SIP-trunk
+    notification) or the environment holds an account. Never true for the
+    provisioning case alone: a bot that passes plain arguments by mistake must
+    not silently create a Daily SIP client.
+    """
+    body = getattr(runner_args, "body", None)
+    if isinstance(body, dict) and isinstance(body.get("sip_client"), dict):
+        return True
+    return bool(os.getenv("SIP_USER") and os.getenv("SIP_DOMAIN"))
+
+
+def _create_sip_transport(
+    runner_args: SIPRunnerArguments, transport_params: dict[str, Callable]
+) -> BaseTransport:
+    params = _get_transport_params("sip", transport_params)
+
+    from pipecat.transports.sip.connection import SIPConnection
+    from pipecat.transports.sip.transport import SIPTransport
+
+    connection = SIPConnection(
+        user=runner_args.user,
+        domain=runner_args.domain,
+        password=runner_args.password,
+        transport=runner_args.transport,
+        audio_codecs=runner_args.audio_codecs,
+        auth_user=runner_args.auth_user,
+        extra_params=runner_args.extra_params,
+        reg_interval=runner_args.reg_interval,
+        rtp_timeout=runner_args.rtp_timeout,
+        instance_id=runner_args.instance_id,
+        native_log_level=runner_args.native_log_level,
+        sip_trace=runner_args.sip_trace,
+        net_interface=runner_args.net_interface,
+        jitter_buffer_mode=runner_args.jitter_buffer_mode,
+        jitter_buffer_ms=runner_args.jitter_buffer_ms,
+    )
+    return SIPTransport(connection, params=params)
+
+
 async def create_transport(
     runner_args: Any, transport_params: dict[str, Callable]
 ) -> BaseTransport:
@@ -603,6 +645,16 @@ async def create_transport(
 
     This function uses the clean transport_params factory pattern where users
     define a dictionary mapping transport names to parameter factory functions.
+
+    SIP needs no transport-specific arguments from the bot. Plain
+    ``RunnerArguments`` whose body carries a ``sip_client`` block (a Daily
+    SIP-trunk notification, what Pipecat Cloud passes through) or whose
+    environment holds ``SIP_USER``/``SIP_PASS``/``SIP_DOMAIN`` build the SIP
+    transport too: the account is resolved with
+    :func:`pipecat.runner.sip.configure` and converted with
+    :func:`pipecat.runner.sip.sip_runner_arguments`, the same path the
+    development runner takes. A temporary Daily SIP client is never
+    provisioned here; call ``configure()`` yourself for that.
 
     Args:
         runner_args: Arguments from the runner.
@@ -741,29 +793,7 @@ async def create_transport(
             port=runner_args.port,
         )
     elif isinstance(runner_args, SIPRunnerArguments):
-        params = _get_transport_params("sip", transport_params)
-
-        from pipecat.transports.sip.connection import SIPConnection
-        from pipecat.transports.sip.transport import SIPTransport
-
-        connection = SIPConnection(
-            user=runner_args.user,
-            domain=runner_args.domain,
-            password=runner_args.password,
-            transport=runner_args.transport,
-            audio_codecs=runner_args.audio_codecs,
-            auth_user=runner_args.auth_user,
-            extra_params=runner_args.extra_params,
-            reg_interval=runner_args.reg_interval,
-            rtp_timeout=runner_args.rtp_timeout,
-            instance_id=runner_args.instance_id,
-            native_log_level=runner_args.native_log_level,
-            sip_trace=runner_args.sip_trace,
-            net_interface=runner_args.net_interface,
-            jitter_buffer_mode=runner_args.jitter_buffer_mode,
-            jitter_buffer_ms=runner_args.jitter_buffer_ms,
-        )
-        return SIPTransport(connection, params=params)
+        return _create_sip_transport(runner_args, transport_params)
     elif isinstance(runner_args, VonageRunnerArguments):
         from pipecat.transports.vonage.video_connector import (
             VonageVideoConnectorTransport,
@@ -834,5 +864,15 @@ async def create_transport(
 
         return transport
 
+    elif _sip_account_available(runner_args):
+        # Plain arguments with a SIP account in the body or the environment: resolve and
+        # convert them here so the bot writes the same line it would under the runner.
+        import aiohttp
+
+        from pipecat.runner.sip import configure, sip_runner_arguments
+
+        async with aiohttp.ClientSession() as session:
+            config = await configure(session, body=getattr(runner_args, "body", None))
+        return _create_sip_transport(sip_runner_arguments(config, runner_args), transport_params)
     else:
         raise ValueError(f"Unsupported runner arguments type: {type(runner_args)}")

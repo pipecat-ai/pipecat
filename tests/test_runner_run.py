@@ -24,6 +24,7 @@ from pipecat.runner.run import (
     _parse_ice_servers,
     _print_startup_message,
     _setup_daily_routes,
+    _setup_sip_routes,
     _setup_telephony_routes,
     _setup_unified_start_route,
     _setup_webrtc_routes,
@@ -302,6 +303,169 @@ class TestRunnerRun(unittest.TestCase):
         paths = {route.path for route in app.routes}
         self.assertIn("/daily", paths)
         self.assertIn("/daily-dialin-webhook", paths)
+
+    # --- SIP: the trunk webhook and /start with transport "sip" -------------------------
+
+    SIP_CLIENT = {
+        "username": "trunk-0a1b2c3d-9f8e7d6c5b4a3f2e",
+        "password": "per-call-secret",
+        "domain": "acme.sip-us.daily.co",
+        "transport": "udp",
+    }
+
+    def _notification(self, **overrides):
+        return {
+            "event": "sip_trunk.incoming",
+            "trunk": {"id": "trunk-1", "trunk_name": "support"},
+            "sip_client": self.SIP_CLIENT,
+            "call": {"sipCallIdHeader": "call-abc", "From": "+15550001", "To": "sip:x"},
+            "domain": "acme",
+            **overrides,
+        }
+
+    def _sip_webhook_app(self):
+        app = FastAPI()
+        with patch("pipecat.runner.run._transport_routes_enabled", return_value=True):
+            _setup_sip_routes(app, argparse.Namespace(transport="sip"))
+        bot_module = MagicMock()
+        start = patch("pipecat.runner.run._start_bot_session")
+        get_bot = patch("pipecat.runner.run._get_bot_module", return_value=bot_module)
+        return app, bot_module, start, get_bot
+
+    def test_setup_sip_routes_skips_when_sip_is_missing(self):
+        app = FastAPI()
+        with patch("pipecat.runner.run._transport_routes_enabled", return_value=False):
+            _setup_sip_routes(app, argparse.Namespace(transport="sip"))
+        self.assertNotIn("/daily-sip-trunk-webhook", {route.path for route in app.routes})
+
+    def test_setup_sip_routes_registers_the_trunk_webhook(self):
+        app = FastAPI()
+        with patch("pipecat.runner.run._transport_routes_enabled", return_value=True):
+            _setup_sip_routes(app, argparse.Namespace(transport="sip"))
+        self.assertIn("/daily-sip-trunk-webhook", {route.path for route in app.routes})
+
+    def test_sip_trunk_webhook_rejects_non_json(self):
+        app, bot_module, start, get_bot = self._sip_webhook_app()
+        with start as start_mock, get_bot:
+            response = TestClient(app).post(
+                "/daily-sip-trunk-webhook",
+                content="not json",
+                headers={"Content-Type": "application/json"},
+            )
+        self.assertEqual(response.status_code, 400)
+        start_mock.assert_not_called()
+
+    def test_sip_trunk_webhook_acknowledges_the_test_probe_without_starting(self):
+        app, bot_module, start, get_bot = self._sip_webhook_app()
+        with start as start_mock, get_bot, patch.dict("os.environ", {}, clear=True):
+            response = TestClient(app).post(
+                "/daily-sip-trunk-webhook", json={"event": "sip_trunk.test", "timestamp": 1}
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"status": "OK"})
+        start_mock.assert_not_called()
+        bot_module.bot.assert_not_called()
+
+    def test_sip_trunk_webhook_never_falls_back_to_the_environment_account(self):
+        app, bot_module, start, get_bot = self._sip_webhook_app()
+        env = {"SIP_USER": "1001", "SIP_PASS": "secret", "SIP_DOMAIN": "sip.example.com"}
+        for body in (
+            self._notification(sip_client=None),
+            self._notification(sip_client={"username": "u", "domain": "d"}),
+            self._notification(call={}),
+        ):
+            with self.subTest(body=body), start as start_mock, get_bot:
+                with patch.dict("os.environ", env, clear=True):
+                    response = TestClient(app).post("/daily-sip-trunk-webhook", json=body)
+                self.assertEqual(response.status_code, 400)
+                self.assertIn("sip_client", response.json()["detail"])
+                start_mock.assert_not_called()
+
+    def test_sip_trunk_webhook_starts_the_bot_on_the_notified_account(self):
+        from pipecat.runner.types import SIPRunnerArguments
+
+        app, bot_module, start, get_bot = self._sip_webhook_app()
+        notification = self._notification()
+        with start as start_mock, get_bot, patch.dict("os.environ", {}, clear=True):
+            response = TestClient(app).post("/daily-sip-trunk-webhook", json=notification)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"status": "OK", "sessionId": "call-abc"})
+        start_mock.assert_called_once()
+        runner_args = bot_module.bot.call_args.args[0]
+        self.assertIsInstance(runner_args, SIPRunnerArguments)
+        self.assertEqual(runner_args.user, self.SIP_CLIENT["username"])
+        self.assertEqual(runner_args.password, "per-call-secret")
+        self.assertEqual(runner_args.domain, "acme.sip-us.daily.co")
+        self.assertEqual(runner_args.transport, "udp")
+        self.assertEqual(runner_args.body, notification)
+        self.assertEqual(runner_args.session_id, "call-abc")
+        self.assertFalse(runner_args.handle_sigint)
+
+    def _start_app(self, transport=None):
+        app = FastAPI()
+        _setup_unified_start_route(app, argparse.Namespace(transport=transport, ice_servers=[]), {})
+        return app
+
+    def test_start_sip_starts_the_bot_from_the_body_account(self):
+        from pipecat.runner.types import SIPRunnerArguments
+
+        bot_module = MagicMock()
+        with (
+            patch("pipecat.runner.run._transport_routes_enabled", return_value=True),
+            patch("pipecat.runner.run._get_bot_module", return_value=bot_module),
+            patch("pipecat.runner.run._start_bot_session") as start_mock,
+            patch.dict("os.environ", {}, clear=True),
+        ):
+            response = TestClient(self._start_app()).post(
+                "/start", json={"transport": "sip", "body": {"sip_client": self.SIP_CLIENT}}
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("sessionId", response.json())
+        start_mock.assert_called_once()
+        runner_args = bot_module.bot.call_args.args[0]
+        self.assertIsInstance(runner_args, SIPRunnerArguments)
+        self.assertEqual(runner_args.user, self.SIP_CLIENT["username"])
+        self.assertEqual(runner_args.body, {"sip_client": self.SIP_CLIENT})
+        self.assertEqual(runner_args.session_id, response.json()["sessionId"])
+
+    def test_start_sip_without_any_account_is_a_400(self):
+        with (
+            patch("pipecat.runner.run._transport_routes_enabled", return_value=True),
+            patch("pipecat.runner.run._get_bot_module") as get_bot,
+            patch("pipecat.runner.run._start_bot_session") as start_mock,
+            patch("pipecat.runner.sip.DailyRESTHelper") as helper_cls,
+            patch.dict("os.environ", {}, clear=True),
+        ):
+            response = TestClient(self._start_app()).post("/start", json={"transport": "sip"})
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("SIP account", response.json()["detail"])
+        helper_cls.assert_not_called()
+        get_bot.assert_not_called()
+        start_mock.assert_not_called()
+
+    def test_start_sip_is_rejected_by_a_daily_only_server(self):
+        with patch("pipecat.runner.run._transport_routes_enabled", return_value=True):
+            response = TestClient(self._start_app(transport="daily")).post(
+                "/start", json={"transport": "sip", "body": {"sip_client": self.SIP_CLIENT}}
+            )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("not allowed", response.json()["detail"])
+
+    def test_startup_message_sip_lists_start_and_the_trunk_webhook(self):
+        args = argparse.Namespace(transport="sip", host="localhost", port=7860)
+
+        with patch("pipecat.runner.run._transport_routes_enabled", return_value=True):
+            output = self._capture_startup_message(args)
+        self.assertIn("Bot ready! (SIP)", output)
+        self.assertIn("POST http://localhost:7860/start", output)
+        self.assertIn("http://localhost:7860/daily-sip-trunk-webhook", output)
+
+        with patch("pipecat.runner.run._transport_routes_enabled", return_value=False):
+            output = self._capture_startup_message(args)
+        self.assertIn("SIP disabled", output)
 
     def test_websocket_routes_require_fastapi_and_websockets(self):
         with patch(
