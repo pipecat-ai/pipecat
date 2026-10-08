@@ -37,17 +37,13 @@ computed message — following the template above::
             Will be removed in 2.0.0.
         \"\"\"
 
-**Everything else — parameters, module moves, behavior/value changes:** the
-decorator cannot mark these, so emit a ``DeprecationWarning`` by hand with
-``warnings.warn(..., DeprecationWarning)``. These do not get static-checker
-detection, but the ``.. deprecated::`` directive (below) still records them for
-documentation and tooling.
-
-**Fields whose reads are intercepted:** a field that warns from
-``__getattribute__`` is read wherever its object travels, so warn through
-:func:`warn_deprecated_read` rather than by hand. A bare ``warnings.warn`` under
-the ``always`` filter repeats itself without bound; the helper warns once per
-call site.
+**Everything else — parameters, fields, module moves, behavior/value changes:**
+the decorator cannot mark these, so warn with :func:`warn_deprecated`, never a
+bare ``warnings.warn``. These do not get static-checker detection, but the
+``.. deprecated::`` directive (below) still records them for documentation and
+tooling. Pass the message as a string or f-string literal so
+``tests/test_deprecation_markers.py`` can check it against the template, and set
+``stacklevel`` so the warning names the caller's line.
 
 In all cases, add a ``.. deprecated:: X.Y.Z`` directive to the docstring (for a
 parameter, in its ``Args:`` / ``Parameters:`` entry). The directive is the
