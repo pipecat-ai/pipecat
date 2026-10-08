@@ -8,15 +8,20 @@ import unittest
 
 from pipecat.frames.frames import (
     ImageRawFrame,
+    LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     OutputAudioRawFrame,
     OutputImageRawFrame,
+    StartFrame,
     TextFrame,
 )
 from pipecat.processors.aggregators.gated import GatedAggregator
+from pipecat.processors.aggregators.gated_llm_context import GatedLLMContextAggregator
+from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.sentence import SentenceAggregator
 from pipecat.tests.utils import run_test
+from pipecat.utils.sync.event_notifier import EventNotifier
 
 
 class TestSentenceAggregator(unittest.IsolatedAsyncioTestCase):
@@ -73,6 +78,25 @@ class TestGatedAggregator(unittest.IsolatedAsyncioTestCase):
             gated_aggregator,
             frames_to_send=frames_to_send,
             expected_down_frames=expected_down_frames,
+        )
+
+
+class TestGatedLLMContextAggregator(unittest.IsolatedAsyncioTestCase):
+    async def test_gated_llm_context_aggregator(self):
+        gated_aggregator = GatedLLMContextAggregator(notifier=EventNotifier())
+
+        frames_to_send = [
+            TextFrame("Hello"),
+            LLMContextFrame(context=LLMContext()),
+        ]
+
+        expected_down_frames = [StartFrame, TextFrame]
+
+        await run_test(
+            gated_aggregator,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+            ignore_start=False,
         )
 
 

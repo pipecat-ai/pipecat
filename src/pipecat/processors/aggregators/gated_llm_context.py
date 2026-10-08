@@ -45,7 +45,7 @@ class GatedLLMContextAggregator(FrameProcessor):
         if isinstance(frame, StartFrame):
             await self.push_frame(frame)
             await self._start()
-        if isinstance(frame, (EndFrame, CancelFrame)):
+        elif isinstance(frame, (EndFrame, CancelFrame)):
             await self._stop()
             await self.push_frame(frame)
         elif isinstance(frame, LLMContextFrame):
