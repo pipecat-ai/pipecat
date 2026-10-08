@@ -18,7 +18,7 @@
       calls:
         - name: delegate
     - event: response
-      # Judged after the delegate call, with no any_time_after: a model that also
+      # Judged after the delegate call, with no look_back_to: a model that also
       # speaks beside the call says a second sentence on the call's result, and
       # the absence check below must find nothing after the one judged here.
       within_ms: 25000

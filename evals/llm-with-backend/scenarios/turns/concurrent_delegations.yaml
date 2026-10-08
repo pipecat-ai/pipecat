@@ -14,7 +14,7 @@
       within_ms: 25000
       eval: "acknowledges that it is starting on the fix; speaks as itself, without mentioning a backend or handing work off"
       text_excludes: "backend"
-      any_time_after: turn_start  # some models say it before the delegate call
+      look_back_to: turn_start  # some models say it before the delegate call
 
 - user: "Oh, and also, look up what the on-call runbook says to do about upstream timeouts."
   send_after:
@@ -27,7 +27,7 @@
       within_ms: 25000
       eval: "acknowledges the research request, without claiming to have the answer yet (an acknowledgement that it is looking it up is enough: answer yes); speaks as itself, without mentioning a backend or handing work off"
       text_excludes: "backend"
-      any_time_after: turn_start  # some models say it before the delegate call
+      look_back_to: turn_start  # some models say it before the delegate call
 
 # No user turn: both results arrive on their own. The lookup is quick and
 # usually comes first, but the two may share one reply, so one turn waits for
@@ -37,12 +37,12 @@
       within_ms: 200000
       calls:
         - name: apply_patch
-      any_time_after: turn_start  # the backend's call, in its own time
+      look_back_to: turn_start  # the backend's call, in its own time
     - event: function_call
       within_ms: 200000
       calls:
         - name: run_tests
-      any_time_after: turn_start  # the backend's call, in its own time
+      look_back_to: turn_start  # the backend's call, in its own time
     - event: response
       within_ms: 200000
       eval: "answer continue, not no, while only one of these two has been reported so far; answer yes once both have been, in either order: what the on-call runbook says about upstream timeouts (check the upstream's status page, then the retry dashboard for a spike in exhausted retries), and that the retry test was fixed and the tests now pass"

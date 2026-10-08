@@ -13,7 +13,7 @@
       within_ms: 25000
       eval: "acknowledges that it is starting on the fix; speaks as itself, without mentioning a backend or handing work off"
       text_excludes: "backend"
-      any_time_after: turn_start  # some models say it before the delegate call
+      look_back_to: turn_start  # some models say it before the delegate call
 
 - user: "While we wait, what's the capital of Australia?"
   send_after:
@@ -45,12 +45,12 @@
       within_ms: 150000
       calls:
         - name: apply_patch
-      any_time_after: turn_start  # the backend's call, in its own time
+      look_back_to: turn_start  # the backend's call, in its own time
     - event: function_call
       within_ms: 150000
       calls:
         - name: run_tests
-      any_time_after: turn_start  # the backend's call, in its own time
+      look_back_to: turn_start  # the backend's call, in its own time
     - event: response
       within_ms: 150000
       eval: "reports, on its own, that the retry test was fixed and the tests now pass (if the bot only reports progress or says the work is still underway, answer continue, not no: the report has not come yet)"

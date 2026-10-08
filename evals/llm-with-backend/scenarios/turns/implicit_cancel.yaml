@@ -27,7 +27,7 @@
     # The acknowledgement and the cancellation land in either order: the
     # cascades acknowledge first, the speech-to-speech bots cancel first.
     - event: response
-      # Judged after the delegate call, with no any_time_after: a model that also
+      # Judged after the delegate call, with no look_back_to: a model that also
       # speaks beside the call says a second sentence on the call's result, and
       # the absence check below must find nothing after the one judged here.
       within_ms: 25000
@@ -38,7 +38,7 @@
       calls:
         - name: run_integration_tests
           args: { cancelled: true }
-      any_time_after: turn_start  # the backend stops it in its own time
+      look_back_to: turn_start  # the backend stops it in its own time
     - event: response
       absent: true
       within_ms: 30000

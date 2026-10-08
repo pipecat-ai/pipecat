@@ -28,13 +28,13 @@
       within_ms: 60000
       eval: "reports what the runbook says about upstream timeouts (check the upstream's status page, then the retry dashboard) and does not report any test results (if the bot has only acknowledged so far, answer continue, not no)"
       text_excludes: "backend"
-      any_time_after: turn_start  # some models say it before the delegate call
+      look_back_to: turn_start  # some models say it before the delegate call
     - event: function_call_stopped
       within_ms: 60000
       calls:
         - name: run_integration_tests
           args: { cancelled: true }
-      any_time_after: turn_start  # the backend stops it in its own time
+      look_back_to: turn_start  # the backend stops it in its own time
 
 # Nothing about the tests arrives later.
 - expect:
