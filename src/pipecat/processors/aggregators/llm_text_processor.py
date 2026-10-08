@@ -85,7 +85,7 @@ class LLMTextProcessor(FrameProcessor):
         async for aggregation in self._text_aggregator.aggregate(in_frame.text):
             out_frame = AggregatedTextFrame(
                 text=aggregation.text,
-                aggregated_by=aggregation.type,
+                text_type=aggregation.type,
                 raw_text=aggregation.full_match
                 if isinstance(aggregation, PatternMatch)
                 else aggregation.text,
@@ -100,7 +100,7 @@ class LLMTextProcessor(FrameProcessor):
         if remaining:
             out_frame = AggregatedTextFrame(
                 text=remaining.text,
-                aggregated_by=remaining.type,
+                text_type=remaining.type,
                 raw_text=remaining.full_match
                 if isinstance(remaining, PatternMatch)
                 else remaining.text,

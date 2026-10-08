@@ -63,14 +63,14 @@ _AMBIGUOUS_UNIT_RE = re.compile(
 )
 
 
-async def expand_units(text: str, aggregation_type: str | AggregationType) -> str:
+async def expand_units(text: str, text_type: str | AggregationType) -> str:
     """Expand unit abbreviations to their full spoken form.
 
     A quantity of exactly one takes the singular form of the unit.
 
     Args:
         text: Input text possibly containing unit expressions.
-        aggregation_type: Aggregation type of the text frame (unused).
+        text_type: Text type of the text frame (unused).
 
     Returns:
         Text with unit abbreviations replaced by spoken equivalents.

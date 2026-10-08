@@ -223,11 +223,15 @@ class _StreamingContext:
             :class:`WordCompletionTracker` (word-timestamp services) or complete
             immediately on promotion (push_text_frames=True services). Turn-constant
             for the context.
+        text_type: The text type of a promoted sentence: ``SENTENCE`` for
+            streamed tokens, or the type the context's text was given with, such
+            as a ``TTSSpeakFrame``'s.
     """
 
     aggregator: "_ParallelSentenceAggregator"
     append_to_context: bool
     build_tracker: bool
+    text_type: AggregationType | str = AggregationType.SENTENCE
 
 
 class AggregatedFrameSequencer:
@@ -368,7 +372,12 @@ class AggregatedFrameSequencer:
 
         if context_id not in self._streaming_contexts:
             self._streaming_contexts[context_id] = _StreamingContext(
-                _ParallelSentenceAggregator(language), append_to_context, build_tracker
+                _ParallelSentenceAggregator(language),
+                append_to_context,
+                build_tracker,
+                AggregationType.SENTENCE
+                if frame.text_type == AggregationType.TOKEN
+                else frame.text_type,
             )
         sc = self._streaming_contexts[context_id]
         sc.aggregator.set_language(language)
@@ -376,7 +385,7 @@ class AggregatedFrameSequencer:
         async for agg in sc.aggregator.aggregate(
             tts_text, frame.raw_text or frame.text, frame.text
         ):
-            frames.extend(self._promote(agg, context_id, sc.append_to_context, sc.build_tracker))
+            frames.extend(self._promote(agg, context_id, sc))
         return frames
 
     async def register_skipped(
@@ -445,7 +454,7 @@ class AggregatedFrameSequencer:
         if sc is None:
             return []
         agg = await sc.aggregator.flush()
-        return self._promote(agg, context_id, sc.append_to_context, sc.build_tracker) if agg else []
+        return self._promote(agg, context_id, sc) if agg else []
 
     def process_word(
         self,
@@ -737,14 +746,14 @@ class AggregatedFrameSequencer:
         self,
         agg: _ParallelAggregation,
         context_id: str,
-        append_to_context: bool,
-        build_tracker: bool,
+        sc: _StreamingContext,
     ) -> list[Frame]:
         """Turn a completed parallel-aggregated sentence into a real spoken slot.
 
-        Builds an ``AggregationType.SENTENCE`` AggregatedTextFrame from the three
-        aggregated text channels and appends the slot for ``context_id``, then
-        replays any words that were buffered waiting for it.
+        Builds an AggregatedTextFrame of the context's text type (usually
+        ``AggregationType.SENTENCE``) from the three aggregated text channels and
+        appends the slot for ``context_id``, then replays any words that were
+        buffered waiting for it.
 
         The sentence frame is **emitted downstream** (first in the returned list)
         with ``will_be_spoken=True``: it is the streaming-mode equivalent of the
@@ -775,9 +784,10 @@ class AggregatedFrameSequencer:
         Args:
             agg: The completed sentence, in the three parallel text channels.
             context_id: The context the promoted slot belongs to.
-            append_to_context: Whether word frames for the slot append to context.
-            build_tracker: Whether the slot should track word completion, or
-                complete immediately (push_text_frames=True services).
+            sc: The context's streaming state: whether word frames for the slot
+                append to context, whether the slot tracks word completion or
+                completes immediately (push_text_frames=True services), and the
+                sentence's text type.
 
         Returns:
             The sentence frame, followed — for push_text_frames=True services — by
@@ -789,7 +799,7 @@ class AggregatedFrameSequencer:
             return []
 
         frame = AggregatedTextFrame(
-            agg.user_facing_text, AggregationType.SENTENCE, raw_text=agg.llm_text or None
+            agg.user_facing_text, sc.text_type, raw_text=agg.llm_text or None
         )
         frame.context_id = context_id
         frame.will_be_spoken = True
@@ -798,19 +808,19 @@ class AggregatedFrameSequencer:
             WordCompletionTracker(
                 agg.tts_text, llm_text=agg.llm_text or None, user_facing_text=agg.user_facing_text
             )
-            if build_tracker
+            if sc.build_tracker
             else None
         )
-        self._append_spoken_slot(frame, context_id, tracker, append_to_context, False)
+        self._append_spoken_slot(frame, context_id, tracker, sc.append_to_context, False)
         frames: list[Frame] = [frame]
 
-        if not build_tracker:
+        if not sc.build_tracker:
             word_frame = TTSTextFrame(
-                agg.user_facing_text, AggregationType.SENTENCE, raw_text=agg.llm_text or None
+                agg.user_facing_text, sc.text_type, raw_text=agg.llm_text or None
             )
             word_frame.context_id = context_id
             word_frame.will_be_spoken = True
-            word_frame.append_to_context = append_to_context
+            word_frame.append_to_context = sc.append_to_context
             frames.append(word_frame)
             frames.extend(self.complete_spoken_slot())
 
@@ -891,7 +901,7 @@ class AggregatedFrameSequencer:
             segment_id=slot.frame.id,
             context_id=slot.context_id,
             text=slot.frame.text,
-            aggregated_by=slot.frame.aggregated_by,
+            text_type=slot.frame.text_type,
             accumulated_text=slot.tracker.get_accumulated_user_facing_text(),
             remaining_text=slot.tracker.get_remaining_user_facing_text(strip=False),
         )
@@ -908,7 +918,7 @@ class AggregatedFrameSequencer:
         includes_inter_frame_spaces: bool = False,
     ) -> Frame:
         """Build a TTSTextFrame with all standard word-timestamp attributes set."""
-        frame = TTSTextFrame(text, aggregated_by=AggregationType.WORD)
+        frame = TTSTextFrame(text, text_type=AggregationType.WORD)
         frame.pts = pts
         frame.context_id = context_id
         if suppress_in_context:

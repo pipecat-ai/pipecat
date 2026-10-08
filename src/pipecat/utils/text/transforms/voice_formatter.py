@@ -137,16 +137,16 @@ class VoiceFormatter:
 
             self._transforms.append(replace_text(custom_replacements))
 
-    async def __call__(self, text: str, aggregation_type: str | AggregationType) -> str:
+    async def __call__(self, text: str, text_type: str | AggregationType) -> str:
         """Apply all configured transforms in order.
 
         Args:
             text: Input text to transform.
-            aggregation_type: Aggregation type passed through to each transform.
+            text_type: Text type passed through to each transform.
 
         Returns:
             Transformed text ready for TTS synthesis.
         """
         for transform in self._transforms:
-            text = await transform(text, aggregation_type)
+            text = await transform(text, text_type)
         return text

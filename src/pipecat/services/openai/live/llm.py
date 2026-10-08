@@ -961,7 +961,7 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
         llm_text_frame.append_to_context = False
         await self.push_frame(llm_text_frame)
 
-        tts_text_frame = TTSTextFrame(text, aggregated_by=AggregationType.SENTENCE)
+        tts_text_frame = TTSTextFrame(text, text_type=AggregationType.SENTENCE)
         tts_text_frame.includes_inter_frame_spaces = True
         await self.push_frame(tts_text_frame)
 

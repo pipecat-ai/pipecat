@@ -61,7 +61,7 @@ them**. The feature quietly decays.
 ### 2.2 Skipped frames arrived out of order
 
 A frame that is never sent to the TTS — a code block, with
-`skip_aggregator_types=["code"]` — has no audio and no word events to wait for. It was
+`skip_text_types=["code"]` — has no audio and no word events to wait for. It was
 **pushed the moment it appeared**, so it landed *before* the sentence that precedes it:
 
 ```
@@ -203,7 +203,7 @@ Three properties fall out of this shape:
 The `PatternPairAggregator` splits that one response into **six** frames — each tagged
 span becomes its own segment, with its own type:
 
-| # | `aggregated_by` | ① LLM text (`raw_text`) | ② Segment text (`text`) | ③ TTS text |
+| # | `text_type` | ① LLM text (`raw_text`) | ② Segment text (`text`) | ③ TTS text |
 | --- | --- | --- | --- | --- |
 | 1 | `sentence` | `Your card is ` | `Your card is` | `Your card is` |
 | 2 | **`credit_card`** | `<card>1234-5678-9012-3456</card>` | `1234-5678-9012-3456` | `<spell>1234-5678-9012-3456</spell>` |
@@ -219,9 +219,9 @@ spoken at all — which is what creates the ordering problem in
 [§2.2](#22-skipped-frames-arrived-out-of-order). The four `sentence` frames are identical
 in all three columns.
 
-`aggregated_by` is **the routing key throughout**: it selects which transformer applies
+`text_type` is **the routing key throughout**: it selects which transformer applies
 (`tts.add_text_transformer(fn, "credit_card")`), whether the frame is spoken at all
-(`skip_aggregator_types=["code"]`), and which RTVI transform redacts it
+(`skip_text_types=["code"]`), and which RTVI transform redacts it
 (`bot_output_transforms=[("credit_card", …)]`).
 
 ### 3.3 The guarantee that makes it useful
@@ -323,7 +323,7 @@ llm_text_aggregator.add_pattern(
 )
 
 # 2. Never speak code blocks
-tts = CartesiaTTSService(..., skip_aggregator_types=["code"])
+tts = CartesiaTTSService(..., skip_text_types=["code"])
 
 # 3. Rewrite what the TTS receives, per segment type
 tts.add_text_transformer(spell_out_text, "credit_card")  # wraps in <spell> tags

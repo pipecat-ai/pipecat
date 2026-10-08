@@ -1597,7 +1597,7 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
             ),
             SleepFrame(),
             TTSStartedFrame(append_to_context=True),
-            TTSTextFrame("Let me check on that.", aggregated_by=AggregationType.SENTENCE),
+            TTSTextFrame("Let me check on that.", text_type=AggregationType.SENTENCE),
             LLMAssistantPushAggregationFrame(),
             SleepFrame(),
             FunctionCallResultFrame(
@@ -2111,9 +2111,9 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
 
         frames_to_send = [
             TTSStartedFrame(append_to_context=True),
-            TTSTextFrame("Hello,", aggregated_by=AggregationType.WORD),
-            TTSTextFrame("how", aggregated_by=AggregationType.WORD),
-            TTSTextFrame("can I help?", aggregated_by=AggregationType.WORD),
+            TTSTextFrame("Hello,", text_type=AggregationType.WORD),
+            TTSTextFrame("how", text_type=AggregationType.WORD),
+            TTSTextFrame("can I help?", text_type=AggregationType.WORD),
             LLMAssistantPushAggregationFrame(),
         ]
         expected_down_frames = [
@@ -2162,8 +2162,8 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
 
         frames_to_send = [
             TTSStartedFrame(append_to_context=True),
-            TTSTextFrame("Let me", aggregated_by=AggregationType.WORD),
-            TTSTextFrame("check on", aggregated_by=AggregationType.WORD),
+            TTSTextFrame("Let me", text_type=AggregationType.WORD),
+            TTSTextFrame("check on", text_type=AggregationType.WORD),
             SleepFrame(),
             InterruptionFrame(),
         ]
@@ -2213,7 +2213,7 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
 
         frames_to_send = [
             TTSStartedFrame(append_to_context=False),
-            TTSTextFrame("off the record", aggregated_by=AggregationType.WORD),
+            TTSTextFrame("off the record", text_type=AggregationType.WORD),
             SleepFrame(),
             InterruptionFrame(),
         ]
@@ -2252,7 +2252,7 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
         frames_to_send = [
             LLMFullResponseStartFrame(),
             TTSStartedFrame(append_to_context=True),
-            TTSTextFrame("Hello!", aggregated_by=AggregationType.WORD),
+            TTSTextFrame("Hello!", text_type=AggregationType.WORD),
             LLMFullResponseEndFrame(),
         ]
         await run_test(aggregator, frames_to_send=frames_to_send)

@@ -444,7 +444,7 @@ class InworldHttpTTSService(TTSService):
                         f"{self}: No timestamps received, pushing fallback text: [{text_clean}]"
                     )
                     fallback = TTSTextFrame(
-                        text_clean, aggregated_by=AggregationType.SENTENCE, context_id=context_id
+                        text_clean, text_type=AggregationType.SENTENCE, context_id=context_id
                     )
                     ctx = self._tts_contexts.get(context_id)
                     fallback.append_to_context = ctx.append_to_context if ctx else True
@@ -940,7 +940,7 @@ class InworldTTSService(WebsocketTTSService):
         if had_timestamps or not text:
             return
         logger.debug(f"{self}: No timestamps for context {context_id}, pushing fallback: [{text}]")
-        fallback = TTSTextFrame(text, aggregated_by=AggregationType.SENTENCE)
+        fallback = TTSTextFrame(text, text_type=AggregationType.SENTENCE)
         fallback.context_id = context_id
         ctx = self._tts_contexts.get(context_id)
         fallback.append_to_context = ctx.append_to_context if ctx else True

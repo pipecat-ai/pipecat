@@ -630,6 +630,28 @@
       "location": "pipecat/flows/types.py"
     },
     {
+      "subject": "AggregatedTextFrame.aggregated_by",
+      "module": "pipecat.frames.frames",
+      "kind": "property",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "text_type",
+      "message": "`AggregatedTextFrame.aggregated_by` is deprecated since 1.13.0 and will be removed in 2.0.0. Use `text_type` instead.",
+      "location": "pipecat/frames/frames.py"
+    },
+    {
+      "subject": "AggregatedTextProgressFrame.aggregated_by",
+      "module": "pipecat.frames.frames",
+      "kind": "property",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "text_type",
+      "message": "`AggregatedTextProgressFrame.aggregated_by` is deprecated since 1.13.0 and will be removed in 2.0.0. Use `text_type` instead.",
+      "location": "pipecat/frames/frames.py"
+    },
+    {
       "subject": "CancelTaskFrame",
       "module": "pipecat.frames.frames",
       "kind": "class",
@@ -1136,6 +1158,17 @@
       "location": "pipecat/processors/frame_processor.py"
     },
     {
+      "subject": "BotOutputMessageData.aggregated_by",
+      "module": "pipecat.processors.frameworks.rtvi.models",
+      "kind": "parameter",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "text_type",
+      "message": "Use ``text_type`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/processors/frameworks/rtvi/models.py"
+    },
+    {
       "subject": "LLMFunctionCallMessage",
       "module": "pipecat.processors.frameworks.rtvi.models",
       "kind": "class",
@@ -1156,6 +1189,39 @@
       "replacement": "LLMFunctionCallInProgressMessageData",
       "message": "`LLMFunctionCallMessageData` is deprecated since 0.0.102 and will be removed in 2.0.0. Use `LLMFunctionCallInProgressMessageData` instead.",
       "location": "pipecat/processors/frameworks/rtvi/models.py"
+    },
+    {
+      "subject": "RTVIObserver.add_bot_output_transformer.aggregation_type",
+      "module": "pipecat.processors.frameworks.rtvi.observer",
+      "kind": "parameter",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "text_type",
+      "message": "Use ``text_type`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/processors/frameworks/rtvi/observer.py"
+    },
+    {
+      "subject": "RTVIObserver.remove_bot_output_transformer.aggregation_type",
+      "module": "pipecat.processors.frameworks.rtvi.observer",
+      "kind": "parameter",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "text_type",
+      "message": "Use ``text_type`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/processors/frameworks/rtvi/observer.py"
+    },
+    {
+      "subject": "RTVIObserverParams.skip_aggregator_types",
+      "module": "pipecat.processors.frameworks.rtvi.observer",
+      "kind": "parameter",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "skip_text_types",
+      "message": "Use ``skip_text_types`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/processors/frameworks/rtvi/observer.py"
     },
     {
       "subject": "RTVIProcessor.handle_function_call",
@@ -4238,6 +4304,17 @@
       "location": "pipecat/services/tts_service.py"
     },
     {
+      "subject": "TTSService.add_text_transformer.aggregation_type",
+      "module": "pipecat.services.tts_service",
+      "kind": "parameter",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "text_type",
+      "message": "Use ``text_type`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/services/tts_service.py"
+    },
+    {
       "subject": "TTSService.aggregate_sentences",
       "module": "pipecat.services.tts_service",
       "kind": "parameter",
@@ -4260,6 +4337,17 @@
       "location": "pipecat/services/tts_service.py"
     },
     {
+      "subject": "TTSService.remove_text_transformer.aggregation_type",
+      "module": "pipecat.services.tts_service",
+      "kind": "parameter",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "text_type",
+      "message": "Use ``text_type`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/services/tts_service.py"
+    },
+    {
       "subject": "TTSService.set_model",
       "module": "pipecat.services.tts_service",
       "kind": "method",
@@ -4279,6 +4367,17 @@
       "relation": "use_existing",
       "replacement": "TTSUpdateSettingsFrame(voice=...)",
       "message": "`TTSService.set_voice` is deprecated since 0.0.104 and will be removed in 2.0.0. Use `TTSUpdateSettingsFrame(voice=...)` instead.",
+      "location": "pipecat/services/tts_service.py"
+    },
+    {
+      "subject": "TTSService.skip_aggregator_types",
+      "module": "pipecat.services.tts_service",
+      "kind": "parameter",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "skip_text_types",
+      "message": "Use ``skip_text_types`` instead. Will be removed in 2.0.0.",
       "location": "pipecat/services/tts_service.py"
     },
     {

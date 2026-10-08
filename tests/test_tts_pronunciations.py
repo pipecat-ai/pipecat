@@ -259,7 +259,7 @@ class RecordingTTSService(TTSService):
             yield
 
 
-async def _upper(text, aggregation_type):
+async def _upper(text, text_type):
     return text.upper()
 
 

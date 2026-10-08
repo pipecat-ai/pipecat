@@ -40,12 +40,12 @@ class PronunciationTransform:
         self._pattern = pattern
         self._replace = replace
 
-    async def __call__(self, text: str, aggregation_type: str | AggregationType) -> str:
+    async def __call__(self, text: str, text_type: str | AggregationType) -> str:
         """Replace every matched word in ``text``.
 
         Args:
             text: The text about to be sent to the service.
-            aggregation_type: The aggregation type of the text (unused).
+            text_type: The text type of the text (unused).
 
         Returns:
             The text with each matched word replaced.

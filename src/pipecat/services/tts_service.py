@@ -185,11 +185,12 @@ class TTSService(AIService):
         append_trailing_space: bool = False,
         # TTS output sample rate
         sample_rate: int | None = None,
-        # Types of text aggregations that should not be spoken.
+        # Types of text that should not be spoken.
+        skip_text_types: list[str] | None = None,
         skip_aggregator_types: list[str] | None = None,
         # A list of callables to transform text before just before sending it to TTS.
         # Each callable takes the aggregated text and its type, and returns the transformed text.
-        # To register, provide a list of tuples of (aggregation_type | '*', transform_function).
+        # To register, provide a list of tuples of (text_type | '*', transform_function).
         text_transforms: list[
             tuple[AggregationType | str, Callable[[str, str | AggregationType], Awaitable[str]]]
         ]
@@ -249,11 +250,17 @@ class TTSService(AIService):
                 Only applied in sentence aggregation mode; when streaming tokens, the incoming
                 text's own whitespace is preserved.
             sample_rate: Output sample rate for generated audio.
-            skip_aggregator_types: List of aggregation types that should not be spoken.
+            skip_text_types: List of text types that should not be spoken.
+            skip_aggregator_types: List of text types that should not be spoken.
+
+                .. deprecated:: 1.13.0
+                    Use ``skip_text_types`` instead.
+                    Will be removed in 2.0.0.
+
             text_transforms: A list of callables to transform text before just before sending it
                 to TTS. Each callable takes the aggregated text and its type, and returns the
                 transformed text. To register, provide a list of tuples of
-                (aggregation_type | '*', transform_function).
+                (text_type | '*', transform_function).
 
             text_filters: Sequence of text filters to apply after aggregation.
             transport_destination: Destination for generated audio frames.
@@ -343,7 +350,15 @@ class TTSService(AIService):
             language=aggregation_language,
         )
 
-        self._skip_aggregator_types: list[str] = skip_aggregator_types or []
+        if skip_aggregator_types is not None:
+            warn_deprecated(
+                "`skip_aggregator_types` is deprecated since 1.13.0 and will be removed in "
+                "2.0.0. Use `skip_text_types` instead.",
+                stacklevel=2,
+            )
+            if skip_text_types is None:
+                skip_text_types = skip_aggregator_types
+        self._skip_text_types: list[str] = skip_text_types or []
         self._text_transforms: list[
             tuple[AggregationType | str, Callable[[str, AggregationType | str], Awaitable[str]]]
         ] = text_transforms or []
@@ -669,34 +684,62 @@ class TTSService(AIService):
     def add_text_transformer(
         self,
         transform_function: Callable[[str, AggregationType | str], Awaitable[str]],
-        aggregation_type: AggregationType | str = "*",
+        text_type: AggregationType | str = "*",
+        *,
+        aggregation_type: AggregationType | str | None = None,
     ):
-        """Transform text for a specific aggregation type.
+        """Transform text of a specific type.
 
         Args:
             transform_function: The function to apply for transformation. This function should take
-                the text and aggregation type as input and return the transformed text.
-                Ex.: async def my_transform(text: str, aggregation_type: str) -> str:
-            aggregation_type: The type of aggregation to transform. This value defaults to "*" indicating
+                the text and its type as input and return the transformed text.
+                Ex.: async def my_transform(text: str, text_type: str) -> str:
+            text_type: The type of text to transform. This value defaults to "*" indicating
                 the function should handle all text before sending to TTS.
+            aggregation_type: The type of text to transform.
+
+                .. deprecated:: 1.13.0
+                    Use ``text_type`` instead.
+                    Will be removed in 2.0.0.
         """
-        self._text_transforms.append((aggregation_type, transform_function))
+        if aggregation_type is not None:
+            warn_deprecated(
+                "`aggregation_type` is deprecated since 1.13.0 and will be removed in 2.0.0. "
+                "Use `text_type` instead.",
+                stacklevel=2,
+            )
+            text_type = aggregation_type
+        self._text_transforms.append((text_type, transform_function))
 
     def remove_text_transformer(
         self,
         transform_function: Callable[[str, AggregationType | str], Awaitable[str]],
-        aggregation_type: AggregationType | str = "*",
+        text_type: AggregationType | str = "*",
+        *,
+        aggregation_type: AggregationType | str | None = None,
     ):
-        """Remove a text transformer for a specific aggregation type.
+        """Remove a text transformer for a specific text type.
 
         Args:
             transform_function: The function to remove.
-            aggregation_type: The type of aggregation to remove the transformer for.
+            text_type: The type of text to remove the transformer for.
+            aggregation_type: The type of text to remove the transformer for.
+
+                .. deprecated:: 1.13.0
+                    Use ``text_type`` instead.
+                    Will be removed in 2.0.0.
         """
+        if aggregation_type is not None:
+            warn_deprecated(
+                "`aggregation_type` is deprecated since 1.13.0 and will be removed in 2.0.0. "
+                "Use `text_type` instead.",
+                stacklevel=2,
+            )
+            text_type = aggregation_type
         self._text_transforms = [
-            (agg_type, func)
-            for agg_type, func in self._text_transforms
-            if not (agg_type == aggregation_type and func == transform_function)
+            (transform_type, func)
+            for transform_type, func in self._text_transforms
+            if not (transform_type == text_type and func == transform_function)
         ]
 
     @classmethod
@@ -968,7 +1011,7 @@ class TTSService(AIService):
             push_assistant_aggregation = frame.append_to_context and not self._llm_response_started
             # Assumption: text in TTSSpeakFrame does not include inter-frame spaces
             await self._push_tts_frames(
-                AggregatedTextFrame(frame.text, AggregationType.SENTENCE, raw_text=frame.text),
+                AggregatedTextFrame(frame.text, frame.text_type, raw_text=frame.text),
                 append_tts_text_to_context=frame.append_to_context,
                 push_assistant_aggregation=push_assistant_aggregation,
             )
@@ -1265,15 +1308,15 @@ class TTSService(AIService):
         append_tts_text_to_context: bool = True,
         push_assistant_aggregation: bool | None = False,
     ):
-        type = src_frame.aggregated_by
+        text_type = src_frame.text_type
         text = src_frame.text
 
         # Create context ID and store metadata
         context_id = self.create_context_id()
 
-        # Skip sending to TTS if the aggregation type is in the skip list. Simply
+        # Skip sending to TTS if the text type is in the skip list. Simply
         # push the original frame downstream.
-        if type in self._skip_aggregator_types:
+        if text_type in self._skip_text_types:
             await self._push_frame_respecting_previous_aggregated_frame(src_frame, context_id)
             return
 
@@ -1360,14 +1403,14 @@ class TTSService(AIService):
         # services that support word-level timestamps, this CAN affect the resulting context
         # since the TTSTextFrames are generated from the TTS output stream
         transformed_text = text
-        for aggregation_type, transform in self._text_transforms:
-            if aggregation_type == type or aggregation_type == "*":
+        for transform_type, transform in self._text_transforms:
+            if transform_type == text_type or transform_type == "*":
                 if isinstance(transform, PronunciationTransform) and not (
                     self._can_apply_pronunciations()
                 ):
                     continue
                 try:
-                    transformed_text = await transform(transformed_text, type)
+                    transformed_text = await transform(transformed_text, text_type)
                 except Exception as e:
                     # Pushing the error with category "APPLICATION" since the failure came
                     # from the application's text transformer. Speaking the untransformed
@@ -1452,7 +1495,7 @@ class TTSService(AIService):
             # per-sentence promotion (see AggregatedFrameSequencer._promote): a call
             # here represents a single token, not the sentence-level unit this frame
             # should carry.
-            frame = TTSTextFrame(text, aggregated_by=type)
+            frame = TTSTextFrame(text, text_type=text_type)
             frame.will_be_spoken = True
             frame.includes_inter_frame_spaces = includes_inter_frame_spaces
             frame.context_id = context_id

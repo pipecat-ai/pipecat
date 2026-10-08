@@ -840,7 +840,7 @@ class UltravoxRealtimeLLMService(LLMService):
                 frame.append_to_context = False
                 await self.push_frame(frame)
             if delta:
-                tts_frame = TTSTextFrame(text=delta, aggregated_by=AggregationType.WORD)
+                tts_frame = TTSTextFrame(text=delta, text_type=AggregationType.WORD)
                 tts_frame.includes_inter_frame_spaces = True
                 await self.push_frame(tts_frame)
         elif medium == "text":

@@ -43,7 +43,7 @@ def replace_text(
     """
     compiled = [(re.compile(pattern), replacement) for pattern, replacement in replacements]
 
-    async def _transform(text: str, aggregation_type: str | AggregationType) -> str:
+    async def _transform(text: str, text_type: str | AggregationType) -> str:
         for pattern, replacement in compiled:
             text = pattern.sub(replacement, text)
         return text

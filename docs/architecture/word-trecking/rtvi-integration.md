@@ -89,7 +89,7 @@ segment** plus the current spoken split, so it can redact the full card number *
 the highlight advancing over the redacted form. Given only disconnected word events
 (`1234`, `5678`, `9012`, `3456`) there is nothing coherent to redact.
 
-Transforms are registered per aggregation type, matching the types defined by the
+Transforms are registered per text type, matching the types defined by the
 `PatternPairAggregator`:
 
 ```python
@@ -114,7 +114,7 @@ onBotOutput: (data) => {
   }
   // Anything else (including spoken_status "new") → render a new bubble element
   this.addConversationMessage(
-    data.text, 'bot', data.aggregated_by, data.segment_id,
+    data.text, 'bot', data.text_type, data.segment_id,
   );
 }
 
@@ -127,7 +127,7 @@ highlightSpokenText(data) {
 }
 ```
 
-`data.aggregated_by` carries the segment type, so the client also renders a `code` segment
+`data.text_type` carries the segment type, so the client also renders a `code` segment
 as a syntax-highlighted `<pre>` block and a `link` segment as an anchor — **without parsing
 any tags itself**.
 
@@ -143,7 +143,7 @@ llm_text_aggregator.add_pattern(
 )
 
 # 2. Never send code blocks to the TTS  →  sequencer holds them in order
-tts = CartesiaTTSService(..., skip_aggregator_types=["code"])
+tts = CartesiaTTSService(..., skip_text_types=["code"])
 
 # 3. Rewrite what the TTS receives  →  TextSegmentMap tracks the divergence
 tts.add_text_transformer(spell_out_text, "credit_card")  # wraps in <spell> tags

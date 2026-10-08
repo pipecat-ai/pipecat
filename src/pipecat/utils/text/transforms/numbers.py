@@ -65,7 +65,7 @@ def expand_numbers(
 
         return num2words(whole, lang="en")
 
-    async def _transform(text: str, aggregation_type: str | AggregationType) -> str:
+    async def _transform(text: str, text_type: str | AggregationType) -> str:
         return _NUMBER_RE.sub(_num_to_words, text)
 
     return _transform

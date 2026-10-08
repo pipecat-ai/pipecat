@@ -140,10 +140,10 @@ class RTVIClientSerializer(FrameSerializer):
             case "bot-llm-stopped":
                 return LLMFullResponseEndFrame()
             case "bot-tts-text":
-                # The message carries only the text; how the bot's TTS aggregated
-                # it (sentence, word) isn't on the wire.
+                # The message carries only the text; its type (sentence, word)
+                # isn't on the wire.
                 return TTSTextFrame(
-                    text=payload.get("text", ""), aggregated_by=AggregationType.SENTENCE
+                    text=payload.get("text", ""), text_type=AggregationType.SENTENCE
                 )
             case "bot-started-speaking":
                 return BotStartedSpeakingFrame()

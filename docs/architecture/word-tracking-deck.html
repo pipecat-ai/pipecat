@@ -789,7 +789,7 @@ ul.pts strong { color: var(--ink); font-weight: 650; }
   <div>
     <p class="eyebrow"><span class="num">2.2</span> <span class="rule"></span> <span>Skipped frames arrived out of order</span></p>
     <h2 class="headline">A frame with no audio has nothing to wait for.</h2>
-    <p class="lede tight">Configure <code class="inl">skip_aggregator_types=["code"]</code> and that frame is never synthesized — no audio, no word events. So it was pushed the moment it appeared, landing <em>before</em> the sentence that precedes it.</p>
+    <p class="lede tight">Configure <code class="inl">skip_text_types=["code"]</code> and that frame is never synthesized — no audio, no word events. So it was pushed the moment it appeared, landing <em>before</em> the sentence that precedes it.</p>
     <pre class="code">LLM:      <b>"Run this:"</b>  →  <b>&lt;code&gt;npm install&lt;/code&gt;</b>  →  <b>"Then reload."</b>
 
 Context:  &lt;code&gt;npm install&lt;/code&gt;      <span class="c">← arrived first, nothing to wait for</span>
@@ -986,7 +986,7 @@ Context:  &lt;code&gt;npm install&lt;/code&gt;      <span class="c">← arrived 
     <div class="scroll">
       <table class="tbl compact">
         <tr>
-          <th>#</th><th>aggregated_by</th>
+          <th>#</th><th>text_type</th>
           <th class="c-llm">① raw_text</th>
           <th class="c-seg">② text</th>
           <th class="c-tts">③ tts text</th>
@@ -999,7 +999,7 @@ Context:  &lt;code&gt;npm install&lt;/code&gt;      <span class="c">← arrived 
         <tr><td class="num">6</td><td class="m">sentence</td><td class="m">to start.</td><td class="m">to start.</td><td class="m">to start.</td></tr>
       </table>
     </div>
-    <p class="note"><strong>Only the two tagged frames do anything interesting.</strong> Frame 2's delimiters moved into <code class="inl">raw_text</code>; its transformer wrapped the digits in <code class="inl">&lt;spell&gt;</code>. Frame 5 is never spoken — which is what creates the ordering problem in 2.2. <code class="inl">aggregated_by</code> is the routing key throughout: it picks the transformer, decides whether the frame is spoken at all, and selects the RTVI redaction.</p>
+    <p class="note"><strong>Only the two tagged frames do anything interesting.</strong> Frame 2's delimiters moved into <code class="inl">raw_text</code>; its transformer wrapped the digits in <code class="inl">&lt;spell&gt;</code>. Frame 5 is never spoken — which is what creates the ordering problem in 2.2. <code class="inl">text_type</code> is the routing key throughout: it picks the transformer, decides whether the frame is spoken at all, and selects the RTVI redaction.</p>
   </div>
 </section>
 
@@ -1581,7 +1581,7 @@ llm_text_aggregator.<span class="fn">add_pattern</span>(
     action=MatchAction.AGGREGATE)
 
 <span class="c"># 2. Never speak code blocks</span>
-tts = <span class="fn">CartesiaTTSService</span>(..., skip_aggregator_types=[<span class="s">"code"</span>])
+tts = <span class="fn">CartesiaTTSService</span>(..., skip_text_types=[<span class="s">"code"</span>])
 
 <span class="c"># 3. Rewrite what the TTS receives, per segment type</span>
 tts.<span class="fn">add_text_transformer</span>(spell_out_text, <span class="s">"credit_card"</span>)

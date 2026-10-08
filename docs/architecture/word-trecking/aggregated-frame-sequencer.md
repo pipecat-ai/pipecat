@@ -65,7 +65,7 @@ AggregatedTextProgressFrame(
     segment_id=slot.frame.id,  # ← the sentence's id
     context_id=slot.context_id,
     text=slot.frame.text,  # full sentence
-    aggregated_by=slot.frame.aggregated_by,
+    text_type=slot.frame.text_type,
     accumulated_text=tracker.get_accumulated_user_facing_text(),
     remaining_text=tracker.get_remaining_user_facing_text(strip=False),
 )
@@ -90,7 +90,7 @@ because no slot is active at all (no segment to report progress against).
 ### The problem
 
 Not every frame reaches the TTS. A code block configured with
-`skip_aggregator_types=["code"]` is never synthesized, so it has no audio and no word
+`skip_text_types=["code"]` is never synthesized, so it has no audio and no word
 events to wait for. Pushed the moment it appears, it lands *before* the sentence that
 precedes it — because that sentence is still being spoken.
 

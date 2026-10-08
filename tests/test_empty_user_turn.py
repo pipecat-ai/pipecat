@@ -105,7 +105,7 @@ def _bot_speaking() -> list[Frame]:
         SleepFrame(),
         LLMFullResponseStartFrame(),
         BotStartedSpeakingFrame(),
-        TTSTextFrame("Where would", aggregated_by=AggregationType.WORD),
+        TTSTextFrame("Where would", text_type=AggregationType.WORD),
         SleepFrame(),
     ]
 

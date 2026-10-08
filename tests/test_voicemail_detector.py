@@ -407,7 +407,7 @@ class TestVoicemailDetectorGating(unittest.IsolatedAsyncioTestCase):
             Pipeline([detector, detector.gate()]),
             frames_to_send=[
                 TTSStartedFrame(),
-                TTSTextFrame("Hi, this is Alex.", aggregated_by=AggregationType.SENTENCE),
+                TTSTextFrame("Hi, this is Alex.", text_type=AggregationType.SENTENCE),
                 SleepFrame(0.2),
                 _said("Hello?"),
                 SleepFrame(VERDICT_SETTLE),
@@ -424,7 +424,7 @@ class TestVoicemailDetectorGating(unittest.IsolatedAsyncioTestCase):
             Pipeline([detector, detector.gate()]),
             frames_to_send=[
                 TTSStartedFrame(),
-                TTSTextFrame("Hi, this is Alex.", aggregated_by=AggregationType.SENTENCE),
+                TTSTextFrame("Hi, this is Alex.", text_type=AggregationType.SENTENCE),
                 SleepFrame(0.2),
                 _said("Please leave a message."),
                 SleepFrame(VERDICT_SETTLE),

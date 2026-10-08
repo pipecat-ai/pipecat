@@ -15,7 +15,7 @@ from pipecat.frames.frames import AggregationType
 _ACRONYM_RE = re.compile(r"\b[A-Z]{2,}(?![a-z])\b")
 
 
-async def normalize_acronyms(text: str, aggregation_type: str | AggregationType) -> str:
+async def normalize_acronyms(text: str, text_type: str | AggregationType) -> str:
     """Insert spaces between letters of uppercase acronyms.
 
     This transformer is alphanumeric-preserving: the same letters are kept,
@@ -24,7 +24,7 @@ async def normalize_acronyms(text: str, aggregation_type: str | AggregationType)
 
     Args:
         text: Input text possibly containing acronyms like API or HTTP.
-        aggregation_type: Aggregation type of the text frame (unused).
+        text_type: Text type of the text frame (unused).
 
     Returns:
         Text with acronyms letter-spaced (e.g. ``"API"`` → ``"A P I"``).
