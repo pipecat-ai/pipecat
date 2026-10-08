@@ -6,6 +6,7 @@
 
 """Tests for DeepgramFluxTTSService."""
 
+import asyncio
 import json
 import unittest
 from unittest.mock import AsyncMock, patch
@@ -28,7 +29,9 @@ from pipecat.frames.frames import (
     TTSSpeakFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
+    TTSTextFrame,
     TTSUpdateSettingsFrame,
+    VADUserStartedSpeakingFrame,
 )
 from pipecat.services.deepgram.flux.tts import DeepgramFluxTTSService
 from pipecat.services.tts_service import TextAggregationMode, TTSService
@@ -44,6 +47,7 @@ def _flux_server_handler(
     warning_first: bool = False,
     end_turn: bool = True,
     reject_configure: bool = False,
+    audio_delay: float = 0,
 ):
     """Build a fake Flux TTS server handler following the documented turn flow.
 
@@ -95,6 +99,7 @@ def _flux_server_handler(
                         )
                     )
                 elif msg.get("type") == "Flush":
+                    await asyncio.sleep(audio_delay)
                     # Flux sends the flush ack before the turn's remaining
                     # audio; SpeechMetadata arrives only after all audio.
                     await ws.send(AUDIO_CHUNK_1)
@@ -168,6 +173,40 @@ async def test_flux_tts_protocol_roundtrip():
     speak_msg = next(m for m in captured["messages"] if m.get("type") == "Speak")
     # In the default token streaming mode, text is sent verbatim.
     assert speak_msg["text"] == "Hello from Flux."
+
+
+@pytest.mark.asyncio
+async def test_flux_uninterruptible_speech_waits_for_audio_after_interruption():
+    """A protected utterance survives barge-in before Flux returns its audio."""
+    captured: dict = {"messages": []}
+    async with serve(_flux_server_handler(captured, audio_delay=0.2), "127.0.0.1", 0) as server:
+        host, port = next(iter(server.sockets)).getsockname()[:2]
+        tts = DeepgramFluxTTSService(
+            api_key="test-key", url=f"ws://{host}:{port}/v2/speak", sample_rate=24000
+        )
+        speech = TTSSpeakFrame("Mm-hmm.", append_to_context=False)
+        speech.interruptible = False
+        down, up = await asyncio.wait_for(
+            run_test(
+                tts,
+                frames_to_send=[
+                    speech,
+                    SleepFrame(sleep=0.05),
+                    VADUserStartedSpeakingFrame(),
+                    InterruptionFrame(),
+                    SleepFrame(sleep=0.3),
+                    BotStoppedSpeakingFrame(),
+                ],
+            ),
+            timeout=5,
+        )
+    assert not any(message["type"] == "Interrupt" for message in captured["messages"])
+    assert not any(isinstance(frame, ErrorFrame) for frame in down + up)
+    audio = [frame for frame in down if isinstance(frame, TTSAudioRawFrame)]
+    assert b"".join(frame.audio for frame in audio) == AUDIO_CHUNK_1 + AUDIO_CHUNK_2
+    text = [frame for frame in down if isinstance(frame, TTSTextFrame)]
+    assert [frame.text for frame in text] == ["Mm-hmm."]
+    assert all(not frame.interruptible for frame in audio + text)
 
 
 @pytest.mark.asyncio

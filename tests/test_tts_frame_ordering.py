@@ -57,6 +57,7 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
     TTSTextFrame,
+    VADUserStartedSpeakingFrame,
 )
 from pipecat.services.tts_service import TextAggregationMode, TTSService
 from pipecat.tests.utils import SleepFrame, run_test
@@ -2551,6 +2552,145 @@ async def test_spoken_text_carries_the_id_of_its_segment(mode):
     spoken = next(f for f in frames_received[0] if isinstance(f, TTSTextFrame))
 
     assert spoken.segment_id == segment.id
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("delivery", ["http", "websocket", "words", "tokens"])
+async def test_uninterruptible_speech_survives_before_audio(delivery):
+    """A protected request finishes synthesis across VAD and turn interruptions."""
+    words = delivery in ("words", "tokens")
+
+    class DelayedTTS(TTSService):
+        def __init__(self):
+            super().__init__(
+                push_start_frame=True,
+                push_stop_frames=True,
+                push_text_frames=not words,
+                sample_rate=_SAMPLE_RATE,
+                text_aggregation_mode=(
+                    TextAggregationMode.TOKEN
+                    if delivery == "tokens"
+                    else TextAggregationMode.SENTENCE
+                ),
+            )
+            self.release = asyncio.Event()
+            self.interrupted = []
+
+        async def process_frame(self, frame, direction):
+            await super().process_frame(frame, direction)
+            if isinstance(frame, InterruptionFrame):
+                self.release.set()
+
+        async def on_audio_context_interrupted(self, context_id):
+            self.interrupted.append(context_id)
+
+        async def run_tts(self, text, context_id):
+            async def deliver():
+                await self.release.wait()
+                if words:
+                    await self.add_word_timestamps([(text, 0.0)], context_id)
+                await self.append_to_audio_context(
+                    context_id,
+                    TTSAudioRawFrame(_FAKE_AUDIO, _SAMPLE_RATE, 1, context_id=context_id),
+                )
+                await self.append_to_audio_context(
+                    context_id, TTSStoppedFrame(context_id=context_id)
+                )
+                await self.remove_audio_context(context_id)
+
+            if delivery == "http":
+                await self.release.wait()
+                yield TTSAudioRawFrame(_FAKE_AUDIO, _SAMPLE_RATE, 1, context_id=context_id)
+            else:
+                self.create_task(deliver())
+                yield None
+
+    tts = DelayedTTS()
+    speech = TTSSpeakFrame("Mm-hmm.", append_to_context=False)
+    speech.interruptible = False
+    down, _ = await asyncio.wait_for(
+        run_test(
+            tts,
+            frames_to_send=[
+                speech,
+                SleepFrame(sleep=0.05),
+                VADUserStartedSpeakingFrame(),
+                InterruptionFrame(),
+                SleepFrame(sleep=0.1),
+                TTSSpeakFrame("Next reply."),
+                SleepFrame(sleep=0.1),
+            ],
+        ),
+        timeout=5,
+    )
+    texts = [f for f in down if isinstance(f, TTSTextFrame)]
+    assert [f.text for f in texts] == ["Mm-hmm.", "Next reply."]
+    assert [f.interruptible for f in texts] == [False, True]
+    for frame_type in (TTSAudioRawFrame, TTSStartedFrame, TTSStoppedFrame):
+        assert [f.interruptible for f in down if isinstance(f, frame_type)] == [False, True]
+    assert tts.interrupted == []
+
+
+@pytest.mark.asyncio
+async def test_queued_uninterruptible_synthesis_survives_an_interrupted_context():
+    """A queued protected context survives while the preceding regular one is dropped."""
+
+    class QueuedTTS(TTSService):
+        def __init__(self):
+            super().__init__(push_start_frame=True, push_text_frames=True, sample_rate=_SAMPLE_RATE)
+            self.release = asyncio.Event()
+            self.interrupted = []
+            self.requests = {}
+
+        async def process_frame(self, frame, direction):
+            await super().process_frame(frame, direction)
+            if isinstance(frame, InterruptionFrame):
+                self.release.set()
+
+        async def on_audio_context_interrupted(self, context_id):
+            self.interrupted.append(context_id)
+
+        async def run_tts(self, text, context_id):
+            self.requests[text] = context_id
+
+            async def deliver():
+                await self.release.wait()
+                if not self.audio_context_available(context_id):
+                    return
+                await self.append_to_audio_context(
+                    context_id,
+                    TTSAudioRawFrame(_FAKE_AUDIO, _SAMPLE_RATE, 1, context_id=context_id),
+                )
+                await self.append_to_audio_context(
+                    context_id, TTSStoppedFrame(context_id=context_id)
+                )
+                await self.remove_audio_context(context_id)
+
+            self.create_task(deliver())
+            yield None
+
+    tts = QueuedTTS()
+    speech = TTSSpeakFrame("Keep this.")
+    speech.interruptible = False
+    down, _ = await asyncio.wait_for(
+        run_test(
+            tts,
+            frames_to_send=[
+                TTSSpeakFrame("Drop this."),
+                speech,
+                SleepFrame(sleep=0.05),
+                InterruptionFrame(),
+                SleepFrame(sleep=0.1),
+            ],
+        ),
+        timeout=5,
+    )
+    assert tts.interrupted == [tts.requests["Drop this."]]
+    audio = [f for f in down if isinstance(f, TTSAudioRawFrame)]
+    assert len(audio) == 1
+    assert audio[0].context_id == tts.requests["Keep this."]
+    assert not audio[0].interruptible
+    assert any(isinstance(f, TTSTextFrame) and f.text == "Keep this." for f in down)
 
 
 if __name__ == "__main__":
