@@ -311,6 +311,35 @@ class TestPipelineWorker(unittest.IsolatedAsyncioTestCase):
         assert frame_count_1 == 1
         assert frame_count_2 == 1
 
+    async def test_task_observer_can_remove_itself(self):
+        frame_count = 0
+
+        class SelfRemovingObserver(BaseObserver):
+            async def on_push_frame(self, data: FramePushed):
+                nonlocal frame_count
+
+                if isinstance(data.source, IdentityFilter) and isinstance(data.frame, TextFrame):
+                    frame_count += 1
+                    await worker.remove_observer(self)
+
+        identity = IdentityFilter()
+        pipeline = Pipeline([identity])
+        worker = PipelineWorker(pipeline)
+        observer = SelfRemovingObserver()
+        worker.add_observer(observer)
+
+        async def push_frames():
+            await asyncio.sleep(0.1)
+            await worker.queue_frame(TextFrame(text="First frame"))
+            await asyncio.sleep(0.1)
+            await worker.queue_frames([TextFrame(text="Second frame"), EndFrame()])
+
+        await asyncio.gather(
+            worker.run(WorkerParams(task_manager=TaskManager())), push_frames()
+        )
+
+        assert frame_count == 1
+
     async def test_task_started_ended_event_handler(self):
         start_received = False
         end_received = False
