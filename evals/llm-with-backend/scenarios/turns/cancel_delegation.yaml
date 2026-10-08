@@ -1,0 +1,26 @@
+# The user calls the work off. The frontend delegates that like any other
+# message; the backend stops, the bot confirms, and no result arrives later.
+- expect:
+    - event: response
+      eval: "the bot opens the conversation in some way (a greeting, an introduction, an offer to help, or a question to get the user started)"
+
+- user: "Fix the flaky retry test in the HTTP client."
+  expect:
+    - event: function_call
+      calls:
+        - name: delegate
+
+- user: "Actually, never mind. Don't change anything, leave the code as it is."
+  send_after:
+    delay_ms: 6000
+  expect:
+    - event: function_call
+      calls:
+        - name: delegate
+    - event: response
+      within_ms: 25000
+      eval: "confirms in words that the work was stopped or that nothing will be changed, and does not report a fix (this reply is complete in itself: answer yes or no, never continue)"
+      any_time_after: turn_start  # some models say it before the delegate call
+    - event: response
+      absent: true
+      within_ms: 30000

@@ -1,0 +1,56 @@
+# Small talk while the backend works. The user is still waiting for the result;
+# chatting about something else in the meantime is not losing interest in it.
+- expect:
+    - event: response
+      eval: "the bot opens the conversation in some way (a greeting, an introduction, an offer to help, or a question to get the user started)"
+
+- user: "Can you fix the flaky retry test in the HTTP client for me?"
+  expect:
+    - event: function_call
+      calls:
+        - name: delegate
+    - event: response
+      within_ms: 25000
+      eval: "acknowledges that it is starting on the fix; speaks as itself, without mentioning a backend or handing work off"
+      text_excludes: "backend"
+      any_time_after: turn_start  # some models say it before the delegate call
+
+- user: "While we wait, what's the capital of Australia?"
+  send_after:
+    delay_ms: 3000
+  expect:
+    - event: response
+      within_ms: 25000
+      eval: "says the capital of Australia is Canberra (it may also mention the fix; that is fine)"
+
+- user: "Right. And what year was the first moon landing?"
+  send_after:
+    delay_ms: 3000
+  expect:
+    - event: response
+      within_ms: 25000
+      eval: "says the first moon landing was in 1969 (it may also mention the fix; that is fine)"
+
+- user: "Okay, unrelated question: what's a good name for a rubber duck?"
+  send_after:
+    delay_ms: 3000
+  expect:
+    - event: response
+      within_ms: 25000
+      eval: "suggests a name for a rubber duck (it may also mention the fix; that is fine)"
+
+# No user turn: the fix is still owed, whatever the chat was about.
+- expect:
+    - event: function_call
+      within_ms: 150000
+      calls:
+        - name: apply_patch
+      any_time_after: turn_start  # the backend's call, in its own time
+    - event: function_call
+      within_ms: 150000
+      calls:
+        - name: run_tests
+      any_time_after: turn_start  # the backend's call, in its own time
+    - event: response
+      within_ms: 150000
+      eval: "reports, on its own, that the retry test was fixed and the tests now pass (if the bot only reports progress or says the work is still underway, answer continue, not no: the report has not come yet)"
