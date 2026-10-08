@@ -102,7 +102,6 @@ import shlex
 import sys
 import time
 import traceback
-import warnings
 from collections import deque
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, replace
@@ -125,6 +124,7 @@ from pipecat.evals.script import EvalScriptScenario
 from pipecat.evals.session import EvalSessionParams, _params_with_deprecated_knobs
 from pipecat.evals.simulation import EvalSimulationScenario
 from pipecat.utils.base_object import BaseObject
+from pipecat.utils.deprecation import warn_deprecated
 
 DEFAULT_BASE_PORT = 7900
 DEFAULT_CONCURRENCY = 4
@@ -732,10 +732,9 @@ class EvalManifest:
         if spec is None:
             return _RunnerBody()
         if isinstance(spec, str):
-            warnings.warn(
-                f"{where} a bare 'runner_body: <file>' is deprecated since 1.11.0 and will be "
-                "removed in 2.0.0. Use 'runner_body: {path: <file>}' instead.",
-                DeprecationWarning,
+            warn_deprecated(
+                "`runner_body: <file>` is deprecated since 1.11.0 and will be removed in "
+                f"2.0.0. Use `runner_body: {{path: <file>}}` instead. Found in {where}.",
                 stacklevel=2,
             )
             spec = {"path": spec}
@@ -1230,10 +1229,9 @@ class EvalSuite(BaseObject):
 
     def _add_legacy_update_callback(self, on_update: Callable[[EvalRun], None]):
         """Register a bare ``on_update`` callback as an event handler; returns the handler, to remove after the run."""
-        warnings.warn(
+        warn_deprecated(
             "`on_update` is deprecated since 1.9.0 and will be removed in 2.0.0. "
             "Use the `on_update` event handler instead.",
-            DeprecationWarning,
             stacklevel=3,
         )
 

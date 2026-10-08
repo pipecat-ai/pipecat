@@ -12,13 +12,13 @@ information to bot functions.
 
 import argparse
 import asyncio
-import warnings
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field
 
+from pipecat.utils.deprecation import warn_deprecated
 from pipecat.utils.file_storage import FileStorage
 
 if TYPE_CHECKING:
@@ -348,10 +348,9 @@ class MOQRunnerArguments(RunnerArguments):
         """Carry the pre-1.8.0 ``serve_bind`` spelling over to ``bind``; check the dial target."""
         super().__post_init__()
         if self.serve_bind is not None:
-            warnings.warn(
+            warn_deprecated(
                 "`MOQRunnerArguments.serve_bind` is deprecated since 1.8.0 and will be "
                 "removed in 2.0.0. Use `MOQRunnerArguments.bind` instead.",
-                DeprecationWarning,
                 stacklevel=2,
             )
             if self.bind is None:

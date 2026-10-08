@@ -8,7 +8,6 @@
 
 import asyncio
 import uuid
-import warnings
 from abc import abstractmethod
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -52,7 +51,7 @@ from pipecat.services.settings import TTSSettings
 from pipecat.services.websocket_service import WebsocketService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.context.aggregated_frame_sequencer import AggregatedFrameSequencer
-from pipecat.utils.deprecation import deprecated
+from pipecat.utils.deprecation import deprecated, warn_deprecated
 from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.frame_queue import FrameQueue
 from pipecat.utils.string import resolve_sentence_tokenizer_language
@@ -297,15 +296,12 @@ class TTSService(AIService):
 
         # Resolve text_aggregation_mode from the new param or deprecated aggregate_sentences
         if aggregate_sentences is not None:
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    "Parameter 'aggregate_sentences' is deprecated. "
-                    "Use 'text_aggregation_mode=TextAggregationMode.SENTENCE' or "
-                    "'text_aggregation_mode=TextAggregationMode.TOKEN' instead.",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
+            warn_deprecated(
+                "`aggregate_sentences` is deprecated since 0.0.104 and will be removed in "
+                "2.0.0. Use `text_aggregation_mode=TextAggregationMode.SENTENCE` or "
+                "`text_aggregation_mode=TextAggregationMode.TOKEN` instead.",
+                stacklevel=2,
+            )
             if text_aggregation_mode is None:
                 text_aggregation_mode = (
                     TextAggregationMode.SENTENCE
@@ -325,16 +321,13 @@ class TTSService(AIService):
         self._silence_time_s: float = silence_time_s
         self._pause_frame_processing: bool = pause_frame_processing
         if pause_watchdog_timeout_s is not None:
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    "`pause_watchdog_timeout_s` is deprecated since 1.8.0 and will be "
-                    "removed in 2.0.0. No replacement. Frame processing is paused only "
-                    "while there is audio still to be played, so the pause cannot "
-                    "outlive what it waits for.",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
+            warn_deprecated(
+                "`pause_watchdog_timeout_s` is deprecated since 1.8.0 and will be "
+                "removed in 2.0.0. No replacement. Frame processing is paused only "
+                "while there is audio still to be played, so the pause cannot "
+                "outlive what it waits for.",
+                stacklevel=2,
+            )
         # Whether the bot is currently speaking. Set on BotStartedSpeakingFrame,
         # cleared on BotStoppedSpeakingFrame and InterruptionFrame. Used by
         # InterruptibleTTSService to decide whether an interruption needs a
@@ -1001,14 +994,12 @@ class TTSService(AIService):
                 await self._update_settings(frame.delta)
             elif frame.settings:
                 # Backward-compatible path: convert legacy dict to settings object.
-                with warnings.catch_warnings():
-                    warnings.simplefilter("always")
-                    warnings.warn(
-                        "Passing a dict via TTSUpdateSettingsFrame(settings={...}) is deprecated "
-                        "since 0.0.104, use TTSUpdateSettingsFrame(delta=TTSSettings(...)) instead.",
-                        DeprecationWarning,
-                        stacklevel=2,
-                    )
+                warn_deprecated(
+                    "`TTSUpdateSettingsFrame(settings={...})` is deprecated since 0.0.104 and "
+                    "will be removed in 2.0.0. Use "
+                    "`TTSUpdateSettingsFrame(delta=TTSSettings(...))` instead.",
+                    stacklevel=2,
+                )
                 delta = type(self._settings).from_mapping(frame.settings)
                 await self._update_settings(delta)
         elif isinstance(frame, BotStartedSpeakingFrame):

@@ -8,7 +8,6 @@
 
 import asyncio
 import os
-import warnings
 from collections.abc import AsyncGenerator, Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -37,6 +36,7 @@ from pipecat.services.stt_latency import SPEECHMATICS_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
+from pipecat.utils.deprecation import warn_deprecated
 from pipecat.utils.network import exponential_backoff_time
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
@@ -144,10 +144,9 @@ def _resolve_model(
             "Pass only `model` (`operating_point` is deprecated)."
         )
     if model is None and operating_point is not None:
-        warnings.warn(
+        warn_deprecated(
             "`operating_point` is deprecated since 1.10.0 and will be removed in 2.0.0. "
             "Use `model` instead.",
-            DeprecationWarning,
             stacklevel=3,
         )
     resolved = model or operating_point or DEFAULT_MODEL
@@ -1318,15 +1317,20 @@ class SpeechmaticsSTTService(STTService):
 
         # Show deprecation warnings
         def _deprecation_warning(old: str, new: str | None = None) -> None:
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                if new:
-                    message = f"`{old}` is deprecated, use `InputParams.{new}`"
-                else:
-                    message = f"`{old}` is deprecated and not used"
-                # 3 frames out of this nested helper is the caller constructing
-                # the service, which is the code that has to change.
-                warnings.warn(message, DeprecationWarning, stacklevel=3)
+            # The caller constructing the service, which is the code that has to
+            # change: past this helper, _check_deprecated_args, and __init__.
+            if new:
+                warn_deprecated(
+                    f"`SpeechmaticsSTTService({old}=...)` is deprecated since 0.0.77 and "
+                    f"will be removed in 2.0.0. Use `InputParams.{new}` instead.",
+                    stacklevel=4,
+                )
+            else:
+                warn_deprecated(
+                    f"`SpeechmaticsSTTService({old}=...)` is deprecated since 0.0.77 and "
+                    "will be removed in 2.0.0. No replacement. It has no effect.",
+                    stacklevel=4,
+                )
 
         # List of deprecated arguments and their new location
         deprecated_args = [

@@ -15,7 +15,6 @@ Classes:
 
 from __future__ import annotations
 
-import warnings
 from pathlib import Path
 
 import numpy as np
@@ -30,6 +29,7 @@ from aic_sdk import (
 from loguru import logger
 
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADParams
+from pipecat.utils.deprecation import warn_deprecated
 
 DEFAULT_QUAIL_VAD_MODEL_ID = "vad-2.1-xxs-16khz"
 
@@ -140,20 +140,17 @@ class AICQuailVADAnalyzer(VADAnalyzer):
         # These SDK-side knobs only affected the post-processed ``is_speech_detected``
         # path, which the raw-probability ``voice_confidence`` no longer uses. They are
         # accepted-but-ignored for one release cycle; gating now lives in ``VADParams``.
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            for _name, _value in (
-                ("speech_hold_duration", speech_hold_duration),
-                ("minimum_speech_duration", minimum_speech_duration),
-                ("sensitivity", sensitivity),
-            ):
-                if _value is not None:
-                    warnings.warn(
-                        f"`AICQuailVADAnalyzer.{_name}` is deprecated since 1.5.0 and will "
-                        "be removed in 2.0.0. Use `VADParams` instead.",
-                        DeprecationWarning,
-                        stacklevel=2,
-                    )
+        for _name, _value in (
+            ("speech_hold_duration", speech_hold_duration),
+            ("minimum_speech_duration", minimum_speech_duration),
+            ("sensitivity", sensitivity),
+        ):
+            if _value is not None:
+                warn_deprecated(
+                    f"`AICQuailVADAnalyzer.{_name}` is deprecated since 1.5.0 and will "
+                    "be removed in 2.0.0. Use `VADParams` instead.",
+                    stacklevel=2,
+                )
 
         self._license_key = license_key
         self._model_id = model_id

@@ -278,17 +278,22 @@ For the *runtime* warning, the mechanism depends on what is being deprecated:
     commit to the release that removes it, don't write "a future release". With
     nothing to migrate to, the second sentence is `No replacement.` — stated
     explicitly.
-- **Parameters, module moves, behavior/value changes** → the decorator can't
-  mark these, so call `warnings.warn(..., DeprecationWarning)` by hand. These
-  don't get static-checker detection; the directive documents them.
-- **Fields whose reads are intercepted by `__getattribute__`** → call
-  `warn_deprecated_read()` (`from pipecat.utils.deprecation import
-  warn_deprecated_read`). Such a field is read wherever its object travels, so a
-  hand-rolled `warnings.warn` repeats itself on every read; the helper warns once
-  per call site, and reports the line that performed the read.
+- **Parameters, fields, module moves, behavior/value changes** → the decorator
+  can't mark these, so call `warn_deprecated(message, stacklevel=...)` (`from
+  pipecat.utils.deprecation import warn_deprecated`), never `warnings.warn`
+  directly. Set `stacklevel` as for `warnings.warn`, pointing at the caller's
+  code where you can. The message follows the same canonical template, written
+  as a string or f-string literal so `tests/test_deprecation_markers.py` can
+  check it. These don't get static-checker detection; the directive documents
+  them.
+
+`warn_deprecated()` shows the warning even where Python's default filters would
+hide it, since many deprecations are detected inside Pipecat as a pipeline runs,
+and warns once per call site, so a check on every frame or a field read
+wherever its object travels doesn't repeat.
 
 ```python
-from pipecat.utils.deprecation import deprecated
+from pipecat.utils.deprecation import deprecated, warn_deprecated
 
 
 @deprecated(
@@ -333,12 +338,10 @@ class MyService(BaseService):
             **kwargs: Additional arguments passed to parent.
         """
         if old_param is not None:
-            import warnings
-
-            warnings.warn(
+            warn_deprecated(
                 "`old_param` is deprecated since 1.2.0 and will be removed in 2.0.0. "
                 "No replacement.",
-                DeprecationWarning,
+                stacklevel=2,
             )
         super().__init__(**kwargs)
 

@@ -104,6 +104,7 @@ from pipecat.processors.aggregators.llm_context import (
     LLMSpecificMessage,
     LLMStandardMessage,
 )
+from pipecat.utils.deprecation import _warned_sites
 
 
 class TestOpenAIGetLLMInvocationParams(unittest.IsolatedAsyncioTestCase):
@@ -4182,6 +4183,9 @@ class TestContextSystemMessageDeprecation(unittest.IsolatedAsyncioTestCase):
         for cls in adapters:
             for system_instruction in (None, "Be concise."):
                 with self.subTest(adapter=cls.__name__, system_instruction=system_instruction):
+                    # Every adapter warns from the same line, so start each one
+                    # from an empty record of warned sites.
+                    _warned_sites.clear()
                     with warnings.catch_warnings(record=True) as caught:
                         warnings.simplefilter("always")
                         await self._invoke(cls(), system_instruction)

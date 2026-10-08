@@ -8,7 +8,6 @@
 
 import inspect
 import time
-import warnings
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -76,6 +75,7 @@ from pipecat.processors.frameworks.rtvi.frames import (
 )
 from pipecat.processors.frameworks.rtvi.models import BotOutputTransformResult
 from pipecat.transports.base_output import BaseOutputTransport
+from pipecat.utils.deprecation import warn_deprecated
 from pipecat.utils.string import match_endofsentence
 
 if TYPE_CHECKING:
@@ -308,12 +308,11 @@ class RTVIObserver(BaseObserver):
         """
         is_progress_aware = self._check_progress_aware(transform_function)
         if not is_progress_aware:
-            warnings.warn(
-                f"Bot output transform '{transform_function.__name__}' uses the deprecated "
-                "2-parameter signature '(text, agg_type) -> str'. Update to the 4-parameter "
-                "signature '(text, agg_type, accumulated_text, remaining_text) -> "
-                "BotOutputTransformResult' to support word-level progress transforms.",
-                DeprecationWarning,
+            warn_deprecated(
+                f"`{transform_function.__name__}(text, agg_type) -> str` is deprecated since "
+                "1.4.0 and will be removed in 2.0.0. Use `(text, agg_type, accumulated_text, "
+                "remaining_text) -> BotOutputTransformResult` instead. It supports word-level "
+                "progress transforms.",
                 stacklevel=2,
             )
         self._aggregation_transforms.append(

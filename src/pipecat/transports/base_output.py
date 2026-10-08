@@ -54,6 +54,7 @@ from pipecat.frames.frames import (
 from pipecat.pipeline.capabilities import BotCapabilities
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 from pipecat.transports.base_transport import TransportParams
+from pipecat.utils.deprecation import warn_deprecated
 from pipecat.utils.frame_queue import FrameQueue
 from pipecat.utils.time import nanoseconds_to_seconds
 
@@ -96,16 +97,11 @@ class BaseOutputTransport(FrameProcessor):
         self._media_senders: dict[Any, BaseOutputTransport.MediaSender] = {}
 
         if params.video_out_bitrate is not None:
-            import warnings
-
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    "Transport parameter `video_out_bitrate` is deprecated and will be removed in "
-                    "2.0.0. Use provider specific settings instead.",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
+            warn_deprecated(
+                "`TransportParams.video_out_bitrate` is deprecated since 1.1.0 and will be "
+                "removed in 2.0.0. Use provider-specific settings instead.",
+                stacklevel=2,
+            )
 
     @property
     def sample_rate(self) -> int:

@@ -151,7 +151,9 @@ class XTTSService(TTSService):
             self._warn_init_param_moved_to_settings("voice_id", "voice")
             default_settings.voice = voice_id
         if language is not None:
-            self._warn_init_param_moved_to_settings("language", "language")
+            self._warn_init_param_moved_to_settings(
+                "language", "language", deprecated_since="0.0.106"
+            )
             default_settings.language = language
 
         # 3. (No step 3, as there's no params object to apply)

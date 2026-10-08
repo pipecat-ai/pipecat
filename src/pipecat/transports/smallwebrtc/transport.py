@@ -14,7 +14,6 @@ streaming, application messaging, and client connection management.
 import asyncio
 import fractions
 import time
-import warnings
 from collections import deque
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -51,6 +50,7 @@ from pipecat.transports.smallwebrtc.connection import (
     SmallWebRTCTrack,
 )
 from pipecat.transports.video_in_sampler import _capture_framerate, _VideoInSamplers
+from pipecat.utils.deprecation import warn_deprecated
 from pipecat.utils.shared import acquires, releases
 from pipecat.utils.types import NOT_GIVEN, NotGiven, is_given
 
@@ -1192,12 +1192,11 @@ class SmallWebRTCTransport(BaseTransport):
             on_request_only: Pass on only the frames that answer image requests.
         """
         if participant_id is None or participant_id in (CAM_VIDEO_SOURCE, SCREEN_VIDEO_SOURCE):
-            warnings.warn(
-                "Calling `SmallWebRTCTransport.capture_participant_video` without a "
-                "`participant_id` is deprecated since 1.13.0 and will be removed in 2.0.0. "
+            warn_deprecated(
+                "`SmallWebRTCTransport.capture_participant_video(participant_id=None)` is "
+                "deprecated since 1.13.0 and will be removed in 2.0.0. "
                 "Use `capture_participant_video(participant_id, framerate, video_source)` "
                 "instead.",
-                DeprecationWarning,
                 stacklevel=2,
             )
             # The deprecated form is (video_source, framerate=None).

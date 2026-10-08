@@ -47,6 +47,7 @@ from pipecat.services.llm_service import (
     FunctionCallParams,  # TODO(aleix): we shouldn't import `services` from `processors`
 )
 from pipecat.transports.base_transport import BaseTransport
+from pipecat.utils.deprecation import warn_deprecated
 
 
 class RTVIProcessor(FrameProcessor):
@@ -91,13 +92,11 @@ class RTVIProcessor(FrameProcessor):
         self._message_task: asyncio.Task | None = None
 
         if transport is not None:
-            import warnings
-
-            warnings.warn(
-                "Passing 'transport' to RTVIProcessor is deprecated since 1.4.0 and is "
-                "ignored. Audio input and audio-streaming start are driven by frames; for "
-                "client-ready audio gating set audio_in_stream_on_start=False on the transport.",
-                DeprecationWarning,
+            warn_deprecated(
+                "`RTVIProcessor(transport=...)` is deprecated since 1.4.0 and will be removed "
+                "in 2.0.0. No replacement. The argument is ignored: audio input and "
+                "audio-streaming start are driven by frames. For client-ready audio gating, "
+                "set `audio_in_stream_on_start=False` on the transport.",
                 stacklevel=2,
             )
 
@@ -197,12 +196,10 @@ class RTVIProcessor(FrameProcessor):
             Configure reporting level via ``RTVIObserverParams.function_call_report_level``.
             Will be removed in 2.0.0.
         """
-        import warnings
-
-        warnings.warn(
-            "handle_function_call is deprecated. Function call events are now "
-            "automatically sent by RTVIObserver using llm-function-call-in-progress.",
-            DeprecationWarning,
+        warn_deprecated(
+            "`RTVIProcessor.handle_function_call` is deprecated since 0.0.102 and will be "
+            "removed in 2.0.0. Use `RTVIObserver` instead. It sends function call events as "
+            "`llm-function-call-in-progress`.",
             stacklevel=2,
         )
         fn = RTVI.LLMFunctionCallMessageData(

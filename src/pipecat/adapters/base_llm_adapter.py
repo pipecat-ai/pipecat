@@ -28,6 +28,7 @@ from pipecat.processors.aggregators.llm_context import (
     LLMSpecificMessage,
     NotGiven,
 )
+from pipecat.utils.deprecation import warn_deprecated
 from pipecat.utils.file_resolver import FileResolver
 from pipecat.utils.security.ssrf import UrlReachability
 
@@ -86,15 +87,12 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
         if method is not None and not inspect.iscoroutinefunction(method):
             # stacklevel=3 steps past ABCMeta.__new__, which calls this hook,
             # so the warning points at the subclass's definition.
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    f"`{cls.__name__}` defines `get_llm_invocation_params` as a sync method, "
-                    "but it is async. Define it with `async def`, and `await` it where you "
-                    "call it.",
-                    DeprecationWarning,
-                    stacklevel=3,
-                )
+            warn_deprecated(
+                f"`def {cls.__name__}.get_llm_invocation_params` is deprecated since 1.13.0 "
+                "and will be removed in 2.0.0. Use `async def` instead. `await` the method "
+                "where you call it.",
+                stacklevel=3,
+            )
 
     @property
     def builtin_tools(self) -> dict[str, FunctionSchema]:
@@ -412,19 +410,12 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
         if self._warned_context_system_message:
             return
         self._warned_context_system_message = True
-        # Raised under an `always` filter so it survives the default
-        # `ignore::DeprecationWarning` that hides call sites outside
-        # `__main__` — every caller here is inside an LLM service. The flag
-        # above supplies the deduplication that filter would provide.
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                'Passing the system prompt as an initial "system" message in `LLMContext` is'
-                " deprecated since 1.9.0 and will be removed in 2.0.0. Set `system_instruction`"
-                " on the LLM service instead.",
-                DeprecationWarning,
-                stacklevel=3,
-            )
+        warn_deprecated(
+            '`LLMContext(messages=[{"role": "system", ...}, ...])` is deprecated since 1.9.0'
+            " and will be removed in 2.0.0. Use `system_instruction` on the LLM service"
+            " instead.",
+            stacklevel=3,
+        )
 
     def _extract_initial_system(
         self,

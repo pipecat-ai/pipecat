@@ -38,7 +38,6 @@ See https://docs.sarvam.ai/api-reference-docs/text-to-speech/stream for full API
 import asyncio
 import base64
 import json
-import warnings
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -60,7 +59,7 @@ from pipecat.services.sarvam._sdk import sdk_headers
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import InterruptibleTTSService, TextAggregationMode, TTSService
 from pipecat.transcriptions.language import Language, resolve_language
-from pipecat.utils.deprecation import deprecated
+from pipecat.utils.deprecation import deprecated, warn_deprecated
 from pipecat.utils.tracing.service_decorators import traced_tts
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 
@@ -510,10 +509,9 @@ class SarvamHttpTTSService(TTSService):
             raise ValueError(f"Unsupported model '{resolved_model}'. Allowed values: {allowed}.")
 
         if resolved_model == SarvamTTSModel.BULBUL_V2:
-            warnings.warn(
+            warn_deprecated(
                 "`SarvamTTSModel.BULBUL_V2` is deprecated since 1.9.0 and will be removed in "
                 "2.0.0. Use `SarvamTTSModel.BULBUL_V3` instead.",
-                DeprecationWarning,
                 stacklevel=2,
             )
 
@@ -943,10 +941,9 @@ class SarvamTTSService(InterruptibleTTSService):
             raise ValueError(f"Unsupported model '{resolved_model}'. Allowed values: {allowed}.")
 
         if resolved_model == SarvamTTSModel.BULBUL_V2:
-            warnings.warn(
+            warn_deprecated(
                 "`SarvamTTSModel.BULBUL_V2` is deprecated since 1.9.0 and will be removed in "
                 "2.0.0. Use `SarvamTTSModel.BULBUL_V3` instead.",
-                DeprecationWarning,
                 stacklevel=2,
             )
 
