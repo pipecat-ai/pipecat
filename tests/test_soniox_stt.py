@@ -591,3 +591,28 @@ async def test_stop_completes_teardown_when_the_end_of_audio_send_fails():
     service._flush_stt_usage_metrics.assert_awaited_once()
     assert service._disconnecting is True
     assert websocket.closed
+
+
+@pytest.mark.asyncio
+async def test_soniox_error_code_sets_category(monkeypatch):
+    from pipecat.utils.errors import ErrorCategory
+
+    events = []
+    service = _instrumented_service(monkeypatch, events)
+    categories = []
+
+    async def fake_push_error(*args, **kwargs):
+        categories.append(kwargs.get("category"))
+
+    monkeypatch.setattr(service, "push_error", fake_push_error)
+
+    messages = [
+        json.dumps({"tokens": [], "error_code": 402, "error_message": "balance exhausted"}),
+        json.dumps({"tokens": [], "error_code": 401, "error_message": "invalid key"}),
+        json.dumps({"tokens": [], "error_message": "no code"}),
+    ]
+    service._websocket = _FakeWebsocket(messages)
+
+    await service._receive_messages()
+
+    assert categories == [ErrorCategory.QUOTA, ErrorCategory.AUTHENTICATION, None]

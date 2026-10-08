@@ -255,3 +255,37 @@ async def test_soniox_run_tts_configures_a_stream_it_has_not_opened():
     assert [m.get("stream_id") for m in sent] == ["stream-1"] * 3
     assert "text" not in sent[0]
     assert [m.get("text") for m in sent[1:]] == ["Hello.", "Again."]
+
+
+class _FakeReceivingWebsocket(_FakeWebsocket):
+    def __init__(self, messages: list[dict]):
+        super().__init__()
+        self._messages = messages
+
+    async def __aiter__(self):
+        for message in self._messages:
+            yield json.dumps(message)
+
+
+@pytest.mark.asyncio
+async def test_soniox_error_code_sets_category(monkeypatch):
+    from pipecat.utils.errors import ErrorCategory
+
+    service = SonioxTTSService(api_key="test-key")
+    categories = []
+
+    async def fake_push_error(*args, **kwargs):
+        categories.append(kwargs.get("category"))
+
+    monkeypatch.setattr(service, "push_error", fake_push_error)
+    service._websocket = _FakeReceivingWebsocket(
+        [
+            {"error_code": 402, "error_type": "organization_balance_exhausted"},
+            {"error_code": 401, "error_type": "unauthorized"},
+            {"error_code": "oops"},
+        ]
+    )
+
+    await service._receive_messages()
+
+    assert categories == [ErrorCategory.QUOTA, ErrorCategory.AUTHENTICATION, None]
