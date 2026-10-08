@@ -93,6 +93,24 @@ class StreamingWorkerTask(BaseWorker):
         await self.send_job_stream_end(message.job_id, self._auto_response)
 
 
+class LateStreamingWorkerTask(StreamingWorkerTask):
+    """Worker that only starts streaming once the other requests have gone out."""
+
+    async def on_job_request(self, message):
+        for _ in range(20):
+            await asyncio.sleep(0)
+        await super().on_job_request(message)
+
+
+class AwaitingPublishBus(AsyncQueueBus):
+    """Bus whose publish() awaits before delivering, as a network bus does."""
+
+    async def publish(self, message):
+        for _ in range(10):
+            await asyncio.sleep(0)
+        self.on_message_received(message)
+
+
 class SlowWorkerTask(BaseWorker):
     """Worker that blocks during job execution until cancelled."""
 
@@ -414,6 +432,60 @@ class TestJobGroupContext(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(events[0].type, JobGroupEvent.UPDATE)
         self.assertEqual(events[0].worker_name, "w1")
         self.assertEqual(tg.responses, {"w1": {"a": 1}, "w2": {"b": 2}})
+
+    async def test_job_group_iterates_events_sent_while_requests_go_out(self):
+        """async for yields events a worker sends before every request is published."""
+        bus = AwaitingPublishBus()
+        await bus.setup(self.tm)
+        await bus.start()
+        self.addAsyncCleanup(bus.stop)
+
+        parent = StubTask("parent")
+        await setup_task(bus, self.registry, parent)
+
+        names = ["w1", "w2", "w3", "w4", "w5"]
+        await setup_task(
+            bus,
+            self.registry,
+            StreamingWorkerTask("w1", chunks=[{"text": "a"}, {"text": "b"}], response={"w": 1}),
+        )
+        for index, name in enumerate(names[1:], start=2):
+            await setup_task(
+                bus,
+                self.registry,
+                LateStreamingWorkerTask(name, chunks=[{"text": "c"}], response={"w": index}),
+            )
+
+        events = []
+        async with parent.job_group(*names) as tg:
+            async for event in tg:
+                events.append(event)
+
+        self.assertEqual(
+            [e.type for e in events if e.worker_name == "w1"],
+            [
+                JobGroupEvent.STREAM_START,
+                JobGroupEvent.STREAM_DATA,
+                JobGroupEvent.STREAM_DATA,
+                JobGroupEvent.STREAM_END,
+            ],
+        )
+        self.assertEqual(len(events), 16)
+
+    async def test_request_job_group_collects_no_events(self):
+        """request_job_group() leaves the group without an event queue."""
+        parent = StubTask("parent")
+        await setup_task(self.bus, self.registry, parent)
+
+        worker = SlowWorkerTask("worker")
+        await setup_task(self.bus, self.registry, worker)
+
+        job_id = await parent.request_job_group("worker")
+        await worker.started.wait()
+
+        self.assertIsNone(parent.job_groups[job_id].event_queue)
+
+        await parent.cancel_job_group(job_id)
 
     async def test_job_group_no_iteration_still_works(self):
         """job_group() works without iterating (pass body)."""
