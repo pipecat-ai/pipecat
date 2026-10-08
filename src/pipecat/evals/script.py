@@ -178,6 +178,29 @@ Supported expectation fields (per event):
           absent: true
           within_ms: 30000
 
+``any_time_after: turn_start``
+    Expectations are matched in order: each is looked for after the events
+    the ones before it went through, and an event of another type that
+    arrives while one waits is passed over. So the list is also a claim
+    about order. ``any_time_after: turn_start`` lifts that claim for one
+    expectation: it may be satisfied by an event from anywhere in the turn,
+    including one that arrived before the expectations listed above it. The
+    expectations after it are still looked for after it. The default,
+    ``previous``, is the ordinary rule. Use it for an event whose timing the
+    bot does not control, such as a call a backend makes at its own pace, or a
+    reply some models give before the tool call that others give after::
+
+        - event: function_call
+          calls:
+            - name: delegate
+        - event: response
+          eval: "tells a joke"
+          any_time_after: turn_start    # a model may say it before it delegates
+        - event: function_call
+          calls:
+            - name: check_ci_status
+          any_time_after: turn_start    # the backend makes it in its own time
+
 Instead of ``user:``, a turn may press DTMF keys with ``dtmf:`` (the two are
 mutually exclusive — you press keys or you talk)::
 
@@ -317,6 +340,10 @@ FUNCTION_CALL_EVENTS = ("function_call", "function_call_stopped")
 # accepts ``short`` or ``long``.
 MARKER_KINDS = ("complete", "short", "long", "incomplete")
 
+# Where an expectation looks for its event from: after the events the
+# expectations before it went through, or from the start of the turn.
+ANY_TIME_AFTER = ("previous", "turn_start")
+
 
 @dataclass
 class EvalFunctionCall:
@@ -377,6 +404,10 @@ class EvalExpectation:
             raw text must hold.
         text_after: For an ``llm_marker`` event, whether text must (True) or
             must not (False) follow the first marker in the raw text.
+        any_time_after: Where the expectation looks for its event from:
+            ``previous`` (the default), after the events the expectations
+            before it went through; or ``turn_start``, anywhere in the turn,
+            including before those expectations.
         absent: When True, the expectation is inverted: it passes only when NO
             event of this type arrives before the ``within_ms`` budget expires,
             and fails as soon as one does. Matches on event type only;
@@ -394,6 +425,7 @@ class EvalExpectation:
     marker_first: bool | None = None
     markers: int | None = None
     text_after: bool | None = None
+    any_time_after: str = "previous"
     absent: bool = False
 
     @property
@@ -894,6 +926,19 @@ def _parse_expectation(e: Any, path: Path, turn_idx: int, exp_idx: int) -> EvalE
         raise ValueError(
             f"{path}: turn #{turn_idx} expectation #{exp_idx} 'absent:' must be a boolean"
         )
+    any_time_after = e.get("any_time_after", "previous")
+    if any_time_after not in ANY_TIME_AFTER:
+        raise ValueError(
+            f"{path}: turn #{turn_idx} expectation #{exp_idx} 'any_time_after:' must be one of "
+            f"{', '.join(ANY_TIME_AFTER)}, not {any_time_after!r}"
+        )
+    if absent and "any_time_after" in e:
+        # An absence is about what arrives after the expectations before it;
+        # looking back for it has no meaning.
+        raise ValueError(
+            f"{path}: turn #{turn_idx} expectation #{exp_idx} 'absent: true' "
+            f"cannot be combined with 'any_time_after'"
+        )
     if absent:
         # An absent expectation matches on event type only: content and call
         # checks describe an event that must arrive, which contradicts absence.
@@ -951,6 +996,7 @@ def _parse_expectation(e: Any, path: Path, turn_idx: int, exp_idx: int) -> EvalE
         marker_first=e.get("marker_first"),
         markers=e.get("markers"),
         text_after=e.get("text_after"),
+        any_time_after=any_time_after,
         absent=absent,
     )
 
