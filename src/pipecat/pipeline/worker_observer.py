@@ -122,6 +122,8 @@ class WorkerObserver(BaseObserver):
             # the worker ends itself instead.
             if proxy.task is not asyncio.current_task():
                 await self.cancel_task(proxy.task)
+            # Shutdown only cleans up the observers in _proxies.
+            await observer.cleanup()
 
         # Remove the observer from the list.
         if observer in self._observers:
