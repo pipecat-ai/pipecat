@@ -117,8 +117,11 @@ class WorkerObserver(BaseObserver):
             proxy = self._proxies[observer]
             # Remove the proxy so it doesn't get called anymore.
             del self._proxies[observer]
-            # Cancel the proxy worker right away.
-            await self.cancel_task(proxy.task)
+            # Cancel the proxy worker right away. An observer removing itself
+            # runs on that worker, which can't be cancelled from inside, so
+            # the worker ends itself instead.
+            if proxy.task is not asyncio.current_task():
+                await self.cancel_task(proxy.task)
 
         # Remove the observer from the list.
         if observer in self._observers:
@@ -246,3 +249,8 @@ class WorkerObserver(BaseObserver):
                 await observer.on_startup_warmup(data)
 
             queue.task_done()
+
+            # Stop once the observer has removed itself (see remove_observer()).
+            proxy = self._proxies.get(observer) if self._proxies else None
+            if not proxy or proxy.queue is not queue:
+                break
