@@ -68,6 +68,26 @@ class TestWorkerObserverInAPipeline(unittest.IsolatedAsyncioTestCase):
 
 
 class TestWorkerObserverMemory(unittest.IsolatedAsyncioTestCase):
+    async def test_first_observer_can_be_added_after_setup(self):
+        worker_observer = WorkerObserver()
+        await worker_observer.setup(TaskManager())
+        self.addAsyncCleanup(worker_observer.cleanup)
+        observer = RecordingObserver()
+        worker_observer.add_observer(observer)
+        source = IdentityFilter(name="source")
+
+        await worker_observer.on_push_frame(
+            FramePushed(
+                source=source,
+                destination=source,
+                frame=TextFrame("hello"),
+                direction=FrameDirection.DOWNSTREAM,
+                timestamp=0,
+            )
+        )
+        await asyncio.gather(*(proxy.queue.join() for proxy in worker_observer._proxies.values()))
+        self.assertEqual(observer.pushes, [("source", True)])
+
     async def test_a_frame_is_forgotten_once_the_pipeline_lets_go_of_it(self):
         observer = RecordingObserver()
         worker_observer = WorkerObserver(observers=[observer])

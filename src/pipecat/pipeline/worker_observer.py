@@ -85,7 +85,7 @@ class WorkerObserver(BaseObserver):
         super().__init__(**kwargs)
         self._observers = observers or []
         self._proxies: dict[BaseObserver, Proxy] | None = (
-            None  # Becomes a dict after start() is called
+            None  # Becomes a dict after setup() is called
         )
         # Frames pushed so far, held weakly: an entry goes away with its
         # frame, so this tracks the frames in flight, not every frame ever
@@ -101,9 +101,8 @@ class WorkerObserver(BaseObserver):
         # Add the observer to the list.
         self._observers.append(observer)
 
-        # If we already started, create a new proxy for the observer.
-        # Otherwise, it will be created in start().
-        if self._proxies:
+        # After setup(), create the proxy immediately; setup() handles earlier additions.
+        if self._proxies is not None:
             proxy = self._create_proxy(observer)
             self._proxies[observer] = proxy
 
