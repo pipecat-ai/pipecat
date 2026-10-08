@@ -10,6 +10,7 @@ import unittest
 from unittest.mock import AsyncMock, Mock, patch
 
 from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.inworld.realtime.llm import InworldRealtimeLLMService
 
 
@@ -64,13 +65,14 @@ class TestInworldRealtimeContext(unittest.IsolatedAsyncioTestCase):
                 {"role": "tool", "tool_call_id": "call-1", "content": '{"temp": 22}'},
             ]
         )
-        await service._handle_context(context)
+        # The assistant aggregator pushes the context back upstream after a tool result.
+        await service._handle_context(context, FrameDirection.UPSTREAM)
 
         self.assertTrue(service._server_vad_handled_turn)
         service.send_client_event.assert_not_awaited()
 
         context.add_message({"role": "user", "content": "What is the weather?"})
-        await service._handle_context(context)
+        await service._handle_context(context, FrameDirection.DOWNSTREAM)
 
         self.assertFalse(service._server_vad_handled_turn)
         service.send_client_event.assert_not_awaited()

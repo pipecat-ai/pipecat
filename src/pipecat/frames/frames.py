@@ -847,11 +847,13 @@ class FunctionCallResultProperties:
         is_final: Whether this is the final result for the function call. When
             ``False`` the result is treated as an intermediate update. Defaults to ``True``.
             Only meaningful for async function calls (``cancel_on_interruption=False``).
-            Note: realtime LLM services do not support streamed intermediate
-            results; they deliver only the final result to the provider. An
-            intermediate result reported to a realtime service is dropped
-            and an error is raised. Use a non-realtime LLM service if your
-            tool needs to stream intermediate results.
+            A speech-to-speech service takes one output per call, so it puts an
+            intermediate result to its model some other way — a conversation
+            item, a text event, a response that keeps the call open — and
+            ``run_llm`` says whether the model should answer it or just take it
+            in. A service that can't do that at all says so with
+            ``accepts_intermediate_function_call_results`` and drops
+            intermediate results with a warning.
     """
 
     run_llm: bool | None = None
@@ -1483,6 +1485,99 @@ class FunctionCallsStartedFrame(SystemFrame):
     """
 
     function_calls: Sequence[FunctionCallFromLLM]
+
+
+@dataclass
+class ExternalFunctionCall:
+    """A function call made outside this pipeline, as announced to it.
+
+    What :class:`ExternalFunctionCallsStartedFrame` carries, one per call.
+
+    Parameters:
+        function_name: Name of the function called.
+        tool_call_id: Unique identifier of the call.
+    """
+
+    function_name: str
+    tool_call_id: str
+
+
+@dataclass
+class ExternalFunctionCallsStartedFrame(SystemFrame):
+    """Function calls were made outside this pipeline: ``FunctionCallsStartedFrame``'s counterpart.
+
+    Nothing in the pipeline acts on one; observers report it as they report
+    the pipeline's own. The calls ran elsewhere, e.g. in a backend worker's
+    pipeline on behalf of a tool here, and belong to that pipeline's
+    conversation, not this one. Like its counterpart it carries every call
+    announced together, which may be one. Each call's later phases come as
+    ``ExternalFunctionCallInProgressFrame``, ``ExternalFunctionCallResultFrame``
+    and ``ExternalFunctionCallCancelFrame``.
+
+    Parameters:
+        function_calls: The calls made.
+    """
+
+    function_calls: Sequence[ExternalFunctionCall]
+
+
+@dataclass
+class ExternalFunctionCallInProgressFrame(SystemFrame):
+    """An external function call is running: ``FunctionCallInProgressFrame``'s counterpart.
+
+    Nothing in the pipeline acts on one; observers report it as they report
+    the pipeline's own. The call ran elsewhere, e.g. in a backend worker's
+    pipeline on behalf of a tool here, and belongs to that pipeline's
+    conversation, not this one.
+
+    Parameters:
+        function_name: Name of the function called.
+        tool_call_id: Unique identifier of the call.
+        arguments: Arguments passed to the function.
+    """
+
+    function_name: str
+    tool_call_id: str
+    arguments: Any
+
+
+@dataclass
+class ExternalFunctionCallResultFrame(SystemFrame):
+    """An external function call produced a result: ``FunctionCallResultFrame``'s counterpart.
+
+    Nothing in the pipeline acts on one; observers report it as they report
+    the pipeline's own.
+
+    Parameters:
+        function_name: Name of the function called.
+        tool_call_id: Unique identifier of the call.
+        arguments: Arguments passed to the function.
+        result: The result.
+        is_final: Whether this result completes the call, or is one of a stream
+            of intermediate results before the final one.
+    """
+
+    function_name: str
+    tool_call_id: str
+    arguments: Any
+    result: Any
+    is_final: bool = True
+
+
+@dataclass
+class ExternalFunctionCallCancelFrame(SystemFrame):
+    """An external function call was cancelled: ``FunctionCallCancelFrame``'s counterpart.
+
+    Nothing in the pipeline acts on one; observers report it as they report
+    the pipeline's own.
+
+    Parameters:
+        function_name: Name of the function called.
+        tool_call_id: Unique identifier of the call.
+    """
+
+    function_name: str
+    tool_call_id: str
 
 
 @dataclass
