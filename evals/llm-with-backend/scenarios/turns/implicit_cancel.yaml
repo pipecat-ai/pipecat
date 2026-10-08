@@ -27,10 +27,12 @@
     # The acknowledgement and the cancellation land in either order: the
     # cascades acknowledge first, the speech-to-speech bots cancel first.
     - event: response
+      # Judged after the delegate call, with no any_time_after: a model that also
+      # speaks beside the call says a second sentence on the call's result, and
+      # the absence check below must find nothing after the one judged here.
       within_ms: 25000
       eval: "acknowledges the change of plan briefly, without reporting any test results and without promising further work; speaks as itself, without mentioning a backend or handing work off (this reply is complete in itself: answer yes or no, never continue)"
       text_excludes: "backend"
-      any_time_after: turn_start  # some models say it before the delegate call
     - event: function_call_stopped
       within_ms: 25000
       calls:
