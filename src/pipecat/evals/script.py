@@ -179,16 +179,16 @@ Supported expectation fields (per event):
           within_ms: 30000
 
 ``any_time_after: turn_start``
-    Expectations are matched in order: each is looked for after the events
-    the ones before it went through, and an event of another type that
-    arrives while one waits is passed over. So the list is also a claim
-    about order. ``any_time_after: turn_start`` lifts that claim for one
-    expectation: it may be satisfied by an event from anywhere in the turn,
-    including one that arrived before the expectations listed above it. The
-    expectations after it are still looked for after it. The default,
+    Expectations are met in order: each is looked for only once the one
+    above it has been met, and an event of another type that arrives in the
+    meantime is passed over. So the list is also a claim about order.
+    ``any_time_after: turn_start`` lifts that claim for one expectation: it
+    may be met by an event from anywhere in the turn, including one that
+    arrived before the expectations above it were met. The expectations
+    below it are still looked for only once it has been met. The default,
     ``previous``, is the ordinary rule. Use it for an event whose timing the
-    bot does not control, such as a call a backend makes at its own pace, or a
-    reply some models give before the tool call that others give after::
+    bot does not control, such as a call a backend makes at its own pace, or
+    a reply some models give before the tool call that others give after::
 
         - event: function_call
           calls:
@@ -340,8 +340,8 @@ FUNCTION_CALL_EVENTS = ("function_call", "function_call_stopped")
 # accepts ``short`` or ``long``.
 MARKER_KINDS = ("complete", "short", "long", "incomplete")
 
-# Where an expectation looks for its event from: after the events the
-# expectations before it went through, or from the start of the turn.
+# Where an expectation looks for its event from: once the expectation above
+# it has been met, or from the start of the turn.
 ANY_TIME_AFTER = ("previous", "turn_start")
 
 
@@ -405,9 +405,9 @@ class EvalExpectation:
         text_after: For an ``llm_marker`` event, whether text must (True) or
             must not (False) follow the first marker in the raw text.
         any_time_after: Where the expectation looks for its event from:
-            ``previous`` (the default), after the events the expectations
-            before it went through; or ``turn_start``, anywhere in the turn,
-            including before those expectations.
+            ``previous`` (the default), only once the expectation above it
+            has been met; or ``turn_start``, anywhere in the turn, including
+            before the expectations above it were met.
         absent: When True, the expectation is inverted: it passes only when NO
             event of this type arrives before the ``within_ms`` budget expires,
             and fails as soon as one does. Matches on event type only;

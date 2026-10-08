@@ -104,8 +104,8 @@ class ExpectationMatcher:
 
         if expectation.absent:
             return await self._match_absent(expectation, deadline, budget_ms, turn_idx, exp_idx)
-        # Where in the turn the expectation looks for its event from: after
-        # everything popped so far, or back from the start of the turn.
+        # Where in the turn the expectation looks for its event from: only what
+        # arrives from here on, or back from the start of the turn.
         since = 0 if expectation.any_time_after == "turn_start" else self._stream.turn_position
         if expectation.aggregates:
             return await self._match_aggregating(
