@@ -32,7 +32,10 @@ scenario ``event:``             RTVI server message(s)
                                 (audio modality only)
 ``response``                    the harness's own transcription of the bot's audio
                                 (audio modality only); ``llm_response`` in text modality
-``function_call``               ``llm-function-call-in-progress``
+``function_call``               ``llm-function-call-in-progress``; a call made
+                                outside the bot's pipeline and reported into it
+                                (``ExternalFunctionCall*Frame``), such as a
+                                backend's, counts the same
 ``function_call_stopped``       ``llm-function-call-stopped``; its ``args`` carry
                                 ``tool_call_id`` and ``cancelled``, so a scenario
                                 can tell work that was stopped from work that
@@ -51,6 +54,9 @@ from pipecat.evals.serializer import EVAL_BOT_IMAGE_TYPE
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
+    ExternalFunctionCallCancelFrame,
+    ExternalFunctionCallInProgressFrame,
+    ExternalFunctionCallResultFrame,
     Frame,
     FunctionCallCancelFrame,
     FunctionCallInProgressFrame,
@@ -374,13 +380,23 @@ class EvalEventStream:
         elif isinstance(frame, BotStoppedSpeakingFrame):
             self._bot_quiet.set()
             return {"type": "bot_stopped_speaking"}
-        elif isinstance(frame, FunctionCallInProgressFrame):
+        elif isinstance(frame, (FunctionCallInProgressFrame, ExternalFunctionCallInProgressFrame)):
             return {
                 "type": "function_call",
                 "name": frame.function_name or None,
                 "args": dict(frame.arguments or {}),
             }
-        elif isinstance(frame, (FunctionCallResultFrame, FunctionCallCancelFrame)):
+        elif isinstance(frame, ExternalFunctionCallResultFrame) and not frame.is_final:
+            return None
+        elif isinstance(
+            frame,
+            (
+                FunctionCallResultFrame,
+                FunctionCallCancelFrame,
+                ExternalFunctionCallResultFrame,
+                ExternalFunctionCallCancelFrame,
+            ),
+        ):
             # How the call ended is the assertable part, so `cancelled` sits in
             # `args` alongside the id: a scenario matches both through the same
             # `calls:`/`args:` check a function_call uses.
@@ -389,7 +405,9 @@ class EvalEventStream:
                 "name": frame.function_name or None,
                 "args": {
                     "tool_call_id": frame.tool_call_id,
-                    "cancelled": isinstance(frame, FunctionCallCancelFrame),
+                    "cancelled": isinstance(
+                        frame, (FunctionCallCancelFrame, ExternalFunctionCallCancelFrame)
+                    ),
                 },
             }
         return None
