@@ -175,5 +175,22 @@ class TestWorkerObserverRemoval(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(self.observer.cleaned_up)
 
 
+class FailingCleanupObserver(BaseObserver):
+    async def cleanup(self):
+        await super().cleanup()
+        raise RuntimeError("cleanup failed")
+
+
+class TestWorkerObserverShutdown(unittest.IsolatedAsyncioTestCase):
+    async def test_an_observer_failing_cleanup_does_not_stop_the_others(self):
+        later = CleanupRecordingObserver()
+        worker_observer = WorkerObserver(observers=[FailingCleanupObserver(), later])
+        await worker_observer.setup(TaskManager())
+
+        await worker_observer.cleanup()
+
+        self.assertTrue(later.cleaned_up)
+
+
 if __name__ == "__main__":
     unittest.main()

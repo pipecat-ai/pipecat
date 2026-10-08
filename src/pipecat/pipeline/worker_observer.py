@@ -16,6 +16,7 @@ import weakref
 from typing import Any
 
 from attr import dataclass
+from loguru import logger
 
 from pipecat.frames.frames import Frame
 from pipecat.observers.base_observer import (
@@ -145,7 +146,11 @@ class WorkerObserver(BaseObserver):
             await observer.setup(task_manager)
 
     async def cleanup(self):
-        """Cleanup all proxy observers."""
+        """Cleanup all proxy observers.
+
+        Tearing down is best effort: an observer that raises is logged and the
+        rest are still cleaned up.
+        """
         await super().cleanup()
 
         if not self._proxies:
@@ -155,7 +160,10 @@ class WorkerObserver(BaseObserver):
             await self.cancel_task(proxy.task)
 
         for observer in self._proxies:
-            await observer.cleanup()
+            try:
+                await observer.cleanup()
+            except Exception as e:
+                logger.error(f"Error cleaning up {observer}: {e}")
 
     async def on_pipeline_started(self):
         """Forward pipeline started signal to all managed observers."""
