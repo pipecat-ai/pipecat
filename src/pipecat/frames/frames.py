@@ -34,7 +34,7 @@ from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.metrics.metrics import MetricsData
 from pipecat.services.settings import LLMSettings, ServiceSettings, STTSettings, TTSSettings
 from pipecat.transcriptions.language import Language
-from pipecat.utils.deprecation import deprecated, warn_deprecated_read
+from pipecat.utils.deprecation import deprecated, warn_deprecated
 from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.text.base_text_aggregator import AggregationType
 from pipecat.utils.time import nanoseconds_to_str
@@ -913,14 +913,13 @@ class TTSSpeakFrame(DataFrame):
         # Coerce it to the new default of True and warn, so existing code keeps
         # working while surfacing the change.
         if self.append_to_context is None:
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    "TTSSpeakFrame.append_to_context=None is deprecated and has been "
-                    "converted to True, the new default.",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
+            warn_deprecated(
+                "`TTSSpeakFrame(append_to_context=None)` is deprecated since 1.4.0 and will "
+                "be removed in 2.0.0. Use `append_to_context=True`, the default, instead. "
+                "`None` is treated as `True`.",
+                # The caller of the generated __init__ that calls __post_init__.
+                stacklevel=3,
+            )
             self.append_to_context = True
 
 
@@ -1085,10 +1084,10 @@ class StartFrame(SystemFrame):
         if name in _START_FRAME_DEPRECATED_FIELDS:
             value = object.__getattribute__(self, name)
             if value is not None:
-                warn_deprecated_read(
-                    f"`StartFrame.{name}` is deprecated since 1.8.0, "
-                    f"read `{name}` in `FrameProcessorSetup.setup()` instead. "
-                    "Will be removed in 2.0.0."
+                warn_deprecated(
+                    f"`StartFrame.{name}` is deprecated since 1.8.0 and will be removed in "
+                    f"2.0.0. Use `FrameProcessorSetup.{name}` instead.",
+                    stacklevel=2,
                 )
             return value
         return object.__getattribute__(self, name)
@@ -1152,20 +1151,18 @@ class ErrorFrame(SystemFrame):
         # Only a set flag carries behavior worth warning about, and
         # `FatalErrorFrame` already warns about itself.
         if self.fatal and not isinstance(self, FatalErrorFrame):
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    "`ErrorFrame.fatal` is deprecated since 1.8.0 and will be removed in "
-                    "2.0.0. If the error leaves its originating processor unable to do its "
-                    "job, report it with `push_error(..., force_treat_as_permanent=True)`: "
-                    "that marks the processor unusable, and the PipelineWorker acts on it "
-                    "according to its `processor_unusable_policy` "
-                    "(`ProcessorUnusablePolicy.CANCEL` does what `fatal=True` did). "
-                    "Otherwise, push this ErrorFrame without `fatal` and follow it with an "
-                    "`EndWorkerFrame` to end the pipeline.",
-                    DeprecationWarning,
-                    stacklevel=3,
-                )
+            warn_deprecated(
+                "`ErrorFrame.fatal` is deprecated since 1.8.0 and will be removed in "
+                "2.0.0. Use `push_error(..., force_treat_as_permanent=True)` or an "
+                "`EndWorkerFrame` instead. If the error leaves its originating processor "
+                "unable to do its job, `force_treat_as_permanent=True` marks the processor "
+                "unusable, and the PipelineWorker acts on it "
+                "according to its `processor_unusable_policy` "
+                "(`ProcessorUnusablePolicy.CANCEL` does what `fatal=True` did). "
+                "Otherwise, push this ErrorFrame without `fatal` and follow it with an "
+                "`EndWorkerFrame` to end the pipeline.",
+                stacklevel=3,
+            )
 
     def __str__(self):
         category = (

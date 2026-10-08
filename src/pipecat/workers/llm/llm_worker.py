@@ -12,7 +12,6 @@ pipeline and automatic tool registration.
 
 import contextvars
 import functools
-import warnings
 from collections import deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -31,6 +30,7 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import LLMService
+from pipecat.utils.deprecation import warn_deprecated
 from pipecat.workers.base_worker import WorkerActivationArgs
 from pipecat.workers.llm.tool_decorator import _collect_tools
 
@@ -231,10 +231,10 @@ class LLMWorker(PipelineWorker):
         """
         self._closing = True
         if messages is not None or result_callback is not None:
-            warnings.warn(
-                "Passing messages or result_callback to LLMWorker.end() is deprecated, "
-                "call params.result_callback(result) before end() instead.",
-                DeprecationWarning,
+            warn_deprecated(
+                "`LLMWorker.end(messages=..., result_callback=...)` is deprecated since 1.8.0 "
+                "and will be removed in 2.0.0. Use `params.result_callback(result)` before "
+                "`end()` instead.",
                 stacklevel=2,
             )
             await self._finish_function_call(result_callback, messages=messages)
@@ -279,11 +279,10 @@ class LLMWorker(PipelineWorker):
                     :meth:`activate_worker` instead. Will be removed in 2.0.0.
         """
         if messages is not None or result_callback is not None:
-            warnings.warn(
-                "Passing messages or result_callback to LLMWorker.activate_worker() is "
-                "deprecated, call params.result_callback(result) before activate_worker() "
-                "instead.",
-                DeprecationWarning,
+            warn_deprecated(
+                "`LLMWorker.activate_worker(messages=..., result_callback=...)` is deprecated "
+                "since 1.8.0 and will be removed in 2.0.0. Use "
+                "`params.result_callback(result)` before `activate_worker()` instead.",
                 stacklevel=2,
             )
             await self._finish_function_call(result_callback, messages=messages)

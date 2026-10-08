@@ -13,7 +13,6 @@ LLM processing, and text-to-speech components in conversational AI pipelines.
 
 import asyncio
 import json
-import warnings
 from abc import abstractmethod
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
@@ -117,6 +116,7 @@ from pipecat.utils.context.llm_context_summarization import (
     LLMAutoContextSummarizationConfig,
     LLMContextSummarizationConfig,
 )
+from pipecat.utils.deprecation import warn_deprecated
 from pipecat.utils.string import TextPartForConcatenation, concatenate_aggregated_text
 from pipecat.utils.time import time_now_iso8601
 
@@ -189,26 +189,25 @@ class LLMUserAggregatorParams:
 
     def __post_init__(self):
         if self.filter_incomplete_user_turns:
-            warnings.warn(
-                "LLMUserAggregatorParams.filter_incomplete_user_turns is deprecated. "
-                "Use user_turn_strategies=FilterIncompleteUserTurnStrategies() instead.",
-                DeprecationWarning,
+            warn_deprecated(
+                "`LLMUserAggregatorParams.filter_incomplete_user_turns` is deprecated since "
+                "1.2.0 and will be removed in 2.0.0. Use "
+                "`user_turn_strategies=FilterIncompleteUserTurnStrategies()` instead.",
                 stacklevel=2,
             )
         if self.user_turn_completion_config:
-            warnings.warn(
-                "LLMUserAggregatorParams.user_turn_completion_config is deprecated. "
-                "Use user_turn_strategies=FilterIncompleteUserTurnStrategies() instead.",
-                DeprecationWarning,
+            warn_deprecated(
+                "`LLMUserAggregatorParams.user_turn_completion_config` is deprecated since "
+                "1.2.0 and will be removed in 2.0.0. Use "
+                "`user_turn_strategies=FilterIncompleteUserTurnStrategies()` instead.",
                 stacklevel=2,
             )
 
         if self.user_turn_completion_config is not None:
-            warnings.warn(
-                "LLMUserAggregatorParams.user_turn_completion_config is deprecated. "
-                "Pass the config directly to "
-                "FilterIncompleteUserTurnStrategies(config=...) instead.",
-                DeprecationWarning,
+            warn_deprecated(
+                "`LLMUserAggregatorParams.user_turn_completion_config` is deprecated since "
+                "1.2.0 and will be removed in 2.0.0. Use "
+                "`FilterIncompleteUserTurnStrategies(config=...)` instead.",
                 stacklevel=2,
             )
 
@@ -262,20 +261,21 @@ class LLMAssistantAggregatorParams:
 
     def __post_init__(self):
         if self.enable_context_summarization is not None:
-            warnings.warn(
-                "LLMAssistantAggregatorParams.enable_context_summarization is deprecated. "
-                "Use enable_auto_context_summarization instead.",
-                DeprecationWarning,
+            warn_deprecated(
+                "`LLMAssistantAggregatorParams.enable_context_summarization` is deprecated "
+                "since 1.2.0 and will be removed in 2.0.0. Use "
+                "`enable_auto_context_summarization` instead.",
                 stacklevel=2,
             )
             self.enable_auto_context_summarization = self.enable_context_summarization
             self.enable_context_summarization = None
 
         if self.context_summarization_config is not None:
-            warnings.warn(
-                "LLMAssistantAggregatorParams.context_summarization_config is deprecated. "
-                "Use auto_context_summarization_config (LLMAutoContextSummarizationConfig) instead.",
-                DeprecationWarning,
+            warn_deprecated(
+                "`LLMAssistantAggregatorParams.context_summarization_config` is deprecated "
+                "since 1.2.0 and will be removed in 2.0.0. Use "
+                "`auto_context_summarization_config` (`LLMAutoContextSummarizationConfig`) "
+                "instead.",
                 stacklevel=2,
             )
             if isinstance(self.context_summarization_config, LLMContextSummarizationConfig):

@@ -41,7 +41,7 @@ from pipecat.services.stt_latency import GRADIUM_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
-from pipecat.utils.deprecation import deprecated
+from pipecat.utils.deprecation import deprecated, warn_deprecated
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
@@ -317,11 +317,9 @@ class GradiumSTTService(WebsocketSTTService):
             **kwargs: Additional arguments passed to parent STTService class.
         """
         if json_config is not None:
-            import warnings
-
-            warnings.warn(
-                "Parameter 'json_config' is deprecated and will be removed in 2.0.0, use 'params' instead.",
-                DeprecationWarning,
+            warn_deprecated(
+                "`GradiumSTTService(json_config=...)` is deprecated since 0.0.101 and will be "
+                "removed in 2.0.0. Use `params` instead.",
                 stacklevel=2,
             )
 

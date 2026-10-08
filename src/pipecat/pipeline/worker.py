@@ -13,7 +13,6 @@ including heartbeats, idle detection, and observer integration.
 
 import asyncio
 import time
-import warnings
 from collections.abc import AsyncIterable, Iterable, Iterator
 from dataclasses import dataclass
 from enum import Enum
@@ -89,7 +88,7 @@ from pipecat.processors.frameworks.rtvi.models import (
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
-from pipecat.utils.deprecation import deprecated
+from pipecat.utils.deprecation import deprecated, warn_deprecated
 from pipecat.utils.startup import run_setup_hook
 from pipecat.utils.tracing.setup import is_tracing_available
 from pipecat.utils.tracing.tracing_context import TracingContext
@@ -422,14 +421,11 @@ class PipelineWorker(BaseWorker):
             handle_flush_frame if handle_flush_frame is not None else bridged is None
         )
         if tool_resources is not None:
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    "`PipelineWorker(tool_resources=...)` is deprecated since 1.2.0, "
-                    "use `app_resources` instead.",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
+            warn_deprecated(
+                "`PipelineWorker(tool_resources=...)` is deprecated since 1.2.0 and will be "
+                "removed in 2.0.0. Use `app_resources` instead.",
+                stacklevel=2,
+            )
             if app_resources is None:
                 app_resources = tool_resources
         self._params = params or PipelineParams()

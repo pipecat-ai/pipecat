@@ -10,7 +10,6 @@ Provides the foundation for all AI services in the Pipecat framework, including
 model management, settings handling, and frame processing lifecycle methods.
 """
 
-import warnings
 from collections.abc import AsyncGenerator
 from typing import Any
 
@@ -28,6 +27,7 @@ from pipecat.frames.frames import (
 from pipecat.metrics.metrics import MetricsData
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 from pipecat.services.settings import ServiceSettings
+from pipecat.utils.deprecation import warn_deprecated
 
 
 class AIService(FrameProcessor):
@@ -182,6 +182,7 @@ class AIService(FrameProcessor):
         param_name: str,
         settings_field: str | None = None,
         stacklevel: int = 3,
+        deprecated_since: str = "0.0.105",
     ):
         """Warn that an ``__init__`` param has moved to ``Settings``.
 
@@ -196,23 +197,16 @@ class AIService(FrameProcessor):
             stacklevel: Stack depth for the warning.  Default ``3`` targets
                 the caller's caller (i.e. user code that instantiated the
                 service).
+            deprecated_since: The release that deprecated the parameter.
         """
-        label = f"{type(self).__name__}.Settings"
-        if settings_field:
-            msg = (
-                f"The `{param_name}` parameter is deprecated. "
-                f"Use `settings={label}({settings_field}=...)` instead. "
-                f"If both are provided, `settings` takes precedence."
-            )
-        else:
-            msg = (
-                f"The `{param_name}` parameter is deprecated. "
-                f"Use `settings={label}(...)` instead. "
-                f"If both are provided, `settings` takes precedence."
-            )
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(msg, DeprecationWarning, stacklevel=stacklevel)
+        service = type(self).__name__
+        field = f"{settings_field}=..." if settings_field else "..."
+        warn_deprecated(
+            f"`{service}({param_name}=...)` is deprecated since {deprecated_since} and will be "
+            f"removed in 2.0.0. Use `settings={service}.Settings({field})` instead. If both "
+            "are provided, `settings` takes precedence.",
+            stacklevel=stacklevel,
+        )
 
     def _warn_unhandled_updated_settings(self, unhandled):
         """Log a warning for settings changes that won't take effect at runtime.

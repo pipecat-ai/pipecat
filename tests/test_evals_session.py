@@ -2646,7 +2646,7 @@ class TestSessionFromScenario(unittest.TestCase):
                         default_timeout_ms=1234,
                     )
                 self.assertEqual([w.category for w in caught], [DeprecationWarning])
-                self.assertIn("`default_timeout_ms`, `stop_bot` of", str(caught[0].message))
+                self.assertIn("(default_timeout_ms=..., stop_bot=...)", str(caught[0].message))
                 self.assertTrue(session._params.stop_bot)
                 self.assertEqual(session._params.default_timeout_ms, 1234)
                 self.assertFalse(session._params.use_cache)

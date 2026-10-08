@@ -74,7 +74,7 @@ class TestScenarioGroups(unittest.TestCase):
         with self.assertWarns(DeprecationWarning) as cm:
             scenarios = EvalScenarioFile.load(_write("name: greet\nturns: [{user: hi}]\n"))
         self.assertEqual([s.name for s in scenarios], ["greet"])
-        self.assertIn("'scenarios:' list", str(cm.warning))
+        self.assertIn("`scenarios:` list", str(cm.warning))
 
     def test_entries_are_named_under_the_group(self):
         scenarios = EvalScenarioFile.load(_write(GROUP))

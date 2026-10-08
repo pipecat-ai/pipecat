@@ -107,6 +107,13 @@ class WarnSite:
 
     relpath: str
     enclosing: str  # qualname of the symbol the warn lives in ("" if module level)
+    lineno: int = 0
+    message: str | None = None  # see warn_message(); None if not a literal
+    uses_helper: bool = True  # raised through warn_deprecated(), not warnings.warn
+
+    @property
+    def location(self) -> str:
+        return f"{self.relpath}:{self.lineno}"
 
     @property
     def key(self) -> str:
@@ -259,10 +266,40 @@ def deprecated_message(node) -> tuple[bool, str | None]:
     return False, None
 
 
-def is_deprecation_warn(call) -> bool:
-    """Whether a Call is ``warnings.warn(..., DeprecationWarning)``."""
+# Stands in for an f-string's interpolated values when a warning message is
+# checked against the template. It fits every field the template has (subject,
+# version, replacement), so only the message's literal text is checked.
+_PLACEHOLDER = "0.0.0"
+
+
+def warn_message(call) -> str | None:
+    """A warn call's message with f-string values replaced, or None if it isn't a literal."""
+    message = call.args[0] if call.args else None
+    for kw in call.keywords:
+        if kw.arg == "message":
+            message = kw.value
+    if isinstance(message, ast.Constant) and isinstance(message.value, str):
+        return message.value
+    if isinstance(message, ast.JoinedStr):
+        return "".join(
+            part.value
+            if isinstance(part, ast.Constant) and isinstance(part.value, str)
+            else _PLACEHOLDER
+            for part in message.values
+        )
+    return None
+
+
+def call_name(call) -> str | None:
     func = call.func
-    name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", None)
+    return func.id if isinstance(func, ast.Name) else getattr(func, "attr", None)
+
+
+def is_deprecation_warn(call) -> bool:
+    """Whether a Call is ``warn_deprecated(...)`` or ``warnings.warn(..., DeprecationWarning)``."""
+    name = call_name(call)
+    if name == "warn_deprecated":
+        return True
     if name != "warn":
         return False
     category = call.args[1] if len(call.args) >= 2 else None
@@ -318,7 +355,15 @@ def scan_source(src_root: Path, *, exclude: frozenset[str] = DEFAULT_EXCLUDE) ->
                 elif isinstance(child, ast.AnnAssign) and isinstance(child.target, ast.Name):
                     scan.definitions.add(child.target.id)
                 if isinstance(child, ast.Call) and is_deprecation_warn(child):
-                    scan.warn_sites.append(WarnSite(relpath, prefix))
+                    scan.warn_sites.append(
+                        WarnSite(
+                            relpath,
+                            prefix,
+                            child.lineno,
+                            warn_message(child),
+                            call_name(child) == "warn_deprecated",
+                        )
+                    )
                 if isinstance(child, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
                     qualname = f"{prefix}.{child.name}" if prefix else child.name
                     scan.definitions.add(child.name)
@@ -546,6 +591,29 @@ def check_decorator_replacements_exist(scan: Scan) -> list[str]:
     return violations
 
 
+def check_warn_messages(scan: Scan) -> list[str]:
+    """Every hand-written deprecation warning's message is a literal matching the template."""
+    violations = []
+    for site in scan.warn_sites:
+        if site.message is None:
+            violations.append(f"{site.location}: message is not a string or f-string literal")
+        elif not DEPRECATION_MESSAGE_RE.match(site.message):
+            violations.append(f"{site.location}: message off-template: {site.message!r}")
+    return violations
+
+
+def check_warn_helper(scan: Scan) -> list[str]:
+    """Every hand-written deprecation warning is raised through ``warn_deprecated()``.
+
+    The helper shows the warning wherever Pipecat raises it, once per call site.
+    """
+    return [
+        f"{site.location}: call warn_deprecated() instead of warnings.warn()"
+        for site in scan.warn_sites
+        if not site.uses_helper
+    ]
+
+
 def all_violations(scan: Scan) -> list[str]:
     """Every validation failure, for the generator to refuse on."""
     out = []
@@ -556,6 +624,8 @@ def all_violations(scan: Scan) -> list[str]:
         check_decorator_subjects,
         check_decorator_versions,
         check_decorator_replacements_exist,
+        check_warn_messages,
+        check_warn_helper,
     ):
         out.extend(f"{check.__name__}: {v}" for v in check(scan))
     return out

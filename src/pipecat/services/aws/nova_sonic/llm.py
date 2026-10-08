@@ -62,7 +62,7 @@ from pipecat.services.aws.nova_sonic.session_continuation import (
 )
 from pipecat.services.llm_service import LLMService
 from pipecat.services.settings import LLMSettings
-from pipecat.utils.deprecation import deprecated
+from pipecat.utils.deprecation import deprecated, warn_deprecated
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
@@ -381,19 +381,14 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
 
         # 3. Apply params overrides — only if settings not provided
         if params is not None:
-            import warnings
-
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    "The `params` parameter is deprecated. "
-                    "Use `settings=self.Settings(...)` for inference settings "
-                    "(temperature, max_tokens, top_p, endpointing_sensitivity) "
-                    "and `audio_config=AudioConfig(...)` for audio configuration "
-                    "(sample rates, sample sizes, channel counts).",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
+            warn_deprecated(
+                "`AWSNovaSonicLLMService(params=...)` is deprecated since 0.0.105 and will be "
+                "removed in 2.0.0. Use `settings=AWSNovaSonicLLMService.Settings(...)` for "
+                "inference settings (temperature, max_tokens, top_p, endpointing_sensitivity) "
+                "and `audio_config=AudioConfig(...)` for audio configuration "
+                "(sample rates, sample sizes, channel counts) instead.",
+                stacklevel=2,
+            )
             if not settings:
                 default_settings.temperature = params.temperature
                 default_settings.max_tokens = params.max_tokens

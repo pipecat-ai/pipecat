@@ -24,7 +24,6 @@ Example::
 
 import time
 import traceback
-import warnings
 from abc import abstractmethod
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Generic, TypeVar, overload
@@ -40,6 +39,7 @@ from pipecat.evals.results import (
 )
 from pipecat.evals.scenario import EvalKind, EvalScriptScenario, EvalSimulationScenario
 from pipecat.utils.base_object import BaseObject
+from pipecat.utils.deprecation import warn_deprecated
 
 if TYPE_CHECKING:
     from pipecat.evals.base_driver import BaseEvalDriver
@@ -109,11 +109,10 @@ def _params_with_deprecated_knobs(
     params = params or EvalSessionParams()
     if not given:
         return params
-    names = ", ".join(f"`{name}`" for name in given)
-    warnings.warn(
-        f"{names} of `{caller}` {'is' if len(given) == 1 else 'are'} deprecated since 1.9.0 "
-        "and will be removed in 2.0.0. Use `params=EvalSessionParams(...)` instead.",
-        DeprecationWarning,
+    names = ", ".join(f"{name}=..." for name in given)
+    warn_deprecated(
+        f"`{caller}({names})` is deprecated since 1.9.0 and will be removed in 2.0.0. "
+        "Use `params=EvalSessionParams(...)` instead.",
         stacklevel=3,
     )
     return params.model_copy(update=given)

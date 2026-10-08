@@ -12,7 +12,6 @@ generating images from text prompts using the Gemini API.
 
 import io
 import os
-import warnings
 
 # Suppress gRPC fork warnings
 os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "false"
@@ -29,7 +28,7 @@ from pipecat.frames.frames import ErrorFrame, Frame, URLImageRawFrame
 from pipecat.services.google.utils import update_google_client_http_options
 from pipecat.services.image_service import ImageGenService
 from pipecat.services.settings import ImageGenSettings
-from pipecat.utils.deprecation import deprecated
+from pipecat.utils.deprecation import deprecated, warn_deprecated
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
 try:
@@ -140,11 +139,10 @@ class GoogleImageGenService(ImageGenService):
             default_settings.apply_update(settings)
 
         if default_settings.negative_prompt:
-            warnings.warn(
+            warn_deprecated(
                 "`negative_prompt` is deprecated since 1.13.0 and will be removed in 2.0.0. "
                 "No replacement. Gemini image models do not accept a negative prompt, "
                 "so the value is ignored.",
-                DeprecationWarning,
                 stacklevel=2,
             )
 

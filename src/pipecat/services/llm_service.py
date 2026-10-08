@@ -11,7 +11,6 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
-import warnings
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import (
@@ -77,7 +76,7 @@ from pipecat.utils.context.llm_context_summarization import (
     DEFAULT_SUMMARIZATION_TIMEOUT,
     LLMContextSummarizationUtil,
 )
-from pipecat.utils.deprecation import deprecated
+from pipecat.utils.deprecation import deprecated, warn_deprecated
 from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.file_resolver import FileResolver
 from pipecat.utils.log_config import _get_llm_context_log_mode, _LLMContextLogMode
@@ -376,11 +375,10 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         self._function_call_timeout_secs = function_call_timeout_secs
         self._file_resolver = file_resolver or FileResolver()
         if enable_async_tool_cancellation:
-            warnings.warn(
+            warn_deprecated(
                 "`enable_async_tool_cancellation` is deprecated since 1.8.0 and will be "
-                "removed in 2.0.0. Set `cancellable_by_llm=True` on the tools that should be "
+                "removed in 2.0.0. Use `cancellable_by_llm=True` on the tools that should be "
                 "cancellable instead.",
-                DeprecationWarning,
                 stacklevel=3,
             )
         self._enable_async_tool_cancellation: bool = enable_async_tool_cancellation
@@ -684,15 +682,12 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         for name, replacement in replacements.items():
             if not getattr(self._settings, name, None):
                 continue
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    f"`{type(self._settings).__name__}.{name}` is deprecated since 1.7.0 and "
-                    f"will be removed in 2.0.0. It has no effect here. "
-                    f"Use {replacement} instead.",
-                    DeprecationWarning,
-                    stacklevel=4,
-                )
+            warn_deprecated(
+                f"`{type(self._settings).__name__}.{name}` is deprecated since 1.7.0 and "
+                f"will be removed in 2.0.0. Use {replacement} instead. "
+                "It has no effect here.",
+                stacklevel=4,
+            )
 
     def append_system_instruction(self, instruction: str) -> None:
         """Append durable text to the system instruction, preserving the user's prompt.
@@ -812,14 +807,12 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 await self._update_settings(frame.delta)
             elif frame.settings:
                 # Backward-compatible path: convert legacy dict to settings object.
-                with warnings.catch_warnings():
-                    warnings.simplefilter("always")
-                    warnings.warn(
-                        "Passing a dict via LLMUpdateSettingsFrame(settings={...}) is deprecated "
-                        "since 0.0.104, use LLMUpdateSettingsFrame(delta=LLMSettings(...)) instead.",
-                        DeprecationWarning,
-                        stacklevel=2,
-                    )
+                warn_deprecated(
+                    "`LLMUpdateSettingsFrame(settings={...})` is deprecated since 0.0.104 and "
+                    "will be removed in 2.0.0. Use "
+                    "`LLMUpdateSettingsFrame(delta=LLMSettings(...))` instead.",
+                    stacklevel=2,
+                )
                 delta = type(self._settings).from_mapping(frame.settings)
                 await self._update_settings(delta)
         elif isinstance(frame, LLMContextSummaryRequestFrame):

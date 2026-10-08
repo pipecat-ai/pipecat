@@ -17,7 +17,6 @@ with ``run_inference()``, so a realtime LLM cannot back the detector.
 """
 
 import asyncio
-import warnings
 from typing import Literal
 
 from loguru import logger
@@ -46,6 +45,7 @@ from pipecat.frames.frames import (
 from pipecat.metrics.metrics import MetricsData
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 from pipecat.services.llm_service import LLMService
+from pipecat.utils.deprecation import warn_deprecated
 from pipecat.utils.sync.base_notifier import BaseNotifier
 from pipecat.utils.sync.event_notifier import EventNotifier
 
@@ -230,17 +230,15 @@ class VoicemailDetector(FrameProcessor):
         """
         super().__init__()
         if llm is not None:
-            warnings.warn(
-                "VoicemailDetector's `llm` parameter is deprecated since 1.12.0 and will be "
+            warn_deprecated(
+                "`VoicemailDetector(llm=...)` is deprecated since 1.12.0 and will be "
                 "removed in 2.0.0. Use `classifier` instead.",
-                DeprecationWarning,
                 stacklevel=2,
             )
         if custom_system_prompt is not None:
-            warnings.warn(
-                "VoicemailDetector's `custom_system_prompt` parameter is deprecated since 1.12.0 "
+            warn_deprecated(
+                "`VoicemailDetector(custom_system_prompt=...)` is deprecated since 1.12.0 "
                 "and will be removed in 2.0.0. Use `classifier` instead.",
-                DeprecationWarning,
                 stacklevel=2,
             )
         if classifier is None:

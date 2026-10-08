@@ -9,7 +9,6 @@
 import base64
 import json
 import re
-import warnings
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -30,6 +29,7 @@ from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TextAggregationMode, TTSService, WebsocketTTSService
 from pipecat.transcriptions.language import Language, resolve_language
+from pipecat.utils.deprecation import warn_deprecated
 from pipecat.utils.text.phonemes import ipa_phones, normalize_ipa, stress_before_vowels
 from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -46,11 +46,10 @@ def _resolve_cartesia_version(cartesia_version: str | None) -> str:
     if cartesia_version is None:
         return _CARTESIA_API_VERSION
 
-    warnings.warn(
+    warn_deprecated(
         "`cartesia_version` is deprecated since 1.8.0 and will be removed in 2.0.0. "
         "No replacement. The service sends the API version it is written against, "
         "so overriding it can break request and response handling.",
-        DeprecationWarning,
         stacklevel=3,
     )
     return cartesia_version

@@ -11,7 +11,6 @@ tracking when turns start and end based on user and bot speech patterns.
 """
 
 import asyncio
-import warnings
 
 from loguru import logger
 
@@ -24,6 +23,7 @@ from pipecat.frames.frames import (
     UserStartedSpeakingFrame,
 )
 from pipecat.observers.base_observer import BaseObserver, FramePushed
+from pipecat.utils.deprecation import warn_deprecated
 
 
 class TurnTrackingObserver(BaseObserver):
@@ -63,10 +63,9 @@ class TurnTrackingObserver(BaseObserver):
             **kwargs: Additional arguments passed to the parent observer.
         """
         if max_frames is not None:
-            warnings.warn(
-                "`max_frames` parameter of `TurnTrackingObserver` is deprecated since 1.12.0 "
+            warn_deprecated(
+                "`TurnTrackingObserver(max_frames=...)` is deprecated since 1.12.0 "
                 "and will be removed in 2.0.0. No replacement.",
-                DeprecationWarning,
                 stacklevel=2,
             )
         super().__init__(observe_every_push=False, **kwargs)

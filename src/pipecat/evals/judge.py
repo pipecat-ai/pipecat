@@ -155,7 +155,6 @@ import asyncio
 import hashlib
 import json
 import re
-import warnings
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, TypeVar, cast
@@ -175,6 +174,7 @@ from pipecat.evals.services import classifier_from_config, llm_service_from_conf
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.services.llm_service import LLMService
 from pipecat.utils.asyncio.task_manager import TaskManager
+from pipecat.utils.deprecation import warn_deprecated
 
 _R = TypeVar("_R")
 
@@ -459,11 +459,10 @@ class EvalJudge:
         if classifier is None:
             raise ValueError("EvalJudge needs a classifier to decide the verdicts")
         if not isinstance(classifier, BaseClassifier):
-            warnings.warn(
-                "Passing an LLM service to `EvalJudge` is deprecated since 1.12.0 and will be "
-                "removed in 2.0.0. Pass `LLMClassifier(llm=service)`, with the service itself "
-                "as the `explainer` for the reasons.",
-                DeprecationWarning,
+            warn_deprecated(
+                "`EvalJudge(llm_service)` is deprecated since 1.12.0 and will be "
+                "removed in 2.0.0. Use `EvalJudge(LLMClassifier(llm=service))` instead. Pass "
+                "the service itself as the `explainer` for the reasons.",
                 stacklevel=2,
             )
             service = cast("LLMService[Any]", classifier)
@@ -684,11 +683,10 @@ class EvalJudge:
                 cast("str", transcript),
             )
         if transcript is not None:
-            warnings.warn(
-                "`transcript` parameter of `EvalJudge.evaluate_run` is deprecated since 1.11.0 "
-                "and will be removed in 2.0.0. Feed the judge with `add_user_message`, "
-                "`add_assistant_message` and `add_tool_call` instead.",
-                DeprecationWarning,
+            warn_deprecated(
+                "`EvalJudge.evaluate_run(transcript=...)` is deprecated since 1.11.0 and will "
+                "be removed in 2.0.0. Use `add_user_message`, `add_assistant_message` and "
+                "`add_tool_call` instead.",
                 stacklevel=2,
             )
         conversation = list(self._transcript if transcript is None else transcript)

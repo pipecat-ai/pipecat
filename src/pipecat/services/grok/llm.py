@@ -11,14 +11,11 @@
     Will be removed in 2.0.0.
 """
 
-import warnings
-
 from pipecat.services.xai.llm import *  # noqa: F401,F403
+from pipecat.utils.deprecation import warn_deprecated
 
-with warnings.catch_warnings():
-    warnings.simplefilter("always")
-    warnings.warn(
-        "pipecat.services.grok.llm is deprecated. Please use pipecat.services.xai.llm instead.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
+warn_deprecated(
+    "`pipecat.services.grok.llm` is deprecated since 0.0.108 and will be removed in "
+    "2.0.0. Use `pipecat.services.xai.llm` instead.",
+    stacklevel=2,
+)
