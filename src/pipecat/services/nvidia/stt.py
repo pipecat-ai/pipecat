@@ -653,7 +653,6 @@ class NvidiaSTTService(STTService):
         tagged_spans: list[tuple[int, int]] = []
         cursor = 0
         for word in words:
-            # Riva uses a proto3 scalar here, so zero is a valid speaker tag.
             speaker_tag = getattr(word, "speaker_tag", None)
             text = getattr(word, "word", "")
             if speaker_tag is None or not text:

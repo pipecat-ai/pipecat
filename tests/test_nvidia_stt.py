@@ -317,6 +317,26 @@ async def test_separate_results_keep_joining_spaces(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_consecutive_mixed_speaker_results_keep_result_spacing(monkeypatch):
+    """Later NVIDIA results start with a space, so split results join cleanly."""
+    service = _make_service(settings=NvidiaSTTService.Settings(speaker_diarization=True))
+    first = _streaming_response(
+        "Hi there hello",
+        words=[_word("Hi", 0), _word("there", 0), _word("hello", 1)],
+    )
+    second = _streaming_response(
+        " Hello again friend",
+        words=[_word("Hello", 1), _word("again", 1), _word("friend", 0)],
+    )
+
+    frames = await _capture_response_frames(monkeypatch, service, first)
+    frames += await _capture_response_frames(monkeypatch, service, second)
+
+    assert [frame.text for frame in frames] == ["Hi there ", "hello", " Hello again ", "friend"]
+    assert _aggregate(frames) == "Hi there hello Hello again friend"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("transcript", "words", "expected"),
     [
