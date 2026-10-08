@@ -10,14 +10,14 @@ The bot registers with a SIP server and answers incoming calls. Run it with
 an account on any SIP server::
 
     SIP_USER=1001 SIP_PASS=secret SIP_DOMAIN=sip.example.com \\
-        uv run python transports-sip-dialin.py -t sip
+        uv run python transports-sip-dialin.py -t sip -d
 
 Or with no account at all: set ``DAILY_API_KEY`` and the runner provisions a
 temporary SIP client on your Daily domain, prints its dialable URI, and
 deletes it again when the bot exits — dial the printed URI from any SIP
 client::
 
-    DAILY_API_KEY=... uv run python transports-sip-dialin.py -t sip
+    DAILY_API_KEY=... uv run python transports-sip-dialin.py -t sip -d
 
 The same bot runs unchanged under ``-t daily``, ``-t webrtc``, or ``-t eval``
 — only the transport params entry differs.
