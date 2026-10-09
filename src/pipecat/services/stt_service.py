@@ -39,7 +39,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSet
 from pipecat.services.ai_service import AIService
 from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import DEFAULT_TTFS_P99
-from pipecat.services.websocket_service import WebsocketService
+from pipecat.services.websocket_service import ReportErrorCallback, WebsocketService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.deprecation import deprecated, warn_deprecated
 from pipecat.utils.types import is_given
@@ -1076,6 +1076,37 @@ class WebsocketSTTService(STTService, WebsocketService):
         """
         await self._disconnect()
         await self._connect()
+
+    async def _maybe_try_reconnect(
+        self,
+        error_message: str,
+        report_error: ReportErrorCallback,
+        error: Exception | None = None,
+    ) -> bool:
+        """Reconnect from the receive loop, buffering audio as ``_reconnect()`` does.
+
+        Audio frames arriving while the receive loop reconnects are buffered
+        rather than sent to a dead connection, and replayed once the new
+        connection is established. They are discarded if reconnecting fails.
+        Services that disable ``reconnect_on_error`` don't reconnect here, so
+        their audio is left to reach ``run_stt``.
+        """
+        if self._reconnecting or not self._reconnect_on_error:
+            return await super()._maybe_try_reconnect(error_message, report_error, error)
+
+        self._reconnect_audio_buffer.clear()
+        self._reconnecting = True
+        try:
+            reconnected = await super()._maybe_try_reconnect(error_message, report_error, error)
+        finally:
+            self._reconnecting = False
+
+        if reconnected:
+            # Replay audio frames that arrived while the connection was down.
+            for buffered_frame, buffered_direction in self._reconnect_audio_buffer:
+                await self.process_audio_frame(buffered_frame, buffered_direction)
+        self._reconnect_audio_buffer.clear()
+        return reconnected
 
     def _is_keepalive_ready(self) -> bool:
         """Check if the websocket is open and ready for keepalive."""

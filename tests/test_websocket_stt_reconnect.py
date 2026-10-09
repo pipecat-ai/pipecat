@@ -137,3 +137,14 @@ async def test_a_failed_first_connect_is_retried(service):
     assert provider.handshakes == 2
     assert len(provider.connections) == 1
     assert "c1" in transcripts
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("service", SERVICES)
+async def test_audio_arriving_during_a_reconnect_reaches_the_new_connection(service):
+    provider = _FakeProvider(service, drop_first_after=15)
+
+    await _run(provider, seconds=1.5)
+
+    assert len(provider.connections) == 2
+    assert sum(c.audio_messages for c in provider.connections) == int(1.5 / FRAME_SECONDS)
