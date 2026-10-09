@@ -1768,6 +1768,27 @@ def _validate_and_clean_proxy(proxy: str) -> str:
     return proxy
 
 
+_WS_AUTH_MODES = frozenset({"none", "token"})
+
+
+def _normalize_ws_auth_mode(raw: str | None) -> str:
+    """Normalize ``PIPECAT_WEBSOCKET_AUTH`` / ``--ws-auth`` to ``none`` or ``token``.
+
+    argparse ``choices`` only validate values supplied on the command line. The
+    environment default is injected as-is, so ``TOKEN``, leading whitespace, or
+    an empty assignment (Windows ``set PIPECAT_WEBSOCKET_AUTH=``) would otherwise
+    skip token auth while looking configured.
+    """
+    if raw is None:
+        return "none"
+    normalized = raw.strip().lower()
+    if normalized == "":
+        return "none"
+    if normalized not in _WS_AUTH_MODES:
+        raise ValueError(f"Invalid WebSocket auth mode {raw!r}. Expected 'none' or 'token'.")
+    return normalized
+
+
 def _parse_ice_servers(value: str | list[str] | None) -> list[dict[str, Any]]:
     """Parse ICE server configuration into a list of plain dictionaries.
 
@@ -2180,6 +2201,12 @@ def main(parser: argparse.ArgumentParser | None = None):
     # Validate and clean proxy hostname
     if args.proxy:
         args.proxy = _validate_and_clean_proxy(args.proxy)
+
+    try:
+        args.ws_auth = _normalize_ws_auth_mode(args.ws_auth)
+    except ValueError as e:
+        logger.error(f"Invalid WebSocket auth configuration: {e}")
+        return
 
     # Normalize ICE servers from either the CLI tokens or PIPECAT_ICE_SERVERS
     try:
