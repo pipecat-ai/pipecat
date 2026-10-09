@@ -23,6 +23,7 @@ from openai.types.responses import (
     ResponseOutputItemDoneEvent,
     ResponseReasoningItem,
     ResponseReasoningSummaryTextDeltaEvent,
+    ResponseRefusalDeltaEvent,
     ResponseTextDeltaEvent,
 )
 from openai.types.responses.response_usage import (
@@ -133,6 +134,22 @@ def _text_delta_event(text):
     event = MagicMock(spec=ResponseTextDeltaEvent)
     event.delta = text
     return event
+
+
+def _refusal_delta_event(text):
+    """Build a ResponseRefusalDeltaEvent carrying the given delta."""
+    event = MagicMock(spec=ResponseRefusalDeltaEvent)
+    event.delta = text
+    return event
+
+
+@pytest.mark.asyncio
+async def test_refusal_delta_is_pushed_as_text():
+    service = _make_service()
+
+    await _run(service, _refusal_delta_event("I can't help with that."))
+
+    service._push_llm_text.assert_awaited_once_with("I can't help with that.")
 
 
 # ---------------------------------------------------------------------------
