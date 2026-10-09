@@ -122,6 +122,33 @@ class TestWorkerRunnerAccess(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.bus, self.tm = await create_test_bus()
 
+    async def test_auto_end_waits_for_all_root_workers_to_start_and_finish(self):
+        class ControlledWorker(BaseWorker):
+            def __init__(self, name, finished):
+                super().__init__(name)
+                self.started = asyncio.Event()
+                self.finished = finished
+
+            async def run(self, params):
+                self.started.set()
+                await self.finished.wait()
+
+        first_finished = asyncio.Event()
+        first_finished.set()
+        second_finished = asyncio.Event()
+        first = ControlledWorker("first", first_finished)
+        second = ControlledWorker("second", second_finished)
+        runner = WorkerRunner(bus=self.bus, handle_sigint=False)
+        await runner.add_workers(first, second)
+
+        run_task = asyncio.create_task(runner.run())
+        try:
+            await asyncio.wait_for(second.started.wait(), timeout=2.0)
+            self.assertFalse(runner._shutdown_event.is_set())
+        finally:
+            second_finished.set()
+            await asyncio.wait_for(run_task, timeout=2.0)
+
     async def test_get_worker_returns_added_worker(self):
         helper = BaseWorker("helper")
         runner = WorkerRunner(bus=self.bus, handle_sigint=False)
