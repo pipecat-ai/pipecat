@@ -120,7 +120,9 @@ carry the segment's `text_type`, so they are skipped by type. Its words are type
 so the observer goes by their `segment_id` instead: it remembers each skipped segment that
 will be spoken, skips the words that name it, and forgets it once its last word is spoken
 (`remaining_text == ""`). With a `push_text_frames=True` service the segment is spoken in
-one `TTSTextFrame` of its own type, which is skipped by type and ends the segment.
+one `TTSTextFrame` of its own type, which is skipped by type and ends the segment. A
+segment an interruption cuts off is forgotten the next time the bot starts or stops
+speaking: by then the output transport has dropped the rest of its words.
 
 The observer can't go by order instead. It holds a turn's segments until the bot starts
 speaking, so they can all arrive before the first one's words, and they all share the

@@ -271,6 +271,8 @@ class RTVIObserver(BaseObserver):
         self._queued_aggregated_text_frames: list[AggregatedTextFrame] = []
         # Skipped segments whose spoken text may still come (see _is_skipped)
         self._skipped_segment_ids: set[int] = set()
+        # Whether an interruption cut off the skipped segments still remembered
+        self._skipped_segments_interrupted = False
 
         self._system_logger_id: int | None = None
         if self._params.system_logs_enabled:
@@ -626,6 +628,7 @@ class RTVIObserver(BaseObserver):
             # The bot's in-flight output was cut off (VAD barge-in or a programmatic
             # run_immediately interrupt). Let clients drop what it was mid-saying.
             await self.send_rtvi_message(RTVI.BotInterruptedMessage())
+            self._skipped_segments_interrupted = True
         elif (
             isinstance(frame, (TranscriptionFrame, InterimTranscriptionFrame))
             and self._params.user_transcription_enabled
@@ -756,6 +759,7 @@ class RTVIObserver(BaseObserver):
         if isinstance(frame, BotStartedSpeakingFrame):
             message = RTVI.BotStartedSpeakingMessage()
             await self.send_rtvi_message(message)
+            self._forget_interrupted_segments()
             # Flush any queued aggregated text frames
             for queued_frame in self._queued_aggregated_text_frames:
                 await self._send_aggregated_llm_text(queued_frame)
@@ -764,6 +768,7 @@ class RTVIObserver(BaseObserver):
         elif isinstance(frame, BotStoppedSpeakingFrame):
             message = RTVI.BotStoppedSpeakingMessage()
             await self.send_rtvi_message(message)
+            self._forget_interrupted_segments()
             self._bot_is_speaking = False
 
     async def _handle_aggregated_llm_text(self, frame: AggregatedTextFrame):
@@ -830,6 +835,14 @@ class RTVIObserver(BaseObserver):
                 )
             )
             await self.send_rtvi_message(message)
+
+    def _forget_interrupted_segments(self):
+        """Forget the skipped segments an interruption cut off."""
+        # By the time the bot next starts or stops speaking, the output transport
+        # has dropped the interrupted words, so none of them can still come.
+        if self._skipped_segments_interrupted:
+            self._skipped_segment_ids.clear()
+            self._skipped_segments_interrupted = False
 
     def _is_skipped(self, frame: AggregatedTextFrame) -> bool:
         """Whether the frame's text type, or its segment's, keeps it from the client."""

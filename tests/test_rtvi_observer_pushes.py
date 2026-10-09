@@ -13,7 +13,10 @@ import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.frames.frames import (
     AggregatedTextFrame,
     AggregatedTextProgressFrame,
+    BotStartedSpeakingFrame,
+    BotStoppedSpeakingFrame,
     InputAudioRawFrame,
+    InterruptionFrame,
     TTSAudioRawFrame,
     TTSTextFrame,
     UserStartedSpeakingFrame,
@@ -97,8 +100,6 @@ class TestRTVIObserverSegments(unittest.IsolatedAsyncioTestCase):
         self.transport = BaseOutputTransport(TransportParams())
 
     async def _push(self, frame):
-        # All the segments of one LLM response share a TTS context.
-        frame.context_id = "turn"
         await self.observer.on_push_frame(
             FramePushed(
                 source=self.transport,
@@ -111,12 +112,13 @@ class TestRTVIObserverSegments(unittest.IsolatedAsyncioTestCase):
         )
 
     def _segment(self, text, text_type):
-        segment = AggregatedTextFrame(text, text_type)
+        # All the segments of one LLM response share a TTS context.
+        segment = AggregatedTextFrame(text, text_type, context_id="turn")
         segment.will_be_spoken = True
         return segment
 
     def _word(self, text, segment):
-        return TTSTextFrame(text, TextType.WORD, segment_id=segment.id)
+        return TTSTextFrame(text, TextType.WORD, context_id="turn", segment_id=segment.id)
 
     def _progress(self, segment, accumulated_text, remaining_text):
         return AggregatedTextProgressFrame(
@@ -129,7 +131,8 @@ class TestRTVIObserverSegments(unittest.IsolatedAsyncioTestCase):
         )
 
     def _sent_texts(self):
-        return [call.args[0].data.text for call in self.observer.send_rtvi_message.await_args_list]
+        messages = [call.args[0] for call in self.observer.send_rtvi_message.await_args_list]
+        return [m.data.text for m in messages if hasattr(getattr(m, "data", None), "text")]
 
     def _sent_outputs(self):
         return [
@@ -184,6 +187,27 @@ class TestRTVIObserverSegments(unittest.IsolatedAsyncioTestCase):
         await self._push(status)
         await self._push(self._progress(status, "One moment, please.", ""))
 
+        self.assertEqual(self.observer._skipped_segment_ids, set())
+
+    async def test_a_skipped_segment_cut_off_is_forgotten_when_the_bot_stops(self):
+        status = self._segment("One moment, please.", "status")
+        await self._push(status)
+        await self._push(InterruptionFrame())
+        # A word the output transport pushed before it handled the interruption.
+        await self._push(self._word("One", status))
+        await self._push(BotStoppedSpeakingFrame())
+
+        self.assertNotIn("One", self._sent_texts())
+        self.assertEqual(self.observer._skipped_segment_ids, set())
+
+    async def test_a_skipped_segment_cut_off_in_a_pause_is_forgotten_when_the_bot_speaks(self):
+        status = self._segment("One moment, please.", "status")
+        await self._push(status)
+        await self._push(BotStoppedSpeakingFrame())
+        self.assertEqual(self.observer._skipped_segment_ids, {status.id})
+
+        await self._push(InterruptionFrame())
+        await self._push(BotStartedSpeakingFrame())
         self.assertEqual(self.observer._skipped_segment_ids, set())
 
     async def test_a_skipped_segment_spoken_in_one_piece_is_forgotten(self):
