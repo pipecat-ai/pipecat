@@ -14,8 +14,8 @@ from loguru import logger
 from pipecat.frames.frames import (
     AggregatedTextFrame,
     AggregatedTextProgressFrame,
-    AggregationType,
     Frame,
+    TextType,
     TTSTextFrame,
 )
 from pipecat.utils.context.word_completion_tracker import WordCompletionTracker
@@ -77,7 +77,7 @@ class _ParallelSentenceAggregator:
         # text. The TTS text is already post-transform, so tag/pattern-aware
         # boundary rules are not needed here.
         self._aggregator = SimpleTextAggregator(
-            aggregation_type=AggregationType.SENTENCE, language=language
+            aggregation_type=TextType.SENTENCE, language=language
         )
         self._reset()
 
@@ -231,7 +231,7 @@ class _StreamingContext:
     aggregator: "_ParallelSentenceAggregator"
     append_to_context: bool
     build_tracker: bool
-    text_type: AggregationType | str = AggregationType.SENTENCE
+    text_type: TextType | str = TextType.SENTENCE
 
 
 class AggregatedFrameSequencer:
@@ -375,9 +375,7 @@ class AggregatedFrameSequencer:
                 _ParallelSentenceAggregator(language),
                 append_to_context,
                 build_tracker,
-                AggregationType.SENTENCE
-                if frame.text_type == AggregationType.TOKEN
-                else frame.text_type,
+                TextType.SENTENCE if frame.text_type == TextType.TOKEN else frame.text_type,
             )
         sc = self._streaming_contexts[context_id]
         sc.aggregator.set_language(language)
@@ -753,7 +751,7 @@ class AggregatedFrameSequencer:
         """Turn a completed parallel-aggregated sentence into a real spoken slot.
 
         Builds an AggregatedTextFrame of the context's text type (usually
-        ``AggregationType.SENTENCE``) from the three aggregated text channels and
+        ``TextType.SENTENCE``) from the three aggregated text channels and
         appends the slot for ``context_id``, then replays any words that were
         buffered waiting for it.
 
@@ -924,7 +922,7 @@ class AggregatedFrameSequencer:
         includes_inter_frame_spaces: bool = False,
     ) -> Frame:
         """Build a TTSTextFrame with all standard word-timestamp attributes set."""
-        frame = TTSTextFrame(text, text_type=AggregationType.WORD, segment_id=segment_id)
+        frame = TTSTextFrame(text, text_type=TextType.WORD, segment_id=segment_id)
         frame.pts = pts
         frame.context_id = context_id
         if suppress_in_context:

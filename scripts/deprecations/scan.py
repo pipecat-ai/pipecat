@@ -455,6 +455,10 @@ def build_records(scan: Scan) -> list[dict]:
         if directive.owner == "<module>" and directive.param is None:
             subject = module_path(directive.relpath)
             kind = "module"
+        elif directive.owner == "<module>":
+            # An entry of the module docstring's Attributes section, such as an alias.
+            subject = directive.param
+            kind = "attribute"
         elif directive.param is not None:
             owner = directive.owner.removesuffix(".__init__")
             subject = f"{owner}.{directive.param}" if owner else directive.param

@@ -10,7 +10,7 @@ import re
 
 from num2words import num2words
 
-from pipecat.frames.frames import AggregationType
+from pipecat.frames.frames import TextType
 
 # Maps currency symbol to (singular, plural, cents_singular, cents_plural)
 _CURRENCY_MAP: dict[str, tuple[str, str, str | None, str | None]] = {
@@ -49,7 +49,7 @@ def _currency_match(match: re.Match) -> str:
     return result
 
 
-async def expand_currency(text: str, text_type: str | AggregationType) -> str:
+async def expand_currency(text: str, text_type: str | TextType) -> str:
     """Expand currency amounts to their spoken form.
 
     Args:

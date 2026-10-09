@@ -27,7 +27,6 @@ from pipecat.audio.volume import AudioVolumeTracker
 from pipecat.frames.frames import (
     AggregatedTextFrame,
     AggregatedTextProgressFrame,
-    AggregationType,
     AudioRawFrame,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
@@ -49,6 +48,7 @@ from pipecat.frames.frames import (
     LLMMarkerResponseFrame,
     LLMTextFrame,
     MetricsFrame,
+    TextType,
     TranscriptionFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
@@ -146,7 +146,7 @@ class RTVIObserverParams:
 
                 async def my_transform(
                     text: str,
-                    text_type: AggregationType | str,
+                    text_type: TextType | str,
                     accumulated_text: str | None = None,
                     remaining_text: str | None = None,
                 ) -> BotOutputTransformResult: ...
@@ -200,11 +200,11 @@ class RTVIObserverParams:
     metrics_enabled: bool = True
     system_logs_enabled: bool = False
     ignored_sources: list[FrameProcessor] = field(default_factory=list)
-    skip_text_types: list[AggregationType | str] | None = None
+    skip_text_types: list[TextType | str] | None = None
     bot_output_transforms: (
         list[
             tuple[
-                AggregationType | str,
+                TextType | str,
                 Callable[..., Awaitable[BotOutputTransformResult | str]],
             ]
         ]
@@ -214,7 +214,7 @@ class RTVIObserverParams:
     function_call_report_level: dict[str, RTVIFunctionCallReportLevel] = field(
         default_factory=lambda: {"*": RTVIFunctionCallReportLevel.NONE}
     )
-    skip_aggregator_types: list[AggregationType | str] | None = field(default=None, kw_only=True)
+    skip_aggregator_types: list[TextType | str] | None = field(default=None, kw_only=True)
 
     def __post_init__(self):
         """Carry the deprecated ``skip_aggregator_types`` over to ``skip_text_types``."""
@@ -278,7 +278,7 @@ class RTVIObserver(BaseObserver):
 
         self._aggregation_transforms: list[
             tuple[
-                AggregationType | str,
+                TextType | str,
                 Callable[..., Awaitable[BotOutputTransformResult | str]],
                 bool,
             ]
@@ -304,9 +304,9 @@ class RTVIObserver(BaseObserver):
     def add_bot_output_transformer(
         self,
         transform_function: Callable[..., Awaitable[BotOutputTransformResult | str]],
-        text_type: AggregationType | str = "*",
+        text_type: TextType | str = "*",
         *,
-        aggregation_type: AggregationType | str | None = None,
+        aggregation_type: TextType | str | None = None,
     ):
         """Register a text transformer for a specific text type.
 
@@ -314,7 +314,7 @@ class RTVIObserver(BaseObserver):
 
             async def my_transform(
                 text: str,
-                text_type: AggregationType | str,
+                text_type: TextType | str,
                 accumulated_text: str | None = None,
                 remaining_text: str | None = None,
             ) -> BotOutputTransformResult: ...
@@ -360,9 +360,9 @@ class RTVIObserver(BaseObserver):
     def remove_bot_output_transformer(
         self,
         transform_function: Callable[..., Awaitable[BotOutputTransformResult | str]],
-        text_type: AggregationType | str = "*",
+        text_type: TextType | str = "*",
         *,
-        aggregation_type: AggregationType | str | None = None,
+        aggregation_type: TextType | str | None = None,
     ):
         """Remove a text transformer for a specific text type.
 
@@ -859,8 +859,8 @@ class RTVIObserver(BaseObserver):
         # word-level progress is covered by the spoken_status/spoken_progress fields.
         # bot-tts-text is a separate channel and is NOT suppressed here.
         suppress_bot_output = not self._is_legacy_client and text_type in (
-            AggregationType.WORD,
-            AggregationType.TOKEN,
+            TextType.WORD,
+            TextType.TOKEN,
         )
 
         text = frame.text

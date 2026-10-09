@@ -8,7 +8,7 @@
 
 import re
 
-from pipecat.frames.frames import AggregationType
+from pipecat.frames.frames import TextType
 
 _EMAIL_RE = re.compile(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}")
 
@@ -26,7 +26,7 @@ def _email_to_spoken(match: re.Match) -> str:
     return f"{local_spoken} at {domain_spoken}"
 
 
-async def email_to_speech(text: str, text_type: str | AggregationType) -> str:
+async def email_to_speech(text: str, text_type: str | TextType) -> str:
     """Transform email addresses into their spoken form.
 
     Args:

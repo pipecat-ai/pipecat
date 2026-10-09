@@ -652,6 +652,17 @@
       "location": "pipecat/frames/frames.py"
     },
     {
+      "subject": "AggregationType",
+      "module": "pipecat.frames.frames",
+      "kind": "attribute",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "pipecat.utils.text.base_text_aggregator.TextType",
+      "message": "Use :class:`~pipecat.utils.text.base_text_aggregator.TextType` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/frames/frames.py"
+    },
+    {
       "subject": "CancelTaskFrame",
       "module": "pipecat.frames.frames",
       "kind": "class",
@@ -4786,6 +4797,17 @@
       "replacement": "LLMAutoContextSummarizationConfig",
       "message": "`LLMContextSummarizationConfig` is deprecated since 0.0.104 and will be removed in 2.0.0. Use `LLMAutoContextSummarizationConfig` instead.",
       "location": "pipecat/utils/context/llm_context_summarization.py"
+    },
+    {
+      "subject": "AggregationType",
+      "module": "pipecat.utils.text.base_text_aggregator",
+      "kind": "attribute",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "TextType",
+      "message": "Use :class:`TextType` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/utils/text/base_text_aggregator.py"
     },
     {
       "subject": "BaseUIWorker",

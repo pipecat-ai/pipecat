@@ -24,7 +24,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.frames.frames import (
-    AggregationType,
+    TextType,
 )
 from pipecat.pipeline.capabilities import BotCapabilities
 from pipecat.utils.deprecation import deprecated
@@ -523,8 +523,8 @@ class BotOutputMessageData(TextMessageData):
             Present when ``will_be_spoken`` is ``True``.
     """
 
-    text_type: AggregationType | str
-    aggregated_by: AggregationType | str | None = None
+    text_type: TextType | str
+    aggregated_by: TextType | str | None = None
     segment_id: int | None = None
     # v1 field (protocol 1.4.x)
     spoken: bool | None = None

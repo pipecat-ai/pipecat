@@ -6,7 +6,7 @@
 
 """Configurable voice formatting bundle for TTS preprocessing."""
 
-from pipecat.frames.frames import AggregationType
+from pipecat.frames.frames import TextType
 
 
 class VoiceFormatter:
@@ -137,7 +137,7 @@ class VoiceFormatter:
 
             self._transforms.append(replace_text(custom_replacements))
 
-    async def __call__(self, text: str, text_type: str | AggregationType) -> str:
+    async def __call__(self, text: str, text_type: str | TextType) -> str:
         """Apply all configured transforms in order.
 
         Args:

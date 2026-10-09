@@ -77,8 +77,8 @@ was never spoken could still be recorded as if it had been**.
 
 ### 2.3 Highlighting spoken words was not possible
 
-The UI receives sentence-level frames (`AggregationType.SENTENCE`) to render, and
-word-level frames (`AggregationType.WORD`) as speech progresses. There was **no
+The UI receives sentence-level frames (`TextType.SENTENCE`) to render, and
+word-level frames (`TextType.WORD`) as speech progresses. There was **no
 correspondence between them** — a word frame carried no indication of which sentence
 frame it belonged to, or where inside it. **The client could not turn a stream of words
 into a highlight moving through a rendered sentence.**

@@ -50,7 +50,7 @@ from pipecat.frames.frames import (
     TTSTextFrame,
 )
 from pipecat.serializers.base_serializer import FrameSerializer
-from pipecat.utils.text.base_text_aggregator import AggregationType
+from pipecat.utils.text.base_text_aggregator import TextType
 
 
 class RTVIClientSerializer(FrameSerializer):
@@ -142,9 +142,7 @@ class RTVIClientSerializer(FrameSerializer):
             case "bot-tts-text":
                 # The message carries only the text; its type (sentence, word)
                 # isn't on the wire.
-                return TTSTextFrame(
-                    text=payload.get("text", ""), text_type=AggregationType.SENTENCE
-                )
+                return TTSTextFrame(text=payload.get("text", ""), text_type=TextType.SENTENCE)
             case "bot-started-speaking":
                 return BotStartedSpeakingFrame()
             case "bot-stopped-speaking":

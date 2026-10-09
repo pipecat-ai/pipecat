@@ -11,7 +11,7 @@ from collections.abc import Callable
 
 from num2words import num2words
 
-from pipecat.frames.frames import AggregationType
+from pipecat.frames.frames import TextType
 
 # Matches integers and decimals, with optional thousand separators.
 _NUMBER_RE = re.compile(r"\b(\d{1,3}(?:,\d{3})*|\d+)(?:\.(\d+))?\b")
@@ -19,7 +19,7 @@ _NUMBER_RE = re.compile(r"\b(\d{1,3}(?:,\d{3})*|\d+)(?:\.(\d+))?\b")
 
 def expand_numbers(
     digit_cutoff: int | None = 2025,
-) -> Callable[[str, str | AggregationType], object]:
+) -> Callable[[str, str | TextType], object]:
     """Return a transform that expands numbers to their spoken form.
 
     When *digit_cutoff* is set, numbers above it are read digit-by-digit
@@ -65,7 +65,7 @@ def expand_numbers(
 
         return num2words(whole, lang="en")
 
-    async def _transform(text: str, text_type: str | AggregationType) -> str:
+    async def _transform(text: str, text_type: str | TextType) -> str:
         return _NUMBER_RE.sub(_num_to_words, text)
 
     return _transform

@@ -9,6 +9,14 @@
 This module contains all frame types used throughout the Pipecat pipeline system,
 including data frames, system frames, and control frames for audio, video, text,
 and LLM processing.
+
+Attributes:
+    AggregationType: Deprecated alias for
+        :class:`~pipecat.utils.text.base_text_aggregator.TextType`.
+
+        .. deprecated:: 1.13.0
+            Use :class:`~pipecat.utils.text.base_text_aggregator.TextType` instead.
+            Will be removed in 2.0.0.
 """
 
 from __future__ import annotations
@@ -36,7 +44,7 @@ from pipecat.services.settings import LLMSettings, ServiceSettings, STTSettings,
 from pipecat.transcriptions.language import Language
 from pipecat.utils.deprecation import deprecated, renamed_init_field, warn_deprecated
 from pipecat.utils.errors import ErrorCategory
-from pipecat.utils.text.base_text_aggregator import AggregationType
+from pipecat.utils.text.base_text_aggregator import TextType
 from pipecat.utils.time import nanoseconds_to_str
 from pipecat.utils.utils import obj_count, obj_id
 
@@ -469,7 +477,7 @@ class AggregatedTextFrame(TextFrame):
             by the TTS service just before synthesis. Defaults to ``False``.
     """
 
-    text_type: AggregationType | str
+    text_type: TextType | str
     context_id: str | None = None
     raw_text: str | None = None
     will_be_spoken: bool = field(default=False, init=False)
@@ -479,7 +487,7 @@ class AggregatedTextFrame(TextFrame):
         "`AggregatedTextFrame.aggregated_by` is deprecated since 1.13.0 and will be removed "
         "in 2.0.0. Use `text_type` instead."
     )
-    def aggregated_by(self) -> AggregationType | str:
+    def aggregated_by(self) -> TextType | str:
         """Deprecated alias for :attr:`text_type`.
 
         .. deprecated:: 1.13.0
@@ -489,7 +497,7 @@ class AggregatedTextFrame(TextFrame):
         return self.text_type
 
     @aggregated_by.setter
-    def aggregated_by(self, value: AggregationType | str):
+    def aggregated_by(self, value: TextType | str):
         warn_deprecated(
             "`AggregatedTextFrame.aggregated_by` is deprecated since 1.13.0 and will be removed "
             "in 2.0.0. Use `text_type` instead.",
@@ -551,7 +559,7 @@ class AggregatedTextProgressFrame(DataFrame):
     segment_id: int
     context_id: str | None
     text: str
-    text_type: AggregationType | str
+    text_type: TextType | str
     accumulated_text: str
     remaining_text: str
 
@@ -560,7 +568,7 @@ class AggregatedTextProgressFrame(DataFrame):
         "`AggregatedTextProgressFrame.aggregated_by` is deprecated since 1.13.0 and will be "
         "removed in 2.0.0. Use `text_type` instead."
     )
-    def aggregated_by(self) -> AggregationType | str:
+    def aggregated_by(self) -> TextType | str:
         """Deprecated alias for :attr:`text_type`.
 
         .. deprecated:: 1.13.0
@@ -570,7 +578,7 @@ class AggregatedTextProgressFrame(DataFrame):
         return self.text_type
 
     @aggregated_by.setter
-    def aggregated_by(self, value: AggregationType | str):
+    def aggregated_by(self, value: TextType | str):
         warn_deprecated(
             "`AggregatedTextProgressFrame.aggregated_by` is deprecated since 1.13.0 and will be "
             "removed in 2.0.0. Use `text_type` instead.",
@@ -983,7 +991,7 @@ class TTSSpeakFrame(DataFrame):
 
     text: str
     append_to_context: bool = True
-    text_type: AggregationType | str = AggregationType.SENTENCE
+    text_type: TextType | str = TextType.SENTENCE
 
     def __post_init__(self):
         super().__post_init__()
@@ -2828,3 +2836,19 @@ class ManuallySwitchServiceFrame(ServiceSwitcherFrame):
     """
 
     service: FrameProcessor
+
+
+if TYPE_CHECKING:
+    AggregationType = TextType
+else:
+
+    def __getattr__(name: str):
+        """Resolve the deprecated ``AggregationType`` alias."""
+        if name == "AggregationType":
+            warn_deprecated(
+                "`AggregationType` is deprecated since 1.13.0 and will be removed in 2.0.0. "
+                "Use `TextType` instead.",
+                stacklevel=2,
+            )
+            return TextType
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -61,7 +61,7 @@ from pipecat.frames.frames import (
 from pipecat.services.tts_service import TextAggregationMode, TTSService
 from pipecat.tests.utils import SleepFrame, run_test
 from pipecat.utils.string import TextPartForConcatenation, concatenate_aggregated_text
-from pipecat.utils.text.base_text_aggregator import AggregationType
+from pipecat.utils.text.base_text_aggregator import TextType
 from pipecat.utils.text.base_text_filter import BaseTextFilter
 from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
 
@@ -951,7 +951,7 @@ async def test_http_skipped_frame_waits_for_spoken_words():
     frames_received = await run_test(
         tts,
         frames_to_send=[
-            AggregatedTextFrame("hello world", AggregationType.SENTENCE),
+            AggregatedTextFrame("hello world", TextType.SENTENCE),
             AggregatedTextFrame("some code", "code"),
         ],
     )
@@ -984,7 +984,7 @@ async def test_ws_skipped_frame_waits_for_spoken_words():
     frames_received = await run_test(
         tts,
         frames_to_send=[
-            AggregatedTextFrame("hello world", AggregationType.SENTENCE),
+            AggregatedTextFrame("hello world", TextType.SENTENCE),
             AggregatedTextFrame("some code", "code"),
         ],
     )
@@ -1019,7 +1019,7 @@ async def test_skipped_frame_before_spoken_emits_immediately():
         tts,
         frames_to_send=[
             AggregatedTextFrame("some code", "code"),
-            AggregatedTextFrame("hello world", AggregationType.SENTENCE),
+            AggregatedTextFrame("hello world", TextType.SENTENCE),
         ],
     )
     down = frames_received[0]
@@ -1054,7 +1054,7 @@ async def test_skipped_frame_flushed_when_word_timestamps_incomplete():
     frames_received = await run_test(
         tts,
         frames_to_send=[
-            AggregatedTextFrame("hello world", AggregationType.SENTENCE),
+            AggregatedTextFrame("hello world", TextType.SENTENCE),
             AggregatedTextFrame("some code", "code"),
         ],
     )
@@ -1087,9 +1087,7 @@ async def test_raw_text_propagated_to_tts_text_frames():
     frames_received = await run_test(
         tts,
         frames_to_send=[
-            AggregatedTextFrame(
-                "4111 1111", AggregationType.SENTENCE, raw_text="<card>4111 1111</card>"
-            )
+            AggregatedTextFrame("4111 1111", TextType.SENTENCE, raw_text="<card>4111 1111</card>")
         ],
     )
     word_frames = [f for f in frames_received[0] if isinstance(f, TTSTextFrame)]
@@ -1135,8 +1133,8 @@ async def test_overflow_word_spanning_two_aggregated_frames():
         tts,
         frames_to_send=[
             LLMFullResponseStartFrame(),
-            AggregatedTextFrame("abc", AggregationType.SENTENCE),
-            AggregatedTextFrame("def", AggregationType.SENTENCE),
+            AggregatedTextFrame("abc", TextType.SENTENCE),
+            AggregatedTextFrame("def", TextType.SENTENCE),
             LLMFullResponseEndFrame(),
         ],
     )
@@ -1379,9 +1377,7 @@ async def test_http_force_complete_raw_text_propagated():
     frames_received = await run_test(
         tts,
         frames_to_send=[
-            AggregatedTextFrame(
-                "4111 1111", AggregationType.SENTENCE, raw_text="<card>4111 1111</card>"
-            )
+            AggregatedTextFrame("4111 1111", TextType.SENTENCE, raw_text="<card>4111 1111</card>")
         ],
     )
     word_frames = [f for f in frames_received[0] if isinstance(f, TTSTextFrame)]
@@ -2066,7 +2062,7 @@ async def test_token_mode_progress_and_context_across_whole_sentence():
        WordCompletionTracker, so AggregatedTextProgressFrame reported a degenerate
        one-word accumulated_text. The sequencer now groups tokens back into a
        sentence, so progress grows across the whole sentence, and a single
-       ``AggregationType.SENTENCE`` frame (``will_be_spoken=True``) is emitted as
+       ``TextType.SENTENCE`` frame (``will_be_spoken=True``) is emitted as
        the anchor the progress frames' ``segment_id`` references.
 
     2. Context: the per-word TTSTextFrames were stamped
@@ -2106,9 +2102,7 @@ async def test_token_mode_progress_and_context_across_whole_sentence():
 
     # --- The anchor: one SENTENCE AggregatedTextFrame, will_be_spoken, matching id ---
     sentence_frames = [
-        f
-        for f in down
-        if type(f) is AggregatedTextFrame and f.text_type == AggregationType.SENTENCE
+        f for f in down if type(f) is AggregatedTextFrame and f.text_type == TextType.SENTENCE
     ]
     assert len(sentence_frames) == 1, (
         f"Expected 1 SENTENCE AggregatedTextFrame anchor, got {len(sentence_frames)}"
@@ -2156,9 +2150,7 @@ async def test_token_mode_coarse_chunk_straddling_sentence_boundary():
 
     # --- Two sentence anchors, sliced at the boundary inside the coarse chunk ---
     sentence_frames = [
-        f
-        for f in down
-        if type(f) is AggregatedTextFrame and f.text_type == AggregationType.SENTENCE
+        f for f in down if type(f) is AggregatedTextFrame and f.text_type == TextType.SENTENCE
     ]
     assert [f.text for f in sentence_frames] == ["Hey there!", " I'm here."], (
         f"Boundary must be sliced inside the chunk; got {[f.text for f in sentence_frames]}"
@@ -2291,9 +2283,7 @@ async def test_token_mode_push_text_frames_groups_into_sentences():
 
     # --- One SENTENCE anchor for the whole response, not one per token ---
     sentence_frames = [
-        f
-        for f in down
-        if type(f) is AggregatedTextFrame and f.text_type == AggregationType.SENTENCE
+        f for f in down if type(f) is AggregatedTextFrame and f.text_type == TextType.SENTENCE
     ]
     assert [f.text for f in sentence_frames] == ["Hi there."], (
         f"Expected one sentence-level anchor, got {[f.text for f in sentence_frames]}"

@@ -28,7 +28,6 @@ from websockets.exceptions import ConnectionClosed
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.adapters.services.azure_voice_live_adapter import AzureVoiceLiveLLMAdapter
 from pipecat.frames.frames import (
-    AggregationType,
     BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
@@ -46,6 +45,7 @@ from pipecat.frames.frames import (
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
     SpeechControlParamsFrame,
+    TextType,
     TranscriptionFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
@@ -1172,7 +1172,7 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
         await self.push_frame(llm_text_frame)
 
         # Push TTSTextFrame for output aggregation
-        tts_text_frame = TTSTextFrame(text, text_type=AggregationType.SENTENCE)
+        tts_text_frame = TTSTextFrame(text, text_type=TextType.SENTENCE)
         tts_text_frame.includes_inter_frame_spaces = True
         await self.push_frame(tts_text_frame)
 

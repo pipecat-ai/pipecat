@@ -16,7 +16,7 @@ from collections.abc import Callable, Mapping
 
 from loguru import logger
 
-from pipecat.frames.frames import AggregationType
+from pipecat.frames.frames import TextType
 
 PronunciationFormatter = Callable[[str, str], str | None]
 
@@ -40,7 +40,7 @@ class PronunciationTransform:
         self._pattern = pattern
         self._replace = replace
 
-    async def __call__(self, text: str, text_type: str | AggregationType) -> str:
+    async def __call__(self, text: str, text_type: str | TextType) -> str:
         """Replace every matched word in ``text``.
 
         Args:

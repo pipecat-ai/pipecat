@@ -10,7 +10,7 @@ import re
 
 from num2words import num2words
 
-from pipecat.frames.frames import AggregationType
+from pipecat.frames.frames import TextType
 
 _PERCENT_RE = re.compile(r"(\d+(?:\.\d+)?)\s*%")
 
@@ -21,7 +21,7 @@ def _percent_to_words(match: re.Match) -> str:
     return f"{number_str} percent"
 
 
-async def expand_percentages(text: str, text_type: str | AggregationType) -> str:
+async def expand_percentages(text: str, text_type: str | TextType) -> str:
     """Expand percentage expressions to their spoken form.
 
     Args:

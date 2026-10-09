@@ -21,7 +21,6 @@ from loguru import logger
 from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
     AggregatedTextFrame,
-    AggregationType,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     CancelFrame,
@@ -37,6 +36,7 @@ from pipecat.frames.frames import (
     StartFrame,
     SystemFrame,
     TextFrame,
+    TextType,
     TranscriptionFrame,
     TTSAudioRawFrame,
     TTSSpeakFrame,
@@ -192,7 +192,7 @@ class TTSService(AIService):
         # Each callable takes the aggregated text and its type, and returns the transformed text.
         # To register, provide a list of tuples of (text_type | '*', transform_function).
         text_transforms: list[
-            tuple[AggregationType | str, Callable[[str, str | AggregationType], Awaitable[str]]]
+            tuple[TextType | str, Callable[[str, str | TextType], Awaitable[str]]]
         ]
         | None = None,
         # Text filter executed after text has been aggregated.
@@ -360,7 +360,7 @@ class TTSService(AIService):
                 skip_text_types = skip_aggregator_types
         self._skip_text_types: list[str] = skip_text_types or []
         self._text_transforms: list[
-            tuple[AggregationType | str, Callable[[str, AggregationType | str], Awaitable[str]]]
+            tuple[TextType | str, Callable[[str, TextType | str], Awaitable[str]]]
         ] = text_transforms or []
         # Whether pronunciation transforms are being skipped, so the warning is
         # logged once each time they start being skipped, not for every sentence.
@@ -683,10 +683,10 @@ class TTSService(AIService):
 
     def add_text_transformer(
         self,
-        transform_function: Callable[[str, AggregationType | str], Awaitable[str]],
-        text_type: AggregationType | str = "*",
+        transform_function: Callable[[str, TextType | str], Awaitable[str]],
+        text_type: TextType | str = "*",
         *,
-        aggregation_type: AggregationType | str | None = None,
+        aggregation_type: TextType | str | None = None,
     ):
         """Transform text of a specific type.
 
@@ -713,10 +713,10 @@ class TTSService(AIService):
 
     def remove_text_transformer(
         self,
-        transform_function: Callable[[str, AggregationType | str], Awaitable[str]],
-        text_type: AggregationType | str = "*",
+        transform_function: Callable[[str, TextType | str], Awaitable[str]],
+        text_type: TextType | str = "*",
         *,
-        aggregation_type: AggregationType | str | None = None,
+        aggregation_type: TextType | str | None = None,
     ):
         """Remove a text transformer for a specific text type.
 
@@ -1250,11 +1250,9 @@ class TTSService(AIService):
     async def _process_text_frame(self, frame: TextFrame):
         async for aggregate in self._text_aggregator.aggregate(frame.text):
             includes_inter_frame_spaces = (
-                frame.includes_inter_frame_spaces
-                if aggregate.type == AggregationType.TOKEN
-                else False
+                frame.includes_inter_frame_spaces if aggregate.type == TextType.TOKEN else False
             )
-            if aggregate.type != AggregationType.TOKEN:
+            if aggregate.type != TextType.TOKEN:
                 # Stop the aggregation metric on the first sentence only.
                 await self.stop_text_aggregation_metrics()
             raw_text = (

@@ -8,14 +8,14 @@
 
 import re
 
-from pipecat.frames.frames import AggregationType
+from pipecat.frames.frames import TextType
 
 # Two or more consecutive uppercase letters not immediately followed by a lowercase
 # letter (to avoid splitting CamelCase words like "iPhone" or "McDonalds").
 _ACRONYM_RE = re.compile(r"\b[A-Z]{2,}(?![a-z])\b")
 
 
-async def normalize_acronyms(text: str, text_type: str | AggregationType) -> str:
+async def normalize_acronyms(text: str, text_type: str | TextType) -> str:
     """Insert spaces between letters of uppercase acronyms.
 
     This transformer is alphanumeric-preserving: the same letters are kept,

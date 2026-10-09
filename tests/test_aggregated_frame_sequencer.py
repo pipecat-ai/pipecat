@@ -31,7 +31,7 @@ import unittest
 from pipecat.frames.frames import (
     AggregatedTextFrame,
     AggregatedTextProgressFrame,
-    AggregationType,
+    TextType,
     TTSTextFrame,
 )
 from pipecat.utils.context.aggregated_frame_sequencer import (
@@ -51,7 +51,7 @@ def _seq(streaming: bool = False) -> AggregatedFrameSequencer:
 
 
 def _spoken_frame(text: str, raw_text: str | None = None) -> AggregatedTextFrame:
-    return AggregatedTextFrame(text, AggregationType.SENTENCE, raw_text=raw_text)
+    return AggregatedTextFrame(text, TextType.SENTENCE, raw_text=raw_text)
 
 
 def _skipped_frame(text: str) -> AggregatedTextFrame:
@@ -1065,7 +1065,7 @@ class TestAggregatedTextProgressFrame(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(progress), 1)
         p = progress[0]
         self.assertEqual(p.text, "hello")
-        self.assertEqual(p.text_type, AggregationType.SENTENCE)
+        self.assertEqual(p.text_type, TextType.SENTENCE)
         self.assertEqual(p.accumulated_text, "hello")
         self.assertEqual(p.remaining_text, "")
         self.assertEqual(p.context_id, "ctx1")
@@ -1360,7 +1360,7 @@ class TestVoiceFormattingTransforms(unittest.IsolatedAsyncioTestCase):
 
     async def _setup(self):
         seq = AggregatedFrameSequencer(name="test-billing")
-        source = AggregatedTextFrame(_BILL_UF, AggregationType.SENTENCE, raw_text=_BILL_UF)
+        source = AggregatedTextFrame(_BILL_UF, TextType.SENTENCE, raw_text=_BILL_UF)
         await seq.register_spoken(source, "ctx1", _BILL_TTS, append_to_context=True)
         return seq, source
 
@@ -1515,7 +1515,7 @@ class TestRegisterSpokenStreaming(unittest.IsolatedAsyncioTestCase):
 
     async def test_sentence_spoken_in_one_piece_carries_its_segment_id(self):
         seq = _seq(streaming=True)
-        frame = AggregatedTextFrame("Hi there.", AggregationType.TOKEN)
+        frame = AggregatedTextFrame("Hi there.", TextType.TOKEN)
         result = await seq.register_spoken(
             frame, "ctx1", "Hi there.", append_to_context=True, build_tracker=False
         )
@@ -1527,10 +1527,10 @@ class TestRegisterSpokenStreaming(unittest.IsolatedAsyncioTestCase):
     async def test_streamed_tokens_promote_as_a_sentence(self):
         seq = _seq(streaming=True)
         for token in ("Hi", " there", "!"):
-            frame = AggregatedTextFrame(token, AggregationType.TOKEN)
+            frame = AggregatedTextFrame(token, TextType.TOKEN)
             await seq.register_spoken(frame, "ctx1", token, append_to_context=True)
         await seq.finalize("ctx1")
-        self.assertEqual(seq._slots[0].frame.text_type, AggregationType.SENTENCE)
+        self.assertEqual(seq._slots[0].frame.text_type, TextType.SENTENCE)
 
     async def test_non_terminal_tokens_do_not_promote(self):
         seq = _seq(streaming=True)
@@ -1550,7 +1550,7 @@ class TestRegisterSpokenStreaming(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(seq._slots), 1)
         slot = seq._slots[0]
         self.assertIsNotNone(slot.tracker)
-        self.assertEqual(slot.frame.text_type, AggregationType.SENTENCE)
+        self.assertEqual(slot.frame.text_type, TextType.SENTENCE)
         self.assertEqual(slot.frame.text, "Hi there!")
 
     async def test_promoted_slot_processes_words_normally(self):

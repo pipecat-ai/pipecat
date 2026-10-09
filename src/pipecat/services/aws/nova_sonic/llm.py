@@ -32,7 +32,6 @@ from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.adapters.services.aws_nova_sonic_adapter import AWSNovaSonicLLMAdapter, Role
 from pipecat.frames.frames import (
     AggregatedTextFrame,
-    AggregationType,
     CancelFrame,
     EndFrame,
     Frame,
@@ -46,6 +45,7 @@ from pipecat.frames.frames import (
     LLMMessagesAppendFrame,
     LLMServiceMetadataFrame,
     LLMTextFrame,
+    TextType,
     TranscriptionFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
@@ -1669,7 +1669,7 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
         llm_text_frame.append_to_context = False
         await self.push_frame(llm_text_frame)
 
-        aggregated_text_frame = AggregatedTextFrame(text, text_type=AggregationType.SENTENCE)
+        aggregated_text_frame = AggregatedTextFrame(text, text_type=TextType.SENTENCE)
         aggregated_text_frame.append_to_context = False
         await self.push_frame(aggregated_text_frame)
 
@@ -1678,7 +1678,7 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
     async def _report_tts_text(self):
         if self._pending_speculative_text:
             tts_text_frame = TTSTextFrame(
-                self._pending_speculative_text, text_type=AggregationType.SENTENCE
+                self._pending_speculative_text, text_type=TextType.SENTENCE
             )
             tts_text_frame.includes_inter_frame_spaces = True
             await self.push_frame(tts_text_frame)

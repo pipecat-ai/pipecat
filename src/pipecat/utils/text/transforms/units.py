@@ -8,7 +8,7 @@
 
 import re
 
-from pipecat.frames.frames import AggregationType
+from pipecat.frames.frames import TextType
 
 # Maps unit abbreviation to (singular, plural) spoken forms.
 _UNIT_MAP: dict[str, tuple[str, str]] = {
@@ -63,7 +63,7 @@ _AMBIGUOUS_UNIT_RE = re.compile(
 )
 
 
-async def expand_units(text: str, text_type: str | AggregationType) -> str:
+async def expand_units(text: str, text_type: str | TextType) -> str:
     """Expand unit abbreviations to their full spoken form.
 
     A quantity of exactly one takes the singular form of the unit.

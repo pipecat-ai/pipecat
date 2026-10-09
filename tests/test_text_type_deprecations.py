@@ -6,6 +6,7 @@
 
 """Tests for the deprecated names of ``text_type``."""
 
+import importlib
 from collections.abc import AsyncGenerator
 
 import pytest
@@ -19,7 +20,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frameworks.rtvi.observer import RTVIObserver, RTVIObserverParams
 from pipecat.services.tts_service import TTSService
-from pipecat.utils.text.base_text_aggregator import AggregationType
+from pipecat.utils.text.base_text_aggregator import TextType
 
 
 class _TestTTSService(TTSService):
@@ -38,13 +39,13 @@ async def _bot_output_transform(text, text_type, accumulated_text=None, remainin
 @pytest.mark.parametrize("frame_cls", [AggregatedTextFrame, TTSTextFrame])
 def test_aggregated_by_keyword_sets_text_type(frame_cls):
     with pytest.warns(DeprecationWarning, match="is deprecated since 1.13.0"):
-        frame = frame_cls("Hello.", aggregated_by=AggregationType.WORD)
-    assert frame.text_type == AggregationType.WORD
+        frame = frame_cls("Hello.", aggregated_by=TextType.WORD)
+    assert frame.text_type == TextType.WORD
 
 
 def test_text_type_by_position():
-    frame = TTSTextFrame("Hello.", AggregationType.WORD)
-    assert frame.text_type == AggregationType.WORD
+    frame = TTSTextFrame("Hello.", TextType.WORD)
+    assert frame.text_type == TextType.WORD
 
 
 def test_reading_aggregated_by_returns_text_type():
@@ -54,7 +55,7 @@ def test_reading_aggregated_by_returns_text_type():
 
 
 def test_assigning_aggregated_by_sets_text_type():
-    frame = TTSTextFrame("Hello.", text_type=AggregationType.SENTENCE)
+    frame = TTSTextFrame("Hello.", text_type=TextType.SENTENCE)
     with pytest.warns(DeprecationWarning, match="`AggregatedTextFrame.aggregated_by`"):
         frame.aggregated_by = "status"
     assert frame.text_type == "status"
@@ -72,8 +73,8 @@ def test_progress_frame_aggregated_by():
         )
     assert frame.text_type == "status"
     with pytest.warns(DeprecationWarning, match="`AggregatedTextProgressFrame.aggregated_by`"):
-        frame.aggregated_by = AggregationType.SENTENCE
-    assert frame.text_type == AggregationType.SENTENCE
+        frame.aggregated_by = TextType.SENTENCE
+    assert frame.text_type == TextType.SENTENCE
 
 
 def test_rtvi_observer_params_skip_aggregator_types():
@@ -116,3 +117,12 @@ def test_bot_output_message_carries_both_fields(field):
         "text_type": "status",
         "aggregated_by": "status",
     }
+
+
+@pytest.mark.parametrize(
+    "module", ["pipecat.utils.text.base_text_aggregator", "pipecat.frames.frames"]
+)
+def test_aggregation_type_is_text_type(module):
+    with pytest.warns(DeprecationWarning, match="`AggregationType` is deprecated"):
+        aggregation_type = importlib.import_module(module).AggregationType
+    assert aggregation_type is TextType

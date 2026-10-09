@@ -24,7 +24,7 @@ from pipecat.processors.frameworks.rtvi.frames import RTVIConfigureObserverFrame
 from pipecat.processors.frameworks.rtvi.observer import RTVIObserver, RTVIObserverParams
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import TransportParams
-from pipecat.utils.text.base_text_aggregator import AggregationType
+from pipecat.utils.text.base_text_aggregator import TextType
 
 
 class TestRTVIObserverPushes(unittest.IsolatedAsyncioTestCase):
@@ -115,7 +115,7 @@ class TestRTVIObserverSkippedTypes(unittest.IsolatedAsyncioTestCase):
         return segment
 
     def _word(self, text, segment):
-        return TTSTextFrame(text, AggregationType.WORD, segment_id=segment.id)
+        return TTSTextFrame(text, TextType.WORD, segment_id=segment.id)
 
     def _progress(self, segment, accumulated_text, remaining_text):
         return AggregatedTextProgressFrame(
@@ -140,7 +140,7 @@ class TestRTVIObserverSkippedTypes(unittest.IsolatedAsyncioTestCase):
 
     async def test_a_segment_after_a_skipped_one_is_sent(self):
         status = self._segment("One moment, please.", "status")
-        sentence = self._segment("That sounds fun.", AggregationType.SENTENCE)
+        sentence = self._segment("That sounds fun.", TextType.SENTENCE)
         await self._push(status)
         await self._push(self._word("One", status))
         await self._push(sentence)
@@ -151,7 +151,7 @@ class TestRTVIObserverSkippedTypes(unittest.IsolatedAsyncioTestCase):
     async def test_words_follow_their_segment_when_the_segments_come_first(self):
         # A turn's segments can all arrive before the first one is spoken.
         status = self._segment("One moment, please.", "status")
-        sentence = self._segment("That sounds fun.", AggregationType.SENTENCE)
+        sentence = self._segment("That sounds fun.", TextType.SENTENCE)
         await self._push(status)
         await self._push(sentence)
         await self._push(self._word("One", status))
