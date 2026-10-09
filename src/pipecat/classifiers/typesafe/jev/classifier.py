@@ -10,7 +10,7 @@
 into a result, through a :class:`~pipecat.classifiers.typesafe.jev.client.JevClient`.
 """
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from loguru import logger
@@ -20,6 +20,7 @@ from pipecat.classifiers.base_classifier import (
     ChoiceQuestion,
     ChoiceResult,
     ClassifierError,
+    ClassifierImage,
     ClassifierQuestion,
     ClassifierResult,
     ScoreLevel,
@@ -117,7 +118,10 @@ class JevClassifier(BaseClassifier):
         return self._client.model
 
     async def _ask(
-        self, state: str | dict[str, Any] | list[Any], questions: Mapping[str, ClassifierQuestion]
+        self,
+        state: str | dict[str, Any] | list[Any],
+        questions: Mapping[str, ClassifierQuestion],
+        images: Sequence[ClassifierImage] = (),
     ) -> tuple[dict[str, ClassifierResult], LLMTokenUsage]:
         """Answer the questions in one request."""
         answers, usage = await self._client.ask(

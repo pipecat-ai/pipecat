@@ -13,16 +13,21 @@ question is one of :class:`YesNoQuestion`, :class:`ChoiceQuestion` or
 at once: :meth:`BaseClassifier.ask` takes any mix of kinds, and
 :meth:`BaseClassifier.yes_no`, :meth:`BaseClassifier.choice` and
 :meth:`BaseClassifier.score` take questions of one kind and return typed
-results.
+results. Classifiers that can see images take :class:`ClassifierImage`
+alongside the state.
 """
 
+import asyncio
+import io
 import time
 from abc import abstractmethod
-from collections.abc import Mapping
-from typing import Any, TypeAlias, TypeVar
+from collections.abc import Mapping, Sequence
+from typing import Any, Literal, TypeAlias, TypeVar
 
+from PIL import Image
 from pydantic import BaseModel, Field
 
+from pipecat.frames.frames import ImageRawFrame
 from pipecat.metrics.metrics import (
     LLMTokenUsage,
     LLMUsageMetricsData,
@@ -80,6 +85,59 @@ class ScoreQuestion(BaseModel):
 
 
 ClassifierQuestion: TypeAlias = YesNoQuestion | ChoiceQuestion | ScoreQuestion
+
+#: The image types every classifier that sees images accepts.
+ClassifierImageType: TypeAlias = Literal["image/png", "image/jpeg", "image/webp"]
+
+
+class ClassifierImage(BaseModel):
+    """An encoded image the questions can look at, alongside the state.
+
+    Parameters:
+        data: The encoded image: PNG, JPEG or WebP.
+        content_type: The image's MIME type, read from ``data`` when not given.
+    """
+
+    data: bytes = Field(repr=False)
+    content_type: ClassifierImageType = Field(
+        default_factory=lambda fields: ClassifierImage._content_type(fields["data"])
+    )
+
+    @classmethod
+    async def from_frame(cls, frame: ImageRawFrame) -> "ClassifierImage":
+        """Build an image from an image frame, such as a frame from the user's camera.
+
+        Raw pixels are encoded as a JPEG. A frame whose format is already one
+        of the accepted MIME types keeps its bytes.
+
+        Args:
+            frame: The image frame.
+
+        Returns:
+            The image.
+        """
+        if frame.format in ("image/png", "image/jpeg", "image/webp"):
+            return cls(data=frame.image, content_type=frame.format)
+
+        def encode() -> bytes:
+            image = Image.frombytes(frame.format or "RGB", frame.size, frame.image)
+            buffer = io.BytesIO()
+            image.convert("RGB").save(buffer, format="JPEG")
+            return buffer.getvalue()
+
+        return cls(data=await asyncio.to_thread(encode), content_type="image/jpeg")
+
+    @staticmethod
+    def _content_type(data: bytes) -> ClassifierImageType:
+        """The MIME type of the encoded image, or a ValueError if it is not one classifiers take."""
+        try:
+            with Image.open(io.BytesIO(data)) as image:
+                content_type = image.get_format_mimetype()
+        except OSError as e:
+            raise ValueError("ClassifierImage data is not an image") from e
+        if content_type not in ("image/png", "image/jpeg", "image/webp"):
+            raise ValueError(f"ClassifierImage takes PNG, JPEG or WebP, got {content_type}")
+        return content_type
 
 
 class YesNoResult(BaseModel):
@@ -174,6 +232,9 @@ class BaseClassifier(BaseObject):
     the three typed methods are built on it and take questions of one kind.
     Subclasses implement :meth:`_ask`.
 
+    Classifiers that can see images say so in :attr:`supports_images`, and
+    then take ``images`` with the state. The others refuse them.
+
     An owner that runs inside a worker calls :meth:`setup` with its task
     manager before the first question, and :meth:`cleanup` when it is done.
 
@@ -208,14 +269,25 @@ class BaseClassifier(BaseObject):
         """The model that answers, named in the metrics."""
         return None
 
+    @property
+    def supports_images(self) -> bool:
+        """Whether questions can come with images."""
+        return False
+
     async def ask(
-        self, state: str | dict[str, Any] | list[Any], questions: Mapping[str, ClassifierQuestion]
+        self,
+        state: str | dict[str, Any] | list[Any],
+        questions: Mapping[str, ClassifierQuestion],
+        *,
+        images: Sequence[ClassifierImage] | None = None,
     ) -> dict[str, ClassifierResult]:
         """Answer several questions about one state.
 
         Args:
             state: What the questions are about.
             questions: The questions, by name.
+            images: Images the questions can look at, for a classifier that
+                supports them.
 
         Returns:
             One result per question, by the same names, each of the type
@@ -225,22 +297,35 @@ class BaseClassifier(BaseObject):
             ClassifierError: If the answers could not be produced, or not in
                 time: every classifier answers or raises within a bound of
                 its own, so a caller waiting on it is never left hanging.
+                Also if images come to a classifier that cannot see them.
         """
+        if images and not self.supports_images:
+            raise ClassifierError(f"{self} cannot see images")
         started = time.perf_counter()
-        results, usage = await self._ask(state, questions)
+        if images:
+            results, usage = await self._ask(state, questions, images=list(images))
+        else:
+            # A classifier that cannot see images may implement _ask without them.
+            results, usage = await self._ask(state, questions)
         await self._call_event_handler(
             "on_metrics", self._metrics(time.perf_counter() - started, usage)
         )
         return results
 
     async def yes_no(
-        self, state: str | dict[str, Any] | list[Any], questions: Mapping[str, YesNoQuestion]
+        self,
+        state: str | dict[str, Any] | list[Any],
+        questions: Mapping[str, YesNoQuestion],
+        *,
+        images: Sequence[ClassifierImage] | None = None,
     ) -> dict[str, YesNoResult]:
         """Ask whether the state meets each condition.
 
         Args:
             state: What the questions are about.
             questions: The questions, by name.
+            images: Images the questions can look at, for a classifier that
+                supports them.
 
         Returns:
             How likely each answer is yes, by the same names.
@@ -248,16 +333,22 @@ class BaseClassifier(BaseObject):
         Raises:
             ClassifierError: If the answers could not be produced.
         """
-        return self._typed(await self.ask(state, questions), YesNoResult)
+        return self._typed(await self.ask(state, questions, images=images), YesNoResult)
 
     async def choice(
-        self, state: str | dict[str, Any] | list[Any], questions: Mapping[str, ChoiceQuestion]
+        self,
+        state: str | dict[str, Any] | list[Any],
+        questions: Mapping[str, ChoiceQuestion],
+        *,
+        images: Sequence[ClassifierImage] | None = None,
     ) -> dict[str, ChoiceResult]:
         """Ask which option fits the state, for each question.
 
         Args:
             state: What the questions are about.
             questions: The questions, by name.
+            images: Images the questions can look at, for a classifier that
+                supports them.
 
         Returns:
             The option that fits and how likely each one is, by the same
@@ -266,16 +357,22 @@ class BaseClassifier(BaseObject):
         Raises:
             ClassifierError: If the answers could not be produced.
         """
-        return self._typed(await self.ask(state, questions), ChoiceResult)
+        return self._typed(await self.ask(state, questions, images=images), ChoiceResult)
 
     async def score(
-        self, state: str | dict[str, Any] | list[Any], questions: Mapping[str, ScoreQuestion]
+        self,
+        state: str | dict[str, Any] | list[Any],
+        questions: Mapping[str, ScoreQuestion],
+        *,
+        images: Sequence[ClassifierImage] | None = None,
     ) -> dict[str, ScoreResult]:
         """Ask where the state falls on each scale.
 
         Args:
             state: What the questions are about.
             questions: The questions, by name.
+            images: Images the questions can look at, for a classifier that
+                supports them.
 
         Returns:
             The position on each scale and how likely each level is, by the
@@ -284,13 +381,20 @@ class BaseClassifier(BaseObject):
         Raises:
             ClassifierError: If the answers could not be produced.
         """
-        return self._typed(await self.ask(state, questions), ScoreResult)
+        return self._typed(await self.ask(state, questions, images=images), ScoreResult)
 
     @abstractmethod
     async def _ask(
-        self, state: str | dict[str, Any] | list[Any], questions: Mapping[str, ClassifierQuestion]
+        self,
+        state: str | dict[str, Any] | list[Any],
+        questions: Mapping[str, ClassifierQuestion],
+        images: Sequence[ClassifierImage] = (),
     ) -> tuple[dict[str, ClassifierResult], LLMTokenUsage | None]:
-        """Answer the questions, and say what tokens the call used if that is known."""
+        """Answer the questions, and say what tokens the call used if that is known.
+
+        ``images`` is passed only to a classifier that supports images, and
+        only when there are some.
+        """
         pass
 
     def _metrics(self, seconds: float, usage: LLMTokenUsage | None) -> list[MetricsData]:
