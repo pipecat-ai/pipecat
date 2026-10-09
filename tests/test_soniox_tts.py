@@ -14,6 +14,7 @@ from pipecat.frames.frames import (
     AggregatedTextFrame,
     AggregatedTextProgressFrame,
     AggregationType,
+    TTSStoppedFrame,
     TTSTextFrame,
 )
 from pipecat.services.settings import TTSSettings
@@ -255,3 +256,80 @@ async def test_soniox_run_tts_configures_a_stream_it_has_not_opened():
     assert [m.get("stream_id") for m in sent] == ["stream-1"] * 3
     assert "text" not in sent[0]
     assert [m.get("text") for m in sent[1:]] == ["Hello.", "Again."]
+
+
+class _FakeReceivingWebsocket(_FakeWebsocket):
+    def __init__(self, messages: list[dict]):
+        super().__init__()
+        self._messages = messages
+
+    async def __aiter__(self):
+        for message in self._messages:
+            yield json.dumps(message)
+
+
+@pytest.mark.asyncio
+async def test_soniox_error_code_sets_category(monkeypatch):
+    from pipecat.utils.errors import ErrorCategory
+
+    service = SonioxTTSService(api_key="test-key")
+    categories = []
+
+    async def fake_push_error(*args, **kwargs):
+        categories.append(kwargs.get("category"))
+
+    monkeypatch.setattr(service, "push_error", fake_push_error)
+    service._websocket = _FakeReceivingWebsocket(
+        [
+            {"error_code": 402, "error_type": "organization_balance_exhausted"},
+            {"error_code": 401, "error_type": "unauthorized"},
+            {"error_code": "oops"},
+        ]
+    )
+
+    await service._receive_messages()
+
+    assert categories == [ErrorCategory.QUOTA, ErrorCategory.AUTHENTICATION, None]
+
+
+@pytest.mark.asyncio
+async def test_soniox_run_tts_send_failure_yields_error_with_exception(monkeypatch):
+    from pipecat.frames.frames import ErrorFrame
+
+    class _FailingWebsocket(_FakeWebsocket):
+        async def send(self, message: str):
+            raise ConnectionError("socket closed")
+
+    service = SonioxTTSService(api_key="test-key")
+    service._websocket = _FailingWebsocket()
+
+    async def fake_noop(*args, **kwargs):
+        pass
+
+    monkeypatch.setattr(service, "_connect", fake_noop)
+    monkeypatch.setattr(service, "_disconnect", fake_noop)
+
+    frames = [frame async for frame in service.run_tts("Hello.", "stream-1")]
+
+    assert isinstance(frames[0], ErrorFrame)
+    assert isinstance(frames[0].exception, ConnectionError)
+    assert isinstance(frames[1], TTSStoppedFrame)
+
+
+@pytest.mark.asyncio
+async def test_soniox_run_tts_connect_failure_yields_error_with_exception(monkeypatch):
+    from pipecat.frames.frames import ErrorFrame
+
+    service = SonioxTTSService(api_key="test-key")
+    service._websocket = None
+
+    async def failing_connect(*args, **kwargs):
+        raise TimeoutError("no answer")
+
+    monkeypatch.setattr(service, "_connect", failing_connect)
+
+    frames = [frame async for frame in service.run_tts("Hello.", "stream-1")]
+
+    assert len(frames) == 1
+    assert isinstance(frames[0], ErrorFrame)
+    assert isinstance(frames[0].exception, TimeoutError)

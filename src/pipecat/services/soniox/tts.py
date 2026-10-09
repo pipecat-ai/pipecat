@@ -35,6 +35,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.settings import TTSSettings
+from pipecat.services.soniox.errors import classify_error_code
 from pipecat.services.tts_service import TextAggregationMode, WebsocketTTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -587,7 +588,8 @@ class SonioxTTSService(WebsocketTTSService):
                     error_msg=(
                         f"Soniox TTS error {error_code} {error_type} "
                         f"(stream {stream_id}): {error_message}"
-                    )
+                    ),
+                    category=classify_error_code(error_code),
                 )
                 if stream_id and self.audio_context_available(stream_id):
                     await self.append_to_audio_context(
@@ -661,11 +663,11 @@ class SonioxTTSService(WebsocketTTSService):
                 await self._get_websocket().send(json.dumps(text_msg))
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
-                yield ErrorFrame(error=f"Unknown error occurred: {e}")
+                yield ErrorFrame(error=f"Unknown error occurred: {e}", exception=e)
                 yield TTSStoppedFrame(context_id=context_id)
                 await self._disconnect()
                 await self._connect()
                 return
             yield None
         except Exception as e:
-            yield ErrorFrame(error=f"Unknown error occurred: {e}")
+            yield ErrorFrame(error=f"Unknown error occurred: {e}", exception=e)

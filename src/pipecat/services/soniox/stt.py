@@ -31,6 +31,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.settings import STTSettings
+from pipecat.services.soniox.errors import classify_error_code
 from pipecat.services.stt_latency import SONIOX_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -751,7 +752,8 @@ class SonioxSTTService(WebsocketSTTService):
                     # in the buffer) and close any open user turn.
                     await finalize_turn()
                     await self.push_error(
-                        error_msg=f"Error: {error_code} (_receive_messages) - {error_message}"
+                        error_msg=f"Error: {error_code} (_receive_messages) - {error_message}",
+                        category=classify_error_code(error_code),
                     )
 
                 finished = content.get("finished")
