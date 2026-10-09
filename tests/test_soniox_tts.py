@@ -18,7 +18,7 @@ from pipecat.frames.frames import (
     TTSTextFrame,
 )
 from pipecat.services.settings import TTSSettings
-from pipecat.services.soniox.tts import SonioxTTSService
+from pipecat.services.soniox.tts import SonioxTTSService, language_to_soniox_tts_language
 from pipecat.transcriptions.language import Language
 from pipecat.utils.context.aggregated_frame_sequencer import AggregatedFrameSequencer
 from pipecat.utils.context.word_completion_tracker import WordCompletionTracker
@@ -333,3 +333,8 @@ async def test_soniox_run_tts_connect_failure_yields_error_with_exception(monkey
     assert len(frames) == 1
     assert isinstance(frames[0], ErrorFrame)
     assert isinstance(frames[0].exception, TimeoutError)
+
+
+@pytest.mark.parametrize("language", [Language.NB, Language.NB_NO])
+def test_norwegian_bokmal_maps_to_soniox_norwegian(language):
+    assert language_to_soniox_tts_language(language) == "no"
