@@ -1779,14 +1779,35 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
         try:
             self._disconnecting = True
             await self.stop_all_metrics()
+            if self._bot_is_responding:
+                if self._settings.modalities == GeminiModalities.AUDIO:
+                    await self.push_frame(TTSStoppedFrame())
+                # Emit InterruptionFrame so the downstream LLMAssistantAggregator
+                # commits the partial assistant turn as interrupted=True and clears
+                # its aggregation buffer. Without this, stale partial text from the
+                # abandoned response would merge with the next session's response.
+                # This is semantically equivalent to a barge-in: the model's response
+                # was cut off mid-turn by an external event (provider failure).
+                # Do NOT emit LLMFullResponseEndFrame: that would mark the incomplete
+                # response as finished (interrupted=False), corrupting context.
+                await self.push_frame(InterruptionFrame())
+                await self._set_bot_is_responding(False)
+                self._bot_text_buffer = ""
+                self._llm_output_buffer = ""
+                self._search_result_buffer = ""
+                self._accumulated_grounding_metadata = None
+                self._bot_audio_buffer.clear()
             if self._connection_task:
                 await self.cancel_task(self._connection_task, timeout=1.0)
                 self._connection_task = None
             if self._transcription_timeout_task:
                 await self.cancel_task(self._transcription_timeout_task)
                 self._transcription_timeout_task = None
+            # _set_bot_is_responding(False) above already releases any pending
+            # deferred EndFrame. The cancel call below is a safety no-op in all
+            # normal paths; it guards against any watchdog left behind if the
+            # service was not responding (so the block above was skipped).
             self._cancel_end_frame_deferral_timeout()
-            self._end_frame_pending_bot_turn_finished = None
             self._discard_deferred_turn()
             if self._session:
                 await self._session.close()
