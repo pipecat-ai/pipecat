@@ -1394,7 +1394,7 @@ class AssemblyAISyncSTTService(SegmentedSTTService):
             **kwargs: Additional arguments passed to SegmentedSTTService.
         """
         default_settings = self.Settings(
-            model="universal-3-5-pro",
+            model="universal-3-6-pro",
             language=Language.EN,
             prompt=None,
             keyterms_prompt=None,
