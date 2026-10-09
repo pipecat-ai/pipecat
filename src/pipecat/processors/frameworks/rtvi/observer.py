@@ -253,6 +253,7 @@ class RTVIObserver(BaseObserver):
         self._bot_is_speaking = False
         self._queued_aggregated_text_frames: list[AggregatedTextFrame] = []
 
+        self._system_logger_id: int | None = None
         if self._params.system_logs_enabled:
             self._system_logger_id = logger.add(self._logger_sink)
 
@@ -411,8 +412,9 @@ class RTVIObserver(BaseObserver):
     async def cleanup(self):
         """Cleanup RTVI observer resources."""
         await super().cleanup()
-        if self._params.system_logs_enabled:
+        if self._system_logger_id is not None:
             logger.remove(self._system_logger_id)
+            self._system_logger_id = None
 
     async def send_rtvi_message(self, model: BaseModel, exclude_none: bool = True):
         """Send an RTVI message.
