@@ -21,7 +21,12 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.soniox.stt import END_TOKEN, SonioxSTTService, _language_from_tokens
+from pipecat.services.soniox.stt import (
+    END_TOKEN,
+    SonioxSTTService,
+    _language_from_tokens,
+    language_to_soniox_language,
+)
 from pipecat.transcriptions.language import Language
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.asyncio.task_manager import TaskManager
@@ -637,3 +642,8 @@ async def test_soniox_error_code_sets_category(monkeypatch):
     await service._receive_messages()
 
     assert categories == [ErrorCategory.QUOTA, ErrorCategory.AUTHENTICATION, None]
+
+
+@pytest.mark.parametrize("language", [Language.NB, Language.NB_NO])
+def test_norwegian_bokmal_maps_to_soniox_norwegian(language):
+    assert language_to_soniox_language(language) == "no"

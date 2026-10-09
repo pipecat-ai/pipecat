@@ -94,6 +94,7 @@ def language_to_soniox_tts_language(language: Language) -> str | None:
         Language.ML: "ml",
         Language.MR: "mr",
         Language.MS: "ms",
+        Language.NB: "no",
         Language.NL: "nl",
         Language.NO: "no",
         Language.PA: "pa",
