@@ -122,8 +122,6 @@ class RTVIObserverParams:
             text of the whole response, which is meant for evaluation, not for
             clients, so this is off by default. Defaults to False.
         bot_tts_enabled: Indicates if the bot's TTS messages should be sent.
-        bot_backchannel_enabled: Indicates if the bot's backchannel messages should be
-            sent. Text of type ``backchannel`` never goes out as bot output or TTS text.
         bot_speaking_enabled: Indicates if the bot's started/stopped speaking messages should be sent.
         bot_audio_level_enabled: Indicates if bot's audio level messages should be sent.
         user_llm_enabled: Indicates if the user's LLM input messages should be sent.
@@ -143,6 +141,8 @@ class RTVIObserverParams:
             Sources can also be added and removed dynamically via ``add_ignored_source()``
             and ``remove_ignored_source()``.
         skip_text_types: List of text types to skip sending as tts/output messages.
+            Text of type ``backchannel`` is only sent to clients of protocol 2.2.0 or
+            later; add ``"backchannel"`` here to keep it from every client.
             Note: if using this to avoid sending secure information, be sure to also disable
             bot_llm_enabled to avoid leaking through LLM messages.
         bot_output_transforms: A list of callables to transform text before sending it to the
@@ -193,7 +193,6 @@ class RTVIObserverParams:
     bot_llm_enabled: bool = True
     bot_llm_marker_enabled: bool = False
     bot_tts_enabled: bool = True
-    bot_backchannel_enabled: bool = True
     bot_speaking_enabled: bool = True
     bot_audio_level_enabled: bool = False
     user_llm_enabled: bool = True
@@ -308,6 +307,13 @@ class RTVIObserver(BaseObserver):
         if not self._rtvi:
             return False
         return self._rtvi.client_version[0] == RTVI.LEGACY_SUPPORTED_MAJOR
+
+    @property
+    def _client_supports_backchannels(self) -> bool:
+        """Return True when the connected client supports the backchannel text type (2.2.0+)."""
+        if not self._rtvi:
+            return True
+        return self._rtvi.client_version >= [2, 2, 0]
 
     def add_bot_output_transformer(
         self,
@@ -675,9 +681,7 @@ class RTVIObserver(BaseObserver):
             if isinstance(src, BaseOutputTransport):
                 await self._handle_aggregated_progress(frame)
         elif isinstance(frame, AggregatedTextFrame) and (
-            self._params.bot_output_enabled
-            or self._params.bot_tts_enabled
-            or self._params.bot_backchannel_enabled
+            self._params.bot_output_enabled or self._params.bot_tts_enabled
         ):
             if isinstance(src, BaseOutputTransport):
                 await self._handle_aggregated_llm_text(frame)
@@ -862,8 +866,12 @@ class RTVIObserver(BaseObserver):
 
     def _is_skipped_type(self, text_type: TextType | str) -> bool:
         """Whether text of this type is kept out of bot output and TTS text messages."""
+        # A client that doesn't support backchannels would show one as part of the
+        # bot's response.
+        if text_type == TextType.BACKCHANNEL and not self._client_supports_backchannels:
+            return True
         skip_types = self._params.skip_text_types
-        return text_type == TextType.BACKCHANNEL or bool(skip_types and text_type in skip_types)
+        return bool(skip_types and text_type in skip_types)
 
     def _is_skipped(self, frame: AggregatedTextFrame) -> bool:
         """Whether the frame's text type, or its segment's, keeps it from bot output."""
@@ -881,17 +889,6 @@ class RTVIObserver(BaseObserver):
 
     async def _send_aggregated_llm_text(self, frame: AggregatedTextFrame):
         """Send aggregated LLM text messages."""
-        # A backchannel is reported once, by the segment the TTS will speak.
-        if (
-            self._params.bot_backchannel_enabled
-            and frame.text_type == TextType.BACKCHANNEL
-            and frame.will_be_spoken
-            and not isinstance(frame, TTSTextFrame)
-        ):
-            await self.send_rtvi_message(
-                RTVI.BotBackchannelMessage(data=RTVI.TextMessageData(text=frame.text))
-            )
-
         if self._is_skipped(frame):
             return
 
