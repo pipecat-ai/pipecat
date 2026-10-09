@@ -112,7 +112,7 @@ class TestRTVIObserverPushes(unittest.IsolatedAsyncioTestCase):
             ),
         )
 
-    async def test_a_transcription_is_sent_as_user_transcription_and_user_input(self):
+    async def test_a_transcription_is_sent_as_user_input_then_user_transcription(self):
         await self._push(InterimTranscriptionFrame(text="Hel", user_id="user", timestamp="t1"))
         await self._push(TranscriptionFrame(text="Hello.", user_id="user", timestamp="t2"))
 
@@ -120,14 +120,14 @@ class TestRTVIObserverPushes(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             [type(m) for m in messages],
             [
-                RTVI.UserTranscriptionMessage,
                 RTVI.UserInputMessage,
                 RTVI.UserTranscriptionMessage,
                 RTVI.UserInputMessage,
+                RTVI.UserTranscriptionMessage,
             ],
         )
         self.assertEqual(
-            [messages[1].data, messages[3].data],
+            [messages[0].data, messages[2].data],
             [
                 RTVI.UserInputMessageData(
                     text="Hel",
