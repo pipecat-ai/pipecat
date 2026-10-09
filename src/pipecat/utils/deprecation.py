@@ -150,9 +150,14 @@ def renamed_init_field(old: str, new: str, message: str):
     """Let a dataclass, and every subclass of it, take a renamed field by its old name.
 
     Apply it above ``@dataclass``. ``@dataclass`` gives each subclass a
-    constructor of its own, so the first time a class is built with the old
-    name, its constructor is wrapped to take it. The class must not define a
-    ``__new__`` of its own.
+    constructor of its own, so the first time a class is built, its constructor
+    and those of the classes between it and the decorated one are wrapped to
+    take the old name. A constructor that passes the old name to ``super()``
+    finds it taken too.
+
+    It supports one rename per class hierarchy, since each use replaces
+    ``__new__``, and a subclass whose own ``__new__`` doesn't call the base
+    class's is left as it is.
 
     Args:
         old: The field's deprecated name.
@@ -174,13 +179,17 @@ def renamed_init_field(old: str, new: str, message: str):
             init(self, *args, **kwargs)
 
         cls.__init__ = __init__
-        cls.__renamed_init__ = __init__
 
     def decorate(cls):
+        marker = f"_{cls.__name__}_takes_{old}"
+
         def __new__(subcls, *args, **kwargs):
-            # A subclass that inherits the wrapped constructor is already covered.
-            if old in kwargs and subcls.__init__ is not getattr(subcls, "__renamed_init__", None):
-                wrap_init(subcls)
+            if marker not in subcls.__dict__:
+                for c in subcls.__mro__:
+                    if issubclass(c, cls) and marker not in c.__dict__:
+                        if "__init__" in c.__dict__:
+                            wrap_init(c)
+                        setattr(c, marker, True)
             return object.__new__(subcls)
 
         cls.__new__ = staticmethod(__new__)
