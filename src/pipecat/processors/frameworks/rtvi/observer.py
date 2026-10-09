@@ -874,6 +874,10 @@ class RTVIObserver(BaseObserver):
 
         isTTS = isinstance(frame, TTSTextFrame)
         will_be_spoken = frame.will_be_spoken
+        # Text the TTS spoke for a segment is reported as that segment.
+        segment_id = frame.id
+        if isinstance(frame, TTSTextFrame) and frame.segment_id is not None:
+            segment_id = frame.segment_id
         if self._params.bot_output_enabled and not suppress_bot_output:
             if will_be_spoken:
                 if isTTS:
@@ -895,7 +899,7 @@ class RTVIObserver(BaseObserver):
                 spoken=isTTS,
                 will_be_spoken=will_be_spoken,
                 text_type=text_type,
-                segment_id=frame.id,
+                segment_id=segment_id,
                 spoken_status=spoken_status,
                 spoken_progress=progress,
             )

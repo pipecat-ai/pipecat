@@ -9,6 +9,7 @@
 import unittest
 from unittest.mock import AsyncMock
 
+import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.frames.frames import (
     AggregatedTextFrame,
     AggregatedTextProgressFrame,
@@ -87,7 +88,7 @@ class TestRTVIObserverPushes(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.observer._queued_aggregated_text_frames, [frame])
 
 
-class TestRTVIObserverSkippedTypes(unittest.IsolatedAsyncioTestCase):
+class TestRTVIObserverSegments(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.observer = RTVIObserver(params=RTVIObserverParams(skip_text_types=["status"]))
         self.observer.send_rtvi_message = AsyncMock()
@@ -129,6 +130,25 @@ class TestRTVIObserverSkippedTypes(unittest.IsolatedAsyncioTestCase):
 
     def _sent_texts(self):
         return [call.args[0].data.text for call in self.observer.send_rtvi_message.await_args_list]
+
+    def _sent_outputs(self):
+        return [
+            call.args[0].data
+            for call in self.observer.send_rtvi_message.await_args_list
+            if isinstance(call.args[0], RTVI.BotOutputMessage)
+        ]
+
+    async def test_a_segment_spoken_in_one_piece_completes_as_that_segment(self):
+        sentence = self._segment("That sounds fun.", TextType.SENTENCE)
+        spoken = TTSTextFrame(sentence.text, TextType.SENTENCE, segment_id=sentence.id)
+        spoken.will_be_spoken = True
+        await self._push(sentence)
+        await self._push(spoken)
+
+        self.assertEqual(
+            [(data.spoken_status, data.segment_id) for data in self._sent_outputs()],
+            [("new", sentence.id), ("completed", sentence.id)],
+        )
 
     async def test_a_skipped_segment_keeps_its_progress_and_words_from_the_client(self):
         status = self._segment("One moment, please.", "status")
