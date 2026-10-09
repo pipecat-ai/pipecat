@@ -1,1 +1,1 @@
-- Fixed `SonioxSTTService` ignoring a `language` settings update (and `set_language`): it reconnected with the previous `language_hints`. A `language` update now replaces `language_hints` with that language.
+- Fixed `SonioxSTTService` ignoring the `language` setting, at construction and in a settings update (and `set_language`): it connected with `language_hints` alone. A `language` now replaces `language_hints` with that language.

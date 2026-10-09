@@ -615,3 +615,31 @@ async def test_language_update_reconnects_with_that_language_as_the_hint(monkeyp
     config = json.loads(websocket.send.call_args.args[0])
     assert config["language_hints"] == ["sv"]
     service._request_reconnect.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_constructor_language_connects_with_that_language_as_the_hint(monkeypatch):
+    websocket = _FakeWebsocket([])
+
+    async def fake_websocket_connect(*args, **kwargs):
+        return websocket
+
+    monkeypatch.setattr(
+        "pipecat.services.websocket_service.websocket_connect", fake_websocket_connect
+    )
+    service = SonioxSTTService(
+        api_key="test-key", settings=SonioxSTTService.Settings(language=Language.SV)
+    )
+
+    await service._connect_websocket()
+
+    config = json.loads(websocket.send.call_args.args[0])
+    assert config["language_hints"] == ["sv"]
+
+
+@pytest.mark.asyncio
+async def test_language_update_outside_the_language_enum_does_not_raise(monkeypatch):
+    service = SonioxSTTService(api_key="test-key")
+    monkeypatch.setattr(service, "_request_reconnect", AsyncMock())
+
+    await service._update_settings(STTSettings(language="zh-Hant"))

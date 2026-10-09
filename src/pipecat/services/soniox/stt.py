@@ -263,6 +263,21 @@ class SonioxSTTSettings(STTSettings):
     client_reference_id: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
+def _move_language_to_hints(delta: SonioxSTTSettings) -> None:
+    """Replace ``language_hints`` with ``delta.language``, the field Soniox reads on connect.
+
+    A string outside :class:`Language` stays in ``language`` for the base class to handle.
+    """
+    if not is_given(delta.language) or delta.language is None:
+        return
+    try:
+        language = Language(delta.language)
+    except ValueError:
+        return
+    delta.language_hints = [language]
+    delta.language = NOT_GIVEN
+
+
 class SonioxSTTService(WebsocketSTTService):
     """Speech-to-Text service using Soniox's WebSocket API.
 
@@ -373,6 +388,7 @@ class SonioxSTTService(WebsocketSTTService):
 
         # --- 4. Settings delta (canonical API, always wins) ---
         if settings is not None:
+            _move_language_to_hints(settings)
             default_settings.apply_update(settings)
 
         super().__init__(
@@ -463,10 +479,7 @@ class SonioxSTTService(WebsocketSTTService):
         Returns:
             Dict mapping changed field names to their previous values.
         """
-        if is_given(delta.language) and delta.language is not None:
-            delta.language_hints = [Language(delta.language)]
-            delta.language = NOT_GIVEN
-
+        _move_language_to_hints(delta)
         changed = await super()._update_settings(delta)
 
         if changed:
