@@ -20,6 +20,7 @@ from typing_extensions import override
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
+    InterimTranscriptionFrame,
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
     STTMetadataFrame,
@@ -795,7 +796,7 @@ class DeepgramFluxSTTBase(EagerEndOfTurnSTTServiceMixin, STTService):
             case FluxEventType.EAGER_END_OF_TURN:
                 await self._handle_eager_end_of_turn(transcript, data)
             case FluxEventType.UPDATE:
-                await self._handle_update(transcript)
+                await self._handle_update(transcript, data)
 
     async def _handle_start_of_turn(self, transcript: str):
         """Handle StartOfTurn events from Deepgram Flux.
@@ -943,16 +944,16 @@ class DeepgramFluxSTTBase(EagerEndOfTurnSTTServiceMixin, STTService):
         )
         await self._call_event_handler("on_eager_end_of_turn", transcript)
 
-    async def _handle_update(self, transcript: str):
+    async def _handle_update(self, transcript: str, data: dict[str, Any]):
         """Handle Update events from Deepgram Flux.
 
         Update events provide incremental transcript updates during an ongoing
-        turn. These events allow for real-time display of transcription progress
-        and can be used to provide visual feedback to users about what's being
-        recognized.
+        turn. Each one is pushed as an InterimTranscriptionFrame holding the
+        transcript of the turn so far.
 
         Args:
             transcript: The current partial transcript text for the ongoing turn.
+            data: The TurnInfo message data containing event type, transcript and some extra metadata.
         """
         if transcript:
             logger.trace(f"Update event: {transcript}")
@@ -962,4 +963,13 @@ class DeepgramFluxSTTBase(EagerEndOfTurnSTTServiceMixin, STTService):
             # both the "user started speaking" event and the first transcript simultaneously,
             # making this timing measurement meaningless in this context.
             # await self.stop_ttfb_metrics()
+            await self.push_frame(
+                InterimTranscriptionFrame(
+                    transcript,
+                    self._user_id,
+                    time_now_iso8601(),
+                    self._primary_detected_language(data),
+                    result=data,
+                )
+            )
             await self._call_event_handler("on_update", transcript)
