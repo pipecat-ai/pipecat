@@ -316,6 +316,8 @@ class RTVIObserver(BaseObserver):
     def _client_supports_backchannels(self) -> bool:
         """Return True when the connected client supports the backchannel text type (2.2.0+)."""
         if not self._rtvi:
+            # No client has negotiated a version, so assume the current protocol, as
+            # _is_legacy_client does.
             return True
         return self._rtvi.client_version >= [2, 2, 0]
 
