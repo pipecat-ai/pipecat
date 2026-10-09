@@ -682,7 +682,8 @@ class UserInputMessageData(BaseModel):
             bot talks, such as "mhm".
         timestamp: When the user said or sent it.
         final: Whether the text is final. Only an interim transcription isn't.
-        user_id: Identifier for the user who spoke. Not set for chat.
+        user_id: Identifier for the user who spoke or typed. For chat, set only
+            when the transport knows the sender, such as Daily and LiveKit.
         msg_id: For chat, the id of the client's ``send-text`` message.
     """
 

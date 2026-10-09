@@ -177,13 +177,14 @@ class RTVIProcessor(FrameProcessor):
         )
         await self.push_frame(frame)
 
-    async def handle_message(self, message: RTVI.Message):
+    async def handle_message(self, message: RTVI.Message, user_id: str | None = None):
         """Handle an incoming RTVI message.
 
         Args:
             message: The RTVI message to handle.
+            user_id: Identifier for the user who sent it, if known.
         """
-        await self._message_queue.put(message)
+        await self._message_queue.put((message, user_id))
 
     async def handle_function_call(self, params: FunctionCallParams):
         """Handle a function call from the LLM.
@@ -280,8 +281,8 @@ class RTVIProcessor(FrameProcessor):
     async def _message_task_handler(self):
         """Handle incoming transport messages."""
         while True:
-            message = await self._message_queue.get()
-            await self._handle_message(message)
+            message, user_id = await self._message_queue.get()
+            await self._handle_message(message, user_id)
             self._message_queue.task_done()
 
     async def _handle_transport_message(self, frame: InputTransportMessageFrame):
@@ -292,12 +293,15 @@ class RTVIProcessor(FrameProcessor):
                 logger.warning(f"Ignoring not RTVI message: {transport_message}")
                 return
             message = RTVI.Message.model_validate(transport_message)
-            await self._message_queue.put(message)
+            # Transports that know the sender, such as Daily and LiveKit, set it
+            # as ``participant_id`` on their subclass of the frame.
+            user_id = getattr(frame, "participant_id", None)
+            await self._message_queue.put((message, user_id))
         except ValidationError as e:
             await self.send_error(f"Invalid RTVI transport message: {e}")
             logger.warning(f"Invalid RTVI transport message: {e}")
 
-    async def _handle_message(self, message: RTVI.Message):
+    async def _handle_message(self, message: RTVI.Message, user_id: str | None = None):
         """Handle a parsed RTVI message."""
         try:
             match message.type:
@@ -362,7 +366,7 @@ class RTVIProcessor(FrameProcessor):
                     await self._handle_function_call_result(data)
                 case "send-text":
                     data = RTVI.SendTextData.model_validate(message.data)
-                    await self._handle_send_text(data, message.id)
+                    await self._handle_send_text(data, message.id, user_id)
                 case "send-file":
                     data = RTVI.SendFileData.model_validate(message.data)
                     await self._handle_send_file(data, message.id)
@@ -468,7 +472,9 @@ class RTVIProcessor(FrameProcessor):
         for button in data.buttons:
             await self.push_frame(InputDTMFFrame(button=button))
 
-    async def _handle_send_text(self, data: RTVI.SendTextData, message_id: str):
+    async def _handle_send_text(
+        self, data: RTVI.SendTextData, message_id: str, user_id: str | None = None
+    ):
         """Handle a send-text message from the client."""
         opts = data.options if data.options is not None else RTVI.SendTextOptions()
         if opts.run_immediately:
@@ -492,7 +498,9 @@ class RTVIProcessor(FrameProcessor):
             run_llm=opts.run_immediately,
         )
         await self.push_frame(text_frame)
-        await self.push_frame(RTVISendTextFrame(msg_id=message_id, text=data.content))
+        await self.push_frame(
+            RTVISendTextFrame(msg_id=message_id, text=data.content, user_id=user_id)
+        )
         if toggle_skip_tts:
             output_frame = LLMConfigureOutputFrame(skip_tts=cur_llm_skip_tts)
             await self.push_frame(output_frame)

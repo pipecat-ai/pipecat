@@ -164,6 +164,12 @@ class TestRTVIObserverPushes(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((message.data.msg_id, message.data.user_id), ("msg-1", None))
         self.assertNotIn("user_id", message.model_dump(exclude_none=True)["data"])
 
+    async def test_text_from_a_known_sender_is_acknowledged_with_their_id(self):
+        await self._push(RTVISendTextFrame(msg_id="msg-1", text="Hello.", user_id="user"))
+
+        message = self.observer.send_rtvi_message.await_args.args[0]
+        self.assertEqual((message.data.msg_id, message.data.user_id), ("msg-1", "user"))
+
     async def test_user_input_is_kept_from_the_client_when_disabled(self):
         self.observer._params.user_input_enabled = False
         await self._push(TranscriptionFrame(text="Hello.", user_id="user", timestamp="now"))
