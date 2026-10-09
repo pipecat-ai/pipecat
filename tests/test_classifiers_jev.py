@@ -19,8 +19,8 @@ from pipecat.classifiers.base_classifier import (
     YesNoQuestion,
     YesNoResult,
 )
-from pipecat.classifiers.jev.classifier import JEV_MAX_CHOICE_OPTIONS, JevClassifier
-from pipecat.classifiers.jev.client import JevClient
+from pipecat.classifiers.typesafe.jev.classifier import JEV_MAX_CHOICE_OPTIONS, JevClassifier
+from pipecat.classifiers.typesafe.jev.client import JevClient
 from pipecat.metrics.metrics import LLMUsageMetricsData, ProcessingMetricsData
 from pipecat.utils.asyncio.task_manager import TaskManager
 
@@ -86,7 +86,7 @@ class TestJevClient:
         async def no_sleep(seconds):
             waits.append(seconds)
 
-        monkeypatch.setattr("pipecat.classifiers.jev.client.asyncio.sleep", no_sleep)
+        monkeypatch.setattr("pipecat.classifiers.typesafe.jev.client.asyncio.sleep", no_sleep)
 
         def handler(request: httpx.Request) -> httpx.Response:
             status = next(statuses, None)
@@ -108,7 +108,7 @@ class TestJevClient:
         async def no_sleep(seconds):
             pass
 
-        monkeypatch.setattr("pipecat.classifiers.jev.client.asyncio.sleep", no_sleep)
+        monkeypatch.setattr("pipecat.classifiers.typesafe.jev.client.asyncio.sleep", no_sleep)
         client = _client(lambda request: httpx.Response(429), max_retries=2)
 
         with pytest.raises(ClassifierError, match="busy"):
