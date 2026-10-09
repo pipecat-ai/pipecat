@@ -111,6 +111,18 @@ class ProjectGenerator:
                     f"(found a 'server' directory).[/yellow]"
                 )
                 raise KeyboardInterrupt("Project creation cancelled")
+            for filename in ("README.md", ".gitignore"):
+                path = project_path / filename
+                if path.exists() or path.is_symlink():
+                    if non_interactive:
+                        raise FileExistsError(
+                            f"Cannot scaffold in {project_path}: {filename} exists"
+                        )
+                    console.print(
+                        f"\n[yellow]⚠️  Cannot scaffold in {project_path}: "
+                        f"{filename} already exists.[/yellow]"
+                    )
+                    raise KeyboardInterrupt("Project creation cancelled")
             return self._write_project_files(project_path)
 
         project_path = output_dir / self.config.project_name
