@@ -680,16 +680,18 @@ class UserInputMessageData(BaseModel):
             transcribed by the STT, ``"chat"`` for text the client sent, or
             ``"backchannel"`` for a short acknowledgment the user said while the
             bot talks, such as "mhm".
-        user_id: Identifier for the user.
         timestamp: When the user said or sent it.
         final: Whether the text is final. Only an interim transcription isn't.
+        user_id: Identifier for the user who spoke. Not set for chat.
+        msg_id: For chat, the id of the client's ``send-text`` message.
     """
 
     text: str
     input_type: UserInputType
-    user_id: str
     timestamp: str
     final: bool
+    user_id: str | None = None
+    msg_id: str | None = None
 
 
 class UserInputMessage(BaseModel):

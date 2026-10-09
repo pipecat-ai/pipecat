@@ -38,6 +38,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.frameworks.rtvi.frames import (
     RTVIClientMessageFrame,
+    RTVISendTextFrame,
     RTVIUICancelJobGroupFrame,
     RTVIUIEventFrame,
     RTVIUISnapshotFrame,
@@ -361,7 +362,7 @@ class RTVIProcessor(FrameProcessor):
                     await self._handle_function_call_result(data)
                 case "send-text":
                     data = RTVI.SendTextData.model_validate(message.data)
-                    await self._handle_send_text(data)
+                    await self._handle_send_text(data, message.id)
                 case "send-file":
                     data = RTVI.SendFileData.model_validate(message.data)
                     await self._handle_send_file(data, message.id)
@@ -467,7 +468,7 @@ class RTVIProcessor(FrameProcessor):
         for button in data.buttons:
             await self.push_frame(InputDTMFFrame(button=button))
 
-    async def _handle_send_text(self, data: RTVI.SendTextData):
+    async def _handle_send_text(self, data: RTVI.SendTextData, message_id: str):
         """Handle a send-text message from the client."""
         opts = data.options if data.options is not None else RTVI.SendTextOptions()
         if opts.run_immediately:
@@ -491,6 +492,7 @@ class RTVIProcessor(FrameProcessor):
             run_llm=opts.run_immediately,
         )
         await self.push_frame(text_frame)
+        await self.push_frame(RTVISendTextFrame(msg_id=message_id, text=data.content))
         if toggle_skip_tts:
             output_frame = LLMConfigureOutputFrame(skip_tts=cur_llm_skip_tts)
             await self.push_frame(output_frame)

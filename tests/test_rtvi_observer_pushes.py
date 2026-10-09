@@ -28,7 +28,10 @@ from pipecat.frames.frames import (
 )
 from pipecat.observers.base_observer import FramePushed
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.processors.frameworks.rtvi.frames import RTVIConfigureObserverFrame
+from pipecat.processors.frameworks.rtvi.frames import (
+    RTVIConfigureObserverFrame,
+    RTVISendTextFrame,
+)
 from pipecat.processors.frameworks.rtvi.observer import RTVIObserver, RTVIObserverParams
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import TransportParams
@@ -149,10 +152,23 @@ class TestRTVIObserverPushes(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual([type(m) for m in self._sent_messages()], [RTVI.UserInputMessage])
 
+    async def test_text_from_the_client_is_acknowledged_as_user_input(self):
+        await self._push(RTVISendTextFrame(msg_id="msg-1", text="Hello."))
+
+        message = self.observer.send_rtvi_message.await_args.args[0]
+        self.assertIsInstance(message, RTVI.UserInputMessage)
+        self.assertEqual(
+            (message.data.text, message.data.input_type, message.data.final),
+            ("Hello.", "chat", True),
+        )
+        self.assertEqual((message.data.msg_id, message.data.user_id), ("msg-1", None))
+        self.assertNotIn("user_id", message.model_dump(exclude_none=True)["data"])
+
     async def test_user_input_is_kept_from_the_client_when_disabled(self):
         self.observer._params.user_input_enabled = False
         await self._push(TranscriptionFrame(text="Hello.", user_id="user", timestamp="now"))
         await self._push(UserBackchannelFrame(text="mhm", user_id="user", timestamp="now"))
+        await self._push(RTVISendTextFrame(msg_id="msg-1", text="Hello."))
 
         self.assertEqual([type(m) for m in self._sent_messages()], [RTVI.UserTranscriptionMessage])
 
