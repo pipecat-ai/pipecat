@@ -19,6 +19,7 @@ from pipecat.frames.frames import (
     InterruptionFrame,
     TTSAudioRawFrame,
     TTSTextFrame,
+    UserBackchannelFrame,
     UserStartedSpeakingFrame,
     VADUserStartedSpeakingFrame,
 )
@@ -90,6 +91,16 @@ class TestRTVIObserverPushes(unittest.IsolatedAsyncioTestCase):
         await self._push(frame, first_push=False, source=transport)
         self.assertEqual(self.observer._queued_aggregated_text_frames, [frame])
 
+    async def test_a_user_backchannel_is_sent(self):
+        await self._push(UserBackchannelFrame(text="mhm", user_id="user", timestamp="now"))
+
+        message = self.observer.send_rtvi_message.await_args.args[0]
+        self.assertIsInstance(message, RTVI.UserBackchannelMessage)
+        self.assertEqual(
+            message.data,
+            RTVI.UserBackchannelMessageData(text="mhm", user_id="user", timestamp="now"),
+        )
+
 
 class TestRTVIObserverSegments(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
@@ -133,6 +144,9 @@ class TestRTVIObserverSegments(unittest.IsolatedAsyncioTestCase):
     def _sent_texts(self):
         messages = [call.args[0] for call in self.observer.send_rtvi_message.await_args_list]
         return [m.data.text for m in messages if hasattr(getattr(m, "data", None), "text")]
+
+    def _sent_messages(self):
+        return [call.args[0] for call in self.observer.send_rtvi_message.await_args_list]
 
     def _sent_outputs(self):
         return [
@@ -217,6 +231,44 @@ class TestRTVIObserverSegments(unittest.IsolatedAsyncioTestCase):
 
         self.observer.send_rtvi_message.assert_not_awaited()
         self.assertEqual(self.observer._skipped_segment_ids, set())
+
+    async def test_a_backchannel_is_sent_once_in_place_of_its_output(self):
+        backchannel = self._segment("Mm-hmm, go on.", TextType.BACKCHANNEL)
+        await self._push(backchannel)
+        await self._push(self._word("Mm-hmm,", backchannel))
+        await self._push(self._progress(backchannel, "Mm-hmm,", " go on."))
+
+        messages = self._sent_messages()
+        self.assertEqual([type(m) for m in messages], [RTVI.BotBackchannelMessage])
+        self.assertEqual(messages[0].data.text, "Mm-hmm, go on.")
+
+    async def test_a_backchannel_spoken_in_one_piece_is_sent_once(self):
+        backchannel = self._segment("Mm-hmm.", TextType.BACKCHANNEL)
+        spoken = TTSTextFrame(backchannel.text, TextType.BACKCHANNEL, segment_id=backchannel.id)
+        spoken.will_be_spoken = True
+        await self._push(backchannel)
+        await self._push(spoken)
+
+        self.assertEqual([type(m) for m in self._sent_messages()], [RTVI.BotBackchannelMessage])
+        self.assertEqual(self.observer._skipped_segment_ids, set())
+
+    async def test_a_segment_after_a_backchannel_is_sent(self):
+        backchannel = self._segment("Mm-hmm.", TextType.BACKCHANNEL)
+        sentence = self._segment("That sounds fun.", TextType.SENTENCE)
+        await self._push(backchannel)
+        await self._push(self._word("Mm-hmm.", backchannel))
+        await self._push(sentence)
+        await self._push(self._word("That", sentence))
+
+        self.assertEqual(self._sent_texts(), ["Mm-hmm.", "That sounds fun.", "That"])
+
+    async def test_a_backchannel_is_kept_from_the_client_when_disabled(self):
+        self.observer._params.bot_backchannel_enabled = False
+        backchannel = self._segment("Mm-hmm.", TextType.BACKCHANNEL)
+        await self._push(backchannel)
+        await self._push(self._word("Mm-hmm.", backchannel))
+
+        self.observer.send_rtvi_message.assert_not_awaited()
 
 
 if __name__ == "__main__":
