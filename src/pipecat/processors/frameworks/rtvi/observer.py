@@ -657,7 +657,12 @@ class RTVIObserver(BaseObserver):
             )
         elif isinstance(frame, RTVISendTextFrame) and self._params.user_input_enabled:
             await self._send_user_input(
-                frame.text, "chat", timestamp=time_now_iso8601(), final=True, msg_id=frame.msg_id
+                frame.text,
+                "chat",
+                timestamp=time_now_iso8601(),
+                final=True,
+                user_id=frame.user_id,
+                msg_id=frame.msg_id,
             )
         elif isinstance(frame, LLMContextFrame) and self._params.user_llm_enabled:
             await self._handle_context(frame)

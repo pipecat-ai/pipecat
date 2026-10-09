@@ -114,10 +114,12 @@ class RTVISendTextFrame(SystemFrame):
     Parameters:
         msg_id: The RTVI message id, as set by the client.
         text: The text the client sent.
+        user_id: Identifier for the user who sent it, if the transport knows.
     """
 
     msg_id: str
     text: str
+    user_id: str | None = None
 
     def __str__(self):
         """String representation of the send-text frame."""
