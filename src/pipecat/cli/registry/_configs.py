@@ -93,6 +93,13 @@ SERVICE_CONFIGS = {
         "    )\n"
     ),
     "xai_stt": 'XAISTTService(api_key=os.getenv("XAI_API_KEY"))',
+    "zoom_scribe_live_stt": 'ZoomScribeLiveSTTService(api_key=os.getenv("ZOOM_SCRIBE_API_KEY"))',
+    "zoom_scribe_fast_stt": (
+        "ZoomScribeFastSTTService(\n"
+        '        api_key=os.getenv("ZOOM_SCRIBE_API_KEY"),\n'
+        "        aiohttp_session=session\n"
+        "    )\n"
+    ),
     # LLM Services
     "anthropic_llm": (
         "AnthropicLLMService(\n"

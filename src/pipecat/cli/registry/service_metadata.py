@@ -496,6 +496,22 @@ class ServiceRegistry:
             env_prefix="XAI",
             include_params=["api_key"],
         ),
+        ServiceDefinition(
+            value="zoom_scribe_live_stt",
+            label="Zoom Scribe Live",
+            package="pipecat-ai[zoom-ai]",
+            class_name=["ZoomScribeLiveSTTService"],
+            env_prefix="ZOOM_SCRIBE",
+            include_params=["api_key"],
+        ),
+        ServiceDefinition(
+            value="zoom_scribe_fast_stt",
+            label="Zoom Scribe Fast",
+            package="pipecat-ai[zoom-ai]",
+            class_name=["ZoomScribeFastSTTService"],
+            env_prefix="ZOOM_SCRIBE",
+            include_params=["api_key"],
+        ),
     ]
 
     # Large Language Model Services
