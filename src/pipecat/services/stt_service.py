@@ -700,7 +700,9 @@ class STTService(AIService):
         and the ``on_connection_error`` event handler.
         """
         logger.info(f"{self} reconnecting...")
-        self._reconnect_audio_buffer.clear()
+        # Keep audio already buffered by a reconnect still in progress.
+        if not self._reconnecting:
+            self._reconnect_audio_buffer.clear()
         self._reconnecting = True
         self._need_reconnect = False
         try:
@@ -1075,6 +1077,9 @@ class WebsocketSTTService(STTService, WebsocketService):
         Keepalive management is handled by ``_connect`` / ``_disconnect``.
         """
         await self._disconnect()
+        # Disconnecting cancels a receive-loop reconnect in progress, which
+        # clears the guard; restore it so audio stays buffered while connecting.
+        self._reconnecting = True
         await self._connect()
 
     async def _maybe_try_reconnect(

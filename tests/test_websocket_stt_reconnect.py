@@ -20,16 +20,19 @@ from http import HTTPStatus
 import pytest
 from websockets.asyncio.server import serve
 
-from pipecat.frames.frames import InputAudioRawFrame, TranscriptionFrame
+from pipecat.frames.frames import InputAudioRawFrame, STTUpdateSettingsFrame, TranscriptionFrame
 from pipecat.services.cartesia.stt import CartesiaSTTService
 from pipecat.services.elevenlabs.stt import ElevenLabsRealtimeSTTService
+from pipecat.services.settings import STTSettings
 from pipecat.services.smallest.stt import SmallestSTTService
 from pipecat.tests.utils import SleepFrame, run_test
+from pipecat.transcriptions.language import Language
 
 SERVICES = ["cartesia", "elevenlabs", "smallest"]
 
 # Long enough that audio frames keep arriving while a handshake is in flight.
 HANDSHAKE_DELAY = 0.1
+SLOW_HANDSHAKE_DELAY = 0.4
 TRANSCRIPT_EVERY = 5
 FRAME_SECONDS = 0.02
 
@@ -45,12 +48,15 @@ class _FakeProvider:
     service: str
     drop_first_after: int | None = None
     reject_first_handshake: bool = False
+    slow_handshake: int | None = None
     connections: list[_Connection] = field(default_factory=list)
     handshakes: int = 0
 
     async def process_request(self, connection, request):
         self.handshakes += 1
         await asyncio.sleep(HANDSHAKE_DELAY)
+        if self.handshakes == self.slow_handshake:
+            await asyncio.sleep(SLOW_HANDSHAKE_DELAY)
         if self.reject_first_handshake and self.handshakes == 1:
             return connection.respond(HTTPStatus.SERVICE_UNAVAILABLE, "unavailable\n")
         return None
@@ -98,13 +104,17 @@ def _make_service(name: str, port: int):
     return service
 
 
-async def _run(provider: _FakeProvider, seconds: float) -> list[str]:
+async def _run(
+    provider: _FakeProvider, seconds: float, frames_before_settings: int | None = None
+) -> list[str]:
     async with serve(
         provider.handle, "127.0.0.1", 0, process_request=provider.process_request
     ) as server:
         port = server.sockets[0].getsockname()[1]
         frames = []
-        for _ in range(int(seconds / FRAME_SECONDS)):
+        for i in range(int(seconds / FRAME_SECONDS)):
+            if i == frames_before_settings:
+                frames.append(STTUpdateSettingsFrame(delta=STTSettings(language=Language.FR)))
             frames.append(
                 InputAudioRawFrame(audio=b"\x00\x00" * 320, sample_rate=16000, num_channels=1)
             )
@@ -147,4 +157,15 @@ async def test_audio_arriving_during_a_reconnect_reaches_the_new_connection(serv
     await _run(provider, seconds=1.5)
 
     assert len(provider.connections) == 2
+    assert sum(c.audio_messages for c in provider.connections) == int(1.5 / FRAME_SECONDS)
+
+
+@pytest.mark.asyncio
+async def test_audio_survives_a_settings_reconnect_during_a_reconnect():
+    # The settings change lands while the receive loop's handshake is in flight.
+    provider = _FakeProvider("cartesia", drop_first_after=15, slow_handshake=2)
+
+    await _run(provider, seconds=1.5, frames_before_settings=25)
+
+    assert provider.handshakes == 3
     assert sum(c.audio_messages for c in provider.connections) == int(1.5 / FRAME_SECONDS)
