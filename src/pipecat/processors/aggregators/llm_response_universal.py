@@ -67,6 +67,8 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
     TranslationFrame,
     TTSStartedFrame,
+    TTSTextFrame,
+    UserBackchannelFrame,
     UserFileRawFrame,
     UserImageRawFrame,
     UserMuteStartedFrame,
@@ -118,6 +120,7 @@ from pipecat.utils.context.llm_context_summarization import (
 )
 from pipecat.utils.deprecation import warn_deprecated
 from pipecat.utils.string import TextPartForConcatenation, concatenate_aggregated_text
+from pipecat.utils.text.base_text_aggregator import TextType
 from pipecat.utils.time import time_now_iso8601
 
 
@@ -336,6 +339,24 @@ class UserTurnMessageAddedMessage:
 
 
 @dataclass
+class UserBackchannelMessage:
+    """A message accompanying ``on_user_backchannel``.
+
+    A short acknowledgment the user said while the bot talks, such as "mhm",
+    which stays out of the LLM context.
+
+    Parameters:
+        content: What the user said.
+        timestamp: When the user said it.
+        user_id: Optional identifier for the user.
+    """
+
+    content: str
+    timestamp: str
+    user_id: str | None = None
+
+
+@dataclass
 class AssistantTurnStoppedMessage:
     """An assistant turn stopped message containing an assistant transcript update.
 
@@ -353,6 +374,22 @@ class AssistantTurnStoppedMessage:
 
     content: str
     interrupted: bool
+    timestamp: str
+
+
+@dataclass
+class AssistantBackchannelMessage:
+    """A message accompanying ``on_assistant_backchannel``.
+
+    A short acknowledgment the assistant said while the user talks, such as
+    "Mm-hmm.".
+
+    Parameters:
+        content: What the assistant said.
+        timestamp: When the assistant started saying it.
+    """
+
+    content: str
     timestamp: str
 
 
@@ -596,6 +633,8 @@ class LLMUserAggregator(LLMContextAggregator):
       ``on_user_turn_stopped`` — subscribe here for the finalized user text.
     - on_user_mute_started: Called when the user becomes muted
     - on_user_mute_stopped: Called when the user becomes unmuted
+    - on_user_backchannel: Called when the user acknowledges the bot without
+      interrupting it, from a ``UserBackchannelFrame``
 
     Example::
 
@@ -628,6 +667,10 @@ class LLMUserAggregator(LLMContextAggregator):
 
         @aggregator.event_handler("on_user_mute_stopped")
         async def on_user_mute_stopped(aggregator):
+            ...
+
+        @aggregator.event_handler("on_user_backchannel")
+        async def on_user_backchannel(aggregator, message: UserBackchannelMessage):
             ...
 
     """
@@ -668,6 +711,7 @@ class LLMUserAggregator(LLMContextAggregator):
         self._register_event_handler("on_user_turn_message_added")
         self._register_event_handler("on_user_mute_started")
         self._register_event_handler("on_user_mute_stopped")
+        self._register_event_handler("on_user_backchannel")
 
         # Realtime-mode wiring. None (the default) means auto-configure from
         # service metadata: cascade behavior until a realtime service announces
@@ -849,6 +893,12 @@ class LLMUserAggregator(LLMContextAggregator):
             # final TranscriptionFrame. The turn strategies still see them: the
             # controller is fed every frame below.
             pass
+        elif isinstance(frame, UserBackchannelFrame):
+            message = UserBackchannelMessage(
+                content=frame.text, timestamp=frame.timestamp, user_id=frame.user_id
+            )
+            await self._call_event_handler("on_user_backchannel", message)
+            await self.push_frame(frame, direction)
         elif isinstance(frame, LLMRunFrame):
             await self._handle_llm_run(frame)
         elif isinstance(frame, LLMMessagesAppendFrame):
@@ -1228,6 +1278,7 @@ class LLMUserAggregator(LLMContextAggregator):
                 InterimTranscriptionFrame,
                 TranscriptionFrame,
                 EagerTranscriptionFrame,
+                UserBackchannelFrame,
             ),
         )
 
@@ -1577,6 +1628,8 @@ class LLMAssistantAggregator(LLMContextAggregator):
     - on_assistant_turn_started: Called when the assistant turn starts
     - on_assistant_turn_stopped: Called when the assistant turn ends
     - on_assistant_thought: Called when an assistant thought is available
+    - on_assistant_backchannel: Called when the assistant starts saying text of
+      type ``backchannel``, such as a ``BotBackchannelFrame``
     - on_summary_applied: Called when a context summarization is applied
 
     Example::
@@ -1591,6 +1644,10 @@ class LLMAssistantAggregator(LLMContextAggregator):
 
         @aggregator.event_handler("on_assistant_thought")
         async def on_assistant_thought(aggregator, message: AssistantThoughtMessage):
+            ...
+
+        @aggregator.event_handler("on_assistant_backchannel")
+        async def on_assistant_backchannel(aggregator, message: AssistantBackchannelMessage):
             ...
 
         @aggregator.event_handler("on_summary_applied")
@@ -1685,6 +1742,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         self._register_event_handler("on_assistant_turn_started")
         self._register_event_handler("on_assistant_turn_stopped")
         self._register_event_handler("on_assistant_thought")
+        self._register_event_handler("on_assistant_backchannel")
         self._register_event_handler("on_summary_applied")
 
     @property
@@ -2333,6 +2391,17 @@ class LLMAssistantAggregator(LLMContextAggregator):
             ),
         ):
             return
+
+        # A backchannel is reported once, by the segment the TTS will speak,
+        # which the output transport releases as its audio starts.
+        if (
+            isinstance(frame, AggregatedTextFrame)
+            and not isinstance(frame, TTSTextFrame)
+            and frame.text_type == TextType.BACKCHANNEL
+            and frame.will_be_spoken
+        ):
+            message = AssistantBackchannelMessage(content=frame.text, timestamp=time_now_iso8601())
+            await self._call_event_handler("on_assistant_backchannel", message)
 
         if not frame.append_to_context:
             return
