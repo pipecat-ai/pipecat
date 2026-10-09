@@ -8,7 +8,7 @@
 
 One :class:`ClefClient` holds one HTTP/2 connection pool, adds the auth
 header, retries when Workers AI is busy, and counts the tokens every request
-used. Several :class:`~pipecat.classifiers.clef.classifier.ClefClassifier`
+used. Several :class:`~pipecat.classifiers.cloudflare.clef.classifier.ClefClassifier`
 instances can share one.
 """
 

@@ -37,12 +37,12 @@ classifier from TypeSafe. It answers each check in a few hundred milliseconds
 and says how sure it is. The judge is picked in `judge_text.yaml`,
 `judge_audio.yaml` and the audio scenario of `language_switch.yaml` through a
 factory we keep in `evals/judges.py` (`factory: evals.judges.typesafe_classifier`).
-It needs the `jev` extra and `TYPESAFE_API_KEY` exported in the shell that runs
+It needs the `typesafe` extra and `TYPESAFE_API_KEY` exported in the shell that runs
 the suite. The harness doesn't read `.env`; only the bots do.
 
 To judge with Cloudflare's [Clef](https://developers.cloudflare.com/workers-ai/models/clef/)
 instead, set `factory: evals.judges.cloudflare_classifier` (add
-`model: clef-flash` for faster answers). It needs the `clef` extra, and
+`model: clef-flash` for faster answers). It needs the `cloudflare` extra, and
 `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_KEY` exported.
 
 Jev gives verdicts but not reasons. So a local LLM, the **explainer**, writes

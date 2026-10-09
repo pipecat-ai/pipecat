@@ -18,8 +18,8 @@ from pipecat.classifiers.base_classifier import (
     ScoreQuestion,
     YesNoQuestion,
 )
-from pipecat.classifiers.clef.classifier import CLEF_MAX_CHOICE_OPTIONS, ClefClassifier
-from pipecat.classifiers.clef.client import ClefClient
+from pipecat.classifiers.cloudflare.clef.classifier import CLEF_MAX_CHOICE_OPTIONS, ClefClassifier
+from pipecat.classifiers.cloudflare.clef.client import ClefClient
 from pipecat.metrics.metrics import LLMUsageMetricsData, ProcessingMetricsData
 from pipecat.utils.asyncio.task_manager import TaskManager
 
@@ -124,7 +124,7 @@ class TestClefClient:
         async def no_sleep(seconds):
             waits.append(seconds)
 
-        monkeypatch.setattr("pipecat.classifiers.clef.client.asyncio.sleep", no_sleep)
+        monkeypatch.setattr("pipecat.classifiers.cloudflare.clef.client.asyncio.sleep", no_sleep)
 
         def handler(request: httpx.Request) -> httpx.Response:
             status = next(statuses, None)
@@ -144,7 +144,7 @@ class TestClefClient:
         async def no_sleep(seconds):
             pass
 
-        monkeypatch.setattr("pipecat.classifiers.clef.client.asyncio.sleep", no_sleep)
+        monkeypatch.setattr("pipecat.classifiers.cloudflare.clef.client.asyncio.sleep", no_sleep)
         client = _client(lambda request: _failure(429, "Account limited"), max_retries=2)
 
         with pytest.raises(ClassifierError, match=r"busy \(HTTP 429: Account limited\)"):

@@ -80,6 +80,28 @@
       "location": "pipecat/bus/bridge_processor.py"
     },
     {
+      "subject": "pipecat.classifiers.jev.classifier",
+      "module": "pipecat.classifiers.jev.classifier",
+      "kind": "module",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "move",
+      "replacement": "pipecat.classifiers.typesafe.jev.classifier",
+      "message": "Moved to :mod:`pipecat.classifiers.typesafe.jev.classifier`. Will be removed in 2.0.0.",
+      "location": "pipecat/classifiers/jev/classifier.py"
+    },
+    {
+      "subject": "pipecat.classifiers.jev.client",
+      "module": "pipecat.classifiers.jev.client",
+      "kind": "module",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "move",
+      "replacement": "pipecat.classifiers.typesafe.jev.client",
+      "message": "Moved to :mod:`pipecat.classifiers.typesafe.jev.client`. Will be removed in 2.0.0.",
+      "location": "pipecat/classifiers/jev/client.py"
+    },
+    {
       "subject": "pipecat.evals.harness",
       "module": "pipecat.evals.harness",
       "kind": "module",

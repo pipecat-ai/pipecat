@@ -14,10 +14,10 @@ goes there), so a block names one as ``evals.judges.<name>``.
 import os
 
 from pipecat.classifiers.base_classifier import BaseClassifier
-from pipecat.classifiers.clef.classifier import ClefClassifier
-from pipecat.classifiers.clef.client import DEFAULT_MODEL as CLEF_DEFAULT_MODEL
-from pipecat.classifiers.jev.classifier import JevClassifier
-from pipecat.classifiers.jev.client import DEFAULT_BASE_URL, DEFAULT_MODEL
+from pipecat.classifiers.cloudflare.clef.classifier import ClefClassifier
+from pipecat.classifiers.cloudflare.clef.client import DEFAULT_MODEL as CLEF_DEFAULT_MODEL
+from pipecat.classifiers.typesafe.jev.classifier import JevClassifier
+from pipecat.classifiers.typesafe.jev.client import DEFAULT_BASE_URL, DEFAULT_MODEL
 
 # Seconds to wait for Jev or Clef to answer a question. Both answer in a few
 # hundred milliseconds, so a question still waiting this long is one to ask again.

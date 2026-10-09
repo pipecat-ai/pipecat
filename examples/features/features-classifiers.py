@@ -32,9 +32,9 @@ from pipecat.classifiers.base_classifier import (
     YesNoQuestion,
     YesNoResult,
 )
-from pipecat.classifiers.clef.classifier import ClefClassifier
-from pipecat.classifiers.jev.classifier import JevClassifier
+from pipecat.classifiers.cloudflare.clef.classifier import ClefClassifier
 from pipecat.classifiers.llm.classifier import LLMClassifier
+from pipecat.classifiers.typesafe.jev.classifier import JevClassifier
 from pipecat.metrics.metrics import LLMUsageMetricsData, ProcessingMetricsData
 from pipecat.services.openai.llm import OpenAILLMService
 
