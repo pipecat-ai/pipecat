@@ -10,7 +10,7 @@ import json
 import time
 from collections import Counter
 from collections.abc import AsyncGenerator
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from loguru import logger
@@ -266,9 +266,12 @@ class SonioxSTTSettings(STTSettings):
 def _move_language_to_hints(delta: SonioxSTTSettings) -> None:
     """Replace ``language_hints`` with ``delta.language``, the field Soniox reads on connect.
 
-    A string outside :class:`Language` stays in ``language`` for the base class to handle.
+    Hints given in the same delta win. A string outside :class:`Language` stays in
+    ``language`` for the base class to handle.
     """
     if not is_given(delta.language) or delta.language is None:
+        return
+    if is_given(getattr(delta, "language_hints", NOT_GIVEN)):
         return
     try:
         language = Language(delta.language)
@@ -388,6 +391,7 @@ class SonioxSTTService(WebsocketSTTService):
 
         # --- 4. Settings delta (canonical API, always wins) ---
         if settings is not None:
+            settings = replace(settings)
             _move_language_to_hints(settings)
             default_settings.apply_update(settings)
 
@@ -470,8 +474,7 @@ class SonioxSTTService(WebsocketSTTService):
     async def _update_settings(self, delta: Settings) -> dict[str, Any]:
         """Apply settings delta and reconnect if anything changed.
 
-        Handles ``language`` from base ``set_language`` by converting it to
-        ``language_hints``, the field Soniox reads on connect.
+        A ``language`` replaces ``language_hints``, the field Soniox reads on connect.
 
         Args:
             delta: A settings delta.

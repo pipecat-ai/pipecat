@@ -639,7 +639,22 @@ async def test_constructor_language_connects_with_that_language_as_the_hint(monk
 
 @pytest.mark.asyncio
 async def test_language_update_outside_the_language_enum_does_not_raise(monkeypatch):
-    service = SonioxSTTService(api_key="test-key")
+    service = SonioxSTTService(
+        api_key="test-key", settings=SonioxSTTService.Settings(language_hints=[Language.FI])
+    )
     monkeypatch.setattr(service, "_request_reconnect", AsyncMock())
 
     await service._update_settings(STTSettings(language="zh-Hant"))
+
+    assert service._settings.language_hints == [Language.FI]
+
+
+def test_language_hints_given_with_a_language_are_kept():
+    service = SonioxSTTService(
+        api_key="test-key",
+        settings=SonioxSTTService.Settings(
+            language=Language.FI, language_hints=[Language.FI, Language.SV]
+        ),
+    )
+
+    assert service._settings.language_hints == [Language.FI, Language.SV]
