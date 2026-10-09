@@ -10,7 +10,8 @@
 into a result, through a :class:`~pipecat.classifiers.cloudflare.clef.client.ClefClient`.
 """
 
-from collections.abc import Mapping
+import base64
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from loguru import logger
@@ -20,6 +21,7 @@ from pipecat.classifiers.base_classifier import (
     ChoiceQuestion,
     ChoiceResult,
     ClassifierError,
+    ClassifierImage,
     ClassifierQuestion,
     ClassifierResult,
     ScoreLevel,
@@ -33,6 +35,8 @@ from pipecat.utils.asyncio.task_manager import BaseTaskManager
 
 #: The most options Clef takes in one choice question.
 CLEF_MAX_CHOICE_OPTIONS = 255
+#: The most images Clef takes in one request.
+CLEF_MAX_IMAGES = 4
 
 
 class ClefClassifier(BaseClassifier):
@@ -42,6 +46,9 @@ class ClefClassifier(BaseClassifier):
     its own, or pass a :class:`ClefClient` to share one between several
     classifiers. A client the classifier created is closed in
     :meth:`cleanup`; a shared one is left to whoever made it.
+
+    Clef can see images: up to :data:`CLEF_MAX_IMAGES` per call, 4 MiB each
+    and 8 MiB in all.
 
     Example::
 
@@ -116,12 +123,30 @@ class ClefClassifier(BaseClassifier):
         """The Clef model the questions go to."""
         return self._client.model
 
+    @property
+    def supports_images(self) -> bool:
+        """Clef can see images."""
+        return True
+
     async def _ask(
-        self, state: str | dict[str, Any] | list[Any], questions: Mapping[str, ClassifierQuestion]
+        self,
+        state: str | dict[str, Any] | list[Any],
+        questions: Mapping[str, ClassifierQuestion],
+        images: Sequence[ClassifierImage] = (),
     ) -> tuple[dict[str, ClassifierResult], LLMTokenUsage]:
         """Answer the questions in one request."""
+        if len(images) > CLEF_MAX_IMAGES:
+            raise ClassifierError(f"Clef takes at most {CLEF_MAX_IMAGES} images, got {len(images)}")
         answers, usage = await self._client.ask(
-            state, {name: self._to_clef(q) for name, q in questions.items()}
+            state,
+            {name: self._to_clef(q) for name, q in questions.items()},
+            [
+                {
+                    "content_type": image.content_type,
+                    "base64": base64.b64encode(image.data).decode(),
+                }
+                for image in images
+            ],
         )
         results = {
             name: self._from_clef(question, answers[name]) for name, question in questions.items()
