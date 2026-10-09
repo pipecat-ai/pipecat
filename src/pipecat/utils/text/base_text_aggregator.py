@@ -47,11 +47,13 @@ class Aggregation:
     """Data class representing aggregated text and its type.
 
     An Aggregation object is created whenever a stream of text is aggregated by
-    a text aggregator. It contains the aggregated text and its type.
+    a text aggregator. It contains the aggregated text and a type saying what
+    the text represents.
 
     Parameters:
         text: The aggregated text content.
-        type: The text's type: a :class:`TextType`, or a custom type such as ``"code"``.
+        type: What the text represents: a :class:`TextType` such as a sentence or
+            a word, or a custom type such as ``"code"``.
     """
 
     text: str
@@ -153,7 +155,8 @@ class BaseTextAggregator(ABC):
         Yields:
             Aggregation objects as they complete. Each Aggregation consists of
             the aggregated text (stripped of leading/trailing whitespace) and
-            its type: a :class:`TextType`, or a custom type such as ``"code"``.
+            a type saying what it represents: a :class:`TextType` such as a
+            sentence or a word, or a custom type such as ``"code"``.
         """
         pass
         # Make this a generator to satisfy type checker
