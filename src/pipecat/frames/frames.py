@@ -1007,6 +1007,24 @@ class TTSSpeakFrame(DataFrame):
 
 
 @dataclass
+class BotBackchannelFrame(TTSSpeakFrame):
+    """A short acknowledgment for the bot to say while the user talks, such as "Mm-hmm.".
+
+    The TTS service speaks it like any :class:`TTSSpeakFrame`, and its text
+    frames have type ``TextType.BACKCHANNEL``. Interruptions don't cut it off
+    unless ``interruptible`` is set to True on the frame.
+
+    Parameters:
+        append_to_context: Whether the spoken text should be appended to the LLM
+            context. Defaults to False.
+    """
+
+    append_to_context: bool = False
+    text_type: TextType | str = field(default=TextType.BACKCHANNEL, init=False)
+    interruptible: bool = field(default=False, init=False)
+
+
+@dataclass
 class OutputTransportMessageFrame(DataFrame):
     """Frame containing transport-specific message data.
 
