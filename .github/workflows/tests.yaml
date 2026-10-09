@@ -48,6 +48,7 @@ jobs:
             --extra livekit \
             --extra mcp \
             --extra moq \
+            --extra openai \
             --extra pgmq \
             --extra piper \
             --extra redis \
