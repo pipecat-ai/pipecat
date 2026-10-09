@@ -147,10 +147,12 @@ def warn_deprecated_read(message: str) -> None:
 
 
 def renamed_init_field(old: str, new: str, message: str):
-    """Let a dataclass constructor take a renamed field by its old name.
+    """Let a dataclass, and every subclass of it, take a renamed field by its old name.
 
-    Apply it above ``@dataclass``. A dataclass subclass gets a constructor of
-    its own, so a subclass that should take the old name needs it too.
+    Apply it above ``@dataclass``. ``@dataclass`` gives each subclass a
+    constructor of its own, so the first time a class is built with the old
+    name, its constructor is wrapped to take it. The class must not define a
+    ``__new__`` of its own.
 
     Args:
         old: The field's deprecated name.
@@ -161,7 +163,7 @@ def renamed_init_field(old: str, new: str, message: str):
         The class decorator.
     """
 
-    def decorate(cls):
+    def wrap_init(cls):
         init = cls.__init__
 
         @functools.wraps(init)
@@ -172,6 +174,16 @@ def renamed_init_field(old: str, new: str, message: str):
             init(self, *args, **kwargs)
 
         cls.__init__ = __init__
+        cls.__renamed_init__ = __init__
+
+    def decorate(cls):
+        def __new__(subcls, *args, **kwargs):
+            # A subclass that inherits the wrapped constructor is already covered.
+            if old in kwargs and subcls.__init__ is not getattr(subcls, "__renamed_init__", None):
+                wrap_init(subcls)
+            return object.__new__(subcls)
+
+        cls.__new__ = staticmethod(__new__)
         return cls
 
     return decorate

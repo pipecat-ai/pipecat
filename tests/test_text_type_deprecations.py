@@ -7,7 +7,9 @@
 """Tests for the deprecated names of ``text_type``."""
 
 import importlib
+from abc import ABC
 from collections.abc import AsyncGenerator
+from dataclasses import dataclass
 
 import pytest
 
@@ -28,6 +30,15 @@ class _TestTTSService(TTSService):
         yield  # pragma: no cover
 
 
+@dataclass
+class _AppTextFrame(TTSTextFrame):
+    extra: int = 0
+
+
+class _AbstractAppTextFrame(_AppTextFrame, ABC):
+    pass
+
+
 async def _transform(text: str, text_type: str) -> str:
     return text
 
@@ -41,6 +52,13 @@ def test_aggregated_by_keyword_sets_text_type(frame_cls):
     with pytest.warns(DeprecationWarning, match="is deprecated since 1.13.0"):
         frame = frame_cls("Hello.", aggregated_by=TextType.WORD)
     assert frame.text_type == TextType.WORD
+
+
+@pytest.mark.parametrize("frame_cls", [_AppTextFrame, _AbstractAppTextFrame])
+def test_aggregated_by_keyword_on_a_subclass(frame_cls):
+    with pytest.warns(DeprecationWarning, match="`AggregatedTextFrame.aggregated_by`"):
+        frame = frame_cls("Hello.", aggregated_by="status", extra=1)
+    assert (frame.text_type, frame.extra) == ("status", 1)
 
 
 def test_text_type_by_position():
