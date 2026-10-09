@@ -431,9 +431,10 @@ class SonioxTTSService(WebsocketTTSService):
             if self._websocket and self._websocket.state is State.OPEN:
                 return
             logger.debug("Connecting to Soniox TTS")
-            # Soniox expects the api_key in the per-stream config message, not
-            # as a header or query param, so the connect call is bare.
-            self._websocket = await self._websocket_connect(self._url)
+            self._websocket = await self._websocket_connect(
+                self._url,
+                additional_headers={"Authorization": f"Bearer {self._api_key}"},
+            )
             await self._call_event_handler("on_connected")
         except Exception as e:
             self._websocket = None
@@ -463,7 +464,6 @@ class SonioxTTSService(WebsocketTTSService):
         """Build the per-stream configuration message for a new stream_id."""
         s = self._settings
         config: dict[str, Any] = {
-            "api_key": self._api_key,
             "stream_id": context_id,
             "model": s.model,
             "voice": s.voice,
