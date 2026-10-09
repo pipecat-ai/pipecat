@@ -12,16 +12,18 @@ object with an answer per question, and the object is parsed into results.
 """
 
 import asyncio
+import base64
 import json
 import re
-from collections.abc import Mapping
-from typing import Any
+from collections.abc import Mapping, Sequence
+from typing import Any, cast
 
 from pipecat.classifiers.base_classifier import (
     BaseClassifier,
     ChoiceQuestion,
     ChoiceResult,
     ClassifierError,
+    ClassifierImage,
     ClassifierQuestion,
     ClassifierResult,
     ScoreLevel,
@@ -29,7 +31,7 @@ from pipecat.classifiers.base_classifier import (
     YesNoQuestion,
     YesNoResult,
 )
-from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_context import LLMContext, LLMContextMessage
 from pipecat.services.llm_service import LLMService
 
 DEFAULT_INSTRUCTIONS = (
@@ -57,7 +59,8 @@ class LLMClassifier(BaseClassifier):
     Any service that implements ``run_inference()`` can back a classifier;
     realtime services cannot. The reply's shape is enforced by the provider
     where the service supports a reply schema, and otherwise asked for in
-    the prompt and parsed from the reply.
+    the prompt and parsed from the reply. Images go to the LLM with the
+    questions, so they need an LLM that can see them.
 
     Example::
 
@@ -105,11 +108,19 @@ class LLMClassifier(BaseClassifier):
         model = self._llm.settings.model
         return model if isinstance(model, str) else None
 
+    @property
+    def supports_images(self) -> bool:
+        """Whether questions can come with images; the LLM must be able to see them."""
+        return True
+
     async def _ask(
-        self, state: str | dict[str, Any] | list[Any], questions: Mapping[str, ClassifierQuestion]
+        self,
+        state: str | dict[str, Any] | list[Any],
+        questions: Mapping[str, ClassifierQuestion],
+        images: Sequence[ClassifierImage] = (),
     ) -> tuple[dict[str, ClassifierResult], None]:
         """Answer the questions in one LLM call. The call reports no token usage."""
-        context = LLMContext([{"role": "user", "content": self._render(state, questions)}])
+        context = LLMContext([self._message(state, questions, images)])
         try:
             reply = await asyncio.wait_for(
                 self._llm.run_inference(
@@ -137,6 +148,26 @@ class LLMClassifier(BaseClassifier):
                 raise ClassifierError(f"the LLM gave no answer for {name!r}")
             results[name] = self._result(question, answer)
         return results, None
+
+    def _message(
+        self,
+        state: str | dict[str, Any] | list[Any],
+        questions: Mapping[str, ClassifierQuestion],
+        images: Sequence[ClassifierImage],
+    ) -> LLMContextMessage:
+        """The message the LLM answers: any images, then the state and the questions."""
+        text = self._render(state, questions)
+        if not images:
+            return {"role": "user", "content": text}
+        content: list[dict[str, Any]] = [
+            {"type": "image_url", "image_url": {"url": self._data_url(image)}} for image in images
+        ]
+        content.append({"type": "text", "text": text})
+        return cast(LLMContextMessage, {"role": "user", "content": content})
+
+    def _data_url(self, image: ClassifierImage) -> str:
+        """The image as a base64 data URL."""
+        return f"data:{image.content_type};base64,{base64.b64encode(image.data).decode()}"
 
     def _render(
         self, state: str | dict[str, Any] | list[Any], questions: Mapping[str, ClassifierQuestion]
