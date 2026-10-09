@@ -40,7 +40,6 @@ jobs:
             --extra daily \
             --extra deepgram \
             --extra google \
-            --extra jev \
             --extra langchain \
             --extra livekit \
             --extra moq \
@@ -52,6 +51,7 @@ jobs:
             --extra sarvam \
             --extra speechmatics \
             --extra tracing \
+            --extra typesafe \
             --extra websocket
 
       - name: Run tests with coverage

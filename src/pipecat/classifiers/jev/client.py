@@ -26,7 +26,7 @@ try:
     import httpx
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error('In order to use Jev, you need to `uv add "pipecat-ai[jev]"`.')
+    logger.error('In order to use Jev, you need to `uv add "pipecat-ai[typesafe]"`.')
     raise ImportError(f"Missing module: {e}") from e
 
 #: Jev answers a request with this status when the caller is rate limited.
