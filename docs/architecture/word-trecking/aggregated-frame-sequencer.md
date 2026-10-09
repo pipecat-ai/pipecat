@@ -27,12 +27,12 @@ to `process_word` builds up to two frames — `_build_word_frame` and
 
 | Frame | Destination | Carries |
 | --- | --- | --- |
-| `TTSTextFrame` | The **conversation context** | The word, plus `raw_text` — the LLM span it represents |
+| `TTSTextFrame` | The **conversation context** | The word, plus `raw_text` — the LLM span it represents — and `segment_id` |
 | `AggregatedTextProgressFrame` | **Any downstream consumer** — a UI via RTVI is the usual one | `segment_id` + `accumulated_text` / `remaining_text` |
 
 ```mermaid
 flowchart LR
-    PW["process_word('cents')"] --> TF["<b>TTSTextFrame</b><br/>text='cents'<br/>raw_text='$42.50'<br/>append_to_context=True"]
+    PW["process_word('cents')"] --> TF["<b>TTSTextFrame</b><br/>text='cents'<br/>raw_text='$42.50'<br/>segment_id=42<br/>append_to_context=True"]
     PW --> PF["<b>AggregatedTextProgressFrame</b><br/>segment_id=42<br/>accumulated='Your balance is $42.50'<br/>remaining=''"]
     TF --> CTX["conversation context"]
     PF --> OBS["RTVIObserver<br/><i>or any consumer</i>"] --> CLIENT["the UI"]
@@ -42,6 +42,10 @@ flowchart LR
 
 `TTSTextFrame.raw_text` is the tracker's `get_llm_consumed()` — the LLM span attributed to
 this word. That is what keeps `<card>…</card>` in the context instead of bare digits.
+
+`TTSTextFrame.segment_id` is the id of the segment the word was spoken in, the same as the
+progress frame's. When RTVI hides a segment from the client, it uses this to hide the
+segment's words too.
 
 Two flags control whether a word is recorded at all:
 

@@ -45,7 +45,7 @@ class LLMTextProcessor(FrameProcessor):
                 default, a SimpleTextAggregator aggregating by sentence will be used.
             **kwargs: Additional arguments passed to parent class.
 
-        TODO: Allow transformations per aggregation type or all (and deprecate the TTS filters).
+        TODO: Allow transformations per text type or all (and deprecate the TTS filters).
         """
         super().__init__(**kwargs)
         self._text_aggregator: BaseTextAggregator = text_aggregator or SimpleTextAggregator()

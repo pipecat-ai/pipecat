@@ -150,7 +150,7 @@ class PatternPairAggregator(SimpleTextAggregator):
         """
         if type in [TextType.SENTENCE, TextType.WORD, TextType.TOKEN]:
             raise ValueError(
-                f"The aggregation type '{type}' is reserved for default behavior and can not be used for custom patterns."
+                f"The text type '{type}' is reserved for default behavior and can not be used for custom patterns."
             )
         self._patterns[type] = {
             "start": start_pattern,
