@@ -38,7 +38,7 @@ from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
-from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 
 KEEPALIVE_MESSAGE = '{"type": "keepalive"}'
 
@@ -454,12 +454,19 @@ class SonioxSTTService(WebsocketSTTService):
     async def _update_settings(self, delta: Settings) -> dict[str, Any]:
         """Apply settings delta and reconnect if anything changed.
 
+        Handles ``language`` from base ``set_language`` by converting it to
+        ``language_hints``, the field Soniox reads on connect.
+
         Args:
             delta: A settings delta.
 
         Returns:
             Dict mapping changed field names to their previous values.
         """
+        if is_given(delta.language) and delta.language is not None:
+            delta.language_hints = [Language(delta.language)]
+            delta.language = NOT_GIVEN
+
         changed = await super()._update_settings(delta)
 
         if changed:

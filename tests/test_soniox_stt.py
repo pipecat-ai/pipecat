@@ -21,6 +21,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.settings import STTSettings
 from pipecat.services.soniox.stt import END_TOKEN, SonioxSTTService, _language_from_tokens
 from pipecat.transcriptions.language import Language
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
@@ -591,3 +592,26 @@ async def test_stop_completes_teardown_when_the_end_of_audio_send_fails():
     service._flush_stt_usage_metrics.assert_awaited_once()
     assert service._disconnecting is True
     assert websocket.closed
+
+
+@pytest.mark.asyncio
+async def test_language_update_reconnects_with_that_language_as_the_hint(monkeypatch):
+    websocket = _FakeWebsocket([])
+
+    async def fake_websocket_connect(*args, **kwargs):
+        return websocket
+
+    monkeypatch.setattr(
+        "pipecat.services.websocket_service.websocket_connect", fake_websocket_connect
+    )
+    service = SonioxSTTService(
+        api_key="test-key", settings=SonioxSTTService.Settings(language_hints=[Language.FI])
+    )
+    monkeypatch.setattr(service, "_request_reconnect", AsyncMock())
+
+    await service._update_settings(STTSettings(language=Language.SV))
+    await service._connect_websocket()
+
+    config = json.loads(websocket.send.call_args.args[0])
+    assert config["language_hints"] == ["sv"]
+    service._request_reconnect.assert_awaited_once()

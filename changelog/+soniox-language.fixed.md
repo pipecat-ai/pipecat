@@ -1,0 +1,1 @@
+- Fixed `SonioxSTTService` ignoring a `language` settings update (and `set_language`): it reconnected with the previous `language_hints`. A `language` update now replaces `language_hints` with that language.
