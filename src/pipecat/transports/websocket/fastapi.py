@@ -149,6 +149,8 @@ class FastAPIWebsocketClient:
         self._leave_counter = 0
         self._ws_close_timeout = ws_close_timeout
         self._close_task: asyncio.Task | None = None
+        self._reconnect_expected = False
+        self._reconnect_timeout_task: asyncio.Task | None = None
 
     async def setup(self, _: FrameProcessorSetup):
         """Set up the WebSocket client.
@@ -182,6 +184,80 @@ class FastAPIWebsocketClient:
             logger.warning(
                 f"{self} exception sending data: {e.__class__.__name__} ({e}), application_state: {self._websocket.application_state}"
             )
+
+    @property
+    def websocket(self) -> WebSocket:
+        """The WebSocket connection this client is currently reading and writing."""
+        return self._websocket
+
+    @property
+    def reconnect_expected(self) -> bool:
+        """Whether the current socket is expected to be replaced rather than closed for good."""
+        return self._reconnect_expected
+
+    async def replace_websocket(self, websocket: WebSocket):
+        """Point this client at a new WebSocket connection.
+
+        For providers that reconnect a media stream mid-session, so the pipeline can carry
+        on instead of being torn down and rebuilt.
+
+        Args:
+            websocket: The replacement WebSocket connection, already accepted.
+        """
+        self._websocket = websocket
+        # The previous socket dropped rather than being closed by us, so clear the closing
+        # latch or `_can_send` would stay shut on the replacement.
+        self._closing = False
+        self.cancel_expected_reconnect()
+
+    def expect_reconnect(self, timeout: float | None = None):
+        """Mark the current socket as about to be replaced.
+
+        Call this *before* triggering whatever closes the socket. A provider generally
+        closes the old connection before opening its replacement, so without this the
+        receive loop reports a disconnect for a connection that is coming back.
+
+        While a reconnect is expected, ``on_client_disconnected`` is suppressed. Outbound
+        data is still dropped for the duration, because there is no socket to write to;
+        pause or gate output if that matters.
+
+        Args:
+            timeout: Seconds to wait for the replacement before giving up, reporting the
+                disconnect and returning to normal behaviour. ``None`` waits indefinitely,
+                leaving the caller responsible for calling ``cancel_expected_reconnect()``.
+        """
+        self._reconnect_expected = True
+        self._cancel_reconnect_timeout()
+        if timeout is not None:
+            self._reconnect_timeout_task = asyncio.create_task(
+                self._expire_expected_reconnect(timeout)
+            )
+
+    def cancel_expected_reconnect(self):
+        """Stop expecting a replacement, so a disconnect is reported normally again."""
+        self._reconnect_expected = False
+        self._cancel_reconnect_timeout()
+
+    async def _expire_expected_reconnect(self, timeout: float):
+        """Report the disconnect if the replacement socket never arrives."""
+        try:
+            await asyncio.sleep(timeout)
+        except asyncio.CancelledError:
+            return
+        if not self._reconnect_expected:
+            return
+        logger.warning(
+            f"{self} expected a replacement websocket within {timeout}s; reporting disconnect"
+        )
+        self._reconnect_expected = False
+        self._reconnect_timeout_task = None
+        await self.trigger_client_disconnected()
+
+    def _cancel_reconnect_timeout(self):
+        """Drop any pending expiry for an expected reconnect."""
+        if self._reconnect_timeout_task:
+            self._reconnect_timeout_task.cancel()
+            self._reconnect_timeout_task = None
 
     async def disconnect(self):
         """Disconnect the WebSocket client.
@@ -332,6 +408,17 @@ class FastAPIWebsocketInputTransport(BaseInputTransport):
 
         await self.set_transport_ready(frame)
 
+    async def restart_receive(self):
+        """Rebind the receive loop to the client's current WebSocket.
+
+        The message iterator is built from the socket when the receive task starts, so the
+        task must be recreated after the client's socket has been replaced.
+        """
+        if self._receive_task:
+            await self.cancel_task(self._receive_task)
+            self._receive_task = None
+        self._receive_task = self.create_task(self._receive_messages())
+
     async def _stop_tasks(self):
         """Stop all running tasks."""
         if self._monitor_websocket_task:
@@ -371,6 +458,7 @@ class FastAPIWebsocketInputTransport(BaseInputTransport):
 
     async def _receive_messages(self):
         """Main message receiving loop for WebSocket messages."""
+        websocket = self._client.websocket
         try:
             async for message in self._client.receive():
                 if not self._params.serializer:
@@ -390,10 +478,21 @@ class FastAPIWebsocketInputTransport(BaseInputTransport):
         except Exception as e:
             logger.error(f"{self} exception receiving data: {e.__class__.__name__} ({e})")
 
-        # Trigger `on_client_disconnected` if the client actually disconnects,
-        # that is, we are not the ones disconnecting.
-        if not self._client.is_closing:
-            await self._client.trigger_client_disconnected()
+        # Report `on_client_disconnected` only for a connection that is really gone.
+        if self._client.is_closing:
+            # We closed it ourselves.
+            return
+        if self._client.reconnect_expected:
+            # The socket is being replaced, not lost. Whoever set the expectation reports
+            # the disconnect if the replacement never turns up.
+            logger.debug(
+                f"{self} socket closed with a replacement expected; not reporting a disconnect"
+            )
+            return
+        if self._client.websocket is not websocket:
+            # This loop was draining a socket that has since been replaced, so it is stale.
+            return
+        await self._client.trigger_client_disconnected()
 
     async def _monitor_websocket(self, timeout: int):
         """Wait for ``timeout`` seconds, then trigger the client-timeout event if still open."""
@@ -676,6 +775,34 @@ class FastAPIWebsocketTransport(BaseTransport):
         self._register_event_handler("on_client_connected")
         self._register_event_handler("on_client_disconnected")
         self._register_event_handler("on_session_timeout")
+
+    def expect_reconnect(self, timeout: float | None = None):
+        """Mark the current WebSocket as about to be replaced.
+
+        Call this before triggering whatever closes the socket, and follow it with
+        ``replace_websocket()`` once the replacement is available.
+
+        Args:
+            timeout: Seconds to wait for the replacement before reporting the disconnect.
+        """
+        self._client.expect_reconnect(timeout)
+
+    def cancel_expected_reconnect(self):
+        """Stop expecting a replacement WebSocket."""
+        self._client.cancel_expected_reconnect()
+
+    async def replace_websocket(self, websocket: WebSocket):
+        """Move this transport onto a new WebSocket without restarting the pipeline.
+
+        The input and output transports share a single client, so replacing its socket
+        redirects the whole transport at once. The receive loop is restarted to read the
+        new socket; the output side picks it up on its next send.
+
+        Args:
+            websocket: The replacement WebSocket connection, already accepted.
+        """
+        await self._client.replace_websocket(websocket)
+        await self._input.restart_receive()
 
     def input(self) -> FastAPIWebsocketInputTransport:
         """Get the input transport processor.
