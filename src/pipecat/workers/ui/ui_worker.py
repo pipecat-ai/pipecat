@@ -9,7 +9,6 @@
 import asyncio
 import json
 import time
-import warnings
 from dataclasses import asdict, is_dataclass
 from typing import Any, NamedTuple
 
@@ -65,7 +64,7 @@ from pipecat.processors.frameworks.rtvi.models import (
     SetInputValue,
 )
 from pipecat.services.llm_service import LLMService
-from pipecat.utils.deprecation import deprecated
+from pipecat.utils.deprecation import deprecated, warn_deprecated
 from pipecat.workers.llm.llm_context_worker import LLMContextWorker
 from pipecat.workers.ui.ui_event_decorator import _collect_ui_event_handlers
 from pipecat.workers.ui.ui_prompts import UI_STATE_PROMPT_GUIDE
@@ -734,10 +733,10 @@ class UIWorker(LLMContextWorker):
             status: Completion status. Defaults to ``JobStatus.COMPLETED``.
         """
         if tts_speak:
-            warnings.warn(
-                "`tts_speak` on `respond_to_job` is deprecated since 1.12.0 and will be "
-                "removed in 2.0.0. Respond with the answer and let the voice LLM say it.",
-                DeprecationWarning,
+            warn_deprecated(
+                "`respond_to_job(tts_speak=...)` is deprecated since 1.12.0 and will be "
+                "removed in 2.0.0. No replacement. Respond with the answer and let the voice "
+                "LLM say it.",
                 stacklevel=2,
             )
         pending = self._pending

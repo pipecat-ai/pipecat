@@ -13,8 +13,7 @@ including heartbeats, idle detection, and observer integration.
 
 import asyncio
 import time
-import warnings
-from collections.abc import AsyncIterable, Iterable
+from collections.abc import AsyncIterable, Iterable, Iterator
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, TypeVar
@@ -71,6 +70,7 @@ from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.observers.turn_tracking_observer import TurnTrackingObserver
 from pipecat.observers.user_bot_latency_observer import UserBotLatencyObserver
 from pipecat.pipeline.base_pipeline import BasePipeline
+from pipecat.pipeline.capabilities import BotCapabilities
 from pipecat.pipeline.pipeline import Pipeline, PipelineSink, PipelineSource
 from pipecat.pipeline.worker_observer import WorkerObserver
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
@@ -85,8 +85,10 @@ from pipecat.processors.frameworks.rtvi.models import (
     UIJobUpdateData,
     UISnapshotMessage,
 )
+from pipecat.transports.base_input import BaseInputTransport
+from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
-from pipecat.utils.deprecation import deprecated
+from pipecat.utils.deprecation import deprecated, warn_deprecated
 from pipecat.utils.startup import run_setup_hook
 from pipecat.utils.tracing.setup import is_tracing_available
 from pipecat.utils.tracing.tracing_context import TracingContext
@@ -282,6 +284,7 @@ class PipelineWorker(BaseWorker):
         cancel_on_idle_timeout: bool = True,
         cancel_runner_on_idle_timeout: bool = True,
         cancel_timeout_secs: float = CANCEL_TIMEOUT_SECS,
+        capabilities: BotCapabilities | None = None,
         check_dangling_tasks: bool = True,
         clock: BaseClock | None = None,
         conversation_id: str | None = None,
@@ -357,6 +360,9 @@ class PipelineWorker(BaseWorker):
                 peers.
             cancel_timeout_secs: Timeout (in seconds) to wait for cancellation to happen
                 cleanly.
+            capabilities: What the bot does, for fields the pipeline can't show.
+                Its known fields replace the ones derived from the pipeline's
+                transports and parameters. See :attr:`capabilities`.
             check_dangling_tasks: Whether to warn about tasks left running when
                 the worker finishes. Only applies when the worker owns its task
                 manager; otherwise the runner reports dangling tasks.
@@ -415,17 +421,15 @@ class PipelineWorker(BaseWorker):
             handle_flush_frame if handle_flush_frame is not None else bridged is None
         )
         if tool_resources is not None:
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    "`PipelineWorker(tool_resources=...)` is deprecated since 1.2.0, "
-                    "use `app_resources` instead.",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
+            warn_deprecated(
+                "`PipelineWorker(tool_resources=...)` is deprecated since 1.2.0 and will be "
+                "removed in 2.0.0. Use `app_resources` instead.",
+                stacklevel=2,
+            )
             if app_resources is None:
                 app_resources = tool_resources
         self._params = params or PipelineParams()
+        self._capabilities_override = capabilities or BotCapabilities()
         self._additional_span_attributes = additional_span_attributes or {}
         self._cancel_on_idle_timeout = cancel_on_idle_timeout
         self._cancel_runner_on_idle_timeout = cancel_runner_on_idle_timeout
@@ -493,7 +497,7 @@ class PipelineWorker(BaseWorker):
             enable_rtvi = bridged is None
         self._rtvi = None
         prepend_rtvi = False
-        external_rtvi = self._find_processor(pipeline, RTVIProcessor)
+        external_rtvi = next(self._iter_processors(pipeline, RTVIProcessor), None)
         external_observer_found = any(isinstance(o, RTVIObserver) for o in observers)
 
         if external_rtvi and not external_observer_found:
@@ -622,6 +626,25 @@ class PipelineWorker(BaseWorker):
             The pipeline parameters configuration.
         """
         return self._params
+
+    @property
+    def capabilities(self) -> BotCapabilities:
+        """What the bot does in this session.
+
+        Derived from the media the pipeline's transports send and receive and
+        from :attr:`PipelineParams.enable_metrics`, with the ``capabilities``
+        passed to the constructor applied on top. A field no transport reports
+        is ``None`` (unknown). RTVI sends this to the client in ``bot-ready``.
+
+        Returns:
+            The bot's capabilities.
+        """
+        derived = BotCapabilities(metrics=self._params.enable_metrics)
+        for processor in self._iter_processors(
+            self._pipeline, (BaseInputTransport, BaseOutputTransport)
+        ):
+            derived = derived.combine(processor.capabilities)
+        return derived.override(self._capabilities_override)
 
     @property
     def bridged(self) -> bool:
@@ -878,6 +901,7 @@ class PipelineWorker(BaseWorker):
             logger.debug(f"Pipeline worker {self} is finishing...")
             await self._cancel_tasks()
             self._print_dangling_tasks()
+            await self._cancel_children()
             self._finished = True
             logger.debug(f"Pipeline worker {self} has finished")
 
@@ -1324,6 +1348,21 @@ class PipelineWorker(BaseWorker):
         # Nothing left to answer a probe we are still holding.
         self._foreign_probes.clear()
 
+    async def _cancel_children(self) -> None:
+        """Cancel the children once this worker's pipeline is over.
+
+        A pipeline that ends on its own (an ``EndFrame`` it queued itself, an
+        idle timeout, a fatal error) is never told to end over the bus, so
+        nothing has passed the end on to its children. A child that has
+        already finished takes no notice.
+        """
+        for child in self._children:
+            await self.send_bus_message(
+                BusCancelWorkerMessage(
+                    source=self.name, target=child.name, reason=f"{self.name} finished"
+                )
+            )
+
     async def _handle_worker_end(self, message: BusEndWorkerMessage) -> None:
         """End the pipeline after propagating end to children.
 
@@ -1651,16 +1690,14 @@ class PipelineWorker(BaseWorker):
 
         return start_metadata
 
-    def _find_processor(self, processor: FrameProcessor, processor_type: type[T]) -> T | None:
-        """Recursively find a processor of the given type in the pipeline."""
+    def _iter_processors(
+        self, processor: FrameProcessor, processor_type: type[T] | tuple[type[T], ...]
+    ) -> Iterator[T]:
+        """Recursively yield the processors of the given type(s) in the pipeline."""
         if isinstance(processor, processor_type):
-            return processor
-
+            yield processor
         for p in processor.processors:
-            found = self._find_processor(p, processor_type)
-            if found:
-                return found
-        return None
+            yield from self._iter_processors(p, processor_type)
 
 
 @deprecated(

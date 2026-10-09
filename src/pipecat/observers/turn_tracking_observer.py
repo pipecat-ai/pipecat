@@ -11,7 +11,6 @@ tracking when turns start and end based on user and bot speech patterns.
 """
 
 import asyncio
-import warnings
 
 from loguru import logger
 
@@ -24,6 +23,7 @@ from pipecat.frames.frames import (
     UserStartedSpeakingFrame,
 )
 from pipecat.observers.base_observer import BaseObserver, FramePushed
+from pipecat.utils.deprecation import warn_deprecated
 
 
 class TurnTrackingObserver(BaseObserver):
@@ -63,10 +63,9 @@ class TurnTrackingObserver(BaseObserver):
             **kwargs: Additional arguments passed to the parent observer.
         """
         if max_frames is not None:
-            warnings.warn(
-                "`max_frames` parameter of `TurnTrackingObserver` is deprecated since 1.12.0 "
+            warn_deprecated(
+                "`TurnTrackingObserver(max_frames=...)` is deprecated since 1.12.0 "
                 "and will be removed in 2.0.0. No replacement.",
-                DeprecationWarning,
                 stacklevel=2,
             )
         super().__init__(observe_every_push=False, **kwargs)
@@ -101,6 +100,16 @@ class TurnTrackingObserver(BaseObserver):
             await self._handle_bot_stopped_speaking(data)
         elif isinstance(data.frame, (EndFrame, CancelFrame)):
             await self._handle_pipeline_end(data)
+
+    async def cleanup(self):
+        """Cancel the pending turn end timer.
+
+        The pipeline can be torn down before this observer receives its
+        EndFrame or CancelFrame, and the timer's callback holds the pipeline
+        until it fires.
+        """
+        self._cancel_turn_end_timer()
+        await super().cleanup()
 
     def _schedule_turn_end(self, data: FramePushed):
         """Schedule turn end with a timeout."""
@@ -164,10 +173,8 @@ class TurnTrackingObserver(BaseObserver):
 
     async def _handle_pipeline_end(self, data: FramePushed):
         """Handle pipeline end or cancellation by flushing any active turn."""
+        self._cancel_turn_end_timer()
         if self._is_turn_active:
-            # Cancel any pending turn end timer
-            self._cancel_turn_end_timer()
-            # End the current turn
             await self._end_turn(data, was_interrupted=True)
 
     async def _start_turn(self, data: FramePushed):

@@ -246,7 +246,7 @@ class TestSuiteUpdateEvent(unittest.IsolatedAsyncioTestCase):
             warnings.simplefilter("always")
             await self.suite.run(self.logs_dir, use_cache=False, default_timeout_ms=1234)
         self.assertEqual([w.category for w in caught], [DeprecationWarning])
-        self.assertIn("`EvalSuite.run`", str(caught[0].message))
+        self.assertIn("`EvalSuite.run(", str(caught[0].message))
 
     async def test_callback_stays_scoped_to_the_call_it_was_passed_to(self):
         """The callback is a per-call parameter, so a reused suite doesn't accumulate it."""

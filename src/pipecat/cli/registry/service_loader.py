@@ -242,6 +242,8 @@ class ServiceLoader:
             imports.update(ServiceRegistry.FEATURE_IMPORTS["observability"])
         if features.get("eval"):
             imports.update(ServiceRegistry.FEATURE_IMPORTS["eval"])
+        if features.get("video_in_sources"):
+            imports.update(ServiceRegistry.FEATURE_IMPORTS["video_in_sources"])
 
         # Most bots build transports via create_transport, so import it whenever the
         # bot uses that collapsed path. Dial-out and SIP keep a bespoke production

@@ -20,6 +20,13 @@ from pipecat.services.sarvam.llm import SarvamLLMService
 from pipecat.utils.types import NotGiven
 
 
+def _mock_adapter() -> MagicMock:
+    """Adapter mock with an async get_llm_invocation_params."""
+    adapter = MagicMock()
+    adapter.get_llm_invocation_params = AsyncMock()
+    return adapter
+
+
 class _FakeSarvamError(Exception):
     def __init__(self, body):
         super().__init__("Request failed")
@@ -693,7 +700,7 @@ async def test_sarvam_llm_vision_validation_skips_non_dict_messages():
     service.push_error = mock_push_error
 
     # Non-dict entries should be skipped by vision validation, not cause an error
-    mock_adapter = MagicMock()
+    mock_adapter = _mock_adapter()
     mock_adapter.get_llm_invocation_params.return_value = OpenAILLMInvocationParams(
         messages=[
             "not a dict",
@@ -731,7 +738,7 @@ async def test_sarvam_llm_run_inference_with_llm_context():
         service._client = AsyncMock()
 
         mock_context = MagicMock(spec=LLMContext)
-        mock_adapter = MagicMock()
+        mock_adapter = _mock_adapter()
         test_messages = [
             {"role": "system", "content": "You are a helpful assistant"},
             {"role": "user", "content": "Hello, world!"},
@@ -797,7 +804,7 @@ async def test_sarvam_llm_run_inference_max_tokens_override():
         service._client = AsyncMock()
 
         mock_context = MagicMock(spec=LLMContext)
-        mock_adapter = MagicMock()
+        mock_adapter = _mock_adapter()
         mock_adapter.get_llm_invocation_params.return_value = OpenAILLMInvocationParams(
             messages=[{"role": "user", "content": "Hello"}],
             tools=OPENAI_NOT_GIVEN,
@@ -827,7 +834,7 @@ async def test_sarvam_llm_run_inference_forwards_system_instruction():
         service._client = AsyncMock()
 
         mock_context = MagicMock(spec=LLMContext)
-        mock_adapter = MagicMock()
+        mock_adapter = _mock_adapter()
         mock_adapter.get_llm_invocation_params.return_value = OpenAILLMInvocationParams(
             messages=[{"role": "user", "content": "Hello"}],
             tools=OPENAI_NOT_GIVEN,
@@ -859,7 +866,7 @@ async def test_sarvam_llm_timeout_errors_are_not_wrapped():
         service._client = AsyncMock()
 
         mock_context = MagicMock(spec=LLMContext)
-        mock_adapter = MagicMock()
+        mock_adapter = _mock_adapter()
         mock_adapter.get_llm_invocation_params.return_value = OpenAILLMInvocationParams(
             messages=[{"role": "user", "content": "Hello"}],
             tools=OPENAI_NOT_GIVEN,
@@ -882,7 +889,7 @@ async def test_sarvam_llm_run_inference_surfaces_raw_server_error():
         service._client = AsyncMock()
 
         mock_context = MagicMock(spec=LLMContext)
-        mock_adapter = MagicMock()
+        mock_adapter = _mock_adapter()
         mock_adapter.get_llm_invocation_params.return_value = OpenAILLMInvocationParams(
             messages=[{"role": "user", "content": "Hello"}],
             tools=OPENAI_NOT_GIVEN,
@@ -912,7 +919,7 @@ async def test_sarvam_llm_get_chat_completions_propagates_response_error():
         )
 
         mock_context = MagicMock(spec=LLMContext)
-        mock_adapter = MagicMock()
+        mock_adapter = _mock_adapter()
         mock_adapter.get_llm_invocation_params.return_value = OpenAILLMInvocationParams(
             messages=[{"role": "user", "content": "Hello"}],
             tools=OPENAI_NOT_GIVEN,
@@ -938,7 +945,7 @@ async def test_sarvam_llm_process_frame_surfaces_raw_server_error():
 
         pushed_errors = []
 
-        async def mock_push_error(error_msg, exception=None):
+        async def mock_push_error(error_msg, exception=None, **kwargs):
             pushed_errors.append({"error_msg": error_msg, "exception": exception})
 
         service.push_error = mock_push_error

@@ -7,10 +7,12 @@
 import argparse
 import io
 import sys
+import tempfile
 import types
 import unittest
 from contextlib import redirect_stdout
 from dataclasses import dataclass
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi import FastAPI
@@ -23,7 +25,9 @@ from pipecat.runner.run import (
     _generate_ws_token,
     _parse_ice_servers,
     _print_startup_message,
+    _resolve_file_storage,
     _setup_daily_routes,
+    _setup_file_uploads_routes,
     _setup_telephony_routes,
     _setup_unified_start_route,
     _setup_webrtc_routes,
@@ -134,7 +138,9 @@ class TestRunnerRun(unittest.TestCase):
     def test_setup_webrtc_routes_skips_when_aiortc_is_missing(self):
         """WebRTC routes should be optional when the webrtc extra is not installed."""
         app = FastAPI()
-        args = argparse.Namespace(folder=None, esp32=False, host="localhost", ice_servers=[])
+        args = argparse.Namespace(
+            downloads_folder=None, esp32=False, host="localhost", ice_servers=[]
+        )
 
         with (
             patch("pipecat.runner.run._transport_routes_enabled", return_value=False),
@@ -149,7 +155,9 @@ class TestRunnerRun(unittest.TestCase):
     def test_setup_webrtc_routes_registers_routes_when_webrtc_is_available(self):
         """WebRTC routes should be registered when dependencies are available."""
         app = FastAPI()
-        args = argparse.Namespace(folder=None, esp32=False, host="localhost", ice_servers=[])
+        args = argparse.Namespace(
+            downloads_folder=None, esp32=False, host="localhost", ice_servers=[]
+        )
 
         with (
             patch("pipecat.runner.run._transport_routes_enabled", return_value=True),
@@ -161,10 +169,52 @@ class TestRunnerRun(unittest.TestCase):
         self.assertIn("/api/offer", paths)
         self.assertIn("/files/{filename:path}", paths)
 
+    def test_download_file_404s_when_downloads_folder_unconfigured(self):
+        """GET /files/<name> 404s cleanly, rather than 500ing on a stale attribute name."""
+        app = FastAPI()
+        args = argparse.Namespace(
+            downloads_folder=None, esp32=False, host="localhost", ice_servers=[]
+        )
+
+        with (
+            patch("pipecat.runner.run._transport_routes_enabled", return_value=True),
+            patch.dict(sys.modules, _fake_smallwebrtc_modules()),
+        ):
+            _setup_webrtc_routes(app, args, {})
+
+        client = TestClient(app)
+        response = client.get("/files/report.txt")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_download_file_serves_file_from_downloads_folder(self):
+        """GET /files/<name> serves the file when a downloads folder is configured."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            (Path(tmpdir) / "report.txt").write_text("hello")
+
+            app = FastAPI()
+            args = argparse.Namespace(
+                downloads_folder=tmpdir, esp32=False, host="localhost", ice_servers=[]
+            )
+
+            with (
+                patch("pipecat.runner.run._transport_routes_enabled", return_value=True),
+                patch.dict(sys.modules, _fake_smallwebrtc_modules()),
+            ):
+                _setup_webrtc_routes(app, args, {})
+
+            client = TestClient(app)
+            response = client.get("/files/report.txt")
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.text, "hello")
+
     def test_setup_webrtc_routes_gives_handler_no_ice_servers_when_unconfigured(self):
         """The bot peer keeps its previous behaviour when nothing is configured."""
         app = FastAPI()
-        args = argparse.Namespace(folder=None, esp32=False, host="localhost", ice_servers=[])
+        args = argparse.Namespace(
+            downloads_folder=None, esp32=False, host="localhost", ice_servers=[]
+        )
         handler_kwargs = []
 
         with (
@@ -179,7 +229,7 @@ class TestRunnerRun(unittest.TestCase):
         """Configured STUN and TURN servers must reach the bot's peer connection."""
         app = FastAPI()
         args = argparse.Namespace(
-            folder=None,
+            downloads_folder=None,
             esp32=False,
             host="localhost",
             ice_servers=[
@@ -415,6 +465,258 @@ class TestRunnerRun(unittest.TestCase):
         self.assertIn("   → Open: http://localhost:7860\n", output)
         self.assertIn("   → XML webhook: http://localhost:7860/\n", output)
         self.assertIn("   → WebSocket:   ws://localhost:7860/ws\n", output)
+
+
+class TestFileUploadsRoute(unittest.TestCase):
+    """POST /files must always be registered so an unconfigured uploads folder
+    fails with a clear 503 from the handler itself, rather than 404ing on the
+    exact path and falling through to Starlette's redirect_slashes, which
+    (because GET /files/{filename:path} also matches the slash-appended
+    path) turns into a confusing 307 followed by a 405.
+    """
+
+    def test_registers_the_route_even_without_storage_configured(self):
+        app = FastAPI()
+        with patch("pipecat.runner.run.RUNNER_FILE_STORAGE", None):
+            _setup_file_uploads_routes(app, {})
+
+        paths = {route.path for route in app.routes}
+        self.assertIn("/files", paths)
+
+    def test_returns_503_directly_when_storage_not_configured(self):
+        app = FastAPI()
+        with patch("pipecat.runner.run.RUNNER_FILE_STORAGE", None):
+            _setup_file_uploads_routes(app, {})
+            client = TestClient(app, follow_redirects=False)
+
+            response = client.post("/files", files={"file": ("a.txt", b"hi")})
+
+        self.assertEqual(response.status_code, 503)
+
+    def test_saves_file_when_storage_is_configured(self):
+        app = FastAPI()
+        fake_storage = MagicMock()
+        fake_storage.save = AsyncMock(return_value="pipecat:abc123")
+
+        with patch("pipecat.runner.run.RUNNER_FILE_STORAGE", fake_storage):
+            _setup_file_uploads_routes(app, {})
+            client = TestClient(app)
+
+            response = client.post("/files", files={"file": ("a.txt", b"hello")})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["source"], {"type": "url", "url": "pipecat:abc123"})
+
+    def test_storage_save_failure_returns_clean_500(self):
+        """A backend-specific save error (not just OSError) becomes a clean 500."""
+        app = FastAPI()
+        fake_storage = MagicMock()
+        fake_storage.save = AsyncMock(side_effect=RuntimeError("AccessDenied: no PutObject"))
+
+        with patch("pipecat.runner.run.RUNNER_FILE_STORAGE", fake_storage):
+            _setup_file_uploads_routes(app, {})
+            client = TestClient(app)
+
+            response = client.post("/files", files={"file": ("a.txt", b"hello")})
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.json()["detail"], "Failed to save file")
+
+
+class TestResolveFileStorage(unittest.TestCase):
+    """The uploads backend comes from the bot module's ``create_file_storage()``
+    when it defines one, falling back to ``-u/--uploads-folder`` local storage."""
+
+    @staticmethod
+    def _args(uploads_folder=None):
+        return argparse.Namespace(uploads_folder=uploads_folder, uploads_folder_max_files=10)
+
+    def test_bot_module_factory_wins_over_the_uploads_folder_flag(self):
+        fake_storage = MagicMock()
+        bot_module = types.SimpleNamespace(create_file_storage=lambda: fake_storage)
+
+        with patch("pipecat.runner.run._get_bot_module", return_value=bot_module):
+            resolved = _resolve_file_storage(self._args(uploads_folder="/tmp/uploads"))
+
+        self.assertIs(resolved, fake_storage)
+
+    def test_factory_returning_none_disables_uploads_despite_the_flag(self):
+        bot_module = types.SimpleNamespace(create_file_storage=lambda: None)
+
+        with patch("pipecat.runner.run._get_bot_module", return_value=bot_module):
+            resolved = _resolve_file_storage(self._args(uploads_folder="/tmp/uploads"))
+
+        self.assertIsNone(resolved)
+
+    def test_uploads_folder_flag_backs_uploads_with_local_storage(self):
+        from pipecat.utils.file_storage import LocalFileStorage
+
+        bot_module = types.SimpleNamespace()
+        with (
+            patch("pipecat.runner.run._get_bot_module", return_value=bot_module),
+            tempfile.TemporaryDirectory() as uploads_folder,
+        ):
+            resolved = _resolve_file_storage(self._args(uploads_folder=uploads_folder))
+
+        self.assertIsInstance(resolved, LocalFileStorage)
+
+    def test_no_factory_and_no_flag_disables_uploads(self):
+        with patch("pipecat.runner.run._get_bot_module", side_effect=ImportError("no bot")):
+            self.assertIsNone(_resolve_file_storage(self._args()))
+
+    def test_async_factory_is_rejected_loudly(self):
+        async def create_file_storage():
+            return MagicMock()
+
+        bot_module = types.SimpleNamespace(create_file_storage=create_file_storage)
+        with patch("pipecat.runner.run._get_bot_module", return_value=bot_module):
+            with self.assertRaises(TypeError):
+                _resolve_file_storage(self._args())
+
+
+class TestSessionScopedUploads(unittest.TestCase):
+    """POST /sessions/{session_id}/files mirrors Pipecat Cloud's session-scoped
+    routes; a session's uploads are tracked and deleted when the session ends.
+    """
+
+    def _app(self, active_sessions):
+        app = FastAPI()
+        _setup_file_uploads_routes(app, active_sessions)
+        return app
+
+    def test_unknown_session_404s(self):
+        fake_storage = MagicMock()
+        with patch("pipecat.runner.run.RUNNER_FILE_STORAGE", fake_storage):
+            client = TestClient(self._app({}))
+            response = client.post("/sessions/nope/files", files={"file": ("a.txt", b"hi")})
+
+        self.assertEqual(response.status_code, 404)
+        fake_storage.save.assert_not_called()
+
+    def test_active_session_upload_is_saved_and_tracked(self):
+        fake_storage = MagicMock()
+        fake_storage.save = AsyncMock(return_value="pipecat:abc123")
+
+        with (
+            patch("pipecat.runner.run.RUNNER_FILE_STORAGE", fake_storage),
+            patch.dict("pipecat.runner.run._SESSION_UPLOAD_URLS", {}, clear=True),
+        ):
+            client = TestClient(self._app({"sess-1": {}}))
+            response = client.post("/sessions/sess-1/files", files={"file": ("a.txt", b"hi")})
+
+            from pipecat.runner.run import _SESSION_UPLOAD_URLS
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["source"], {"type": "url", "url": "pipecat:abc123"})
+            self.assertEqual(_SESSION_UPLOAD_URLS, {"sess-1": ["pipecat:abc123"]})
+
+    def test_sessionless_upload_is_not_tracked(self):
+        fake_storage = MagicMock()
+        fake_storage.save = AsyncMock(return_value="pipecat:abc123")
+
+        with (
+            patch("pipecat.runner.run.RUNNER_FILE_STORAGE", fake_storage),
+            patch.dict("pipecat.runner.run._SESSION_UPLOAD_URLS", {}, clear=True),
+        ):
+            client = TestClient(self._app({}))
+            response = client.post("/files", files={"file": ("a.txt", b"hi")})
+
+            from pipecat.runner.run import _SESSION_UPLOAD_URLS
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(_SESSION_UPLOAD_URLS, {})
+
+    def test_session_files_route_wins_over_webrtc_session_proxy(self):
+        """Registration order in _configure_server_app: the upload route must be
+        added before the catch-all /sessions/{session_id}/{path:path} proxy, or
+        uploads would get swallowed by the proxy's 200 stub."""
+        app = FastAPI()
+        active_sessions = {"sess-1": {}}
+        _setup_file_uploads_routes(app, active_sessions)
+        args = argparse.Namespace(
+            downloads_folder=None, esp32=False, host="localhost", ice_servers=[]
+        )
+        with (
+            patch("pipecat.runner.run._transport_routes_enabled", return_value=True),
+            patch.dict(sys.modules, _fake_smallwebrtc_modules()),
+        ):
+            _setup_webrtc_routes(app, args, active_sessions)
+
+        with patch("pipecat.runner.run.RUNNER_FILE_STORAGE", None):
+            client = TestClient(app)
+            response = client.post("/sessions/sess-1/files", files={"file": ("a.txt", b"hi")})
+
+        # The upload handler answers (503: storage unconfigured), not the proxy (200).
+        self.assertEqual(response.status_code, 503)
+
+
+class TestRunBotSessionCleanup(unittest.IsolatedAsyncioTestCase):
+    async def test_session_end_deletes_uploads_and_releases_session(self):
+        from pipecat.runner.run import _run_bot_session
+
+        fake_storage = MagicMock()
+        fake_storage.delete = AsyncMock()
+        active_sessions = {"sess-1": {}}
+
+        async def bot():
+            pass
+
+        with (
+            patch("pipecat.runner.run.RUNNER_FILE_STORAGE", fake_storage),
+            patch.dict(
+                "pipecat.runner.run._SESSION_UPLOAD_URLS",
+                {"sess-1": ["pipecat:aaa", "pipecat:bbb"]},
+                clear=True,
+            ),
+        ):
+            await _run_bot_session(bot(), "sess-1", active_sessions)
+
+            from pipecat.runner.run import _SESSION_UPLOAD_URLS
+
+            self.assertEqual(active_sessions, {})
+            self.assertEqual(_SESSION_UPLOAD_URLS, {})
+        fake_storage.delete.assert_any_await("pipecat:aaa")
+        fake_storage.delete.assert_any_await("pipecat:bbb")
+
+    async def test_cleanup_runs_even_when_the_bot_raises(self):
+        from pipecat.runner.run import _run_bot_session
+
+        fake_storage = MagicMock()
+        fake_storage.delete = AsyncMock()
+        active_sessions = {"sess-1": {}}
+
+        async def bot():
+            raise RuntimeError("boom")
+
+        with (
+            patch("pipecat.runner.run.RUNNER_FILE_STORAGE", fake_storage),
+            patch.dict(
+                "pipecat.runner.run._SESSION_UPLOAD_URLS", {"sess-1": ["pipecat:aaa"]}, clear=True
+            ),
+        ):
+            with self.assertRaises(RuntimeError):
+                await _run_bot_session(bot(), "sess-1", active_sessions)
+
+        self.assertEqual(active_sessions, {})
+        fake_storage.delete.assert_awaited_once_with("pipecat:aaa")
+
+    async def test_delete_failure_is_swallowed(self):
+        """A backend delete error must not propagate out of session teardown."""
+        from pipecat.runner.run import _run_bot_session
+
+        fake_storage = MagicMock()
+        fake_storage.delete = AsyncMock(side_effect=RuntimeError("AccessDenied"))
+
+        async def bot():
+            pass
+
+        with (
+            patch("pipecat.runner.run.RUNNER_FILE_STORAGE", fake_storage),
+            patch.dict(
+                "pipecat.runner.run._SESSION_UPLOAD_URLS", {"sess-1": ["pipecat:aaa"]}, clear=True
+            ),
+        ):
+            await _run_bot_session(bot(), "sess-1", {"sess-1": {}})
 
 
 @unittest.skipUnless(LIVEKIT_AVAILABLE, "livekit package not installed")
@@ -926,6 +1228,48 @@ class TestStartIceConfig(unittest.TestCase):
         configured = [{"urls": "stun:stun.example.com:3478"}]
         result = self._post_start(configured, {"enableDefaultIceServers": True})
         self.assertEqual(result["iceConfig"], {"iceServers": configured})
+
+
+class TestStartFileUploadUrl(unittest.TestCase):
+    """Tests for the fileUploadUrl the /start response advertises so clients
+    never have to reconstruct the uploads route themselves.
+    """
+
+    def _post_start(self, body: dict, storage) -> dict:
+        app = FastAPI()
+        args = argparse.Namespace(
+            transport=None,
+            ice_servers=[],
+            ws_auth="none",
+            host="localhost",
+            port=7860,
+        )
+        _setup_unified_start_route(app, args, {})
+        with (
+            patch("pipecat.runner.run._transport_routes_enabled", return_value=True),
+            patch("pipecat.runner.run.RUNNER_FILE_STORAGE", storage),
+        ):
+            response = TestClient(app).post("/start", json=body)
+        self.assertEqual(response.status_code, 200)
+        return response.json()
+
+    def test_webrtc_advertises_the_session_scoped_route(self):
+        result = self._post_start({"transport": "webrtc"}, MagicMock())
+        self.assertEqual(result["fileUploadUrl"], f"/sessions/{result['sessionId']}/files")
+
+    def test_webrtc_omits_the_url_when_uploads_are_disabled(self):
+        result = self._post_start({"transport": "webrtc"}, None)
+        self.assertNotIn("fileUploadUrl", result)
+
+    def test_websocket_advertises_the_flat_route(self):
+        # The websocket /start sessionId is never registered (the bot mints
+        # its own at connect time), so the session-scoped route would 404.
+        result = self._post_start({"transport": "websocket"}, MagicMock())
+        self.assertEqual(result["fileUploadUrl"], "/files")
+
+    def test_telephony_advertises_nothing(self):
+        result = self._post_start({"transport": "twilio"}, MagicMock())
+        self.assertNotIn("fileUploadUrl", result)
 
 
 if __name__ == "__main__":

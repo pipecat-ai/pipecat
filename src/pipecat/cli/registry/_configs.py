@@ -359,7 +359,7 @@ SERVICE_CONFIGS = {
         "BlandTTSService(\n"
         '        api_key=os.getenv("BLAND_API_KEY"),\n'
         "        settings=BlandTTSService.Settings(\n"
-        '            voice=os.getenv("BLAND_VOICE_ID", "2f29fdbb-c55e-4add-9c7c-93437ebf379d"),\n'
+        '            voice=os.getenv("BLAND_VOICE_ID", "29158307-9893-4149-8a75-bc9ce313d64e"),\n'
         "        ),\n"
         "    )\n"
     ),
@@ -636,6 +636,22 @@ SERVICE_CONFIGS = {
         '    api_key=os.getenv("AZURE_REALTIME_API_KEY"),\n'
         '    base_url=os.getenv("AZURE_REALTIME_BASE_URL"),\n'
         "    settings=AzureRealtimeLLMService.Settings(\n"
+        "        session_properties=session_properties,\n"
+        '        system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can\'t be spoken. Respond to what the user said in a creative, helpful, and brief way.",\n'
+        "    ),\n"
+        ")\n"
+    ),
+    "azure_voice_live": (
+        "session_properties = SessionProperties(\n"
+        '    voice=AzureStandardVoice(name="en-US-Ava:DragonHDLatestNeural"),\n'
+        '    turn_detection=TurnDetection(type="azure_semantic_vad"),\n'
+        '    input_audio_transcription=InputAudioTranscription(model="azure-speech"),\n'
+        ")\n"
+        "llm = AzureVoiceLiveLLMService(\n"
+        '    api_key=os.getenv("AZURE_VOICE_LIVE_API_KEY"),\n'
+        '    endpoint=os.getenv("AZURE_VOICE_LIVE_ENDPOINT"),\n'
+        "    settings=AzureVoiceLiveLLMService.Settings(\n"
+        '        model="gpt-4o-mini",\n'
         "        session_properties=session_properties,\n"
         '        system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can\'t be spoken. Respond to what the user said in a creative, helpful, and brief way.",\n'
         "    ),\n"

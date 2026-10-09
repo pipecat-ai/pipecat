@@ -21,7 +21,6 @@ Example::
     print(f"{sum(1 for t in scored if t.status == 'passed')}/{len(scored)} turns")
 """
 
-import warnings
 from collections.abc import Callable
 
 from loguru import logger
@@ -39,6 +38,7 @@ from pipecat.evals.services import stt_service_from_config, tts_service_from_con
 from pipecat.evals.session import EvalSession, EvalSessionParams, _params_with_deprecated_knobs
 from pipecat.evals.tts import CachingTTSService
 from pipecat.services.stt_service import STTService
+from pipecat.utils.deprecation import warn_deprecated
 
 
 class EvalScriptSession(EvalSession[EvalScriptResult]):
@@ -260,10 +260,9 @@ class EvalScriptSession(EvalSession[EvalScriptResult]):
         self, on_progress: Callable[[EvalScriptTurnProgress], None]
     ) -> None:
         """Register a bare ``on_progress`` callback as an event handler, dropping the session argument."""
-        warnings.warn(
+        warn_deprecated(
             "`on_progress` is deprecated since 1.9.0 and will be removed in 2.0.0. "
             "Use the `on_progress` event handler instead.",
-            DeprecationWarning,
             stacklevel=3,
         )
         self.add_event_handler("on_progress", lambda _session, record: on_progress(record))

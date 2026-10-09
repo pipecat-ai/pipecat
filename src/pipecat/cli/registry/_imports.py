@@ -13,6 +13,7 @@ Source: scripts/cli/imports/import_generator.py
 IMPORTS = {
     # Transports - WebRTC
     "daily": ["from pipecat.transports.daily.transport import DailyParams"],
+    "livekit": ["from pipecat.transports.livekit.transport import LiveKitParams"],
     "smallwebrtc": ["from pipecat.transports.base_transport import TransportParams"],
     "websocket": [
         "from pipecat.serializers.protobuf import ProtobufFrameSerializer",
@@ -165,6 +166,10 @@ IMPORTS = {
         "from pipecat.services.azure.realtime.llm import AzureRealtimeLLMService",
         "from pipecat.services.openai.realtime.events import SessionProperties, InputAudioTranscription",
     ],
+    "azure_voice_live": [
+        "from pipecat.services.azure.voice_live.llm import AzureVoiceLiveLLMService",
+        "from pipecat.services.azure.voice_live.events import AzureStandardVoice, InputAudioTranscription, SessionProperties, TurnDetection",
+    ],
     "gemini_live_realtime": [
         "from pipecat.services.google.gemini_live.llm import GeminiLiveLLMService"
     ],
@@ -224,6 +229,7 @@ FEATURE_IMPORTS = {
     "observability": ["from pipecat_whisker import WhiskerObserver"],
     "create_transport": ["from pipecat.runner.utils import create_transport"],
     "eval": ["from pipecat.evals.transport import EvalTransportParams"],
+    "video_in_sources": ["from pipecat.transports.base_transport import VideoInSourceParams"],
 }
 
 # Base imports always included in generated bot files

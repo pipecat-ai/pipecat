@@ -12,7 +12,6 @@ This module provides a STT service using Smallest AI's Waves API:
   continuously and receives interim/final transcripts with low latency.
 """
 
-import asyncio
 import json
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
@@ -206,8 +205,6 @@ class SmallestSTTService(WebsocketSTTService):
         self._base_url = base_url.rstrip("/")
         self._encoding = encoding
         self._receive_task = None
-        self._connected_event = asyncio.Event()
-        self._connected_event.set()
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics."""
@@ -263,11 +260,8 @@ class SmallestSTTService(WebsocketSTTService):
         Yields:
             None -- transcription results arrive via WebSocket messages.
         """
-        await self._connected_event.wait()
-
-        if not self._websocket or self._websocket.state is State.CLOSED:
-            await self._connect()
-
+        # The receive loop reconnects a dropped socket; audio arriving
+        # meanwhile is dropped.
         if self._websocket and self._websocket.state is State.OPEN:
             try:
                 await self._websocket.send(audio)
@@ -288,17 +282,13 @@ class SmallestSTTService(WebsocketSTTService):
         return changed
 
     async def _connect(self):
-        self._connected_event.clear()
-        try:
-            await self._connect_websocket()
-            await super()._connect()
+        await self._connect_websocket()
+        await super()._connect()
 
-            if self._websocket and not self._receive_task:
-                self._receive_task = self.create_task(
-                    self._receive_task_handler(self._report_error)
-                )
-        finally:
-            self._connected_event.set()
+        # Started even when the connection failed: with no socket the receive
+        # loop goes straight to its reconnect path, which retries the connect.
+        if not self._receive_task:
+            self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
     async def _disconnect(self):
         await super()._disconnect()

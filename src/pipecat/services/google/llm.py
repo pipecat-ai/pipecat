@@ -45,6 +45,7 @@ from pipecat.services.google.utils import update_google_client_http_options
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.utils.deprecation import deprecated
+from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.tracing.service_decorators import traced_llm
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 
@@ -54,6 +55,7 @@ os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "false"
 try:
     import google.genai as genai
     from google.api_core.exceptions import DeadlineExceeded
+    from google.genai.errors import ClientError
     from google.genai.types import (
         FinishReason,
         GenerateContentConfig,
@@ -382,7 +384,7 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
             self._settings.system_instruction
         )
         adapter = self.get_llm_adapter()
-        params = adapter.get_llm_invocation_params(
+        params = await adapter.get_llm_invocation_params(
             context,
             system_instruction=effective_instruction,
             ensure_last_message_is_user=self._should_inject_trailing_user_message(),
@@ -565,15 +567,13 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
 
     async def _stream_content(self, context: LLMContext) -> AsyncIterator[GenerateContentResponse]:
         adapter = self.get_llm_adapter()
-        params = adapter.get_llm_invocation_params(
+        params = await adapter.get_llm_invocation_params(
             context,
             system_instruction=assert_given(self._settings.system_instruction),
             ensure_last_message_is_user=self._should_inject_trailing_user_message(),
         )
 
-        logger.debug(
-            f"{self}: Generating chat from context {adapter.get_messages_for_logging(context)}"
-        )
+        self._log_llm_response(context)
 
         messages = params["messages"]
 
@@ -900,8 +900,33 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
             await self.push_error(error_msg="LLM completion timeout", exception=e)
         except LLMContextConversionError as e:
             await self.push_error(error_msg=str(e), exception=e)
+            # A conversion failure (e.g. corrupt base64 data) can't reach the
+            # API at all, but is just as much evidence of an invalid file as a
+            # rejection from Gemini itself, so it gets the same best-effort
+            # cleanup.
+            context.remove_invalid_file_message()
         except Exception as e:
-            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
+            # Gemini doesn't say which field was invalid, but ClientError.status
+            # carries the gRPC-style code, and INVALID_ARGUMENT (unsupported MIME
+            # type, corrupt bytes, etc.) is grounds to remove a pending file
+            # message on a best-effort basis. The rest of the 4xx range —
+            # UNAUTHENTICATED, PERMISSION_DENIED, NOT_FOUND, RESOURCE_EXHAUSTED —
+            # says nothing about whether our request (or its file) was bad, and
+            # removing the file there would discard it for no benefit. When a
+            # message is removed as a result of this error, the fault lay in
+            # application-supplied content and the context is repaired, so the
+            # error is pushed as APPLICATION instead of letting the rejection
+            # classify as permanent and cost the service its usability.
+            removed = (
+                isinstance(e, ClientError)
+                and e.status == "INVALID_ARGUMENT"
+                and context.remove_invalid_file_message()
+            )
+            await self.push_error(
+                error_msg=f"Unknown error occurred: {e}",
+                exception=e,
+                category=ErrorCategory.APPLICATION if removed else None,
+            )
         finally:
             if grounding_metadata and isinstance(grounding_metadata, dict):
                 llm_search_frame = LLMSearchResponseFrame(

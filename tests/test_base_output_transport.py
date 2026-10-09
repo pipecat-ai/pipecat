@@ -31,6 +31,8 @@ from pipecat.frames.frames import (
     StartFrame,
     TTSAudioRawFrame,
     TTSStoppedFrame,
+    VolumeFrame,
+    VolumeGainFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.transports.base_output import BaseOutputTransport
@@ -89,12 +91,14 @@ async def _make_transport(
     mixer: BaseAudioMixer | None = None,
     audio_out_sample_rate: int | None = None,
     audio_filter: BaseAudioFilter | None = None,
+    audio_out_volume: float = 1.0,
 ) -> BaseOutputTransport:
     params = TransportParams(
         audio_out_enabled=True,
         audio_out_mixer=mixer,
         audio_out_filter=audio_filter,
         audio_out_sample_rate=audio_out_sample_rate,
+        audio_out_volume=audio_out_volume,
     )
     transport = BaseOutputTransport(params)
     transport.push_frame = AsyncMock()
@@ -637,5 +641,96 @@ class TestBaseOutputTransportAudioFilter(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0.1)
 
             self.assertEqual(audio_filter.calls, [audio[0], audio[1], *controls, audio[2]])
+        finally:
+            await transport.cancel(CancelFrame())
+
+
+class TestBaseOutputTransportVolume(unittest.IsolatedAsyncioTestCase):
+    """The output volume, and the gain on it, scale the audio that follows them."""
+
+    def _audio(self, transport: BaseOutputTransport, sample: int = 1000) -> OutputAudioRawFrame:
+        """One chunk of audio, every sample set to ``sample``."""
+        sender = transport._media_senders[None]
+        return OutputAudioRawFrame(
+            audio=np.full(sender.audio_chunk_size // 2, sample, dtype=np.int16).tobytes(),
+            sample_rate=sender.sample_rate,
+            num_channels=1,
+        )
+
+    def _written(self, transport: BaseOutputTransport) -> list[int]:
+        """The first sample of each chunk written, in order."""
+        calls = transport.write_audio_frame.call_args_list
+        return [int(np.frombuffer(call.args[0].audio, dtype=np.int16)[0]) for call in calls]
+
+    async def test_transport_writes_audio_at_its_volume(self):
+        transport = await _make_transport(audio_out_volume=0.5)
+        try:
+            await transport.process_frame(self._audio(transport), FrameDirection.DOWNSTREAM)
+            await asyncio.sleep(0.1)
+
+            self.assertEqual(self._written(transport), [500])
+        finally:
+            await transport.cancel(CancelFrame())
+
+    async def test_volume_and_gain_scale_the_audio_after_them(self):
+        transport = await _make_transport()
+        try:
+            frames = [
+                self._audio(transport),
+                VolumeFrame(volume=0.5),
+                self._audio(transport),
+                VolumeGainFrame(gain=0.5),
+                self._audio(transport),
+                VolumeGainFrame(gain=1.0),
+                self._audio(transport),
+            ]
+            for frame in frames:
+                await transport.process_frame(frame, FrameDirection.DOWNSTREAM)
+            await asyncio.sleep(0.1)
+
+            self.assertEqual(self._written(transport), [1000, 500, 250, 500])
+        finally:
+            await transport.cancel(CancelFrame())
+
+    async def test_an_interruption_keeps_the_gain_frames(self):
+        transport = await _make_transport()
+        try:
+            release_write = asyncio.Event()
+
+            async def held_write(frame):
+                await release_write.wait()
+                return True
+
+            transport.write_audio_frame = AsyncMock(side_effect=held_write)
+
+            # The first chunk holds the write, so the gain frames and the quiet
+            # chunk between them are still queued when the user interrupts.
+            await transport.process_frame(self._audio(transport), FrameDirection.DOWNSTREAM)
+            await asyncio.sleep(0.1)
+            for frame in (
+                VolumeGainFrame(gain=0.5),
+                self._audio(transport),
+                VolumeGainFrame(gain=1.0),
+            ):
+                await transport.process_frame(frame, FrameDirection.DOWNSTREAM)
+            await transport.process_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
+            release_write.set()
+            await transport.process_frame(self._audio(transport), FrameDirection.DOWNSTREAM)
+            await asyncio.sleep(0.1)
+
+            # The quiet chunk is dropped, and the audio after it plays at full
+            # volume again.
+            self.assertEqual(self._written(transport), [1000, 1000])
+        finally:
+            await transport.cancel(CancelFrame())
+
+    async def test_a_loud_gain_clips_to_the_sample_range(self):
+        transport = await _make_transport()
+        try:
+            for frame in (VolumeGainFrame(gain=2.0), self._audio(transport, sample=30000)):
+                await transport.process_frame(frame, FrameDirection.DOWNSTREAM)
+            await asyncio.sleep(0.1)
+
+            self.assertEqual(self._written(transport), [32767])
         finally:
             await transport.cancel(CancelFrame())

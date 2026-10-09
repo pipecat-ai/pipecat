@@ -46,6 +46,7 @@ from pipecat.pipeline.runner import PipelineRunner  # noqa: E402
 from pipecat.pipeline.worker import PipelineTask, PipelineTaskParams  # noqa: E402
 from pipecat.processors.filters.identity_filter import IdentityFilter  # noqa: E402
 from pipecat.utils.asyncio.task_manager import TaskManager  # noqa: E402
+from pipecat.utils.deprecation import warn_deprecated_read  # noqa: E402
 
 SRC_ROOT = Path(__file__).parent.parent / "src" / "pipecat"
 _SCAN = dscan.scan_source(SRC_ROOT)
@@ -114,6 +115,25 @@ def test_deprecated_messages_follow_template():
     assert not bad, (
         "These @deprecated messages don't follow the canonical template from "
         "pipecat.utils.deprecation:\n" + "\n".join(f"  {b}" for b in bad)
+    )
+
+
+def test_warn_messages_follow_template():
+    """Every hand-written deprecation warning uses a literal message matching the template."""
+    assert _SCAN.warn_sites, "expected warnings.warn(..., DeprecationWarning) call sites"
+    bad = dscan.check_warn_messages(_SCAN)
+    assert not bad, (
+        "These deprecation warnings don't follow the canonical template from "
+        "pipecat.utils.deprecation:\n" + "\n".join(f"  {b}" for b in bad)
+    )
+
+
+def test_deprecation_warnings_use_the_helper():
+    """Every hand-written deprecation warning is raised through ``warn_deprecated()``."""
+    bad = dscan.check_warn_helper(_SCAN)
+    assert not bad, (
+        "These deprecation warnings call warnings.warn() directly; use "
+        "pipecat.utils.deprecation.warn_deprecated():\n" + "\n".join(f"  {b}" for b in bad)
     )
 
 
@@ -216,13 +236,13 @@ def test_no_deprecation_warnings_at_import_time():
     assert result.returncode == 0, result.stderr
 
 
-# --- Intercepted field reads (warn_deprecated_read) ---------------------------
+# --- Intercepted field reads (warn_deprecated) --------------------------------
 #
 # A field whose reads are intercepted by ``__getattribute__`` warns once per call
-# site. The helper finds that site by walking two frames up and reports it with a
-# matching ``stacklevel``, so the tests below pin both the count and the reported
-# location: a call layer added between the shim and the helper would otherwise
-# silently collapse every reader into one entry.
+# site. The shim passes ``stacklevel=2`` to name the reading line, and the helper
+# keys its record of warned sites on that same line, so the tests below pin both
+# the count and the reported location: a call layer added between the shim and
+# the helper would otherwise silently collapse every reader into one entry.
 
 
 def _read_enable_metrics(frame):
@@ -257,12 +277,38 @@ def test_intercepted_read_reports_the_reading_line():
     assert caught[0].lineno == lineno
 
 
+class _LegacyShim:
+    old = 1
+
+    def __getattribute__(self, name):
+        if name == "old":
+            warn_deprecated_read(
+                "`_LegacyShim.old` is deprecated since 1.0.0 and will be removed in 2.0.0. "
+                "No replacement."
+            )
+        return object.__getattribute__(self, name)
+
+
+def test_deprecated_warn_deprecated_read_still_names_the_reading_line():
+    """``warn_deprecated_read()`` warns that it is deprecated, and still reports the read."""
+    shim = _LegacyShim()
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        _ = shim.old
+        lineno = inspect.currentframe().f_lineno - 1
+    messages = {str(w.message).split(" is deprecated")[0]: w for w in caught}
+    assert set(messages) == {"`warn_deprecated_read`", "`_LegacyShim.old`"}
+    assert messages["`_LegacyShim.old`"].filename == __file__
+    assert messages["`_LegacyShim.old`"].lineno == lineno
+
+
 def test_intercepted_read_warns_through_an_ignore_filter():
     """The warning reaches a reader who has filtered ``DeprecationWarning`` out.
 
-    Deprecations that only reach ``__main__`` would miss every caller inside a
-    library, so the warning is raised under its own ``always`` filter. Run in a
-    subprocess to get an interpreter whose filters ignore the category.
+    Many deprecations are detected inside Pipecat, where Python's default
+    filters would hide them, so ``warn_deprecated()`` raises them under its own
+    ``always`` filter. Run in a subprocess to get an interpreter whose filters
+    ignore the category.
     """
     script = "from pipecat.frames.frames import StartFrame\n_ = StartFrame().enable_metrics\n"
     result = subprocess.run(

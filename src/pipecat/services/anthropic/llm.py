@@ -42,13 +42,21 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.utils.deprecation import deprecated
+from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.http import TIMEOUT_EXCEPTIONS
 from pipecat.utils.tracing.service_decorators import traced_llm
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 
 try:
     from anthropic import NOT_GIVEN as ANTHROPIC_NOT_GIVEN
-    from anthropic import APITimeoutError, AsyncAnthropic
+    from anthropic import (
+        APIStatusError,
+        APITimeoutError,
+        AsyncAnthropic,
+        BadRequestError,
+        RequestTooLargeError,
+        UnprocessableEntityError,
+    )
     from anthropic import NotGiven as AnthropicNotGiven
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
@@ -428,7 +436,7 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
             self._settings.system_instruction
         )
         adapter = self.get_llm_adapter()
-        invocation_params = adapter.get_llm_invocation_params(
+        invocation_params = await adapter.get_llm_invocation_params(
             context,
             enable_prompt_caching=assert_given(self._settings.enable_prompt_caching),
             system_instruction=effective_instruction,
@@ -495,9 +503,9 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
         model = self._settings.model or ""
         return not any(model.startswith(p) for p in self._PREFILL_SUPPORTED_PATTERNS)
 
-    def _get_llm_invocation_params(self, context: LLMContext) -> AnthropicLLMInvocationParams:
+    async def _get_llm_invocation_params(self, context: LLMContext) -> AnthropicLLMInvocationParams:
         adapter = self.get_llm_adapter()
-        params = adapter.get_llm_invocation_params(
+        params = await adapter.get_llm_invocation_params(
             context,
             enable_prompt_caching=assert_given(self._settings.enable_prompt_caching),
             system_instruction=assert_given(self._settings.system_instruction),
@@ -524,11 +532,9 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
             await self.push_frame(LLMFullResponseStartFrame())
             await self.start_processing_metrics()
 
-            params_from_context = self._get_llm_invocation_params(context)
+            params_from_context = await self._get_llm_invocation_params(context)
 
-            adapter = self.get_llm_adapter()
-            messages_for_logging = adapter.get_messages_for_logging(context)
-            logger.debug(f"{self}: Generating chat from context {messages_for_logging}")
+            self._log_llm_response(context)
 
             await self.start_ttfb_metrics()
 
@@ -650,6 +656,32 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
             await self._call_event_handler("on_completion_timeout")
         except LLMContextConversionError as e:
             await self.push_error(error_msg=str(e), exception=e)
+            # A conversion failure (e.g. an unsupported file MIME type, corrupt
+            # base64 data) can't reach the API at all, but is just as much
+            # evidence of an invalid file as a rejection from Anthropic itself, so
+            # it gets the same best-effort cleanup.
+            context.remove_invalid_file_message()
+        except APIStatusError as e:
+            # Only the payload-shaped errors (bad request, payload too large,
+            # unprocessable content) are grounds to remove a pending file
+            # message on a best-effort basis. The rest of the 4xx range —
+            # auth, permissions, not-found, rate limiting — says nothing
+            # about whether our request (or its file) was bad, and removing
+            # the file there would discard it for no benefit: the file isn't
+            # what needs fixing before the next retry can succeed. When a
+            # message is removed as a result of this error, the fault lay in
+            # application-supplied content and the context is repaired, so the
+            # error is pushed as APPLICATION instead of letting the rejection
+            # classify as permanent and cost the service its usability.
+            removed = (
+                isinstance(e, (BadRequestError, RequestTooLargeError, UnprocessableEntityError))
+                and context.remove_invalid_file_message()
+            )
+            await self.push_error(
+                error_msg=f"Unknown error occurred: {e}",
+                exception=e,
+                category=ErrorCategory.APPLICATION if removed else None,
+            )
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:

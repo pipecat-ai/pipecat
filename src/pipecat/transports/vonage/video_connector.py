@@ -5,6 +5,8 @@
 #
 """Vonage Video Connector transport."""
 
+from typing import Any
+
 from loguru import logger
 
 from pipecat.frames.frames import (
@@ -25,6 +27,12 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, F
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport
+
+# the following "as" imports help to re-export these types and avoid type checking warnings
+# when importing these types from the main transport module
+from pipecat.transports.vonage.client import (
+    AudioInFrameSource as AudioInFrameSource,
+)
 from pipecat.transports.vonage.client import (
     Session,  # type: ignore[attr-defined]
     Stream,  # type: ignore[attr-defined]
@@ -32,9 +40,6 @@ from pipecat.transports.vonage.client import (
     VonageClient,
     VonageClientListener,
 )
-
-# the following "as" imports help to re-export these types and avoid type checking warnings
-# when importing these types from the main transport module
 from pipecat.transports.vonage.client import (
     SubscribeSettings as SubscribeSettings,
 )
@@ -387,6 +392,17 @@ class VonageVideoConnectorTransport(BaseTransport):
         self._input: VonageVideoConnectorInputTransport | None = None
         self._output: VonageVideoConnectorOutputTransport | None = None
         self._one_stream_received: bool = False
+
+    def get_client_id(self, client: Any) -> str:
+        """The id of a client, as passed to ``on_client_connected``.
+
+        Args:
+            client: The client, as passed to the transport's client events.
+
+        Returns:
+            The client's stream id.
+        """
+        return client["streamId"]
 
     def input(self) -> FrameProcessor:
         """Get the input transport for Vonage.

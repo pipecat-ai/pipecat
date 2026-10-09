@@ -293,7 +293,7 @@ class TestPaidServicesAreDeprecated(unittest.TestCase):
             )
         self.assertIsInstance(tts, CachingTTSService)
         self.assertEqual([w.category for w in caught], [DeprecationWarning])
-        self.assertIn("`service: cartesia` in `user.speech`", str(caught[0].message))
+        self.assertIn("`user.speech.service: cartesia`", str(caught[0].message))
 
     def test_openai_by_name_warns_and_builds(self):
         with patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}):
@@ -301,7 +301,7 @@ class TestPaidServicesAreDeprecated(unittest.TestCase):
                 warnings.simplefilter("always")
                 llm_service_from_config({"service": "openai"}, where="simulator")
         self.assertEqual([w.category for w in caught], [DeprecationWarning])
-        self.assertIn("`service: openai` in `simulator`", str(caught[0].message))
+        self.assertIn("`simulator.service: openai`", str(caught[0].message))
 
     def test_unknown_names_point_at_the_factory(self):
         with self.assertRaises(ValueError) as cm:

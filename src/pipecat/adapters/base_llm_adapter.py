@@ -10,10 +10,13 @@ This module provides the abstract base class for implementing LLM provider-speci
 adapters that handle tool format conversion and standardization.
 """
 
+import base64
+import inspect
 import warnings
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic, TypeVar, cast
+from urllib.parse import urlsplit
 
 from loguru import logger
 
@@ -25,6 +28,10 @@ from pipecat.processors.aggregators.llm_context import (
     LLMSpecificMessage,
     NotGiven,
 )
+from pipecat.utils.deprecation import warn_deprecated
+from pipecat.utils.file_resolver import FileResolver
+from pipecat.utils.security.ssrf import UrlReachability
+from pipecat.utils.types import is_given
 
 # Should be a TypedDict
 TLLMInvocationParams = TypeVar("TLLMInvocationParams", bound=Mapping[str, Any])
@@ -73,6 +80,20 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
         self._warned_system_instruction = False
         self._warned_context_system_message = False
         self._builtin_tools: dict[str, FunctionSchema] = {}
+        self._file_resolver: FileResolver | None = None
+
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        method = cls.__dict__.get("get_llm_invocation_params")
+        if method is not None and not inspect.iscoroutinefunction(method):
+            # stacklevel=3 steps past ABCMeta.__new__, which calls this hook,
+            # so the warning points at the subclass's definition.
+            warn_deprecated(
+                f"`def {cls.__name__}.get_llm_invocation_params` is deprecated since 1.13.0 "
+                "and will be removed in 2.0.0. Use `async def` instead. `await` the method "
+                "where you call it.",
+                stacklevel=3,
+            )
 
     @property
     def builtin_tools(self) -> dict[str, FunctionSchema]:
@@ -99,8 +120,14 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
         pass
 
     @abstractmethod
-    def get_llm_invocation_params(self, context: LLMContext, **kwargs) -> TLLMInvocationParams:
+    async def get_llm_invocation_params(
+        self, context: LLMContext, **kwargs
+    ) -> TLLMInvocationParams:
         """Get provider-specific LLM invocation parameters from a universal LLM context.
+
+        An adapter whose provider takes files awaits
+        :meth:`prepare_file_content` first, so the files its conversion inlines
+        are in the :attr:`file_resolver`'s caches.
 
         Args:
             context: The LLM context containing messages, tools, etc.
@@ -136,6 +163,171 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
         """
         pass
 
+    # Whether this provider's conversion consumes raw bytes (rather than the
+    # base64 payload of a data URL) for inline file content. Decides which
+    # form the resolution pass prepares in the resolver's cache, so conversion
+    # never re-decodes or re-encodes a file on later turns.
+    prefers_raw_file_bytes: bool = False
+
+    @property
+    def file_resolver(self) -> FileResolver | None:
+        """The resolver that fetches and caches file content for this adapter.
+
+        Set once by the owning LLM service. Every conversion this adapter
+        performs — invocation params and logging alike — reads the same
+        resolver caches. Without one, conversion still passes through URLs the
+        provider consumes directly, but fails on any file that would need
+        fetching.
+        """
+        return self._file_resolver
+
+    @file_resolver.setter
+    def file_resolver(self, resolver: FileResolver | None) -> None:
+        self._file_resolver = resolver
+
+    def supports_file_url(self, url: str, mime_type: str) -> bool:
+        """Whether the provider can be handed `url` to fetch itself.
+
+        This covers both URLs the provider fetches over the public internet
+        and cloud-storage URIs it resolves through its own IAM (e.g. Bedrock
+        reading ``s3://``). A URL the provider can't consume is instead
+        fetched into the file resolver's cache and inlined at conversion —
+        see :meth:`prepare_file_content`.
+
+        Args:
+            url: The file URL from a ``file_url`` context content item.
+            mime_type: The file's MIME type.
+
+        Returns:
+            True if conversion can pass `url` through to the provider.
+        """
+        return False
+
+    async def prepare_file_content(self, context: LLMContext) -> None:
+        """Fetch the file content this provider will need into the resolver's caches.
+
+        A ``file_url`` item whose URL the provider consumes directly
+        (:meth:`supports_file_url`, and — for ``http(s)`` — publicly routable)
+        needs nothing. Any other ``file_url`` item is fetched into the
+        :attr:`file_resolver`'s cache, in the form this provider's conversion
+        reads: raw bytes when ``prefers_raw_file_bytes``, a base64 data URL
+        otherwise. Inline ``file_base64`` items get their decoded bytes cached
+        for raw-bytes providers. The resolver caches by URL, so each file is
+        fetched once no matter how many turns — or how many adapters sharing
+        the resolver — consume it; only the per-provider pass-through decision
+        is re-evaluated here on every run.
+
+        An adapter whose conversion inlines files (through
+        :meth:`inlined_file_content` or :meth:`decoded_file_bytes`) awaits this
+        at the start of :meth:`get_llm_invocation_params`. An adapter for a
+        provider that doesn't take files doesn't call it, so nothing is fetched
+        for that provider.
+
+        Args:
+            context: The LLM context whose messages to resolve.
+
+        Raises:
+            LLMContextConversionError: If a file URL can't be resolved (refused
+                by the reachability policy, download failure, unresolvable
+                scheme, corrupt base64). The service handles it like any other
+                conversion failure, including invalid-file-message cleanup.
+        """
+        resolver = self._file_resolver
+        if resolver is None:
+            return
+        for message in context.get_messages():
+            if isinstance(message, LLMSpecificMessage):
+                continue
+            content = message.get("content")
+            if not isinstance(content, list):
+                continue
+            for raw_item in content:
+                if not isinstance(raw_item, dict):
+                    continue
+                item = cast("dict[str, Any]", raw_item)
+                try:
+                    if item.get("type") == "file_url":
+                        file_data = item["file"]
+                        url = file_data["url"]
+                        mime_type = file_data["mime_type"]
+                        if await self._can_pass_file_url(url, mime_type, resolver):
+                            continue
+                        if self.prefers_raw_file_bytes:
+                            await resolver.fetch(url)
+                        else:
+                            await resolver.ensure_data_url(url, mime_type)
+                    elif item.get("type") == "file_base64" and self.prefers_raw_file_bytes:
+                        await resolver.fetch(item["file"]["file_data"])
+                except Exception as e:
+                    raise LLMContextConversionError(e) from e
+
+    async def _can_pass_file_url(self, url: str, mime_type: str, resolver: FileResolver) -> bool:
+        """Whether `url` can be handed to the provider to fetch itself."""
+        if not self.supports_file_url(url, mime_type):
+            return False
+        if urlsplit(url).scheme not in ("http", "https"):
+            # A cloud-storage URI resolved via the provider's own IAM;
+            # reachability from here is irrelevant.
+            return True
+        return await resolver.classify(url) == UrlReachability.PUBLIC
+
+    def inlined_file_content(self, file_data: Mapping[str, Any]) -> bytes | str | None:
+        """Return the content to inline for a ``file_url`` item, or None when the URL passes through.
+
+        Args:
+            file_data: The item's ``file`` mapping (``url``, ``mime_type``, ...).
+
+        Returns:
+            None when the URL passes through for the provider to fetch itself;
+            otherwise the resolved content from the :attr:`file_resolver`'s
+            caches — raw bytes when ``prefers_raw_file_bytes``, a base64 data
+            URL otherwise.
+
+        Raises:
+            ValueError: If the provider can't consume the URL and no resolved
+                content is cached (wrapped as ``LLMContextConversionError`` by
+                the conversion routine's caller).
+        """
+        resolver = self._file_resolver
+        url = file_data["url"]
+        mime_type = file_data["mime_type"]
+        if self.supports_file_url(url, mime_type):
+            if urlsplit(url).scheme not in ("http", "https"):
+                return None
+            reachability = resolver.cached_reachability(url) if resolver is not None else None
+            # Unclassified (no resolver / resolution not run) keeps the
+            # conversion-only behavior: hand the URL to the provider.
+            if reachability is None or reachability == UrlReachability.PUBLIC:
+                return None
+        if resolver is not None:
+            resolved: bytes | str | None
+            if self.prefers_raw_file_bytes:
+                resolved = resolver.cached_bytes(url)
+            else:
+                resolved = resolver.cached_data_url(url)
+            if resolved is not None:
+                return resolved
+        raise ValueError(
+            f"Unresolved file URL for this provider: {url!r} (await prepare_file_content "
+            "in get_llm_invocation_params, with a file resolver set)"
+        )
+
+    def decoded_file_bytes(self, file_data: Mapping[str, Any]) -> bytes:
+        """Return a ``file_base64`` item's decoded bytes, from the resolver's cache when prepared.
+
+        Falls back to decoding inline for conversion-only calls where no
+        resolution has run.
+
+        Args:
+            file_data: The item's ``file`` mapping (``file_data``, ...).
+        """
+        data_url = file_data["file_data"]
+        if self._file_resolver is not None:
+            cached = self._file_resolver.cached_bytes(data_url)
+            if cached is not None:
+                return cached
+        return base64.b64decode(data_url.split(",", 1)[1])
+
     def create_llm_specific_message(self, message: Any) -> LLMSpecificMessage:
         """Create an LLM-specific message (as opposed to a standard message) for use in an LLMContext.
 
@@ -164,11 +356,37 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
             self.id_for_llm_specific_messages, truncate_large_values=truncate_large_values
         )
 
+    def _realtime_session_tools(self, context_tools: Any, service_tools: Any) -> list[Any] | None:
+        """The tools a realtime session carries, in provider format.
+
+        The context's own tools when it has any, else the init-provided ones.
+        Built-in tools ride along with whichever set is in use, and are the
+        set when there is neither.
+
+        Args:
+            context_tools: The context's tools (``NOT_GIVEN`` or ``None`` when it
+                has none).
+            service_tools: The service's init-provided tools, as
+                ``_service_tools()`` returns them: a ``ToolsSchema`` or a
+                provider-native tool list, or ``None``.
+
+        Returns:
+            The tools, or ``None`` when there are none at all.
+        """
+        own = (
+            context_tools
+            if context_tools is not None and is_given(context_tools)
+            else service_tools
+        )
+        converted = self.from_standard_tools(own)
+        return None if converted is None or not is_given(converted) else converted
+
     def from_standard_tools(self, tools: Any) -> list[Any] | NotGiven | None:
         """Convert tools from standard format to provider format.
 
         Built-in tools are automatically merged into the schema before conversion so that every
-        inference request receives them without the user having to declare them explicitly.
+        inference request receives them without the user having to declare them explicitly;
+        when there are no other tools, they are the tool set.
 
         Args:
             tools: Tools in standard format or provider-specific format.
@@ -183,6 +401,8 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
                     standard_tools=tools.standard_tools + list(self._builtin_tools.values()),
                     custom_tools=tools.custom_tools,
                 )
+            elif tools is None or not is_given(tools):
+                tools = ToolsSchema(standard_tools=list(self._builtin_tools.values()))
             else:
                 # User supplied tools in a legacy/provider-specific format.
                 # Built-in tools cannot be safely merged, so they will not be injected.
@@ -219,19 +439,12 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
         if self._warned_context_system_message:
             return
         self._warned_context_system_message = True
-        # Raised under an `always` filter so it survives the default
-        # `ignore::DeprecationWarning` that hides call sites outside
-        # `__main__` — every caller here is inside an LLM service. The flag
-        # above supplies the deduplication that filter would provide.
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                'Passing the system prompt as an initial "system" message in `LLMContext` is'
-                " deprecated since 1.9.0 and will be removed in 2.0.0. Set `system_instruction`"
-                " on the LLM service instead.",
-                DeprecationWarning,
-                stacklevel=3,
-            )
+        warn_deprecated(
+            '`LLMContext(messages=[{"role": "system", ...}, ...])` is deprecated since 1.9.0'
+            " and will be removed in 2.0.0. Use `system_instruction` on the LLM service"
+            " instead.",
+            stacklevel=3,
+        )
 
     def _extract_initial_system(
         self,

@@ -10,6 +10,7 @@ import unittest
 
 import pytest
 
+from pipecat.frames.frames import InterimTranscriptionFrame
 from pipecat.services.deepgram.flux.stt import DeepgramFluxSTTService
 from pipecat.services.deepgram.flux.stt_base import (
     DeepgramFluxSTTBase,
@@ -17,6 +18,7 @@ from pipecat.services.deepgram.flux.stt_base import (
     FluxConnectionNotConfirmedError,
     FluxFatalError,
 )
+from pipecat.transcriptions.language import Language
 from pipecat.turns.user_turn_strategies import (
     EagerUserTurnStrategies,
     ExternalUserTurnStrategies,
@@ -417,6 +419,42 @@ def test_flux_keeps_a_configured_eager_threshold():
     )
 
     assert service._settings.eager_eot_threshold == 0.8
+
+
+@pytest.mark.asyncio
+async def test_update_pushes_interim_transcription():
+    service = DeepgramFluxSTTService(api_key="test-key")
+    pushed = []
+
+    async def push_frame(frame, direction=None):
+        pushed.append(frame)
+
+    service.push_frame = push_frame
+
+    data = {"event": "Update", "transcript": "so I was thinking"}
+    await service._handle_turn_info(data)
+
+    assert len(pushed) == 1
+    frame = pushed[0]
+    assert isinstance(frame, InterimTranscriptionFrame)
+    assert frame.text == "so I was thinking"
+    assert frame.language == Language.EN
+    assert frame.result == data
+
+
+@pytest.mark.asyncio
+async def test_empty_update_pushes_nothing():
+    service = DeepgramFluxSTTService(api_key="test-key")
+    pushed = []
+
+    async def push_frame(frame, direction=None):
+        pushed.append(frame)
+
+    service.push_frame = push_frame
+
+    await service._handle_turn_info({"event": "Update", "transcript": ""})
+
+    assert pushed == []
 
 
 if __name__ == "__main__":

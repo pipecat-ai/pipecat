@@ -26,10 +26,19 @@ from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.frames.frames import (
     AggregationType,
 )
+from pipecat.pipeline.capabilities import BotCapabilities
 from pipecat.utils.deprecation import deprecated
 
+RTVIFileSourceType = Literal["bytes", "url"]
+"""Source type for an RTVI ``send-file`` message.
+
+Matches :data:`~pipecat.frames.frames.FileSourceType`: a file arrives either
+as inline base64 bytes or as a URL, and both flow through to a
+:class:`~pipecat.frames.frames.UserFileRawFrame` unresolved.
+"""
+
 # -- Constants --
-PROTOCOL_VERSION = "2.1.0"
+PROTOCOL_VERSION = "2.2.0"
 
 # -- Version compatibility --
 # Any 1.x client is deprecated but still supported with the old bot-output format.
@@ -166,10 +175,18 @@ class BotReadyData(BaseModel):
     """Data for bot ready notification.
 
     Contains protocol version and initial configuration.
+
+    Parameters:
+        version: The RTVI protocol version the bot speaks with this client.
+        about: Information about the bot, such as the Pipecat library and version.
+        capabilities: What the bot does in this session (media sent and received,
+            metrics), so the client can show only the UI that applies. Added in
+            protocol 2.2.0.
     """
 
     version: str
     about: Mapping[str, Any] | None = None
+    capabilities: BotCapabilities | None = None
 
 
 class BotReady(BaseModel):
@@ -241,6 +258,66 @@ class SendTextData(BaseModel):
     options: SendTextOptions | None = None
 
 
+class FileSource(BaseModel):
+    """Base class for RTVI file sources."""
+
+    type: RTVIFileSourceType
+
+
+class FileBytes(FileSource):
+    """File source as base64-encoded bytes."""
+
+    type: RTVIFileSourceType = "bytes"
+    bytes: str  # base64-encoded string
+    width: int | None = None
+    height: int | None = None
+
+
+class FileUrl(FileSource):
+    """File source as a URL.
+
+    Parameters:
+        url: The file's URL: whatever the ``POST /files`` upload endpoint
+            returned (``pipecat:<id>`` with the default local storage, or a
+            URL minted by a custom storage backend), a cloud-storage URI
+            (``s3://``, ``gs://``), or a plain ``http(s)`` URL. The URL is
+            resolved at completion time: the LLM provider fetches it itself
+            when it can (public URLs, its own cloud IAM), and otherwise the
+            LLM service's :class:`~pipecat.utils.file_resolver.FileResolver`
+            downloads the bytes and inlines them.
+    """
+
+    type: RTVIFileSourceType = "url"
+    url: str
+
+
+class File(BaseModel):
+    """File data structure for RTVI file sending."""
+
+    format: str  # Mime format of the file, e.g., 'application/pdf'
+    name: str | None = None
+    source: FileBytes | FileUrl
+
+
+class SendFileOptions(BaseModel):
+    """Options for sending a file to the LLM."""
+
+    run_immediately: bool = True
+    audio_response: bool = True
+    custom_options: dict | None = None  # ex. 'detail' in openAI or 'citations' in Bedrock
+
+
+class SendFileData(BaseModel):
+    """Data format for sending a file to the LLM.
+
+    Contains the information of the file to send and any options for how the pipeline should process it.
+    """
+
+    content: str  # Text to accompany the file
+    file: File
+    options: SendFileOptions | None = None
+
+
 class DTMFInputData(BaseModel):
     """Data format for DTMF keypresses sent from the client.
 
@@ -259,6 +336,9 @@ class LLMFunctionCallStartMessageData(BaseModel):
 
     Contains the function name being called. Fields may be omitted based on
     the configured function_call_report_level for security.
+
+    Parameters:
+        function_name: Name of the function called.
     """
 
     function_name: str | None = None
@@ -292,6 +372,11 @@ class LLMFunctionCallInProgressMessageData(BaseModel):
 
     Contains function call details including name, ID, and arguments.
     Fields may be omitted based on the configured function_call_report_level for security.
+
+    Parameters:
+        tool_call_id: Unique identifier of the call.
+        function_name: Name of the function called.
+        arguments: Arguments passed to the function.
     """
 
     tool_call_id: str
@@ -316,6 +401,12 @@ class LLMFunctionCallStoppedMessageData(BaseModel):
     Contains details about the function call that stopped, including
     whether it was cancelled or completed with a result.
     Fields may be omitted based on the configured function_call_report_level for security.
+
+    Parameters:
+        tool_call_id: Unique identifier of the call.
+        cancelled: Whether the call was cancelled rather than completed.
+        function_name: Name of the function called.
+        result: The result, when the call completed with one.
     """
 
     tool_call_id: str

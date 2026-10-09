@@ -12,7 +12,6 @@ real-time communication features.
 """
 
 import asyncio
-import time
 from collections.abc import Awaitable, Callable, Mapping
 from concurrent.futures import CancelledError as FuturesCancelledError
 from dataclasses import dataclass, field
@@ -55,6 +54,7 @@ from pipecat.transcriptions.language import Language
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
+from pipecat.transports.video_in_sampler import _capture_framerate, _VideoInSamplers
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
 from pipecat.utils.shared import acquires, releases
 
@@ -345,6 +345,20 @@ class DailyParams(TransportParams):
     microphone_out_enabled: bool = True
     transcription_enabled: bool = False
     transcription_settings: DailyTranscriptionSettings = DailyTranscriptionSettings()
+
+
+# A video track in one of these states sends no frames until it changes again.
+_STOPPED_VIDEO_STATES = ("off", "blocked")
+
+
+def _video_state(participant: Mapping[str, Any], video_source: str) -> str | None:
+    """The state of a participant's video track, e.g. ``"playable"`` or ``"off"``."""
+    media = participant.get("media", {})
+    if video_source in ("camera", "screenVideo"):
+        track = media.get(video_source)
+    else:
+        track = media.get("customVideo", {}).get(video_source)
+    return track.get("state") if track else None
 
 
 class DailyCallbacks(BaseModel):
@@ -1195,7 +1209,7 @@ class DailyTransportClient(EventHandler):
         self,
         participant_id: str,
         callback: Callable,
-        framerate: int = 30,
+        framerate: int | None = 30,
         video_source: str = "camera",
         color_format: str = "RGB",
     ):
@@ -1812,7 +1826,7 @@ class DailyInputTransport(BaseInputTransport):
         self._client = client
         self._params = params
 
-        self._video_renderers = {}
+        self._video_samplers = _VideoInSamplers()
 
         # Whether we have started audio streaming.
         self._streaming_started = False
@@ -1823,6 +1837,18 @@ class DailyInputTransport(BaseInputTransport):
 
         # Audio task when using a virtual speaker (i.e. no user tracks).
         self._audio_in_task: asyncio.Task | None = None
+
+    def _supports_video_in_source(self, video_source: str) -> bool:
+        """Whether this transport captures a video source listed in ``video_in_sources``.
+
+        Args:
+            video_source: The video source.
+
+        Returns:
+            Always ``True``: Daily captures the camera, the screen share and
+            custom tracks.
+        """
+        return True
 
     async def setup(self, setup: FrameProcessorSetup):
         """Setup the input transport with shared client setup.
@@ -2013,26 +2039,26 @@ class DailyInputTransport(BaseInputTransport):
     async def capture_participant_video(
         self,
         participant_id: str,
-        framerate: int = 30,
+        framerate: int | None = 30,
         video_source: str = "camera",
         color_format: str = "RGB",
+        *,
+        on_request_only: bool = False,
     ):
         """Capture video from a specific participant.
 
         Args:
             participant_id: ID of the participant to capture video from.
-            framerate: Desired framerate for video capture.
+            framerate: Frames per second to pass on, or ``None`` for every frame. It
+                doesn't apply with ``on_request_only``.
             video_source: Video source to capture from.
             color_format: Color format for video frames.
+            on_request_only: Pass on only the frames that answer image requests.
         """
-        if participant_id not in self._video_renderers:
-            self._video_renderers[participant_id] = {}
-
-        self._video_renderers[participant_id][video_source] = {
-            "framerate": framerate,
-            "timestamp": 0,
-            "render_next_frame": [],
-        }
+        framerate = _capture_framerate(
+            framerate, on_request_only, "DailyTransport.capture_participant_video"
+        )
+        self._video_samplers.capture(participant_id, video_source, framerate)
 
         await self._client.capture_participant_video(
             participant_id, self._on_participant_video_frame, framerate, video_source, color_format
@@ -2044,32 +2070,53 @@ class DailyInputTransport(BaseInputTransport):
         Args:
             frame: The user image request frame.
         """
-        if frame.user_id in self._video_renderers:
-            video_source = frame.video_source if frame.video_source else "camera"
-            self._video_renderers[frame.user_id][video_source]["render_next_frame"].append(frame)
+        video_source = frame.video_source if frame.video_source else "camera"
+        participant = self._client.participants().get(frame.user_id)
+        if participant and _video_state(participant, video_source) in _STOPPED_VIDEO_STATES:
+            error = f"{frame.user_id} isn't sending {video_source} video."
+            await self._answer_image_requests([frame], error)
+            return
+
+        if not self._video_samplers.add_request(frame.user_id, video_source, frame):
+            error = f"No {video_source} video is being captured from {frame.user_id}."
+            await self._answer_image_requests([frame], error)
+
+    async def update_participant_video(self, participant: Mapping[str, Any]):
+        """Answer the image requests waiting on a participant's video that stopped.
+
+        The sources stay captured, so their frames are sampled again if they restart.
+
+        Args:
+            participant: The participant, as in a participant-updated event.
+        """
+        participant_id = participant["id"]
+        media = participant.get("media", {})
+        video_sources = ["camera", "screenVideo", *media.get("customVideo", {})]
+        for video_source in video_sources:
+            if _video_state(participant, video_source) in _STOPPED_VIDEO_STATES:
+                requests = self._video_samplers.take_requests(participant_id, video_source)
+                error = f"{participant_id} stopped sending {video_source} video."
+                await self._answer_image_requests(requests, error)
+
+    async def remove_participant_video(self, participant_id: str):
+        """Stop sampling video from a participant who left.
+
+        Args:
+            participant_id: ID of the participant who left.
+        """
+        requests = self._video_samplers.remove_participant(participant_id)
+        await self._answer_image_requests(requests, f"{participant_id} left.")
+
+    async def remove_all_video(self):
+        """Stop sampling video from every participant, e.g. after leaving the room."""
+        requests = self._video_samplers.clear()
+        await self._answer_image_requests(requests, "The bot left the room.")
 
     async def _on_participant_video_frame(
         self, participant_id: str, video_frame: VideoFrame, video_source: str
     ):
         """Handle received participant video frames."""
-        render_frame = False
-
-        curr_time = time.time()
-        prev_time = self._video_renderers[participant_id][video_source]["timestamp"]
-        framerate = self._video_renderers[participant_id][video_source]["framerate"]
-
-        # Some times we render frames because of a request.
-        request_frame = None
-
-        if framerate > 0:
-            next_time = prev_time + 1 / framerate
-            render_frame = (next_time - curr_time) < 0.1
-
-        if self._video_renderers[participant_id][video_source]["render_next_frame"]:
-            request_frame = self._video_renderers[participant_id][video_source][
-                "render_next_frame"
-            ].pop(0)
-            render_frame = True
+        render_frame, request_frame = self._video_samplers.sample(participant_id, video_source)
 
         if render_frame:
             frame = UserImageRawFrame(
@@ -2083,7 +2130,6 @@ class DailyInputTransport(BaseInputTransport):
             )
             frame.transport_source = video_source
             await self.push_video_frame(frame)
-            self._video_renderers[participant_id][video_source]["timestamp"] = curr_time
 
 
 class DailyOutputTransport(BaseOutputTransport):
@@ -2437,6 +2483,17 @@ class DailyTransport(BaseTransport):
     # BaseTransport
     #
 
+    def get_client_id(self, client: Any) -> str:
+        """The id of a client, as passed to ``on_client_connected``.
+
+        Args:
+            client: The client, as passed to the transport's client events.
+
+        Returns:
+            The participant's id.
+        """
+        return client["id"]
+
     def input(self) -> DailyInputTransport:
         """Get the input transport for receiving media and events.
 
@@ -2720,21 +2777,32 @@ class DailyTransport(BaseTransport):
     async def capture_participant_video(
         self,
         participant_id: str,
-        framerate: int = 30,
+        framerate: int | None = 30,
         video_source: str = "camera",
         color_format: str = "RGB",
+        *,
+        on_request_only: bool = False,
     ):
         """Capture video from a specific participant.
 
         Args:
             participant_id: ID of the participant to capture video from.
-            framerate: Desired framerate for video capture.
+            framerate: Frames per second to pass on, or ``None`` for every frame. It
+                doesn't apply with ``on_request_only``.
             video_source: Video source to capture from.
             color_format: Color format for video frames.
+            on_request_only: Pass on only the frames that answer image requests.
         """
+        framerate = _capture_framerate(
+            framerate, on_request_only, "DailyTransport.capture_participant_video"
+        )
         if self._input:
             await self._input.capture_participant_video(
-                participant_id, framerate, video_source, color_format
+                participant_id,
+                framerate,
+                video_source,
+                color_format,
+                on_request_only=framerate == 0,
             )
 
     async def update_publishing(
@@ -2860,6 +2928,8 @@ class DailyTransport(BaseTransport):
 
     async def _on_call_state_updated(self, state: str):
         """Handle call state update events."""
+        if state == "left" and self._input:
+            await self._input.remove_all_video()
         await self._call_event_handler("on_call_state_updated", state)
 
     async def _on_client_connected(self, participant: Any):
@@ -2976,6 +3046,17 @@ class DailyTransport(BaseTransport):
                 id, "microphone", self._client.in_sample_rate
             )
 
+        # Capture the configured video sources before the event handlers run, so
+        # a handler that captures a source itself takes precedence.
+        if self._input:
+            for video_source, source_params in self._params.video_in_sources.items():
+                await self._input.capture_participant_video(
+                    id,
+                    source_params.framerate,
+                    video_source,
+                    on_request_only=source_params.on_request_only,
+                )
+
         if not self._other_participant_has_joined:
             self._other_participant_has_joined = True
             await self._call_event_handler("on_first_participant_joined", participant)
@@ -2990,6 +3071,8 @@ class DailyTransport(BaseTransport):
         """Handle participant left events."""
         id = participant["id"]
         logger.info(f"Participant left {id}")
+        if self._input:
+            await self._input.remove_participant_video(id)
         await self._call_event_handler("on_participant_left", participant, reason)
         # Also call on_client_disconnected for compatibility with other transports
         await self._call_event_handler("on_client_disconnected", participant)
@@ -2997,6 +3080,8 @@ class DailyTransport(BaseTransport):
     async def _on_participant_updated(self, participant):
         """Handle participant updated events."""
         logger.trace(f"{self} participant updated: {participant}")
+        if self._input:
+            await self._input.update_participant_video(participant)
         await self._call_event_handler("on_participant_updated", participant)
 
     async def _on_transcription_message(self, message: Mapping[str, Any]) -> None:

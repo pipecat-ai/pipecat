@@ -17,6 +17,9 @@ from pipecat.runner.types import (
 from pipecat.runner.utils import (
     _maybe_apply_daily_dialin,
     create_transport,
+    get_transport_client_id,
+    maybe_capture_participant_camera,
+    maybe_capture_participant_screen,
     parse_telephony_websocket,
 )
 
@@ -310,3 +313,26 @@ class TestMaybeApplyDailyDialin(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestGetTransportClientId(unittest.TestCase):
+    def test_is_deprecated_and_asks_the_transport(self):
+        transport = MagicMock()
+        transport.get_client_id.return_value = "User-1234"
+
+        with self.assertWarns(DeprecationWarning):
+            client_id = get_transport_client_id(transport, {"id": "User-1234"})
+
+        self.assertEqual(client_id, "User-1234")
+        transport.get_client_id.assert_called_once_with({"id": "User-1234"})
+
+
+class TestMaybeCaptureParticipantVideo(unittest.IsolatedAsyncioTestCase):
+    async def test_is_deprecated(self):
+        class OtherTransport:
+            pass
+
+        with self.assertWarns(DeprecationWarning):
+            await maybe_capture_participant_camera(OtherTransport(), {"id": "User-1234"})
+        with self.assertWarns(DeprecationWarning):
+            await maybe_capture_participant_screen(OtherTransport(), {"id": "User-1234"})

@@ -32,6 +32,8 @@ from pipecat.frames.frames import (
     OutputTransportMessageUrgentFrame,
     StartFrame,
     SystemFrame,
+    UserFileRawFrame,
+    UserImageRawFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.frameworks.rtvi.frames import (
@@ -45,6 +47,7 @@ from pipecat.services.llm_service import (
     FunctionCallParams,  # TODO(aleix): we shouldn't import `services` from `processors`
 )
 from pipecat.transports.base_transport import BaseTransport
+from pipecat.utils.deprecation import warn_deprecated
 
 
 class RTVIProcessor(FrameProcessor):
@@ -74,7 +77,6 @@ class RTVIProcessor(FrameProcessor):
                     :class:`InputTransportStartAudioStreamingFrame`) pushed
                     downstream. For client-ready audio gating, set
                     ``audio_in_stream_on_start=False`` on the transport params.
-
             **kwargs: Additional arguments passed to parent class.
         """
         super().__init__(**kwargs)
@@ -90,13 +92,11 @@ class RTVIProcessor(FrameProcessor):
         self._message_task: asyncio.Task | None = None
 
         if transport is not None:
-            import warnings
-
-            warnings.warn(
-                "Passing 'transport' to RTVIProcessor is deprecated since 1.4.0 and is "
-                "ignored. Audio input and audio-streaming start are driven by frames; for "
-                "client-ready audio gating set audio_in_stream_on_start=False on the transport.",
-                DeprecationWarning,
+            warn_deprecated(
+                "`RTVIProcessor(transport=...)` is deprecated since 1.4.0 and will be removed "
+                "in 2.0.0. No replacement. The argument is ignored: audio input and "
+                "audio-streaming start are driven by frames. For client-ready audio gating, "
+                "set `audio_in_stream_on_start=False` on the transport.",
                 stacklevel=2,
             )
 
@@ -196,12 +196,10 @@ class RTVIProcessor(FrameProcessor):
             Configure reporting level via ``RTVIObserverParams.function_call_report_level``.
             Will be removed in 2.0.0.
         """
-        import warnings
-
-        warnings.warn(
-            "handle_function_call is deprecated. Function call events are now "
-            "automatically sent by RTVIObserver using llm-function-call-in-progress.",
-            DeprecationWarning,
+        warn_deprecated(
+            "`RTVIProcessor.handle_function_call` is deprecated since 0.0.102 and will be "
+            "removed in 2.0.0. Use `RTVIObserver` instead. It sends function call events as "
+            "`llm-function-call-in-progress`.",
             stacklevel=2,
         )
         fn = RTVI.LLMFunctionCallMessageData(
@@ -364,6 +362,9 @@ class RTVIProcessor(FrameProcessor):
                 case "send-text":
                     data = RTVI.SendTextData.model_validate(message.data)
                     await self._handle_send_text(data)
+                case "send-file":
+                    data = RTVI.SendFileData.model_validate(message.data)
+                    await self._handle_send_file(data, message.id)
                 case "raw-audio" | "raw-audio-batch":
                     await self._handle_audio_buffer(message.data)
                 case "dtmf":
@@ -371,6 +372,7 @@ class RTVIProcessor(FrameProcessor):
                     await self._handle_dtmf(data)
 
                 case _:
+                    logger.warning(f"Unsupported RTVI message type: {message.type}")
                     await self._send_error_response(message.id, f"Unsupported type {message.type}")
 
         except ValidationError as e:
@@ -493,6 +495,80 @@ class RTVIProcessor(FrameProcessor):
             output_frame = LLMConfigureOutputFrame(skip_tts=cur_llm_skip_tts)
             await self.push_frame(output_frame)
 
+    async def _handle_send_file(self, data: RTVI.SendFileData, message_id: str):
+        """Handle a send-file message from the client.
+
+        Validation and framing only: a URL source is passed through unresolved,
+        and whether the LLM provider fetches it itself or the LLM service's
+        :class:`~pipecat.utils.file_resolver.FileResolver` downloads it is
+        decided at completion time.
+        """
+        file = data.file
+        opts = data.options if data.options is not None else RTVI.SendFileOptions()
+
+        logger.debug(f"Handling file from RTVI: format={file.format}, type={file.source.type}")
+
+        source: str
+        source_type: RTVI.RTVIFileSourceType
+        match file.source:
+            case RTVI.FileBytes() as fs:
+                # `bytes` is raw base64, but tolerate clients that send a full data URL.
+                if fs.bytes.startswith("data:"):
+                    source = fs.bytes
+                else:
+                    source = f"data:{file.format};base64,{fs.bytes}"
+                source_type = "bytes"
+            case RTVI.FileUrl() as fs:
+                source = fs.url
+                source_type = "url"
+            case _:
+                logger.warning(f"Unsupported file source type: {file.source.type}")
+                await self._send_error_response(
+                    message_id, f"Unsupported file source type: {file.source.type}"
+                )
+                return
+
+        if file.format.startswith("image/") and source_type == "bytes":
+            size = (
+                (file.source.width or 0, file.source.height or 0)
+                if isinstance(file.source, RTVI.FileBytes)
+                else (0, 0)
+            )
+            image_bytes = await asyncio.to_thread(base64.b64decode, source.split("base64,", 1)[1])
+            file_frame = UserImageRawFrame(
+                text=data.content,
+                image=image_bytes,
+                size=size,
+                format=file.format,
+                append_to_context=True,
+                run_llm=opts.run_immediately,
+            )
+        else:
+            file_frame = UserFileRawFrame(
+                text=data.content,
+                file=source,
+                type=source_type,
+                filename=file.name,
+                format=file.format,
+                custom_options=opts.custom_options,
+                append_to_context=True,
+                run_llm=opts.run_immediately,
+            )
+
+        if opts.run_immediately:
+            await self.interrupt_bot()
+
+        cur_llm_skip_tts = self._llm_skip_tts
+        should_skip_tts = not opts.audio_response
+        toggle_skip_tts = cur_llm_skip_tts != should_skip_tts
+        if toggle_skip_tts:
+            output_frame = LLMConfigureOutputFrame(skip_tts=should_skip_tts)
+            await self.push_frame(output_frame)
+        await self.push_frame(file_frame)
+        if toggle_skip_tts:
+            output_frame = LLMConfigureOutputFrame(skip_tts=cur_llm_skip_tts)
+            await self.push_frame(output_frame)
+
     async def _handle_client_message(self, msg_id: str, data: RTVI.RawClientMessageData):
         """Handle a client message frame."""
         # Create a RTVIClientMessageFrame to push the message
@@ -539,7 +615,11 @@ class RTVIProcessor(FrameProcessor):
             version = RTVI.PROTOCOL_VERSION
         message = RTVI.BotReady(
             id=self._client_ready_id,
-            data=RTVI.BotReadyData(version=version, about=about),
+            data=RTVI.BotReadyData(
+                version=version,
+                about=about,
+                capabilities=self.pipeline_worker.capabilities,
+            ),
         )
         await self.push_transport_message(message)
 

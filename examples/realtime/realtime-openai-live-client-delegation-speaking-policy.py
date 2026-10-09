@@ -4,31 +4,37 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""OpenAI Live (gpt-live-1) where the backend decides which updates are spoken.
+"""OpenAI Live (gpt-live-1) with an app deciding what the user hears from its backend.
 
-Rebooking a cancelled flight takes the backend three tool calls, seconds
-apart, each needing the last one's answer. It works through them in unmarked
-messages and marks the two the user is waiting to hear: that the flight is
-gone and it is looking for another, then the seat it found. A caller that
-spoke every update would put the backend's whole working-out through the live
-model's voice.
+A ``BackendLLMWorker``'s model decides which of what it writes the user hears:
+it speaks up for a result, a question it cannot proceed without, and news the
+user should have now, and works through the steps in between in silence. An
+app has two levers over that.
 
-To hear it, ask for something like "my flight UA482 this morning — can you
-check it, and get me on something else if it's not running?" Any flight
-number does: the tools report that one cancelled whatever you give them.
+What must be said, a tool says itself, with ``send_output``. ``rebook_flight``
+tells the user the new flight, seat and confirmation code as the booking
+system gave them: spoken whatever the model would have chosen, and in no one's
+paraphrase. Its result says the user has been told.
 
-A marked message is relayed; an unmarked one becomes thinking context, which
-the live model is not asked to say but may still work into what it says.
+The backend's prompt shapes the model's judgment, in plain words. The last
+paragraph of ``BACKEND_INSTRUCTIONS`` says the booking system announces a
+booking itself, so the model never repeats it and adds only what the user
+still needs to know, in a sentence or nothing. The model still speaks up on
+its own for news, as when it finds the flight cancelled: the prompt steers
+its judgment rather than replacing it.
 
-``transform_output`` reads that marker and sets ``prefers_spoken``. A backend
-can say the same thing by calling a tool to talk to the user; a marker
-convention needs no extra plumbing, and ``prefers_spoken`` is what reaches the
-live model either way.
+``transform_output`` is the third lever, for code that should see every
+output the model produces: it can drop one, rewrite it, or change whether it
+is spoken. Here it only logs each one with its flag.
+
+To hear it, ask for something that takes the backend several steps, like "my
+flight UA482 this morning — can you check it, and get me on something else if
+it's not running?" Any flight number does: the tools report that one cancelled
+whatever you give them.
 """
 
 import asyncio
 import os
-from dataclasses import replace
 
 from dotenv import load_dotenv
 from loguru import logger
@@ -50,14 +56,12 @@ from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.live.llm import OpenAILiveLLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.livekit.transport import LiveKitParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 from pipecat.workers.llm import BackendLLMWorker, BackendOutput
 from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
-
-#: Prefix the backend puts on anything it wants the user to hear.
-SPEAK_MARKER = ">>"
 
 #: What to say to set the backend's three-step job going.
 SUGGESTED_REQUEST = (
@@ -75,42 +79,33 @@ user's flights or bookings — checking one, changing one, finding another. The
 backend reads the conversation, so hand off as soon as you know the request is
 for it.
 
-The backend chooses what the user should hear and sends it to you as it
-works; relay those updates as they arrive. Everything else it does reaches
-you as context: keep it to yourself, and draw on it only if the user asks
-what is happening.
+The backend speaks up when it has something for the user; relay that.
+Everything else it does reaches you as context: keep it to yourself, and draw
+on it only if the user asks what is happening.
 
 ## Interruptions
 Stop speaking when the user interrupts and listen to the new request."""
 
-BACKEND_INSTRUCTIONS = f"""You are the backend of a voice assistant. Each message you receive
-is the recent voice conversation between the user and the assistant, as a
-transcript. Work out what is being asked from it and answer that. The
-transcript may contain transcription errors; use the most likely intent.
+BACKEND_INSTRUCTIONS = """You look after the user's flights and bookings: checking a flight,
+finding another, moving a booking. The conversation you are sent may contain
+transcription errors; use the most likely intent.
 
-You decide what the user hears. Begin a message with {SPEAK_MARKER} and the
-whole of it is said to them; write anything else and the whole message stays a
-note to yourself. Speak up when you have something worth hearing — the
-verified result, or a word about what is taking time — and keep a spoken
-message to one or two sentences. Work out loud as much as you like in the
-messages you leave unmarked.
+See a request through. When one takes several steps, as rebooking does (check
+the flight, find what else flies the route, book a seat on the earliest flight
+that has them), carry on to the end rather than coming back with a menu. Never
+claim an action completed without a tool result confirming it.
 
-Rebooking runs in steps: check the flight, find what else flies that route,
-then book a seat on the earliest one that has them. Each step needs the one
-before it, and the user has asked you to see it through, so carry on to the
-booking rather than coming back with a menu. Say something when the user
-would otherwise be waiting with no news — when you learn something that
-changes their plans, and when the job is done. Never claim an action
-completed without a tool result confirming it."""
+The booking system tells the user itself when a booking goes through, with
+the flight, seat and confirmation code, so never repeat those; once it has,
+add only what they still need to know, in a sentence, or nothing. If a job
+ends without a booking, tell them once where they stand."""
 
 
-async def transform_output(output: BackendOutput) -> BackendOutput:
-    """Let the backend's own marker decide what reaches the user."""
-    # `prefers_spoken` is one flag on one output, and an output is a whole message
-    # the backend wrote, so the marker opens the message it applies to.
-    if output.text.startswith(SPEAK_MARKER):
-        return replace(output, text=output.text[len(SPEAK_MARKER) :].lstrip(), prefers_spoken=True)
-    return replace(output, prefers_spoken=False)
+async def log_output(output: BackendOutput) -> BackendOutput:
+    """Log each output with the flag the model's choice gave it, and send it on as is."""
+    kind = "thought" if output.is_thought else "spoken" if output.prefers_spoken else "note"
+    logger.info(f"Backend ({kind}): {output.text}")
+    return output
 
 
 # The three steps of a rebooking, each slow enough that the user notices the
@@ -161,9 +156,17 @@ async def rebook_flight(params: FunctionCallParams, flight_number: str):
         flight_number: The flight to move the booking to, e.g. "UA716".
     """
     await asyncio.sleep(3)
-    await params.result_callback(
-        {"flight": flight_number, "status": "confirmed", "seat": "14C", "confirmation": "X7K2QP"}
+    booking = {"flight": flight_number, "departs": "16:15", "seat": "14C", "confirmation": "X7K2QP"}
+    # The confirmation is told to the user by the tool itself, as the booking
+    # system gave it, whatever the model would have chosen to say.
+    told = (
+        f"You're booked on {booking['flight']}, departing at {booking['departs']}, "
+        f"seat {booking['seat']}. Your confirmation code is {booking['confirmation']}."
     )
+    backend = params.pipeline_worker
+    assert isinstance(backend, BackendLLMWorker)
+    await backend.send_output(BackendOutput(text=told))
+    await params.result_callback({**booking, "status": "confirmed", "user_told": told})
 
 
 # We use lambdas to defer transport parameter creation until the transport
@@ -174,6 +177,10 @@ transport_params = {
         audio_out_enabled=True,
     ),
     "daily": lambda: DailyParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
+    "livekit": lambda: LiveKitParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
     ),
@@ -200,7 +207,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             ),
         ),
         context=LLMContext(tools=[check_flight_status, find_alternative_flights, rebook_flight]),
-        transform_output=transform_output,
+        transform_output=log_output,
     )
 
     llm = OpenAILiveLLMService(
@@ -253,11 +260,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_disconnected(transport, client):
         logger.info("Client disconnected")
         await runner.cancel()
-
-    @backend.assistant_aggregator.event_handler("on_assistant_turn_stopped")
-    async def on_backend_turn_stopped(aggregator, message: AssistantTurnStoppedMessage):
-        spoken = "spoken" if message.content.startswith(SPEAK_MARKER) else "silent"
-        logger.info(f"Backend ({spoken}): {message.content}")
 
     @assistant_aggregator.event_handler("on_assistant_turn_stopped")
     async def on_assistant_turn_stopped(aggregator, message: AssistantTurnStoppedMessage):

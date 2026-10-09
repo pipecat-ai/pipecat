@@ -34,7 +34,7 @@ from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.metrics.metrics import MetricsData
 from pipecat.services.settings import LLMSettings, ServiceSettings, STTSettings, TTSSettings
 from pipecat.transcriptions.language import Language
-from pipecat.utils.deprecation import deprecated, warn_deprecated_read
+from pipecat.utils.deprecation import deprecated, warn_deprecated
 from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.text.base_text_aggregator import AggregationType
 from pipecat.utils.time import nanoseconds_to_str
@@ -205,6 +205,26 @@ class ImageRawFrame:
     image: bytes
     size: tuple[int, int]
     format: str | None
+
+
+FileSourceType = Literal["bytes", "url"]
+
+
+@dataclass
+class FileRawFrame:
+    """A frame containing a raw file.
+
+    Parameters:
+        file: A base64 data URL, or a URL string, depending on ``type``.
+        type: Type of the file ('bytes' or 'url').
+        filename: Optional name of the file.
+        format: File format (expected in Mime Format).
+    """
+
+    file: str
+    type: FileSourceType
+    filename: str | None
+    format: str
 
 
 #
@@ -827,11 +847,13 @@ class FunctionCallResultProperties:
         is_final: Whether this is the final result for the function call. When
             ``False`` the result is treated as an intermediate update. Defaults to ``True``.
             Only meaningful for async function calls (``cancel_on_interruption=False``).
-            Note: realtime LLM services do not support streamed intermediate
-            results; they deliver only the final result to the provider. An
-            intermediate result reported to a realtime service is dropped
-            and an error is raised. Use a non-realtime LLM service if your
-            tool needs to stream intermediate results.
+            A speech-to-speech service takes one output per call, so it puts an
+            intermediate result to its model some other way — a conversation
+            item, a text event, a response that keeps the call open — and
+            ``run_llm`` says whether the model should answer it or just take it
+            in. A service that can't do that at all says so with
+            ``accepts_intermediate_function_call_results`` and drops
+            intermediate results with a warning.
     """
 
     run_llm: bool | None = None
@@ -893,14 +915,13 @@ class TTSSpeakFrame(DataFrame):
         # Coerce it to the new default of True and warn, so existing code keeps
         # working while surfacing the change.
         if self.append_to_context is None:
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    "TTSSpeakFrame.append_to_context=None is deprecated and has been "
-                    "converted to True, the new default.",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
+            warn_deprecated(
+                "`TTSSpeakFrame(append_to_context=None)` is deprecated since 1.4.0 and will "
+                "be removed in 2.0.0. Use `append_to_context=True`, the default, instead. "
+                "`None` is treated as `True`.",
+                # The caller of the generated __init__ that calls __post_init__.
+                stacklevel=3,
+            )
             self.append_to_context = True
 
 
@@ -1065,10 +1086,10 @@ class StartFrame(SystemFrame):
         if name in _START_FRAME_DEPRECATED_FIELDS:
             value = object.__getattribute__(self, name)
             if value is not None:
-                warn_deprecated_read(
-                    f"`StartFrame.{name}` is deprecated since 1.8.0, "
-                    f"read `{name}` in `FrameProcessorSetup.setup()` instead. "
-                    "Will be removed in 2.0.0."
+                warn_deprecated(
+                    f"`StartFrame.{name}` is deprecated since 1.8.0 and will be removed in "
+                    f"2.0.0. Use `FrameProcessorSetup.{name}` instead.",
+                    stacklevel=2,
                 )
             return value
         return object.__getattribute__(self, name)
@@ -1132,20 +1153,18 @@ class ErrorFrame(SystemFrame):
         # Only a set flag carries behavior worth warning about, and
         # `FatalErrorFrame` already warns about itself.
         if self.fatal and not isinstance(self, FatalErrorFrame):
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    "`ErrorFrame.fatal` is deprecated since 1.8.0 and will be removed in "
-                    "2.0.0. If the error leaves its originating processor unable to do its "
-                    "job, report it with `push_error(..., force_treat_as_permanent=True)`: "
-                    "that marks the processor unusable, and the PipelineWorker acts on it "
-                    "according to its `processor_unusable_policy` "
-                    "(`ProcessorUnusablePolicy.CANCEL` does what `fatal=True` did). "
-                    "Otherwise, push this ErrorFrame without `fatal` and follow it with an "
-                    "`EndWorkerFrame` to end the pipeline.",
-                    DeprecationWarning,
-                    stacklevel=3,
-                )
+            warn_deprecated(
+                "`ErrorFrame.fatal` is deprecated since 1.8.0 and will be removed in "
+                "2.0.0. Use `push_error(..., force_treat_as_permanent=True)` or an "
+                "`EndWorkerFrame` instead. If the error leaves its originating processor "
+                "unable to do its job, `force_treat_as_permanent=True` marks the processor "
+                "unusable, and the PipelineWorker acts on it "
+                "according to its `processor_unusable_policy` "
+                "(`ProcessorUnusablePolicy.CANCEL` does what `fatal=True` did). "
+                "Otherwise, push this ErrorFrame without `fatal` and follow it with an "
+                "`EndWorkerFrame` to end the pipeline.",
+                stacklevel=3,
+            )
 
     def __str__(self):
         category = (
@@ -1469,6 +1488,99 @@ class FunctionCallsStartedFrame(SystemFrame):
 
 
 @dataclass
+class ExternalFunctionCall:
+    """A function call made outside this pipeline, as announced to it.
+
+    What :class:`ExternalFunctionCallsStartedFrame` carries, one per call.
+
+    Parameters:
+        function_name: Name of the function called.
+        tool_call_id: Unique identifier of the call.
+    """
+
+    function_name: str
+    tool_call_id: str
+
+
+@dataclass
+class ExternalFunctionCallsStartedFrame(SystemFrame):
+    """Function calls were made outside this pipeline: ``FunctionCallsStartedFrame``'s counterpart.
+
+    Nothing in the pipeline acts on one; observers report it as they report
+    the pipeline's own. The calls ran elsewhere, e.g. in a backend worker's
+    pipeline on behalf of a tool here, and belong to that pipeline's
+    conversation, not this one. Like its counterpart it carries every call
+    announced together, which may be one. Each call's later phases come as
+    ``ExternalFunctionCallInProgressFrame``, ``ExternalFunctionCallResultFrame``
+    and ``ExternalFunctionCallCancelFrame``.
+
+    Parameters:
+        function_calls: The calls made.
+    """
+
+    function_calls: Sequence[ExternalFunctionCall]
+
+
+@dataclass
+class ExternalFunctionCallInProgressFrame(SystemFrame):
+    """An external function call is running: ``FunctionCallInProgressFrame``'s counterpart.
+
+    Nothing in the pipeline acts on one; observers report it as they report
+    the pipeline's own. The call ran elsewhere, e.g. in a backend worker's
+    pipeline on behalf of a tool here, and belongs to that pipeline's
+    conversation, not this one.
+
+    Parameters:
+        function_name: Name of the function called.
+        tool_call_id: Unique identifier of the call.
+        arguments: Arguments passed to the function.
+    """
+
+    function_name: str
+    tool_call_id: str
+    arguments: Any
+
+
+@dataclass
+class ExternalFunctionCallResultFrame(SystemFrame):
+    """An external function call produced a result: ``FunctionCallResultFrame``'s counterpart.
+
+    Nothing in the pipeline acts on one; observers report it as they report
+    the pipeline's own.
+
+    Parameters:
+        function_name: Name of the function called.
+        tool_call_id: Unique identifier of the call.
+        arguments: Arguments passed to the function.
+        result: The result.
+        is_final: Whether this result completes the call, or is one of a stream
+            of intermediate results before the final one.
+    """
+
+    function_name: str
+    tool_call_id: str
+    arguments: Any
+    result: Any
+    is_final: bool = True
+
+
+@dataclass
+class ExternalFunctionCallCancelFrame(SystemFrame):
+    """An external function call was cancelled: ``FunctionCallCancelFrame``'s counterpart.
+
+    Nothing in the pipeline acts on one; observers report it as they report
+    the pipeline's own.
+
+    Parameters:
+        function_name: Name of the function called.
+        tool_call_id: Unique identifier of the call.
+    """
+
+    function_name: str
+    tool_call_id: str
+
+
+@dataclass
 class FunctionCallCancelFrame(SystemFrame):
     """Frame signaling that a function call has been cancelled.
 
@@ -1587,6 +1699,18 @@ class InputImageRawFrame(SystemFrame, ImageRawFrame):
 
 
 @dataclass
+class InputFileRawFrame(SystemFrame, FileRawFrame):
+    """Raw file input frame.
+
+    A file usually coming from RTVI.
+    """
+
+    def __str__(self):
+        pts = format_pts(self.pts)
+        return f"{self.name}(pts: {pts}, type: {self.type})"
+
+
+@dataclass
 class InputTextRawFrame(SystemFrame, TextFrame):
     """Raw text input frame from transport.
 
@@ -1628,16 +1752,48 @@ class UserImageRawFrame(InputImageRawFrame):
         text: An optional text associated to this image.
         append_to_context: Whether the requested image should be appended to the LLM context.
         request: The original image request frame if this is a response.
+        run_llm: Whether appending this image should trigger an LLM completion.
+            None (the default) preserves the old unconditional-trigger behavior;
+            only an explicit False suppresses it.
     """
 
     user_id: str = ""
     text: str | None = None
     append_to_context: bool | None = None
     request: UserImageRequestFrame | None = None
+    run_llm: bool | None = None
 
     def __str__(self):
         pts = format_pts(self.pts)
         return f"{self.name}(pts: {pts}, user: {self.user_id}, source: {self.transport_source}, size: {self.size}, format: {self.format}, text: {self.text}, append_to_context: {self.append_to_context})"
+
+
+@dataclass
+class UserFileRawFrame(InputFileRawFrame):
+    """Raw file input frame associated with a specific user.
+
+    A file associated to a user.
+
+    Parameters:
+        user_id: Identifier of the user who provided this file.
+        text: Text associated to this file.
+        append_to_context: Whether the requested file should be appended to the LLM context.
+        custom_options: Dictionary of custom llm-specific options to be used when processing
+            this file, like 'detail' in openAI or 'citations' in Bedrock.
+        run_llm: Whether appending this file should trigger an LLM completion.
+            None (the default) preserves the old unconditional-trigger behavior;
+            only an explicit False suppresses it.
+    """
+
+    user_id: str = ""
+    text: str = ""
+    append_to_context: bool | None = None
+    custom_options: dict | None = None
+    run_llm: bool | None = None
+
+    def __str__(self):
+        pts = format_pts(self.pts)
+        return f"{self.name}(pts: {pts}, user: {self.user_id}, format: {self.format}, type: {self.type}, text: {self.text}, append_to_context: {self.append_to_context})"
 
 
 @dataclass
@@ -2541,6 +2697,44 @@ class MixerEnableFrame(MixerControlFrame):
     """
 
     enable: bool
+
+
+@dataclass
+class VolumeFrame(ControlFrame):
+    """Frame that sets the volume of the output transport's audio.
+
+    The volume holds until the next ``VolumeFrame``, and starts at the
+    transport's ``audio_out_volume``. Audio plays at the volume times the gain
+    set by :class:`VolumeGainFrame`. The frame takes effect in order with the
+    audio before it, and an interruption doesn't drop it.
+
+    Parameters:
+        volume: The volume, as a multiplier on the audio's samples: 1.0 leaves
+            it unchanged, 0.5 halves it.
+    """
+
+    volume: float
+    interruptible: bool = field(default=False, init=False)
+
+
+@dataclass
+class VolumeGainFrame(ControlFrame):
+    """Frame that sets a gain on the output transport's volume.
+
+    A gain adjusts the volume for some audio and is reset afterwards, for
+    example ``VolumeGainFrame(0.5)`` before a ``TTSSpeakFrame`` and
+    ``VolumeGainFrame(1.0)`` after it, which plays that utterance at half the
+    volume without changing the volume set by :class:`VolumeFrame`. The frame
+    takes effect in order with the audio before it, and an interruption
+    doesn't drop it.
+
+    Parameters:
+        gain: The gain, as a multiplier on the volume: 1.0 leaves it
+            unchanged, 0.5 halves it.
+    """
+
+    gain: float
+    interruptible: bool = field(default=False, init=False)
 
 
 @dataclass

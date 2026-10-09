@@ -15,7 +15,6 @@ import asyncio
 import json
 import os
 import time
-import warnings
 from dataclasses import dataclass, field
 
 from pipecat.utils.tracing.service_decorators import traced_stt
@@ -41,7 +40,7 @@ from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import GOOGLE_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language, resolve_language
-from pipecat.utils.deprecation import deprecated
+from pipecat.utils.deprecation import deprecated, warn_deprecated
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 
@@ -833,14 +832,12 @@ class GoogleSTTService(STTService):
 
         # Warn on deprecated language_codes usage
         if is_given(delta.language_codes):
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    "self.Settings.language_codes is deprecated. "
-                    "Use self.Settings.languages (List[Language]) instead.",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
+            warn_deprecated(
+                "`GoogleSTTService.Settings.language_codes` is deprecated since 0.0.104 and "
+                "will be removed in 2.0.0. Use `GoogleSTTService.Settings.languages` "
+                "(`list[Language]`) instead.",
+                stacklevel=2,
+            )
 
         if is_given(delta.adaptation) and delta.adaptation is not None:
             delta.adaptation = _normalize_speech_adaptation(delta.adaptation)

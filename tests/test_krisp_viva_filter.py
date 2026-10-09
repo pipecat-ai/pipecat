@@ -127,6 +127,14 @@ class TestKrispVivaFilter(unittest.IsolatedAsyncioTestCase):
             self.mock_sdk_manager.acquire.assert_not_called()
             self.assertEqual(filter_instance._model_path, self.model_path)
 
+    async def test_initialization_with_deprecated_env_variable(self):
+        """Test that the KRISP_VIVA_MODEL_PATH fallback works and warns."""
+        with patch.dict(os.environ, {"KRISP_VIVA_MODEL_PATH": self.model_path}, clear=True):
+            with self.assertWarnsRegex(DeprecationWarning, "KRISP_VIVA_MODEL_PATH"):
+                filter_instance = KrispVivaFilter()
+
+            self.assertEqual(filter_instance._model_path, self.model_path)
+
     async def test_initialization_without_model_path(self):
         """Test filter initialization fails without model path."""
         with patch.dict(os.environ, {}, clear=True):

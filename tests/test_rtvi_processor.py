@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import base64
 import unittest
 import warnings
 from unittest.mock import AsyncMock, Mock
@@ -16,6 +17,8 @@ from pipecat.frames.frames import (
     InputAudioRawFrame,
     InputDTMFFrame,
     InputTransportStartAudioStreamingFrame,
+    UserFileRawFrame,
+    UserImageRawFrame,
 )
 from pipecat.processors.frameworks.rtvi.processor import RTVIProcessor
 
@@ -224,6 +227,163 @@ class TestRTVIDTMF(unittest.IsolatedAsyncioTestCase):
     def test_dtmf_input_data_rejects_legacy_button_field(self):
         with self.assertRaises(ValidationError):
             RTVI.DTMFInputData.model_validate({"button": "1"})
+
+
+class TestRTVISendFile(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.processor = RTVIProcessor()
+        self.processor.push_frame = AsyncMock()
+        self.processor._send_error_response = AsyncMock()
+        self.processor.interrupt_bot = AsyncMock()
+
+    async def asyncTearDown(self):
+        await self.processor.cleanup()
+
+    def _make_send_file_data(
+        self, source, *, fmt="application/pdf", name=None, content="", options=None
+    ):
+        return RTVI.SendFileData(
+            content=content,
+            file=RTVI.File(format=fmt, name=name, source=source),
+            options=options or RTVI.SendFileOptions(run_immediately=False, audio_response=True),
+        )
+
+    def _pushed_frames(self):
+        return [c.args[0] for c in self.processor.push_frame.call_args_list]
+
+    # -- FileBytes ------------------------------------------------------------
+
+    async def test_file_bytes_pdf_pushes_user_file_frame(self):
+        raw = b"%PDF-1.4 fake content"
+        b64 = base64.b64encode(raw).decode()
+        data = self._make_send_file_data(RTVI.FileBytes(bytes=b64), fmt="application/pdf")
+        await self.processor._handle_send_file(data, "msg-1")
+
+        frames = self._pushed_frames()
+        self.assertEqual(len(frames), 1)
+        self.assertIsInstance(frames[0], UserFileRawFrame)
+        self.assertEqual(frames[0].file, f"data:application/pdf;base64,{b64}")
+        self.assertEqual(frames[0].format, "application/pdf")
+
+    async def test_file_bytes_pdf_stores_filename(self):
+        raw = b"%PDF-1.4 fake content"
+        b64 = base64.b64encode(raw).decode()
+        data = self._make_send_file_data(
+            RTVI.FileBytes(bytes=b64), fmt="application/pdf", name="report.pdf"
+        )
+        await self.processor._handle_send_file(data, "msg-1")
+
+        frames = self._pushed_frames()
+        self.assertEqual(frames[0].filename, "report.pdf")
+
+    async def test_file_bytes_image_pushes_user_image_frame_with_bytes(self):
+        raw = b"\x89PNG\r\n\x1a\n fake png"
+        b64 = base64.b64encode(raw).decode()
+        data = self._make_send_file_data(RTVI.FileBytes(bytes=b64), fmt="image/png")
+        await self.processor._handle_send_file(data, "msg-1")
+
+        frames = self._pushed_frames()
+        self.assertEqual(len(frames), 1)
+        self.assertIsInstance(frames[0], UserImageRawFrame)
+        self.assertIsInstance(frames[0].image, bytes)
+        self.assertEqual(frames[0].image, raw)
+
+    # -- FileBytes carrying a full data URL -----------------------------------
+
+    async def test_file_bytes_data_url_not_double_wrapped(self):
+        raw = b"%PDF-1.4 fake content"
+        b64 = base64.b64encode(raw).decode()
+        data_url = f"data:application/pdf;base64,{b64}"
+        data = self._make_send_file_data(RTVI.FileBytes(bytes=data_url), fmt="application/pdf")
+        await self.processor._handle_send_file(data, "msg-1")
+
+        frames = self._pushed_frames()
+        self.assertEqual(len(frames), 1)
+        self.assertIsInstance(frames[0], UserFileRawFrame)
+        self.assertEqual(frames[0].file, data_url)
+
+    async def test_file_bytes_image_data_url_decodes_to_raw_bytes(self):
+        raw = b"\x89PNG\r\n\x1a\n fake png"
+        b64 = base64.b64encode(raw).decode()
+        data_url = f"data:image/png;base64,{b64}"
+        data = self._make_send_file_data(RTVI.FileBytes(bytes=data_url), fmt="image/png")
+        await self.processor._handle_send_file(data, "msg-1")
+
+        frames = self._pushed_frames()
+        self.assertEqual(len(frames), 1)
+        self.assertIsInstance(frames[0], UserImageRawFrame)
+        self.assertEqual(frames[0].image, raw)
+
+    # -- FileUrl (always passed through unresolved) ----------------------------
+
+    async def test_file_url_pushes_user_file_frame_with_url_source(self):
+        data = self._make_send_file_data(
+            RTVI.FileUrl(url="https://example.com/doc.pdf"),
+            fmt="application/pdf",
+        )
+        await self.processor._handle_send_file(data, "msg-1")
+
+        frames = self._pushed_frames()
+        self.assertEqual(len(frames), 1)
+        self.assertIsInstance(frames[0], UserFileRawFrame)
+        self.assertEqual(frames[0].type, "url")
+        self.assertEqual(frames[0].file, "https://example.com/doc.pdf")
+
+    async def test_file_url_image_pushes_user_file_frame_not_image_frame(self):
+        """A URL-sourced image stays a file frame; resolution happens at the LLM service."""
+        data = self._make_send_file_data(
+            RTVI.FileUrl(url="https://example.com/photo.png"),
+            fmt="image/png",
+        )
+        await self.processor._handle_send_file(data, "msg-1")
+
+        frames = self._pushed_frames()
+        self.assertEqual(len(frames), 1)
+        self.assertIsInstance(frames[0], UserFileRawFrame)
+        self.assertEqual(frames[0].type, "url")
+
+    async def test_file_url_cloud_and_storage_schemes_pass_through(self):
+        for url in (
+            "s3://my-bucket/doc.pdf",
+            "gs://my-bucket/doc.pdf",
+            "pipecat:0123456789abcdef0123456789abcdef",
+        ):
+            with self.subTest(url=url):
+                self.processor.push_frame.reset_mock()
+                data = self._make_send_file_data(RTVI.FileUrl(url=url), fmt="application/pdf")
+                await self.processor._handle_send_file(data, "msg-1")
+
+                frames = self._pushed_frames()
+                self.assertEqual(len(frames), 1)
+                self.assertIsInstance(frames[0], UserFileRawFrame)
+                self.assertEqual(frames[0].type, "url")
+                self.assertEqual(frames[0].file, url)
+
+    # -- Options ---------------------------------------------------------------
+
+    async def test_run_immediately_true_interrupts_bot(self):
+        data = self._make_send_file_data(
+            RTVI.FileUrl(url="https://example.com/doc.pdf"),
+            fmt="application/pdf",
+            options=RTVI.SendFileOptions(run_immediately=True),
+        )
+        await self.processor._handle_send_file(data, "msg-1")
+
+        self.processor.interrupt_bot.assert_called_once()
+        frames = self._pushed_frames()
+        self.assertEqual(len(frames), 1)
+        self.assertTrue(frames[0].run_llm)
+
+    async def test_run_immediately_false_does_not_interrupt_bot(self):
+        data = self._make_send_file_data(
+            RTVI.FileUrl(url="https://example.com/doc.pdf"),
+            fmt="application/pdf",
+        )
+        await self.processor._handle_send_file(data, "msg-1")
+
+        self.processor.interrupt_bot.assert_not_called()
+        frames = self._pushed_frames()
+        self.assertFalse(frames[0].run_llm)
 
 
 if __name__ == "__main__":

@@ -50,6 +50,7 @@ from pipecat.runner.types import (
     WebSocketRunnerArguments,
 )
 from pipecat.transports.base_transport import BaseTransport, TransportParams
+from pipecat.utils.deprecation import deprecated
 
 if TYPE_CHECKING:
     # Imported for type-checking only so the typed guard functions (e.g.
@@ -333,8 +334,17 @@ def _is_vonage(transport: BaseTransport) -> "TypeGuard[VonageVideoConnectorTrans
     return _transport_is(transport, "VonageVideoConnectorTransport")
 
 
+@deprecated(
+    "`get_transport_client_id` is deprecated since 1.13.0 and will be removed in 2.0.0. "
+    "Use `BaseTransport.get_client_id()` instead."
+)
 def get_transport_client_id(transport: BaseTransport, client: Any) -> str:
     """Get client identifier from transport-specific client object.
+
+    .. deprecated:: 1.13.0
+        Use :meth:`~pipecat.transports.base_transport.BaseTransport.get_client_id`
+        instead: ``transport.get_client_id(client)``.
+        Will be removed in 2.0.0.
 
     Args:
         transport: The transport instance.
@@ -343,21 +353,27 @@ def get_transport_client_id(transport: BaseTransport, client: Any) -> str:
     Returns:
         Client identifier string, empty if transport not supported.
     """
-    if _is_smallwebrtc(transport):
-        return client.pc_id
-    if _is_daily(transport):
-        return client["id"]
-    if _is_vonage(transport):
-        return client["streamId"]
-
-    logger.warning(f"Unable to get client id from unsupported transport {type(transport)}")
-    return ""
+    return transport.get_client_id(client)
 
 
+@deprecated(
+    "`maybe_capture_participant_camera` is deprecated since 1.13.0 and will be removed in "
+    "2.0.0. Use `TransportParams.video_in_sources` or "
+    "`BaseTransport.capture_participant_video()` instead."
+)
 async def maybe_capture_participant_camera(
     transport: BaseTransport, client: Any, framerate: int = 0
 ):
     """Capture participant camera video if transport supports it.
+
+    .. deprecated:: 1.13.0
+        Use :attr:`~pipecat.transports.base_transport.TransportParams.video_in_sources`
+        or :meth:`~pipecat.transports.base_transport.BaseTransport.capture_participant_video`
+        instead: the first captures the listed sources as each user connects, the
+        second captures a source on demand. On Vonage, subscribe to video with
+        ``video_in_auto_subscribe`` or
+        ``VonageVideoConnectorTransport.subscribe_to_stream()``.
+        Will be removed in 2.0.0.
 
     Args:
         transport: The transport instance.
@@ -366,10 +382,10 @@ async def maybe_capture_participant_camera(
     """
     if _is_daily(transport):
         await transport.capture_participant_video(
-            client["id"], framerate=framerate, video_source="camera"
+            client["id"], framerate=framerate, video_source="camera", on_request_only=framerate == 0
         )
     elif _is_smallwebrtc(transport):
-        await transport.capture_participant_video(video_source="camera")
+        await transport.capture_participant_video(client.pc_id, None, "camera")
     elif _is_vonage(transport):
         # Imported in-branch (not at module scope) to avoid a hard Vonage dependency;
         # we only get here when the transport is Vonage, so the extra is installed.
@@ -385,10 +401,22 @@ async def maybe_capture_participant_camera(
         )
 
 
+@deprecated(
+    "`maybe_capture_participant_screen` is deprecated since 1.13.0 and will be removed in "
+    "2.0.0. Use `TransportParams.video_in_sources` or "
+    "`BaseTransport.capture_participant_video()` instead."
+)
 async def maybe_capture_participant_screen(
     transport: BaseTransport, client: Any, framerate: int = 0
 ):
     """Capture participant screen video if transport supports it.
+
+    .. deprecated:: 1.13.0
+        Use :attr:`~pipecat.transports.base_transport.TransportParams.video_in_sources`
+        or :meth:`~pipecat.transports.base_transport.BaseTransport.capture_participant_video`
+        instead: the first captures the listed sources as each user connects, the
+        second captures a source on demand.
+        Will be removed in 2.0.0.
 
     Args:
         transport: The transport instance.
@@ -397,10 +425,13 @@ async def maybe_capture_participant_screen(
     """
     if _is_daily(transport):
         await transport.capture_participant_video(
-            client["id"], framerate=framerate, video_source="screenVideo"
+            client["id"],
+            framerate=framerate,
+            video_source="screenVideo",
+            on_request_only=framerate == 0,
         )
     elif _is_smallwebrtc(transport):
-        await transport.capture_participant_video(video_source="screenVideo")
+        await transport.capture_participant_video(client.pc_id, None, "screenVideo")
 
 
 def _smallwebrtc_sdp_cleanup_ice_candidates(text: str, pattern: str) -> str:

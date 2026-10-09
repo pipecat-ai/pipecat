@@ -141,12 +141,22 @@ from pipecat.runner.types import (
     WebSocketRunnerArguments,
 )
 from pipecat.runner.vonage import configure as configure_vonage
+from pipecat.utils.file_storage import FileStorage, LocalFileStorage
 from pipecat.utils.security.allowed_origins import is_origin_allowed
 
 try:
     import uvicorn
     from dotenv import load_dotenv
-    from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request, WebSocket
+    from fastapi import (
+        BackgroundTasks,
+        FastAPI,
+        File,
+        Header,
+        HTTPException,
+        Request,
+        UploadFile,
+        WebSocket,
+    )
     from fastapi.encoders import jsonable_encoder
     from fastapi.exceptions import RequestValidationError
     from fastapi.middleware.cors import CORSMiddleware
@@ -184,6 +194,7 @@ TRANSPORT_INSTALL_HINTS = {
 PIPECAT_ROOM_EXP_HOURS = 4.0
 
 RUNNER_DOWNLOADS_FOLDER: str | None = None
+RUNNER_FILE_STORAGE: FileStorage | None = None
 RUNNER_HOST: str = "localhost"
 RUNNER_PORT: int = 7860
 
@@ -219,6 +230,38 @@ def _start_bot_session(coro) -> asyncio.Task:
     _bot_sessions.add(task)
     task.add_done_callback(_bot_sessions.discard)
     return task
+
+
+# Upload URLs saved through the session-scoped upload route, per session, so a
+# session's files can be removed when it ends.
+_SESSION_UPLOAD_URLS: dict[str, list[str]] = {}
+
+
+async def _delete_session_uploads(session_id: str):
+    """Best-effort deletion of the files uploaded through a session's upload route."""
+    file_urls = _SESSION_UPLOAD_URLS.pop(session_id, None)
+    if not file_urls or RUNNER_FILE_STORAGE is None:
+        return
+    for file_url in file_urls:
+        try:
+            await RUNNER_FILE_STORAGE.delete(file_url)
+        except Exception as e:
+            logger.warning(f"Failed to delete session upload {file_url}: {e}")
+
+
+async def _run_bot_session(coro, session_id: str, active_sessions: dict[str, Any] | None):
+    """Run a bot session, releasing its session resources when it ends.
+
+    Removes the session from `active_sessions` — closing the
+    ``/sessions/{session_id}/...`` routes for it — and deletes any files
+    uploaded through the session's upload route.
+    """
+    try:
+        await coro
+    finally:
+        if active_sessions is not None:
+            active_sessions.pop(session_id, None)
+        await _delete_session_uploads(session_id)
 
 
 def _is_module_available(module: str) -> bool:
@@ -536,7 +579,11 @@ async def _run_telephony_bot(websocket: WebSocket, args: argparse.Namespace):
     bot_module = _get_bot_module()
 
     # Just pass the WebSocket - let the bot handle parsing
-    runner_args = WebSocketRunnerArguments(websocket=websocket, session_id=str(uuid.uuid4()))
+    runner_args = WebSocketRunnerArguments(
+        websocket=websocket,
+        session_id=str(uuid.uuid4()),
+        file_storage=RUNNER_FILE_STORAGE,
+    )
     runner_args.cli_args = args
 
     await bot_module.bot(runner_args)
@@ -547,6 +594,7 @@ async def _run_websocket_bot(websocket: WebSocket, args: argparse.Namespace):
     bot_module = _get_bot_module()
 
     runner_args = WebSocketRunnerArguments(
+        file_storage=RUNNER_FILE_STORAGE,
         websocket=websocket,
         transport_type="websocket",
         session_id=str(uuid.uuid4()),
@@ -631,6 +679,10 @@ def _configure_server_app(args: argparse.Namespace):
     ws_used_tokens: set[str] = set()
 
     _setup_frontend_routes(app)
+    # Registered before the WebRTC routes so POST /sessions/{session_id}/files
+    # wins over the catch-all /sessions/{session_id}/{path:path} proxy (routes
+    # match in registration order).
+    _setup_file_uploads_routes(app, active_sessions)
     _setup_webrtc_routes(app, args, active_sessions)
     _setup_daily_routes(app, args)
     _setup_telephony_routes(app, args, ws_used_tokens)
@@ -639,6 +691,19 @@ def _configure_server_app(args: argparse.Namespace):
 
     if args.whatsapp:
         _setup_whatsapp_routes(app, args)
+
+
+def _advertised_file_upload_url(session_id: str | None = None) -> str | None:
+    """Determine the uploads route a /start response should advertise.
+
+    The uploads route a /start response should advertise, or None when
+    uploads are disabled. Returned as a path relative to the /start endpoint
+    so clients resolve it against whatever public origin they reached the
+    runner on — the runner can't know its public hostname behind a proxy.
+    """
+    if RUNNER_FILE_STORAGE is None:
+        return None
+    return f"/sessions/{session_id}/files" if session_id else "/files"
 
 
 def _setup_unified_start_route(
@@ -669,6 +734,11 @@ def _setup_unified_start_route(
 
     class StartBotResult(TypedDict, total=False):
         sessionId: str
+        # Where to POST file uploads for this session, when uploads are
+        # enabled. A path relative to the /start endpoint's origin (or an
+        # absolute URL from backends that know theirs). Omitted when uploads
+        # are disabled.
+        fileUploadUrl: str
         iceConfig: IceConfig | None
         dailyRoom: str | None
         dailyToken: str | None
@@ -704,6 +774,12 @@ def _setup_unified_start_route(
         was started with (``--ice-servers`` or ``PIPECAT_ICE_SERVERS``). When the
         runner has none, ``enableDefaultIceServers`` returns a public STUN server
         instead.
+
+        When file uploads are enabled (``-u/--uploads-folder`` or a custom
+        storage backend), ``fileUploadUrl`` in the response carries the route
+        to POST uploads to, relative to this endpoint's origin — the
+        session-scoped route for flows that register their session, the flat
+        ``/files`` route otherwise. Omitted when uploads are disabled.
         """
         try:
             request_data = await request.json()
@@ -746,6 +822,8 @@ def _setup_unified_start_route(
             result = StartBotResult(
                 sessionId=session_id,
             )
+            if upload_url := _advertised_file_upload_url(session_id):
+                result["fileUploadUrl"] = upload_url
             # Servers configured on the runner are handed to the client too, so
             # both peers negotiate against the same STUN and TURN servers. They
             # take precedence over the Google STUN fallback.
@@ -808,18 +886,30 @@ def _setup_unified_start_route(
                         token_properties=token_properties,
                     )
                     runner_args = DailyRunnerArguments(
-                        room_url=room_url, token=token, body=body, session_id=session_id
+                        file_storage=RUNNER_FILE_STORAGE,
+                        room_url=room_url,
+                        token=token,
+                        body=body,
+                        session_id=session_id,
                     )
                     result = StartBotResult(
                         dailyRoom=room_url,
                         dailyToken=token,
                         sessionId=session_id,
                     )
+                    if upload_url := _advertised_file_upload_url(session_id):
+                        result["fileUploadUrl"] = upload_url
             else:
-                runner_args = RunnerArguments(body=body, session_id=session_id)
+                runner_args = RunnerArguments(
+                    body=body, session_id=session_id, file_storage=RUNNER_FILE_STORAGE
+                )
 
             runner_args.cli_args = args
-            _start_bot_session(bot_module.bot(runner_args))
+
+            active_sessions[session_id] = body
+            _start_bot_session(
+                _run_bot_session(bot_module.bot(runner_args), session_id, active_sessions)
+            )
             return result
 
         elif transport == "livekit":
@@ -836,6 +926,7 @@ def _setup_unified_start_route(
 
             bot_module = _get_bot_module()
             runner_args = LiveKitRunnerArguments(
+                file_storage=RUNNER_FILE_STORAGE,
                 room_name=room_name,
                 url=livekit_url,
                 token=agent_token,
@@ -843,13 +934,19 @@ def _setup_unified_start_route(
                 session_id=session_id,
             )
             runner_args.cli_args = args
-            _start_bot_session(bot_module.bot(runner_args))
+            active_sessions[session_id] = body
+            _start_bot_session(
+                _run_bot_session(bot_module.bot(runner_args), session_id, active_sessions)
+            )
 
-            return StartBotResult(
+            result = StartBotResult(
                 url=livekit_url,
                 token=user_token,
                 sessionId=session_id,
             )
+            if upload_url := _advertised_file_upload_url(session_id):
+                result["fileUploadUrl"] = upload_url
+            return result
 
         elif transport in TELEPHONY_TRANSPORTS:
             # Telephony: the bot starts when the provider connects to /ws.
@@ -865,11 +962,17 @@ def _setup_unified_start_route(
             scheme = "wss" if args.host != "localhost" else "ws"
             session_id = str(uuid.uuid4())
             token = _generate_ws_token() if args.ws_auth == "token" else None
-            return StartBotResult(
+            result = StartBotResult(
                 wsUrl=f"{scheme}://{args.host}:{args.port}/ws-client",
                 sessionId=session_id,
                 token=token,
             )
+            # The flat route: this session_id is never registered — the bot
+            # mints its own at connect time — so the session-scoped uploads
+            # route would reject it.
+            if upload_url := _advertised_file_upload_url(None):
+                result["fileUploadUrl"] = upload_url
+            return result
 
         elif transport == "moq":
             # MoQ: spawn the bot and wait for it to finish MoQ bring-up
@@ -889,6 +992,7 @@ def _setup_unified_start_route(
 
             ready_event = asyncio.Event()
             runner_args = MOQRunnerArguments(
+                file_storage=RUNNER_FILE_STORAGE,
                 host=args.moq_host,
                 port=args.moq_port,
                 path=args.moq_path,
@@ -907,7 +1011,10 @@ def _setup_unified_start_route(
             )
             runner_args.cli_args = args
 
-            _start_bot_session(bot_module.bot(runner_args))
+            active_sessions[session_id] = body
+            _start_bot_session(
+                _run_bot_session(bot_module.bot(runner_args), session_id, active_sessions)
+            )
             try:
                 await asyncio.wait_for(ready_event.wait(), timeout=15.0)
             except TimeoutError:
@@ -916,10 +1023,13 @@ def _setup_unified_start_route(
                     detail="Bot did not become ready within 15s",
                 )
 
-            return StartBotResult(
+            result = StartBotResult(
                 sessionId=session_id,
                 moq=_build_moq_client_config(args, namespace, runner_args.cert_fingerprints),
             )
+            if upload_url := _advertised_file_upload_url(session_id):
+                result["fileUploadUrl"] = upload_url
+            return result
 
         else:
             raise HTTPException(
@@ -977,11 +1087,11 @@ def _setup_webrtc_routes(
     @app.get("/files/{filename:path}")
     async def download_file(filename: str):
         """Handle file downloads."""
-        if not args.folder:
+        if not args.downloads_folder:
             logger.warning(f"Attempting to download {filename}, but downloads folder not setup.")
             raise HTTPException(404)
 
-        file_path = _resolve_download_path(args.folder, filename)
+        file_path = _resolve_download_path(args.downloads_folder, filename)
         if not file_path.exists():
             raise HTTPException(404)
 
@@ -1014,12 +1124,15 @@ def _setup_webrtc_routes(
             bot_module = _get_bot_module()
 
             runner_args = SmallWebRTCRunnerArguments(
+                file_storage=RUNNER_FILE_STORAGE,
                 webrtc_connection=connection,
                 body=request.request_data,
                 session_id=resolved_session_id,
             )
             runner_args.cli_args = args
-            background_tasks.add_task(bot_module.bot, runner_args)
+            background_tasks.add_task(
+                _run_bot_session, bot_module.bot(runner_args), resolved_session_id, active_sessions
+            )
 
         # Delegate handling to SmallWebRTCRequestHandler
         answer = await small_webrtc_handler.handle_web_request(
@@ -1211,6 +1324,7 @@ def _setup_whatsapp_routes(app: FastAPI, args: argparse.Namespace):
             """
             bot_module = _get_bot_module()
             runner_args = SmallWebRTCRunnerArguments(
+                file_storage=RUNNER_FILE_STORAGE,
                 webrtc_connection=connection,
                 session_id=str(uuid.uuid4()),
                 body=call,
@@ -1279,7 +1393,10 @@ def _setup_daily_routes(app: FastAPI, args: argparse.Namespace):
             # Start the bot in the background with empty body for GET requests
             bot_module = _get_bot_module()
             runner_args = DailyRunnerArguments(
-                room_url=room_url, token=token, session_id=str(uuid.uuid4())
+                file_storage=RUNNER_FILE_STORAGE,
+                room_url=room_url,
+                token=token,
+                session_id=str(uuid.uuid4()),
             )
             runner_args.cli_args = args
             _start_bot_session(bot_module.bot(runner_args))
@@ -1383,6 +1500,7 @@ def _setup_daily_routes(app: FastAPI, args: argparse.Namespace):
             # Start bot with dial-in context
             bot_module = _get_bot_module()
             runner_args = DailyRunnerArguments(
+                file_storage=RUNNER_FILE_STORAGE,
                 room_url=room_config.room_url,
                 token=room_config.token,
                 body=request_body.model_dump(),
@@ -1484,6 +1602,66 @@ def _setup_telephony_routes(app: FastAPI, args: argparse.Namespace, ws_used_toke
         await _handle_telephony_ws(websocket, path_token=token)
 
 
+_MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+
+
+def _setup_file_uploads_routes(app: FastAPI, active_sessions: dict[str, dict[str, Any]]):
+    async def handle_upload(file: UploadFile, session_id: str | None) -> dict[str, Any]:
+        if RUNNER_FILE_STORAGE is None:
+            raise HTTPException(
+                503,
+                "File upload is disabled: start the runner with -u/--uploads-folder to set the uploads directory.",
+            )
+        contents = await file.read(_MAX_UPLOAD_BYTES + 1)
+        if len(contents) > _MAX_UPLOAD_BYTES:
+            raise HTTPException(413, f"File exceeds {_MAX_UPLOAD_BYTES} byte limit")
+        try:
+            file_url = await RUNNER_FILE_STORAGE.save(file.filename or "", contents)
+        except Exception as e:
+            # Custom storage backends raise backend-specific errors (e.g.
+            # botocore's ClientError), so catch everything: the client gets a
+            # clean 500 either way.
+            logger.error(f"Failed to save upload: {e}")
+            raise HTTPException(500, "Failed to save file") from e
+        if session_id is not None:
+            _SESSION_UPLOAD_URLS.setdefault(session_id, []).append(file_url)
+        # Use original filename only for format/mime in response
+        original_name = Path(file.filename or "").name
+        media_type, _ = mimetypes.guess_type(original_name, strict=False)
+        media_type = media_type or file.content_type or "application/octet-stream"
+        # Matches the RTVI File format, so the client can pass it straight
+        # back in a send-file message. The URL is whatever the storage backend
+        # minted (`pipecat:<id>` for local storage); the bot's LLM service
+        # resolves it at completion time via its FileResolver.
+        return {
+            "name": original_name,
+            "source": {"type": "url", "url": file_url},
+            "format": media_type,
+        }
+
+    @app.post("/sessions/{session_id}/files")
+    async def upload_session_file(session_id: str, file: UploadFile = File(...)):  # noqa: B008
+        """Handle file uploads scoped to a session, mirroring Pipecat Cloud's routes.
+
+        Files uploaded here are deleted when the session ends. Requires
+        --uploads-folder (or a custom storage backend) to be set.
+        """
+        if session_id not in active_sessions:
+            raise HTTPException(404, "Invalid or not-yet-ready session_id")
+        return await handle_upload(file, session_id)
+
+    @app.post("/files")
+    async def upload_file(file: UploadFile = File(...)):  # noqa: B008
+        """Handle file uploads without a session, for transports whose clients never learn one.
+
+        Prefer the session-scoped route: files uploaded here are only removed
+        by the storage backend's own retention (e.g. --uploads-folder-max-files
+        trimming), not at session end. Requires --uploads-folder (or a custom
+        storage backend) to be set.
+        """
+        return await handle_upload(file, None)
+
+
 async def _run_daily_direct(args: argparse.Namespace):
     """Run Daily bot with direct connection (no FastAPI server)."""
     try:
@@ -1499,7 +1677,10 @@ async def _run_daily_direct(args: argparse.Namespace):
 
         # Direct connections have no request body, so use empty dict
         runner_args = DailyRunnerArguments(
-            room_url=room_url, token=token, session_id=str(uuid.uuid4())
+            file_storage=RUNNER_FILE_STORAGE,
+            room_url=room_url,
+            token=token,
+            session_id=str(uuid.uuid4()),
         )
         runner_args.handle_sigint = True
         runner_args.cli_args = args
@@ -1524,7 +1705,12 @@ async def _run_eval(args: argparse.Namespace):
     """
     logger.info("Running with eval transport...")
 
-    runner_args = EvalRunnerArguments(host=args.host, port=args.port, session_id=str(uuid.uuid4()))
+    runner_args = EvalRunnerArguments(
+        host=args.host,
+        port=args.port,
+        session_id=str(uuid.uuid4()),
+        file_storage=RUNNER_FILE_STORAGE,
+    )
     runner_args.handle_sigint = True
     runner_args.cli_args = args
 
@@ -1545,7 +1731,10 @@ async def _run_vonage():
 
     application_id, session_id, token = await configure_vonage()
     runner_args = VonageRunnerArguments(
-        application_id=application_id, vonage_session_id=session_id, token=token
+        file_storage=RUNNER_FILE_STORAGE,
+        application_id=application_id,
+        vonage_session_id=session_id,
+        token=token,
     )
     runner_args.handle_sigint = True
 
@@ -1660,6 +1849,38 @@ def runner_downloads_folder() -> str | None:
     return RUNNER_DOWNLOADS_FOLDER
 
 
+def _resolve_file_storage(args: argparse.Namespace) -> FileStorage | None:
+    """Determine the storage backend for client uploads, or None to disable them.
+
+    A ``create_file_storage() -> FileStorage | None`` function defined in the
+    bot module (alongside ``bot()``) takes precedence: any host that runs the
+    bot — this runner, or a cloud platform's base image — discovers and calls
+    it the same way, so a bot brings its own backend (e.g. a cloud bucket)
+    without host-specific wiring. The factory must be synchronous. Without
+    one, ``-u/--uploads-folder`` backs uploads with local disk; with neither,
+    uploads are disabled.
+
+    Whatever backend wins here serves the upload endpoints and is injected
+    into the bot as ``runner_args.file_storage``.
+    """
+    try:
+        bot_module = _get_bot_module()
+    except ImportError:
+        # No bot module yet: per-session discovery will surface the error
+        # with its usual message. Uploads just fall back to the flag.
+        bot_module = None
+    factory = getattr(bot_module, "create_file_storage", None)
+    if factory is not None:
+        file_storage = factory()
+        if asyncio.iscoroutine(file_storage):
+            file_storage.close()
+            raise TypeError("create_file_storage() must be synchronous (got a coroutine)")
+        return file_storage
+    if args.uploads_folder:
+        return LocalFileStorage(args.uploads_folder, args.uploads_folder_max_files)
+    return None
+
+
 def runner_host() -> str:
     """Returns the host name of this runner."""
     return RUNNER_HOST
@@ -1691,7 +1912,10 @@ def main(parser: argparse.ArgumentParser | None = None):
          all transports.
        - -x/--proxy: Public proxy hostname for telephony webhooks
        - -d/--direct: Connect directly to Daily room (automatically sets transport to daily)
-       - -f/--folder: Path to downloads folder
+       - -f/--downloads-folder: Path to folder for files available for download
+       - -u/--uploads-folder: Path to folder for client uploads (short-lived; default:
+         the PIPECAT_UPLOADS_FOLDER env var)
+       - --uploads-folder-max-files: Max files in uploads folder (default: 10)
        - --dialin/--no-dialin: Mount the Daily PSTN dial-in webhook for -t daily
          (on by default; --no-dialin disables it)
        - --esp32: Enable SDP munging for ESP32 compatibility (requires --host with IP address)
@@ -1707,7 +1931,7 @@ def main(parser: argparse.ArgumentParser | None = None):
             ones. Custom args are accessible via `runner_args.cli_args`.
 
     """
-    global RUNNER_DOWNLOADS_FOLDER, RUNNER_HOST, RUNNER_PORT
+    global RUNNER_DOWNLOADS_FOLDER, RUNNER_FILE_STORAGE, RUNNER_HOST, RUNNER_PORT
 
     if not parser:
         parser = argparse.ArgumentParser(description="Pipecat Development Runner")
@@ -1741,7 +1965,38 @@ def main(parser: argparse.ArgumentParser | None = None):
         default=False,
         help="Connect directly to Daily room (automatically sets transport to daily)",
     )
-    parser.add_argument("-f", "--folder", type=str, help="Path to downloads folder")
+    parser.add_argument(
+        "-f",
+        "--downloads-folder",
+        type=str,
+        dest="downloads_folder",
+        help="Path to folder for files available for download",
+    )
+    # left in for backward compatibility but deprecated in favor of --downloads-folder
+    parser.add_argument(
+        "--folder",
+        type=str,
+        dest="downloads_folder",
+        help="Path to folder for files available for download. (Deprecated: use --downloads-folder instead)",
+    )
+    parser.add_argument(
+        "-u",
+        "--uploads-folder",
+        type=str,
+        dest="uploads_folder",
+        default=os.getenv("PIPECAT_UPLOADS_FOLDER"),
+        help=(
+            "Path to folder for client uploads (short-lived; max files enforced). "
+            "Defaults to the PIPECAT_UPLOADS_FOLDER environment variable."
+        ),
+    )
+    parser.add_argument(
+        "--uploads-folder-max-files",
+        type=int,
+        default=10,
+        dest="uploads_folder_max_files",
+        help="Max files to keep in uploads folder; oldest removed (default: 10)",
+    )
     parser.add_argument(
         "--runner-body",
         type=str,
@@ -1964,6 +2219,10 @@ def main(parser: argparse.ArgumentParser | None = None):
     # Print overall dev runner banner
     _print_dev_runner_banner()
 
+    # Resolve uploads storage before any transport flow runs, so every flow
+    # (including the serverless ones below) injects it into runner_args.
+    RUNNER_FILE_STORAGE = _resolve_file_storage(args)
+
     # Handle direct Daily connection (no FastAPI server)
     if args.direct:
         print()
@@ -1990,7 +2249,7 @@ def main(parser: argparse.ArgumentParser | None = None):
         print()
         return
 
-    RUNNER_DOWNLOADS_FOLDER = args.folder
+    RUNNER_DOWNLOADS_FOLDER = args.downloads_folder
     RUNNER_HOST = args.host
     RUNNER_PORT = args.port
 

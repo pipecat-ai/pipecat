@@ -25,7 +25,6 @@ Actions are used to perform side effects during conversations, such as:
 
 import asyncio
 import inspect
-import warnings
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -41,6 +40,7 @@ from pipecat.frames.frames import (
     TTSSpeakFrame,
 )
 from pipecat.pipeline.worker import PipelineWorker
+from pipecat.utils.deprecation import warn_deprecated
 
 if TYPE_CHECKING:
     from pipecat.flows.manager import FlowManager
@@ -196,11 +196,10 @@ class ActionManager:
                 else:
                     if not self._showed_deprecation_warning_for_legacy_action_handler:
                         self._showed_deprecation_warning_for_legacy_action_handler = True
-                        warnings.warn(
-                            "Single-argument (legacy) action handlers are deprecated "
-                            "and will be removed in 2.0.0. Update handlers to accept "
-                            "(action: dict, flow_manager: FlowManager) instead.",
-                            DeprecationWarning,
+                        warn_deprecated(
+                            "`async def handler(action)` is deprecated since 1.5.0 and "
+                            "will be removed in 2.0.0. Use `async def handler(action: "
+                            "dict, flow_manager: FlowManager)` instead.",
                             stacklevel=2,
                         )
                     if asyncio.iscoroutinefunction(handler):

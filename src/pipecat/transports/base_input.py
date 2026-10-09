@@ -25,7 +25,9 @@ from pipecat.frames.frames import (
     StartFrame,
     StopFrame,
     SystemFrame,
+    UserImageRequestFrame,
 )
+from pipecat.pipeline.capabilities import BotCapabilities
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 from pipecat.transports.base_transport import TransportParams
 from pipecat.utils.deprecation import deprecated
@@ -75,6 +77,12 @@ class BaseInputTransport(FrameProcessor):
         # them downstream until we get another `StartFrame`.
         self._paused = False
 
+        unsupported = [s for s in params.video_in_sources if not self._supports_video_in_source(s)]
+        if unsupported:
+            logger.warning(
+                f"{self}: video_in_sources {unsupported} aren't supported and will be ignored."
+            )
+
     def enable_audio_in_stream_on_start(self, enabled: bool) -> None:
         """Enable or disable audio streaming on transport start.
 
@@ -115,6 +123,59 @@ class BaseInputTransport(FrameProcessor):
             The sample rate in Hz.
         """
         return self._sample_rate
+
+    async def _answer_image_requests(self, requests: list[UserImageRequestFrame], error: str):
+        """Complete image requests that no frame will answer, with an error.
+
+        The function call that made each request would otherwise never finish.
+
+        Args:
+            requests: The image requests to complete.
+            error: Why no frame will answer them.
+        """
+        if not requests:
+            return
+        logger.warning(f"{self}: {error}")
+        for request in requests:
+            if request.result_callback:
+                await request.result_callback({"error": error})
+
+    def _supports_video_in_source(self, video_source: str) -> bool:
+        """Whether this transport captures a video source listed in ``video_in_sources``.
+
+        Transports that support ``video_in_sources`` override this. A listed
+        source this returns ``False`` for is ignored, with a warning.
+
+        Args:
+            video_source: The video source, e.g. ``"camera"`` or ``"screenVideo"``.
+
+        Returns:
+            Whether the source is captured as its user connects.
+        """
+        return False
+
+    @property
+    def capabilities(self) -> BotCapabilities:
+        """The media this transport receives from the user.
+
+        Returns:
+            The ``audio_in``, ``video_in`` and ``screen_in`` capabilities.
+            ``screen_in`` is unknown when video input is enabled without
+            ``video_in_sources``, since the application then decides which
+            sources to capture, and when the transport doesn't capture screen
+            shares through ``video_in_sources``.
+        """
+        if not self._params.video_in_enabled:
+            screen_in = False
+        elif self._supports_video_in_source("screenVideo") and self._params.video_in_sources:
+            screen_in = "screenVideo" in self._params.video_in_sources
+        else:
+            screen_in = None
+        return BotCapabilities(
+            audio_in=self._params.audio_in_enabled,
+            video_in=self._params.video_in_enabled,
+            screen_in=screen_in,
+        )
 
     async def setup(self, setup: FrameProcessorSetup):
         """Set up the transport.

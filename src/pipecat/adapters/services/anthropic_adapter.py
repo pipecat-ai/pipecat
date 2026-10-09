@@ -76,7 +76,7 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
         """Get the identifier used in LLMSpecificMessage instances for Anthropic."""
         return "anthropic"
 
-    def get_llm_invocation_params(
+    async def get_llm_invocation_params(
         self,
         context: LLMContext,
         enable_prompt_caching: bool,
@@ -102,6 +102,7 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
         Returns:
             Dictionary of parameters for invoking Anthropic's LLM API.
         """
+        await self.prepare_file_content(context)
         converted = self._from_universal_context_messages(
             self.get_messages(context), system_instruction=system_instruction
         )
@@ -159,8 +160,18 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
                             source["data"] = "..."
                     if item.get("type") == "thinking" and item.get("signature"):
                         item["signature"] = "..."
+                    if item.get("type") == "document":
+                        source = item.get("source")
+                        if isinstance(source, dict) and "data" in source:
+                            source["data"] = "..."
             messages_for_logging.append(msg)
         return messages_for_logging
+
+    def supports_file_url(self, url: str, mime_type: str) -> bool:
+        """Anthropic fetches image and PDF URLs itself; other files must be inlined."""
+        return url.startswith(("http://", "https://")) and (
+            mime_type.startswith("image/") or mime_type == "application/pdf"
+        )
 
     @dataclass
     class ConvertedMessages:
@@ -383,6 +394,7 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
             if content == "":
                 content = "(empty)"
         elif isinstance(content, list):
+            new_content = []
             for item in content:
                 # fix empty text
                 if item["type"] == "text" and item["text"] == "":
@@ -408,22 +420,73 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
                         }
                         del item["image_url"]
                     else:
-                        url = item["image_url"]["url"]
-                        logger.warning(f"Unsupported 'image_url': {url}")
+                        logger.warning(f"Unsupported 'image_url': {item['image_url']['url']}")
+                        continue
+                if item["type"] == "file_url":
+                    f_data = item["file"]
+                    # Raises for a URL the provider can't consume with nothing
+                    # resolved (wrapped as LLMContextConversionError by the
+                    # caller in _from_universal_context_messages).
+                    resolved = self.inlined_file_content(f_data)
+                    if resolved is None:
+                        # Pass-through: supports_file_url admits only images
+                        # and PDFs.
+                        item["type"] = (
+                            "image" if f_data["mime_type"].startswith("image/") else "document"
+                        )
+                        item["source"] = {
+                            "type": "url",
+                            "url": f_data["url"],
+                        }
+                        del item["file"]
+                    else:
+                        # Resolved content converts through the inline branch
+                        # below. Non-raw adapters always cache the data-URL form.
+                        item = {
+                            "type": "file_base64",
+                            "file": {**f_data, "file_data": cast(str, resolved)},
+                        }
+                if item["type"] == "file_base64":
+                    f_data = item["file"]
+                    if f_data["mime_type"].startswith("image/"):
+                        item["type"] = "image"
+                        item["source"] = {
+                            "type": "base64",
+                            "media_type": f_data["mime_type"],
+                            "data": f_data["file_data"].split(",")[1],
+                        }
+                        del item["file"]
+                    elif f_data["mime_type"] == "application/pdf":
+                        item["type"] = "document"
+                        item["source"] = {
+                            "type": "base64",
+                            "media_type": f_data["mime_type"],
+                            "data": f_data["file_data"].split(",")[1],
+                        }
+                        del item["file"]
+                    else:
+                        # Wrapped as LLMContextConversionError by the caller in
+                        # _from_universal_context_messages.
+                        raise ValueError(f"Unsupported 'file' MIME type: {f_data['mime_type']}")
+                new_content.append(item)
+            content = new_content
+            msg["content"] = content
 
-            # In the case where there's a single image in the list (like what
-            # would result from a UserImageRawFrame), ensure that the image
-            # comes before text, as recommended by Anthropic docs
+            # In the case where there's a single image or document in the list (like
+            # what would result from a UserImageRawFrame or UserFileRawFrame), ensure
+            # it comes before text, as recommended by Anthropic docs
             # (https://docs.anthropic.com/en/docs/build-with-claude/vision#example-one-image)
-            image_indices = [i for i, item in enumerate(content) if item["type"] == "image"]
+            media_indices = [
+                i for i, item in enumerate(content) if item["type"] in ("image", "document")
+            ]
             text_indices = [i for i, item in enumerate(content) if item["type"] == "text"]
-            if len(image_indices) == 1 and text_indices:
-                img_idx = image_indices[0]
+            if len(media_indices) == 1 and text_indices:
+                media_idx = media_indices[0]
                 first_txt_idx = text_indices[0]
-                if img_idx > first_txt_idx:
-                    # Move image before the first text
-                    image_item = content.pop(img_idx)
-                    content.insert(first_txt_idx, image_item)
+                if media_idx > first_txt_idx:
+                    # Move the image/document before the first text
+                    media_item = content.pop(media_idx)
+                    content.insert(first_txt_idx, media_item)
 
         return cast(MessageParam, msg)
 

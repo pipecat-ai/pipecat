@@ -63,7 +63,7 @@ def _make_service(**kwargs):
     # streaming completion handler here.
     adapter = MagicMock()
     adapter.get_messages_for_logging.return_value = []
-    adapter.get_llm_invocation_params.return_value = {}
+    adapter.get_llm_invocation_params = AsyncMock(return_value={})
     service.get_llm_adapter = MagicMock(return_value=adapter)
     service._build_response_params = MagicMock(return_value={})
 
@@ -614,3 +614,32 @@ class TestHttpRetryOnTimeout:
 
         assert await service._create_stream({}) is stream
         assert attempts == 2
+
+
+# ---------------------------------------------------------------------------
+# _build_response_params — default reasoning effort
+# ---------------------------------------------------------------------------
+
+
+class TestHttpReasoningParams:
+    def _params(self, model):
+        # Built without _make_service, which stubs out _build_response_params.
+        with patch.object(OpenAIResponsesHttpLLMService, "_create_client"):
+            service = OpenAIResponsesHttpLLMService(
+                api_key="test-key",
+                settings=OpenAIResponsesHttpLLMService.Settings(model=model),
+            )
+        return service._build_response_params({"input": []})
+
+    def test_mainline_gpt_disabled_by_default(self):
+        """Mainline gpt models from gpt-5 onward default to effort="none"."""
+        assert self._params("gpt-5.5")["reasoning"] == {"effort": "none"}
+
+    def test_original_gpt_5_gets_minimal(self):
+        """The original gpt-5 models reject effort="none", so they get "minimal"."""
+        assert self._params("gpt-5-mini")["reasoning"] == {"effort": "minimal"}
+
+    def test_models_rejecting_effort_none_left_untouched(self):
+        """Models that reject effort="none" are left at the provider default."""
+        for model in ("o3", "gpt-6-astra", "gpt-6.1-sol", "gpt-5.5-pro"):
+            assert "reasoning" not in self._params(model), model
