@@ -38,7 +38,7 @@ as inline base64 bytes or as a URL, and both flow through to a
 """
 
 # -- Constants --
-PROTOCOL_VERSION = "2.3.0"
+PROTOCOL_VERSION = "2.2.0"
 
 # -- Version compatibility --
 # Any 1.x client is deprecated but still supported with the old bot-output format.
@@ -620,18 +620,6 @@ class BotTTSTextMessage(BaseModel):
 
     label: MessageLiteral = MESSAGE_LABEL
     type: Literal["bot-tts-text"] = "bot-tts-text"
-    data: TextMessageData
-
-
-class BotBackchannelMessage(BaseModel):
-    """Message containing a short acknowledgment the bot says, such as "Mm-hmm.".
-
-    Sent when the bot starts saying text of type ``backchannel``, in place of
-    ``bot-output`` and ``bot-tts-text``.
-    """
-
-    label: MessageLiteral = MESSAGE_LABEL
-    type: Literal["bot-backchannel"] = "bot-backchannel"
     data: TextMessageData
 
 
