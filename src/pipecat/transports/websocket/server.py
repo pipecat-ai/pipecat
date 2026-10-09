@@ -493,7 +493,7 @@ class SingleClientWebsocketServerOutputTransport(BaseOutputTransport):
         try:
             payload = await self._params.serializer.serialize(frame)
             if payload and self._websocket:
-                await self._websocket.send(payload)
+                success = await self._write_within_timeout(self._websocket.send(payload))
         except websockets.ConnectionClosed:
             # The client went away mid-send (a normal race on disconnect, e.g.
             # while still streaming TTS audio). Not an error.
