@@ -587,7 +587,10 @@ class SonioxSTTService(WebsocketSTTService):
 
             logger.debug("Connecting to Soniox STT")
 
-            self._websocket = await self._websocket_connect(self._url)
+            self._websocket = await self._websocket_connect(
+                self._url,
+                additional_headers={"Authorization": f"Bearer {self._api_key}"},
+            )
 
             if not self._websocket:
                 await self.push_error(error_msg=f"Unable to connect to Soniox API at {self._url}")
@@ -605,7 +608,6 @@ class SonioxSTTService(WebsocketSTTService):
 
             # Send the initial configuration message.
             config = {
-                "api_key": self._api_key,
                 "model": s.model,
                 "audio_format": self._audio_format,
                 "num_channels": self._num_channels,

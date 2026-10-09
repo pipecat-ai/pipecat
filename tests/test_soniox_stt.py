@@ -48,6 +48,27 @@ class _FakeWebsocket:
 
 
 @pytest.mark.asyncio
+async def test_connect_sends_api_key_on_the_handshake(monkeypatch):
+    captured = {}
+    websocket = _FakeWebsocket([], state=State.OPEN)
+
+    async def fake_websocket_connect(*args, **kwargs):
+        captured.update(kwargs)
+        return websocket
+
+    monkeypatch.setattr(
+        "pipecat.services.websocket_service.websocket_connect", fake_websocket_connect
+    )
+
+    service = SonioxSTTService(api_key="test-key")
+    await service._connect_websocket()
+
+    assert captured["additional_headers"] == {"Authorization": "Bearer test-key"}
+    # The handshake is the only carrier; the config message no longer repeats the key.
+    assert "api_key" not in json.loads(websocket.send.await_args.args[0])
+
+
+@pytest.mark.asyncio
 async def test_connect_failure_clears_stale_websocket_without_raising(monkeypatch):
     async def fake_websocket_connect(*args, **kwargs):
         raise RuntimeError("connection failed")
