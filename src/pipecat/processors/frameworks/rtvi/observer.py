@@ -982,13 +982,6 @@ class RTVIObserver(BaseObserver):
     ):
         """Handle user transcription frames."""
         final = isinstance(frame, TranscriptionFrame)
-        if self._params.user_transcription_enabled:
-            message = RTVI.UserTranscriptionMessage(
-                data=RTVI.UserTranscriptionMessageData(
-                    text=frame.text, user_id=frame.user_id, timestamp=frame.timestamp, final=final
-                )
-            )
-            await self.send_rtvi_message(message)
         if self._params.user_input_enabled:
             await self._send_user_input(
                 frame.text,
@@ -997,6 +990,13 @@ class RTVIObserver(BaseObserver):
                 final=final,
                 user_id=frame.user_id,
             )
+        if self._params.user_transcription_enabled:
+            message = RTVI.UserTranscriptionMessage(
+                data=RTVI.UserTranscriptionMessageData(
+                    text=frame.text, user_id=frame.user_id, timestamp=frame.timestamp, final=final
+                )
+            )
+            await self.send_rtvi_message(message)
 
     async def _send_user_input(
         self,
