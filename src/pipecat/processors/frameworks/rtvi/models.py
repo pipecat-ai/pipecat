@@ -668,29 +668,40 @@ class UserTranscriptionMessage(BaseModel):
     data: UserTranscriptionMessageData
 
 
-class UserBackchannelMessageData(BaseModel):
-    """Data for user backchannel messages.
+UserInputType = Literal["transcription", "chat", "backchannel"]
+
+
+class UserInputMessageData(BaseModel):
+    """Data for user input messages.
 
     Parameters:
-        text: What the user said.
-        user_id: Identifier for the user who spoke.
-        timestamp: When the user said it.
+        text: What the user said or typed.
+        input_type: What kind of input it is: ``"transcription"`` for speech
+            transcribed by the STT, ``"chat"`` for text the client sent, or
+            ``"backchannel"`` for a short acknowledgment the user said while the
+            bot talks, such as "mhm".
+        user_id: Identifier for the user.
+        timestamp: When the user said or sent it.
+        final: Whether the text is final. Only an interim transcription isn't.
     """
 
     text: str
+    input_type: UserInputType
     user_id: str
     timestamp: str
+    final: bool
 
 
-class UserBackchannelMessage(BaseModel):
-    """Message containing a short acknowledgment the user said while the bot talks.
+class UserInputMessage(BaseModel):
+    """Message containing what the user said or typed.
 
-    An acknowledgment such as "mhm" doesn't interrupt the bot or reach the LLM.
+    The user's counterpart of ``bot-output``. A backchannel doesn't interrupt the
+    bot or reach the LLM.
     """
 
     label: MessageLiteral = MESSAGE_LABEL
-    type: Literal["user-backchannel"] = "user-backchannel"
-    data: UserBackchannelMessageData
+    type: Literal["user-input"] = "user-input"
+    data: UserInputMessageData
 
 
 class UserLLMTextMessage(BaseModel):

@@ -131,7 +131,9 @@ class RTVIObserverParams:
             finalization (unlike ``user_speaking_enabled``, which a turn strategy may gate or
             defer). Off by default. Defaults to False.
         user_transcription_enabled: Indicates if user's transcription messages should be sent.
-        user_backchannel_enabled: Indicates if user's backchannel messages should be sent.
+        user_input_enabled: Indicates if the user's input messages should be sent. They
+            report what the user said or typed: transcriptions, including interim ones,
+            and backchannels.
         user_audio_level_enabled: Indicates if user's audio level messages should be sent.
         metrics_enabled: Indicates if metrics messages should be sent.
         system_logs_enabled: Indicates if system logs should be sent.
@@ -200,7 +202,7 @@ class RTVIObserverParams:
     vad_user_speaking_enabled: bool = False
     user_mute_enabled: bool = True
     user_transcription_enabled: bool = True
-    user_backchannel_enabled: bool = True
+    user_input_enabled: bool = True
     user_audio_level_enabled: bool = False
     metrics_enabled: bool = True
     system_logs_enabled: bool = False
@@ -641,18 +643,11 @@ class RTVIObserver(BaseObserver):
             # run_immediately interrupt). Let clients drop what it was mid-saying.
             await self.send_rtvi_message(RTVI.BotInterruptedMessage())
             self._skipped_segments_interrupted = True
-        elif (
-            isinstance(frame, (TranscriptionFrame, InterimTranscriptionFrame))
-            and self._params.user_transcription_enabled
-        ):
+        elif isinstance(frame, (TranscriptionFrame, InterimTranscriptionFrame)):
             await self._handle_user_transcriptions(frame)
-        elif isinstance(frame, UserBackchannelFrame) and self._params.user_backchannel_enabled:
-            await self.send_rtvi_message(
-                RTVI.UserBackchannelMessage(
-                    data=RTVI.UserBackchannelMessageData(
-                        text=frame.text, user_id=frame.user_id, timestamp=frame.timestamp
-                    )
-                )
+        elif isinstance(frame, UserBackchannelFrame) and self._params.user_input_enabled:
+            await self._send_user_input(
+                frame.text, "backchannel", frame.user_id, frame.timestamp, final=True
             )
         elif isinstance(frame, LLMContextFrame) and self._params.user_llm_enabled:
             await self._handle_context(frame)
@@ -965,24 +960,39 @@ class RTVIObserver(BaseObserver):
             )
             self._bot_transcription = ""
 
-    async def _handle_user_transcriptions(self, frame: Frame):
+    async def _handle_user_transcriptions(
+        self, frame: TranscriptionFrame | InterimTranscriptionFrame
+    ):
         """Handle user transcription frames."""
-        message = None
-        if isinstance(frame, TranscriptionFrame):
+        final = isinstance(frame, TranscriptionFrame)
+        if self._params.user_transcription_enabled:
             message = RTVI.UserTranscriptionMessage(
                 data=RTVI.UserTranscriptionMessageData(
-                    text=frame.text, user_id=frame.user_id, timestamp=frame.timestamp, final=True
+                    text=frame.text, user_id=frame.user_id, timestamp=frame.timestamp, final=final
                 )
             )
-        elif isinstance(frame, InterimTranscriptionFrame):
-            message = RTVI.UserTranscriptionMessage(
-                data=RTVI.UserTranscriptionMessageData(
-                    text=frame.text, user_id=frame.user_id, timestamp=frame.timestamp, final=False
-                )
+            await self.send_rtvi_message(message)
+        if self._params.user_input_enabled:
+            await self._send_user_input(
+                frame.text, "transcription", frame.user_id, frame.timestamp, final=final
             )
 
-        if message:
-            await self.send_rtvi_message(message)
+    async def _send_user_input(
+        self,
+        text: str,
+        input_type: RTVI.UserInputType,
+        user_id: str,
+        timestamp: str,
+        *,
+        final: bool,
+    ):
+        """Send a user input message."""
+        message = RTVI.UserInputMessage(
+            data=RTVI.UserInputMessageData(
+                text=text, input_type=input_type, user_id=user_id, timestamp=timestamp, final=final
+            )
+        )
+        await self.send_rtvi_message(message)
 
     async def _handle_context(self, frame: LLMContextFrame):
         """Process LLM context frames to extract user messages for the RTVI client."""

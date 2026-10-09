@@ -17,7 +17,9 @@ from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     InputAudioRawFrame,
+    InterimTranscriptionFrame,
     InterruptionFrame,
+    TranscriptionFrame,
     TTSAudioRawFrame,
     TTSTextFrame,
     UserBackchannelFrame,
@@ -92,15 +94,67 @@ class TestRTVIObserverPushes(unittest.IsolatedAsyncioTestCase):
         await self._push(frame, first_push=False, source=transport)
         self.assertEqual(self.observer._queued_aggregated_text_frames, [frame])
 
-    async def test_a_user_backchannel_is_sent(self):
+    def _sent_messages(self):
+        return [call.args[0] for call in self.observer.send_rtvi_message.await_args_list]
+
+    async def test_a_user_backchannel_is_sent_as_user_input(self):
         await self._push(UserBackchannelFrame(text="mhm", user_id="user", timestamp="now"))
 
         message = self.observer.send_rtvi_message.await_args.args[0]
-        self.assertIsInstance(message, RTVI.UserBackchannelMessage)
+        self.assertIsInstance(message, RTVI.UserInputMessage)
         self.assertEqual(
             message.data,
-            RTVI.UserBackchannelMessageData(text="mhm", user_id="user", timestamp="now"),
+            RTVI.UserInputMessageData(
+                text="mhm", input_type="backchannel", user_id="user", timestamp="now", final=True
+            ),
         )
+
+    async def test_a_transcription_is_sent_as_user_transcription_and_user_input(self):
+        await self._push(InterimTranscriptionFrame(text="Hel", user_id="user", timestamp="t1"))
+        await self._push(TranscriptionFrame(text="Hello.", user_id="user", timestamp="t2"))
+
+        messages = self._sent_messages()
+        self.assertEqual(
+            [type(m) for m in messages],
+            [
+                RTVI.UserTranscriptionMessage,
+                RTVI.UserInputMessage,
+                RTVI.UserTranscriptionMessage,
+                RTVI.UserInputMessage,
+            ],
+        )
+        self.assertEqual(
+            [messages[1].data, messages[3].data],
+            [
+                RTVI.UserInputMessageData(
+                    text="Hel",
+                    input_type="transcription",
+                    user_id="user",
+                    timestamp="t1",
+                    final=False,
+                ),
+                RTVI.UserInputMessageData(
+                    text="Hello.",
+                    input_type="transcription",
+                    user_id="user",
+                    timestamp="t2",
+                    final=True,
+                ),
+            ],
+        )
+
+    async def test_a_transcription_is_only_sent_as_user_input_without_user_transcription(self):
+        self.observer._params.user_transcription_enabled = False
+        await self._push(TranscriptionFrame(text="Hello.", user_id="user", timestamp="now"))
+
+        self.assertEqual([type(m) for m in self._sent_messages()], [RTVI.UserInputMessage])
+
+    async def test_user_input_is_kept_from_the_client_when_disabled(self):
+        self.observer._params.user_input_enabled = False
+        await self._push(TranscriptionFrame(text="Hello.", user_id="user", timestamp="now"))
+        await self._push(UserBackchannelFrame(text="mhm", user_id="user", timestamp="now"))
+
+        self.assertEqual([type(m) for m in self._sent_messages()], [RTVI.UserTranscriptionMessage])
 
 
 class TestRTVIObserverSegments(unittest.IsolatedAsyncioTestCase):
