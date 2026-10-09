@@ -2548,5 +2548,20 @@ async def test_tts_speak_frame_labels_its_text(mode):
     assert {f.text_type for f in text_frames} == {"status"}
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", [TextAggregationMode.SENTENCE, TextAggregationMode.TOKEN])
+async def test_spoken_text_carries_the_id_of_its_segment(mode):
+    """A TTSTextFrame names the AggregatedTextFrame it speaks."""
+    tts = MockHttpPushTextTTSService(text_aggregation_mode=mode)
+    frames_received = await run_test(
+        tts,
+        frames_to_send=[TTSSpeakFrame(text="One moment, please.", append_to_context=False)],
+    )
+    segment = next(f for f in frames_received[0] if type(f) is AggregatedTextFrame)
+    spoken = next(f for f in frames_received[0] if isinstance(f, TTSTextFrame))
+
+    assert spoken.segment_id == segment.id
+
+
 if __name__ == "__main__":
     unittest.main()

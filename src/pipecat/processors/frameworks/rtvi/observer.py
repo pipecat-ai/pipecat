@@ -269,8 +269,8 @@ class RTVIObserver(BaseObserver):
         # Track bot speaking state for queuing aggregated text frames
         self._bot_is_speaking = False
         self._queued_aggregated_text_frames: list[AggregatedTextFrame] = []
-        # The TTS context whose latest segment was skipped (see _is_skipped)
-        self._skipped_context_id: str | None = None
+        # Skipped segments whose spoken text may still come (see _is_skipped)
+        self._skipped_segment_ids: set[int] = set()
 
         self._system_logger_id: int | None = None
         if self._params.system_logs_enabled:
@@ -777,12 +777,15 @@ class RTVIObserver(BaseObserver):
 
     async def _handle_aggregated_progress(self, frame: AggregatedTextProgressFrame):
         """Handle progress frames."""
+        if self._params.skip_text_types and frame.text_type in self._params.skip_text_types:
+            if frame.remaining_text == "":
+                # The skipped segment's last word has been spoken.
+                self._skipped_segment_ids.discard(frame.segment_id)
+            return
+
         # 1.4.x clients use the old separate bot-output-progress event which was never
         # released, so progress events are simply not sent to legacy clients.
         if self._is_legacy_client:
-            return
-
-        if self._params.skip_text_types and frame.text_type in self._params.skip_text_types:
             return
 
         logger.trace(
@@ -829,22 +832,21 @@ class RTVIObserver(BaseObserver):
             await self.send_rtvi_message(message)
 
     def _is_skipped(self, frame: AggregatedTextFrame) -> bool:
-        """Whether the frame's text type keeps it from the client."""
+        """Whether the frame's text type, or its segment's, keeps it from the client."""
         skip_types = self._params.skip_text_types
         if not skip_types:
             return False
+        segment_id = frame.segment_id if isinstance(frame, TTSTextFrame) else None
         if frame.text_type in skip_types:
-            # A skipped segment's words come next: remember its context to skip them.
-            self._skipped_context_id = frame.context_id
+            if segment_id is not None:
+                # The segment spoken in one piece: no words of it follow.
+                self._skipped_segment_ids.discard(segment_id)
+            elif frame.will_be_spoken:
+                # A segment the TTS will speak: skip the words it is spoken in too.
+                self._skipped_segment_ids.add(frame.id)
             return True
-        # A word frame has no segment, only a TTS context. It belongs to that
-        # context's latest segment and is skipped when that segment was.
-        if frame.text_type == AggregationType.WORD:
-            return frame.context_id is not None and frame.context_id == self._skipped_context_id
-        # A shown segment replaces the skipped one, and its words are shown too.
-        if frame.context_id == self._skipped_context_id:
-            self._skipped_context_id = None
-        return False
+        # A word is skipped with the segment it was spoken in.
+        return segment_id in self._skipped_segment_ids
 
     async def _send_aggregated_llm_text(self, frame: AggregatedTextFrame):
         """Send aggregated LLM text messages."""

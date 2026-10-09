@@ -95,8 +95,9 @@ class TestRTVIObserverSkippedTypes(unittest.IsolatedAsyncioTestCase):
         self.observer._bot_is_speaking = True
         self.transport = BaseOutputTransport(TransportParams())
 
-    async def _push(self, frame, context_id):
-        frame.context_id = context_id
+    async def _push(self, frame):
+        # All the segments of one LLM response share a TTS context.
+        frame.context_id = "turn"
         await self.observer.on_push_frame(
             FramePushed(
                 source=self.transport,
@@ -108,41 +109,70 @@ class TestRTVIObserverSkippedTypes(unittest.IsolatedAsyncioTestCase):
             )
         )
 
+    def _segment(self, text, text_type):
+        segment = AggregatedTextFrame(text, text_type)
+        segment.will_be_spoken = True
+        return segment
+
+    def _word(self, text, segment):
+        return TTSTextFrame(text, AggregationType.WORD, segment_id=segment.id)
+
+    def _progress(self, segment, accumulated_text, remaining_text):
+        return AggregatedTextProgressFrame(
+            segment_id=segment.id,
+            context_id="turn",
+            text=segment.text,
+            text_type=segment.text_type,
+            accumulated_text=accumulated_text,
+            remaining_text=remaining_text,
+        )
+
     def _sent_texts(self):
         return [call.args[0].data.text for call in self.observer.send_rtvi_message.await_args_list]
 
     async def test_a_skipped_segment_keeps_its_progress_and_words_from_the_client(self):
-        segment = AggregatedTextFrame("One moment, please.", "status")
-        await self._push(segment, "status")
-        await self._push(TTSTextFrame("One", text_type=AggregationType.WORD), "status")
-        progress = AggregatedTextProgressFrame(
-            segment_id=segment.id,
-            context_id="status",
-            text="One moment, please.",
-            text_type="status",
-            accumulated_text="One",
-            remaining_text=" moment, please.",
-        )
-        await self._push(progress, "status")
+        status = self._segment("One moment, please.", "status")
+        await self._push(status)
+        await self._push(self._word("One", status))
+        await self._push(self._progress(status, "One", " moment, please."))
 
         self.observer.send_rtvi_message.assert_not_awaited()
 
-    async def test_the_next_segment_is_sent_as_usual(self):
-        await self._push(AggregatedTextFrame("One moment, please.", "status"), "status")
-        await self._push(AggregatedTextFrame("That sounds fun.", AggregationType.SENTENCE), "llm")
-        await self._push(TTSTextFrame("That", text_type=AggregationType.WORD), "llm")
-
-        self.assertIn("That sounds fun.", self._sent_texts())
-        self.assertIn("That", self._sent_texts())
-
-    async def test_a_segment_after_a_skipped_one_in_the_same_context_is_sent(self):
-        # All the segments of one LLM response share a TTS context.
-        await self._push(AggregatedTextFrame("One moment, please.", "status"), "llm")
-        await self._push(TTSTextFrame("One", text_type=AggregationType.WORD), "llm")
-        await self._push(AggregatedTextFrame("That sounds fun.", AggregationType.SENTENCE), "llm")
-        await self._push(TTSTextFrame("That", text_type=AggregationType.WORD), "llm")
+    async def test_a_segment_after_a_skipped_one_is_sent(self):
+        status = self._segment("One moment, please.", "status")
+        sentence = self._segment("That sounds fun.", AggregationType.SENTENCE)
+        await self._push(status)
+        await self._push(self._word("One", status))
+        await self._push(sentence)
+        await self._push(self._word("That", sentence))
 
         self.assertEqual(self._sent_texts(), ["That sounds fun.", "That"])
+
+    async def test_words_follow_their_segment_when_the_segments_come_first(self):
+        # A turn's segments can all arrive before the first one is spoken.
+        status = self._segment("One moment, please.", "status")
+        sentence = self._segment("That sounds fun.", AggregationType.SENTENCE)
+        await self._push(status)
+        await self._push(sentence)
+        await self._push(self._word("One", status))
+        await self._push(self._word("That", sentence))
+
+        self.assertEqual(self._sent_texts(), ["That sounds fun.", "That"])
+
+    async def test_a_skipped_segment_is_forgotten_once_spoken(self):
+        status = self._segment("One moment, please.", "status")
+        await self._push(status)
+        await self._push(self._progress(status, "One moment, please.", ""))
+
+        self.assertEqual(self.observer._skipped_segment_ids, set())
+
+    async def test_a_skipped_segment_spoken_in_one_piece_is_forgotten(self):
+        status = self._segment("One moment, please.", "status")
+        await self._push(status)
+        await self._push(TTSTextFrame(status.text, "status", segment_id=status.id))
+
+        self.observer.send_rtvi_message.assert_not_awaited()
+        self.assertEqual(self.observer._skipped_segment_ids, set())
 
 
 if __name__ == "__main__":

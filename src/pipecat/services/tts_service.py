@@ -1495,7 +1495,7 @@ class TTSService(AIService):
             # per-sentence promotion (see AggregatedFrameSequencer._promote): a call
             # here represents a single token, not the sentence-level unit this frame
             # should carry.
-            frame = TTSTextFrame(text, text_type=text_type)
+            frame = TTSTextFrame(text, text_type=text_type, segment_id=src_frame.id)
             frame.will_be_spoken = True
             frame.includes_inter_frame_spaces = includes_inter_frame_spaces
             frame.context_id = context_id

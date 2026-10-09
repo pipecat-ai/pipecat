@@ -571,6 +571,7 @@ class AggregatedFrameSequencer:
                     frame_text,
                     pts,
                     emit_context_id,
+                    segment_id=active.frame.id if active else None,
                     raw_text=raw_text,
                     suppress_in_context=suppress,
                     includes_inter_frame_spaces=slot_ifs,
@@ -692,6 +693,7 @@ class AggregatedFrameSequencer:
                                 remaining_text,
                                 last_word_pts,
                                 slot.context_id,
+                                segment_id=slot.frame.id,
                                 raw_text=raw_remaining,
                                 includes_inter_frame_spaces=slot.includes_inter_frame_spaces,
                             )
@@ -816,7 +818,10 @@ class AggregatedFrameSequencer:
 
         if not sc.build_tracker:
             word_frame = TTSTextFrame(
-                agg.user_facing_text, sc.text_type, raw_text=agg.llm_text or None
+                agg.user_facing_text,
+                sc.text_type,
+                raw_text=agg.llm_text or None,
+                segment_id=frame.id,
             )
             word_frame.context_id = context_id
             word_frame.will_be_spoken = True
@@ -913,12 +918,13 @@ class AggregatedFrameSequencer:
         text: str,
         pts: int,
         context_id: str | None,
+        segment_id: int | None = None,
         raw_text: str | None = None,
         suppress_in_context: bool = False,
         includes_inter_frame_spaces: bool = False,
     ) -> Frame:
         """Build a TTSTextFrame with all standard word-timestamp attributes set."""
-        frame = TTSTextFrame(text, text_type=AggregationType.WORD)
+        frame = TTSTextFrame(text, text_type=AggregationType.WORD, segment_id=segment_id)
         frame.pts = pts
         frame.context_id = context_id
         if suppress_in_context:
