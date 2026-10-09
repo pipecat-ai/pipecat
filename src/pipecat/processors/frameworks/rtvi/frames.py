@@ -104,6 +104,27 @@ class RTVIConfigureObserverFrame(SystemFrame):
 
 
 @dataclass
+class RTVISendTextFrame(SystemFrame):
+    """Text the client sent in a ``send-text`` message.
+
+    Pushed downstream by ``RTVIProcessor`` right after the frame that appends
+    the text to the LLM context. ``RTVIObserver`` acknowledges it to the client
+    with a ``user-input`` message.
+
+    Parameters:
+        msg_id: The RTVI message id, as set by the client.
+        text: The text the client sent.
+    """
+
+    msg_id: str
+    text: str
+
+    def __str__(self):
+        """String representation of the send-text frame."""
+        return f"{self.name}(msg_id: {self.msg_id}, text: [{self.text}])"
+
+
+@dataclass
 class RTVIUICommandFrame(SystemFrame):
     """A frame for sending a UI command to the client.
 

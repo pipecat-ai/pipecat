@@ -75,6 +75,7 @@ from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.frameworks.rtvi.frames import (
     RTVIConfigureObserverFrame,
+    RTVISendTextFrame,
     RTVIServerMessageFrame,
     RTVIServerResponseFrame,
     RTVIUICommandFrame,
@@ -84,6 +85,7 @@ from pipecat.processors.frameworks.rtvi.models import BotOutputTransformResult
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.utils.deprecation import warn_deprecated
 from pipecat.utils.string import match_endofsentence
+from pipecat.utils.time import time_now_iso8601
 
 if TYPE_CHECKING:
     from pipecat.processors.frameworks.rtvi.processor import RTVIProcessor
@@ -133,7 +135,7 @@ class RTVIObserverParams:
         user_transcription_enabled: Indicates if user's transcription messages should be sent.
         user_input_enabled: Indicates if the user's input messages should be sent. They
             report what the user said or typed: transcriptions, including interim ones,
-            and backchannels.
+            backchannels, and the text the client sent.
         user_audio_level_enabled: Indicates if user's audio level messages should be sent.
         metrics_enabled: Indicates if metrics messages should be sent.
         system_logs_enabled: Indicates if system logs should be sent.
@@ -647,7 +649,15 @@ class RTVIObserver(BaseObserver):
             await self._handle_user_transcriptions(frame)
         elif isinstance(frame, UserBackchannelFrame) and self._params.user_input_enabled:
             await self._send_user_input(
-                frame.text, "backchannel", frame.user_id, frame.timestamp, final=True
+                frame.text,
+                "backchannel",
+                timestamp=frame.timestamp,
+                final=True,
+                user_id=frame.user_id,
+            )
+        elif isinstance(frame, RTVISendTextFrame) and self._params.user_input_enabled:
+            await self._send_user_input(
+                frame.text, "chat", timestamp=time_now_iso8601(), final=True, msg_id=frame.msg_id
             )
         elif isinstance(frame, LLMContextFrame) and self._params.user_llm_enabled:
             await self._handle_context(frame)
@@ -974,22 +984,32 @@ class RTVIObserver(BaseObserver):
             await self.send_rtvi_message(message)
         if self._params.user_input_enabled:
             await self._send_user_input(
-                frame.text, "transcription", frame.user_id, frame.timestamp, final=final
+                frame.text,
+                "transcription",
+                timestamp=frame.timestamp,
+                final=final,
+                user_id=frame.user_id,
             )
 
     async def _send_user_input(
         self,
         text: str,
         input_type: RTVI.UserInputType,
-        user_id: str,
-        timestamp: str,
         *,
+        timestamp: str,
         final: bool,
+        user_id: str | None = None,
+        msg_id: str | None = None,
     ):
         """Send a user input message."""
         message = RTVI.UserInputMessage(
             data=RTVI.UserInputMessageData(
-                text=text, input_type=input_type, user_id=user_id, timestamp=timestamp, final=final
+                text=text,
+                input_type=input_type,
+                timestamp=timestamp,
+                final=final,
+                user_id=user_id,
+                msg_id=msg_id,
             )
         )
         await self.send_rtvi_message(message)

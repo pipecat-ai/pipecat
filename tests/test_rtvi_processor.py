@@ -17,9 +17,12 @@ from pipecat.frames.frames import (
     InputAudioRawFrame,
     InputDTMFFrame,
     InputTransportStartAudioStreamingFrame,
+    LLMConfigureOutputFrame,
+    LLMMessagesAppendFrame,
     UserFileRawFrame,
     UserImageRawFrame,
 )
+from pipecat.processors.frameworks.rtvi.frames import RTVISendTextFrame
 from pipecat.processors.frameworks.rtvi.processor import RTVIProcessor
 
 
@@ -384,6 +387,46 @@ class TestRTVISendFile(unittest.IsolatedAsyncioTestCase):
         self.processor.interrupt_bot.assert_not_called()
         frames = self._pushed_frames()
         self.assertFalse(frames[0].run_llm)
+
+
+class TestRTVISendText(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.processor = RTVIProcessor()
+        self.processor.push_frame = AsyncMock()
+        self.processor.interrupt_bot = AsyncMock()
+
+    async def asyncTearDown(self):
+        await self.processor.cleanup()
+
+    def _pushed_frames(self):
+        return [c.args[0] for c in self.processor.push_frame.call_args_list]
+
+    async def test_the_text_is_acknowledged_once_it_is_appended(self):
+        data = RTVI.SendTextData(
+            content="Hello.", options=RTVI.SendTextOptions(run_immediately=False)
+        )
+        await self.processor._handle_send_text(data, "msg-1")
+
+        frames = self._pushed_frames()
+        self.assertEqual([type(f) for f in frames], [LLMMessagesAppendFrame, RTVISendTextFrame])
+        self.assertEqual((frames[1].msg_id, frames[1].text), ("msg-1", "Hello."))
+
+    async def test_the_text_is_acknowledged_before_the_tts_setting_is_restored(self):
+        data = RTVI.SendTextData(
+            content="Hello.",
+            options=RTVI.SendTextOptions(run_immediately=False, audio_response=False),
+        )
+        await self.processor._handle_send_text(data, "msg-1")
+
+        self.assertEqual(
+            [type(f) for f in self._pushed_frames()],
+            [
+                LLMConfigureOutputFrame,
+                LLMMessagesAppendFrame,
+                RTVISendTextFrame,
+                LLMConfigureOutputFrame,
+            ],
+        )
 
 
 if __name__ == "__main__":
