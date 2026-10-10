@@ -6,12 +6,14 @@
 
 """Ask a classifier about an image, such as a frame from the user's camera.
 
-By default the questions go to Cloudflare's Clef; with ``--llm`` they go to
-an OpenAI vision model through ``LLMClassifier`` instead.
+By default the questions go to Cloudflare's Clef; with ``--openai`` they go
+to OpenAI's Decisions API, and with ``--llm`` to an OpenAI vision model
+through ``LLMClassifier``.
 
 Usage::
 
     CLOUDFLARE_ACCOUNT_ID=... CLOUDFLARE_API_KEY=... python features-classifiers-images.py
+    OPENAI_API_KEY=... python features-classifiers-images.py --openai
     OPENAI_API_KEY=... python features-classifiers-images.py --llm gpt-4.1-mini
 """
 
@@ -32,6 +34,7 @@ from pipecat.classifiers.base_classifier import (
 )
 from pipecat.classifiers.cloudflare.clef.classifier import ClefClassifier
 from pipecat.classifiers.llm.classifier import LLMClassifier
+from pipecat.classifiers.openai.decisions.classifier import OpenAIDecisionsClassifier
 from pipecat.frames.frames import ImageRawFrame
 from pipecat.services.openai.llm import OpenAILLMService
 
@@ -91,10 +94,22 @@ async def main(classifier: BaseClassifier):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--openai",
+        metavar="MODEL",
+        nargs="?",
+        const="gpt-6-luna",
+        help="use OpenAI's Decisions API instead of Clef",
+    )
     parser.add_argument("--llm", metavar="MODEL", help="use an OpenAI vision model instead of Clef")
     args = parser.parse_args()
 
-    if args.llm:
+    if args.openai:
+        classifier = OpenAIDecisionsClassifier(
+            api_key=os.environ["OPENAI_API_KEY"], model=args.openai
+        )
+        asyncio.run(main(classifier))
+    elif args.llm:
         llm = OpenAILLMService(
             api_key=os.environ["OPENAI_API_KEY"],
             settings=OpenAILLMService.Settings(model=args.llm),
