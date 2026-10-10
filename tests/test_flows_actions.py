@@ -75,6 +75,23 @@ class TestActionManager(unittest.IsolatedAsyncioTestCase):
         self.assertIn("tts_say", self.action_manager._action_handlers)
         self.assertIn("end_conversation", self.action_manager._action_handlers)
 
+    async def test_ongoing_actions_finished_event_set_at_init(self):
+        """The ``_ongoing_actions_finished_event`` must be SET at init.
+
+        Invariant: the event indicates "no ongoing actions still running".
+        Right after ``__init__`` there are zero ongoing actions
+        (``_ongoing_actions_count == 0``), so the event must be set.
+        Otherwise ``await event.wait()`` before the first ``_enqueue_action``
+        call would block indefinitely.
+        """
+        self.assertEqual(self.action_manager._ongoing_actions_count, 0)
+        self.assertTrue(
+            self.action_manager._ongoing_actions_finished_event.is_set(),
+            "_ongoing_actions_finished_event must be SET when count == 0, "
+            "including at construction time — the invariant is "
+            "'count == 0 ↔ event set'.",
+        )
+
     async def test_tts_action(self):
         """Test basic TTS action execution."""
         action = {"type": "tts_say", "text": "Hello"}
