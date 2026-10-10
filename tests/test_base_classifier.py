@@ -153,3 +153,10 @@ class TestImageFromFrame:
         image = await ClassifierImage.from_frame(frame)
 
         assert (image.content_type, image.data) == ("image/png", png.getvalue())
+
+    @pytest.mark.asyncio
+    async def test_an_encoded_frame_of_another_type_is_an_error(self):
+        frame = ImageRawFrame(image=b"gif bytes", size=(4, 4), format="image/gif")
+
+        with pytest.raises(ValueError):
+            await ClassifierImage.from_frame(frame)

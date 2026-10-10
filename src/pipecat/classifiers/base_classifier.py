@@ -17,7 +17,6 @@ results. Classifiers that can see images take :class:`ClassifierImage`
 alongside the state.
 """
 
-import asyncio
 import io
 import time
 from abc import abstractmethod
@@ -35,6 +34,7 @@ from pipecat.metrics.metrics import (
     ProcessingMetricsData,
 )
 from pipecat.utils.base_object import BaseObject
+from pipecat.utils.image import encode_image
 
 
 class ClassifierError(Exception):
@@ -107,8 +107,8 @@ class ClassifierImage(BaseModel):
     async def from_frame(cls, frame: ImageRawFrame) -> "ClassifierImage":
         """Build an image from an image frame, such as a frame from the user's camera.
 
-        Raw pixels are encoded as a JPEG. A frame whose format is already one
-        of the accepted MIME types keeps its bytes.
+        Raw pixels are encoded as a JPEG. A frame whose format is already a
+        MIME type keeps its bytes.
 
         Args:
             frame: The image frame.
@@ -116,16 +116,8 @@ class ClassifierImage(BaseModel):
         Returns:
             The image.
         """
-        if frame.format in ("image/png", "image/jpeg", "image/webp"):
-            return cls(data=frame.image, content_type=frame.format)
-
-        def encode() -> bytes:
-            image = Image.frombytes(frame.format or "RGB", frame.size, frame.image)
-            buffer = io.BytesIO()
-            image.convert("RGB").save(buffer, format="JPEG")
-            return buffer.getvalue()
-
-        return cls(data=await asyncio.to_thread(encode), content_type="image/jpeg")
+        data, content_type = await encode_image(frame.image, frame.size, frame.format)
+        return cls.model_validate({"data": data, "content_type": content_type})
 
     @staticmethod
     def _content_type(data: bytes) -> ClassifierImageType:
