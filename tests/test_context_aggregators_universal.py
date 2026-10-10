@@ -1470,6 +1470,97 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
         )
         assert json.loads(context.messages[-1]["content"]) == {"conditions": "Sunny"}
 
+    async def test_function_call_result_runs_llm_after_user_stops_speaking(self):
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        frames_to_send = [
+            FunctionCallInProgressFrame(
+                function_name="get_weather",
+                tool_call_id="1",
+                arguments={"location": "Los Angeles"},
+                cancel_on_interruption=True,
+            ),
+            UserStartedSpeakingFrame(),
+            FunctionCallResultFrame(
+                function_name="get_weather",
+                tool_call_id="1",
+                arguments={"location": "Los Angeles"},
+                result={"conditions": "Sunny"},
+            ),
+            SleepFrame(),
+            UserStoppedSpeakingFrame(),
+        ]
+        await run_test(
+            aggregator,
+            frames_to_send=frames_to_send,
+            expected_down_frames=[UserStartedSpeakingFrame, UserStoppedSpeakingFrame],
+            expected_up_frames=[LLMContextFrame],
+        )
+
+    async def test_function_call_result_waits_for_both_speakers_to_stop(self):
+        for stop_frames in (
+            [UserStoppedSpeakingFrame, BotStoppedSpeakingFrame],
+            [BotStoppedSpeakingFrame, UserStoppedSpeakingFrame],
+        ):
+            for both_stopped in (False, True):
+                with self.subTest(first_stop=stop_frames[0].__name__, both_stopped=both_stopped):
+                    aggregator = LLMAssistantAggregator(LLMContext())
+                    frames_to_send = [
+                        FunctionCallInProgressFrame(
+                            function_name="get_weather", tool_call_id="1", arguments={}
+                        ),
+                        UserStartedSpeakingFrame(),
+                        BotStartedSpeakingFrame(),
+                        FunctionCallResultFrame(
+                            function_name="get_weather",
+                            tool_call_id="1",
+                            arguments={},
+                            result={"conditions": "Sunny"},
+                        ),
+                        SleepFrame(),
+                        stop_frames[0](),
+                        SleepFrame(),
+                    ]
+                    expected_down_frames = [
+                        UserStartedSpeakingFrame,
+                        BotStartedSpeakingFrame,
+                        stop_frames[0],
+                    ]
+                    if both_stopped:
+                        frames_to_send.append(stop_frames[1]())
+                        expected_down_frames.append(stop_frames[1])
+                    await run_test(
+                        aggregator,
+                        frames_to_send=frames_to_send,
+                        expected_down_frames=expected_down_frames,
+                        expected_up_frames=[LLMContextFrame] if both_stopped else [],
+                    )
+
+    async def test_function_call_result_is_settled_by_an_existing_llm_run(self):
+        aggregator = LLMAssistantAggregator(LLMContext())
+        await run_test(
+            aggregator,
+            frames_to_send=[
+                FunctionCallInProgressFrame(
+                    function_name="get_weather", tool_call_id="1", arguments={}
+                ),
+                UserStartedSpeakingFrame(),
+                FunctionCallResultFrame(
+                    function_name="get_weather",
+                    tool_call_id="1",
+                    arguments={},
+                    result={"conditions": "Sunny"},
+                ),
+                SleepFrame(),
+                LLMFullResponseStartFrame(),
+                LLMFullResponseEndFrame(),
+                SleepFrame(),
+                UserStoppedSpeakingFrame(),
+            ],
+            expected_down_frames=[UserStartedSpeakingFrame, UserStoppedSpeakingFrame],
+            expected_up_frames=[],
+        )
+
     async def test_function_call_cancel(self):
         context = LLMContext()
         aggregator = LLMAssistantAggregator(context)
