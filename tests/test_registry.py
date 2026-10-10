@@ -164,6 +164,52 @@ class TestTaskRegistry(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(received), 1)
         self.assertIs(received[0], data)
 
+    async def test_unwatch_removes_the_handler(self):
+        """An unwatched handler no longer fires when the worker registers."""
+        received = []
+
+        async def handler(worker_data):
+            received.append(worker_data)
+
+        await self.registry.watch("greeter", handler)
+        self.registry.unwatch("greeter", handler)
+        await self.registry.register(WorkerReadyData(worker_name="greeter", runner="runner_a"))
+
+        self.assertEqual(received, [])
+        self.assertNotIn("greeter", self.registry._watches)
+
+    async def test_unwatch_unknown_handler_or_worker_is_a_no_op(self):
+        """Unwatching something that was never watched does nothing."""
+        received = []
+
+        async def handler(worker_data):
+            received.append(worker_data)
+
+        self.registry.unwatch("never-watched", handler)
+        await self.registry.watch("greeter", handler)
+        self.registry.unwatch("greeter", handler)
+        self.registry.unwatch("greeter", handler)  # already removed
+        await self.registry.register(WorkerReadyData(worker_name="greeter", runner="runner_a"))
+
+        self.assertEqual(received, [])
+        self.assertNotIn("never-watched", self.registry._watches)
+
+    async def test_handler_removed_while_notifying_does_not_skip_the_next(self):
+        """Unwatching during a notification still lets later handlers fire."""
+        seen = []
+
+        async def removes_itself(worker_data):
+            self.registry.unwatch("greeter", removes_itself)
+
+        async def after(worker_data):
+            seen.append(worker_data)
+
+        await self.registry.watch("greeter", removes_itself)
+        await self.registry.watch("greeter", after)
+        await self.registry.register(WorkerReadyData(worker_name="greeter", runner="runner_a"))
+
+        self.assertEqual(len(seen), 1)
+
     async def test_runner_name_property(self):
         """runner_name returns the name passed at construction."""
         self.assertEqual(self.registry.runner_name, "runner_a")

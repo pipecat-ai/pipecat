@@ -1092,9 +1092,8 @@ class BaseWorker(BaseObject, BusSubscriber):
             timeout=timeout,
             cancel_on_error=cancel_on_error,
         )
-        all_ready = await self._wait_workers_ready(worker_names)
         try:
-            await asyncio.wait_for(all_ready, timeout=group_params.timeout)
+            await self._wait_workers_ready(worker_names, timeout=group_params.timeout)
         except TimeoutError:
             raise JobGroupError("workers not ready within timeout")
 
@@ -1538,29 +1537,46 @@ class BaseWorker(BaseObject, BusSubscriber):
 
         return group
 
-    async def _wait_workers_ready(self, worker_names: list[str]) -> asyncio.Future:
-        """Return a future that resolves when all named workers are ready.
+    async def _wait_workers_ready(
+        self, worker_names: list[str], *, timeout: float | None = None
+    ) -> None:
+        """Wait until all the named workers are registered as ready.
 
-        Callers can race the returned future against a timeout or group
-        done signal.
+        The readiness watches are removed before returning on every path
+        (ready, timed out, or cancelled), so repeated job requests do not
+        accumulate watches on the registry.
+
+        Args:
+            worker_names: Names of the workers to wait for.
+            timeout: Seconds to wait for, or None to wait indefinitely.
 
         Raises:
             RuntimeError: If the registry is not available.
+            TimeoutError: If the workers are not all ready within ``timeout``.
         """
         if not self._registry:
             raise RuntimeError(f"Worker '{self}': registry not available")
 
         ready_events: dict[str, asyncio.Event] = {}
-        for name in worker_names:
-            event = asyncio.Event()
-            ready_events[name] = event
+        watches = []
+        try:
+            for name in worker_names:
+                event = asyncio.Event()
+                ready_events[name] = event
 
-            async def _on_ready(data, ev=event):
-                ev.set()
+                async def _on_ready(data, ev=event):
+                    ev.set()
 
-            await self._registry.watch(name, _on_ready)
+                # Recorded before watching so a mid-loop failure still unwatches.
+                watches.append((name, _on_ready))
+                await self._registry.watch(name, _on_ready)
 
-        return asyncio.ensure_future(asyncio.gather(*(ev.wait() for ev in ready_events.values())))
+            await asyncio.wait_for(
+                asyncio.gather(*(ev.wait() for ev in ready_events.values())), timeout=timeout
+            )
+        finally:
+            for name, handler in watches:
+                self._registry.unwatch(name, handler)
 
     async def _send_job_request(
         self,
