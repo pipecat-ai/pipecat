@@ -431,6 +431,9 @@ class STTService(AIService):
             direction: The direction of frame processing.
         """
         if self._reconnecting:
+            # Buffered audio counts as activity, so keepalive doesn't send
+            # silence ahead of the replay.
+            self._last_audio_time = time.monotonic()
             self._reconnect_audio_buffer.append((frame, direction))
             return
 
