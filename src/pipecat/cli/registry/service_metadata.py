@@ -686,10 +686,11 @@ class ServiceRegistry:
             value="perplexity_llm",
             label="Perplexity",
             package="pipecat-ai[perplexity]",
-            class_name=["PerplexityLLMService"],
+            class_name=["PerplexityAgentLLMService"],
             env_prefix="PERPLEXITY",
             include_params=["api_key"],
             settings_params=["model", "system_instruction"],
+            param_defaults={"model": "openai/gpt-5.6-luna"},
         ),
         ServiceDefinition(
             value="qwen_llm",

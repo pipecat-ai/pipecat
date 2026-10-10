@@ -35,6 +35,7 @@ from openai.types.responses import (
     ResponseReasoningSummaryTextDeltaEvent,
     ResponseStreamEvent,
     ResponseTextDeltaEvent,
+    ResponseUsage,
 )
 from pydantic import BaseModel
 from websockets.exceptions import ConnectionClosed
@@ -1342,6 +1343,33 @@ class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
             logger.debug(f"{self}: Retrying response creation due to timeout")
             return await self._client.responses.create(**params)
 
+    def _token_usage(self, usage: ResponseUsage) -> LLMTokenUsage:
+        """Convert a completed response's usage into Pipecat's token usage.
+
+        Args:
+            usage: The usage reported with the completed response.
+
+        Returns:
+            The token usage to report.
+        """
+        # Third-party Responses API servers may omit fields the OpenAI SDK treats
+        # as required. The SDK's lenient streaming decoder leaves anything omitted
+        # as None — at the top level (token counts), as a missing detail
+        # sub-object, or as a missing field inside one. Coalesce each to 0 so a
+        # partial usage payload can't raise or leak None into metrics.
+        input_details = usage.input_tokens_details
+        output_details = usage.output_tokens_details
+        return LLMTokenUsage(
+            prompt_tokens=usage.input_tokens or 0,
+            completion_tokens=usage.output_tokens or 0,
+            total_tokens=usage.total_tokens or 0,
+            cache_read_input_tokens=(input_details.cached_tokens or 0) if input_details else 0,
+            cache_creation_input_tokens=(getattr(input_details, "cache_write_tokens", None) or 0)
+            if input_details
+            else 0,
+            reasoning_tokens=(output_details.reasoning_tokens or 0) if output_details else 0,
+        )
+
     @traced_llm
     async def _process_context(self, context: LLMContext):
         adapter = self.get_llm_adapter()
@@ -1361,6 +1389,7 @@ class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
         # Track function calls across stream events
         function_calls: dict[str, dict[str, str]] = {}  # item_id -> {name, call_id, arguments}
         current_arguments: dict[str, str] = {}  # item_id -> accumulated arguments
+        function_call_indexes: dict[int, str] = {}  # output_index -> item_id
         reasoning_summary_open = False
         stream_errored = False
 
@@ -1413,6 +1442,7 @@ class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
                             "arguments": "",
                         }
                         current_arguments[item_id] = ""
+                        function_call_indexes[event.output_index] = item_id
 
                 elif isinstance(event, ResponseFunctionCallArgumentsDeltaEvent):
                     item_id = event.item_id
@@ -1426,6 +1456,14 @@ class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
 
                 elif isinstance(event, ResponseOutputItemDoneEvent):
                     item = event.item
+                    if not isinstance(item, ResponseFunctionToolCall):
+                        # A server that runs a tool itself, such as Perplexity's web
+                        # search, can announce it as a function call and complete it
+                        # as another kind of item. It isn't a call for Pipecat to run.
+                        announced = function_call_indexes.pop(event.output_index, None)
+                        if announced is not None:
+                            function_calls.pop(announced, None)
+                            current_arguments.pop(announced, None)
                     if isinstance(item, ResponseFunctionToolCall):
                         item_id = item.id or ""
                         if item_id in function_calls:
@@ -1448,33 +1486,7 @@ class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
                 elif isinstance(event, ResponseCompletedEvent):
                     response = event.response
                     if response.usage:
-                        usage = response.usage
-                        # Third-party Responses API servers may omit fields the
-                        # OpenAI SDK treats as required. The SDK's lenient
-                        # streaming decoder leaves anything omitted as None — at
-                        # the top level (token counts), as a missing detail
-                        # sub-object, or as a missing field inside one. Coalesce
-                        # each to 0 so a partial usage payload can't raise or
-                        # leak None into metrics.
-                        input_details = usage.input_tokens_details
-                        output_details = usage.output_tokens_details
-                        tokens = LLMTokenUsage(
-                            prompt_tokens=usage.input_tokens or 0,
-                            completion_tokens=usage.output_tokens or 0,
-                            total_tokens=usage.total_tokens or 0,
-                            cache_read_input_tokens=(input_details.cached_tokens or 0)
-                            if input_details
-                            else 0,
-                            cache_creation_input_tokens=(
-                                getattr(input_details, "cache_write_tokens", None) or 0
-                            )
-                            if input_details
-                            else 0,
-                            reasoning_tokens=(output_details.reasoning_tokens or 0)
-                            if output_details
-                            else 0,
-                        )
-                        await self.start_llm_usage_metrics(tokens)
+                        await self.start_llm_usage_metrics(self._token_usage(response.usage))
 
                     # This field is used by @traced_llm for more detailed
                     # model name in tracing spans

@@ -3721,6 +3721,17 @@
       "location": "pipecat/services/openrouter/llm.py"
     },
     {
+      "subject": "PerplexityLLMService",
+      "module": "pipecat.services.perplexity.llm",
+      "kind": "class",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "PerplexityAgentLLMService",
+      "message": "`PerplexityLLMService` is deprecated since 1.13.0 and will be removed in 2.0.0. Use `PerplexityAgentLLMService` instead.",
+      "location": "pipecat/services/perplexity/llm.py"
+    },
+    {
       "subject": "PerplexityLLMService.model",
       "module": "pipecat.services.perplexity.llm",
       "kind": "parameter",
