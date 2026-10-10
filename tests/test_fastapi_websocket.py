@@ -357,12 +357,12 @@ class TestWriteAudioFramePacesWrittenFrames(unittest.IsolatedAsyncioTestCase):
     reaching downstream consumers.
     """
 
-    def _make_output(self, serializer):
+    def _make_output(self, serializer, **params):
         mock_ws = AsyncMock()
         type(mock_ws).client_state = PropertyMock(return_value=WebSocketState.CONNECTED)
         type(mock_ws).application_state = PropertyMock(return_value=WebSocketState.CONNECTED)
 
-        params = FastAPIWebsocketParams(audio_out_enabled=True, serializer=serializer)
+        params = FastAPIWebsocketParams(audio_out_enabled=True, serializer=serializer, **params)
         output = FastAPIWebsocketTransport(mock_ws, params).output()
         output._sample_rate = 8000
         output._write_audio_sleep = AsyncMock()
@@ -392,6 +392,51 @@ class TestWriteAudioFramePacesWrittenFrames(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(written)
         output._write_audio_sleep.assert_not_awaited()
+
+    async def test_frame_is_not_written_when_sending_fails(self):
+        """A send that fails leaves the frame unwritten, and unpaced."""
+        serializer = _CoalescingSerializer()
+        serializer.serialize = AsyncMock(return_value=b"\x00" * 960)
+        output, mock_ws = self._make_output(serializer)
+        mock_ws.send_bytes.side_effect = Exception("connection closed")
+
+        written = await output.write_audio_frame(self._audio_frame())
+
+        self.assertFalse(written)
+        output._write_audio_sleep.assert_not_awaited()
+
+    async def test_frame_is_not_written_when_a_packet_fails_to_send(self):
+        """Fixed-size packets stop at the first one that fails to send."""
+        serializer = _CoalescingSerializer()
+        serializer.serialize = AsyncMock(return_value=b"\x00" * 960)
+        output, mock_ws = self._make_output(serializer, fixed_audio_packet_size=320)
+        mock_ws.send_bytes.side_effect = Exception("connection closed")
+
+        written = await output.write_audio_frame(self._audio_frame())
+
+        self.assertFalse(written)
+        mock_ws.send_bytes.assert_awaited_once()
+
+    async def test_frames_are_not_written_once_a_send_has_failed(self):
+        """Sends suppressed after a failed one leave their frames unwritten too."""
+        serializer = _CoalescingSerializer()
+        serializer.serialize = AsyncMock(return_value=b"\x00" * 960)
+        output, mock_ws = self._make_output(serializer)
+
+        # Starlette marks the connection disconnected when a send fails.
+        app_state = {"state": WebSocketState.CONNECTED}
+        type(mock_ws).application_state = PropertyMock(side_effect=lambda: app_state["state"])
+
+        def fail_and_transition(data):
+            app_state["state"] = WebSocketState.DISCONNECTED
+            raise Exception("connection closed")
+
+        mock_ws.send_bytes.side_effect = fail_and_transition
+
+        written = [await output.write_audio_frame(self._audio_frame()) for _ in range(3)]
+
+        self.assertEqual(written, [False] * 3)
+        mock_ws.send_bytes.assert_awaited_once()
 
 
 if __name__ == "__main__":
