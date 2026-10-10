@@ -69,7 +69,7 @@ README. To run just the flows bots:
 evals/release/run.sh -p flows
 ```
 
-Or iterate on a single bot: run it with `-t eval`, then drive one scenario
+Or iterate on a single bot: run it (`python bot.py`), then drive one scenario
 against it with
 `pipecat eval run evals/release/scenarios/<name>.yaml -v`.
 

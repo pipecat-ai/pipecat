@@ -522,6 +522,29 @@ class TestSpawnWithRunnerBody(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(Path(seen["cwd"]).resolve(), body.parent)
 
 
+class TestStopBot(unittest.IsolatedAsyncioTestCase):
+    """A run's bot is terminated as soon as the run ends: its dev runner outlives the session."""
+
+    async def test_running_bot_is_terminated_promptly(self):
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable, "-c", "import time; time.sleep(60)"
+        )
+        started = asyncio.get_running_loop().time()
+
+        await EvalSuite._stop_bot(proc)
+
+        self.assertIsNotNone(proc.returncode)
+        self.assertLess(asyncio.get_running_loop().time() - started, 5)
+
+    async def test_exited_bot_is_left_alone(self):
+        proc = await asyncio.create_subprocess_exec(sys.executable, "-c", "pass")
+        await proc.wait()
+
+        await EvalSuite._stop_bot(proc)
+
+        self.assertEqual(proc.returncode, 0)
+
+
 if __name__ == "__main__":
     unittest.main()
 

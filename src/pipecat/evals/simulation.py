@@ -118,6 +118,7 @@ from pipecat.evals.scenario_config import (
     _judge_segments,
     _llm_identity,
     _parse_judge_block,
+    _parse_trigger_disconnect,
     _parse_user_block,
     _user_segments,
 )
@@ -184,8 +185,13 @@ class EvalSimulationScenario:
         max_duration_s: Cap on the run's wall clock, in seconds.
         max_silence_s: Cap on a lull with no event from either side, in seconds.
         runs: How many times the suite runs the simulation; every run must pass.
-        trigger_disconnect: Whether the harness fires the bot's
+        trigger_disconnect: Whether a bot serving the server
+            :class:`~pipecat.evals.transport.EvalTransport` fires its
             ``on_client_disconnected`` handler when the connection ends.
+
+            .. deprecated:: 1.13.0
+                No replacement. A bot fires ``on_client_disconnected`` whenever
+                the harness disconnects. Will be removed in 2.0.0.
         source_path: Path the simulation was loaded from, for error messages.
     """
 
@@ -279,7 +285,7 @@ def _parse_simulation(data: dict, path: Path) -> EvalSimulationScenario:
         max_duration_s=_positive_number(data, "max_duration_s", DEFAULT_MAX_DURATION_S, path),
         max_silence_s=_positive_number(data, "max_silence_s", DEFAULT_MAX_SILENCE_S, path),
         runs=_positive_int(data, "runs", 1, path),
-        trigger_disconnect=bool(data.get("trigger_disconnect", False)),
+        trigger_disconnect=_parse_trigger_disconnect(data, path),
         source_path=path,
     )
 

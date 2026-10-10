@@ -104,10 +104,10 @@ A Pipecat AI voice agent built with {% if mode == 'cascade' %}a cascade pipeline
 
 This project includes behavioral evals: scripted conversations that drive the bot headless — no live call needed. Starter scenarios live in `server/evals/`; edit them as your bot takes shape and copy them to add more.
 
-From `server/`, run the bot with the eval transport, then drive scenarios against it from a second terminal (the bot stays up across runs):
+From `server/`, run the bot, then drive scenarios against it from a second terminal (the bot stays up across runs):
 
 ```bash
-uv run bot.py -t eval
+uv run bot.py
 {% if mode == 'cascade' %}
 # In another terminal:
 uv run pipecat eval run evals/starter_text.yaml -v    # fast text-mode check

@@ -8,6 +8,7 @@ import json
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from pipecat.evals.serializer import EvalConnectionFlags, eval_connect_message
 from pipecat.runner.types import (
     CallData,
     ExotelCallData,
@@ -257,6 +258,30 @@ class TestParseTelephonyIdempotent(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(first[1]["call_id"], "CA1")
 
 
+class TestParseEvalConnect(unittest.IsolatedAsyncioTestCase):
+    async def test_eval_connect_detected_from_first_message(self):
+        flags = EvalConnectionFlags(skip_tts=True, capture_bot_audio=True)
+        ws = MagicMock()
+        ws.iter_text.return_value = MockAsyncIterator([eval_connect_message(flags)])
+
+        transport_type, call_data = await parse_telephony_websocket(ws)
+
+        self.assertEqual(transport_type, "eval")
+        self.assertEqual(EvalConnectionFlags.model_validate(call_data.body), flags)
+
+    async def test_eval_connect_leaves_the_next_message_unread(self):
+        # The harness's client-ready follows eval-connect and must reach the bot.
+        messages = MockAsyncIterator(
+            [eval_connect_message(EvalConnectionFlags()), json.dumps({"type": "client-ready"})]
+        )
+        ws = MagicMock()
+        ws.iter_text.return_value = messages
+
+        await parse_telephony_websocket(ws)
+
+        self.assertEqual(messages.index, 1)
+
+
 class TestCreateTransportExposesCallData(unittest.IsolatedAsyncioTestCase):
     async def test_telephony_call_data_set_on_runner_args(self):
         """create_transport exposes the parsed handshake on runner_args for the bot."""
@@ -280,6 +305,35 @@ class TestCreateTransportExposesCallData(unittest.IsolatedAsyncioTestCase):
         # Both styles work: typed attribute access and dict-style subscript.
         self.assertEqual(args.call_data.call_id, "CA9")
         self.assertEqual(args.call_data["call_id"], "CA9")
+
+
+class TestCreateTransportEval(unittest.IsolatedAsyncioTestCase):
+    async def test_eval_connect_builds_the_eval_transport_with_its_flags(self):
+        from pipecat.evals.fastapi_transport import EvalFastAPIWebsocketTransport
+        from pipecat.evals.serializer import EvalSerializer
+        from pipecat.evals.transport import EvalTransportParams
+
+        flags = EvalConnectionFlags(skip_tts=True, capture_bot_audio=True)
+        ws = MagicMock()
+        ws.iter_text.return_value = MockAsyncIterator([eval_connect_message(flags)])
+        args = WebSocketRunnerArguments(websocket=ws)
+
+        transport = await create_transport(args, {"eval": lambda: EvalTransportParams()})
+
+        self.assertIsInstance(transport, EvalFastAPIWebsocketTransport)
+        self.assertEqual(args.transport_type, "eval")
+        self.assertIsInstance(transport._params.serializer, EvalSerializer)
+        self.assertTrue(transport._params.serializer._capture_audio)
+
+    async def test_eval_connect_without_eval_params_raises(self):
+        ws = MagicMock()
+        ws.iter_text.return_value = MockAsyncIterator([eval_connect_message(EvalConnectionFlags())])
+        args = WebSocketRunnerArguments(websocket=ws)
+
+        with self.assertRaises(ValueError) as context:
+            await create_transport(args, {"twilio": lambda: MagicMock()})
+
+        self.assertIn("'eval'", str(context.exception))
 
 
 @unittest.skipUnless(DAILY_AVAILABLE, "requires the daily-python SDK")

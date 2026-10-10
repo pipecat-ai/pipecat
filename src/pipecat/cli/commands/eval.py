@@ -44,7 +44,7 @@ from pipecat.evals.scenario import (
     describe_simulation,
     is_scenario_file,
 )
-from pipecat.evals.session import EvalSession, EvalSessionParams
+from pipecat.evals.session import DEFAULT_BOT_READY_TIMEOUT_S, EvalSession, EvalSessionParams
 from pipecat.evals.suite import (
     SCENARIO_SUFFIXES,
     EvalManifest,
@@ -388,9 +388,9 @@ def run(
         help="One or more scenario YAML files (scripted, or simulations), or directories of them.",
     ),
     bot_url: str = typer.Option(
-        "ws://localhost:7860",
+        "ws://localhost:7860/ws",
         "--bot-url",
-        help="WebSocket URL of the bot's eval transport.",
+        help="WebSocket URL of the bot: the dev runner's /ws route, or a Pipecat Cloud session's.",
     ),
     verbose: bool = typer.Option(
         False,
@@ -441,15 +441,19 @@ def run(
     stop_bot: bool = typer.Option(
         False,
         "--stop-bot",
-        help="Cancel the bot's pipeline (exit it) after the run. By default the "
-        "bot is left running so it can serve more scenarios.",
+        help="Deprecated, no effect: the harness always ends the bot's session after a run.",
     ),
     trigger_disconnect: bool = typer.Option(
         False,
         "--trigger-disconnect",
-        help="Fire the bot's on_client_disconnected handler when the eval client "
-        "disconnects. Bots often cancel their pipeline there, so it's off by "
-        "default. A scenario's 'trigger_disconnect:' field opts in on its own.",
+        help="Deprecated: a bot fires on_client_disconnected whenever the eval client "
+        "disconnects. Only affects a bot serving the server EvalTransport.",
+    ),
+    bot_ready_timeout: float = typer.Option(
+        DEFAULT_BOT_READY_TIMEOUT_S,
+        "--bot-ready-timeout",
+        help="Seconds to wait, once connected, for the bot's RTVI bot-ready, which "
+        "covers the bot's startup.",
     ),
 ) -> None:
     """Run one or more scenarios, scripted or simulations, against an already-running bot.
@@ -471,12 +475,23 @@ def run(
     if audio:
         _print_run_settings(runs, None, audio)
 
+    if stop_bot:
+        _console.print(
+            "[yellow]--stop-bot is deprecated since 1.13.0 and has no effect: "
+            "the harness always ends the bot's session after a run.[/yellow]"
+        )
+    if trigger_disconnect:
+        _console.print(
+            "[yellow]--trigger-disconnect is deprecated since 1.13.0: a bot fires "
+            "on_client_disconnected whenever the eval client disconnects.[/yellow]"
+        )
+
     params = EvalSessionParams(
         default_timeout_ms=timeout * 1000,
         cache_dir=cache_dir,
         use_cache=not no_cache,
-        stop_bot=stop_bot,
         trigger_disconnect=trigger_disconnect,
+        bot_ready_timeout_s=bot_ready_timeout,
     )
     started = time.monotonic()
     asyncio.run(

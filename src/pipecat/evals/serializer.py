@@ -9,17 +9,21 @@
 :class:`EvalSerializer` runs in the bot, as the serializer of its
 :class:`~pipecat.evals.transport.EvalTransport`; :class:`EvalClientSerializer`
 runs in the harness, in :class:`~pipecat.evals.client_transport.EvalClientTransport`.
-Both speak RTVI. The eval adds messages of its own on top: ``eval-configure``,
-``eval-context``, ``eval-cancel``, and ``eval-image`` from the harness, and
-``eval-bot-audio`` and ``eval-bot-image`` from the bot when the harness asks for
-them.
+Both speak RTVI. The eval adds messages of its own on top: ``eval-connect``,
+``eval-configure``, ``eval-context``, ``eval-cancel``, and ``eval-image`` from
+the harness, and ``eval-bot-audio`` and ``eval-bot-image`` from the bot when the
+harness asks for them.
 """
 
+import asyncio
 import base64
+import io
 import json
 from typing import Any
 
 from loguru import logger
+from PIL import Image
+from pydantic import BaseModel
 
 import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.frames.frames import (
@@ -32,12 +36,21 @@ from pipecat.frames.frames import (
     OutputImageRawFrame,
     OutputTransportMessageFrame,
     OutputTransportMessageUrgentFrame,
+    UserImageRawFrame,
+    UserImageRequestFrame,
 )
 from pipecat.processors.frameworks.rtvi.frames import RTVIConfigureObserverFrame
 from pipecat.processors.frameworks.rtvi.observer import RTVIFunctionCallReportLevel
 from pipecat.serializers.base_serializer import FrameSerializer
 from pipecat.serializers.rtvi_client import RTVIClientSerializer
 from pipecat.utils.deprecation import deprecated
+
+# A ``client-message`` with this ``t`` is the first message the harness sends on
+# every connection, carrying the connection's flags (``EvalConnectionFlags``).
+# On a WebSocket the bot accepted itself, as on Pipecat Cloud, it is how
+# ``create_transport`` recognizes an eval and how the flags reach the bot, since
+# only the session body survives the hops in between. The serializer consumes it.
+EVAL_CONNECT_MESSAGE_TYPE = "eval-connect"
 
 # A ``client-message`` with this ``t`` is intercepted by the serializer and
 # turned into an ``LLMMessagesUpdateFrame`` instead of being forwarded to the
@@ -80,6 +93,47 @@ EVAL_BOT_IMAGE_TYPE = "eval-bot-image"
 EVAL_STT_SAMPLE_RATE = 16000
 
 
+class EvalConnectionFlags(BaseModel):
+    """What one eval connection asks of the bot, sent in the ``eval-connect`` message.
+
+    Parameters:
+        skip_tts: Silence the bot's speech for the connection (text mode).
+        capture_bot_audio: Forward the bot's synthesized audio to the harness.
+        capture_bot_images: Report the images the bot outputs to the harness.
+    """
+
+    skip_tts: bool = False
+    capture_bot_audio: bool = False
+    capture_bot_images: bool = False
+
+
+def eval_connect_message(flags: EvalConnectionFlags) -> str:
+    """The ``eval-connect`` message carrying ``flags``, as JSON text."""
+    message = RTVI.Message(
+        type="client-message",
+        id=EVAL_CONNECT_MESSAGE_TYPE,
+        data={"t": EVAL_CONNECT_MESSAGE_TYPE, "d": flags.model_dump()},
+    )
+    return message.model_dump_json()
+
+
+def parse_eval_connect(message: Any) -> EvalConnectionFlags | None:
+    """The flags of an ``eval-connect`` message, or ``None`` for any other message.
+
+    Args:
+        message: A decoded JSON message.
+    """
+    if not isinstance(message, dict) or message.get("label") != RTVI.MESSAGE_LABEL:
+        return None
+    if message.get("type") != "client-message":
+        return None
+    data = message.get("data")
+    if not isinstance(data, dict) or data.get("t") != EVAL_CONNECT_MESSAGE_TYPE:
+        return None
+    payload = data.get("d")
+    return EvalConnectionFlags.model_validate(payload if isinstance(payload, dict) else {})
+
+
 class EvalSerializer(FrameSerializer):
     """Bridges RTVI messages and frames on the bot's side of an eval.
 
@@ -98,11 +152,11 @@ class EvalSerializer(FrameSerializer):
         # wire so the harness can observe semantic events.
         super().__init__(params=FrameSerializer.InputParams(ignore_rtvi_messages=False), **kwargs)
         # Off by default; the eval transport flips this on per connection (from
-        # the ?capture_bot_audio query param) only for tts_response scenarios, so we
+        # its capture_bot_audio flag) only for tts_response scenarios, so we
         # don't ship the bot's audio over the wire unless something asserts on it.
         self._capture_audio = False
         # Off by default like the audio; the eval transport flips it on per
-        # connection (from the ?capture_bot_images query param) for scenarios
+        # connection (from its capture_bot_images flag) for scenarios
         # that assert on ``image``, so a bot animating its video output doesn't
         # flood the harness.
         self._capture_images = False
@@ -121,6 +175,28 @@ class EvalSerializer(FrameSerializer):
     def get_user_image(self) -> tuple[bytes, str] | None:
         """The image registered for the current turn as ``(bytes, mime)``, or None."""
         return self._user_image
+
+    async def user_image_frame(self, request: UserImageRequestFrame) -> UserImageRawFrame | None:
+        """The registered image as the frame answering ``request``, or ``None`` if none is registered.
+
+        The harness sends the image encoded, but a real camera transport pushes
+        raw frames, so it is decoded to raw RGB. The LLM context re-encodes raw
+        frames to JPEG anyway, and consumers that decode directly (e.g. a local
+        vision model doing ``Image.frombytes``) need the raw pixels and real size.
+        """
+        if self._user_image is None:
+            return None
+        data, _fmt = self._user_image
+        decoded = await asyncio.to_thread(lambda: Image.open(io.BytesIO(data)).convert("RGB"))
+        return UserImageRawFrame(
+            image=decoded.tobytes(),
+            size=decoded.size,
+            format="RGB",
+            user_id=request.user_id,
+            text=request.text,
+            append_to_context=request.append_to_context,
+            request=request,
+        )
 
     async def serialize(self, frame: Frame) -> str | bytes | None:
         """Serialize an outbound frame for the harness; only RTVI server messages go out.
@@ -176,6 +252,11 @@ class EvalSerializer(FrameSerializer):
 
         if not isinstance(message, dict) or message.get("label") != RTVI.MESSAGE_LABEL:
             logger.warning(f"EvalSerializer: ignoring non-RTVI message: {message!r}")
+            return None
+
+        # The transport already applied the connection's flags: from this
+        # message when it was built, or from the URL when it is the server.
+        if parse_eval_connect(message) is not None:
             return None
 
         context = self._maybe_context_frame(message)

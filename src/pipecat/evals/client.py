@@ -43,8 +43,9 @@ from pipecat.evals.serializer import (
     EVAL_IMAGE_MESSAGE_TYPE,
     EVAL_STT_SAMPLE_RATE,
     EvalClientSerializer,
+    EvalConnectionFlags,
 )
-from pipecat.evals.session import EvalSessionParams
+from pipecat.evals.session import DEFAULT_BOT_READY_TIMEOUT_S, EvalSessionParams
 from pipecat.evals.tts import CachingTTSService, tts_sample_rate
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
@@ -88,7 +89,8 @@ from pipecat.services.stt_service import SegmentedSTTService, STTService
 from pipecat.transports.websocket.client import WebsocketClientParams
 from pipecat.workers.runner import WorkerRunner
 
-BOT_READY_TIMEOUT_S = 10.0
+# The default, at the name the deprecated ``pipecat.evals.harness`` re-exports.
+BOT_READY_TIMEOUT_S = DEFAULT_BOT_READY_TIMEOUT_S
 
 
 # Frames the bot produced: the sink turns them into events and stops them here.
@@ -394,10 +396,10 @@ class EvalClientParams(BaseModel):
             emits.
         context: Messages the bot's context starts from, sent right after the
             handshake; empty sends nothing.
-        trigger_disconnect: Whether the scenario itself asks for the bot's
-            ``on_client_disconnected`` handler to fire when this connection
-            ends; the run's :class:`~pipecat.evals.session.EvalSessionParams`
-            can ask too.
+        trigger_disconnect: Whether the scenario itself asks a bot serving the
+            server :class:`~pipecat.evals.transport.EvalTransport` to fire its
+            ``on_client_disconnected`` handler when this connection ends; the
+            run's :class:`~pipecat.evals.session.EvalSessionParams` can ask too.
     """
 
     bot_audio: bool = False
@@ -564,12 +566,11 @@ class EvalClient:
         """
         # The transport sends client-ready on connect and fires on_bot_ready when
         # the bot answers; our handler sets _bot_ready_event.
+        timeout_s = self._session_params.bot_ready_timeout_s
         try:
-            await asyncio.wait_for(self._bot_ready_event.wait(), timeout=BOT_READY_TIMEOUT_S)
+            await asyncio.wait_for(self._bot_ready_event.wait(), timeout=timeout_s)
         except TimeoutError:
-            raise TimeoutError(
-                f"bot-ready not received within {int(BOT_READY_TIMEOUT_S * 1000)}ms"
-            ) from None
+            raise TimeoutError(f"bot-ready not received within {int(timeout_s * 1000)}ms") from None
 
         # Ask the bot's RTVIObserver to expose what this scenario needs, for the
         # duration of this eval only (bots keep their defaults; only the eval
@@ -594,17 +595,15 @@ class EvalClient:
             await self._send_eval(EVAL_CONTEXT_MESSAGE_TYPE, {"messages": self._params.context})
 
     async def stop(self) -> None:
-        """Save the recording, optionally cancel the bot, and end the pipeline."""
+        """Save the recording, end the bot's session, and end the pipeline."""
         self._stopping = True
         # Write the recording first: the recorder is harness-owned and fed raw
         # audio by the transport, so nothing below clears it, but writing here
         # lands it even if the teardown raises.
         await self._write_recording()
-        # Optionally ask the bot to tear its pipeline down gracefully so it exits
-        # on its own (best-effort; skipped by default so it stays up for more
-        # scenarios).
-        if self._session_params.stop_bot:
-            await self._send_cancel()
+        # End the bot's session whatever its disconnect handler does, so it
+        # doesn't wait out its pipeline's idle timeout.
+        await self._send_cancel()
         if self._worker is None or self._run_task is None:
             return
         # End the worker (which disconnects the transport), falling back to
@@ -732,21 +731,34 @@ class EvalClient:
         assert self._persona is not None
         self._persona.hang_up()
 
-    def _connect_url(self) -> str:
-        """The bot's URL with this connection's eval flags.
+    def _connection_flags(self) -> EvalConnectionFlags:
+        """What this connection asks of the bot.
 
         ``skip_tts`` in text mode, ``capture_bot_audio`` when the harness needs
-        the bot's audio, ``capture_bot_images`` when it needs the bot's images,
-        ``trigger_disconnect`` when the run asks for it.
+        the bot's audio, ``capture_bot_images`` when it needs the bot's images.
         """
+        return EvalConnectionFlags(
+            skip_tts=not self._params.bot_audio,
+            # Forward the bot's audio when something listens to it (the response
+            # transcription, a persona) or when recording an audio run.
+            capture_bot_audio=self._params.capture_bot_audio
+            or bool(self._record_path and self._params.bot_audio),
+            capture_bot_images=self._params.capture_bot_images,
+        )
+
+    def _connect_url(self) -> str:
+        """The bot's URL with this connection's eval flags as query params.
+
+        The flags, and ``trigger_disconnect`` when the run asks for it, for a
+        bot serving the eval transport's WebSocket server.
+        """
+        connection = self._connection_flags()
         flags = []
-        if not self._params.bot_audio:
+        if connection.skip_tts:
             flags.append("skip_tts=true")
-        # Forward the bot's audio when something listens to it (the response
-        # transcription, a persona) or when recording an audio run.
-        if self._params.capture_bot_audio or (self._record_path and self._params.bot_audio):
+        if connection.capture_bot_audio:
             flags.append("capture_bot_audio=true")
-        if self._params.capture_bot_images:
+        if connection.capture_bot_images:
             flags.append("capture_bot_images=true")
         if self._session_params.trigger_disconnect or self._params.trigger_disconnect:
             flags.append("trigger_disconnect=true")
@@ -778,7 +790,9 @@ class EvalClient:
         # would make the recording stutter.
         if self._record_path and self._params.bot_audio:
             self._recorder = EvalClientRecorder(self._user_audio_rate or EVAL_STT_SAMPLE_RATE)
-        transport = EvalClientTransport(self._connect_url(), params, recorder=self._recorder)
+        transport = EvalClientTransport(
+            self._connect_url(), params, flags=self._connection_flags(), recorder=self._recorder
+        )
 
         @transport.event_handler("on_bot_ready")
         async def _on_bot_ready(_transport):
@@ -893,7 +907,7 @@ class EvalClient:
         return self._message("send-text", data.model_dump()).model_dump()
 
     async def _send_cancel(self) -> None:
-        """Ask the bot to cancel its pipeline and exit.
+        """Ask the bot to cancel its pipeline, ending its session.
 
         Best-effort: the connection may already be gone.
         """

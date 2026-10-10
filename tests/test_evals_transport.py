@@ -4,13 +4,19 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Tests for the eval transport's per-connection query flags."""
+"""Tests for the eval transport's per-connection flags, over its server and over an accepted WebSocket."""
 
 import asyncio
 import types
 import unittest
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
+from pipecat.evals.fastapi_transport import (
+    EvalFastAPIWebsocketInputTransport,
+    EvalFastAPIWebsocketOutputTransport,
+    EvalFastAPIWebsocketTransport,
+)
+from pipecat.evals.serializer import EvalConnectionFlags, EvalSerializer
 from pipecat.evals.transport import (
     CAPTURE_AUDIO_QUERY_PARAM,
     CAPTURE_IMAGES_QUERY_PARAM,
@@ -72,7 +78,8 @@ class TestConnectionOutputSettings(unittest.IsolatedAsyncioTestCase):
         await self._assert_tts_resets_between_connections("/?skip_tts=false")
 
     async def _assert_tts_resets_between_connections(self, audio_path: str):
-        transport = EvalTransport(params=EvalTransportParams())
+        with self.assertWarns(DeprecationWarning):
+            transport = EvalTransport(params=EvalTransportParams())
         self.addAsyncCleanup(transport.cleanup)
         input_transport = transport.input()
         push_frame = AsyncMock()
@@ -96,6 +103,49 @@ class TestConnectionOutputSettings(unittest.IsolatedAsyncioTestCase):
 
         # Each greeting must see its own session's output setting.
         self.assertEqual(observed, [True, False, True])
+
+
+class TestEvalFastAPIWebsocketTransport(unittest.IsolatedAsyncioTestCase):
+    def _transport(self, flags: EvalConnectionFlags) -> EvalFastAPIWebsocketTransport:
+        params = EvalTransportParams(serializer=EvalSerializer())
+        return EvalFastAPIWebsocketTransport(MagicMock(), params, flags)
+
+    def test_uses_the_eval_input_and_output(self):
+        transport = self._transport(EvalConnectionFlags())
+        self.assertIsInstance(transport.input(), EvalFastAPIWebsocketInputTransport)
+        self.assertIsInstance(transport.output(), EvalFastAPIWebsocketOutputTransport)
+
+    def test_capture_flags_reach_the_serializer(self):
+        transport = self._transport(
+            EvalConnectionFlags(capture_bot_audio=True, capture_bot_images=True)
+        )
+        serializer = transport._params.serializer
+        self.assertTrue(serializer._capture_audio)
+        self.assertTrue(serializer._capture_images)
+
+    async def test_skip_tts_is_configured_before_on_client_connected(self):
+        self.assertEqual(await self._greeting_skip_tts(True), [True])
+        self.assertEqual(await self._greeting_skip_tts(False), [False])
+
+    async def _greeting_skip_tts(self, skip_tts: bool) -> list[bool]:
+        """The skip_tts settings pushed by the time ``on_client_connected`` runs."""
+        transport = self._transport(EvalConnectionFlags(skip_tts=skip_tts))
+        push_frame = AsyncMock()
+        transport.input().push_frame = push_frame
+        greeting_settings = asyncio.Queue()
+
+        @transport.event_handler("on_client_connected")
+        async def on_connected(transport, websocket):
+            greeting_settings.put_nowait(
+                [
+                    call.args[0].skip_tts
+                    for call in push_frame.await_args_list
+                    if isinstance(call.args[0], LLMConfigureOutputFrame)
+                ]
+            )
+
+        await transport._on_client_connected(MagicMock())
+        return await asyncio.wait_for(greeting_settings.get(), timeout=1)
 
 
 if __name__ == "__main__":

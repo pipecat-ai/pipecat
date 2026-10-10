@@ -212,6 +212,17 @@
       "location": "pipecat/evals/script.py"
     },
     {
+      "subject": "EvalScriptScenario.trigger_disconnect",
+      "module": "pipecat.evals.script",
+      "kind": "parameter",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "No replacement. A bot fires ``on_client_disconnected`` whenever the harness disconnects. Will be removed in 2.0.0.",
+      "location": "pipecat/evals/script.py"
+    },
+    {
       "subject": "EvalTurn",
       "module": "pipecat.evals.script",
       "kind": "class",
@@ -465,6 +476,28 @@
       "location": "pipecat/evals/session.py"
     },
     {
+      "subject": "EvalSessionParams.stop_bot",
+      "module": "pipecat.evals.session",
+      "kind": "parameter",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "No replacement. The harness always ends the bot's session. Will be removed in 2.0.0.",
+      "location": "pipecat/evals/session.py"
+    },
+    {
+      "subject": "EvalSessionParams.trigger_disconnect",
+      "module": "pipecat.evals.session",
+      "kind": "parameter",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "No replacement. A bot fires ``on_client_disconnected`` whenever the harness disconnects. Will be removed in 2.0.0.",
+      "location": "pipecat/evals/session.py"
+    },
+    {
       "subject": "EvalSimulationScenario.load",
       "module": "pipecat.evals.simulation",
       "kind": "method",
@@ -473,6 +506,17 @@
       "relation": "use_existing",
       "replacement": "EvalScenarioFile.load",
       "message": "`EvalSimulationScenario.load` is deprecated since 1.11.0 and will be removed in 2.0.0. Use `EvalScenarioFile.load` instead.",
+      "location": "pipecat/evals/simulation.py"
+    },
+    {
+      "subject": "EvalSimulationScenario.trigger_disconnect",
+      "module": "pipecat.evals.simulation",
+      "kind": "parameter",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "No replacement. A bot fires ``on_client_disconnected`` whenever the harness disconnects. Will be removed in 2.0.0.",
       "location": "pipecat/evals/simulation.py"
     },
     {
@@ -529,6 +573,17 @@
       "replacement": "runner_body: {path: <file>}",
       "message": "Use ``runner_body: {path: <file>}`` instead of a bare ``runner_body: <file>``. Will be removed in 2.0.0.",
       "location": "pipecat/evals/suite.py"
+    },
+    {
+      "subject": "EvalTransport",
+      "module": "pipecat.evals.transport",
+      "kind": "class",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "EvalFastAPIWebsocketTransport",
+      "message": "`EvalTransport` is deprecated since 1.13.0 and will be removed in 2.0.0. Use `EvalFastAPIWebsocketTransport` instead.",
+      "location": "pipecat/evals/transport.py"
     },
     {
       "subject": "VoicemailDetector.custom_system_prompt",
@@ -1178,6 +1233,17 @@
       "replacement": null,
       "message": "No replacement; the parameter is ignored. Will be removed in 2.0.0. The processor no longer needs a transport reference — audio input and audio-streaming start are driven by frames (:class:`InputAudioRawFrame` and :class:`InputTransportStartAudioStreamingFrame`) pushed downstream. For client-ready audio gating, set ``audio_in_stream_on_start=False`` on the transport params.",
       "location": "pipecat/processors/frameworks/rtvi/processor.py"
+    },
+    {
+      "subject": "EvalRunnerArguments",
+      "module": "pipecat.runner.types",
+      "kind": "class",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "WebSocketRunnerArguments",
+      "message": "`EvalRunnerArguments` is deprecated since 1.13.0 and will be removed in 2.0.0. Use `WebSocketRunnerArguments` instead.",
+      "location": "pipecat/runner/types.py"
     },
     {
       "subject": "MOQRunnerArguments.serve_bind",
