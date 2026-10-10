@@ -83,7 +83,7 @@ def test_sarvam_llm_default_model_is_sarvam_105b():
 @pytest.mark.parametrize(
     "model, expected_base_url",
     [
-        ("sarvam-105b", "https://api.sarvam.ai/v2"),
+        ("sarvam-105b", "https://api.sarvam.ai/v1"),
         ("deepseekv4-flash", "https://api.sarvam.ai/v2"),
         ("gemma4", "https://api.sarvam.ai/v2"),
         ("glm5.2", "https://api.sarvam.ai/v2"),
