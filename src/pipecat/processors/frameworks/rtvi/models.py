@@ -718,6 +718,46 @@ class UserLLMTextMessage(BaseModel):
     data: TextMessageData
 
 
+class STTRawTextMessageData(BaseModel):
+    """Data for STT raw text messages.
+
+    Parameters:
+        text: The transcribed text.
+        user_id: Identifier for the user who spoke.
+        timestamp: When the user said it.
+        final: Whether the transcription is final, as opposed to interim.
+    """
+
+    text: str
+    user_id: str
+    timestamp: str
+    final: bool
+
+
+class STTRawTextMessage(BaseModel):
+    """Message reporting a transcription as the STT produced it, interim ones included."""
+
+    label: MessageLiteral = MESSAGE_LABEL
+    type: Literal["stt-raw-text"] = "stt-raw-text"
+    data: STTRawTextMessageData
+
+
+class LLMRawTextMessage(BaseModel):
+    """Message reporting a chunk of text as the LLM streamed it."""
+
+    label: MessageLiteral = MESSAGE_LABEL
+    type: Literal["llm-raw-text"] = "llm-raw-text"
+    data: TextMessageData
+
+
+class TTSRawTextMessage(BaseModel):
+    """Message reporting text the TTS speaks, as it is spoken."""
+
+    label: MessageLiteral = MESSAGE_LABEL
+    type: Literal["tts-raw-text"] = "tts-raw-text"
+    data: TextMessageData
+
+
 class UserStartedSpeakingMessage(BaseModel):
     """Message indicating user has started speaking."""
 
