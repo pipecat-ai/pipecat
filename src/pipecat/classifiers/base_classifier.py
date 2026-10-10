@@ -294,11 +294,7 @@ class BaseClassifier(BaseObject):
         if images and not self.supports_images:
             raise ClassifierError(f"{self} cannot see images")
         started = time.perf_counter()
-        if images:
-            results, usage = await self._ask(state, questions, images=list(images))
-        else:
-            # A classifier that cannot see images may implement _ask without them.
-            results, usage = await self._ask(state, questions)
+        results, usage = await self._ask(state, questions, images=list(images or []))
         await self._call_event_handler(
             "on_metrics", self._metrics(time.perf_counter() - started, usage)
         )
@@ -384,8 +380,7 @@ class BaseClassifier(BaseObject):
     ) -> tuple[dict[str, ClassifierResult], LLMTokenUsage | None]:
         """Answer the questions, and say what tokens the call used if that is known.
 
-        ``images`` is passed only to a classifier that supports images, and
-        only when there are some.
+        ``images`` is always empty for a classifier that does not support images.
         """
         pass
 

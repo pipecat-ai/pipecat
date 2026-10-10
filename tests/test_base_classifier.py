@@ -30,7 +30,7 @@ class _TextClassifier(BaseClassifier):
         super().__init__()
         self.calls = 0
 
-    async def _ask(self, state, questions):
+    async def _ask(self, state, questions, images=()):
         self.calls += 1
         return {name: YesNoResult(probability=0.5) for name in questions}, None
 
@@ -73,7 +73,7 @@ class TestImages:
         assert classifier.calls == 0
 
     @pytest.mark.asyncio
-    async def test_a_classifier_without_images_in_its_ask_still_answers_text(self):
+    async def test_a_classifier_that_cannot_see_images_still_answers_text(self):
         classifier = _TextClassifier()
 
         results = await classifier.yes_no("hello", QUESTION)
@@ -89,7 +89,7 @@ class TestImages:
         await classifier.ask("a frame", QUESTION, images=(image, image))
         await classifier.yes_no("no frame", QUESTION)
 
-        assert classifier.images == [[image], [image, image], ()]
+        assert classifier.images == [[image], [image, image], []]
 
     def test_the_image_bytes_stay_out_of_the_repr(self):
         assert "data" not in repr(_jpeg())
