@@ -1,0 +1,1 @@
+- Fixed `AnthropicLLMService` requests to Claude Sonnet 5.5 failing with a 400 error when `thinking` isn't configured. The service now sends a thinking default only to models where it measurably shortens responses, currently Claude Sonnet 5, and logs the value the first time it applies it. Every other model, Claude Sonnet 5.5 included, runs at Anthropic's default.
