@@ -572,6 +572,9 @@ class BotLLMTextMessage(BaseModel):
     """Message containing bot LLM text output.
 
     Sent when the bot's LLM generates text.
+
+    .. deprecated:: 1.13.0
+        Use :class:`LLMRawTextMessage` instead. Will be removed in 2.0.0.
     """
 
     label: MessageLiteral = MESSAGE_LABEL
@@ -616,6 +619,9 @@ class BotTTSTextMessage(BaseModel):
     """Message containing bot TTS text output.
 
     Sent when text is being processed by TTS.
+
+    .. deprecated:: 1.13.0
+        Use :class:`TTSRawTextMessage` instead. Will be removed in 2.0.0.
     """
 
     label: MessageLiteral = MESSAGE_LABEL
@@ -649,6 +655,9 @@ class UserTranscriptionMessageData(BaseModel):
     """Data for user transcription messages.
 
     Contains transcription text and metadata.
+
+    .. deprecated:: 1.13.0
+        Use :class:`STTRawTextMessageData` instead. Will be removed in 2.0.0.
     """
 
     text: str
@@ -661,6 +670,10 @@ class UserTranscriptionMessage(BaseModel):
     """Message containing user transcription.
 
     Sent when user speech is transcribed.
+
+    .. deprecated:: 1.13.0
+        Use :class:`STTRawTextMessage` instead, or :class:`UserInputMessage` for what
+        the user said. Will be removed in 2.0.0.
     """
 
     label: MessageLiteral = MESSAGE_LABEL

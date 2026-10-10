@@ -117,13 +117,19 @@ class RTVIObserverParams:
 
     Parameters:
         bot_output_enabled: Indicates if bot output messages should be sent.
-        bot_llm_enabled: Indicates if the bot's LLM messages should be sent.
+        bot_llm_enabled: Indicates if the bot's LLM messages should be sent. Of these,
+            the ``bot-llm-text`` message is deprecated in favor of ``llm-raw-text``
+            (``llm_raw_text_enabled``) and will be removed in 2.0.0. This flag stays, for
+            ``bot-llm-started`` and ``bot-llm-stopped``.
         bot_llm_marker_enabled: Indicates if the bot's LLM marker reports
             (``LLMMarkerResponseFrame``, e.g. from ``filter_incomplete_user_turns``)
             should be sent. A report carries the marker the LLM emitted and the raw
             text of the whole response, which is meant for evaluation, not for
             clients, so this is off by default. Defaults to False.
-        bot_tts_enabled: Indicates if the bot's TTS messages should be sent.
+        bot_tts_enabled: Indicates if the bot's TTS messages should be sent. Of these,
+            the ``bot-tts-text`` message is deprecated in favor of ``tts-raw-text``
+            (``tts_raw_text_enabled``) and will be removed in 2.0.0. This flag stays, for
+            ``bot-tts-started`` and ``bot-tts-stopped``.
         bot_speaking_enabled: Indicates if the bot's started/stopped speaking messages should be sent.
         bot_audio_level_enabled: Indicates if bot's audio level messages should be sent.
         user_llm_enabled: Indicates if the user's LLM input messages should be sent.
@@ -133,6 +139,12 @@ class RTVIObserverParams:
             finalization (unlike ``user_speaking_enabled``, which a turn strategy may gate or
             defer). Off by default. Defaults to False.
         user_transcription_enabled: Indicates if user's transcription messages should be sent.
+
+            .. deprecated:: 1.13.0
+                No replacement. It only turns off ``user-transcription``, which is
+                deprecated in favor of ``user-input`` and ``stt-raw-text``. Will be
+                removed in 2.0.0.
+
         user_input_enabled: Indicates if the user's input messages should be sent. They
             report what the user said or typed: transcriptions, including interim ones,
             backchannels, and the text the client sent.
@@ -240,7 +252,15 @@ class RTVIObserverParams:
     skip_aggregator_types: list[TextType | str] | None = field(default=None, kw_only=True)
 
     def __post_init__(self):
-        """Carry the deprecated ``skip_aggregator_types`` over to ``skip_text_types``."""
+        """Warn about deprecated fields, carrying any with a replacement over to it."""
+        # False is the only value that differs from the default.
+        if not self.user_transcription_enabled:
+            warn_deprecated(
+                "`RTVIObserverParams.user_transcription_enabled` is deprecated since 1.13.0 and "
+                "will be removed in 2.0.0. No replacement.",
+                # The caller of the generated __init__ that calls __post_init__.
+                stacklevel=3,
+            )
         if self.skip_aggregator_types is not None:
             warn_deprecated(
                 "`RTVIObserverParams.skip_aggregator_types` is deprecated since 1.13.0 and will "
