@@ -8,6 +8,7 @@ import unittest
 
 from pipecat.utils.context.text_segment_map import TextSegmentMap, _HopKind
 from pipecat.utils.text.alnum_utils import fold_for_matching
+from pipecat.utils.text.markup_utils import strip_complete_markup
 
 
 class TestTextSegmentMapBuild(unittest.TestCase):
@@ -285,6 +286,83 @@ class TestTextSegmentMapSsmlPhonemeTag(unittest.TestCase):
         smap.advance_word("is")  # prior unchanged segment now fully consumed
         smap.advance_word("<phoneme")  # 0 alnum chars, but inside the transformed segment
         self.assertTrue(smap.in_transformed_segment)
+
+
+class TestTagsAreWholeTokens(unittest.TestCase):
+    """A tag holding spaces stays one token, so the diff cannot cut it in half.
+
+    Splitting on whitespace alone hands difflib "<speed" and 'ratio="0.9"/>' as
+    separate words, free to land in different segments. The half that keeps the
+    "<" reads as markup and strips away; the half without it reads as ordinary
+    text, and no spoken word ever matches it -- so the cursor stops there and
+    the rest of the utterance never reaches the transcript.
+    """
+
+    def test_tag_run_opening_an_utterance_keeps_the_whole_utterance(self):
+        """The space inside a tag is what lets the diff cut the tag apart.
+
+        The user-facing text is what the tracker itself derives when a caller
+        supplies none, so this is the shape a caller gets by default. It holds
+        no markup, which means the only tokens the tag's internal space can be
+        matched against are the spaces the stripped tags left behind -- and
+        matching it there splits the tag across two segments.
+
+        Whitespace-only tokenizing gives difflib "<speed", " ", then
+        'ratio="0.9"/> <emotion value="calm"/>That'. The last of those keeps no
+        "<" of its own, so it reads as ordinary text rather than markup, the
+        word "That" can never match it, and the whole utterance is lost.
+        """
+        tts = '<speed ratio="0.9"/> <emotion value="calm"/>That helps. One more thing?'
+        original = strip_complete_markup(tts)
+        smap = TextSegmentMap(tts, original)
+
+        for word in ("That", "helps.", "One", "more", "thing?"):
+            smap.advance_word(word)
+
+        self.assertEqual(smap.user_facing_pos, len(original))
+
+    def test_same_tag_run_with_a_trailing_space_already_passes(self):
+        """The control for the case above: one space is the only difference.
+
+        With a space after the last tag, its closing "/>" is no longer welded to
+        the word, so 'value="calm"/>' stands alone as a token and is identical on
+        both sides. The equal run then covers the whole tag run and the cut never
+        happens -- which is why the failure looks intermittent in the wild, since
+        it turns on nothing more than how the text happened to be spaced.
+        """
+        tts = '<speed ratio="0.9"/> <emotion value="calm"/> That helps. One more thing?'
+        original = strip_complete_markup(tts)
+        smap = TextSegmentMap(tts, original)
+
+        for word in ("That", "helps.", "One", "more", "thing?"):
+            smap.advance_word(word)
+
+        self.assertEqual(smap.user_facing_pos, len(original))
+
+    def test_spaced_tag_run_before_a_word_does_not_strand_the_tag_body(self):
+        tts = 'Thanks for waiting. <speed ratio="0.9"/> <emotion value="calm"/>That order shipped.'
+        original = strip_complete_markup(tts)
+        smap = TextSegmentMap(tts, original)
+
+        for word in ("Thanks", "for", "waiting.", "That", "order", "shipped."):
+            smap.advance_word(word)
+
+        self.assertEqual(smap.user_facing_pos, len(original))
+
+    def test_tag_body_never_lands_in_a_segment_without_its_opening_bracket(self):
+        tts = 'Hello <speed ratio="0.9"/> world'
+        smap = TextSegmentMap(tts, strip_complete_markup(tts))
+
+        for seg in smap._segments:
+            stripped = seg.tts.lstrip()
+            if "ratio=" in stripped:
+                self.assertTrue(stripped.startswith("<"))
+
+    def test_tokens_still_rebuild_the_text(self):
+        """Both alternatives are captured, so no character is dropped."""
+        text = 'Okay. <break time="500ms"/> <speed ratio="1.1"/>Let me check.'
+        smap = TextSegmentMap(text, "Okay. Let me check.")
+        self.assertEqual("".join(seg.tts for seg in smap._segments), text)
 
 
 class TestTextSegmentMapStrayAngleBracket(unittest.TestCase):
