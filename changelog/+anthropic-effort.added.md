@@ -1,0 +1,1 @@
+- Added `effort` to `AnthropicLLMService.Settings`, sent as `output_config.effort`. It sets how much the model spends on its response, thinking included, and lowering it is Anthropic's recommended way to reduce thinking.
