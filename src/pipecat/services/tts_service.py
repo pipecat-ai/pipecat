@@ -406,6 +406,9 @@ class TTSService(AIService):
         # PTS of the last word frame pushed via _add_word_timestamps, used to assign
         # correct PTS to TTSStoppedFrame and LLMFullResponseEndFrame.
         self._word_last_pts: int = 0
+        # PTS of the last uninterruptible word frame pushed. Those words keep
+        # playing through interruptions, so words after one come after them.
+        self._uninterruptible_word_last_pts: int = 0
         self._llm_response_started: bool = False
         # LLMFullResponseEndFrames received in process_frame, keyed by the turn's
         # context_id, held so each can be re-pushed (with corrected PTS) at end of
@@ -1094,6 +1097,8 @@ class TTSService(AIService):
         context = self._tts_contexts.get(context_id) if context_id is not None else None
         if context:
             frame.interruptible = frame.interruptible and context.interruptible
+        if isinstance(frame, TTSTextFrame) and frame.pts and not frame.interruptible:
+            self._uninterruptible_word_last_pts = frame.pts
         # Clean up context when we see TTSStoppedFrame
         if isinstance(frame, TTSStoppedFrame) and frame.context_id:
             if frame.context_id in self._tts_contexts:
@@ -1236,7 +1241,7 @@ class TTSService(AIService):
         if interrupt_playing:
             await self._stop_audio_context_task()
             await self.reset_word_timestamps()
-            self._word_last_pts = 0
+            self._word_last_pts = self._uninterruptible_word_last_pts
 
         self._serialization_queue.reset()
         self._aggregated_frame_sequencer.clear(keep_contexts=preserved)

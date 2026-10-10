@@ -2693,5 +2693,33 @@ async def test_queued_uninterruptible_synthesis_survives_an_interrupted_context(
     assert any(isinstance(f, TTSTextFrame) and f.text == "Keep this." for f in down)
 
 
+@pytest.mark.asyncio
+async def test_words_after_an_interruption_follow_protected_words_still_to_play():
+    """Protected words outlive their synthesis, so the next words are timed after them."""
+    tts = _MockPerCallWordTimestampWSTTSService(
+        word_times_per_call=[[("Keep", 0.0), ("this.", 5.0)], [("Next.", 0.0)]]
+    )
+    speech = TTSSpeakFrame("Keep this.", append_to_context=False)
+    speech.interruptible = False
+    down, _ = await asyncio.wait_for(
+        run_test(
+            tts,
+            frames_to_send=[
+                speech,
+                # Synthesis finishes long before "this." plays.
+                SleepFrame(sleep=0.1),
+                InterruptionFrame(),
+                SleepFrame(sleep=0.05),
+                TTSSpeakFrame("Next.", append_to_context=False),
+                SleepFrame(sleep=0.1),
+            ],
+        ),
+        timeout=5,
+    )
+    texts = [f for f in down if isinstance(f, TTSTextFrame)]
+    assert [f.text for f in texts] == ["Keep", "this.", "Next."]
+    assert texts[2].pts >= texts[1].pts
+
+
 if __name__ == "__main__":
     unittest.main()
