@@ -89,10 +89,10 @@ class TestSkipTagsAggregator(unittest.IsolatedAsyncioTestCase):
 
 class TestSkipTagsAggregatorTokenMode(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
-        from pipecat.utils.text.base_text_aggregator import AggregationType
+        from pipecat.utils.text.base_text_aggregator import TextType
 
         self.aggregator = SkipTagsAggregator(
-            [("<spell>", "</spell>")], aggregation_type=AggregationType.TOKEN
+            [("<spell>", "</spell>")], aggregation_type=TextType.TOKEN
         )
 
     async def test_token_no_tags(self):
@@ -220,11 +220,11 @@ class TestSkipTagsAggregatorTokenMode(unittest.IsolatedAsyncioTestCase):
         """With multiple registered tag pairs, a split start tag of either
         pair is held back and reassembles.
         """
-        from pipecat.utils.text.base_text_aggregator import AggregationType
+        from pipecat.utils.text.base_text_aggregator import TextType
 
         aggregator = SkipTagsAggregator(
             [("<spell>", "</spell>"), ("<code>", "</code>")],
-            aggregation_type=AggregationType.TOKEN,
+            aggregation_type=TextType.TOKEN,
         )
 
         results = []

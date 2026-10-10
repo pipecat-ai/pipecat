@@ -43,6 +43,7 @@ jobs:
             --extra langchain \
             --extra livekit \
             --extra moq \
+            --extra openai \
             --extra pgmq \
             --extra piper \
             --extra redis \

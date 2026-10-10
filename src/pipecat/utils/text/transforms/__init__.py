@@ -8,7 +8,7 @@
 
 Transformers are async callables with signature::
 
-    async def transform(text: str, aggregation_type: str) -> str
+    async def transform(text: str, text_type: str) -> str
 
 They are registered with a TTS service via ``text_transforms``::
 

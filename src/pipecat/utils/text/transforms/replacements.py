@@ -9,12 +9,12 @@
 import re
 from collections.abc import Callable
 
-from pipecat.frames.frames import AggregationType
+from pipecat.frames.frames import TextType
 
 
 def replace_text(
     replacements: list[tuple[str, str]],
-) -> Callable[[str, str | AggregationType], object]:
+) -> Callable[[str, str | TextType], object]:
     r"""Return a transform that applies a list of find-and-replace rules.
 
     Each rule is a ``(pattern, replacement)`` tuple. Patterns are treated as
@@ -43,7 +43,7 @@ def replace_text(
     """
     compiled = [(re.compile(pattern), replacement) for pattern, replacement in replacements]
 
-    async def _transform(text: str, aggregation_type: str | AggregationType) -> str:
+    async def _transform(text: str, text_type: str | TextType) -> str:
         for pattern, replacement in compiled:
             text = pattern.sub(replacement, text)
         return text

@@ -42,7 +42,7 @@ class _FakeClassifier(BaseClassifier):
         self._answers = answers
         self.asked: list[dict] = []
 
-    async def _ask(self, state, questions):
+    async def _ask(self, state, questions, images=()):
         self.asked.append({"state": state, "questions": dict(questions)})
         answer = (
             self._answers(state, questions) if callable(self._answers) else self._answers.pop(0)

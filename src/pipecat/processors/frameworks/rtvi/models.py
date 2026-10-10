@@ -20,11 +20,11 @@ from typing import (
     Literal,
 )
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.frames.frames import (
-    AggregationType,
+    TextType,
 )
 from pipecat.pipeline.capabilities import BotCapabilities
 from pipecat.utils.deprecation import deprecated
@@ -505,7 +505,13 @@ class BotOutputMessageData(TextMessageData):
     only sees the fields relevant to its version.
 
     Parameters:
-        aggregated_by: What form the text is in (e.g., sentence, code, etc.).
+        text_type: What form the text is in (e.g., sentence, code, etc.).
+        aggregated_by: What form the text is in, always the same as ``text_type``.
+
+            .. deprecated:: 1.13.0
+                Use ``text_type`` instead.
+                Will be removed in 2.0.0.
+
         segment_id: ID of the source AggregatedTextFrame.
         spoken: **(v1 only)** Whether the text has been spoken by TTS.
         will_be_spoken: **(v2+)** Whether the text will be spoken by TTS.
@@ -517,7 +523,8 @@ class BotOutputMessageData(TextMessageData):
             Present when ``will_be_spoken`` is ``True``.
     """
 
-    aggregated_by: AggregationType | str
+    text_type: TextType | str
+    aggregated_by: TextType | str | None = None
     segment_id: int | None = None
     # v1 field (protocol 1.4.x)
     spoken: bool | None = None
@@ -525,6 +532,17 @@ class BotOutputMessageData(TextMessageData):
     will_be_spoken: bool | None = None
     spoken_status: SpokenStatus | None = None
     spoken_progress: SpokenProgressData | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _sync_text_type(cls, data: Any) -> Any:
+        """Fill whichever of ``text_type`` and ``aggregated_by`` is missing from the other."""
+        if isinstance(data, dict):
+            if "text_type" not in data and "aggregated_by" in data:
+                data = {**data, "text_type": data["aggregated_by"]}
+            elif "aggregated_by" not in data and "text_type" in data:
+                data = {**data, "aggregated_by": data["text_type"]}
+        return data
 
 
 class BotOutputMessage(BaseModel):

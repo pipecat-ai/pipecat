@@ -57,7 +57,6 @@ from pipecat.evals.scenario import (
 )
 from pipecat.evals.script_session import EvalScriptSession
 from pipecat.frames.frames import (
-    AggregationType,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     FunctionCallInProgressFrame,
@@ -70,6 +69,7 @@ from pipecat.frames.frames import (
     LLMMarkerResponseFrame,
     LLMTextFrame,
     OutputTransportMessageUrgentFrame,
+    TextType,
     TranscriptionFrame,
     TTSSpeakFrame,
     TTSTextFrame,
@@ -303,7 +303,7 @@ class TestFramesToEvents(unittest.TestCase):
 
     def test_tts_text_only_in_audio_mode(self):
         def tts(text):
-            return TTSTextFrame(text=text, aggregated_by=AggregationType.SENTENCE)
+            return TTSTextFrame(text=text, text_type=TextType.SENTENCE)
 
         self.assertIsNone(_stream(bot_audio=False).frame_to_event(tts("x")))
         self.assertEqual(
@@ -1261,7 +1261,7 @@ class TestBotFrameSink(unittest.IsolatedAsyncioTestCase):
         await self._push(
             sink,
             *_bot_response("Hello"),
-            TTSTextFrame(text="Hello", aggregated_by=AggregationType.SENTENCE),
+            TTSTextFrame(text="Hello", text_type=TextType.SENTENCE),
             BotStartedSpeakingFrame(),
             FunctionCallInProgressFrame(function_name="f", tool_call_id="c", arguments={}),
             InputTransportMessageFrame(message={"label": RTVI.MESSAGE_LABEL, "type": "x"}),
@@ -1381,7 +1381,7 @@ class TestPersonaTurnRelay(unittest.IsolatedAsyncioTestCase):
         for frame in (
             LLMFullResponseStartFrame(),
             LLMTextFrame(text="Hi"),
-            TTSTextFrame(text="Hi", aggregated_by=AggregationType.SENTENCE),
+            TTSTextFrame(text="Hi", text_type=TextType.SENTENCE),
             LLMFullResponseEndFrame(),
         ):
             await relay.process_frame(frame, FrameDirection.DOWNSTREAM)

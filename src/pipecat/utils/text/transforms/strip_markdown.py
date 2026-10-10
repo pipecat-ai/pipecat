@@ -8,10 +8,10 @@
 
 import re
 
-from pipecat.frames.frames import AggregationType
+from pipecat.frames.frames import TextType
 
 
-async def strip_markdown(text: str, aggregation_type: str | AggregationType) -> str:
+async def strip_markdown(text: str, text_type: str | TextType) -> str:
     """Remove Markdown formatting symbols that have no spoken equivalent.
 
     Strips bold/italic markers, backtick code spans, fenced code blocks, ATX
@@ -24,7 +24,7 @@ async def strip_markdown(text: str, aggregation_type: str | AggregationType) -> 
 
     Args:
         text: Input text, potentially containing Markdown formatting.
-        aggregation_type: Aggregation type of the text frame (unused).
+        text_type: Text type of the text frame (unused).
 
     Returns:
         Text with Markdown formatting symbols removed.

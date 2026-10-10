@@ -45,6 +45,10 @@ instead, set `factory: evals.judges.cloudflare_classifier` (add
 `model: clef-flash` for faster answers). It needs the `cloudflare` extra, and
 `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_KEY` exported.
 
+To judge with OpenAI's [Decisions API](https://developers.openai.com/api/docs/guides/decisions)
+instead, set `factory: evals.judges.openai_classifier`. It needs the `openai`
+extra and `OPENAI_API_KEY` exported.
+
 Jev gives verdicts but not reasons. So a local LLM, the **explainer**, writes
 the reason for every `no` and for every verdict Jev is not sure about. Jev's
 verdict always stands.

@@ -91,7 +91,7 @@ async def _run_and_report(service: AssemblyAISyncSTTService) -> ErrorFrame:
 def test_defaults_use_the_sync_model_and_english():
     service = AssemblyAISyncSTTService(api_key="k", aiohttp_session=object())
 
-    assert service._settings.model == "universal-3-5-pro"
+    assert service._settings.model == "universal-3-6-pro"
     # The base class converts the Language enum to AssemblyAI's code at init.
     assert service._settings.language == "en"
 
@@ -123,11 +123,27 @@ async def test_transcribe_posts_the_audio_and_config_parts(aiohttp_client):
 
     assert result["text"] == "Hello there"
     assert captured["headers"]["Authorization"] == "test-key"
-    assert captured["headers"]["X-AAI-Model"] == "universal-3-5-pro"
+    assert captured["headers"]["X-AAI-Model"] == "universal-3-6-pro"
     assert captured["parts"]["audio"] == WAV
     assert captured["audio_type"] == "audio/wav"
     assert captured["audio_filename"] == "audio.wav"
     assert _config(captured) == {"language_codes": ["en"]}
+
+
+@pytest.mark.asyncio
+async def test_an_explicit_model_routes_the_request(aiohttp_client):
+    captured = {}
+    async with aiohttp.ClientSession() as session:
+        service = await _service(
+            aiohttp_client,
+            _transcribe_app(captured),
+            session,
+            settings=AssemblyAISyncSTTService.Settings(model="universal-3-5-pro"),
+        )
+
+        await service._transcribe(WAV)
+
+    assert captured["headers"]["X-AAI-Model"] == "universal-3-5-pro"
 
 
 @pytest.mark.asyncio
@@ -532,7 +548,7 @@ async def test_warm_gets_the_warm_path_with_the_model_and_no_auth(aiohttp_client
 
         await service.warm()
 
-    assert captured["headers"]["X-AAI-Model"] == "universal-3-5-pro"
+    assert captured["headers"]["X-AAI-Model"] == "universal-3-6-pro"
     assert "Authorization" not in captured["headers"]
 
 

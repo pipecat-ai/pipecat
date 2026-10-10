@@ -13,7 +13,7 @@ instances can share one.
 """
 
 import asyncio
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from loguru import logger
@@ -148,7 +148,10 @@ class ClefClient:
         await self._http.aclose()
 
     async def ask(
-        self, state: str | dict[str, Any] | list[Any], questions: Mapping[str, dict[str, Any]]
+        self,
+        state: str | dict[str, Any] | list[Any],
+        questions: Mapping[str, dict[str, Any]],
+        images: Sequence[Mapping[str, str]] = (),
     ) -> tuple[dict[str, dict[str, Any]], ClefUsage]:
         """Send questions about one state and return Clef's answers.
 
@@ -157,6 +160,8 @@ class ClefClient:
             questions: The questions by name, each in Clef's own format: a
                 ``type`` of ``noul``, ``choice`` or ``score``,
                 ``instructions``, and ``criteria``.
+            images: Images the questions can look at, each in Clef's own
+                format: a ``content_type`` and the ``base64`` bytes.
 
         Returns:
             The answers by the same names, in Clef's own format, and the
@@ -167,7 +172,9 @@ class ClefClient:
                 because it was busy, could not be reached, or left a question
                 unanswered.
         """
-        body = {"model": self._model, "state": state, "questions": dict(questions)}
+        body: dict[str, Any] = {"model": self._model, "state": state, "questions": dict(questions)}
+        if images:
+            body["images"] = [dict(image) for image in images]
         attempt = 0
         while True:
             attempt += 1

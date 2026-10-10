@@ -63,13 +63,20 @@ Prefer Sphinx cross-reference roles (``:class:``, ``:meth:``, ``:func:``,
 docs — but a backticked name is accepted.
 """
 
+import functools
 import re
 import sys
 import warnings
 
 from typing_extensions import deprecated
 
-__all__ = ["DEPRECATION_MESSAGE_RE", "deprecated", "warn_deprecated", "warn_deprecated_read"]
+__all__ = [
+    "DEPRECATION_MESSAGE_RE",
+    "deprecated",
+    "renamed_init_field",
+    "warn_deprecated",
+    "warn_deprecated_read",
+]
 
 # The canonical deprecation message, for @deprecated and hand-written warnings
 # alike. Kept consistent and parseable so the developer-facing message agrees
@@ -137,3 +144,55 @@ def warn_deprecated_read(message: str) -> None:
     # Past this function, the decorator's wrapper, and __getattribute__ to the
     # line that read the field.
     warn_deprecated(message, stacklevel=4)
+
+
+def renamed_init_field(old: str, new: str, message: str):
+    """Let a dataclass, and every subclass of it, take a renamed field by its old name.
+
+    Apply it above ``@dataclass``. ``@dataclass`` gives each subclass a
+    constructor of its own, so the first time a class is built, its constructor
+    and those of the classes between it and the decorated one are wrapped to
+    take the old name. A constructor that passes the old name to ``super()``
+    finds it taken too.
+
+    It supports one rename per class hierarchy, since each use replaces
+    ``__new__``, and a subclass whose own ``__new__`` doesn't call the base
+    class's is left as it is.
+
+    Args:
+        old: The field's deprecated name.
+        new: The field's name.
+        message: The warning message, following :data:`DEPRECATION_MESSAGE_RE`.
+
+    Returns:
+        The class decorator.
+    """
+
+    def wrap_init(cls):
+        init = cls.__init__
+
+        @functools.wraps(init)
+        def __init__(self, *args, **kwargs):
+            if old in kwargs:
+                warn_deprecated(message, stacklevel=2)
+                kwargs.setdefault(new, kwargs.pop(old))
+            init(self, *args, **kwargs)
+
+        cls.__init__ = __init__
+
+    def decorate(cls):
+        marker = f"_{cls.__name__}_takes_{old}"
+
+        def __new__(subcls, *args, **kwargs):
+            if marker not in subcls.__dict__:
+                for c in subcls.__mro__:
+                    if issubclass(c, cls) and marker not in c.__dict__:
+                        if "__init__" in c.__dict__:
+                            wrap_init(c)
+                        setattr(c, marker, True)
+            return object.__new__(subcls)
+
+        cls.__new__ = staticmethod(__new__)
+        return cls
+
+    return decorate

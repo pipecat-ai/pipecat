@@ -183,9 +183,9 @@ class TestSimpleTextAggregator(unittest.IsolatedAsyncioTestCase):
 
 class TestSimpleTextAggregatorTokenMode(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
-        from pipecat.utils.text.base_text_aggregator import AggregationType
+        from pipecat.utils.text.base_text_aggregator import TextType
 
-        self.aggregator = SimpleTextAggregator(aggregation_type=AggregationType.TOKEN)
+        self.aggregator = SimpleTextAggregator(aggregation_type=TextType.TOKEN)
 
     async def test_token_passthrough(self):
         """TOKEN mode yields text immediately without buffering."""
