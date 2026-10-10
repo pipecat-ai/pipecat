@@ -17,8 +17,9 @@ since bots often cancel their pipeline there and the server serves several
 scenarios in a row.
 
 The input transport also serves the harness's image to a vision bot, which
-has no camera under eval. The user's audio arrives as a continuous stream,
-so nothing else is special on the way in.
+has no camera under eval. The user's audio arrives as a continuous stream, at
+the rate the scenario synthesized it, which need not be the bot's
+``audio_in_sample_rate``; audio at another rate is resampled on the way in.
 """
 
 import asyncio
@@ -28,8 +29,11 @@ from urllib.parse import parse_qs, urlsplit
 from loguru import logger
 from PIL import Image
 
+from pipecat.audio.resamplers.base_audio_resampler import BaseAudioResampler
+from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
     Frame,
+    InputAudioRawFrame,
     LLMConfigureOutputFrame,
     OutputImageRawFrame,
     UserImageRawFrame,
@@ -73,11 +77,78 @@ class EvalTransportParams(SingleClientWebsocketServerParams):
 
 
 class EvalInputTransport(SingleClientWebsocketServerInputTransport):
-    """Input transport that serves the harness's image.
+    """Input transport that serves the harness's image and matches its audio rate.
 
     A vision bot asks for the user's camera image; under eval there is no
     camera, so the image the harness registered for the turn is served instead.
+
+    The user's speech is synthesized at the rate its scenario declared, which
+    need not be the bot's ``audio_in_sample_rate``. Audio arriving at another
+    rate is resampled to the transport's, so the pipeline's VAD, turn detection
+    and STT see the signal at the rate they were configured for instead of a
+    time-stretched, pitch-shifted one.
     """
+
+    def __init__(self, *args, **kwargs):
+        """Initialize the transport.
+
+        Args:
+            *args: Forwarded to
+                :class:`~pipecat.transports.websocket.server.SingleClientWebsocketServerInputTransport`.
+            **kwargs: Forwarded to the parent transport.
+        """
+        super().__init__(*args, **kwargs)
+        # Created on the first frame that needs resampling, and replaced when the
+        # rate changes: a stream resampler is bound to one rate pair, and a
+        # kept-alive server serves scenarios that speak at different rates.
+        self._resampler: BaseAudioResampler | None = None
+        self._resampler_rates: tuple[int, int] | None = None
+
+    async def push_audio_frame(self, frame: InputAudioRawFrame):
+        """Push the frame to the audio path, resampled if it is at another rate.
+
+        Args:
+            frame: The input audio frame.
+        """
+        if self._needs_resampling(frame):
+            frame = await self._resampled(frame)
+        await super().push_audio_frame(frame)
+
+    def _needs_resampling(self, frame: InputAudioRawFrame) -> bool:
+        """Whether the frame's audio is at a known rate other than the transport's.
+
+        A rate of 0 means unknown: the transport's is unset until ``setup()``, and
+        a frame that declares none carries no rate to convert from.
+        """
+        return bool(
+            frame.audio
+            and self.sample_rate
+            and frame.sample_rate
+            and frame.sample_rate != self.sample_rate
+        )
+
+    async def _resampled(self, frame: InputAudioRawFrame) -> InputAudioRawFrame:
+        """The frame with its audio resampled to the transport's input rate."""
+        if frame.num_channels != 1:
+            # The resampler is mono-only, and mistaking interleaved channels for
+            # mono ones would pitch-shift the audio rather than convert it.
+            logger.warning(
+                f"{self}: cannot resample {frame.num_channels}-channel user audio from "
+                f"{frame.sample_rate} Hz to {self.sample_rate} Hz; passing it on as is"
+            )
+            return frame
+
+        rates = (frame.sample_rate, self.sample_rate)
+        if self._resampler is None or self._resampler_rates != rates:
+            self._resampler = create_stream_resampler()
+            self._resampler_rates = rates
+            logger.debug(f"{self}: resampling user audio {rates[0]} -> {rates[1]} Hz")
+        audio = await self._resampler.resample(frame.audio, rates[0], rates[1])
+        return InputAudioRawFrame(
+            audio=audio,
+            sample_rate=self.sample_rate,
+            num_channels=frame.num_channels,
+        )
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Serve image requests; otherwise behave like the base input transport."""
