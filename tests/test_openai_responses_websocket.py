@@ -785,6 +785,20 @@ class TestReasoningConfig:
         assert c.effort == "ultra"
 
 
+class TestToolChoiceParam:
+    def test_tool_choice_forwarded(self):
+        """A tool choice resolved from the context reaches the request."""
+        service = _make_service()
+        params = service._build_response_params({"input": [], "tool_choice": "required"})
+        assert params["tool_choice"] == "required"
+
+    def test_no_tool_choice_omits_param(self):
+        """Without a tool choice the request carries none, rather than a null."""
+        service = _make_service()
+        params = service._build_response_params({"input": []})
+        assert "tool_choice" not in params
+
+
 class TestReasoningParams:
     def _params(self, service):
         return service._build_response_params({"input": []})
