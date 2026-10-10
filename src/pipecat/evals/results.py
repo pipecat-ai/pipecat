@@ -58,6 +58,8 @@ class EvalAssertionFailure:
             arrived, a function call was missing, ...), not what it means about
             the bot. ``reason`` is free text and differs on every run — often
             judge prose — so grouping failures across many runs keys on this.
+        confidence: The judge's confidence in its verdict, from 0 to 1; ``None``
+            when the expectation wasn't judged, or the judge call failed.
     """
 
     turn_index: int
@@ -65,6 +67,7 @@ class EvalAssertionFailure:
     event_name: str
     reason: str
     kind: str
+    confidence: float | None = None
 
     def __str__(self) -> str:
         return (
@@ -85,12 +88,17 @@ class EvalExpectationResult:
             ``llm_marker``, a function call's signature, the text of a reply or
             a transcript. Empty for an event that carries no text, and on a
             failure, whose reason is in the turn's failures.
+        confidence: The judge's confidence in its verdict, from 0 to 1, for a
+            pass or a failure; the lowest one when the judge ruled on several
+            function calls. ``None`` when the expectation wasn't judged, or the
+            judge call failed.
     """
 
     expectation_index: int
     event_name: str
     passed: bool
     matched: str = ""
+    confidence: float | None = None
 
 
 @dataclass
@@ -201,12 +209,15 @@ class EvalSimulationTurnVerdict:
         reason: The judge's one-sentence justification.
         verdict: The judge's answer: ``yes``, ``no``, or ``none`` when it gave
             no verdict on the turn, which counts as a no.
+        confidence: The judge's confidence in ``verdict``, from 0 to 1; ``None``
+            when the judge call failed.
     """
 
     turn: int
     passed: bool
     reason: str
     verdict: str = "no"
+    confidence: float | None = None
 
 
 @dataclass
@@ -267,6 +278,10 @@ class EvalSimulationResult:
         duration_ms: Wall-clock time the run took, in milliseconds.
         events_seen: Every friendly event observed, for diagnostics.
         debug_log: Timestamped trace of the harness's own decisions.
+        confidence: The judge's confidence in ``succeeded``, from 0 to 1. This
+            is about the goal only; each per-turn verdict in ``metrics`` carries
+            its own. ``None`` when the goal wasn't judged, or the judge call
+            failed.
     """
 
     simulation_name: str
@@ -281,6 +296,7 @@ class EvalSimulationResult:
     duration_ms: int = 0
     events_seen: list[dict] = field(default_factory=list)
     debug_log: list[str] = field(default_factory=list)
+    confidence: float | None = None
 
     @property
     def passed(self) -> bool:
