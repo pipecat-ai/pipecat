@@ -65,6 +65,7 @@ in guides and concept pages rather than on a per-provider reference page.
 | `transports/base_output.py`      | `api-reference/server/services/transport/transport-params.mdx`                                                |
 | `pipeline/pipeline.py`           | `pipecat/learn/pipeline.mdx`                                                                                  |
 | `processors/frame_processor.py`  | `pipecat/fundamentals/custom-frame-processor.mdx` and `api-reference/server/events/frame-processor-events.mdx` |
+| `classifiers/base_classifier.py` | `api-reference/server/classifiers/overview.mdx` and `pipecat/learn/classifiers.mdx`                           |
 
 Several of these carry documented parameters with no reference page of their own.
 Where a change fits none of the pages above, report it as a missing-page gap in
@@ -152,6 +153,7 @@ For files not in the tables above, apply these patterns. Convert underscores to 
 | `processors/filters/**`           | `api-reference/server/utilities/filters/` (match by class name)   |
 | `workers/**`                      | `api-reference/server/workers/` (match by class name)             |
 | `bus/**`                          | `api-reference/server/bus/` (match by class name)                 |
+| `classifiers/**`                  | `api-reference/server/classifiers/` (match by class name)         |
 | `turns/**`                        | `api-reference/server/utilities/turn-management/`                 |
 | `frames/frames.py`                | `api-reference/server/frames/` (match by frame class name)        |
 | `evals/**`                        | `pipecat/evals/` and `api-reference/cli/eval.mdx`                 |
