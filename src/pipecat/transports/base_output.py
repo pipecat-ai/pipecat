@@ -635,8 +635,9 @@ class BaseOutputTransport(FrameProcessor):
             self._create_clock_task()
 
             # Let's send a bot stopped speaking if we have to. The bot keeps
-            # speaking while there's uninterruptible audio still to play.
-            if not (self._audio_runs or self._audio_queue.has_uninterruptible):
+            # speaking while there's uninterruptible audio still to play (after
+            # the reset, everything left in the queue is uninterruptible).
+            if not (self._audio_runs or self._audio_queue.has_frame(OutputAudioRawFrame)):
                 await self._bot_stopped_speaking()
 
         async def handle_audio_frame(self, frame: OutputAudioRawFrame):
