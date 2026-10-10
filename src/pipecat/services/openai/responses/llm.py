@@ -149,10 +149,11 @@ class OpenAIResponsesLLMSettings(LLMSettings):
     Parameters:
         max_completion_tokens: Maximum completion tokens to generate.
         reasoning: Reasoning configuration for reasoning-capable models. ``None``
-            (the default) leaves reasoning unconfigured — the service then disables
-            reasoning by default for whatever models possible, to keep latency low
-            for real-time voice. Note that the default model, ``gpt-4.1``, does
-            not reason.
+            (the default) leaves reasoning unconfigured: the service then sends
+            a low effort to the models where that measurably shortens responses
+            (``gpt-5``, ``gpt-5-mini``, ``gpt-5-nano`` and ``gpt-6-luna``) and
+            logs that it did, and every other model runs at OpenAI's default.
+            The default model, ``gpt-4.1``, does not reason.
     """
 
     # Override inherited LLMSettings fields to also accept the OpenAI SDK's
@@ -178,35 +179,24 @@ def _is_o_series(model: str) -> bool:
     return bool(re.match(r"o\d", model.lower()))
 
 
-def _default_reasoning_effort(model: str) -> str | None:
-    """The effort to request for a model when ``reasoning`` isn't configured.
+# Reasoning efforts sent when the caller doesn't configure ``reasoning``, keyed
+# by model name. A model is listed only where the effort measurably shortens the
+# time to the first response token; every other model runs at OpenAI's default.
+# At their default efforts the original gpt-5 models reason before most replies
+# and gpt-6-luna before many, while the later mainline models already answer
+# conversational turns without reasoning. The gpt-5 models reject "none", so
+# they get their lowest effort.
+_REASONING_DEFAULTS: dict[str, str] = {
+    "gpt-5": "minimal",
+    "gpt-5-mini": "minimal",
+    "gpt-5-nano": "minimal",
+    "gpt-6-luna": "none",
+}
 
-    ``"none"`` switches reasoning off on the mainline gpt series from gpt-5.1
-    onward. The original ``gpt-5``, ``gpt-5-mini`` and ``gpt-5-nano`` reject
-    ``"none"``, so they get their lowest effort, ``"minimal"``. Models that
-    accept neither are left at the provider default: the o-series, the ``-pro``
-    models, ``gpt-6-astra`` and ``gpt-6.1-sol``.
 
-    Args:
-        model: The model name, optionally with a snapshot date
-            (e.g. ``"gpt-5.4"``, ``"gpt-5-2025-08-07"``, ``"o3"``).
-
-    Returns:
-        The effort level, or ``None`` to leave the provider default, which is
-        also the case for models that don't reason or aren't recognized (see
-        :func:`_model_supports_reasoning`).
-    """
-    if not _model_supports_reasoning(model):
-        return None
-    model = model.lower()
-    if _is_o_series(model) or model.startswith(("gpt-6-astra", "gpt-6.1-sol")):
-        return None
-    name = re.sub(r"-\d{4}-\d{2}-\d{2}$", "", model)
-    if name.endswith("-pro"):
-        return None
-    if name in ("gpt-5", "gpt-5-mini", "gpt-5-nano"):
-        return "minimal"
-    return "none"
+def _model_name(model: str) -> str:
+    """The name of a model id, without a snapshot date (``gpt-5-2025-08-07``)."""
+    return re.sub(r"-\d{4}-\d{2}-\d{2}$", "", model.lower())
 
 
 def _model_supports_reasoning(model: str) -> bool | None:
@@ -328,6 +318,9 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
         # Tracks the model we've already warned about (reasoning configured on a
         # non-reasoning model) so we log it once per model rather than per turn.
         self._reasoning_unsupported_warned_for: str | None = None
+        # The model whose reasoning default was last logged, so each model's is
+        # logged once, including after a settings update changes the model.
+        self._logged_reasoning_default_model: str | None = None
         self._client = self._create_client(
             api_key=api_key,
             base_url=base_url,
@@ -427,13 +420,13 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
             # turns, preserving reasoning context across the conversation.
             params["include"] = ["reasoning.encrypted_content"]
             self._warn_if_reasoning_unsupported()
-        else:
-            # No reasoning configured: disable it by default on the mainline gpt
-            # series from gpt-5 onward, for real-time latency (see the helper).
-            self._maybe_disable_reasoning(params)
 
         # Extra settings
         params.update(self._settings.extra)
+
+        # Applied last, so reasoning configured in the settings or in extra wins
+        # over the low-latency default.
+        self._maybe_apply_reasoning_default(params)
 
         return params
 
@@ -537,25 +530,31 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
 
     # -- reasoning ------------------------------------------------------------
 
-    def _maybe_disable_reasoning(self, params: dict):
-        """Disable reasoning by default on the mainline gpt series for real-time voice.
+    def _maybe_apply_reasoning_default(self, params: dict):
+        """Send the model's low-latency reasoning effort when no reasoning is configured.
 
-        When the caller hasn't configured ``reasoning``, request ``effort="none"``
-        for whatever models possible, or ``"minimal"`` for models whose lowest
-        effort it is (see :func:`_default_reasoning_effort`). Note that this is a
-        no-op for models like ``gpt-5.4`` that already default to ``none``. Models
-        that accept neither are left at the provider default, as are gpt-4.x and
-        earlier, which don't reason at all. Mirrors Gemini's
-        ``_maybe_unset_thinking_budget``, which disables or minimizes thinking on
-        its latency-sensitive models.
+        Applies the model's entry in ``_REASONING_DEFAULTS``, if it has one, and
+        logs it the first time it is applied to each model. A request that
+        already sets ``reasoning``, from the settings or from ``extra``, is
+        left as it is.
 
         Args:
             params: The response params dict (modified in place).
         """
-        model = assert_given(self._settings.model)
-        effort = _default_reasoning_effort(model) if model else None
-        if effort:
-            params["reasoning"] = {"effort": effort}
+        if "reasoning" in params:
+            return
+        model = assert_given(self._settings.model) or ""
+        effort = _REASONING_DEFAULTS.get(_model_name(model))
+        if effort is None:
+            return
+        params["reasoning"] = {"effort": effort}
+        if model != self._logged_reasoning_default_model:
+            self._logged_reasoning_default_model = model
+            logger.info(
+                f"{self}: sending reasoning={params['reasoning']} to {model} to reduce "
+                f"response latency. Set `reasoning` in {type(self).__name__}.Settings "
+                "to change this."
+            )
 
     def _warn_if_reasoning_unsupported(self):
         """Log a clear error when reasoning is configured on a model that can't use it.
