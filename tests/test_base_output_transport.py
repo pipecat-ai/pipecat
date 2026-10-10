@@ -25,6 +25,7 @@ from pipecat.frames.frames import (
     FilterControlFrame,
     FilterEnableFrame,
     FilterUpdateSettingsFrame,
+    FunctionCallInProgressFrame,
     InterruptionFrame,
     MixerControlFrame,
     OutputAudioRawFrame,
@@ -222,6 +223,40 @@ class TestBaseOutputTransportInterruptions(unittest.IsolatedAsyncioTestCase):
             pushed = [type(call.args[0]) for call in transport.push_frame.call_args_list]
             self.assertIn(BotStoppedSpeakingFrame, pushed)
         finally:
+            await transport.cancel(CancelFrame())
+
+    async def test_interruption_stops_bot_speaking_with_only_protected_control_frames(self):
+        transport = await self._make_transport()
+        release = asyncio.Event()
+
+        async def write(frame):
+            await release.wait()
+            return True
+
+        transport.write_audio_frame.side_effect = write
+        try:
+            sender = transport._media_senders[None]
+
+            # The bot is speaking, with more audio and a function call (an
+            # uninterruptible control frame) queued behind it.
+            audio = TTSAudioRawFrame(b"\x01" * (sender.audio_chunk_size * 2), sender.sample_rate, 1)
+            await transport.process_frame(audio, FrameDirection.DOWNSTREAM)
+            function_call = FunctionCallInProgressFrame(
+                function_name="get_weather", tool_call_id="1", arguments={}
+            )
+            await transport.process_frame(function_call, FrameDirection.DOWNSTREAM)
+            await asyncio.sleep(0.01)
+            self.assertTrue(sender._bot_speaking)
+
+            await transport.process_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
+
+            # The function call is kept, but there's no audio left to play.
+            self.assertTrue(sender._audio_queue.has_frame(FunctionCallInProgressFrame))
+            self.assertFalse(sender._bot_speaking)
+            pushed = [type(call.args[0]) for call in transport.push_frame.call_args_list]
+            self.assertIn(BotStoppedSpeakingFrame, pushed)
+        finally:
+            release.set()
             await transport.cancel(CancelFrame())
 
     async def test_interruption_with_mixer_keeps_audio_task_and_mixer_output(self):
