@@ -10,16 +10,18 @@ client uses them. For how the frames themselves are built, see
 ## 1. What arrives here
 
 [`AggregatedFrameSequencer`](./aggregated-frame-sequencer.md#1-the-output-two-frames-per-word)
-emits two frames for every spoken word. Only one of them concerns RTVI:
+emits two frames for every spoken word:
 
 | Frame | Destination | Carries |
 | --- | --- | --- |
-| `TTSTextFrame` | The conversation context | The word, plus `raw_text` — the LLM span it represents |
+| `TTSTextFrame` | The conversation context | The word, plus `raw_text` — the LLM span it represents — and `segment_id` |
 | `AggregatedTextProgressFrame` | **RTVI → the client** — and any other consumer | `segment_id` + `accumulated_text` / `remaining_text` |
 
 The progress frame is the one `RTVIObserver` turns into client messages: `segment_id` is
 the id of the sentence `AggregatedTextFrame` the word belongs to, which is **what lets a
-client match a stream of words back to a sentence it already rendered**.
+client match a stream of words back to a sentence it already rendered**. The word frame
+carries the same `segment_id`, which RTVI uses to
+[keep a hidden segment's words from the client](#4-hiding-text-from-the-client).
 
 Nothing about the frame is RTVI-specific, though — `accumulated_text + remaining_text`
 reconstructs that frame's text exactly, so any processor holding the segment can position
@@ -55,9 +57,10 @@ covered entirely by `spoken_status` / `spoken_progress`, so the client sees one 
 stream of sentence-scoped updates rather than two overlapping ones.
 
 That lifecycle belongs to the word-timestamp path. A `push_text_frames=True` service has
-no word events to drive it, so its `TTSTextFrame` arrives only once synthesis is done and
-the observer emits a single `"completed"` with the whole segment already accumulated. A
-client that assumes it will always see `"new"` first has to handle that.
+no word events to drive it: after `"new"`, its `TTSTextFrame` arrives only once synthesis
+is done, and the observer emits a single `"completed"` with the whole segment already
+accumulated. The `TTSTextFrame` carries the segment's id in `segment_id`, so the
+`"completed"` message names the same segment as `"new"`.
 
 ## 3. Bot output transforms
 
@@ -67,7 +70,7 @@ the credit-card redaction case. The progress-aware signature receives all three 
 ```python
 async def obfuscate_credit_card(
     text: str,
-    agg_type: str,
+    text_type: str,
     accumulated_text: str | None = None,
     remaining_text: str | None = None,
 ) -> BotOutputTransformResult:
@@ -89,7 +92,7 @@ segment** plus the current spoken split, so it can redact the full card number *
 the highlight advancing over the redacted form. Given only disconnected word events
 (`1234`, `5678`, `9012`, `3456`) there is nothing coherent to redact.
 
-Transforms are registered per aggregation type, matching the types defined by the
+Transforms are registered per text type, matching the types defined by the
 `PatternPairAggregator`:
 
 ```python
@@ -100,7 +103,36 @@ rtvi_observer_params = RTVIObserverParams(
 
 Use `"*"` to match every type.
 
-## 4. The client side
+## 4. Hiding text from the client
+
+`RTVIObserverParams.skip_text_types` keeps text of the listed types from the client. The
+text is still spoken; the client just never hears about it. A short status message is the
+usual case:
+
+```python
+await worker.queue_frame(TTSSpeakFrame("One moment, please.", text_type="status"))
+
+rtvi_observer_params = RTVIObserverParams(skip_text_types=["status"])
+```
+
+A skipped segment sends nothing: no `"new"`, no progress, no words. Its progress frames
+carry the segment's `text_type`, so they are skipped by type. Its words are typed `WORD`,
+so the observer goes by their `segment_id` instead: it remembers each skipped segment that
+will be spoken, skips the words that name it, and forgets it once its last word is spoken
+(`remaining_text == ""`). With a `push_text_frames=True` service the segment is spoken in
+one `TTSTextFrame` of its own type, which is skipped by type and ends the segment. A
+segment an interruption cuts off is forgotten the next time the bot starts or stops
+speaking: by then the output transport has dropped the rest of its words.
+
+The observer can't go by order instead. It holds a turn's segments until the bot starts
+speaking, so they can all arrive before the first one's words, and they all share the
+turn's TTS context.
+
+`bot-llm-text` messages are separate: turn `bot_llm_enabled` off too when the text must
+not reach the client at all. And `TTSService(skip_text_types=...)` is a different setting:
+it keeps text from being spoken, like the `code` blocks below.
+
+## 5. The client side
 
 With the server doing the work, `code-helper`'s client is almost trivial
 (`client/src/app.js`):
@@ -114,7 +146,7 @@ onBotOutput: (data) => {
   }
   // Anything else (including spoken_status "new") → render a new bubble element
   this.addConversationMessage(
-    data.text, 'bot', data.aggregated_by, data.segment_id,
+    data.text, 'bot', data.text_type, data.segment_id,
   );
 }
 
@@ -127,11 +159,11 @@ highlightSpokenText(data) {
 }
 ```
 
-`data.aggregated_by` carries the segment type, so the client also renders a `code` segment
+`data.text_type` carries the segment type, so the client also renders a `code` segment
 as a syntax-highlighted `<pre>` block and a `link` segment as an anchor — **without parsing
 any tags itself**.
 
-## 5. Everything together: code-helper
+## 6. Everything together: code-helper
 
 The bot ([`code-helper/server/bot.py`](https://github.com/pipecat-ai/pipecat-examples/tree/main/code-helper/server/bot.py)) wires the whole stack in
 four steps:
@@ -143,7 +175,7 @@ llm_text_aggregator.add_pattern(
 )
 
 # 2. Never send code blocks to the TTS  →  sequencer holds them in order
-tts = CartesiaTTSService(..., skip_aggregator_types=["code"])
+tts = CartesiaTTSService(..., skip_text_types=["code"])
 
 # 3. Rewrite what the TTS receives  →  TextSegmentMap tracks the divergence
 tts.add_text_transformer(spell_out_text, "credit_card")  # wraps in <spell> tags

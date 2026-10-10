@@ -11,7 +11,7 @@ from datetime import datetime
 
 from num2words import num2words
 
-from pipecat.frames.frames import AggregationType
+from pipecat.frames.frames import TextType
 
 # ISO dates: 2023-05-10
 _ISO_DATE_RE = re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b")
@@ -67,14 +67,14 @@ def _us_replace(match: re.Match) -> str:
         return match.group(0)
 
 
-async def normalize_dates(text: str, aggregation_type: str | AggregationType) -> str:
+async def normalize_dates(text: str, text_type: str | TextType) -> str:
     """Expand date expressions to their spoken form.
 
     Handles ISO format (``YYYY-MM-DD``) and US format (``MM/DD/YYYY`` or ``MM-DD-YYYY``).
 
     Args:
         text: Input text possibly containing date expressions.
-        aggregation_type: Aggregation type of the text frame (unused).
+        text_type: Text type of the text frame (unused).
 
     Returns:
         Text with date expressions replaced by spoken equivalents.

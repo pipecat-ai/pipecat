@@ -15,7 +15,7 @@ from collections.abc import AsyncIterator
 from enum import Enum, auto
 
 from pipecat.utils.string import SENTENCE_ENDING_PUNCTUATION, match_endofsentence
-from pipecat.utils.text.base_text_aggregator import Aggregation, AggregationType, BaseTextAggregator
+from pipecat.utils.text.base_text_aggregator import Aggregation, BaseTextAggregator, TextType
 
 
 class _LookaheadState(Enum):
@@ -63,7 +63,7 @@ class SimpleTextAggregator(BaseTextAggregator):
         Returns:
             The text that has been accumulated in the buffer.
         """
-        return Aggregation(text=self._text.strip(" "), type=AggregationType.SENTENCE)
+        return Aggregation(text=self._text.strip(" "), type=TextType.SENTENCE)
 
     async def aggregate(self, text: str) -> AsyncIterator[Aggregation]:
         """Aggregate text and yield completed aggregations.
@@ -80,9 +80,9 @@ class SimpleTextAggregator(BaseTextAggregator):
         Yields:
             Aggregation objects (sentences in SENTENCE mode, tokens in TOKEN mode).
         """
-        if self._aggregation_type == AggregationType.TOKEN:
+        if self._aggregation_type == TextType.TOKEN:
             if text:
-                yield Aggregation(text=text, type=AggregationType.TOKEN)
+                yield Aggregation(text=text, type=TextType.TOKEN)
             return
 
         # Process text character by character
@@ -135,7 +135,7 @@ class SimpleTextAggregator(BaseTextAggregator):
             eos_marker = match_endofsentence(candidate, language=self.language)
             if eos_marker:
                 result = Aggregation(
-                    text=self._text[:eos_marker].strip(" "), type=AggregationType.SENTENCE
+                    text=self._text[:eos_marker].strip(" "), type=TextType.SENTENCE
                 )
                 # Keep the lookahead text for the next sentence ("N" in "Hello. N").
                 self._text = self._text[eos_marker:]
@@ -205,14 +205,14 @@ class SimpleTextAggregator(BaseTextAggregator):
         Returns:
             Any remaining text as a sentence, or None if buffer is empty or in TOKEN mode.
         """
-        if self._aggregation_type == AggregationType.TOKEN:
+        if self._aggregation_type == TextType.TOKEN:
             return None
 
         if self._text:
             # Return whatever we have in the buffer
             result = self._text
             await self.reset()
-            return Aggregation(text=result.strip(" "), type=AggregationType.SENTENCE)
+            return Aggregation(text=result.strip(" "), type=TextType.SENTENCE)
         return None
 
     async def handle_interruption(self):

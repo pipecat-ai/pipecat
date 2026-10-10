@@ -27,12 +27,12 @@ to `process_word` builds up to two frames — `_build_word_frame` and
 
 | Frame | Destination | Carries |
 | --- | --- | --- |
-| `TTSTextFrame` | The **conversation context** | The word, plus `raw_text` — the LLM span it represents |
+| `TTSTextFrame` | The **conversation context** | The word, plus `raw_text` — the LLM span it represents — and `segment_id` |
 | `AggregatedTextProgressFrame` | **Any downstream consumer** — a UI via RTVI is the usual one | `segment_id` + `accumulated_text` / `remaining_text` |
 
 ```mermaid
 flowchart LR
-    PW["process_word('cents')"] --> TF["<b>TTSTextFrame</b><br/>text='cents'<br/>raw_text='$42.50'<br/>append_to_context=True"]
+    PW["process_word('cents')"] --> TF["<b>TTSTextFrame</b><br/>text='cents'<br/>raw_text='$42.50'<br/>segment_id=42<br/>append_to_context=True"]
     PW --> PF["<b>AggregatedTextProgressFrame</b><br/>segment_id=42<br/>accumulated='Your balance is $42.50'<br/>remaining=''"]
     TF --> CTX["conversation context"]
     PF --> OBS["RTVIObserver<br/><i>or any consumer</i>"] --> CLIENT["the UI"]
@@ -42,6 +42,10 @@ flowchart LR
 
 `TTSTextFrame.raw_text` is the tracker's `get_llm_consumed()` — the LLM span attributed to
 this word. That is what keeps `<card>…</card>` in the context instead of bare digits.
+
+`TTSTextFrame.segment_id` is the id of the segment the word was spoken in, the same as the
+progress frame's. When RTVI hides a segment from the client, it uses this to hide the
+segment's words too.
 
 Two flags control whether a word is recorded at all:
 
@@ -65,7 +69,7 @@ AggregatedTextProgressFrame(
     segment_id=slot.frame.id,  # ← the sentence's id
     context_id=slot.context_id,
     text=slot.frame.text,  # full sentence
-    aggregated_by=slot.frame.aggregated_by,
+    text_type=slot.frame.text_type,
     accumulated_text=tracker.get_accumulated_user_facing_text(),
     remaining_text=tracker.get_remaining_user_facing_text(strip=False),
 )
@@ -90,7 +94,7 @@ because no slot is active at all (no segment to report progress against).
 ### The problem
 
 Not every frame reaches the TTS. A code block configured with
-`skip_aggregator_types=["code"]` is never synthesized, so it has no audio and no word
+`skip_text_types=["code"]` is never synthesized, so it has no audio and no word
 events to wait for. Pushed the moment it appears, it lands *before* the sentence that
 precedes it — because that sentence is still being spoken.
 

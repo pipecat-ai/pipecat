@@ -18,7 +18,7 @@ from pipecat.utils.string import (
     longest_trailing_partial_match,
     parse_start_end_tags,
 )
-from pipecat.utils.text.base_text_aggregator import Aggregation, AggregationType
+from pipecat.utils.text.base_text_aggregator import Aggregation, TextType
 from pipecat.utils.text.simple_text_aggregator import SimpleTextAggregator
 
 
@@ -68,7 +68,7 @@ class SkipTagsAggregator(SimpleTextAggregator):
             Aggregation objects containing text up to a sentence boundary,
             marked as SENTENCE type (or TOKEN type in TOKEN mode).
         """
-        if self._aggregation_type == AggregationType.TOKEN:
+        if self._aggregation_type == TextType.TOKEN:
             # In TOKEN mode, process chars for tag tracking but yield the
             # full input as a single token when not inside a tag.
             for char in text:
@@ -93,7 +93,7 @@ class SkipTagsAggregator(SimpleTextAggregator):
                     content = self._text[:yield_length]
                     self._text = self._text[yield_length:]
                     self._current_tag_index = 0
-                    yield Aggregation(text=content, type=AggregationType.TOKEN)
+                    yield Aggregation(text=content, type=TextType.TOKEN)
             return
 
         # Process text character by character
@@ -125,11 +125,11 @@ class SkipTagsAggregator(SimpleTextAggregator):
         Returns:
             Any remaining text, or None if the buffer is empty.
         """
-        if self._aggregation_type == AggregationType.TOKEN:
+        if self._aggregation_type == TextType.TOKEN:
             if self._text:
                 result = self._text
                 await self.reset()
-                return Aggregation(text=result, type=AggregationType.TOKEN)
+                return Aggregation(text=result, type=TextType.TOKEN)
             return None
         return await super().flush()
 

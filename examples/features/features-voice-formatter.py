@@ -100,8 +100,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         settings=ElevenLabsTTSService.Settings(
             voice=os.getenv("ELEVENLABS_VOICE_ID", ""),
         ),
-        # Attach VoiceFormatter as a text transform. The "*" aggregation type
-        # means it runs on every text frame regardless of how it was aggregated.
+        # Attach VoiceFormatter as a text transform. The "*" text type means it
+        # runs on every text frame, whatever its type.
         text_transforms=[("*", voice_formatter)],
     )
 

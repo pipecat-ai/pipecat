@@ -11,10 +11,10 @@ using the VoiceFormatter bundle, giving fine-grained control over which
 transforms are applied and in what order.
 
 Each transform is an async callable with the signature:
-    async def transform(text: str, aggregation_type: str) -> str
+    async def transform(text: str, text_type: str) -> str
 
 Transforms are registered via text_transforms on the TTS service as a list of
-(aggregation_type, callable) pairs. The aggregation_type string controls which
+(text_type, callable) pairs. The text_type string controls which
 frames the transform applies to ("*" means all frames).
 
 This example shows a billing-assistant scenario where several transforms are
