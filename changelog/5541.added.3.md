@@ -1,0 +1,1 @@
+- Added `threshold`, `prefix_padding_ms`, `silence_duration_ms` and `idle_timeout_ms` to Inworld Realtime's `TurnDetection`, so `type="server_vad"` sessions can be tuned the way Inworld documents.
