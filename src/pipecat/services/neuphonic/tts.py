@@ -188,13 +188,13 @@ class NeuphonicTTSService(InterruptibleTTSService):
             pause_frame_processing=True,
             sample_rate=sample_rate,
             settings=default_settings,
+            keepalive_interval=10,
             **kwargs,
         )
 
         self._api_key = api_key
         self._url = url
         self._receive_task = None
-        self._keepalive_task = None
         self._encoding = encoding
         self._sampling_rate = sample_rate
 
@@ -250,8 +250,8 @@ class NeuphonicTTSService(InterruptibleTTSService):
         if self._websocket and not self._receive_task:
             self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
-        if self._websocket and not self._keepalive_task:
-            self._keepalive_task = self.create_task(self._keepalive_task_handler())
+        if self._websocket:
+            self._create_keepalive_task()
 
     async def _disconnect(self):
         """Disconnect from Neuphonic WebSocket and clean up tasks."""
@@ -261,9 +261,7 @@ class NeuphonicTTSService(InterruptibleTTSService):
             await self.cancel_task(self._receive_task)
             self._receive_task = None
 
-        if self._keepalive_task:
-            await self.cancel_task(self._keepalive_task)
-            self._keepalive_task = None
+        await self._cancel_keepalive_task()
 
         await self._disconnect_websocket()
 
@@ -338,19 +336,10 @@ class NeuphonicTTSService(InterruptibleTTSService):
                     )
                     await self.append_to_audio_context(context_id, frame)
 
-    async def _keepalive_task_handler(self):
-        """Handle keepalive messages to maintain WebSocket connection."""
-        KEEPALIVE_SLEEP = 10
-        while True:
-            await asyncio.sleep(KEEPALIVE_SLEEP)
-            await self._send_keepalive()
-
     async def _send_keepalive(self):
-        """Send keepalive message to maintain connection."""
+        """Send empty text to keep the connection open through silences."""
         if self._websocket:
-            # Send empty text for keepalive
-            msg = {"text": ""}
-            await self._websocket.send(json.dumps(msg))
+            await self._websocket.send(json.dumps({"text": ""}))
 
     async def _send_text(self, text: str):
         """Send text to Neuphonic WebSocket for synthesis."""

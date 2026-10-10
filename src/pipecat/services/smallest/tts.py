@@ -10,7 +10,6 @@ This module provides a WebSocket-based integration with Smallest AI's
 Waves API for real-time text-to-speech synthesis.
 """
 
-import asyncio
 import base64
 import json
 from collections.abc import AsyncGenerator
@@ -205,6 +204,7 @@ class SmallestTTSService(InterruptibleTTSService):
             # the word events; otherwise the base class pushes the whole text.
             push_text_frames=not word_timestamps,
             settings=default_settings,
+            keepalive_interval=30,
             **kwargs,
         )
 
@@ -214,7 +214,6 @@ class SmallestTTSService(InterruptibleTTSService):
         self._word_timestamps = word_timestamps
         self._max_buffer_delay_ms = max_buffer_delay_ms
         self._receive_task = None
-        self._keepalive_task = None
 
         # Word-timestamp offset tracking. Smallest sends one request per
         # run_tts() call and reports word timestamps relative to *that request's*
@@ -351,8 +350,8 @@ class SmallestTTSService(InterruptibleTTSService):
         if self._websocket and not self._receive_task:
             self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
-        if self._websocket and not self._keepalive_task:
-            self._keepalive_task = self.create_task(self._keepalive_task_handler())
+        if self._websocket:
+            self._create_keepalive_task()
 
     async def _disconnect(self):
         """Disconnect from Smallest WebSocket and clean up tasks."""
@@ -362,9 +361,7 @@ class SmallestTTSService(InterruptibleTTSService):
             await self.cancel_task(self._receive_task)
             self._receive_task = None
 
-        if self._keepalive_task:
-            await self.cancel_task(self._keepalive_task)
-            self._keepalive_task = None
+        await self._cancel_keepalive_task()
 
         await self._disconnect_websocket()
 
@@ -420,23 +417,15 @@ class SmallestTTSService(InterruptibleTTSService):
             return self._websocket
         raise Exception("Websocket not connected")
 
-    async def _keepalive_task_handler(self):
-        """Send periodic keepalive messages to prevent idle timeout."""
-        KEEPALIVE_INTERVAL = 30
-        while True:
-            await asyncio.sleep(KEEPALIVE_INTERVAL)
-            await self._send_keepalive()
-
     async def _send_keepalive(self):
         """Send a silent message to keep the WebSocket connection alive."""
-        if self._websocket and self._websocket.state is State.OPEN:
-            msg = {
-                "text": " ",
-                "voice_id": self._settings.voice,
-                "model": self._settings.model,
-                "language": self._settings.language,
-            }
-            await self._websocket.send(json.dumps(msg))
+        msg = {
+            "text": " ",
+            "voice_id": self._settings.voice,
+            "model": self._settings.model,
+            "language": self._settings.language,
+        }
+        await self._get_websocket().send(json.dumps(msg))
 
     def _advance_word_timestamp_request(self, request_id: str | None):
         """Roll the turn offset forward when word timestamps cross into a new request.
