@@ -11,8 +11,9 @@ each reply into a result, through a
 :class:`~pipecat.classifiers.openai.decisions.client.OpenAIDecisionsClient`.
 """
 
+import base64
 import json
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from loguru import logger
@@ -22,6 +23,7 @@ from pipecat.classifiers.base_classifier import (
     ChoiceQuestion,
     ChoiceResult,
     ClassifierError,
+    ClassifierImage,
     ClassifierQuestion,
     ClassifierResult,
     ScoreLevel,
@@ -41,15 +43,21 @@ from pipecat.utils.asyncio.task_manager import BaseTaskManager
 #: The most options the Decisions API takes in one choice question.
 OPENAI_DECISIONS_MAX_CHOICE_OPTIONS = 255
 
+#: The most images the Decisions API takes in one request.
+OPENAI_DECISIONS_MAX_IMAGES = 128
+
 
 class OpenAIDecisionsClassifier(BaseClassifier):
     """Answers questions by asking OpenAI's Decisions API.
 
-    The API takes only text, so structured state, instructions and
-    descriptions are sent as JSON. Build one with an API key to get a client
-    of its own, or pass an :class:`OpenAIDecisionsClient` to share one
-    between several classifiers. A client the classifier created is closed
-    in :meth:`cleanup`; a shared one is left to whoever made it.
+    Structured state, instructions and descriptions are sent as JSON. Build
+    one with an API key to get a client of its own, or pass an
+    :class:`OpenAIDecisionsClient` to share one between several classifiers.
+    A client the classifier created is closed in :meth:`cleanup`; a shared
+    one is left to whoever made it.
+
+    The Decisions API can see images: up to
+    :data:`OPENAI_DECISIONS_MAX_IMAGES` per call.
 
     Example::
 
@@ -121,12 +129,25 @@ class OpenAIDecisionsClassifier(BaseClassifier):
         """The decision model the questions go to."""
         return self._client.model
 
+    @property
+    def supports_images(self) -> bool:
+        """The Decisions API can see images."""
+        return True
+
     async def _ask(
-        self, state: str | dict[str, Any] | list[Any], questions: Mapping[str, ClassifierQuestion]
+        self,
+        state: str | dict[str, Any] | list[Any],
+        questions: Mapping[str, ClassifierQuestion],
+        images: Sequence[ClassifierImage] = (),
     ) -> tuple[dict[str, ClassifierResult], LLMTokenUsage]:
         """Answer the questions in one request."""
+        if len(images) > OPENAI_DECISIONS_MAX_IMAGES:
+            raise ClassifierError(
+                f"OpenAI Decisions takes at most {OPENAI_DECISIONS_MAX_IMAGES} images, "
+                f"got {len(images)}"
+            )
         answers, usage = await self._client.ask(
-            self._text(state), {name: self._to_openai(q) for name, q in questions.items()}
+            self._input(state, images), {name: self._to_openai(q) for name, q in questions.items()}
         )
         results = {
             name: self._from_openai(name, question, answers[name])
@@ -137,6 +158,24 @@ class OpenAIDecisionsClassifier(BaseClassifier):
             completion_tokens=usage.output_tokens,
             total_tokens=usage.input_tokens + usage.output_tokens,
         )
+
+    def _input(
+        self, state: str | dict[str, Any] | list[Any], images: Sequence[ClassifierImage]
+    ) -> str | list[dict[str, Any]]:
+        """The request's input: the state as text, or a user message with any images first."""
+        text = self._text(state)
+        if not images:
+            return text
+        content: list[dict[str, Any]] = [
+            {
+                "type": "input_image",
+                "image_url": f"data:{image.content_type};base64,"
+                f"{base64.b64encode(image.data).decode()}",
+            }
+            for image in images
+        ]
+        content.append({"type": "input_text", "text": text})
+        return [{"role": "user", "content": content}]
 
     def _to_openai(self, question: ClassifierQuestion) -> dict[str, Any]:
         """A question in the Decisions API's own format."""

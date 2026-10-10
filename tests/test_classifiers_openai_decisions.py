@@ -5,21 +5,26 @@
 #
 
 import asyncio
+import base64
+import io
 import json
 import os
 from collections.abc import Callable
 
 import httpx
 import pytest
+from PIL import Image, ImageDraw
 
 from pipecat.classifiers.base_classifier import (
     ChoiceQuestion,
     ClassifierError,
+    ClassifierImage,
     ScoreQuestion,
     YesNoQuestion,
 )
 from pipecat.classifiers.openai.decisions.classifier import (
     OPENAI_DECISIONS_MAX_CHOICE_OPTIONS,
+    OPENAI_DECISIONS_MAX_IMAGES,
     OpenAIDecisionsClassifier,
 )
 from pipecat.classifiers.openai.decisions.client import OpenAIDecisionsClient
@@ -65,6 +70,15 @@ def _failure(status: int, message: str, code: str | None = None) -> httpx.Respon
             }
         },
     )
+
+
+def _circle(color: str) -> ClassifierImage:
+    """A camera-sized JPEG with a circle in the middle."""
+    image = Image.new("RGB", (640, 480), "white")
+    ImageDraw.Draw(image).ellipse((220, 140, 420, 340), fill=color)
+    buffer = io.BytesIO()
+    image.save(buffer, format="JPEG")
+    return ClassifierImage(data=buffer.getvalue(), content_type="image/jpeg")
 
 
 def _model(request: httpx.Request) -> httpx.Response:
@@ -445,6 +459,55 @@ class TestOpenAIDecisionsClassifier:
         await classifier.client.close()
 
     @pytest.mark.asyncio
+    async def test_images_go_in_a_user_message_with_the_state(self):
+        bodies = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            bodies.append(json.loads(request.content))
+            return _reply(_predicate(0.99))
+
+        classifier = OpenAIDecisionsClassifier(client=_client(handler))
+        png = ClassifierImage(data=b"png bytes", content_type="image/png")
+        question = {"answer": YesNoQuestion(instructions="is there a red circle?")}
+        assert classifier.supports_images
+
+        await classifier.yes_no("a camera frame", question, images=[png])
+        await classifier.yes_no("no frame", question)
+
+        assert bodies[0]["input"] == [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "input_image",
+                        "image_url": "data:image/png;base64,"
+                        + base64.b64encode(b"png bytes").decode(),
+                    },
+                    {"type": "input_text", "text": "a camera frame"},
+                ],
+            }
+        ]
+        assert bodies[1]["input"] == "no frame"
+        await classifier.client.close()
+
+    @pytest.mark.asyncio
+    async def test_too_many_images_is_an_error_before_any_request(self):
+        sent = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            sent.append(request)
+            return _reply(_predicate(0.5))
+
+        classifier = OpenAIDecisionsClassifier(client=_client(handler))
+        images = [_circle("red")] * (OPENAI_DECISIONS_MAX_IMAGES + 1)
+        with pytest.raises(ClassifierError, match="at most 128 images"):
+            await classifier.yes_no(
+                "frames", {"answer": YesNoQuestion(instructions="?")}, images=images
+            )
+        assert sent == []
+        await classifier.client.close()
+
+    @pytest.mark.asyncio
     async def test_a_choice_outside_the_options_is_an_error(self):
         classifier = OpenAIDecisionsClassifier(
             client=_client(
@@ -713,5 +776,17 @@ class TestOpenAIDecisionsLive:
             assert abs(sum(results["turn"].probabilities.values()) - 1.0) < 0.05
             assert 0 <= results["mood"].score <= 2
             assert classifier.client.usage.input_tokens > 0
+        finally:
+            await classifier.cleanup()
+
+    @pytest.mark.asyncio
+    async def test_a_question_about_an_image(self):
+        classifier = OpenAIDecisionsClassifier(api_key=os.environ["OPENAI_API_KEY"])
+        question = {"red": YesNoQuestion(instructions="Is there a red circle in the image?")}
+        try:
+            red = await classifier.yes_no("A camera frame.", question, images=[_circle("red")])
+            blue = await classifier.yes_no("A camera frame.", question, images=[_circle("blue")])
+            assert red["red"].is_yes
+            assert not blue["red"].is_yes
         finally:
             await classifier.cleanup()
