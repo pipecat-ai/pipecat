@@ -261,7 +261,7 @@ class SmallestSTTService(WebsocketSTTService):
             None -- transcription results arrive via WebSocket messages.
         """
         # The receive loop reconnects a dropped socket; audio arriving
-        # meanwhile is dropped.
+        # meanwhile is buffered by the base class and replayed.
         if self._websocket and self._websocket.state is State.OPEN:
             try:
                 await self._websocket.send(audio)

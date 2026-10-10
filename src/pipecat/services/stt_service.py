@@ -39,7 +39,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSet
 from pipecat.services.ai_service import AIService
 from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import DEFAULT_TTFS_P99
-from pipecat.services.websocket_service import WebsocketService
+from pipecat.services.websocket_service import ReportErrorCallback, WebsocketService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.deprecation import deprecated, warn_deprecated
 from pipecat.utils.types import is_given
@@ -431,6 +431,9 @@ class STTService(AIService):
             direction: The direction of frame processing.
         """
         if self._reconnecting:
+            # Buffered audio counts as activity, so keepalive doesn't send
+            # silence ahead of the replay.
+            self._last_audio_time = time.monotonic()
             self._reconnect_audio_buffer.append((frame, direction))
             return
 
@@ -700,7 +703,9 @@ class STTService(AIService):
         and the ``on_connection_error`` event handler.
         """
         logger.info(f"{self} reconnecting...")
-        self._reconnect_audio_buffer.clear()
+        # Keep audio already buffered by a reconnect still in progress.
+        if not self._reconnecting:
+            self._reconnect_audio_buffer.clear()
         self._reconnecting = True
         self._need_reconnect = False
         try:
@@ -713,10 +718,11 @@ class STTService(AIService):
         finally:
             self._reconnecting = False
 
-        # Replay audio frames that arrived while the connection was down.
-        for buffered_frame, buffered_direction in self._reconnect_audio_buffer:
+        # Replay audio frames that arrived while the connection was down. The
+        # receive loop's reconnect shares the buffer, so replay from a snapshot.
+        buffered, self._reconnect_audio_buffer = self._reconnect_audio_buffer, []
+        for buffered_frame, buffered_direction in buffered:
             await self.process_audio_frame(buffered_frame, buffered_direction)
-        self._reconnect_audio_buffer.clear()
 
     async def _do_reconnect(self):
         """Perform the service-specific connection reset.
@@ -1075,7 +1081,49 @@ class WebsocketSTTService(STTService, WebsocketService):
         Keepalive management is handled by ``_connect`` / ``_disconnect``.
         """
         await self._disconnect()
+        # Disconnecting cancels a receive-loop reconnect in progress, which
+        # clears the guard; restore it so audio stays buffered while connecting.
+        self._reconnecting = True
         await self._connect()
+
+    async def _maybe_try_reconnect(
+        self,
+        error_message: str,
+        report_error: ReportErrorCallback,
+        error: Exception | None = None,
+    ) -> bool:
+        """Reconnect from the receive loop, buffering audio as ``_reconnect()`` does.
+
+        Audio frames arriving while the receive loop reconnects are buffered
+        rather than sent to a dead connection, and replayed once the new
+        connection is established. They are discarded if reconnecting fails.
+        Services that disable ``reconnect_on_error`` don't reconnect here, so
+        their audio is left to reach ``run_stt``.
+
+        Args:
+            error_message: Human-readable error message for logging.
+            report_error: Callback function to report connection errors.
+            error: The exception that occurred (optional, may be None for graceful closes).
+
+        Returns:
+            True if should continue the receive loop, False if should break.
+        """
+        if self._reconnecting or not self._reconnect_on_error:
+            return await super()._maybe_try_reconnect(error_message, report_error, error)
+
+        self._reconnect_audio_buffer.clear()
+        self._reconnecting = True
+        try:
+            reconnected = await super()._maybe_try_reconnect(error_message, report_error, error)
+        finally:
+            self._reconnecting = False
+
+        buffered, self._reconnect_audio_buffer = self._reconnect_audio_buffer, []
+        if reconnected:
+            # Replay audio frames that arrived while the connection was down.
+            for buffered_frame, buffered_direction in buffered:
+                await self.process_audio_frame(buffered_frame, buffered_direction)
+        return reconnected
 
     def _is_keepalive_ready(self) -> bool:
         """Check if the websocket is open and ready for keepalive."""
