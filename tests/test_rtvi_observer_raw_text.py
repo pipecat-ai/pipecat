@@ -7,6 +7,7 @@
 """Tests for the raw text messages RTVIObserver sends for the STT, LLM and TTS."""
 
 import unittest
+import warnings
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -158,6 +159,22 @@ class TestRTVIObserverRawText(unittest.IsolatedAsyncioTestCase):
                 await self._push_one_of_each()
 
                 self.assertEqual(self._sent_raw_text(), [])
+
+
+class TestRTVIObserverParamsUserTranscription(unittest.TestCase):
+    def test_turning_user_transcription_off_is_deprecated(self):
+        with self.assertWarnsRegex(
+            DeprecationWarning, "`RTVIObserverParams.user_transcription_enabled` is deprecated"
+        ) as caught:
+            RTVIObserverParams(user_transcription_enabled=False)
+
+        self.assertEqual(caught.filename, __file__)
+
+    def test_leaving_user_transcription_on_is_not_deprecated(self):
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", DeprecationWarning)
+            RTVIObserverParams()
+            RTVIObserverParams(user_transcription_enabled=True)
 
 
 if __name__ == "__main__":
