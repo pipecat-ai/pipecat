@@ -5,20 +5,28 @@
 #
 
 import asyncio
+import base64
+import io
 import json
 import os
 from collections.abc import Callable
 
 import httpx
 import pytest
+from PIL import Image, ImageDraw
 
 from pipecat.classifiers.base_classifier import (
     ChoiceQuestion,
     ClassifierError,
+    ClassifierImage,
     ScoreQuestion,
     YesNoQuestion,
 )
-from pipecat.classifiers.cloudflare.clef.classifier import CLEF_MAX_CHOICE_OPTIONS, ClefClassifier
+from pipecat.classifiers.cloudflare.clef.classifier import (
+    CLEF_MAX_CHOICE_OPTIONS,
+    CLEF_MAX_IMAGES,
+    ClefClassifier,
+)
 from pipecat.classifiers.cloudflare.clef.client import ClefClient
 from pipecat.metrics.metrics import LLMUsageMetricsData, ProcessingMetricsData
 from pipecat.utils.asyncio.task_manager import TaskManager
@@ -58,6 +66,15 @@ def _failure(status: int, *reasons: str) -> httpx.Response:
 
 def _schema(request: httpx.Request) -> httpx.Response:
     return _success({"input": {}, "output": {}})
+
+
+def _circle(color: str) -> ClassifierImage:
+    """A camera-sized JPEG with a circle in the middle."""
+    image = Image.new("RGB", (640, 480), "white")
+    ImageDraw.Draw(image).ellipse((220, 140, 420, 340), fill=color)
+    buffer = io.BytesIO()
+    image.save(buffer, format="JPEG")
+    return ClassifierImage(data=buffer.getvalue(), content_type="image/jpeg")
 
 
 class TestClefClient:
@@ -480,6 +497,46 @@ class TestClefClassifier:
             )
         await classifier.client.close()
 
+    @pytest.mark.asyncio
+    async def test_images_go_with_the_state(self):
+        bodies = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            bodies.append(json.loads(request.content))
+            return _reply({"type": "noul", "noul": 0.99})
+
+        classifier = ClefClassifier(client=_client(handler))
+        png = ClassifierImage(data=b"png bytes", content_type="image/png")
+        question = {"answer": YesNoQuestion(instructions="is there a red circle?")}
+        assert classifier.supports_images
+
+        await classifier.yes_no("a camera frame", question, images=[png])
+        await classifier.yes_no("no frame", question)
+
+        assert bodies[0]["state"] == "a camera frame"
+        assert bodies[0]["images"] == [
+            {"content_type": "image/png", "base64": base64.b64encode(b"png bytes").decode()}
+        ]
+        assert "images" not in bodies[1]
+        await classifier.client.close()
+
+    @pytest.mark.asyncio
+    async def test_too_many_images_is_an_error_before_any_request(self):
+        sent = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            sent.append(request)
+            return _reply({"type": "noul", "noul": 0.5})
+
+        classifier = ClefClassifier(client=_client(handler))
+        images = [_circle("red")] * (CLEF_MAX_IMAGES + 1)
+        with pytest.raises(ClassifierError, match="at most 4 images"):
+            await classifier.yes_no(
+                "frames", {"answer": YesNoQuestion(instructions="?")}, images=images
+            )
+        assert sent == []
+        await classifier.client.close()
+
     def test_needs_an_account_and_key_or_a_client(self):
         with pytest.raises(ValueError):
             ClefClassifier()
@@ -605,5 +662,23 @@ class TestClefLive:
             assert abs(sum(results["turn"].probabilities.values()) - 1.0) < 0.05
             assert 0 <= results["mood"].score <= 2
             assert classifier.client.usage.input_tokens > 0
+        finally:
+            await classifier.cleanup()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("model", ["clef", "clef-flash"])
+    async def test_a_question_about_an_image(self, model):
+        classifier = ClefClassifier(
+            account_id=os.environ["CLOUDFLARE_ACCOUNT_ID"],
+            api_key=os.environ["CLOUDFLARE_API_KEY"],
+            model=model,
+            timeout=30,
+        )
+        question = {"red": YesNoQuestion(instructions="Is there a red circle in the image?")}
+        try:
+            red = await classifier.yes_no("A camera frame.", question, images=[_circle("red")])
+            blue = await classifier.yes_no("A camera frame.", question, images=[_circle("blue")])
+            assert red["red"].is_yes
+            assert not blue["red"].is_yes
         finally:
             await classifier.cleanup()

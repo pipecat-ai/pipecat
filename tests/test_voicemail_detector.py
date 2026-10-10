@@ -53,7 +53,7 @@ class _FakeClassifier(BaseClassifier):
     async def cleanup(self):
         self.cleaned_up = True
 
-    async def _ask(self, state, questions):
+    async def _ask(self, state, questions, images=()):
         self.asked.append(state)
         answer = self.answers.pop(0)
         if isinstance(answer, Exception):

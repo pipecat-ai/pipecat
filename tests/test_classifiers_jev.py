@@ -15,6 +15,7 @@ import pytest
 from pipecat.classifiers.base_classifier import (
     ChoiceQuestion,
     ClassifierError,
+    ClassifierImage,
     ScoreQuestion,
     YesNoQuestion,
     YesNoResult,
@@ -365,6 +366,25 @@ class TestJevClassifier:
 
         with pytest.raises(ClassifierError, match="noul"):
             (await classifier.yes_no("a", {"answer": YesNoQuestion(instructions="?")}))["answer"]
+        await classifier.client.close()
+
+    @pytest.mark.asyncio
+    async def test_images_are_refused_before_any_request(self):
+        sent = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            sent.append(request)
+            return _reply({"type": "noul", "noul": 0.5})
+
+        classifier = JevClassifier(client=_client(handler))
+        image = ClassifierImage(data=b"jpeg", content_type="image/jpeg")
+
+        assert not classifier.supports_images
+        with pytest.raises(ClassifierError, match="cannot see images"):
+            await classifier.yes_no(
+                "a frame", {"answer": YesNoQuestion(instructions="?")}, images=[image]
+            )
+        assert sent == []
         await classifier.client.close()
 
     def test_needs_a_key_or_a_client(self):
