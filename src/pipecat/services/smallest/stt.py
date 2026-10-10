@@ -39,7 +39,7 @@ from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
-from pipecat.utils.types import NOT_GIVEN, NotGiven
+from pipecat.utils.types import NOT_GIVEN, NotGiven, is_given
 
 
 def language_to_smallest_stt_language(language: Language) -> str:
@@ -89,10 +89,28 @@ def language_to_smallest_stt_language(language: Language) -> str:
     return resolve_language(language, LANGUAGE_MAP)
 
 
+def _validate_pulse_2_language(model: str | None, language: Language | str | None) -> None:
+    """Reject non-English languages on the English-only ``pulse-2`` model.
+
+    The server closes the socket with a ``LANGUAGE_NOT_SUPPORTED_BY_MODEL``
+    error in this case; raise here instead so the failure surfaces at
+    settings-update time with a clear message.
+    """
+    if model != SmallestSTTModel.PULSE_2.value or language is None:
+        return
+
+    code = (
+        language_to_smallest_stt_language(language) if isinstance(language, Language) else language
+    )
+    if code != "en":
+        raise ValueError(f"model 'pulse-2' is English-only, got language '{code}'")
+
+
 class SmallestSTTModel(StrEnum):
     """Available Smallest AI STT models."""
 
     PULSE = "pulse"
+    PULSE_2 = "pulse-2"
 
 
 @dataclass
@@ -111,6 +129,12 @@ class SmallestSTTSettings(STTSettings):
         keywords: Comma-separated ``KEYWORD:INTENSIFIER`` pairs to boost
             recognition of domain-specific words/phrases (e.g. ``"NVIDIA:2"``).
         format: Apply punctuation and capitalization to transcripts.
+        emotion_detection: ``model="pulse-2"`` only. Adds a six-class
+            per-utterance ``emotion`` object to every final transcript. No
+            effect on ``model="pulse"``.
+        gender_detection: ``model="pulse-2"`` only. Adds an acoustic
+            per-utterance ``gender`` estimate to every final transcript. No
+            effect on ``model="pulse"``.
     """
 
     word_timestamps: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -123,6 +147,8 @@ class SmallestSTTSettings(STTSettings):
     endpointing: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     keywords: str | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     format: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    emotion_detection: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    gender_detection: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class SmallestSTTService(WebsocketSTTService):
@@ -136,7 +162,12 @@ class SmallestSTTService(WebsocketSTTService):
     a ``finalize`` message to flush the final transcript while keeping the
     session alive for the next utterance.
 
-    Connects to ``wss://api.smallest.ai/waves/v1/stt/live?model=pulse``.
+    Connects to ``wss://api.smallest.ai/waves/v1/stt/live?model=pulse``. Pass
+    ``model=SmallestSTTModel.PULSE_2`` for Pulse 2.0, an English-only
+    streaming model with built-in end-of-turn detection (``endpointing`` has
+    no effect on it) that also adds per-utterance ``emotion`` and ``gender``
+    to every final transcript (see ``emotion_detection``/``gender_detection``,
+    on by default).
 
     Example::
 
@@ -187,10 +218,14 @@ class SmallestSTTService(WebsocketSTTService):
             endpointing=True,
             keywords="",
             format=True,
+            emotion_detection=True,
+            gender_detection=True,
         )
 
         if settings is not None:
             default_settings.apply_update(settings)
+
+        _validate_pulse_2_language(default_settings.model, default_settings.language)
 
         super().__init__(
             sample_rate=sample_rate,
@@ -273,6 +308,12 @@ class SmallestSTTService(WebsocketSTTService):
 
     async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
         """Apply a settings delta and reconnect if anything changed."""
+        prospective_model = delta.model if is_given(delta.model) else self._settings.model
+        prospective_language = (
+            delta.language if is_given(delta.language) else self._settings.language
+        )
+        _validate_pulse_2_language(prospective_model, prospective_language)
+
         changed = await super()._update_settings(delta)
 
         if changed:
@@ -321,6 +362,8 @@ class SmallestSTTService(WebsocketSTTService):
                 "diarize": str(self._settings.diarize).lower(),
                 "endpointing": str(self._settings.endpointing).lower(),
                 "format": str(self._settings.format).lower(),
+                "emotion_detection": str(self._settings.emotion_detection).lower(),
+                "gender_detection": str(self._settings.gender_detection).lower(),
             }
 
             # An empty `keywords` value would register a single empty keyword,
