@@ -54,6 +54,7 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
     TTSTextFrame,
+    UserBackchannelFrame,
     UserMuteStartedFrame,
     UserMuteStoppedFrame,
     UserStartedSpeakingFrame,
@@ -121,6 +122,8 @@ class RTVIObserverParams:
             text of the whole response, which is meant for evaluation, not for
             clients, so this is off by default. Defaults to False.
         bot_tts_enabled: Indicates if the bot's TTS messages should be sent.
+        bot_backchannel_enabled: Indicates if the bot's backchannel messages should be
+            sent. Text of type ``backchannel`` never goes out as bot output or TTS text.
         bot_speaking_enabled: Indicates if the bot's started/stopped speaking messages should be sent.
         bot_audio_level_enabled: Indicates if bot's audio level messages should be sent.
         user_llm_enabled: Indicates if the user's LLM input messages should be sent.
@@ -130,6 +133,7 @@ class RTVIObserverParams:
             finalization (unlike ``user_speaking_enabled``, which a turn strategy may gate or
             defer). Off by default. Defaults to False.
         user_transcription_enabled: Indicates if user's transcription messages should be sent.
+        user_backchannel_enabled: Indicates if user's backchannel messages should be sent.
         user_audio_level_enabled: Indicates if user's audio level messages should be sent.
         metrics_enabled: Indicates if metrics messages should be sent.
         system_logs_enabled: Indicates if system logs should be sent.
@@ -189,6 +193,7 @@ class RTVIObserverParams:
     bot_llm_enabled: bool = True
     bot_llm_marker_enabled: bool = False
     bot_tts_enabled: bool = True
+    bot_backchannel_enabled: bool = True
     bot_speaking_enabled: bool = True
     bot_audio_level_enabled: bool = False
     user_llm_enabled: bool = True
@@ -196,6 +201,7 @@ class RTVIObserverParams:
     vad_user_speaking_enabled: bool = False
     user_mute_enabled: bool = True
     user_transcription_enabled: bool = True
+    user_backchannel_enabled: bool = True
     user_audio_level_enabled: bool = False
     metrics_enabled: bool = True
     system_logs_enabled: bool = False
@@ -634,6 +640,14 @@ class RTVIObserver(BaseObserver):
             and self._params.user_transcription_enabled
         ):
             await self._handle_user_transcriptions(frame)
+        elif isinstance(frame, UserBackchannelFrame) and self._params.user_backchannel_enabled:
+            await self.send_rtvi_message(
+                RTVI.UserBackchannelMessage(
+                    data=RTVI.UserBackchannelMessageData(
+                        text=frame.text, user_id=frame.user_id, timestamp=frame.timestamp
+                    )
+                )
+            )
         elif isinstance(frame, LLMContextFrame) and self._params.user_llm_enabled:
             await self._handle_context(frame)
         elif isinstance(frame, LLMFullResponseStartFrame) and self._params.bot_llm_enabled:
@@ -661,7 +675,9 @@ class RTVIObserver(BaseObserver):
             if isinstance(src, BaseOutputTransport):
                 await self._handle_aggregated_progress(frame)
         elif isinstance(frame, AggregatedTextFrame) and (
-            self._params.bot_output_enabled or self._params.bot_tts_enabled
+            self._params.bot_output_enabled
+            or self._params.bot_tts_enabled
+            or self._params.bot_backchannel_enabled
         ):
             if isinstance(src, BaseOutputTransport):
                 await self._handle_aggregated_llm_text(frame)
@@ -782,7 +798,7 @@ class RTVIObserver(BaseObserver):
 
     async def _handle_aggregated_progress(self, frame: AggregatedTextProgressFrame):
         """Handle progress frames."""
-        if self._params.skip_text_types and frame.text_type in self._params.skip_text_types:
+        if self._is_skipped_type(frame.text_type):
             if frame.remaining_text == "":
                 # The skipped segment's last word has been spoken.
                 self._skipped_segment_ids.discard(frame.segment_id)
@@ -844,13 +860,15 @@ class RTVIObserver(BaseObserver):
             self._skipped_segment_ids.clear()
             self._skipped_segments_interrupted = False
 
-    def _is_skipped(self, frame: AggregatedTextFrame) -> bool:
-        """Whether the frame's text type, or its segment's, keeps it from the client."""
+    def _is_skipped_type(self, text_type: TextType | str) -> bool:
+        """Whether text of this type is kept out of bot output and TTS text messages."""
         skip_types = self._params.skip_text_types
-        if not skip_types:
-            return False
+        return text_type == TextType.BACKCHANNEL or bool(skip_types and text_type in skip_types)
+
+    def _is_skipped(self, frame: AggregatedTextFrame) -> bool:
+        """Whether the frame's text type, or its segment's, keeps it from bot output."""
         segment_id = frame.segment_id if isinstance(frame, TTSTextFrame) else None
-        if frame.text_type in skip_types:
+        if self._is_skipped_type(frame.text_type):
             if segment_id is not None:
                 # The segment spoken in one piece: no words of it follow.
                 self._skipped_segment_ids.discard(segment_id)
@@ -863,6 +881,17 @@ class RTVIObserver(BaseObserver):
 
     async def _send_aggregated_llm_text(self, frame: AggregatedTextFrame):
         """Send aggregated LLM text messages."""
+        # A backchannel is reported once, by the segment the TTS will speak.
+        if (
+            self._params.bot_backchannel_enabled
+            and frame.text_type == TextType.BACKCHANNEL
+            and frame.will_be_spoken
+            and not isinstance(frame, TTSTextFrame)
+        ):
+            await self.send_rtvi_message(
+                RTVI.BotBackchannelMessage(data=RTVI.TextMessageData(text=frame.text))
+            )
+
         if self._is_skipped(frame):
             return
 
