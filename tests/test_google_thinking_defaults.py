@@ -64,19 +64,77 @@ def test_gemini_38_flash_uses_the_lowest_level_it_accepts():
     assert _applied_thinking_config("gemini-3.8-flash") == {"thinking_level": "low"}
 
 
-def test_unrecognized_gemini_3_flash_falls_back_to_minimal():
-    """An unknown flash model is assumed to accept the fastest level."""
-    assert _applied_thinking_config("gemini-3.9-flash") == {"thinking_level": "minimal"}
+def test_every_id_form_of_a_listed_model_is_recognized():
+    """Resource paths and version suffixes name the same model."""
+    assert _applied_thinking_config("models/gemini-3.6-flash") == {"thinking_level": "minimal"}
+    assert _applied_thinking_config("publishers/google/models/gemini-3.6-flash") == {
+        "thinking_level": "minimal"
+    }
+    assert _applied_thinking_config("gemini-2.5-flash-001") == {"thinking_budget": 0}
 
 
-def test_image_models_get_no_thinking_default():
-    """Image models are left alone."""
-    assert _applied_thinking_config("gemini-3.1-flash-image") is None
+def test_unlisted_models_run_at_googles_default():
+    """Only listed models get a thinking default, so a new model is never guessed at."""
+    for model in (
+        "gemini-3.9-flash",
+        "gemini-2.5-flash-lite",
+        "gemini-3.1-flash-lite",
+        "gemini-3.5-flash-lite",
+        "gemini-3.1-pro-preview",
+        "gemini-3.1-flash-image",
+    ):
+        assert _applied_thinking_config(model) is None, model
 
 
-def test_non_flash_models_get_no_thinking_default():
-    """Only the flash line trades reasoning for latency by default."""
-    assert _applied_thinking_config("gemini-3.1-pro-preview") is None
+def test_thinking_config_in_extra_is_left_alone():
+    """A thinking config passed through extra wins too."""
+    service = GoogleLLMService(
+        api_key="test-key",
+        settings=GoogleLLMService.Settings(
+            model="gemini-3.6-flash", extra={"thinking_config": {"thinking_level": "high"}}
+        ),
+    )
+
+    params = service._build_generation_params()
+
+    assert params["thinking_config"] == {"thinking_level": "high"}
+
+
+def test_the_applied_default_is_logged_once_per_model():
+    """The developer learns what Pipecat sent, without a log line per request."""
+    service = GoogleLLMService(
+        api_key="test-key", settings=GoogleLLMService.Settings(model="gemini-3.6-flash")
+    )
+    sink = io.StringIO()
+    handler_id = logger.add(sink, level="INFO", format="{message}")
+    try:
+        service._build_generation_params()
+        service._build_generation_params()
+        service._settings.model = "gemini-3.8-flash"
+        service._build_generation_params()
+    finally:
+        logger.remove(handler_id)
+
+    lines = [line for line in sink.getvalue().splitlines() if "thinking_config=" in line]
+    assert len(lines) == 2
+    assert "gemini-3.6-flash" in lines[0]
+    assert "Set `thinking` in GoogleLLMService.Settings" in lines[0]
+    assert "gemini-3.8-flash" in lines[1]
+
+
+def test_nothing_is_logged_for_a_model_without_a_default():
+    """A model running at Google's default needs no explanation."""
+    service = GoogleLLMService(
+        api_key="test-key", settings=GoogleLLMService.Settings(model="gemini-3.5-flash-lite")
+    )
+    sink = io.StringIO()
+    handler_id = logger.add(sink, level="INFO", format="{message}")
+    try:
+        service._build_generation_params()
+    finally:
+        logger.remove(handler_id)
+
+    assert "thinking_config=" not in sink.getvalue()
 
 
 def test_a_configured_thinking_config_is_left_alone():
