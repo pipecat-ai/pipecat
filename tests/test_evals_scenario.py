@@ -975,3 +975,35 @@ class TestTurnAudioFile(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestLookBackTo(unittest.TestCase):
+    """The ``look_back_to:`` key on an expectation."""
+
+    def _turns(self, expectation: str):
+        return (
+            "name: g\nscenarios:\n  - name: a\n    turns:\n      - user: hi\n"
+            f"        expect:\n          - {expectation}\n"
+        )
+
+    def test_defaults_to_previous(self):
+        scenario = EvalScenarioFile.load(_write(self._turns("{event: response}"))).scenarios[0]
+        self.assertEqual(scenario.turns[0].expect[0].look_back_to, "previous")
+
+    def test_turn_start_is_accepted(self):
+        scenario = EvalScenarioFile.load(
+            _write(self._turns("{event: response, look_back_to: turn_start}"))
+        ).scenarios[0]
+        self.assertEqual(scenario.turns[0].expect[0].look_back_to, "turn_start")
+
+    def test_other_values_are_rejected(self):
+        with self.assertRaises(ValueError) as cm:
+            EvalScenarioFile.load(_write(self._turns("{event: response, look_back_to: later}")))
+        self.assertIn("'look_back_to:' must be one of previous, turn_start", str(cm.exception))
+
+    def test_not_combined_with_absent(self):
+        with self.assertRaises(ValueError) as cm:
+            EvalScenarioFile.load(
+                _write(self._turns("{event: response, absent: true, look_back_to: turn_start}"))
+            )
+        self.assertIn("cannot be combined with 'look_back_to'", str(cm.exception))

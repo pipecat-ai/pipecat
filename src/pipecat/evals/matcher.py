@@ -27,6 +27,16 @@ from pipecat.evals.script import FUNCTION_CALL_EVENTS, EvalExpectation
 JUDGE_NO_GRACE_S = 2.0
 
 
+def _call_matches(event: dict, name: str | None, args: dict | None) -> bool:
+    """Whether a call event is the one a ``calls:`` entry names, with the arguments it gives."""
+    if name is not None and event.get("name") != name:
+        return False
+    if args is None:
+        return True
+    actual = event.get("args") or {}
+    return all(actual.get(k) == v for k, v in args.items())
+
+
 class ExpectationMatcher:
     """Matches one expectation at a time against the event stream.
 
@@ -49,9 +59,6 @@ class ExpectationMatcher:
         self._stream = stream
         self._judge = judge
         self._trace = trace
-        # function_call events popped while matching another expectation, held so
-        # the turn's calls can be matched by name in any order (reset per turn).
-        self._pending_function_calls: list[dict] = []
         # Text content of the most recently matched event (the bot's response, or
         # a user transcript), surfaced to verbose progress. Empty for events with
         # no text (llm_started, function_call, speaking events).
@@ -61,8 +68,8 @@ class ExpectationMatcher:
         self._last_match_at: float = 0.0
 
     def reset_turn(self) -> None:
-        """Forget the previous turn's unclaimed function calls."""
-        self._pending_function_calls = []
+        """Forget the previous turn's events."""
+        self._stream.begin_turn()
 
     async def match(
         self,
@@ -97,23 +104,26 @@ class ExpectationMatcher:
 
         if expectation.absent:
             return await self._match_absent(expectation, deadline, budget_ms, turn_idx, exp_idx)
+        # Where in the turn the expectation looks for its event from: only what
+        # arrives from here on, or back from the start of the turn.
+        since = 0 if expectation.look_back_to == "turn_start" else self._stream.turn_position
         if expectation.aggregates:
             return await self._match_aggregating(
-                expectation, deadline, budget_ms, turn_idx, exp_idx
+                expectation, deadline, budget_ms, turn_idx, exp_idx, since
             )
         if expectation.event in FUNCTION_CALL_EVENTS:
             # A call expectation holds the set of calls the turn should make; it
             # completes only when all are found, in any order (a response
             # arriving doesn't short-circuit it).
-            return await self._match_function_calls(expectation, deadline, turn_idx, exp_idx)
-        return await self._match_one(expectation, deadline, turn_idx, exp_idx)
+            return await self._match_function_calls(expectation, deadline, turn_idx, exp_idx, since)
+        return await self._match_one(expectation, deadline, turn_idx, exp_idx, since)
 
     async def _match_one(
-        self, expectation: EvalExpectation, deadline: float, turn_idx: int, exp_idx: int
+        self, expectation: EvalExpectation, deadline: float, turn_idx: int, exp_idx: int, since: int
     ) -> EvalAssertionFailure | None:
         """Match a single event and check its payload and judge assertion."""
         self._trace.log(f"match: waiting for {expectation.event!r}")
-        event = await self._stream.next_event(expectation.event, deadline)
+        event = await self._stream.next_event(expectation.event, deadline, since=since)
         payload_failure = self._check_payload(event, expectation, turn_idx, exp_idx)
         if payload_failure:
             return payload_failure
@@ -130,6 +140,7 @@ class ExpectationMatcher:
         budget_ms: int,
         turn_idx: int,
         exp_idx: int,
+        since: int,
     ) -> EvalAssertionFailure | None:
         """Accumulate reply segments until the content check passes or fails."""
         if expectation.eval is not None and self._judge is None:
@@ -159,7 +170,7 @@ class ExpectationMatcher:
                 event, pending = pending, None
             else:
                 try:
-                    event = await self._stream.next_event(expectation.event, deadline)
+                    event = await self._stream.next_event(expectation.event, deadline, since=since)
                 except TimeoutError:
                     if not seen_any:
                         raise  # no response at all: the caller reports the missing event
@@ -187,7 +198,7 @@ class ExpectationMatcher:
                 # once the reply is complete: a "no" on a reply still being
                 # spoken, or whose last sentence is still being transcribed, is
                 # a "continue" that the next segment may turn into a "yes".
-                pending = await self._rest_of_reply(expectation.event, deadline)
+                pending = await self._rest_of_reply(expectation.event, deadline, since)
                 if pending is None:
                     return self._failure(expectation, turn_idx, exp_idx, reason, "judge_no")
                 self._trace.log("eval: no, but the reply goes on: judging the rest")
@@ -196,7 +207,7 @@ class ExpectationMatcher:
             aggregate += " "
             last_reason = reason
 
-    async def _rest_of_reply(self, event_type: str, deadline: float) -> dict | None:
+    async def _rest_of_reply(self, event_type: str, deadline: float, since: int) -> dict | None:
         """The next segment of a reply the judge rejected, or ``None`` when the reply is over.
 
         While the bot is speaking the next segment is awaited within the turn's
@@ -208,7 +219,7 @@ class ExpectationMatcher:
         else:
             until = min(deadline, time.monotonic() + JUDGE_NO_GRACE_S)
         try:
-            return await self._stream.next_event(event_type, until)
+            return await self._stream.next_event(event_type, until, since=since)
         except TimeoutError:
             return None
 
@@ -285,8 +296,12 @@ class ExpectationMatcher:
         deadline: float,
         turn_idx: int,
         exp_idx: int,
+        since: int,
     ) -> EvalAssertionFailure | None:
         """Match every call in the expectation, in any order, within the budget; else a failure naming the call that was missing or whose args did not match.
+
+        The calls are looked for from ``since`` on, so they may arrive in any
+        order, and a call the LLM corrects and repeats still satisfies it.
 
         With ``eval:``, each matched call is also put to the judge, and the
         first one it rejects fails the expectation.
@@ -305,14 +320,19 @@ class ExpectationMatcher:
             want = spec.args or None
             self._trace.log(f"match: waiting for {expectation.event!r} ({spec.signature})")
             try:
-                event = await self._next_function_call(spec.name, deadline, want, expectation.event)
+                event = await self._stream.next_event(
+                    expectation.event,
+                    deadline,
+                    since=since,
+                    accept=lambda ev, name=spec.name, args=want: _call_matches(ev, name, args),
+                )
             except TimeoutError:
                 # A call of the right name with the wrong arguments is a different
                 # failure from the call never being made, and the bot's arguments
                 # are what the reader needs to see.
                 near = [
                     ev.get("args")
-                    for ev in self._pending_function_calls
+                    for ev in self._stream.unclaimed_since(since)
                     if ev.get("type") == expectation.event
                     and (spec.name is None or ev.get("name") == spec.name)
                 ]
@@ -374,42 +394,6 @@ class ExpectationMatcher:
             f"judge said {verdict.verdict} — {verdict.reason}",
             "judge_no",
         )
-
-    async def _next_function_call(
-        self,
-        name: str | None,
-        deadline: float,
-        args: dict | None = None,
-        event_type: str = "function_call",
-    ) -> dict:
-        """The next call event matching ``name`` (``None`` for any) and ``args``.
-
-        Calls seen but not yet claimed are buffered, so a turn's calls can arrive
-        in any order and a call the LLM corrects and repeats still satisfies it.
-        Raises TimeoutError at ``deadline``.
-        """
-
-        def matches(ev: dict) -> bool:
-            if ev.get("type") != event_type:
-                return False
-            if name is not None and ev.get("name") != name:
-                return False
-            if args is None:
-                return True
-            actual = ev.get("args") or {}
-            return all(actual.get(k) == v for k, v in args.items())
-
-        for i, ev in enumerate(self._pending_function_calls):
-            if matches(ev):
-                return self._pending_function_calls.pop(i)
-
-        while True:
-            event = await self._stream.next_any(deadline)
-            if event.get("type") not in FUNCTION_CALL_EVENTS:
-                continue
-            if matches(event):
-                return event
-            self._pending_function_calls.append(event)
 
     async def _evaluate_aggregate(
         self, aggregate: str, expectation: EvalExpectation

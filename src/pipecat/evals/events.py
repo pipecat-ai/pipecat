@@ -32,7 +32,10 @@ scenario ``event:``             RTVI server message(s)
                                 (audio modality only)
 ``response``                    the harness's own transcription of the bot's audio
                                 (audio modality only); ``llm_response`` in text modality
-``function_call``               ``llm-function-call-in-progress``
+``function_call``               ``llm-function-call-in-progress``; a call made
+                                outside the bot's pipeline and reported into it
+                                (``ExternalFunctionCall*Frame``), such as a
+                                backend's, counts the same
 ``function_call_stopped``       ``llm-function-call-stopped``; its ``args`` carry
                                 ``tool_call_id`` and ``cancelled``, so a scenario
                                 can tell work that was stopped from work that
@@ -45,12 +48,16 @@ scenario ``event:``             RTVI server message(s)
 
 import asyncio
 import time
+from collections.abc import Callable
 
 from pipecat.evals.results import EvalTrace
 from pipecat.evals.serializer import EVAL_BOT_IMAGE_TYPE
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
+    ExternalFunctionCallCancelFrame,
+    ExternalFunctionCallInProgressFrame,
+    ExternalFunctionCallResultFrame,
     Frame,
     FunctionCallCancelFrame,
     FunctionCallInProgressFrame,
@@ -90,6 +97,13 @@ class EvalEventStream:
         self._bot_audio = bot_audio
         self._trace = trace
         self._queue: asyncio.Queue[dict] = asyncio.Queue()
+        # The events popped during the current turn, in order, and which of them
+        # an expectation has claimed. An expectation looks for its event from
+        # the point the turn had reached when it began, or from the start of the
+        # turn (``look_back_to: turn_start``), so an event popped on the way to
+        # another expectation's is not lost to one that may look back for it.
+        self._turn_log: list[dict] = []
+        self._claimed: set[int] = set()
         # Every event in arrival order, for the result's diagnostics.
         self.events_seen: list[dict] = []
         # When each event type last arrived, for send_after anchoring.
@@ -255,25 +269,67 @@ class EvalEventStream:
         async with asyncio.timeout(remaining):
             return await self._queue.get()
 
-    async def next_event(self, event_type: str, deadline: float) -> dict:
-        """Pop events until one of ``event_type`` arrives.
+    @property
+    def turn_position(self) -> int:
+        """How many events the turn has popped so far: where an expectation beginning now looks from."""
+        return len(self._turn_log)
 
-        Events of other types are dropped from the queue, so a scenario need not
-        list every event the bot emits; they stay in :attr:`events_seen`.
+    def begin_turn(self) -> None:
+        """Forget the events popped during the previous turn."""
+        self._turn_log = []
+        self._claimed = set()
+
+    def unclaimed_since(self, since: int) -> list[dict]:
+        """The events popped from position ``since`` on that no expectation has claimed."""
+        return [
+            event for i, event in enumerate(self._turn_log) if i >= since and i not in self._claimed
+        ]
+
+    async def next_event(
+        self,
+        event_type: str,
+        deadline: float,
+        *,
+        since: int | None = None,
+        accept: Callable[[dict], bool] | None = None,
+    ) -> dict:
+        """The next unclaimed event of ``event_type`` that ``accept`` takes, looking from ``since``.
+
+        The turn's log is searched first, from ``since`` on, then the queue is
+        popped until such an event arrives. Events popped on the way stay in the
+        log, unclaimed: a scenario need not list every event the bot emits, and
+        an expectation that looks back from an earlier point can still claim
+        them. Every event stays in :attr:`events_seen`.
 
         Args:
             event_type: The event type to wait for.
             deadline: Monotonic time to give up at.
+            since: Position in the turn's log to look from; ``None`` looks only
+                at what arrives from now on.
+            accept: A further check on an event of the type, such as a call's
+                name; one it turns down is left for another expectation.
 
         Returns:
-            The first event of that type.
+            The event.
 
         Raises:
             TimeoutError: If none arrives before ``deadline``.
         """
+
+        def wanted(event: dict) -> bool:
+            return event.get("type") == event_type and (accept is None or accept(event))
+
+        if since is not None:
+            for i in range(since, len(self._turn_log)):
+                if i not in self._claimed and wanted(self._turn_log[i]):
+                    self._claimed.add(i)
+                    self._trace.log(f"match: {event_type!r} from earlier in the turn")
+                    return self._turn_log[i]
         while True:
             event = await self.next_any(deadline)
-            if event.get("type") == event_type:
+            self._turn_log.append(event)
+            if wanted(event):
+                self._claimed.add(len(self._turn_log) - 1)
                 return event
 
     def drop_pending_bot_output(self, why: str) -> None:
@@ -374,13 +430,23 @@ class EvalEventStream:
         elif isinstance(frame, BotStoppedSpeakingFrame):
             self._bot_quiet.set()
             return {"type": "bot_stopped_speaking"}
-        elif isinstance(frame, FunctionCallInProgressFrame):
+        elif isinstance(frame, (FunctionCallInProgressFrame, ExternalFunctionCallInProgressFrame)):
             return {
                 "type": "function_call",
                 "name": frame.function_name or None,
                 "args": dict(frame.arguments or {}),
             }
-        elif isinstance(frame, (FunctionCallResultFrame, FunctionCallCancelFrame)):
+        elif isinstance(frame, ExternalFunctionCallResultFrame) and not frame.is_final:
+            return None
+        elif isinstance(
+            frame,
+            (
+                FunctionCallResultFrame,
+                FunctionCallCancelFrame,
+                ExternalFunctionCallResultFrame,
+                ExternalFunctionCallCancelFrame,
+            ),
+        ):
             # How the call ended is the assertable part, so `cancelled` sits in
             # `args` alongside the id: a scenario matches both through the same
             # `calls:`/`args:` check a function_call uses.
@@ -389,7 +455,9 @@ class EvalEventStream:
                 "name": frame.function_name or None,
                 "args": {
                     "tool_call_id": frame.tool_call_id,
-                    "cancelled": isinstance(frame, FunctionCallCancelFrame),
+                    "cancelled": isinstance(
+                        frame, (FunctionCallCancelFrame, ExternalFunctionCallCancelFrame)
+                    ),
                 },
             }
         return None

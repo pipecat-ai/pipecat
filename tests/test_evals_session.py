@@ -59,6 +59,9 @@ from pipecat.evals.script_session import EvalScriptSession
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
+    ExternalFunctionCallCancelFrame,
+    ExternalFunctionCallInProgressFrame,
+    ExternalFunctionCallResultFrame,
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
     InputTransportMessageFrame,
@@ -2693,3 +2696,175 @@ class TestBotImageEvent(unittest.TestCase):
             _stream().frame_to_event(InputTransportMessageFrame(message=message)),
             {"type": "image", "width": 64, "height": 32, "format": "RGB"},
         )
+
+
+class TestExternalFunctionCallEvents(unittest.TestCase):
+    """A call made outside the pipeline and reported into it is an event like the pipeline's own."""
+
+    def test_an_external_call_starts_and_stops_like_the_pipelines_own(self):
+        s = _stream()
+        started = s.frame_to_event(
+            ExternalFunctionCallInProgressFrame("run_tests", "toolu_1", arguments={"path": "x"})
+        )
+        progress = s.frame_to_event(
+            ExternalFunctionCallResultFrame(
+                "run_tests", "toolu_1", arguments={}, result="1 of 3", is_final=False
+            )
+        )
+        cancelled = s.frame_to_event(ExternalFunctionCallCancelFrame("run_tests", "toolu_1"))
+        done = s.frame_to_event(
+            ExternalFunctionCallResultFrame("run_tests", "toolu_2", arguments={}, result="ok")
+        )
+
+        self.assertEqual(
+            started, {"type": "function_call", "name": "run_tests", "args": {"path": "x"}}
+        )
+        self.assertIsNone(progress)
+        self.assertEqual(
+            cancelled,
+            {
+                "type": "function_call_stopped",
+                "name": "run_tests",
+                "args": {"tool_call_id": "toolu_1", "cancelled": True},
+            },
+        )
+        self.assertEqual(done["args"], {"tool_call_id": "toolu_2", "cancelled": False})
+
+
+class TestLookBackTo(unittest.IsolatedAsyncioTestCase):
+    """Expectations match in order unless one says ``look_back_to: turn_start``."""
+
+    def _queue(self, m: ExpectationMatcher, *events: dict) -> None:
+        for event in events:
+            m._stream._queue.put_nowait(event)
+
+    async def _match(self, m: ExpectationMatcher, exp_idx: int, **fields) -> str | None:
+        """Match one expectation; ``None`` on success, else the failure's reason."""
+        failure = await m.match(
+            EvalExpectation(**fields), time.monotonic(), 500, turn_idx=0, exp_idx=exp_idx
+        )
+        return None if failure is None else failure.reason
+
+    async def test_an_ordered_expectation_passes_over_an_earlier_reply(self):
+        """The default: a reply that came before the call is not the reply after it."""
+        m = _matcher()
+        self._queue(
+            m,
+            {"type": "llm_response", "text": "Why did the duck cross?"},
+            {"type": "function_call", "name": "delegate", "args": {}},
+            {"type": "llm_response", "text": "I'll let you know."},
+        )
+        self.assertIsNone(
+            await self._match(
+                m, 0, event="function_call", calls=[EvalFunctionCall(name="delegate")]
+            )
+        )
+        reason = await self._match(m, 1, event="llm_response", text_contains="duck")
+        self.assertIn("duck", reason or "")
+
+    async def test_a_flagged_expectation_claims_the_earlier_reply(self):
+        m = _matcher()
+        self._queue(
+            m,
+            {"type": "llm_response", "text": "Why did the duck cross?"},
+            {"type": "function_call", "name": "delegate", "args": {}},
+            {"type": "llm_response", "text": "I'll let you know."},
+        )
+        self.assertIsNone(
+            await self._match(
+                m, 0, event="function_call", calls=[EvalFunctionCall(name="delegate")]
+            )
+        )
+        self.assertIsNone(
+            await self._match(
+                m, 1, event="llm_response", text_contains="duck", look_back_to="turn_start"
+            )
+        )
+        self.assertIn("duck", m.last_match_text)
+
+    async def test_the_expectations_after_a_flagged_one_are_still_ordered_after_it(self):
+        """The handoff shape: call and first reply in either order, second reply after both."""
+        m = _matcher()
+        self._queue(
+            m,
+            {"type": "llm_response", "text": "Transferring you now."},
+            {"type": "function_call", "name": "transfer_to_agent", "args": {}},
+            {"type": "llm_response", "text": "The Rocket Boots do 500 mph."},
+        )
+        self.assertIsNone(
+            await self._match(
+                m, 0, event="function_call", calls=[EvalFunctionCall(name="transfer_to_agent")]
+            )
+        )
+        self.assertIsNone(
+            await self._match(
+                m,
+                1,
+                event="llm_response",
+                text_contains="Transferring",
+                look_back_to="turn_start",
+            )
+        )
+        self.assertIsNone(await self._match(m, 2, event="llm_response", text_contains="Boots"))
+        # Nothing new after the second reply.
+        self.assertIsNone(await self._match(m, 3, event="llm_response", absent=True, within_ms=100))
+
+    async def test_a_flagged_call_is_found_from_before_the_reply_it_follows(self):
+        """A backend's call lands while the turn waits on the reply listed before it."""
+        m = _matcher()
+        self._queue(
+            m,
+            {"type": "function_call", "name": "delegate", "args": {}},
+            {
+                "type": "function_call_stopped",
+                "name": "run_integration_tests",
+                "args": {"tool_call_id": "t1", "cancelled": True},
+            },
+            {"type": "llm_response", "text": "Okay, I've stopped the tests."},
+        )
+        self.assertIsNone(
+            await self._match(
+                m, 0, event="function_call", calls=[EvalFunctionCall(name="delegate")]
+            )
+        )
+        self.assertIsNone(await self._match(m, 1, event="llm_response", text_contains="stopped"))
+        self.assertIsNone(
+            await self._match(
+                m,
+                2,
+                event="function_call_stopped",
+                calls=[EvalFunctionCall(name="run_integration_tests", args={"cancelled": True})],
+                look_back_to="turn_start",
+            )
+        )
+
+    async def test_a_flagged_expectation_looks_back_no_further_than_its_turn(self):
+        m = _matcher()
+        self._queue(m, {"type": "function_call", "name": "check_ci_status", "args": {}})
+        await m._stream.next_event("function_call", time.monotonic() + 1)  # the previous turn's
+        m.reset_turn()
+        reason = await self._match(
+            m,
+            0,
+            event="function_call",
+            calls=[EvalFunctionCall(name="check_ci_status")],
+            look_back_to="turn_start",
+        )
+        self.assertIn("'check_ci_status' not seen", reason or "")
+
+    async def test_a_call_claimed_by_one_expectation_is_not_matched_again(self):
+        m = _matcher()
+        self._queue(m, {"type": "function_call", "name": "delegate", "args": {}})
+        self.assertIsNone(
+            await self._match(
+                m, 0, event="function_call", calls=[EvalFunctionCall(name="delegate")]
+            )
+        )
+        reason = await self._match(
+            m,
+            1,
+            event="function_call",
+            calls=[EvalFunctionCall(name="delegate")],
+            look_back_to="turn_start",
+        )
+        self.assertIn("'delegate' not seen", reason or "")

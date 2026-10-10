@@ -1,0 +1,31 @@
+# Work handed to the backend, plus something the frontend can do itself while
+# the backend works.
+- expect:
+    - event: response
+      eval: "the bot opens the conversation in some way (a greeting, an introduction, an offer to help, or a question to get the user started)"
+
+- user: "Fix the flaky retry test in the HTTP client, and tell me a joke while I wait."
+  expect:
+    - event: function_call
+      calls:
+        - name: delegate
+    - event: response
+      within_ms: 25000
+      eval: "tells a joke, and acknowledges the fix is underway without claiming it is done; speaks as itself, without mentioning a backend or handing work off"
+      text_excludes: "backend"
+      look_back_to: turn_start  # some models say it before the delegate call
+
+- expect:
+    - event: function_call
+      within_ms: 150000
+      calls:
+        - name: apply_patch
+      look_back_to: turn_start  # the backend's call, in its own time
+    - event: function_call
+      within_ms: 150000
+      calls:
+        - name: run_tests
+      look_back_to: turn_start  # the backend's call, in its own time
+    - event: response
+      within_ms: 150000
+      eval: "reports that the retry test was fixed and the tests now pass (if the bot only reports progress, says the work is still underway, or finishes the joke from its previous reply, answer continue, not no: the report has not come yet)"
