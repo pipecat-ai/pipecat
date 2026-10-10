@@ -258,18 +258,12 @@ class OpenAITTSService(TTSService):
         if voice is None:
             yield ErrorFrame(error="OpenAI TTS voice must be specified")
             return
-        if voice not in VALID_VOICES:
-            yield ErrorFrame(
-                error=f"OpenAI TTS voice {voice!r} is not supported "
-                f"(must be one of: {', '.join(sorted(VALID_VOICES))})"
-            )
-            return
         try:
             # Setup API parameters
             create_params = {
                 "input": text,
                 "model": self._settings.model,
-                "voice": VALID_VOICES[voice],
+                "voice": VALID_VOICES.get(voice, voice),
                 "response_format": "pcm",
             }
 
