@@ -1169,6 +1169,17 @@
       "location": "pipecat/processors/frame_processor.py"
     },
     {
+      "subject": "BotLLMTextMessage",
+      "module": "pipecat.processors.frameworks.rtvi.models",
+      "kind": "class",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "LLMRawTextMessage",
+      "message": "Use :class:`LLMRawTextMessage` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/processors/frameworks/rtvi/models.py"
+    },
+    {
       "subject": "BotOutputMessageData.aggregated_by",
       "module": "pipecat.processors.frameworks.rtvi.models",
       "kind": "parameter",
@@ -1177,6 +1188,17 @@
       "relation": "use_existing",
       "replacement": "text_type",
       "message": "Use ``text_type`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/processors/frameworks/rtvi/models.py"
+    },
+    {
+      "subject": "BotTTSTextMessage",
+      "module": "pipecat.processors.frameworks.rtvi.models",
+      "kind": "class",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "TTSRawTextMessage",
+      "message": "Use :class:`TTSRawTextMessage` instead. Will be removed in 2.0.0.",
       "location": "pipecat/processors/frameworks/rtvi/models.py"
     },
     {
@@ -1199,6 +1221,28 @@
       "relation": "use_existing",
       "replacement": "LLMFunctionCallInProgressMessageData",
       "message": "`LLMFunctionCallMessageData` is deprecated since 0.0.102 and will be removed in 2.0.0. Use `LLMFunctionCallInProgressMessageData` instead.",
+      "location": "pipecat/processors/frameworks/rtvi/models.py"
+    },
+    {
+      "subject": "UserTranscriptionMessage",
+      "module": "pipecat.processors.frameworks.rtvi.models",
+      "kind": "class",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "STTRawTextMessage",
+      "message": "Use :class:`STTRawTextMessage` instead, or :class:`UserInputMessage` for what the user said. Will be removed in 2.0.0.",
+      "location": "pipecat/processors/frameworks/rtvi/models.py"
+    },
+    {
+      "subject": "UserTranscriptionMessageData",
+      "module": "pipecat.processors.frameworks.rtvi.models",
+      "kind": "class",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "STTRawTextMessageData",
+      "message": "Use :class:`STTRawTextMessageData` instead. Will be removed in 2.0.0.",
       "location": "pipecat/processors/frameworks/rtvi/models.py"
     },
     {
@@ -1232,6 +1276,17 @@
       "relation": "use_existing",
       "replacement": "skip_text_types",
       "message": "Use ``skip_text_types`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/processors/frameworks/rtvi/observer.py"
+    },
+    {
+      "subject": "RTVIObserverParams.user_transcription_enabled",
+      "module": "pipecat.processors.frameworks.rtvi.observer",
+      "kind": "parameter",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "No replacement. It only turns off ``user-transcription``, which is deprecated in favor of ``user-input`` and ``stt-raw-text``. Will be removed in 2.0.0.",
       "location": "pipecat/processors/frameworks/rtvi/observer.py"
     },
     {

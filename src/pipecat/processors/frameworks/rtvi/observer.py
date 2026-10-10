@@ -117,13 +117,19 @@ class RTVIObserverParams:
 
     Parameters:
         bot_output_enabled: Indicates if bot output messages should be sent.
-        bot_llm_enabled: Indicates if the bot's LLM messages should be sent.
+        bot_llm_enabled: Indicates if the bot's LLM messages should be sent. Of these,
+            the ``bot-llm-text`` message is deprecated in favor of ``llm-raw-text``
+            (``llm_raw_text_enabled``) and will be removed in 2.0.0. This flag stays, for
+            ``bot-llm-started`` and ``bot-llm-stopped``.
         bot_llm_marker_enabled: Indicates if the bot's LLM marker reports
             (``LLMMarkerResponseFrame``, e.g. from ``filter_incomplete_user_turns``)
             should be sent. A report carries the marker the LLM emitted and the raw
             text of the whole response, which is meant for evaluation, not for
             clients, so this is off by default. Defaults to False.
-        bot_tts_enabled: Indicates if the bot's TTS messages should be sent.
+        bot_tts_enabled: Indicates if the bot's TTS messages should be sent. Of these,
+            the ``bot-tts-text`` message is deprecated in favor of ``tts-raw-text``
+            (``tts_raw_text_enabled``) and will be removed in 2.0.0. This flag stays, for
+            ``bot-tts-started`` and ``bot-tts-stopped``.
         bot_speaking_enabled: Indicates if the bot's started/stopped speaking messages should be sent.
         bot_audio_level_enabled: Indicates if bot's audio level messages should be sent.
         user_llm_enabled: Indicates if the user's LLM input messages should be sent.
@@ -133,6 +139,12 @@ class RTVIObserverParams:
             finalization (unlike ``user_speaking_enabled``, which a turn strategy may gate or
             defer). Off by default. Defaults to False.
         user_transcription_enabled: Indicates if user's transcription messages should be sent.
+
+            .. deprecated:: 1.13.0
+                No replacement. It only turns off ``user-transcription``, which is
+                deprecated in favor of ``user-input`` and ``stt-raw-text``. Will be
+                removed in 2.0.0.
+
         user_input_enabled: Indicates if the user's input messages should be sent. They
             report what the user said or typed: transcriptions, including interim ones,
             backchannels, and the text the client sent.
@@ -148,7 +160,8 @@ class RTVIObserverParams:
             Text of type ``backchannel`` is only sent to clients of protocol 2.2.0 or
             later; add ``"backchannel"`` here to keep it from every client.
             Note: if using this to avoid sending secure information, be sure to also disable
-            bot_llm_enabled to avoid leaking through LLM messages.
+            bot_llm_enabled, and leave llm_raw_text_enabled off, to avoid leaking through
+            LLM messages.
         bot_output_transforms: A list of callables to transform text before sending it to the
             client. Each callable should use the 4-parameter signature::
 
@@ -186,6 +199,16 @@ class RTVIObserverParams:
                 - FULL: Adds function name, arguments, and results.
 
             Defaults to ``{"*": RTVIFunctionCallReportLevel.NONE}``.
+        stt_raw_text_enabled: Indicates if the STT's raw text messages should be sent. They
+            report each transcription, interim ones included, as the STT produced it. Only
+            sent to clients of protocol 2.2.0 or later. Defaults to False.
+        llm_raw_text_enabled: Indicates if the LLM's raw text messages should be sent. They
+            report each chunk of text the LLM streams. Only sent to clients of protocol
+            2.2.0 or later. Defaults to False.
+        tts_raw_text_enabled: Indicates if the TTS's raw text messages should be sent. They
+            report the text the TTS speaks, as it is spoken, and leave out the same text
+            types as bot output messages. Only sent to clients of protocol 2.2.0 or later.
+            Defaults to False.
         skip_aggregator_types: List of text types to skip sending as tts/output messages.
 
             .. deprecated:: 1.13.0
@@ -223,10 +246,21 @@ class RTVIObserverParams:
     function_call_report_level: dict[str, RTVIFunctionCallReportLevel] = field(
         default_factory=lambda: {"*": RTVIFunctionCallReportLevel.NONE}
     )
+    stt_raw_text_enabled: bool = False
+    llm_raw_text_enabled: bool = False
+    tts_raw_text_enabled: bool = False
     skip_aggregator_types: list[TextType | str] | None = field(default=None, kw_only=True)
 
     def __post_init__(self):
-        """Carry the deprecated ``skip_aggregator_types`` over to ``skip_text_types``."""
+        """Warn about deprecated fields, carrying any with a replacement over to it."""
+        # False is the only value that differs from the default.
+        if not self.user_transcription_enabled:
+            warn_deprecated(
+                "`RTVIObserverParams.user_transcription_enabled` is deprecated since 1.13.0 and "
+                "will be removed in 2.0.0. No replacement.",
+                # The caller of the generated __init__ that calls __post_init__.
+                stacklevel=3,
+            )
         if self.skip_aggregator_types is not None:
             warn_deprecated(
                 "`RTVIObserverParams.skip_aggregator_types` is deprecated since 1.13.0 and will "
@@ -312,14 +346,23 @@ class RTVIObserver(BaseObserver):
             return False
         return self._rtvi.client_version[0] == RTVI.LEGACY_SUPPORTED_MAJOR
 
-    @property
-    def _client_supports_backchannels(self) -> bool:
-        """Return True when the connected client supports the backchannel text type (2.2.0+)."""
+    def _client_is_at_least(self, version: list[int]) -> bool:
+        """Return True when the connected client's protocol is ``version`` or later."""
         if not self._rtvi:
             # No client has negotiated a version, so assume the current protocol, as
             # _is_legacy_client does.
             return True
-        return self._rtvi.client_version >= [2, 2, 0]
+        return self._rtvi.client_version >= version
+
+    @property
+    def _client_supports_backchannels(self) -> bool:
+        """Return True when the connected client supports the backchannel text type (2.2.0+)."""
+        return self._client_is_at_least([2, 2, 0])
+
+    @property
+    def _client_supports_raw_text(self) -> bool:
+        """Return True when the connected client supports the raw text messages (2.2.0+)."""
+        return self._client_is_at_least([2, 2, 0])
 
     def add_bot_output_transformer(
         self,
@@ -672,7 +715,9 @@ class RTVIObserver(BaseObserver):
             await self.send_rtvi_message(RTVI.BotLLMStartedMessage())
         elif isinstance(frame, LLMFullResponseEndFrame) and self._params.bot_llm_enabled:
             await self.send_rtvi_message(RTVI.BotLLMStoppedMessage())
-        elif isinstance(frame, LLMTextFrame) and self._params.bot_llm_enabled:
+        elif isinstance(frame, LLMTextFrame) and (
+            self._params.bot_llm_enabled or self._params.llm_raw_text_enabled
+        ):
             await self._handle_llm_text_frame(frame)
         elif isinstance(frame, LLMMarkerResponseFrame) and self._params.bot_llm_marker_enabled:
             await self.send_rtvi_message(
@@ -693,7 +738,9 @@ class RTVIObserver(BaseObserver):
             if isinstance(src, BaseOutputTransport):
                 await self._handle_aggregated_progress(frame)
         elif isinstance(frame, AggregatedTextFrame) and (
-            self._params.bot_output_enabled or self._params.bot_tts_enabled
+            self._params.bot_output_enabled
+            or self._params.bot_tts_enabled
+            or self._params.tts_raw_text_enabled
         ):
             if isinstance(src, BaseOutputTransport):
                 await self._handle_aggregated_llm_text(frame)
@@ -957,12 +1004,25 @@ class RTVIObserver(BaseObserver):
             message = RTVI.BotOutputMessage(data=data)
             await self.send_rtvi_message(message)
 
+        if isTTS and self._params.tts_raw_text_enabled and self._client_supports_raw_text:
+            await self.send_rtvi_message(
+                RTVI.TTSRawTextMessage(data=RTVI.TextMessageData(text=text))
+            )
+
         if isTTS and self._params.bot_tts_enabled:
             tts_message = RTVI.BotTTSTextMessage(data=RTVI.TextMessageData(text=text))
             await self.send_rtvi_message(tts_message)
 
     async def _handle_llm_text_frame(self, frame: LLMTextFrame):
         """Handle LLM text output frames."""
+        if self._params.llm_raw_text_enabled and self._client_supports_raw_text:
+            await self.send_rtvi_message(
+                RTVI.LLMRawTextMessage(data=RTVI.TextMessageData(text=frame.text))
+            )
+
+        if not self._params.bot_llm_enabled:
+            return
+
         message = RTVI.BotLLMTextMessage(data=RTVI.TextMessageData(text=frame.text))
         await self.send_rtvi_message(message)
 
@@ -989,6 +1049,17 @@ class RTVIObserver(BaseObserver):
                 timestamp=frame.timestamp,
                 final=final,
                 user_id=frame.user_id,
+            )
+        if self._params.stt_raw_text_enabled and self._client_supports_raw_text:
+            await self.send_rtvi_message(
+                RTVI.STTRawTextMessage(
+                    data=RTVI.STTRawTextMessageData(
+                        text=frame.text,
+                        user_id=frame.user_id,
+                        timestamp=frame.timestamp,
+                        final=final,
+                    )
+                )
             )
         if self._params.user_transcription_enabled:
             message = RTVI.UserTranscriptionMessage(
