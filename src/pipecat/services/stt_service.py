@@ -715,10 +715,11 @@ class STTService(AIService):
         finally:
             self._reconnecting = False
 
-        # Replay audio frames that arrived while the connection was down.
-        for buffered_frame, buffered_direction in self._reconnect_audio_buffer:
+        # Replay audio frames that arrived while the connection was down. The
+        # receive loop's reconnect shares the buffer, so replay from a snapshot.
+        buffered, self._reconnect_audio_buffer = self._reconnect_audio_buffer, []
+        for buffered_frame, buffered_direction in buffered:
             await self.process_audio_frame(buffered_frame, buffered_direction)
-        self._reconnect_audio_buffer.clear()
 
     async def _do_reconnect(self):
         """Perform the service-specific connection reset.
@@ -1095,6 +1096,14 @@ class WebsocketSTTService(STTService, WebsocketService):
         connection is established. They are discarded if reconnecting fails.
         Services that disable ``reconnect_on_error`` don't reconnect here, so
         their audio is left to reach ``run_stt``.
+
+        Args:
+            error_message: Human-readable error message for logging.
+            report_error: Callback function to report connection errors.
+            error: The exception that occurred (optional, may be None for graceful closes).
+
+        Returns:
+            True if should continue the receive loop, False if should break.
         """
         if self._reconnecting or not self._reconnect_on_error:
             return await super()._maybe_try_reconnect(error_message, report_error, error)
@@ -1106,11 +1115,11 @@ class WebsocketSTTService(STTService, WebsocketService):
         finally:
             self._reconnecting = False
 
+        buffered, self._reconnect_audio_buffer = self._reconnect_audio_buffer, []
         if reconnected:
             # Replay audio frames that arrived while the connection was down.
-            for buffered_frame, buffered_direction in self._reconnect_audio_buffer:
+            for buffered_frame, buffered_direction in buffered:
                 await self.process_audio_frame(buffered_frame, buffered_direction)
-        self._reconnect_audio_buffer.clear()
         return reconnected
 
     def _is_keepalive_ready(self) -> bool:
