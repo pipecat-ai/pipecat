@@ -73,22 +73,44 @@ class InputAudioTranscription(BaseModel):
     model: str = OPENAI_REALTIME_WHISPER_MODEL
     language: str | None
     prompt: str | None
+    delay: Literal["minimal", "low", "medium", "high", "xhigh"] | None = None
+    keywords: list[str] | None = None
+    languages: list[str] | None = None
 
     def __init__(
         self,
         model: str | None = OPENAI_REALTIME_WHISPER_MODEL,
         language: str | None = None,
         prompt: str | None = None,
+        delay: Literal["minimal", "low", "medium", "high", "xhigh"] | None = None,
+        keywords: list[str] | None = None,
+        languages: list[str] | None = None,
     ):
         """Initialize InputAudioTranscription.
 
         Args:
             model: Transcription model to use (e.g., "gpt-realtime-whisper",
-                "gpt-4o-transcribe", "whisper-1").
+                "gpt-transcribe", "gpt-live-transcribe").
             language: Optional language code for transcription.
             prompt: Optional transcription hint text.
+            delay: How long the model waits before emitting transcription text.
+                Higher values trade latency for accuracy. Supported by
+                ``"gpt-realtime-whisper"``.
+            keywords: Words or phrases that guide transcription of the input
+                audio. Supported by ``"gpt-transcribe"`` and
+                ``"gpt-live-transcribe"``.
+            languages: Possible languages of the input audio, as ISO-639-1
+                codes. Supported by ``"gpt-transcribe"`` and
+                ``"gpt-live-transcribe"``.
         """
-        super().__init__(model=model, language=language, prompt=prompt)
+        super().__init__(
+            model=model,
+            language=language,
+            prompt=prompt,
+            delay=delay,
+            keywords=keywords,
+            languages=languages,
+        )
 
 
 class TurnDetection(BaseModel):
@@ -188,6 +210,38 @@ class Reasoning(BaseModel):
     effort: Literal["minimal", "low", "medium", "high", "xhigh"] | str | None = None
 
 
+class TruncationTokenLimits(BaseModel):
+    """Custom token limits for a retention-ratio truncation strategy.
+
+    Parameters:
+        post_instructions: Maximum tokens allowed in the conversation after
+            instructions (which include tool definitions). Cannot exceed the
+            model's context window minus the maximum output tokens.
+    """
+
+    post_instructions: int | None = None
+
+
+class TruncationRetentionRatio(BaseModel):
+    """Retain a fraction of the conversation when it exceeds the input token limit.
+
+    Amortizing truncation across turns keeps more of the prompt cache intact
+    than dropping only as much as each turn requires.
+
+    Parameters:
+        type: Truncation strategy, always "retention_ratio".
+        retention_ratio: Fraction of post-instruction conversation tokens to
+            retain (0.0-1.0). 0.8 drops messages until 80% of the maximum
+            allowed tokens are used.
+        token_limits: Custom token limits for this strategy. Defaults to the
+            model's own limits.
+    """
+
+    type: Literal["retention_ratio"] = "retention_ratio"
+    retention_ratio: float
+    token_limits: TruncationTokenLimits | None = None
+
+
 class SessionProperties(BaseModel):
     """Configuration properties for an OpenAI Realtime session.
 
@@ -210,6 +264,10 @@ class SessionProperties(BaseModel):
         include: Additional fields to include in server outputs.
         reasoning: Reasoning configuration. Only supported by reasoning-capable
             Realtime models such as ``gpt-realtime-2``.
+        truncation: How the conversation is truncated once it exceeds the
+            model's input token limit: ``"auto"``, ``"disabled"`` (the server
+            errors instead of truncating), or a
+            :class:`TruncationRetentionRatio`.
     """
 
     # Needed to support ToolSchema in tools field.
@@ -235,6 +293,7 @@ class SessionProperties(BaseModel):
     expires_at: int | None = None
     include: list[str] | None = None
     reasoning: Reasoning | None = None
+    truncation: Literal["auto", "disabled"] | TruncationRetentionRatio | None = None
 
     @field_validator("tools", mode="before")
     @classmethod
