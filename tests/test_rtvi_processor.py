@@ -4,9 +4,11 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import asyncio
 import base64
 import unittest
 import warnings
+from dataclasses import dataclass
 from unittest.mock import AsyncMock, Mock
 
 from pydantic import ValidationError
@@ -16,10 +18,14 @@ from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.frames.frames import (
     InputAudioRawFrame,
     InputDTMFFrame,
+    InputTransportMessageFrame,
     InputTransportStartAudioStreamingFrame,
+    LLMConfigureOutputFrame,
+    LLMMessagesAppendFrame,
     UserFileRawFrame,
     UserImageRawFrame,
 )
+from pipecat.processors.frameworks.rtvi.frames import RTVISendTextFrame
 from pipecat.processors.frameworks.rtvi.processor import RTVIProcessor
 
 
@@ -384,6 +390,82 @@ class TestRTVISendFile(unittest.IsolatedAsyncioTestCase):
         self.processor.interrupt_bot.assert_not_called()
         frames = self._pushed_frames()
         self.assertFalse(frames[0].run_llm)
+
+
+@dataclass
+class ParticipantMessageFrame(InputTransportMessageFrame):
+    """A transport message that names its sender, as Daily's and LiveKit's do."""
+
+    participant_id: str | None = None
+
+
+class TestRTVISendText(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.processor = RTVIProcessor()
+        self.processor.push_frame = AsyncMock()
+        self.processor.interrupt_bot = AsyncMock()
+        self.processor._message_queue = asyncio.Queue()
+
+    async def asyncTearDown(self):
+        await self.processor.cleanup()
+
+    def _pushed_frames(self):
+        return [c.args[0] for c in self.processor.push_frame.call_args_list]
+
+    async def test_the_text_is_acknowledged_once_it_is_appended(self):
+        data = RTVI.SendTextData(
+            content="Hello.", options=RTVI.SendTextOptions(run_immediately=False)
+        )
+        await self.processor._handle_send_text(data, "msg-1")
+
+        frames = self._pushed_frames()
+        self.assertEqual([type(f) for f in frames], [LLMMessagesAppendFrame, RTVISendTextFrame])
+        self.assertEqual((frames[1].msg_id, frames[1].text), ("msg-1", "Hello."))
+
+    async def _receive(self, frame: InputTransportMessageFrame):
+        await self.processor._handle_transport_message(frame)
+        await self.processor._handle_message(*self.processor._message_queue.get_nowait())
+
+    def _send_text_message(self):
+        return {
+            "label": RTVI.MESSAGE_LABEL,
+            "type": "send-text",
+            "id": "msg-1",
+            "data": {"content": "Hello.", "options": {"run_immediately": False}},
+        }
+
+    async def test_the_text_is_acknowledged_with_the_sender_the_transport_names(self):
+        await self._receive(
+            ParticipantMessageFrame(message=self._send_text_message(), participant_id="user")
+        )
+
+        frame = self._pushed_frames()[-1]
+        self.assertIsInstance(frame, RTVISendTextFrame)
+        self.assertEqual((frame.msg_id, frame.user_id), ("msg-1", "user"))
+
+    async def test_the_text_is_acknowledged_without_a_sender_the_transport_doesnt_name(self):
+        await self._receive(InputTransportMessageFrame(message=self._send_text_message()))
+
+        frame = self._pushed_frames()[-1]
+        self.assertIsInstance(frame, RTVISendTextFrame)
+        self.assertEqual((frame.msg_id, frame.user_id), ("msg-1", None))
+
+    async def test_the_text_is_acknowledged_before_the_tts_setting_is_restored(self):
+        data = RTVI.SendTextData(
+            content="Hello.",
+            options=RTVI.SendTextOptions(run_immediately=False, audio_response=False),
+        )
+        await self.processor._handle_send_text(data, "msg-1")
+
+        self.assertEqual(
+            [type(f) for f in self._pushed_frames()],
+            [
+                LLMConfigureOutputFrame,
+                LLMMessagesAppendFrame,
+                RTVISendTextFrame,
+                LLMConfigureOutputFrame,
+            ],
+        )
 
 
 if __name__ == "__main__":
