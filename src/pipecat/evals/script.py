@@ -119,6 +119,11 @@ Supported expectation fields (per event):
 ``text_excludes: <str>``
     the reverse: the event's text content must not hold this substring
 
+``text_matches: <regex> | [<regex>, ...]``
+    regular expressions (Python ``re.search``) the event's text content must
+    each match, such as a format the reply must open with. The failure names
+    the first pattern that did not match
+
 ``marker: <str>``
     for ``llm_marker`` — the marker's meaning: ``complete``, ``short``, ``long``,
     or ``incomplete`` for either of the last two
@@ -289,6 +294,7 @@ relative to the scenario file's directory. This is handy for sharing the
     judge: !include judge_audio.yaml
 """
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -359,6 +365,9 @@ class EvalExpectation:
         text_excludes: Optional substring the event's text content must not
             hold. Checked on the text the expectation matched; with
             ``text_contains``, on the reply accumulated up to the match.
+        text_matches: Optional regular expressions (``re.search``) the event's
+            text content must each match, checked on the same text as
+            ``text_excludes``.
         calls: For a ``function_call`` event, the set of calls expected in the
             turn. They are matched by name in any order and the expectation passes
             only when all of them are found. Built from ``calls:`` in the YAML, or
@@ -380,14 +389,15 @@ class EvalExpectation:
         absent: When True, the expectation is inverted: it passes only when NO
             event of this type arrives before the ``within_ms`` budget expires,
             and fails as soon as one does. Matches on event type only;
-            ``text_contains``, ``text_excludes``, ``eval``, ``calls`` and the
-            marker checks are not allowed alongside it.
+            ``text_contains``, ``text_excludes``, ``text_matches``, ``eval``,
+            ``calls`` and the marker checks are not allowed alongside it.
     """
 
     event: str
     within_ms: int | None = None
     text_contains: str | None = None
     text_excludes: str | None = None
+    text_matches: list[str] | None = None
     calls: list[EvalFunctionCall] | None = None
     eval: str | None = None
     marker: str | None = None
@@ -902,6 +912,7 @@ def _parse_expectation(e: Any, path: Path, turn_idx: int, exp_idx: int) -> EvalE
             for key in (
                 "text_contains",
                 "text_excludes",
+                "text_matches",
                 "eval",
                 "calls",
                 "name",
@@ -940,11 +951,24 @@ def _parse_expectation(e: Any, path: Path, turn_idx: int, exp_idx: int) -> EvalE
         ):
             raise ValueError(f"{where} '{key}:' must be a {kind.__name__}")
 
+    text_matches = e.get("text_matches")
+    if isinstance(text_matches, str):
+        text_matches = [text_matches]
+    if text_matches is not None:
+        if not isinstance(text_matches, list) or not all(isinstance(p, str) for p in text_matches):
+            raise ValueError(f"{where} 'text_matches:' must be a pattern or a list of patterns")
+        for pattern in text_matches:
+            try:
+                re.compile(pattern)
+            except re.error as ex:
+                raise ValueError(f"{where} 'text_matches:' pattern {pattern!r}: {ex}") from ex
+
     return EvalExpectation(
         event=event,
         within_ms=e.get("within_ms"),
         text_contains=e.get("text_contains"),
         text_excludes=e.get("text_excludes"),
+        text_matches=text_matches,
         calls=calls,
         eval=criterion,
         marker=marker,

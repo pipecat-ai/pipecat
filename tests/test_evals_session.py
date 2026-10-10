@@ -871,6 +871,17 @@ class TestEvaluateAggregate(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(failure.kind, "text_present")
         self.assertIn("'Berlin.●'", failure.reason)
 
+    async def test_text_matches_checks_the_accumulated_reply(self):
+        import time
+
+        exp = EvalExpectation(event="llm_response", text_contains="Germany", text_matches=[r"^●"])
+        for first, kind in (("● Berlin.", None), ("Berlin. ●", "text_unmatched")):
+            s = _matcher(bot_audio=False)
+            s._stream._queue.put_nowait({"type": "llm_response", "text": first})
+            s._stream._queue.put_nowait({"type": "llm_response", "text": "The capital of Germany."})
+            failure = await s.match(exp, time.monotonic(), 100, 0, 0)
+            self.assertEqual(failure.kind if failure else None, kind)
+
     async def test_eval_yes_passes(self):
         s = _matcher()
         s._judge = _FakeJudge(["yes"])
@@ -1134,6 +1145,20 @@ class TestTextContainsResolution(unittest.TestCase):
         # Spacing is ignored, as for text_contains.
         exp = EvalExpectation(event="llm_response", text_excludes="not sure")
         self.assertIsNotNone(self._check({"type": "llm_response", "text": "I'm not  sure."}, exp))
+
+    def test_text_matches(self):
+        exp = EvalExpectation(
+            event="llm_response", text_matches=[r"^\[\[voice:[^\]]*\]\]", r"\]\]\s*\S"]
+        )
+        ok = {"type": "llm_response", "text": "[[voice: emotion=warm]] Sure thing."}
+        self.assertIsNone(self._check(ok, exp))
+        failure = self._check({"type": "llm_response", "text": "Sure. [[voice: x]]"}, exp)
+        self.assertEqual(failure.kind, "text_unmatched")
+        self.assertIn("does not match '^", failure.reason)
+        # Each pattern must match; the failure names the first that did not.
+        failure = self._check({"type": "llm_response", "text": "[[voice: emotion=warm]]"}, exp)
+        self.assertEqual(failure.kind, "text_unmatched")
+        self.assertIn(repr(r"\]\]\s*\S"), failure.reason)
 
 
 class TestMarkerCheck(unittest.TestCase):

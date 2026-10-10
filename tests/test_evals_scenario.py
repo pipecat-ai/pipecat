@@ -325,6 +325,40 @@ class TestEvalsScenarioParser(unittest.TestCase):
         self.assertIsNone(exp.calls)
         self.assertFalse(exp.absent)
 
+    def test_text_matches_parsed(self):
+        s = _script(
+            _write(
+                """
+                name: matches
+                turns:
+                  - user: "x"
+                    expect:
+                      - event: llm_response
+                        text_matches: "^Hi"
+                      - event: llm_response
+                        text_matches: ["^Hi", "!$"]
+                """
+            )
+        )
+        self.assertEqual(s.turns[0].expect[0].text_matches, ["^Hi"])
+        self.assertEqual(s.turns[0].expect[1].text_matches, ["^Hi", "!$"])
+
+    def test_text_matches_rejects_bad_patterns(self):
+        for value in ('"(unclosed"', "[1, 2]"):
+            with self.assertRaises(ValueError):
+                _script(
+                    _write(
+                        f"""
+                        name: bad_matches
+                        turns:
+                          - user: "x"
+                            expect:
+                              - event: llm_response
+                                text_matches: {value}
+                        """
+                    )
+                )
+
     def test_absent_expectation_parsed(self):
         s = _script(
             _write(
@@ -346,7 +380,12 @@ class TestEvalsScenarioParser(unittest.TestCase):
         self.assertEqual(exp.within_ms, 5000)
 
     def test_absent_rejects_content_checks(self):
-        for extra in ('eval: "repeats itself"', 'text_contains: "again"', 'text_excludes: "x"'):
+        for extra in (
+            'eval: "repeats itself"',
+            'text_contains: "again"',
+            'text_excludes: "x"',
+            'text_matches: "x"',
+        ):
             with self.assertRaises(ValueError):
                 _script(
                     _write(
