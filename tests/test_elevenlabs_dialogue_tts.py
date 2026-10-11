@@ -6,7 +6,6 @@
 
 """Tests for the ElevenLabs Text-to-Dialogue TTS service."""
 
-import asyncio
 import base64
 import json
 import unittest
@@ -50,7 +49,7 @@ async def _open_dialogue_context(service, ws, context_id="ctx-1"):
     """Put the service in the state run_tts leaves behind for an open context."""
     service._websocket = ws
     service._contexts[context_id] = _DialogueContext()
-    service._audio_contexts[context_id] = asyncio.Queue()
+    await service._audio_context_manager.create(context_id)
 
 
 @pytest.mark.asyncio
@@ -149,7 +148,7 @@ async def test_dialogue_quiet_context_is_not_registered_again():
     await service._send_text("First sentence.", "ctx-1")
 
     # What the base class does when an audio context reaches its idle timeout.
-    del service._audio_contexts["ctx-1"]
+    service._audio_context_manager.remove("ctx-1")
     await service.on_audio_context_completed("ctx-1")
     ws.sent.clear()
 
@@ -275,7 +274,7 @@ async def test_dialogue_turn_end_closes_a_context_that_went_quiet():
     service._turn_context_id = "ctx-1"
 
     # What the base class does when an audio context reaches its idle timeout.
-    del service._audio_contexts["ctx-1"]
+    service._audio_context_manager.remove("ctx-1")
     await service.on_audio_context_completed("ctx-1")
 
     await service.on_turn_context_completed()
@@ -460,7 +459,8 @@ async def test_dialogue_drained_alignment_does_not_disturb_the_next_turn():
     # The next turn is under way with a fresh clock.
     service._cumulative_time = 0.0
     service._partial_word = ""
-    service._audio_contexts = {"ctx-2": None}
+    service._audio_context_manager.clear()
+    await service._audio_context_manager.create("ctx-2")
 
     # Late alignment from the interrupted context arrives.
     await service._handle_message(
