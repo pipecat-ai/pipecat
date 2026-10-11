@@ -4,8 +4,11 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Tests for leaving out thinking blocks the conversation no longer matches."""
+"""Tests for keeping Anthropic thinking blocks valid when a conversation changes."""
 
+import copy
+from collections.abc import Callable
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import anthropic
@@ -20,13 +23,15 @@ from pipecat.adapters.services.anthropic_adapter import (
 )
 from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
 from pipecat.services.anthropic.llm import AnthropicLLMService
-from pipecat.services.anthropic.thinking_binding import StaleThinking, is_binding_error
+from pipecat.services.anthropic.thinking_binding import ThinkingBinding, is_binding_error
 
 BINDING_ERROR = (
     "messages.1.content.0: Invalid `signature` in `thinking` block. The block is bound to a "
     "different conversation. Remove the block, or set `thinking.block_binding.prefix_mismatch_"
     'behavior` to "drop_block". The `tools` list differs from the one this block was created with.'
 )
+TAMPERED_ERROR = "messages.1.content.0: Invalid `signature` in `thinking` block"
+OTHER_ERROR = "messages: text content blocks must be non-empty"
 
 
 def _tool(name: str) -> FunctionSchema:
@@ -38,9 +43,9 @@ def _tool(name: str) -> FunctionSchema:
     )
 
 
-def _thought(signature: str) -> LLMSpecificMessage:
+def _thought(signature: str, llm: str = "anthropic") -> LLMSpecificMessage:
     return LLMSpecificMessage(
-        llm="anthropic", message={"type": "thought", "text": "", "signature": signature}
+        llm=llm, message={"type": "thought", "text": "", "signature": signature}
     )
 
 
@@ -51,6 +56,12 @@ def _context() -> LLMContext:
     context.add_message({"role": "assistant", "content": "It's 14:05."})
     context.add_message({"role": "user", "content": "And the weather?"})
     return context
+
+
+def _add_turn(context: LLMContext, signature: str):
+    context.add_message(_thought(signature))
+    context.add_message({"role": "assistant", "content": "Sunny."})
+    context.add_message({"role": "user", "content": "Thanks."})
 
 
 def _make_service() -> AnthropicLLMService:
@@ -79,15 +90,27 @@ def _signatures(messages: list) -> list[str]:
     ]
 
 
-class _Requests:
-    """Stands in for the Anthropic API: records requests, optionally rejecting some."""
+def _params(system="You are a voice assistant.", tools=None) -> AnthropicLLMInvocationParams:
+    return {"system": system, "messages": [], "tools": tools or [{"name": "get_time"}]}
 
-    def __init__(self, *errors: Exception):
-        self.sent: list[list[str]] = []
+
+class _Api:
+    """Stands in for the Anthropic API: records requests, rejecting the first ones given."""
+
+    def __init__(self, *errors: Exception, during_first: Callable[[], None] | None = None):
+        self.requests: list[dict] = []
         self._errors = list(errors)
+        self._during_first = during_first
+
+    @property
+    def sent(self) -> list[list[str]]:
+        return [_signatures(request["messages"]) for request in self.requests]
 
     async def create(self, api_call, params):
-        self.sent.append(_signatures(params["messages"]))
+        self.requests.append({**params, "messages": copy.deepcopy(params["messages"])})
+        if self._during_first:
+            self._during_first()
+            self._during_first = None
         if self._errors:
             raise self._errors.pop(0)
 
@@ -98,161 +121,218 @@ class _Requests:
         return no_events()
 
 
-async def _run(service: AnthropicLLMService, context: LLMContext, requests: _Requests):
-    with patch.object(service, "_create_message_stream", requests.create):
+async def _run(service: AnthropicLLMService, context: LLMContext, api: _Api):
+    with patch.object(service, "_create_message_stream", api.create):
         await service._process_context(context)
 
 
-def _params(system="You are a voice assistant.", tools=None) -> AnthropicLLMInvocationParams:
-    return {"system": system, "messages": [], "tools": tools or [{"name": "get_time"}]}
+def _enforced() -> ThinkingBinding:
+    binding = ThinkingBinding()
+    binding.enforced = True
+    return binding
+
+
+def test_binding_changes_only_count_once_enforced():
+    binding, context = ThinkingBinding(), LLMContext()
+    binding.record(context, _params())
+    assert not binding.changed(context, _params(system="You are a weather assistant."))
 
 
 def test_binding_changes_with_system_prompt_or_tools():
-    stale = StaleThinking()
-    assert not stale.binding_changed(_params())
-    assert not stale.binding_changed(_params())
-    assert stale.binding_changed(_params(system="You are a weather assistant."))
-    assert stale.binding_changed(_params(tools=[{"name": "get_time"}, {"name": "get_weather"}]))
+    binding, context = _enforced(), LLMContext()
+    assert not binding.changed(context, _params())
+    binding.record(context, _params())
+    assert not binding.changed(context, _params())
+    assert binding.changed(context, _params(system="You are a weather assistant."))
+    assert binding.changed(context, _params(tools=[{"name": "get_time"}, {"name": "get_weather"}]))
 
 
 def test_binding_ignores_cache_markers_and_tool_order():
-    stale = StaleThinking()
-    stale.binding_changed(_params(tools=[{"name": "a"}, {"name": "b"}]))
-    cached_system = [
-        {
-            "type": "text",
-            "text": "You are a voice assistant.",
-            "cache_control": {"type": "ephemeral"},
-        }
-    ]
-    assert not stale.binding_changed(
-        _params(system=cached_system, tools=[{"name": "b"}, {"name": "a"}])
-    )
+    binding, context = _enforced(), LLMContext()
+    binding.record(context, _params(tools=[{"name": "a"}, {"name": "b"}]))
+    system = [{"type": "text", "text": "You are a voice assistant.", "cache_control": {"x": 1}}]
+    tools = [{"name": "b", "cache_control": {"x": 1}}, {"name": "a"}]
+    assert not binding.changed(context, _params(system=system, tools=tools))
 
 
-def test_add_reports_only_new_signatures():
-    stale = StaleThinking()
-    assert stale.add({"sig-1"})
-    assert not stale.add({"sig-1"})
-    assert stale.add({"sig-1", "sig-2"})
-    assert stale.signatures == {"sig-1", "sig-2"}
+def test_binding_sees_a_tool_parameter_named_cache_control():
+    binding, context = _enforced(), LLMContext()
+    tool = {"name": "a", "input_schema": {"properties": {"cache_control": {"type": "string"}}}}
+    binding.record(context, _params(tools=[tool]))
+    changed = copy.deepcopy(tool)
+    changed["input_schema"]["properties"]["cache_control"]["type"] = "integer"
+    assert binding.changed(context, _params(tools=[changed]))
+
+
+def test_binding_is_kept_per_context():
+    binding, first, second = _enforced(), LLMContext(), LLMContext()
+    binding.record(first, _params())
+    binding.record(second, _params(tools=[{"name": "get_weather"}]))
+    assert not binding.changed(first, _params())
+    assert not binding.changed(second, _params(tools=[{"name": "get_weather"}]))
 
 
 def test_is_binding_error():
     assert is_binding_error(_bad_request(BINDING_ERROR))
-    assert not is_binding_error(_bad_request("messages: text content blocks must be non-empty"))
+    assert not is_binding_error(_bad_request(TAMPERED_ERROR))
+    assert not is_binding_error(_bad_request(OTHER_ERROR))
 
 
-@pytest.mark.asyncio
-async def test_adapter_leaves_out_excluded_thoughts():
+def test_adapter_removes_only_its_own_thoughts():
     adapter = AnthropicLLMAdapter()
     context = _context()
-    context.add_message(_thought("sig-2"))
-    context.add_message({"role": "assistant", "content": "Sunny."})
+    context.add_message(_thought("google-sig", llm="google"))
 
-    assert adapter.thought_signatures(context) == {"sig-1", "sig-2"}
-
-    params = await adapter.get_llm_invocation_params(
-        context, enable_prompt_caching=False, excluded_thought_signatures={"sig-1"}
-    )
-    assert _signatures(params["messages"]) == ["sig-2"]
-    assert [m["role"] for m in params["messages"]] == ["user", "assistant", "user", "assistant"]
+    assert adapter.remove_thoughts(context)
+    assert not adapter.remove_thoughts(context)
+    assert [m for m in context.messages if isinstance(m, LLMSpecificMessage)] == [
+        _thought("google-sig", llm="google")
+    ]
 
 
 @pytest.mark.asyncio
-async def test_thinking_kept_while_system_prompt_and_tools_are_unchanged():
-    service = _make_service()
-    context = _context()
-    requests = _Requests()
+async def test_thinking_kept_until_anthropic_rejects_it():
+    service, context, api = _make_service(), _context(), _Api()
 
-    await _run(service, context, requests)
-    await _run(service, context, requests)
-
-    assert requests.sent == [["sig-1"], ["sig-1"]]
-
-
-@pytest.mark.asyncio
-async def test_tool_change_leaves_out_earlier_thinking_from_then_on():
-    service = _make_service()
-    context = _context()
-    requests = _Requests()
-
-    await _run(service, context, requests)
+    await _run(service, context, api)
     context.set_tools(ToolsSchema(standard_tools=[_tool("get_time"), _tool("get_weather")]))
-    await _run(service, context, requests)
-    # Thinking created after the change is bound to the new tools and kept.
-    context.add_message(_thought("sig-2"))
-    context.add_message({"role": "assistant", "content": "Sunny."})
-    context.add_message({"role": "user", "content": "Thanks."})
-    await _run(service, context, requests)
+    await _run(service, context, api)
 
-    assert requests.sent == [["sig-1"], [], ["sig-2"]]
+    assert api.sent == [["sig-1"], ["sig-1"]]
 
 
 @pytest.mark.asyncio
-async def test_system_prompt_change_leaves_out_earlier_thinking():
-    service = _make_service()
-    context = _context()
-    requests = _Requests()
+async def test_rejection_retries_without_thinking_and_removes_it():
+    service, context, api = _make_service(), _context(), _Api(_bad_request(BINDING_ERROR))
 
-    service._settings.system_instruction = "You are a voice assistant."
-    await _run(service, context, requests)
-    service._settings.system_instruction = "You are a weather assistant."
-    await _run(service, context, requests)
+    await _run(service, context, api)
+    await _run(service, context, api)
 
-    assert requests.sent == [["sig-1"], []]
-
-
-@pytest.mark.asyncio
-async def test_tool_order_and_prompt_caching_are_not_changes():
-    service = _make_service()
-    context = LLMContext(
-        messages=_context().get_messages(),
-        tools=ToolsSchema(standard_tools=[_tool("get_time"), _tool("get_weather")]),
-    )
-    requests = _Requests()
-
-    service._settings.system_instruction = "You are a voice assistant."
-    await _run(service, context, requests)
-    context.set_tools(ToolsSchema(standard_tools=[_tool("get_weather"), _tool("get_time")]))
-    service._settings.enable_prompt_caching = True
-    await _run(service, context, requests)
-
-    assert requests.sent == [["sig-1"], ["sig-1"]]
-
-
-@pytest.mark.asyncio
-async def test_binding_rejection_retries_without_thinking_and_keeps_it_out():
-    service = _make_service()
-    context = _context()
-    requests = _Requests(_bad_request(BINDING_ERROR))
-
-    await _run(service, context, requests)
-    await _run(service, context, requests)
-
-    assert requests.sent == [["sig-1"], [], []]
+    assert api.sent == [["sig-1"], [], []]
+    first, retry = api.requests[0], api.requests[1]
+    assert {k: v for k, v in first.items() if k != "messages"} == {
+        k: v for k, v in retry.items() if k != "messages"
+    }
+    assert not any(isinstance(m, LLMSpecificMessage) for m in context.messages)
     assert service.is_usable
 
 
 @pytest.mark.asyncio
-async def test_other_bad_request_is_not_retried():
-    service = _make_service()
+async def test_after_a_rejection_a_tool_change_removes_earlier_thinking_up_front():
+    service, context, api = _make_service(), _context(), _Api(_bad_request(BINDING_ERROR))
+
+    await _run(service, context, api)
+    _add_turn(context, "sig-2")
+    await _run(service, context, api)
+    context.set_tools(ToolsSchema(standard_tools=[_tool("get_time"), _tool("get_weather")]))
+    await _run(service, context, api)
+    _add_turn(context, "sig-3")
+    await _run(service, context, api)
+
+    assert api.sent == [["sig-1"], [], ["sig-2"], [], ["sig-3"]]
+
+
+@pytest.mark.asyncio
+async def test_after_a_rejection_a_system_prompt_change_removes_earlier_thinking_up_front():
+    service, context, api = _make_service(), _context(), _Api(_bad_request(BINDING_ERROR))
+
+    await _run(service, context, api)
+    _add_turn(context, "sig-2")
+    service._settings.system_instruction = "You are a weather assistant."
+    await _run(service, context, api)
+
+    assert api.sent == [["sig-1"], [], []]
+
+
+@pytest.mark.asyncio
+async def test_retry_leaves_out_messages_added_during_the_request():
     context = _context()
-    requests = _Requests(_bad_request("messages: text content blocks must be non-empty"))
 
-    await _run(service, context, requests)
+    def user_speaks():
+        context.add_message({"role": "user", "content": "Also, is it raining?"})
 
-    assert requests.sent == [["sig-1"]]
+    service, api = _make_service(), _Api(_bad_request(BINDING_ERROR), during_first=user_speaks)
+
+    await _run(service, context, api)
+
+    first, retry = api.requests[0]["messages"], api.requests[1]["messages"]
+    assert len(retry) == len(first)
+    assert "raining" not in str(retry)
+
+
+@pytest.mark.asyncio
+async def test_retry_keeps_a_tool_round_valid():
+    context = LLMContext(tools=ToolsSchema(standard_tools=[_tool("get_time")]))
+    context.add_message({"role": "user", "content": "What time is it in Helsinki?"})
+    context.add_message(_thought("sig-1"))
+    context.add_message(
+        {
+            "role": "assistant",
+            "tool_calls": [
+                {
+                    "id": "t1",
+                    "type": "function",
+                    "function": {"name": "get_time", "arguments": '{"city": "Helsinki"}'},
+                }
+            ],
+        }
+    )
+    context.add_message({"role": "tool", "tool_call_id": "t1", "content": '{"time": "14:05"}'})
+    service, api = _make_service(), _Api(_bad_request(BINDING_ERROR))
+
+    await _run(service, context, api)
+
+    retry = api.requests[1]["messages"]
+    assert [m["role"] for m in retry] == ["user", "assistant", "user"]
+    assert [b["type"] for b in retry[1]["content"]] == ["tool_use"]
+    assert [b["type"] for b in retry[2]["content"]] == ["tool_result"]
+
+
+@pytest.mark.asyncio
+async def test_other_bad_request_is_not_retried():
+    service, context, api = _make_service(), _context(), _Api(_bad_request(OTHER_ERROR))
+
+    await _run(service, context, api)
+
+    assert api.sent == [["sig-1"]]
     assert not service.is_usable
 
 
 @pytest.mark.asyncio
-async def test_binding_rejection_is_retried_only_once():
-    service = _make_service()
-    context = _context()
-    requests = _Requests(_bad_request(BINDING_ERROR), _bad_request(BINDING_ERROR))
+async def test_rejection_is_retried_only_once():
+    rejections = (_bad_request(BINDING_ERROR), _bad_request(BINDING_ERROR))
+    service, context, api = _make_service(), _context(), _Api(*rejections)
 
-    await _run(service, context, requests)
+    await _run(service, context, api)
 
-    assert requests.sent == [["sig-1"], []]
+    assert api.sent == [["sig-1"], []]
     assert not service.is_usable
+
+
+@pytest.mark.asyncio
+async def test_another_service_on_the_same_context_does_not_resend_removed_thinking():
+    context = _context()
+    await _run(_make_service(), context, _Api(_bad_request(BINDING_ERROR)))
+    _add_turn(context, "sig-2")
+
+    api = _Api()
+    await _run(_make_service(), context, api)
+
+    assert api.sent == [["sig-2"]]
+
+
+@pytest.mark.asyncio
+async def test_run_inference_retries_without_thinking_and_keeps_the_context():
+    service, context = _make_service(), _context()
+    reply = SimpleNamespace(content=[SimpleNamespace(text="Sunny.")])
+    create = AsyncMock(side_effect=[_bad_request(BINDING_ERROR), reply])
+    service._client.beta.messages.create = create
+
+    result = await service.run_inference(context, system_instruction="Summarize the call.")
+
+    assert result == "Sunny."
+    assert [_signatures(call.kwargs["messages"]) for call in create.call_args_list] == [
+        ["sig-1"],
+        [],
+    ]
+    assert _thought("sig-1") in context.messages

@@ -4,16 +4,19 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Thinking blocks Anthropic rejects because the conversation changed after them.
+"""Keeping Anthropic thinking blocks valid when a conversation changes.
 
 Newer Claude models bind each thinking block to the system prompt, the tools
-and the earlier messages it was created with, and reject a request that replays
-it once any of them has changed. Removing thinking blocks from the start of a
-conversation keeps the later ones valid.
+and the earlier messages it was created with. Where Anthropic enforces this, a
+request that replays a block after any of them has changed is rejected.
+Removing thinking blocks from the start of a conversation keeps the later ones
+valid.
 """
 
 import json
+from collections.abc import Mapping
 from typing import Any
+from weakref import WeakKeyDictionary
 
 from anthropic import BadRequestError
 
@@ -21,50 +24,50 @@ from pipecat.adapters.services.anthropic_adapter import (
     AnthropicLLMInvocationParams,
     anthropic_is_given,
 )
+from pipecat.processors.aggregators.llm_context import LLMContext
 
 
-class StaleThinking:
-    """The thinking blocks a conversation should no longer send.
+class ThinkingBinding:
+    """Tells when a context's thinking no longer matches its system prompt or tools.
+
+    Thinking is left alone until Anthropic first rejects a block, since accounts
+    it doesn't enforce binding on accept stale blocks.
 
     Parameters:
-        signatures: Signatures of the thinking blocks to leave out.
+        enforced: Whether Anthropic has rejected a thinking block.
     """
 
     def __init__(self):
-        """Initialize with no stale thinking blocks."""
-        self.signatures: set[str] = set()
-        self._binding: str | None = None
+        """Initialize with nothing enforced or recorded."""
+        self.enforced = False
+        self._bindings: WeakKeyDictionary[LLMContext, str] = WeakKeyDictionary()
 
-    def binding_changed(self, params: AnthropicLLMInvocationParams) -> bool:
-        """Record a request's system prompt and tools.
+    def changed(self, context: LLMContext, params: AnthropicLLMInvocationParams) -> bool:
+        """Check whether a request's thinking would be rejected for a changed binding.
 
         Args:
+            context: The LLM context the request is built from.
             params: Invocation parameters of the request.
 
         Returns:
-            Whether they differ from the previous request's.
+            True when binding is enforced and the system prompt or tools differ
+            from the context's previous request.
         """
-        binding = _binding(params)
-        changed = self._binding is not None and binding != self._binding
-        self._binding = binding
-        return changed
+        previous = self._bindings.get(context)
+        return self.enforced and previous is not None and previous != _binding(params)
 
-    def add(self, signatures: set[str]) -> bool:
-        """Leave thinking blocks out from now on.
+    def record(self, context: LLMContext, params: AnthropicLLMInvocationParams):
+        """Remember the system prompt and tools a context's request is sent with.
 
         Args:
-            signatures: Signatures of the thinking blocks.
-
-        Returns:
-            Whether any of them was not already left out.
+            context: The LLM context the request is built from.
+            params: Invocation parameters of the request.
         """
-        new = signatures - self.signatures
-        self.signatures |= new
-        return bool(new)
+        self._bindings[context] = _binding(params)
 
 
 def is_binding_error(error: BadRequestError) -> bool:
-    """Whether Anthropic rejected a thinking block made in a different conversation.
+    """Check whether Anthropic rejected a thinking block made in a different conversation.
 
     Args:
         error: The rejection.
@@ -72,27 +75,23 @@ def is_binding_error(error: BadRequestError) -> bool:
     Returns:
         True for a thinking block bound to a different conversation.
     """
-    # The rejection has no error code of its own.
+    # It has no error code of its own. A tampered signature lacks this phrase.
     return "bound to a different conversation" in error.message
 
 
 def _binding(params: AnthropicLLMInvocationParams) -> str:
     """Key the system prompt and tool set, ignoring cache markers and tool order."""
-    system = params["system"] if anthropic_is_given(params["system"]) else None
+    system = params["system"] if anthropic_is_given(params["system"]) else []
     if isinstance(system, str):
-        # Prompt caching sends the same prompt as text blocks.
+        # Prompt caching sends the same prompt as a text block.
         system = [{"type": "text", "text": system}]
-    tools = sorted(_dumps(tool) for tool in params["tools"])
-    return _dumps([system, tools])
+    tools = sorted(_dumps(_without_cache_control(tool)) for tool in params["tools"])
+    return _dumps([[_without_cache_control(block) for block in system], tools])
+
+
+def _without_cache_control(block: Mapping[str, Any]) -> dict[str, Any]:
+    return {k: v for k, v in block.items() if k != "cache_control"}
 
 
 def _dumps(value: Any) -> str:
-    return json.dumps(_without_cache_control(value), sort_keys=True, default=str)
-
-
-def _without_cache_control(value: Any) -> Any:
-    if isinstance(value, dict):
-        return {k: _without_cache_control(v) for k, v in value.items() if k != "cache_control"}
-    if isinstance(value, list):
-        return [_without_cache_control(v) for v in value]
-    return value
+    return json.dumps(value, sort_keys=True, default=str)
