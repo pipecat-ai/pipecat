@@ -1,0 +1,1 @@
+- Fixed `DeepgramFluxSTTService` hanging on a stalled WebSocket send. Audio and control writes now time out after a configurable `ws_send_timeout` (5 seconds by default), closing the connection so audio can reconnect and retry.

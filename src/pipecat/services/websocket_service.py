@@ -104,6 +104,7 @@ class WebsocketService(ABC):
         reconnect_backoff_max_wait: float = 10.0,
         reconnect_on_error: bool = True,
         ws_close_timeout: float = WS_CLOSE_TIMEOUT,
+        ws_send_timeout: float | None = None,
         **kwargs,
     ):
         """Initialize the websocket service.
@@ -119,13 +120,20 @@ class WebsocketService(ABC):
                 connection. Applied to connections opened through
                 :meth:`_websocket_connect`. Increase it for peers that need
                 longer to complete a graceful close.
+            ws_send_timeout: Maximum time, in seconds, for a send through
+                :meth:`send_with_retry` or :meth:`_send_websocket_message`.
+                A timed-out send closes the connection before raising.
+                None disables the send timeout.
             **kwargs: Additional arguments (unused, for compatibility).
         """
+        if ws_send_timeout is not None and ws_send_timeout <= 0:
+            raise ValueError("ws_send_timeout must be positive or None")
         self._websocket: websockets.WebSocketClientProtocol | None = None  # pyright: ignore[reportAttributeAccessIssue]
         self._reconnect_backoff_min_wait = reconnect_backoff_min_wait
         self._reconnect_backoff_max_wait = reconnect_backoff_max_wait
         self._reconnect_on_error = reconnect_on_error
         self._ws_close_timeout = ws_close_timeout
+        self._ws_send_timeout = ws_send_timeout
         self._reconnect_in_progress: bool = False
         self._disconnecting: bool = False
         # Rapid failure detection: when a server accepts the WebSocket handshake
@@ -253,15 +261,38 @@ class WebsocketService(ABC):
         finally:
             self._reconnect_in_progress = False
 
+    async def _send_websocket_message(self, message: str | bytes) -> None:
+        """Send a message, closing the connection if the send deadline expires.
+
+        Args:
+            message: Text or binary message to send.
+
+        Raises:
+            ConnectionError: If no websocket is connected.
+            TimeoutError: If the send exceeds ``ws_send_timeout``.
+        """
+        websocket = self._websocket
+        if websocket is None:
+            raise ConnectionError(f"{self} no websocket connected")
+        if self._ws_send_timeout is None:
+            await websocket.send(message)
+            return
+        try:
+            async with asyncio.timeout(self._ws_send_timeout):
+                await websocket.send(message)
+        except TimeoutError as e:
+            # A closing handshake writes to the same stalled buffer. Abort it
+            # and wait for CLOSED before reconnecting or sending anything else.
+            websocket.transport.abort()
+            await websocket.wait_closed()
+            raise TimeoutError(
+                f"{self} websocket send timed out after {self._ws_send_timeout}s"
+            ) from e
+
     async def send_with_retry(self, message, report_error: ReportErrorCallback):
         """Attempt to send a message, retrying after reconnect if necessary."""
         try:
-            # If websocket isn't connected/present, treat as a send failure —
-            # the broad `except Exception` below will trigger a reconnect
-            # attempt.
-            if self._websocket is None:
-                raise ConnectionError(f"{self} no websocket connected")
-            await self._websocket.send(message)
+            await self._send_websocket_message(message)
         except Exception as e:
             logger.error(f"{self} send failed: {e}, will try to reconnect")
             # Try to reconnect before retrying
@@ -269,7 +300,7 @@ class WebsocketService(ABC):
             if success and self._websocket is not None:
                 logger.info(f"{self} reconnected successfully, will retry send the message")
                 # trying to send the message one more time
-                await self._websocket.send(message)
+                await self._send_websocket_message(message)
             else:
                 logger.error(f"{self} send failed; unable to reconnect")
 
