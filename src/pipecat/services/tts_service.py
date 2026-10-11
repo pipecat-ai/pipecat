@@ -67,23 +67,6 @@ from pipecat.utils.time import seconds_to_nanoseconds
 from pipecat.utils.types import is_given
 
 
-@dataclass
-class TTSContext:
-    """Context information for a TTS request.
-
-    Parameters:
-        append_to_context: Whether this TTS output should be appended to the
-            conversation context after it is spoken.
-        push_assistant_aggregation: Whether to push an
-            ``LLMAssistantPushAggregationFrame`` after the TTS has finished
-            speaking, forcing the assistant aggregator to commit its current
-            text buffer to the conversation context.
-    """
-
-    append_to_context: bool = True
-    push_assistant_aggregation: bool | None = False
-
-
 class TextAggregationMode(StrEnum):
     """Controls how incoming text is aggregated before TTS synthesis.
 
@@ -102,13 +85,29 @@ class TextAggregationMode(StrEnum):
 
 
 @dataclass
-class _WordTimestampEntry:
-    """Internal: word timestamp routed through an audio context queue."""
+class TTSContext:
+    """Context information for a TTS request.
 
-    word: str
-    timestamp: float
+    Parameters:
+        append_to_context: Whether this TTS output should be appended to the
+            conversation context after it is spoken.
+        push_assistant_aggregation: Whether to push an
+            ``LLMAssistantPushAggregationFrame`` after the TTS has finished
+            speaking, forcing the assistant aggregator to commit its current
+            text buffer to the conversation context.
+        interruptible: Whether an interruption may discard this synthesis.
+    """
+
+    append_to_context: bool = True
+    push_assistant_aggregation: bool | None = False
+    interruptible: bool = True
+
+
+@dataclass
+class _AudioContextFrame(Frame):
+    """Queue an audio context with its interruption policy."""
+
     context_id: str
-    includes_inter_frame_spaces: bool = False
 
 
 @dataclass
@@ -118,6 +117,16 @@ class _AudioRemainder:
     audio: bytes
     sample_rate: int
     num_channels: int
+
+
+@dataclass
+class _WordTimestampEntry:
+    """Internal: word timestamp routed through an audio context queue."""
+
+    word: str
+    timestamp: float
+    context_id: str
+    includes_inter_frame_spaces: bool = False
 
 
 class TTSService(AIService):
@@ -397,6 +406,9 @@ class TTSService(AIService):
         # PTS of the last word frame pushed via _add_word_timestamps, used to assign
         # correct PTS to TTSStoppedFrame and LLMFullResponseEndFrame.
         self._word_last_pts: int = 0
+        # PTS of the last uninterruptible word frame pushed. Those words keep
+        # playing through interruptions, so words after one come after them.
+        self._uninterruptible_word_last_pts: int = 0
         self._llm_response_started: bool = False
         # LLMFullResponseEndFrames received in process_frame, keyed by the turn's
         # context_id, held so each can be re-pushed (with corrected PTS) at end of
@@ -431,8 +443,7 @@ class TTSService(AIService):
 
         # Single FIFO queue that serializes everything the TTS service emits downstream.
         # Items can be:
-        #   str   – an audio context ID: process the per-context audio queue in full before
-        #           moving on (see _handle_audio_context).
+        #   _AudioContextFrame – process its audio queue in full before moving on.
         #   Frame – a non-system downstream frame (e.g. AggregatedTextFrame, FooFrame) that
         #           must be emitted in-order relative to surrounding audio contexts.
         #   None  – shutdown sentinel (sent by stop()).
@@ -655,6 +666,8 @@ class TTSService(AIService):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
+        self._audio_contexts.clear()
+        self._audio_remainders.clear()
         self._create_audio_context_task()
 
     async def stop(self, frame: EndFrame):
@@ -1005,13 +1018,21 @@ class TTSService(AIService):
             saved_turn_context_id = self._turn_context_id
             self._turn_context_id = None
             # Creating a new context_id for the TTS request.
-            self._turn_context_id = self.create_context_id()
-            await self.on_turn_context_created(self._turn_context_id)
+            speak_context_id = self.create_context_id()
+            self._turn_context_id = speak_context_id
             # If we are not receiving text from the LLM, we can assume that the SpeakFrame should be automatically added to the context
             push_assistant_aggregation = frame.append_to_context and not self._llm_response_started
+            self._tts_contexts[speak_context_id] = TTSContext(
+                append_to_context=frame.append_to_context,
+                push_assistant_aggregation=push_assistant_aggregation,
+                interruptible=frame.interruptible,
+            )
+            await self.on_turn_context_created(speak_context_id)
             # Assumption: text in TTSSpeakFrame does not include inter-frame spaces
+            text_frame = AggregatedTextFrame(frame.text, frame.text_type, raw_text=frame.text)
+            text_frame.interruptible = frame.interruptible
             await self._push_tts_frames(
-                AggregatedTextFrame(frame.text, frame.text_type, raw_text=frame.text),
+                text_frame,
                 append_tts_text_to_context=frame.append_to_context,
                 push_assistant_aggregation=push_assistant_aggregation,
             )
@@ -1024,6 +1045,8 @@ class TTSService(AIService):
                 self._turn_context_id,
             )
             await self.on_turn_context_completed()
+            if not self.audio_context_available(speak_context_id):
+                self._tts_contexts.pop(speak_context_id, None)
             # We pause processing incoming frames because we are sending data to
             # the TTS. We pause to avoid audio overlapping.
             await self._maybe_pause_frame_processing()
@@ -1050,7 +1073,11 @@ class TTSService(AIService):
             await self.push_frame(frame, direction)
         elif isinstance(frame, BotStoppedSpeakingFrame):
             self._bot_speaking = False
-            await self._maybe_resume_frame_processing()
+            # Services without context IDs label new audio with the context still
+            # open, so the next reply waits for uninterruptible speech to end or
+            # its audio would be uninterruptible too.
+            if not self._uninterruptible_speech_pending():
+                await self._maybe_resume_frame_processing()
             await self.push_frame(frame, direction)
         else:
             if direction == FrameDirection.DOWNSTREAM and not isinstance(frame, SystemFrame):
@@ -1070,11 +1097,18 @@ class TTSService(AIService):
             frame: The frame to push.
             direction: The direction to push the frame.
         """
+        context_id = getattr(frame, "context_id", None)
+        context = self._tts_contexts.get(context_id) if context_id is not None else None
+        if context:
+            frame.interruptible = frame.interruptible and context.interruptible
+        if isinstance(frame, TTSTextFrame) and frame.pts and not frame.interruptible:
+            self._uninterruptible_word_last_pts = frame.pts
         # Clean up context when we see TTSStoppedFrame
         if isinstance(frame, TTSStoppedFrame) and frame.context_id:
             if frame.context_id in self._tts_contexts:
                 if self._tts_contexts[frame.context_id].push_assistant_aggregation:
                     aggregation_frame = LLMAssistantPushAggregationFrame()
+                    aggregation_frame.interruptible = frame.interruptible
                     # When word-level TTSTextFrames are routed through the
                     # transport's clock queue (PTS-based), the aggregation frame
                     # would otherwise take the audio (sync) queue path and
@@ -1096,6 +1130,7 @@ class TTSService(AIService):
                 num_channels=1,
             )
             silence_frame.transport_destination = self._transport_destination
+            silence_frame.interruptible = frame.interruptible
             await self.push_frame(silence_frame)
 
         if isinstance(frame, (TTSStartedFrame, TTSStoppedFrame, TTSAudioRawFrame, TTSTextFrame)):
@@ -1185,43 +1220,55 @@ class TTSService(AIService):
         self._processing_text = False
         self._sent_non_whitespace_in_context = False
         self._bot_speaking = False
+        self._llm_response_started = False
+        self._streamed_text = ""
+        self._text_aggregation_metrics_started = False
+        self._pending_llm_response_end_frames.clear()
+
         await self._text_aggregator.handle_interruption()
         for filter in self._text_filters:
             await filter.handle_interruption()
 
-        self._llm_response_started = False
-        self._streamed_text = ""
-        self._text_aggregation_metrics_started = False
-        self._aggregated_frame_sequencer.clear()  # discard all pending slots on interruption
-        self._pending_llm_response_end_frames.clear()
-        await self.reset_word_timestamps()
-
-        await self._stop_audio_context_task()
-        # Drops interruptible items while keeping uninterruptible ones
-        # (e.g. FunctionCallResultFrame) that must not be lost mid-flight.
-        self._serialization_queue.reset()
-        audio_contexts = self.get_audio_contexts()
-        if audio_contexts:
-            for ctx_id in audio_contexts:
-                # A failing hook must not skip restarting the audio context task below.
-                try:
-                    await self.on_audio_context_interrupted(context_id=ctx_id)
-                except Exception as e:
-                    logger.warning(f"{self} on_audio_context_interrupted failed for {ctx_id}: {e}")
-        self.reset_active_audio_context()
-        self._turn_context_id = None
-        self._word_last_pts = 0
+        await self._interrupt_audio_contexts()
         self._create_audio_context_task()
-        # When pause_frame_processing=True, the process task may be blocked at
-        # __process_event.wait() because pause_processing_frames() was called
-        # after LLMFullResponseEndFrame and an uninterruptible frame was dequeued
-        # before the interrupt arrived. _start_interruption() in the base class
-        # handles the common case (interruptible frames) by cancelling and
-        # recreating the process task. But when _start_interruption() finds an
-        # uninterruptible frame it only resets the queue, leaving the process task
-        # blocked. BotStoppedSpeakingFrame never arrives (no audio played), so we
-        # must resume here to prevent a permanent deadlock.
-        await self._maybe_resume_frame_processing()
+        # Interrupted playback may never send the BotStoppedSpeakingFrame that
+        # normally resumes processing. Uninterruptible speech still open pauses
+        # it again until its context ends.
+        if self._pause_frame_processing and self._uninterruptible_speech_pending():
+            await self.pause_processing_frames()
+        else:
+            await self._maybe_resume_frame_processing()
+
+    async def _interrupt_audio_contexts(self):
+        """Discard interruptible contexts while preserving ongoing synthesis and playback."""
+        preserved = {
+            key for key, context in self._tts_contexts.items() if not context.interruptible
+        }
+        interrupt_playing = self._playing_context_id not in preserved
+        if interrupt_playing:
+            await self._stop_audio_context_task()
+            await self.reset_word_timestamps()
+            self._word_last_pts = self._uninterruptible_word_last_pts
+
+        self._serialization_queue.reset()
+        self._aggregated_frame_sequencer.clear(keep_contexts=preserved)
+
+        for context_id in self.get_audio_contexts():
+            if context_id in preserved:
+                continue
+            # A failing provider hook must not prevent cleanup or task restart.
+            try:
+                await self.on_audio_context_interrupted(context_id=context_id)
+            except Exception as e:
+                logger.warning(f"{self} on_audio_context_interrupted failed for {context_id}: {e}")
+            self._audio_contexts.pop(context_id, None)
+            self._audio_remainders.pop(context_id, None)
+            self._tts_contexts.pop(context_id, None)
+
+        if interrupt_playing:
+            self.reset_active_audio_context()
+        if self._turn_context_id not in preserved:
+            self._turn_context_id = None
 
     async def _maybe_pause_frame_processing(self):
         """Hold incoming frames until the audio for this turn has been played.
@@ -1246,6 +1293,14 @@ class TTSService(AIService):
     async def _maybe_resume_frame_processing(self):
         if self._pause_frame_processing:
             await self.resume_processing_frames()
+
+    def _uninterruptible_speech_pending(self) -> bool:
+        """Whether an uninterruptible context can still produce audio."""
+        return any(
+            not context.interruptible
+            for context_id, context in self._tts_contexts.items()
+            if context_id in self._audio_contexts
+        )
 
     async def _process_text_frame(self, frame: TextFrame):
         async for aggregate in self._text_aggregator.aggregate(frame.text):
@@ -1335,6 +1390,12 @@ class TTSService(AIService):
             if not text.strip():
                 return
 
+        self._tts_contexts[context_id] = TTSContext(
+            append_to_context=append_tts_text_to_context,
+            push_assistant_aggregation=push_assistant_aggregation,
+            interruptible=src_frame.interruptible,
+        )
+
         # Accumulate text for a single debug log at flush time when streaming tokens.
         if self._is_streaming_tokens:
             self._streamed_text += text
@@ -1420,11 +1481,6 @@ class TTSService(AIService):
                         category=ErrorCategory.APPLICATION,
                     )
                     return
-
-        self._tts_contexts[context_id] = TTSContext(
-            append_to_context=append_tts_text_to_context,
-            push_assistant_aggregation=push_assistant_aggregation,
-        )
 
         # Apply any final text preparation (e.g., trailing space)
         prepared_text = self._prepare_text_for_tts(transformed_text)
@@ -1660,7 +1716,11 @@ class TTSService(AIService):
         Args:
             context_id: Unique identifier for the audio context.
         """
-        await self._serialization_queue.put(context_id)
+        frame = _AudioContextFrame(context_id)
+        context = self._tts_contexts.get(context_id)
+        if context:
+            frame.interruptible = context.interruptible
+        await self._serialization_queue.put(frame)
         self._audio_contexts[context_id] = asyncio.Queue()
         logger.trace(f"{self} created audio context {context_id}")
 
@@ -1824,8 +1884,6 @@ class TTSService(AIService):
 
     def _create_audio_context_task(self):
         if not self._audio_context_task:
-            self._audio_contexts: dict[str, asyncio.Queue] = {}
-            self._audio_remainders = {}
             self._audio_context_task = self.create_task(self._audio_context_task_handler())
 
     async def _stop_audio_context_task(self):
@@ -1836,9 +1894,9 @@ class TTSService(AIService):
     async def _audio_context_task_handler(self):
         """Drain the serialization queue, preserving downstream frame order.
 
-        The queue carries three kinds of items (see _create_audio_context_task):
+        The queue carries three kinds of items:
 
-        * str  – audio context ID: block until all audio for that context has been
+        * _AudioContextFrame – block until all audio for that context has been
                  pushed downstream, then call on_audio_context_completed().
         * Frame – a non-system downstream frame that must be emitted at this exact
                   position in the output stream (e.g. AggregatedTextFrame preceding
@@ -1848,10 +1906,8 @@ class TTSService(AIService):
         running = True
         while running:
             context_value = await self._serialization_queue.get()
-            if isinstance(context_value, Frame):
-                await self.push_frame(context_value)
-            elif isinstance(context_value, str):
-                context_id = context_value
+            if isinstance(context_value, _AudioContextFrame):
+                context_id = context_value.context_id
                 self._playing_context_id = context_id
 
                 # Process the audio context until the context doesn't have more
@@ -1871,6 +1927,13 @@ class TTSService(AIService):
                         f"{self} on_audio_context_completed failed for {context_id}: {e}"
                     )
                 self.reset_active_audio_context()
+                # Uninterruptible speech ignores the BotStoppedSpeakingFrame that
+                # comes while its context is open, so processing resumes here.
+                if not context_value.interruptible and not self._bot_speaking:
+                    if not self._uninterruptible_speech_pending():
+                        await self._maybe_resume_frame_processing()
+            elif isinstance(context_value, Frame):
+                await self.push_frame(context_value)
             else:
                 running = False
 
@@ -2078,13 +2141,11 @@ class TTSService(AIService):
 
         Override this in a subclass to perform provider-specific cleanup (e.g.
         sending a cancel/close message over the WebSocket) when the bot is
-        interrupted mid-speech.  The audio context task has already been stopped
-        and the active context has **not** yet been reset when this is called,
-        so ``context_id`` reflects the context that was cut short.
+        interrupted mid-speech. The context is still registered when this hook
+        runs. Uninterruptible contexts continue playing and do not call this hook.
 
         Args:
-            context_id: The ID of the audio context that was interrupted, or
-                ``None`` if no context was active at the time.
+            context_id: The ID of the audio context that was interrupted.
         """
         pass
 
@@ -2252,7 +2313,7 @@ class InterruptibleTTSService(WebsocketTTSService):
         should_reconnect = self._bot_speaking or self._tts_started
         self._tts_started = False
         await super()._handle_interruption(frame, direction)
-        if should_reconnect:
+        if should_reconnect and not self._uninterruptible_speech_pending():
             await self._disconnect()
             await self._connect()
 

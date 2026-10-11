@@ -972,6 +972,9 @@ class TTSSpeakFrame(DataFrame):
     A frame that contains text that should be spoken by the TTS service
     in the pipeline (if any).
 
+    Set ``interruptible=False`` on the frame to preserve its synthesis and
+    generated audio and text through interruptions.
+
     Parameters:
         text: The text to be spoken.
         append_to_context: Whether the spoken text should be appended to the LLM
