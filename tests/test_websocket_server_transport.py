@@ -189,6 +189,47 @@ class TestServerTornDownAfterSession(WebsocketServerTransportTest):
         await self._assert_not_listening(port)
 
 
+class TestSessionTimeout(WebsocketServerTransportTest):
+    async def test_timeout_applies_to_next_client_after_disconnect(self):
+        port = _free_port()
+        params = _params()
+        params.session_timeout = 1
+        transport = SingleClientWebsocketServerTransport(params=params, host="localhost", port=port)
+        first_disconnected = asyncio.Event()
+        timed_out = asyncio.Event()
+        connected_websockets = []
+        timed_out_websockets = []
+
+        @transport.event_handler("on_client_connected")
+        async def on_client_connected(transport, websocket):
+            connected_websockets.append(websocket)
+
+        @transport.event_handler("on_client_disconnected")
+        async def on_client_disconnected(transport, websocket):
+            first_disconnected.set()
+
+        @transport.event_handler("on_session_timeout")
+        async def on_session_timeout(transport, websocket):
+            timed_out_websockets.append(websocket)
+            timed_out.set()
+
+        worker, run_task = await self._serve(transport, [transport.input(), transport.output()])
+        first_client = await self._connect(port)
+        await first_client.close()
+        await asyncio.wait_for(first_disconnected.wait(), 2)
+
+        second_client = await self._connect(port)
+        try:
+            await asyncio.wait_for(timed_out.wait(), 3)
+        finally:
+            await worker.queue_frames([EndFrame()])
+            await asyncio.wait_for(run_task, 10)
+            await second_client.close()
+
+        self.assertEqual(len(connected_websockets), 2)
+        self.assertEqual(timed_out_websockets, [connected_websockets[1]])
+
+
 class _CoalescingSerializer(FrameSerializer):
     """Emits one coalesced payload every third frame, buffering the two before it."""
 
