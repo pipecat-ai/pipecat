@@ -2311,9 +2311,19 @@ class InterruptibleTTSService(WebsocketTTSService):
         # reconnect. Captured before calling super(), which clears
         # _bot_speaking as part of its own interruption handling.
         should_reconnect = self._bot_speaking or self._tts_started
+        # Without context IDs, audio still coming for an interrupted context
+        # would be labeled with an uninterruptible one, so the connection is
+        # kept only when nothing interruptible is open.
+        interruptible_speech_pending = any(
+            context.interruptible
+            for context_id, context in self._tts_contexts.items()
+            if context_id in self._audio_contexts
+        )
         self._tts_started = False
         await super()._handle_interruption(frame, direction)
-        if should_reconnect and not self._uninterruptible_speech_pending():
+        if should_reconnect and (
+            interruptible_speech_pending or not self._uninterruptible_speech_pending()
+        ):
             await self._disconnect()
             await self._connect()
 
