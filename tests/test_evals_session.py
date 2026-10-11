@@ -27,6 +27,7 @@ import time
 import unittest
 import warnings
 from collections import deque
+from http import HTTPStatus
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -2323,6 +2324,61 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
             if m.get("type") == "client-message" and m["data"].get("t") == "eval-context"
         ]
         self.assertEqual(context_messages, [])
+
+
+class TestBotUnavailableBeforeReady(unittest.IsolatedAsyncioTestCase):
+    """A bot that refuses the run, or never answers, before ``bot-ready``."""
+
+    async def _run(self, handler, process_request=None, bot_ready_timeout_s=5.0):
+        """Run a one-turn scenario against ``handler``; return the result and how long it took."""
+        scenario = EvalScriptScenario(
+            name="refused",
+            turns=[EvalScriptTurn(user="x", expect=[EvalExpectation(event="llm_started")])],
+        )
+        port = _free_port()
+        async with websockets.serve(handler, "localhost", port, process_request=process_request):
+            started = time.monotonic()
+            result = await EvalScriptSession.from_scenario(
+                scenario,
+                f"ws://localhost:{port}",
+                params=EvalSessionParams(bot_ready_timeout_s=bot_ready_timeout_s),
+            ).run()
+            return result, time.monotonic() - started
+
+    async def test_a_close_before_bot_ready_fails_at_once_with_its_code(self):
+        async def close_at_capacity(ws):
+            await ws.close(1011, "Concurrency limit reached")
+
+        result, elapsed = await self._run(close_at_capacity)
+        self.assertLess(elapsed, 2)
+        self.assertEqual(len(result.failures), 1)
+        failure = result.failures[0]
+        self.assertEqual(failure.kind, "closed_before_ready")
+        self.assertEqual(failure.event_name, "<bot-ready>")
+        self.assertIn("1011 Concurrency limit reached", failure.reason)
+        self.assertEqual([t.status for t in result.turns], ["not_run"])
+
+    async def test_a_refused_connection_fails_at_once(self):
+        async def never_reached(ws):
+            pass
+
+        def forbid(connection, request):
+            return connection.respond(HTTPStatus.FORBIDDEN, "forbidden\n")
+
+        result, elapsed = await self._run(never_reached, process_request=forbid)
+        self.assertLess(elapsed, 2)
+        self.assertEqual(len(result.failures), 1)
+        failure = result.failures[0]
+        self.assertEqual(failure.kind, "connect_failed")
+        self.assertEqual(failure.event_name, "<connect>")
+        self.assertIn("HTTP 403", failure.reason)
+
+    async def test_a_bot_that_accepts_but_never_says_ready_still_times_out(self):
+        async def silent(ws):
+            await ws.wait_closed()
+
+        result, _elapsed = await self._run(silent, bot_ready_timeout_s=0.5)
+        self.assertEqual(result.failures[0].kind, "handshake_timeout")
 
 
 class TestProgressEvent(unittest.IsolatedAsyncioTestCase):
