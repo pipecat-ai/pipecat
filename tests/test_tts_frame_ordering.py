@@ -2721,5 +2721,88 @@ async def test_words_after_an_interruption_follow_protected_words_still_to_play(
     assert texts[2].pts >= texts[1].pts
 
 
+class _MockActiveContextTTSService(TTSService):
+    """Labels audio with the active context and never ends one (e.g. FishAudioTTSService).
+
+    Contexts end with the stop-frame timeout, a while after their audio arrives.
+    """
+
+    def __init__(self):
+        super().__init__(
+            push_start_frame=True,
+            push_stop_frames=True,
+            stop_frame_timeout_s=0.2,
+            pause_frame_processing=True,
+            sample_rate=_SAMPLE_RATE,
+        )
+
+    def can_generate_metrics(self) -> bool:
+        return False
+
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:
+        active_context_id = self.get_active_audio_context_id()
+
+        async def deliver():
+            await self.append_to_audio_context(
+                active_context_id,
+                TTSAudioRawFrame(_FAKE_AUDIO, _SAMPLE_RATE, 1, context_id=active_context_id),
+            )
+
+        self.create_task(deliver())
+        yield None
+
+
+@pytest.mark.asyncio
+async def test_reply_after_protected_speech_waits_for_its_context_to_end():
+    """The bot stops before protected speech ends, and the reply's audio stays interruptible."""
+    speech = TTSSpeakFrame("Keep this.", append_to_context=False)
+    speech.interruptible = False
+    down, _ = await asyncio.wait_for(
+        run_test(
+            _MockActiveContextTTSService(),
+            frames_to_send=[
+                speech,
+                SleepFrame(sleep=0.05),
+                BotStartedSpeakingFrame(),
+                BotStoppedSpeakingFrame(),
+                LLMFullResponseStartFrame(),
+                TextFrame("Hello there."),
+                LLMFullResponseEndFrame(),
+                SleepFrame(sleep=0.4),
+                BotStoppedSpeakingFrame(),
+            ],
+        ),
+        timeout=5,
+    )
+    audio = [f for f in down if isinstance(f, TTSAudioRawFrame)]
+    assert [f.interruptible for f in audio] == [False, True]
+
+
+@pytest.mark.asyncio
+async def test_interruption_keeps_the_pause_while_protected_speech_is_open():
+    """An interruption doesn't let the reply start before protected speech ends."""
+    speech = TTSSpeakFrame("Keep this.", append_to_context=False)
+    speech.interruptible = False
+    down, _ = await asyncio.wait_for(
+        run_test(
+            _MockActiveContextTTSService(),
+            frames_to_send=[
+                speech,
+                SleepFrame(sleep=0.05),
+                BotStartedSpeakingFrame(),
+                InterruptionFrame(),
+                LLMFullResponseStartFrame(),
+                TextFrame("Hello there."),
+                LLMFullResponseEndFrame(),
+                SleepFrame(sleep=0.4),
+                BotStoppedSpeakingFrame(),
+            ],
+        ),
+        timeout=5,
+    )
+    audio = [f for f in down if isinstance(f, TTSAudioRawFrame)]
+    assert [f.interruptible for f in audio] == [False, True]
+
+
 if __name__ == "__main__":
     unittest.main()

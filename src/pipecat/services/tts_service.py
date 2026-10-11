@@ -1073,7 +1073,11 @@ class TTSService(AIService):
             await self.push_frame(frame, direction)
         elif isinstance(frame, BotStoppedSpeakingFrame):
             self._bot_speaking = False
-            await self._maybe_resume_frame_processing()
+            # Services without context IDs label new audio with the context still
+            # open, so the next reply waits for uninterruptible speech to end or
+            # its audio would be uninterruptible too.
+            if not self._uninterruptible_speech_pending():
+                await self._maybe_resume_frame_processing()
             await self.push_frame(frame, direction)
         else:
             if direction == FrameDirection.DOWNSTREAM and not isinstance(frame, SystemFrame):
@@ -1213,8 +1217,6 @@ class TTSService(AIService):
             yield TTSAudioRawFrame(audio, self.sample_rate, 1, context_id=context_id)
 
     async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
-        await self._interrupt_audio_contexts()
-
         self._processing_text = False
         self._sent_non_whitespace_in_context = False
         self._bot_speaking = False
@@ -1227,10 +1229,15 @@ class TTSService(AIService):
         for filter in self._text_filters:
             await filter.handle_interruption()
 
+        await self._interrupt_audio_contexts()
         self._create_audio_context_task()
         # Interrupted playback may never send the BotStoppedSpeakingFrame that
-        # normally resumes processing.
-        await self._maybe_resume_frame_processing()
+        # normally resumes processing. Uninterruptible speech still open pauses
+        # it again until its context ends.
+        if self._pause_frame_processing and self._uninterruptible_speech_pending():
+            await self.pause_processing_frames()
+        else:
+            await self._maybe_resume_frame_processing()
 
     async def _interrupt_audio_contexts(self):
         """Discard interruptible contexts while preserving ongoing synthesis and playback."""
@@ -1286,6 +1293,14 @@ class TTSService(AIService):
     async def _maybe_resume_frame_processing(self):
         if self._pause_frame_processing:
             await self.resume_processing_frames()
+
+    def _uninterruptible_speech_pending(self) -> bool:
+        """Whether an uninterruptible context can still produce audio."""
+        return any(
+            not context.interruptible
+            for context_id, context in self._tts_contexts.items()
+            if context_id in self._audio_contexts
+        )
 
     async def _process_text_frame(self, frame: TextFrame):
         async for aggregate in self._text_aggregator.aggregate(frame.text):
@@ -1912,6 +1927,11 @@ class TTSService(AIService):
                         f"{self} on_audio_context_completed failed for {context_id}: {e}"
                     )
                 self.reset_active_audio_context()
+                # Uninterruptible speech ignores the BotStoppedSpeakingFrame that
+                # comes while its context is open, so processing resumes here.
+                if not context_value.interruptible and not self._bot_speaking:
+                    if not self._uninterruptible_speech_pending():
+                        await self._maybe_resume_frame_processing()
             elif isinstance(context_value, Frame):
                 await self.push_frame(context_value)
             else:
@@ -2293,9 +2313,7 @@ class InterruptibleTTSService(WebsocketTTSService):
         should_reconnect = self._bot_speaking or self._tts_started
         self._tts_started = False
         await super()._handle_interruption(frame, direction)
-        if should_reconnect and all(
-            context.interruptible for context in self._tts_contexts.values()
-        ):
+        if should_reconnect and not self._uninterruptible_speech_pending():
             await self._disconnect()
             await self._connect()
 
