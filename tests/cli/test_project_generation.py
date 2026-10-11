@@ -641,6 +641,23 @@ def test_generate_in_place_preserves_existing_neutral_files(temp_output_dir):
     assert (temp_output_dir / "server" / "bot.py").exists()
 
 
+@pytest.mark.parametrize("filename", ["README.md", ".gitignore"])
+@pytest.mark.parametrize("non_interactive", [False, True])
+def test_generate_in_place_refuses_existing_root_files(temp_output_dir, filename, non_interactive):
+    """Existing project documents are never overwritten by in-place scaffolding."""
+    existing_file = temp_output_dir / filename
+    existing_file.write_text("keep this content", encoding="utf-8")
+
+    error = FileExistsError if non_interactive else KeyboardInterrupt
+    with pytest.raises(error, match=filename if non_interactive else "Project creation cancelled"):
+        ProjectGenerator(_inplace_config()).generate(
+            output_dir=temp_output_dir, in_place=True, non_interactive=non_interactive
+        )
+
+    assert existing_file.read_text(encoding="utf-8") == "keep this content"
+    assert not (temp_output_dir / "server").exists()
+
+
 def test_generate_in_place_aborts_if_project_exists(temp_output_dir):
     """in_place refuses to clobber an existing project (server/ present)."""
     (temp_output_dir / "server").mkdir()
