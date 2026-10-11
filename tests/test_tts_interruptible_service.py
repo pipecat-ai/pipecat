@@ -10,7 +10,7 @@ InterruptibleTTSService reconnects its websocket on interruption if the bot
 was speaking (or about to start speaking) for the turn being interrupted. It
 tracks this with two flags:
 
-- ``_bot_speaking`` (on the base TTSService): true only once BotStartedSpeakingFrame
+- ``_bot_speaking``: true only once BotStartedSpeakingFrame
   confirms the output transport actually received audio (see
   test_no_error_on_long_streaming_turn and
   test_no_deadlock_on_zero_audio_context_completion in test_tts_frame_ordering.py).

@@ -326,11 +326,6 @@ class TTSService(AIService):
                 "waits for.",
                 stacklevel=2,
             )
-        # Whether the bot is currently speaking. Set on BotStartedSpeakingFrame,
-        # cleared on BotStoppedSpeakingFrame and InterruptionFrame. Used by
-        # InterruptibleTTSService to decide whether an interruption needs a
-        # reconnect.
-        self._bot_speaking: bool = False
         self._max_consecutive_zero_audio_contexts: int = max_consecutive_zero_audio_contexts
         self._consecutive_zero_audio_contexts: int = 0
         self._append_trailing_space: bool = append_trailing_space
@@ -1026,12 +1021,6 @@ class TTSService(AIService):
                 )
                 delta = type(self._settings).from_mapping(frame.settings)
                 await self._update_settings(delta)
-        elif isinstance(frame, BotStartedSpeakingFrame):
-            self._bot_speaking = True
-            await self.push_frame(frame, direction)
-        elif isinstance(frame, BotStoppedSpeakingFrame):
-            self._bot_speaking = False
-            await self.push_frame(frame, direction)
         else:
             if direction == FrameDirection.DOWNSTREAM and not isinstance(frame, SystemFrame):
                 # Queue non-system downstream frames behind the audio contexts so they
@@ -1171,7 +1160,6 @@ class TTSService(AIService):
 
     async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
         self._sent_non_whitespace_in_context = False
-        self._bot_speaking = False
         self._llm_response_started = False
         self._streamed_text = ""
         self._text_aggregation_metrics_started = False
@@ -2143,6 +2131,9 @@ class InterruptibleTTSService(WebsocketTTSService):
         """
         super().__init__(**kwargs)
 
+        # Whether the bot is speaking, as BotStartedSpeakingFrame and
+        # BotStoppedSpeakingFrame report it.
+        self._bot_speaking: bool = False
         # True once run_tts has been invoked (TTSStartedFrame pushed) for the
         # current turn but before BotStartedSpeakingFrame confirms playback —
         # the narrow window where _bot_speaking (which only reflects confirmed
@@ -2154,8 +2145,7 @@ class InterruptibleTTSService(WebsocketTTSService):
     async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
         # If the bot is not speaking we don't need to reconnect when the user
         # speaks. If the bot is speaking and the user interrupts we need to
-        # reconnect. Captured before calling super(), which clears
-        # _bot_speaking as part of its own interruption handling.
+        # reconnect.
         should_reconnect = self._bot_speaking or self._tts_started
         # Without context IDs, audio still coming for an interrupted context
         # would be labeled with an uninterruptible one, so the connection is
@@ -2164,6 +2154,7 @@ class InterruptibleTTSService(WebsocketTTSService):
             self._tts_contexts[c] for c in self.get_audio_contexts() if c in self._tts_contexts
         ]
         keep_connection = bool(contexts) and all(not c.interruptible for c in contexts)
+        self._bot_speaking = False
         self._tts_started = False
         await super()._handle_interruption(frame, direction)
         if should_reconnect and not keep_connection:
@@ -2185,7 +2176,7 @@ class InterruptibleTTSService(WebsocketTTSService):
         await super().push_frame(frame, direction)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        """Process frames, resetting per-turn reconnect tracking on a new turn.
+        """Process frames, tracking whether an interruption needs a reconnect.
 
         Args:
             frame: The frame to process.
@@ -2193,8 +2184,11 @@ class InterruptibleTTSService(WebsocketTTSService):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, BotStoppedSpeakingFrame):
+        if isinstance(frame, BotStartedSpeakingFrame):
+            self._bot_speaking = True
+        elif isinstance(frame, BotStoppedSpeakingFrame):
             # The turn ended normally; nothing left to reconnect for.
+            self._bot_speaking = False
             self._tts_started = False
         elif isinstance(frame, LLMFullResponseStartFrame):
             # Safety net for a previous turn that never produced audio, so
