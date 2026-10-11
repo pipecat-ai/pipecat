@@ -11,6 +11,7 @@ import json
 import pytest
 
 from pipecat.services.smallest.tts import SmallestTTSService
+from pipecat.transcriptions.language import Language
 
 CTX = "ctx-1"
 
@@ -70,6 +71,27 @@ def test_build_msg_omits_buffer_delay_by_default():
 def test_build_msg_includes_buffer_delay_when_set():
     service = SmallestTTSService(api_key="test-key", max_buffer_delay_ms=1500)
     assert service._build_msg("hi")["max_buffer_delay_ms"] == 1500
+
+
+def test_build_msg_omits_number_pronunciation_language_by_default():
+    """Numerals are read in the synthesis language unless a language is set."""
+    service = _make_service()
+    assert "number_pronunciation_language" not in service._build_msg("hi")
+
+
+def test_build_msg_maps_number_pronunciation_language():
+    """A Language is mapped to the provider's code, a raw code is sent as-is."""
+    service = SmallestTTSService(
+        api_key="test-key",
+        settings=SmallestTTSService.Settings(number_pronunciation_language=Language.HI),
+    )
+    assert service._build_msg("hi")["number_pronunciation_language"] == "hi"
+
+    service = SmallestTTSService(
+        api_key="test-key",
+        settings=SmallestTTSService.Settings(number_pronunciation_language="auto"),
+    )
+    assert service._build_msg("hi")["number_pronunciation_language"] == "auto"
 
 
 @pytest.mark.asyncio

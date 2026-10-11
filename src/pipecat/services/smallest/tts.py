@@ -109,10 +109,16 @@ class SmallestTTSSettings(TTSSettings):
         math_notation: Read digit-flanked math operators as words (``2 + 2`` as
             "two plus two") instead of leaving them to the default number reader.
             If None, the API default (off) applies.
+        number_pronunciation_language: Language used to read numerals, currency,
+            times and dates, independent of the synthesis language. If None, the
+            API reads them in the synthesis language.
     """
 
     speed: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     math_notation: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    number_pronunciation_language: Language | str | None | NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
 
 
 class SmallestTTSService(InterruptibleTTSService):
@@ -191,6 +197,7 @@ class SmallestTTSService(InterruptibleTTSService):
             language=Language.EN,
             speed=None,
             math_notation=None,
+            number_pronunciation_language=None,
         )
 
         if settings is not None:
@@ -293,6 +300,14 @@ class SmallestTTSService(InterruptibleTTSService):
         if self._settings.math_notation is not None:
             msg["math_notation"] = self._settings.math_notation
 
+        npl = self._settings.number_pronunciation_language
+        if npl is not None:
+            # Unlike `language`, which the base class converts on write, this
+            # field is service-specific and is mapped here.
+            msg["number_pronunciation_language"] = (
+                self.language_to_service_language(npl) if isinstance(npl, Language) else npl
+            )
+
         if self._word_timestamps:
             msg["word_timestamps"] = True
 
@@ -337,8 +352,9 @@ class SmallestTTSService(InterruptibleTTSService):
     async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
         """Apply a settings delta.
 
-        All fields (model, speed, math_notation, voice, language) take effect on
-        the next ``_build_msg`` call without reconnecting.
+        All fields (model, speed, math_notation, number_pronunciation_language,
+        voice, language) take effect on the next ``_build_msg`` call without
+        reconnecting.
         """
         return await super()._update_settings(delta)
 
