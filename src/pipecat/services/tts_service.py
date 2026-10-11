@@ -1307,12 +1307,6 @@ class TTSService(AIService):
             if not text.strip():
                 return
 
-        self._tts_contexts[context_id] = TTSContext(
-            append_to_context=append_tts_text_to_context,
-            push_assistant_aggregation=push_assistant_aggregation,
-            interruptible=src_frame.interruptible,
-        )
-
         # Accumulate text for a single debug log at flush time when streaming tokens.
         if self._is_streaming_tokens:
             self._streamed_text += text
@@ -1325,21 +1319,16 @@ class TTSService(AIService):
         if self.supports_processing_metrics and not self._is_streaming_tokens:
             await self.start_processing_metrics()
 
-        # Process all filters.
-        for filter in self._text_filters:
-            await filter.reset_interruption()
-            text = await filter.filter(text)
-
-        # Post-filter whitespace gate. Mirrors the pre-filter logic so filter
-        # output that collapses to whitespace-only is handled consistently.
-        if self._is_streaming_tokens:
-            # If empty, or only-whitespace and we haven't sent any non-whitespace, skip.
-            if not text or (not text.strip() and not self._sent_non_whitespace_in_context):
-                return
-            self._sent_non_whitespace_in_context = True
-        elif not text.strip():
+        text = await self._filter_text(text)
+        if text is None:
             await self.stop_processing_metrics()
             return
+
+        self._tts_contexts[context_id] = TTSContext(
+            append_to_context=append_tts_text_to_context,
+            push_assistant_aggregation=push_assistant_aggregation,
+            interruptible=src_frame.interruptible,
+        )
 
         # To support use cases that may want to know the text before it's spoken, we
         # push the AggregatedTextFrame version before transforming and sending to TTS.
@@ -1365,34 +1354,9 @@ class TTSService(AIService):
             else:
                 await self.append_to_audio_context(context_id, src_frame)
 
-        # Note: Text transformations are meant to only affect the text sent to the TTS for
-        # TTS-specific purposes. This allows for explicit TTS modifications (e.g., inserting
-        # TTS supported tags for spelling or emotion or replacing an @ with "at"). For TTS
-        # services that support word-level timestamps, this CAN affect the resulting context
-        # since the TTSTextFrames are generated from the TTS output stream
-        transformed_text = text
-        for transform_type, transform in self._text_transforms:
-            if transform_type == text_type or transform_type == "*":
-                if isinstance(transform, PronunciationTransform) and not (
-                    self._can_apply_pronunciations()
-                ):
-                    continue
-                try:
-                    transformed_text = await transform(transformed_text, text_type)
-                except Exception as e:
-                    # Pushing the error with category "APPLICATION" since the failure came
-                    # from the application's text transformer. Speaking the untransformed
-                    # text isn't safe — a transformer may exist to remove something — so this
-                    # turn produces no audio.
-                    await self.push_error(
-                        error_msg=f"Error transforming text for TTS [{transformed_text}]: {e}",
-                        exception=e,
-                        category=ErrorCategory.APPLICATION,
-                    )
-                    return
-
-        # Apply any final text preparation (e.g., trailing space)
-        prepared_text = self._prepare_text_for_tts(transformed_text)
+        prepared_text = await self._transform_text(text, text_type)
+        if prepared_text is None:
+            return
 
         # Trigger event before starting TTS
         await self._call_event_handler("on_tts_request", context_id, prepared_text)
@@ -1469,6 +1433,62 @@ class TTSService(AIService):
             # frames (e.g. code blocks) waiting behind it can be flushed in order.
             for f in self._aggregated_frame_sequencer.complete_spoken_slot():
                 await self.push_frame(f)
+
+    async def _filter_text(self, text: str) -> str | None:
+        """Run the text filters on text about to be synthesized.
+
+        Returns:
+            The filtered text, or None if nothing is left to say.
+        """
+        for filter in self._text_filters:
+            await filter.reset_interruption()
+            text = await filter.filter(text)
+
+        # Mirrors the whitespace gate before the filters, so filter output that
+        # collapses to whitespace-only is handled consistently.
+        if self._is_streaming_tokens:
+            # If empty, or only-whitespace and we haven't sent any non-whitespace, skip.
+            if not text or (not text.strip() and not self._sent_non_whitespace_in_context):
+                return None
+            self._sent_non_whitespace_in_context = True
+        elif not text.strip():
+            return None
+        return text
+
+    async def _transform_text(self, text: str, text_type: str) -> str | None:
+        """Turn filtered text into the text sent to the TTS.
+
+        Transforms only affect the text sent to the TTS for TTS-specific
+        purposes (e.g. inserting tags for spelling or emotion, or replacing an
+        @ with "at"). For services with word timestamps they can affect the
+        context, since TTSTextFrames are built from the TTS output.
+
+        Returns:
+            The text to synthesize, or None if a transform failed.
+        """
+        transformed_text = text
+        for transform_type, transform in self._text_transforms:
+            if transform_type == text_type or transform_type == "*":
+                if isinstance(transform, PronunciationTransform) and not (
+                    self._can_apply_pronunciations()
+                ):
+                    continue
+                try:
+                    transformed_text = await transform(transformed_text, text_type)
+                except Exception as e:
+                    # Pushing the error with category "APPLICATION" since the failure came
+                    # from the application's text transformer. Speaking the untransformed
+                    # text isn't safe — a transformer may exist to remove something — so this
+                    # turn produces no audio.
+                    await self.push_error(
+                        error_msg=f"Error transforming text for TTS [{transformed_text}]: {e}",
+                        exception=e,
+                        category=ErrorCategory.APPLICATION,
+                    )
+                    return None
+
+        # Apply any final text preparation (e.g., trailing space)
+        return self._prepare_text_for_tts(transformed_text)
 
     async def tts_process_generator(
         self, context_id: str, generator: AsyncGenerator[Frame | None, None]
