@@ -4,9 +4,11 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import asyncio
 import base64
 import json
 from dataclasses import fields
+from http import HTTPStatus
 from unittest.mock import AsyncMock
 from urllib.parse import parse_qs, urlparse
 
@@ -17,6 +19,9 @@ from websockets.frames import Close
 from websockets.protocol import State
 
 pytest.importorskip("sarvamai")
+
+from sarvamai import AsyncSarvamAI
+from sarvamai.environment import SarvamAIEnvironment
 
 import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.frames.frames import (
@@ -51,11 +56,13 @@ from tests.frame_processor_helpers import frame_processor_setup
 
 
 class _FakeWebsocket:
-    def __init__(self, messages=None, *, state=State.OPEN):
+    def __init__(self, messages=None, *, state=State.OPEN, stays_open=False):
         self._messages = messages or []
         self.state = state
         self.sent = []
         self.closed = False
+        # Like a live socket, keep iteration going after the messages run out.
+        self._stays_open = stays_open
 
     async def send(self, message):
         self.sent.append(message)
@@ -70,6 +77,8 @@ class _FakeWebsocket:
     async def _iter_messages(self):
         for message in self._messages:
             yield message
+        if self._stays_open:
+            await asyncio.Event().wait()
 
 
 class _CapturingLogger:
@@ -1325,7 +1334,7 @@ async def test_legacy_sdk_carries_keyterms_on_every_connection(monkeypatch, keyt
     async def fake_connect(url, **kwargs):
         queries.append(parse_qs(urlparse(url).query))
         headers.append(kwargs["extra_headers"])
-        yield _FakeWebsocket()
+        yield _FakeWebsocket(stays_open=True)
 
     monkeypatch.setattr(
         "sarvamai.speech_to_text_streaming.client.websockets_client_connect", fake_connect
@@ -1380,3 +1389,151 @@ async def test_keyterms_cannot_be_updated_mid_stream():
     service = SarvamRealtimeSTTService(api_key="test-key")
     with pytest.raises(ValueError, match="keyterms"):
         await service.update_config(keyterms=["Sarvam"])
+
+
+def _legacy_service_for(port: int) -> SarvamSTTService:
+    service = SarvamSTTService(api_key="secret-key", sample_rate=16000)
+    service._sarvam_client = AsyncSarvamAI(
+        api_subscription_key="secret-key",
+        environment=SarvamAIEnvironment(
+            base=f"http://127.0.0.1:{port}", production=f"ws://127.0.0.1:{port}"
+        ),
+    )
+    return service
+
+
+def _capture_errors(errors):
+    """Record each error as (message, permanent, category), as push_error would judge it."""
+
+    async def inner(
+        error_msg, exception=None, fatal=False, category=None, force_treat_as_permanent=False
+    ):
+        permanent = force_treat_as_permanent or bool(category and category.is_permanent)
+        errors.append((error_msg, permanent, category))
+
+    return inner
+
+
+async def _wait_for(condition, timeout=5.0):
+    async def poll():
+        while not condition():
+            await asyncio.sleep(0.01)
+
+    await asyncio.wait_for(poll(), timeout)
+
+
+def _refuse(status, refused_handshakes):
+    """Build a handshake hook that refuses the given handshake numbers with ``status``."""
+    handshakes = []
+
+    def process_request(connection, request):
+        handshakes.append(request)
+        if refused_handshakes is None or len(handshakes) in refused_handshakes:
+            return connection.respond(status, "refused\n")
+
+    return process_request, handshakes
+
+
+@pytest.mark.asyncio
+async def test_legacy_reconnects_after_the_connection_drops(monkeypatch):
+    monkeypatch.setattr("pipecat.services.sarvam.stt.exponential_backoff_time", lambda _: 0)
+    handshakes = []
+
+    async def endpoint(websocket):
+        handshakes.append(websocket)
+        if len(handshakes) == 1:
+            await websocket.close(1011, "internal server error")
+            return
+        await websocket.wait_closed()
+
+    errors = []
+    async with serve(endpoint, "127.0.0.1", 0) as server:
+        service = _legacy_service_for(server.sockets[0].getsockname()[1])
+        monkeypatch.setattr(service, "push_error", _capture_errors(errors))
+        events = []
+        for name in ("on_connected", "on_disconnected", "on_connection_error"):
+            service.add_event_handler(name, lambda _service, *_args, name=name: events.append(name))
+        await service.setup(frame_processor_setup(TaskManager()))
+        try:
+            await _wait_for(lambda: len(handshakes) == 2 and events.count("on_connected") == 2)
+        finally:
+            await service._disconnect()
+            await service.cleanup()
+
+    assert errors == []
+    assert service.is_usable
+    assert events[:3] == ["on_connected", "on_disconnected", "on_connected"]
+
+
+@pytest.mark.asyncio
+async def test_legacy_rejected_key_gives_up_without_reporting_the_key(monkeypatch):
+    process_request, handshakes = _refuse(HTTPStatus.UNAUTHORIZED, None)
+    errors = []
+    connection_errors = []
+    async with serve(AsyncMock(), "127.0.0.1", 0, process_request=process_request) as server:
+        service = _legacy_service_for(server.sockets[0].getsockname()[1])
+        monkeypatch.setattr(service, "push_error", _capture_errors(errors))
+        service.add_event_handler(
+            "on_connection_error", lambda _service, error: connection_errors.append(error)
+        )
+        await service.setup(frame_processor_setup(TaskManager()))
+        try:
+            await _wait_for(lambda: service._connection_task.done())
+        finally:
+            await service._disconnect()
+            await service.cleanup()
+
+    assert len(handshakes) == 1
+    assert len(errors) == 1
+    assert connection_errors == [errors[0][0]]
+    message, permanent, category = errors[0]
+    assert permanent
+    assert category is ErrorCategory.AUTHENTICATION
+    assert "401" in message
+    assert "secret-key" not in message
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [HTTPStatus.SERVICE_UNAVAILABLE, HTTPStatus.TOO_MANY_REQUESTS])
+async def test_legacy_gives_up_after_repeated_failed_connects(monkeypatch, status):
+    """A refusal that may clear on its own, such as a rate limit, is retried before giving up."""
+    monkeypatch.setattr("pipecat.services.sarvam.stt.exponential_backoff_time", lambda _: 0)
+    process_request, handshakes = _refuse(status, None)
+    errors = []
+    async with serve(AsyncMock(), "127.0.0.1", 0, process_request=process_request) as server:
+        service = _legacy_service_for(server.sockets[0].getsockname()[1])
+        monkeypatch.setattr(service, "push_error", _capture_errors(errors))
+        await service.setup(frame_processor_setup(TaskManager()))
+        try:
+            await _wait_for(lambda: service._connection_task.done())
+        finally:
+            await service._disconnect()
+            await service.cleanup()
+
+    assert len(handshakes) == service._quick_failure_tracker.max_consecutive_failures
+    assert [permanent for _, permanent, _ in errors] == [False] * len(handshakes) + [True]
+
+
+@pytest.mark.asyncio
+async def test_legacy_failed_first_connect_is_retried_in_the_background(monkeypatch):
+    monkeypatch.setattr("pipecat.services.sarvam.stt.exponential_backoff_time", lambda _: 0.2)
+    process_request, handshakes = _refuse(HTTPStatus.SERVICE_UNAVAILABLE, {1})
+
+    async def endpoint(websocket):
+        await websocket.wait_closed()
+
+    errors = []
+    async with serve(endpoint, "127.0.0.1", 0, process_request=process_request) as server:
+        service = _legacy_service_for(server.sockets[0].getsockname()[1])
+        monkeypatch.setattr(service, "push_error", _capture_errors(errors))
+        await service.setup(frame_processor_setup(TaskManager()))
+        try:
+            # setup returns after the refused attempt instead of waiting out the retry.
+            assert service._socket_client is None
+            await _wait_for(lambda: service._socket_client is not None)
+        finally:
+            await service._disconnect()
+            await service.cleanup()
+
+    assert len(handshakes) == 2
+    assert [permanent for _, permanent, _ in errors] == [False]
