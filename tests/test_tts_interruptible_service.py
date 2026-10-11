@@ -12,7 +12,7 @@ tracks this with two flags:
 
 - ``_bot_speaking`` (on the base TTSService): true only once BotStartedSpeakingFrame
   confirms the output transport actually received audio (see
-  test_no_early_resume_on_long_streaming_turn and
+  test_no_error_on_long_streaming_turn and
   test_no_deadlock_on_zero_audio_context_completion in test_tts_frame_ordering.py).
 - ``_tts_started`` (InterruptibleTTSService only): true from the moment
   run_tts is invoked (TTSStartedFrame pushed) until consumed by an
@@ -23,7 +23,7 @@ tracks this with two flags:
 
 These are deliberately separate: folding _tts_started's early, unconfirmed
 signal into _bot_speaking would let a turn that produces zero audio look
-"confirmed", leaving nothing to lift the pause it took.
+"confirmed".
 """
 
 import asyncio

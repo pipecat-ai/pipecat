@@ -217,15 +217,15 @@ class TTSService(AIService):
             stop_frame_timeout_s: Idle time before pushing TTSStoppedFrame when push_stop_frames is True.
             push_silence_after_stop: Whether to push silence audio after TTSStoppedFrame.
             silence_time_s: Duration of silence to push when push_silence_after_stop is True.
-            pause_frame_processing: Whether to pause frame processing during audio generation.
+            pause_frame_processing: Whether to hold incoming frames after a turn until its
+                audio contexts end. Needed by services whose audio doesn't carry its
+                request's context ID.
             pause_watchdog_timeout_s: Unused.
 
                 .. deprecated:: 1.8.0
-                    No replacement. Frame processing is now paused only while there is
-                    audio still to be played, so the pause is lifted by the
-                    ``BotStoppedSpeakingFrame`` that follows playback or by the audio
-                    context completing in silence, and no timer is needed to break it.
-                    Will be removed in 2.0.0.
+                    No replacement. Frame processing is now paused only while an
+                    audio context is open, and every context ends, so no timer is
+                    needed to break the pause. Will be removed in 2.0.0.
 
             max_consecutive_zero_audio_contexts: How many consecutive TTS contexts may
                 complete without producing any audio before the service is reported unable
@@ -322,8 +322,8 @@ class TTSService(AIService):
             warn_deprecated(
                 "`pause_watchdog_timeout_s` is deprecated since 1.8.0 and will be "
                 "removed in 2.0.0. No replacement. Frame processing is paused only "
-                "while there is audio still to be played, so the pause cannot "
-                "outlive what it waits for.",
+                "while an audio context is open, so the pause cannot outlive what it "
+                "waits for.",
                 stacklevel=2,
             )
         # Whether the bot is currently speaking. Set on BotStartedSpeakingFrame,
@@ -376,7 +376,6 @@ class TTSService(AIService):
 
         self._resampler = create_stream_resampler()
 
-        self._processing_text: bool = False
         self._tts_contexts: dict[str, TTSContext] = {}
         self._streamed_text: str = ""
         self._sent_non_whitespace_in_context: bool = False
@@ -945,10 +944,7 @@ class TTSService(AIService):
                 self._turn_context_id,
             )
 
-            # We pause processing incoming frames if the LLM response included
-            # text (it might be that it's only a function calling response). We
-            # pause to avoid audio overlapping.
-            await self._maybe_pause_frame_processing()
+            await self._update_frame_processing()
 
             # Log accumulated streamed text and emit aggregated usage metric.
             if self._streamed_text:
@@ -957,7 +953,6 @@ class TTSService(AIService):
                 self._streamed_text = ""
 
             # Reset aggregator state
-            self._processing_text = False
             self._sent_non_whitespace_in_context = False
             if isinstance(frame, LLMFullResponseEndFrame):
                 if self._push_text_frames:
@@ -977,8 +972,6 @@ class TTSService(AIService):
 
             await self.on_turn_context_completed()
         elif isinstance(frame, TTSSpeakFrame):
-            # Store if we were processing text or not so we can set it back.
-            processing_text = self._processing_text
             saved_sent_non_whitespace = self._sent_non_whitespace_in_context
             self._sent_non_whitespace_in_context = False
             # TTSSpeakFrame is independent — temporarily clear the turn context
@@ -1015,12 +1008,9 @@ class TTSService(AIService):
             await self.on_turn_context_completed()
             if not self.audio_context_available(speak_context_id):
                 self._tts_contexts.pop(speak_context_id, None)
-            # We pause processing incoming frames because we are sending data to
-            # the TTS. We pause to avoid audio overlapping.
-            await self._maybe_pause_frame_processing()
+            await self._update_frame_processing()
             self._turn_context_id = saved_turn_context_id
             self._sent_non_whitespace_in_context = saved_sent_non_whitespace
-            self._processing_text = processing_text
         elif isinstance(frame, TTSUpdateSettingsFrame):
             if frame.service is not None and frame.service is not self:
                 await self.push_frame(frame, direction)
@@ -1041,11 +1031,6 @@ class TTSService(AIService):
             await self.push_frame(frame, direction)
         elif isinstance(frame, BotStoppedSpeakingFrame):
             self._bot_speaking = False
-            # Services without context IDs label new audio with the context still
-            # open, so the next reply waits for uninterruptible speech to end or
-            # its audio would be uninterruptible too.
-            if not self._uninterruptible_speech_pending():
-                await self._maybe_resume_frame_processing()
             await self.push_frame(frame, direction)
         else:
             if direction == FrameDirection.DOWNSTREAM and not isinstance(frame, SystemFrame):
@@ -1185,7 +1170,6 @@ class TTSService(AIService):
             yield TTSAudioRawFrame(audio, self.sample_rate, 1, context_id=context_id)
 
     async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
-        self._processing_text = False
         self._sent_non_whitespace_in_context = False
         self._bot_speaking = False
         self._llm_response_started = False
@@ -1199,13 +1183,8 @@ class TTSService(AIService):
 
         await self._interrupt_audio_contexts()
         self._create_audio_context_task()
-        # Interrupted playback may never send the BotStoppedSpeakingFrame that
-        # normally resumes processing. Uninterruptible speech still open pauses
-        # it again until its context ends.
-        if self._pause_frame_processing and self._uninterruptible_speech_pending():
-            await self.pause_processing_frames()
-        else:
-            await self._maybe_resume_frame_processing()
+        # Uninterruptible speech still open keeps holding frames.
+        await self._update_frame_processing()
 
     async def _interrupt_audio_contexts(self):
         """Discard interruptible contexts while preserving ongoing synthesis and playback."""
@@ -1237,37 +1216,20 @@ class TTSService(AIService):
         if self._turn_context_id not in preserved:
             self._turn_context_id = None
 
-    async def _maybe_pause_frame_processing(self):
-        """Hold incoming frames until the audio for this turn has been played.
+    async def _update_frame_processing(self):
+        """Hold incoming frames while an audio context is open, resume them otherwise.
 
-        Pausing waits for the ``BotStoppedSpeakingFrame`` that follows playback,
-        so it is only taken while there is playback to wait for: the bot
-        speaking, or an audio context still open that may yet produce audio. A
-        turn with neither — one whose contexts all completed in silence, or
-        whose playback finished before the turn's text ran out — has nothing
-        left to resume it, and pausing would latch frame processing for good.
+        Services whose audio doesn't carry its request's context ID label
+        incoming audio with the context still open, so the next request waits
+        for every open context to end. Contexts play in order, so audio from
+        different requests never overlaps.
         """
-        if not (self._processing_text and self._pause_frame_processing):
+        if not self._pause_frame_processing:
             return
-
-        # With no audio playing or on its way, no BotStoppedSpeakingFrame is
-        # coming to lift the pause and it would latch for good.
-        if not (self._bot_speaking or self._audio_context_manager.context_ids):
-            return
-
-        await self.pause_processing_frames()
-
-    async def _maybe_resume_frame_processing(self):
-        if self._pause_frame_processing:
+        if self.get_audio_contexts():
+            await self.pause_processing_frames()
+        else:
             await self.resume_processing_frames()
-
-    def _uninterruptible_speech_pending(self) -> bool:
-        """Whether an uninterruptible context can still produce audio."""
-        return any(
-            not context.interruptible
-            for context_id, context in self._tts_contexts.items()
-            if self.audio_context_available(context_id)
-        )
 
     async def _process_text_frame(self, frame: TextFrame):
         async for aggregate in self._text_aggregator.aggregate(frame.text):
@@ -1390,14 +1352,6 @@ class TTSService(AIService):
         elif not text.strip():
             await self.stop_processing_metrics()
             return
-
-        # This is just a flag that indicates if we sent something to the TTS
-        # service. It will be cleared if we sent text because of a TTSSpeakFrame
-        # or when we received an LLMFullResponseEndFrame. Set only after the
-        # whitespace/filter gates above, otherwise a filter that strips the text
-        # to empty would leave the flag latched and, with pause_frame_processing
-        # enabled, pause frame processing waiting for audio that never comes.
-        self._processing_text = True
 
         # To support use cases that may want to know the text before it's spoken, we
         # push the AggregatedTextFrame version before transforming and sending to TTS.
@@ -1833,11 +1787,9 @@ class TTSService(AIService):
                         f"{self} on_audio_context_completed failed for {context_id}: {e}"
                     )
                 self.reset_active_audio_context()
-                # Uninterruptible speech ignores the BotStoppedSpeakingFrame that
-                # comes while its context is open, so processing resumes here.
-                if not context_value.interruptible and not self._bot_speaking:
-                    if not self._uninterruptible_speech_pending():
-                        await self._maybe_resume_frame_processing()
+                # Frames held for open contexts go on once the last one ends.
+                if not self.get_audio_contexts():
+                    await self._update_frame_processing()
             elif isinstance(context_value, Frame):
                 await self.push_frame(context_value)
             else:
@@ -1989,14 +1941,6 @@ class TTSService(AIService):
         if received_audio:
             self._consecutive_zero_audio_contexts = 0
             return
-
-        # This context played nothing, so the transport will never send the
-        # BotStoppedSpeakingFrame that lifts a pause taken for it, which can
-        # happen when the pause was taken while the context was still open. A
-        # bot still speaking is playing audio from another context, whose own
-        # BotStoppedSpeakingFrame is still to come.
-        if not self._bot_speaking:
-            await self._maybe_resume_frame_processing()
 
         # An unusable service is deliberately not given work (see
         # _synthesize_text), so its silent contexts say nothing new.
@@ -2215,17 +2159,14 @@ class InterruptibleTTSService(WebsocketTTSService):
         should_reconnect = self._bot_speaking or self._tts_started
         # Without context IDs, audio still coming for an interrupted context
         # would be labeled with an uninterruptible one, so the connection is
-        # kept only when nothing interruptible is open.
-        interruptible_speech_pending = any(
-            context.interruptible
-            for context_id, context in self._tts_contexts.items()
-            if self.audio_context_available(context_id)
-        )
+        # kept only when uninterruptible speech is all that's open.
+        contexts = [
+            self._tts_contexts[c] for c in self.get_audio_contexts() if c in self._tts_contexts
+        ]
+        keep_connection = bool(contexts) and all(not c.interruptible for c in contexts)
         self._tts_started = False
         await super()._handle_interruption(frame, direction)
-        if should_reconnect and (
-            interruptible_speech_pending or not self._uninterruptible_speech_pending()
-        ):
+        if should_reconnect and not keep_connection:
             await self._disconnect()
             await self._connect()
 
