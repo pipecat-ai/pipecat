@@ -52,6 +52,7 @@ from pipecat.services.websocket_service import WebsocketService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.context.aggregated_frame_sequencer import AggregatedFrameSequencer
 from pipecat.utils.context.audio_context_manager import AudioContextFrame, AudioContextManager
+from pipecat.utils.context.word_timestamps import CachedWord, WordTimestamps
 from pipecat.utils.deprecation import deprecated, warn_deprecated
 from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.string import resolve_sentence_tokenizer_language
@@ -63,7 +64,6 @@ from pipecat.utils.text.transforms.pronunciations import (
     pronunciation_transform,
 )
 from pipecat.utils.text.word_timestamp_utils import merge_punct_tokens
-from pipecat.utils.time import seconds_to_nanoseconds
 from pipecat.utils.types import is_given
 
 
@@ -376,15 +376,9 @@ class TTSService(AIService):
         self._sent_non_whitespace_in_context: bool = False
         self._text_aggregation_metrics_started: bool = False
 
-        # Word timestamp state
-        self._initial_word_timestamp: int = -1
-        self._initial_word_times: list[tuple[str, float, str | None, bool]] = []
-        # PTS of the last word frame pushed via _add_word_timestamps, used to assign
-        # correct PTS to TTSStoppedFrame and LLMFullResponseEndFrame.
-        self._word_last_pts: int = 0
-        # PTS of the last uninterruptible word frame pushed. Those words keep
-        # playing through interruptions, so words after one come after them.
-        self._uninterruptible_word_last_pts: int = 0
+        # Turns provider word times into the PTS of word frames, and gives
+        # TTSStoppedFrame and LLMFullResponseEndFrame the PTS of the last word.
+        self._word_timestamps = WordTimestamps()
         self._llm_response_started: bool = False
         # LLMFullResponseEndFrames received in process_frame, keyed by the turn's
         # context_id, held so each can be re-pushed (with corrected PTS) at end of
@@ -947,7 +941,7 @@ class TTSService(AIService):
         if context:
             frame.interruptible = frame.interruptible and context.interruptible
         if isinstance(frame, TTSTextFrame) and frame.pts and not frame.interruptible:
-            self._uninterruptible_word_last_pts = frame.pts
+            self._word_timestamps.uninterruptible_last_pts = frame.pts
 
     async def _finish_tts_context(self, frame: TTSStoppedFrame):
         """Forget a stopped context and push the assistant aggregation it asked for."""
@@ -964,8 +958,8 @@ class TTSService(AIService):
         # (sync) queue path and could overtake the final word frames. Stamping it
         # with a PTS just past the last word forces it through the clock queue
         # too, so the assistant aggregator sees every word before flushing.
-        if self._word_last_pts:
-            aggregation_frame.pts = self._word_last_pts + 1
+        if self._word_timestamps.last_pts:
+            aggregation_frame.pts = self._word_timestamps.last_pts + 1
         await self.push_frame(aggregation_frame)
 
     async def _push_stop_silence(self, frame: TTSStoppedFrame):
@@ -993,7 +987,7 @@ class TTSService(AIService):
         # sorted immediately before its first progress frame (ties broken by push order).
         # Only on the word-timestamp path (push_text_frames services have no progress frames).
         if frame.will_be_spoken and frame.pts is None and not self._push_text_frames:
-            frame.pts = max(self._word_last_pts, self.get_clock().get_time())
+            frame.pts = max(self._word_timestamps.last_pts, self.get_clock().get_time())
 
     async def _stream_audio_frames_from_iterator(
         self,
@@ -1115,9 +1109,9 @@ class TTSService(AIService):
                 await self._audio_context_manager.put_frame(frame)
             elif self._turn_context_id is not None:
                 # Hold the original frame, keyed by this turn's context_id, so
-                # _maybe_reset_word_timestamps can re-push it (with the PTS of
-                # the last word frame) at end of that context, rather than
-                # emitting a fresh frame with a new id.
+                # _push_llm_response_end can re-push it (with the PTS of the
+                # last word frame) at end of that context, rather than emitting
+                # a fresh frame with a new id.
                 self._pending_llm_response_end_frames[self._turn_context_id] = frame
         else:
             await self.push_frame(frame, direction)
@@ -1210,7 +1204,8 @@ class TTSService(AIService):
         if interrupt_playing:
             await self._stop_audio_context_task()
             await self.reset_word_timestamps()
-            self._word_last_pts = self._uninterruptible_word_last_pts
+            # Next words follow the uninterruptible words still to play.
+            self._word_timestamps.last_pts = self._word_timestamps.uninterruptible_last_pts
 
         self._audio_context_manager.reset()
         self._aggregated_frame_sequencer.clear(keep_contexts=preserved)
@@ -1585,29 +1580,16 @@ class TTSService(AIService):
 
     async def start_word_timestamps(self):
         """Start tracking word timestamps from the current time."""
-        if self._initial_word_timestamp == -1:
-            current_time = self.get_clock().get_time()
-            # Initialize word timestamp tracking. Use the last emitted timestamp if it's ahead
-            # of current time to maintain continuity across overlapping audio contexts.
-            self._initial_word_timestamp = (
-                self._word_last_pts if self._word_last_pts > current_time else current_time
+        for cached in self._word_timestamps.start(self.get_clock().get_time()):
+            await self._add_word_timestamps(
+                [(cached.word, cached.timestamp)],
+                cached.context_id,
+                includes_inter_frame_spaces=cached.includes_inter_frame_spaces,
             )
-            # If we cached some initial word times (because we didn't receive
-            # audio), let's add them now.
-            if self._initial_word_times:
-                cached = self._initial_word_times.copy()
-                self._initial_word_times = []
-                for word, timestamp_seconds, ctx_id, ifs in cached:
-                    await self._add_word_timestamps(
-                        [(word, timestamp_seconds)], ctx_id, includes_inter_frame_spaces=ifs
-                    )
 
     async def reset_word_timestamps(self):
         """Reset word timestamp tracking."""
-        self._initial_word_timestamp = -1
-        # Discard any pre-audio word timestamps from the interrupted turn so they
-        # cannot be flushed into the next context after the audio baseline resets.
-        self._initial_word_times = []
+        self._word_timestamps.reset()
 
     async def add_word_timestamps(
         self,
@@ -1669,31 +1651,35 @@ class TTSService(AIService):
 
         Used both from _handle_audio_context (via _WordTimestampEntry) and from services
         that do not use audio contexts. Each entry emits a TTSTextFrame with a PTS
-        relative to the baseline established by start_word_timestamps().
-
-        When the baseline (_initial_word_timestamp) is not yet set, entries are cached
-        in _initial_word_times and flushed once start_word_timestamps() is called
-        (i.e. when the first audio chunk is received).
+        relative to when start_word_timestamps() was called. Entries that come
+        before that are cached and timed once it is called (i.e. when the first
+        audio chunk is received).
         """
         for word, timestamp in word_times:
-            ts_ns = seconds_to_nanoseconds(timestamp)
-            if self._initial_word_timestamp == -1:
-                # Cache until we have audio and can compute PTS.
-                self._initial_word_times.append(
-                    (word, timestamp, context_id, includes_inter_frame_spaces)
+            if not self._word_timestamps.started:
+                self._word_timestamps.cache(
+                    CachedWord(word, timestamp, context_id, includes_inter_frame_spaces)
                 )
-            else:
-                pts = self._initial_word_timestamp + ts_ns
-                # Build TTSTextFrame(s) for this word token, advancing the active
-                # slot's tracker and flushing any skipped frames now unblocked.
-                for f in self._aggregated_frame_sequencer.process_word(
-                    word, pts, context_id, includes_inter_frame_spaces
-                ):
-                    if isinstance(f, TTSTextFrame):
-                        # The sequencer stamps every word frame it builds.
-                        assert f.pts is not None
-                        self._word_last_pts = f.pts
-                    await self.push_frame(f)
+                continue
+            # Build TTSTextFrame(s) for this word token, advancing the active
+            # slot's tracker and flushing any skipped frames now unblocked.
+            await self._push_word_frames(
+                self._aggregated_frame_sequencer.process_word(
+                    word,
+                    self._word_timestamps.pts(timestamp),
+                    context_id,
+                    includes_inter_frame_spaces,
+                )
+            )
+
+    async def _push_word_frames(self, frames: list[Frame]):
+        """Push frames built by the sequencer, noting the PTS of the last word."""
+        for f in frames:
+            if isinstance(f, TTSTextFrame):
+                # The sequencer stamps every word frame it builds.
+                assert f.pts is not None
+                self._word_timestamps.last_pts = f.pts
+            await self.push_frame(f)
 
     #
     # Audio context methods (active when using websocket-based TTS with context management)
@@ -1863,24 +1849,12 @@ class TTSService(AIService):
             else:
                 running = False
 
-    async def _maybe_reset_word_timestamps(self, context_id: str):
-        """Reset word-timestamp state and emit LLMFullResponseEndFrame if needed.
+    async def _push_llm_response_end(self, context_id: str):
+        """Push the LLMFullResponseEndFrame held for a context, at the PTS of its last word.
 
-        Called at the end of an audio context (either on clean completion timeout or
-        when the context queue is drained). Resets the PTS baseline so the next turn
-        starts fresh. If text frames are not being pushed directly (which would have
-        already emitted the frame), the end frame held for ``context_id`` is re-pushed
-        with the PTS of the last word frame.
-
-        The lookup is keyed by ``context_id`` since multiple audio contexts (and
-        therefore multiple held end frames) can be in flight concurrently — each
-        context's own completion must re-push its own frame independently.
-
-        Args:
-            context_id: The audio context that just ended, used to look up the held
-                LLMFullResponseEndFrame.
+        Several audio contexts (and so several held end frames) can be in flight,
+        so each context's end re-pushes its own frame.
         """
-        await self.reset_word_timestamps()
         if self._push_text_frames:
             # We have already pushed the original LLMFullResponseEndFrame.
             return
@@ -1894,7 +1868,7 @@ class TTSService(AIService):
             frame = LLMFullResponseEndFrame()
         if frame is not None:
             self._llm_response_started = False
-            frame.pts = self._word_last_pts
+            frame.pts = self._word_timestamps.last_pts
             await self.push_frame(frame)
 
     async def _apply_force_complete(self, context_id: str):
@@ -1908,12 +1882,11 @@ class TTSService(AIService):
         Args:
             context_id: The audio context that has ended.
         """
-        for f in self._aggregated_frame_sequencer.force_complete(context_id, self._word_last_pts):
-            if isinstance(f, TTSTextFrame):
-                # The sequencer stamps every word frame it builds.
-                assert f.pts is not None
-                self._word_last_pts = f.pts
-            await self.push_frame(f)
+        await self._push_word_frames(
+            self._aggregated_frame_sequencer.force_complete(
+                context_id, self._word_timestamps.last_pts
+            )
+        )
 
     async def _handle_audio_context(self, context_id: str):
         """Process items from an audio context queue until it is exhausted."""
@@ -1963,7 +1936,7 @@ class TTSService(AIService):
                         should_push_stop_frame = False
                         # Setting the last word timestamp as the TTSStoppedFrame PTS
                         if not frame.pts:
-                            frame.pts = self._word_last_pts
+                            frame.pts = self._word_timestamps.last_pts
 
                     if isinstance(frame, ErrorFrame):
                         await self.push_error_frame(frame)
@@ -1982,7 +1955,8 @@ class TTSService(AIService):
         if should_push_stop_frame and self._push_stop_frames:
             await self.push_frame(TTSStoppedFrame(context_id=context_id))
 
-        await self._maybe_reset_word_timestamps(context_id)
+        await self.reset_word_timestamps()
+        await self._push_llm_response_end(context_id)
 
         await self._record_context_audio_outcome(context_id, received_audio)
 
