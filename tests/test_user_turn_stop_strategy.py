@@ -7,9 +7,11 @@
 import asyncio
 import unittest
 import warnings
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
+from pipecat.audio.turn.base_turn_analyzer import EndOfTurnState
 from pipecat.frames.frames import (
+    InputAudioRawFrame,
     InterimTranscriptionFrame,
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
@@ -26,6 +28,7 @@ from pipecat.turns.user_stop import (
     ExternalUserTurnCompletionStopStrategy,
     ExternalUserTurnStopStrategy,
     SpeechTimeoutUserTurnStopStrategy,
+    TurnAnalyzerUserTurnStopStrategy,
 )
 from pipecat.utils.asyncio.task_manager import TaskManager
 from tests.frame_processor_helpers import frame_processor_setup
@@ -801,6 +804,51 @@ class TestSpeechTimeoutStopSecsWarnings(unittest.IsolatedAsyncioTestCase):
         await strategy.process_frame(VADUserStoppedSpeakingFrame(stop_secs=0.2))
 
         mock_logger.warning.assert_not_called()
+
+
+class TestTurnAnalyzerNoAudioWarning(unittest.IsolatedAsyncioTestCase):
+    """A turn analyzer that never receives audio can never complete a turn."""
+
+    async def asyncSetUp(self) -> None:
+        self.task_manager = TaskManager()
+
+    async def _create_strategy(self):
+        analyzer = MagicMock()
+        analyzer.append_audio.return_value = EndOfTurnState.INCOMPLETE
+        analyzer.analyze_end_of_turn = AsyncMock(return_value=(EndOfTurnState.INCOMPLETE, None))
+        analyzer.cleanup = AsyncMock()
+        strategy = TurnAnalyzerUserTurnStopStrategy(turn_analyzer=analyzer)
+        await strategy.setup(frame_processor_setup(self.task_manager))
+        return strategy
+
+    async def _turn(self, strategy, audio: bool):
+        await strategy.process_frame(VADUserStartedSpeakingFrame())
+        if audio:
+            await strategy.process_frame(
+                InputAudioRawFrame(audio=b"\x00\x00" * 160, sample_rate=16000, num_channels=1)
+            )
+        await strategy.process_frame(VADUserStoppedSpeakingFrame(stop_secs=0.2))
+
+    @patch("pipecat.turns.user_stop.turn_analyzer_user_turn_stop_strategy.logger")
+    async def test_warns_once_when_no_audio_reaches_the_analyzer(self, mock_logger):
+        strategy = await self._create_strategy()
+
+        await self._turn(strategy, audio=False)
+        await self._turn(strategy, audio=False)
+
+        warnings = [c[0][0] for c in mock_logger.warning.call_args_list]
+        self.assertEqual(sum("no audio" in w for w in warnings), 1)
+        await strategy.cleanup()
+
+    @patch("pipecat.turns.user_stop.turn_analyzer_user_turn_stop_strategy.logger")
+    async def test_no_warning_when_audio_arrives(self, mock_logger):
+        strategy = await self._create_strategy()
+
+        await self._turn(strategy, audio=True)
+
+        warnings = [c[0][0] for c in mock_logger.warning.call_args_list]
+        self.assertFalse(any("no audio" in w for w in warnings))
+        await strategy.cleanup()
 
 
 class TestExternalUserTurnCompletionStopStrategy(unittest.IsolatedAsyncioTestCase):
