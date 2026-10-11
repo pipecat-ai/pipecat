@@ -1491,8 +1491,8 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
         assert context.messages[-1]["content"] == "CANCELLED"
         assert not aggregator.has_function_calls_in_progress
 
-    async def test_function_call_after_user_message_is_deferred(self):
-        """A synchronous call the LLM has replied to keeps its placeholder as the LLM saw it."""
+    async def test_function_call_after_user_message_settles_in_place(self):
+        """A message added with no reply in between does not defer a synchronous call."""
         context = LLMContext()
         aggregator = LLMAssistantAggregator(context)
         frames_to_send = [
@@ -1515,14 +1515,71 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
         ]
         await run_test(aggregator, frames_to_send=frames_to_send, expected_down_frames=[])
         tool_messages = [m for m in context.messages if m.get("role") == "tool"]
+        assert tool_messages[0]["content"] == '{"answer": 42}'
+        assert all(async_tool_messages.parse_message(m) is None for m in context.messages)
+
+    async def test_function_call_seen_by_a_thinking_reply_is_deferred(self):
+        """A result arriving while a thinking reply runs keeps the placeholder it saw."""
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        frames_to_send = [
+            FunctionCallInProgressFrame(
+                function_name="lookup",
+                tool_call_id="1",
+                arguments={},
+                cancel_on_interruption=True,
+            ),
+            SleepFrame(),
+            LLMFullResponseStartFrame(),
+            LLMThoughtStartFrame(append_to_context=True, llm="anthropic"),
+            SleepFrame(),
+            FunctionCallResultFrame(
+                function_name="lookup",
+                tool_call_id="1",
+                arguments={},
+                result={"answer": 42},
+                run_llm=False,
+            ),
+            SleepFrame(),
+            LLMThoughtEndFrame(signature="sig"),
+            LLMFullResponseEndFrame(),
+        ]
+        await run_test(aggregator, frames_to_send=frames_to_send)
+        tool_messages = [m for m in context.messages if isinstance(m, dict) and m["role"] == "tool"]
         assert tool_messages[0]["content"] == "IN_PROGRESS"
-        payload = async_tool_messages.parse_message(context.messages[-1])
+        payload = async_tool_messages.parse_message(context.messages[-2])
         assert payload is not None and payload.kind == "final"
-        assert payload.tool_call_id == "1"
         assert payload.result == '{"answer": 42}'
 
-    async def test_function_call_after_thought_is_deferred(self):
-        """A thought after the placeholder comes from a reply that saw it, so the call defers."""
+    async def test_thinking_before_the_call_does_not_defer_it(self):
+        """The reply that made the call thought before its placeholder existed."""
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        frames_to_send = [
+            LLMFullResponseStartFrame(),
+            LLMThoughtStartFrame(append_to_context=True, llm="anthropic"),
+            LLMThoughtEndFrame(signature="sig"),
+            FunctionCallInProgressFrame(
+                function_name="lookup",
+                tool_call_id="1",
+                arguments={},
+                cancel_on_interruption=True,
+            ),
+            LLMFullResponseEndFrame(),
+            SleepFrame(),
+            FunctionCallResultFrame(
+                function_name="lookup",
+                tool_call_id="1",
+                arguments={},
+                result={"answer": 42},
+                run_llm=False,
+            ),
+        ]
+        await run_test(aggregator, frames_to_send=frames_to_send)
+        tool_messages = [m for m in context.messages if isinstance(m, dict) and m["role"] == "tool"]
+        assert tool_messages[0]["content"] == '{"answer": 42}'
+
+    async def test_function_call_cancel_after_a_thinking_reply_is_deferred(self):
         context = LLMContext()
         aggregator = LLMAssistantAggregator(context)
         frames_to_send = [
@@ -1536,8 +1593,31 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
             LLMFullResponseStartFrame(),
             LLMThoughtStartFrame(append_to_context=True, llm="anthropic"),
             LLMThoughtEndFrame(signature="sig"),
-            LLMTextFrame("Still looking."),
             LLMFullResponseEndFrame(),
+            SleepFrame(),
+            FunctionCallCancelFrame(function_name="lookup", tool_call_id="1"),
+        ]
+        await run_test(aggregator, frames_to_send=frames_to_send)
+        tool_messages = [m for m in context.messages if isinstance(m, dict) and m["role"] == "tool"]
+        assert tool_messages[0]["content"] == "IN_PROGRESS"
+        payload = async_tool_messages.parse_message(context.messages[-1])
+        assert payload is not None and payload.kind == "final"
+        assert payload.result is not None and payload.result.startswith("CANCELLED")
+        assert not aggregator.has_function_calls_in_progress
+
+    async def test_async_function_call_seen_by_a_thinking_reply_is_deferred(self):
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        frames_to_send = [
+            FunctionCallInProgressFrame(
+                function_name="lookup",
+                tool_call_id="1",
+                arguments={},
+                cancel_on_interruption=False,
+            ),
+            SleepFrame(),
+            LLMFullResponseStartFrame(),
+            LLMThoughtStartFrame(append_to_context=True, llm="anthropic"),
             SleepFrame(),
             FunctionCallResultFrame(
                 function_name="lookup",
@@ -1546,37 +1626,13 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
                 result={"answer": 42},
                 run_llm=False,
             ),
+            SleepFrame(),
+            LLMThoughtEndFrame(signature="sig"),
+            LLMFullResponseEndFrame(),
         ]
         await run_test(aggregator, frames_to_send=frames_to_send)
-        tool_messages = [
-            m for m in context.messages if isinstance(m, dict) and m.get("role") == "tool"
-        ]
-        assert tool_messages[0]["content"] == "IN_PROGRESS"
-        payload = async_tool_messages.parse_message(context.messages[-1])
+        payload = async_tool_messages.parse_message(context.messages[-2])
         assert payload is not None and payload.kind == "final"
-
-    async def test_function_call_cancel_after_user_message_is_deferred(self):
-        context = LLMContext()
-        aggregator = LLMAssistantAggregator(context)
-        frames_to_send = [
-            FunctionCallInProgressFrame(
-                function_name="lookup",
-                tool_call_id="1",
-                arguments={},
-                cancel_on_interruption=True,
-            ),
-            SleepFrame(),
-            LLMMessagesAppendFrame(messages=[{"role": "user", "content": "Any news?"}]),
-            SleepFrame(),
-            FunctionCallCancelFrame(function_name="lookup", tool_call_id="1"),
-        ]
-        await run_test(aggregator, frames_to_send=frames_to_send, expected_down_frames=[])
-        tool_messages = [m for m in context.messages if m.get("role") == "tool"]
-        assert tool_messages[0]["content"] == "IN_PROGRESS"
-        payload = async_tool_messages.parse_message(context.messages[-1])
-        assert payload is not None and payload.kind == "final"
-        assert payload.result is not None and payload.result.startswith("CANCELLED")
-        assert not aggregator.has_function_calls_in_progress
 
     async def test_fast_async_function_call_settles_in_place(self):
         """An async call whose result lands before anything else settles like a sync one."""

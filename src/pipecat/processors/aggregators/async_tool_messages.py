@@ -28,11 +28,10 @@ synchronous call, and no ``final`` message is written. A cancellation always
 gets a ``final`` message, because it has to tell the LLM the task did not
 complete.
 
-A synchronous call (``cancel_on_interruption=True``) has an ``"IN_PROGRESS"``
-tool message in place of the ``started`` message. Its result or cancellation
-overwrites that message unless the conversation moved on while the call ran;
-then the placeholder is left as the LLM saw it and the result or cancellation
-arrives in a ``final`` message, as for an async call.
+A synchronous call (``cancel_on_interruption=True``) settles in place too,
+unless a thinking reply has seen its ``"IN_PROGRESS"`` placeholder: then the
+placeholder stays as that reply saw it, and the result or cancellation
+arrives in a ``final`` message.
 
 This module is the single source of truth for the on-the-wire payload shape:
 

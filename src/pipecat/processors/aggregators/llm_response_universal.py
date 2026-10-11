@@ -373,11 +373,6 @@ class AssistantThoughtMessage:
     timestamp: str
 
 
-def _is_thought(message: LLMSpecificMessage) -> bool:
-    """Whether a message is a thought the assistant aggregator added to the context."""
-    return isinstance(message.message, dict) and message.message.get("type") == "thought"
-
-
 class LLMContextAggregator(FrameProcessor):
     """Base LLM aggregator that uses an LLMContext for conversation storage.
 
@@ -1643,6 +1638,8 @@ class LLMAssistantAggregator(LLMContextAggregator):
         self._paired_user_aggregator = _paired_user_aggregator
 
         self._function_calls_in_progress: dict[str, FunctionCallInProgressFrame | None] = {}
+        # Running calls whose placeholder a thinking reply has seen.
+        self._function_calls_seen_by_thinking: set[str] = set()
         self._function_calls_image_results: dict[str, UserImageRawFrame] = {}
         # Markers seen on LLMMarkerFrames, so a service configured with markers
         # other than the defaults still gets them stripped from transcripts.
@@ -2159,7 +2156,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         triggers LLM inference when appropriate.
         """
         deferred = self._is_deferred(in_progress_frame)
-        del self._function_calls_in_progress[frame.tool_call_id]
+        self._forget_function_call(frame.tool_call_id)
 
         result = json.dumps(frame.result, ensure_ascii=False) if frame.result else "COMPLETED"
 
@@ -2184,9 +2181,8 @@ class LLMAssistantAggregator(LLMContextAggregator):
         # Update context with the function call cancellation. An async call is
         # settled with a developer message, the same channel its results use,
         # whether or not the conversation moved on, since the notice says the
-        # call did not complete and asks for the user to be told. A synchronous
-        # call settles in place, like its result, unless the conversation moved
-        # on (see _is_deferred).
+        # call did not complete and asks for the user to be told. So is a call
+        # a thinking reply has seen (see _is_deferred).
         if function_call.cancel_on_interruption and not self._is_deferred(function_call):
             self._update_function_call_result(frame.function_name, frame.tool_call_id, "CANCELLED")
         else:
@@ -2195,7 +2191,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
             )
 
         group_id = function_call.group_id
-        del self._function_calls_in_progress[frame.tool_call_id]
+        self._forget_function_call(frame.tool_call_id)
 
         if not frame.run_llm or self._user_speaking:
             return
@@ -2394,6 +2390,13 @@ class LLMAssistantAggregator(LLMContextAggregator):
         # an empty string here for typing purposes.
         self._thought_llm = frame.llm or ""
         self._thought_start_time = time_now_iso8601()
+        if frame.append_to_context:
+            # This reply sees every running call's placeholder.
+            self._function_calls_seen_by_thinking.update(
+                tool_call_id
+                for tool_call_id, in_progress_frame in self._function_calls_in_progress.items()
+                if in_progress_frame is not None
+            )
 
     async def _handle_thought_text(self, frame: LLMThoughtTextFrame):
         # Make sure we really have text (spaces count, too!)
@@ -2447,26 +2450,25 @@ class LLMAssistantAggregator(LLMContextAggregator):
     def _is_deferred(self, in_progress_frame: FunctionCallInProgressFrame) -> bool:
         """Whether a call's final result must be delivered as a deferred message.
 
-        A call settles in place, its placeholder (``"IN_PROGRESS"``, or an
-        async call's "started" message) becoming the tool result, unless the
-        conversation moved on while it ran. The LLM has then replied with the
-        placeholder in view, so the placeholder stays as it saw it: rewriting
-        it would change that reply's history, which Anthropic rejects the
-        reply's thinking for.
+        An async call (``cancel_on_interruption=False``) whose result arrives
+        before the conversation moved on is indistinguishable from a synchronous
+        one, and settles in place: its "started" placeholder becomes the tool
+        result, and the LLM sees an ordinary call. The context alone decides.
+        The result is deferred when a user or developer message follows the
+        placeholder: something the user said, new task instructions, or an
+        intermediate update from this call. Assistant messages are ignored,
+        so filler spoken with a ``TTSSpeakFrame`` while the call runs does
+        not defer it, whether the tool handler or an event handler spoke it.
+        The same holds for text the model wrote after seeing the placeholder
+        with no user turn in between, as when an ungrouped sibling's result
+        runs inference; the result still settles in place. Other calls'
+        placeholders, results, and deferred messages are ignored too. A
+        placeholder that is no longer in the context, because the context was
+        rebuilt while the call ran, also defers.
 
-        The context alone decides. The result is deferred when a user or
-        developer message follows the placeholder: something the user said,
-        new task instructions, or an intermediate update from this call. A
-        thought after the placeholder defers it too, since only a reply that
-        saw the placeholder can have produced it. Assistant messages are
-        ignored, so filler spoken with a ``TTSSpeakFrame`` while the call runs
-        does not defer it, whether the tool handler or an event handler spoke
-        it. The same holds for text the model wrote after seeing the
-        placeholder with no user turn in between, as when an ungrouped
-        sibling's result runs inference; the result still settles in place.
-        Other calls' placeholders, results, and deferred messages are ignored
-        too. A placeholder that is no longer in the context, because the
-        context was rebuilt while the call ran, also defers.
+        Any call, synchronous or async, also defers once a thinking reply has
+        seen its placeholder: providers such as Anthropic bind that thinking to
+        the placeholder and reject it once the placeholder is rewritten.
 
         Args:
             in_progress_frame: The call's in-progress frame.
@@ -2474,12 +2476,14 @@ class LLMAssistantAggregator(LLMContextAggregator):
         Returns:
             True when the result goes into a developer message.
         """
+        if in_progress_frame.tool_call_id in self._function_calls_seen_by_thinking:
+            return True
+        if in_progress_frame.cancel_on_interruption:
+            return False
         tool_call_id = in_progress_frame.tool_call_id
         after_placeholder = False
         for message in self._context.messages:
             if isinstance(message, LLMSpecificMessage):
-                if after_placeholder and _is_thought(message):
-                    return True
                 continue
             if not after_placeholder:
                 after_placeholder = (
@@ -2496,6 +2500,10 @@ class LLMAssistantAggregator(LLMContextAggregator):
                 continue
             return True
         return not after_placeholder
+
+    def _forget_function_call(self, tool_call_id: str):
+        del self._function_calls_in_progress[tool_call_id]
+        self._function_calls_seen_by_thinking.discard(tool_call_id)
 
     def _update_function_call_result(self, function_name: str, tool_call_id: str, result: Any):
         for message in self._context.get_messages():
