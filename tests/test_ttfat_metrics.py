@@ -286,7 +286,7 @@ class TestTTFATToolCalls:
             return patch.object(svc, "_create_message_stream", fake_stream)
 
         events = [
-            SimpleNamespace(type="message_start"),
+            SimpleNamespace(type="message_start", message=SimpleNamespace(usage=None)),
             SimpleNamespace(
                 type="content_block_start",
                 index=0,

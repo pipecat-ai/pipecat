@@ -547,9 +547,13 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
 
             # Function calling. Each tool call streams as its own content block,
             # identified by index, so tool blocks and argument accumulators are
-            # keyed by that index.
+            # keyed by that index. Calls are collected as their blocks end and
+            # only dispatched when the terminal stop_reason is "tool_use": a
+            # stream cut short by e.g. max_tokens can end with incomplete tool
+            # input that must not be executed.
             tool_use_blocks = {}
             json_accumulators = {}
+            collected_tool_calls = []
 
             function_calls = []
             async for event in response:
@@ -593,21 +597,35 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
                 elif event.type == "content_block_stop":
                     tool_use_block = tool_use_blocks.pop(event.index, None)
                     if tool_use_block:
-                        json_accumulator = json_accumulators.pop(event.index, "")
-                        try:
-                            args = json.loads(json_accumulator) if json_accumulator else {}
+                        collected_tool_calls.append(
+                            (
+                                tool_use_block.id,
+                                tool_use_block.name,
+                                json_accumulators.pop(event.index, ""),
+                            )
+                        )
+                elif event.type == "message_delta" and hasattr(event.delta, "stop_reason"):
+                    # Only a response that stopped to invoke tools executes the
+                    # collected calls; a stream cut short by e.g. max_tokens
+                    # leaves incomplete tool input undelivered, like the base.
+                    if event.delta.stop_reason == "tool_use":
+                        for tool_call_id, function_name, json_accumulator in collected_tool_calls:
+                            try:
+                                args = json.loads(json_accumulator) if json_accumulator else {}
+                            except json.JSONDecodeError:
+                                logger.warning(
+                                    f"{self}: Failed to parse function call arguments: {json_accumulator}"
+                                )
+                                continue
                             function_calls.append(
                                 FunctionCallFromLLM(
                                     context=context,
-                                    tool_call_id=tool_use_block.id,
-                                    function_name=tool_use_block.name,
+                                    tool_call_id=tool_call_id,
+                                    function_name=function_name,
                                     arguments=args,
                                 )
                             )
-                        except json.JSONDecodeError:
-                            logger.warning(
-                                f"{self}: Failed to parse function call arguments: {json_accumulator}"
-                            )
+                    collected_tool_calls.clear()
 
                 # Calculate usage. Do this here in its own if statement, because there may be usage
                 # data embedded in messages that we do other processing for, above.
