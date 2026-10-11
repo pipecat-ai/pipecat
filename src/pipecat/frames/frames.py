@@ -801,7 +801,9 @@ class LLMRunFrame(DataFrame):
     """Frame to trigger LLM processing with current context.
 
     A frame that instructs the LLM service to process the current context and
-    generate a response.
+    generate a response. If it reaches the user aggregator while a user turn
+    is in progress, the run waits for that turn to end and is covered by the
+    turn's own inference when there is one.
     """
 
     pass

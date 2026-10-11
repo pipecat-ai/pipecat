@@ -175,6 +175,11 @@ class UserTurnController(BaseObject):
         await self._setup_strategies()
 
     @property
+    def user_turn_active(self) -> bool:
+        """Whether a user turn has started and not yet stopped."""
+        return self._user_turn
+
+    @property
     def resolves_proposed_turn_start_frames(self) -> bool:
         """Whether any active start strategy resolves proposed turn starts.
 

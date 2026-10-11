@@ -1106,6 +1106,102 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
         user_messages = [m for m in context.get_messages() if m.get("role") == "user"]
         self.assertEqual([m["content"] for m in user_messages], ["I'm thinking", "about pizza"])
 
+    async def test_llm_run_during_user_turn_runs_once_at_turn_end(self):
+        """A run requested mid-turn is covered by the turn's own inference."""
+        context = LLMContext()
+        user_aggregator = LLMUserAggregator(
+            context,
+            params=LLMUserAggregatorParams(
+                user_turn_strategies=UserTurnStrategies(
+                    stop=[
+                        SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=TRANSCRIPTION_TIMEOUT)
+                    ],
+                ),
+            ),
+        )
+
+        frames_to_send = [
+            VADUserStartedSpeakingFrame(),
+            TranscriptionFrame(text="Hello?", user_id="", timestamp="now"),
+            SleepFrame(),
+            LLMRunFrame(),
+            SleepFrame(),
+            VADUserStoppedSpeakingFrame(),
+            SleepFrame(sleep=TRANSCRIPTION_TIMEOUT + 0.1),
+        ]
+        received_down, _ = await run_test(
+            Pipeline([user_aggregator]), frames_to_send=frames_to_send
+        )
+
+        context_frames = [f for f in received_down if isinstance(f, LLMContextFrame)]
+        self.assertEqual(len(context_frames), 1)
+        self.assertEqual(context.get_messages(), [{"role": "user", "content": "Hello?"}])
+
+    async def test_llm_run_during_empty_user_turn_runs_at_turn_end(self):
+        """A run requested mid-turn still runs when the turn ends with no transcript."""
+        context = LLMContext()
+        user_aggregator = LLMUserAggregator(
+            context,
+            params=LLMUserAggregatorParams(user_turn_stop_timeout=USER_TURN_STOP_TIMEOUT),
+        )
+
+        frames_to_send = [
+            VADUserStartedSpeakingFrame(),
+            LLMRunFrame(),
+            SleepFrame(),
+            VADUserStoppedSpeakingFrame(),
+            SleepFrame(sleep=USER_TURN_STOP_TIMEOUT + 0.1),
+        ]
+        received_down, _ = await run_test(
+            Pipeline([user_aggregator]), frames_to_send=frames_to_send
+        )
+
+        context_frames = [f for f in received_down if isinstance(f, LLMContextFrame)]
+        self.assertEqual(len(context_frames), 1)
+        # Deferred, not dropped: the run comes after the turn ends.
+        names = [type(f).__name__ for f in received_down]
+        self.assertLess(names.index("UserStoppedSpeakingFrame"), names.index("LLMContextFrame"))
+
+    async def test_llm_messages_append_during_user_turn_runs_once_at_turn_end(self):
+        """Appended messages land right away; their run waits for the turn."""
+        context = LLMContext()
+        user_aggregator = LLMUserAggregator(
+            context,
+            params=LLMUserAggregatorParams(
+                user_turn_strategies=UserTurnStrategies(
+                    stop=[
+                        SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=TRANSCRIPTION_TIMEOUT)
+                    ],
+                ),
+            ),
+        )
+
+        frames_to_send = [
+            VADUserStartedSpeakingFrame(),
+            TranscriptionFrame(text="Hello?", user_id="", timestamp="now"),
+            SleepFrame(),
+            LLMMessagesAppendFrame(
+                messages=[{"role": "developer", "content": "Ask for the user's name."}],
+                run_llm=True,
+            ),
+            SleepFrame(),
+            VADUserStoppedSpeakingFrame(),
+            SleepFrame(sleep=TRANSCRIPTION_TIMEOUT + 0.1),
+        ]
+        received_down, _ = await run_test(
+            Pipeline([user_aggregator]), frames_to_send=frames_to_send
+        )
+
+        context_frames = [f for f in received_down if isinstance(f, LLMContextFrame)]
+        self.assertEqual(len(context_frames), 1)
+        self.assertEqual(
+            context.get_messages(),
+            [
+                {"role": "developer", "content": "Ask for the user's name."},
+                {"role": "user", "content": "Hello?"},
+            ],
+        )
+
 
 class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
     async def test_empty(self):
