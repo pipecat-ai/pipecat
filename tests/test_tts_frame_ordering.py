@@ -2819,5 +2819,45 @@ async def test_next_request_waits_for_open_contexts_to_end():
     assert not any(isinstance(f, ErrorFrame) for f in down + up)
 
 
+class _MockUntimedWordsTTSService(TTSService):
+    """Sends audio without word timestamps and never ends its contexts, so they go quiet."""
+
+    def __init__(self):
+        super().__init__(
+            push_start_frame=True,
+            push_text_frames=False,
+            push_stop_frames=True,
+            stop_frame_timeout_s=0.1,
+            sample_rate=_SAMPLE_RATE,
+        )
+
+    def can_generate_metrics(self) -> bool:
+        return False
+
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:
+        await self.append_to_audio_context(
+            context_id, TTSAudioRawFrame(_FAKE_AUDIO, _SAMPLE_RATE, 1, context_id=context_id)
+        )
+        yield None
+
+
+@pytest.mark.asyncio
+async def test_untimed_words_come_before_the_stop_frame_of_a_quiet_context():
+    """Text the provider never timed is pushed before the context's stop frame."""
+    down, _ = await asyncio.wait_for(
+        run_test(
+            _MockUntimedWordsTTSService(),
+            frames_to_send=[TTSSpeakFrame("Hello there."), SleepFrame(sleep=0.4)],
+        ),
+        timeout=5,
+    )
+    order = [
+        type(f)
+        for f in down
+        if isinstance(f, (TTSTextFrame, LLMAssistantPushAggregationFrame, TTSStoppedFrame))
+    ]
+    assert order == [TTSTextFrame, LLMAssistantPushAggregationFrame, TTSStoppedFrame]
+
+
 if __name__ == "__main__":
     unittest.main()

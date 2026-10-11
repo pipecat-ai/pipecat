@@ -113,6 +113,14 @@ class _WordTimestampEntry:
     includes_inter_frame_spaces: bool = False
 
 
+@dataclass
+class _AudioContextPlayback:
+    """Internal: what has happened so far while an audio context plays."""
+
+    received_audio: bool = False
+    stop_frame_due: bool = False
+
+
 class TTSService(AIService):
     """Base class for text-to-speech services.
 
@@ -1889,76 +1897,73 @@ class TTSService(AIService):
         )
 
     async def _handle_audio_context(self, context_id: str):
-        """Process items from an audio context queue until it is exhausted."""
-        running = True
-        timestamps_started = False
-        received_audio = False
-        should_push_stop_frame = False
-        while running:
+        """Push an audio context's items in order until it ends or goes quiet."""
+        playback = _AudioContextPlayback()
+        while True:
             try:
-                frame = await self._audio_context_manager.get(
+                item = await self._audio_context_manager.get(
                     context_id, timeout=self._stop_frame_timeout_s
                 )
-                if frame is None:
-                    running = False
-                elif isinstance(frame, _WordTimestampEntry):
-                    # Route word timestamps through _add_word_timestamps so they are
-                    # processed in playback order alongside audio frames.
-                    await self._add_word_timestamps(
-                        [(frame.word, frame.timestamp)],
-                        frame.context_id,
-                        includes_inter_frame_spaces=frame.includes_inter_frame_spaces,
-                    )
-                    continue
-                elif isinstance(frame, TTSAudioRawFrame):
-                    received_audio = True
-                    # Set the word-timestamp baseline once, on the first audio chunk.
-                    if not timestamps_started:
-                        await self.stop_ttfb_metrics()
-                        await self.start_word_timestamps()
-                        timestamps_started = True
-                    await self.process_ttfa_metrics(frame)
-
-                if frame:
-                    if isinstance(frame, TTSStartedFrame):
-                        should_push_stop_frame = self._push_stop_frames
-                        # Stamp appropriate append_to_context value onto every
-                        # TTSStartedFrame here — the single point both
-                        # base-class- and subclass-emitted started frames pass
-                        # through.
-                        tts_context = self._tts_contexts.get(context_id)
-                        if tts_context is not None:
-                            frame.append_to_context = tts_context.append_to_context
-                    elif isinstance(frame, TTSStoppedFrame):
-                        # Checking if we have any remaining spoken slots before pushing the TTSStoppedFrame
-                        await self._apply_force_complete(context_id)
-
-                        should_push_stop_frame = False
-                        # Setting the last word timestamp as the TTSStoppedFrame PTS
-                        if not frame.pts:
-                            frame.pts = self._word_timestamps.last_pts
-
-                    if isinstance(frame, ErrorFrame):
-                        await self.push_error_frame(frame)
-                    else:
-                        await self.push_frame(frame)
             except TimeoutError:
                 # We didn't get audio, so let's consider this context finished.
                 logger.trace(f"{self} time out on audio context {context_id}")
-                if should_push_stop_frame and self._push_stop_frames:
-                    await self.push_frame(TTSStoppedFrame(context_id=context_id))
-                    should_push_stop_frame = False
                 break
+            if item is None:
+                break
+            await self._push_audio_context_item(context_id, item, playback)
+        await self._end_audio_context(context_id, playback)
 
+    async def _push_audio_context_item(
+        self, context_id: str, item: Frame | _WordTimestampEntry, playback: _AudioContextPlayback
+    ):
+        """Push one item of the playing audio context."""
+        if isinstance(item, _WordTimestampEntry):
+            # Route word timestamps through _add_word_timestamps so they are
+            # processed in playback order alongside audio frames.
+            await self._add_word_timestamps(
+                [(item.word, item.timestamp)],
+                item.context_id,
+                includes_inter_frame_spaces=item.includes_inter_frame_spaces,
+            )
+            return
+
+        if isinstance(item, TTSAudioRawFrame):
+            # Set the word-timestamp baseline once, on the first audio chunk.
+            if not playback.received_audio:
+                await self.stop_ttfb_metrics()
+                await self.start_word_timestamps()
+            playback.received_audio = True
+            await self.process_ttfa_metrics(item)
+        elif isinstance(item, TTSStartedFrame):
+            playback.stop_frame_due = self._push_stop_frames
+            # Stamp appropriate append_to_context value onto every
+            # TTSStartedFrame here — the single point both base-class- and
+            # subclass-emitted started frames pass through.
+            tts_context = self._tts_contexts.get(context_id)
+            if tts_context is not None:
+                item.append_to_context = tts_context.append_to_context
+        elif isinstance(item, TTSStoppedFrame):
+            # Checking if we have any remaining spoken slots before pushing the TTSStoppedFrame
+            await self._apply_force_complete(context_id)
+            playback.stop_frame_due = False
+            # Setting the last word timestamp as the TTSStoppedFrame PTS
+            if not item.pts:
+                item.pts = self._word_timestamps.last_pts
+
+        if isinstance(item, ErrorFrame):
+            await self.push_error_frame(item)
+        else:
+            await self.push_frame(item)
+
+    async def _end_audio_context(self, context_id: str, playback: _AudioContextPlayback):
+        """Finish the playing audio context once it ends or goes quiet."""
+        # Words the provider never timed come before the stop frame.
         await self._apply_force_complete(context_id)
-
-        if should_push_stop_frame and self._push_stop_frames:
+        if playback.stop_frame_due:
             await self.push_frame(TTSStoppedFrame(context_id=context_id))
-
         await self.reset_word_timestamps()
         await self._push_llm_response_end(context_id)
-
-        await self._record_context_audio_outcome(context_id, received_audio)
+        await self._record_context_audio_outcome(context_id, playback.received_audio)
 
     async def _record_context_audio_outcome(self, context_id: str, received_audio: bool):
         """Track whether contexts are producing audio, and act when they stop.
