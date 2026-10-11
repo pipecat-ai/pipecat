@@ -235,6 +235,17 @@ class TestExpandUnits(unittest.IsolatedAsyncioTestCase):
         result = await expand_units("1 g of something", "*")
         self.assertNotIn("grams", result)
 
+    async def test_ambiguous_uppercase_not_expanded(self):
+        """Uppercase 'M' and 'G' after a number are not meters or grams."""
+        self.assertEqual(await expand_units("We raised $5M", "*"), "We raised $5M")
+        self.assertEqual(await expand_units("10M downloads", "*"), "10M downloads")
+        self.assertEqual(await expand_units("Works on 5G networks", "*"), "Works on 5G networks")
+
+    async def test_ambiguous_lowercase_and_liter_symbol_expanded(self):
+        self.assertEqual(await expand_units("Run 5m", "*"), "Run 5 meters")
+        self.assertEqual(await expand_units("Add 200g of flour", "*"), "Add 200 grams of flour")
+        self.assertEqual(await expand_units("Buy 2L of milk", "*"), "Buy 2 liters of milk")
+
 
 class TestExpandUnitsSingular(unittest.IsolatedAsyncioTestCase):
     """A quantity of exactly one takes the singular form of the unit."""
