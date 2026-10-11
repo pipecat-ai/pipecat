@@ -336,3 +336,15 @@ async def test_run_inference_retries_without_thinking_and_keeps_the_context():
         [],
     ]
     assert _thought("sig-1") in context.messages
+
+
+@pytest.mark.asyncio
+async def test_run_inference_raises_other_bad_requests():
+    service, context = _make_service(), _context()
+    create = AsyncMock(side_effect=_bad_request(OTHER_ERROR))
+    service._client.beta.messages.create = create
+
+    with pytest.raises(anthropic.BadRequestError):
+        await service.run_inference(context)
+
+    assert create.await_count == 1
