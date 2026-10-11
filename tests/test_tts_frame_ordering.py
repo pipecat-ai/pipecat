@@ -967,7 +967,7 @@ async def test_ws_skipped_frame_waits_for_spoken_words():
     """Same ordering guarantee on the WebSocket / async audio delivery path.
 
     Because audio is delivered from a background task after asyncio.sleep(), the
-    skipped frame arrives at _push_frame_respecting_previous_aggregated_frame
+    skipped frame arrives at _push_skipped_text
     *before* the spoken slot's word timestamps have been processed, directly
     exercising the hold-and-flush path.
     """

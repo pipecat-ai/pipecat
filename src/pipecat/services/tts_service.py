@@ -56,6 +56,7 @@ from pipecat.utils.context.word_timestamps import CachedWord, WordTimestamps
 from pipecat.utils.deprecation import deprecated, warn_deprecated
 from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.string import resolve_sentence_tokenizer_language
+from pipecat.utils.text.base_text_aggregator import Aggregation
 from pipecat.utils.text.base_text_filter import BaseTextFilter
 from pipecat.utils.text.pattern_pair_aggregator import PatternMatch
 from pipecat.utils.text.simple_text_aggregator import SimpleTextAggregator
@@ -280,25 +281,10 @@ class TTSService(AIService):
             self._settings.language if is_given(self._settings.language) else None
         )
 
-        # Convert Language enum to service-specific format at init time.
-        # Runtime updates are handled by _update_settings(), but init-time
-        # settings bypass that path and need explicit conversion.
-        # Raw strings (e.g. "de-DE") are first converted to Language enums
-        # so they go through the same resolution logic.
-        if isinstance(self._settings.language, str) and not isinstance(
-            self._settings.language, Language
-        ):
-            try:
-                self._settings.language = Language(self._settings.language)
-            except ValueError:
-                logger.debug(
-                    f"Language string '{self._settings.language}' is not a recognized "
-                    f"Language code. It will be passed to the service as-is."
-                )
-        if isinstance(self._settings.language, Language):
-            converted = self.language_to_service_language(self._settings.language)
-            if converted is not None:
-                self._settings.language = converted
+        # Runtime updates are converted by _update_settings(), but init-time
+        # settings bypass that path.
+        if isinstance(self._settings.language, str):
+            self._settings.language = self._service_language(self._settings.language)
 
         # Resolve text_aggregation_mode from the new param or deprecated aggregate_sentences
         if aggregate_sentences is not None:
@@ -396,21 +382,10 @@ class TTSService(AIService):
         self._pending_llm_response_end_frames: dict[str, LLMFullResponseEndFrame] = {}
         self._reuse_context_id_within_turn: bool = reuse_context_id_within_turn
 
-        # _turn_context_id:
-        #   Set on LLMFullResponseStartFrame and cleared after LLMFullResponseEndFrame
-        #   is processed (i.e. after flush). All sentences within one LLM turn share
-        #   this ID so the TTS service groups them into a single audio context.
-        #   Temporarily set to None for TTSSpeakFrame utterances, which are standalone.
-        #
-        # The audio context manager's playing_context_id (playback-side cursor):
-        #   Set as _audio_context_task_handler dequeues contexts for playback.
-        #   Cleared by reset_active_audio_context() on interruption. Used by
-        #   has_active_audio_context() and get_active_audio_context_id().
-        #
-        # Both may hold the same value during a turn, but they clear at different
-        # times: _turn_context_id is cleared when the LLM turn ends (synthesis done)
-        # while the playing context stays set until the audio finishes playing.
-        # Merging them would null out the playback cursor prematurely.
+        # Shared by the sentences of the current turn, so they form one audio
+        # context. A TTSSpeakFrame swaps in its own while it is spoken. Unlike the
+        # playing context (see get_active_audio_context_id), it is cleared once
+        # the turn's synthesis completes, before its audio has played.
         self._turn_context_id: str | None = None
 
         # Audio contexts and the downstream frames between them, emitted in order.
@@ -545,8 +520,10 @@ class TTSService(AIService):
         """
         if self._reuse_context_id_within_turn and self._turn_context_id:
             self._refresh_audio_context(self._turn_context_id)
-            return self._turn_context_id
-        return str(uuid.uuid4())
+            context_id = self._turn_context_id
+        else:
+            context_id = str(uuid.uuid4())
+        return context_id
 
     # Converts the text to audio.
     @abstractmethod
@@ -791,6 +768,7 @@ class TTSService(AIService):
         )
 
     def _can_apply_pronunciations(self) -> bool:
+        """Whether pronunciation transforms apply, warning once when they stop applying."""
         supported = self.supports_pronunciations
         if not supported and not self._skipping_pronunciations:
             logger.warning(
@@ -813,23 +791,8 @@ class TTSService(AIService):
         """
         language = delta.language
         # Translate language *before* applying so the stored value is canonical.
-        # Raw strings are first converted to Language enums for proper resolution.
-        if (
-            is_given(delta.language)
-            and isinstance(delta.language, str)
-            and not isinstance(delta.language, Language)
-        ):
-            try:
-                delta.language = Language(delta.language)
-            except ValueError:
-                logger.debug(
-                    f"Language string '{delta.language}' is not a recognized "
-                    f"Language code. It will be passed to the service as-is."
-                )
-        if is_given(delta.language) and isinstance(delta.language, Language):
-            converted = self.language_to_service_language(delta.language)
-            if converted is not None:
-                delta.language = converted
+        if is_given(delta.language) and isinstance(delta.language, str):
+            delta.language = self._service_language(delta.language)
 
         changed = await super()._update_settings(delta)
 
@@ -837,6 +800,24 @@ class TTSService(AIService):
             self._text_aggregator.set_language(language)
 
         return changed
+
+    def _service_language(self, language: str) -> str:
+        """Convert a language to the service's format, passing unknown codes as they are."""
+        # Raw strings (e.g. "de-DE") are first converted to Language enums so
+        # they go through the same resolution logic.
+        if not isinstance(language, Language):
+            try:
+                language = Language(language)
+            except ValueError:
+                logger.debug(
+                    f"Language string '{language}' is not a recognized "
+                    f"Language code. It will be passed to the service as-is."
+                )
+        if isinstance(language, Language):
+            converted = self.language_to_service_language(language)
+            if converted is not None:
+                language = converted
+        return language
 
     async def on_turn_context_created(self, context_id: str):
         """Called when a new turn context ID has been created.
@@ -852,8 +833,8 @@ class TTSService(AIService):
 
     async def on_turn_context_completed(self):
         """Handle the completion of a turn."""
-        # For HTTP services they emit the frames synchronously, so close the audio context here
-        # once all frames (including TTSTextFrame above) have been enqueued.
+        # HTTP services yield their audio inline, so their audio context is closed
+        # here, once all the turn's frames (including TTSTextFrame) are queued.
         if (
             self._is_yielding_frames_synchronously
             and self._turn_context_id is not None
@@ -957,18 +938,17 @@ class TTSService(AIService):
         if not context:
             return
         logger.debug(f"{self} cleaning up TTS context {frame.context_id}")
-        if not context.push_assistant_aggregation:
-            return
-        aggregation_frame = LLMAssistantPushAggregationFrame()
-        aggregation_frame.interruptible = frame.interruptible
-        # When word-level TTSTextFrames are routed through the transport's clock
-        # queue (PTS-based), the aggregation frame would otherwise take the audio
-        # (sync) queue path and could overtake the final word frames. Stamping it
-        # with a PTS just past the last word forces it through the clock queue
-        # too, so the assistant aggregator sees every word before flushing.
-        if self._word_timestamps.last_pts:
-            aggregation_frame.pts = self._word_timestamps.last_pts + 1
-        await self.push_frame(aggregation_frame)
+        if context.push_assistant_aggregation:
+            aggregation_frame = LLMAssistantPushAggregationFrame()
+            aggregation_frame.interruptible = frame.interruptible
+            # When word-level TTSTextFrames are routed through the transport's clock
+            # queue (PTS-based), the aggregation frame would otherwise take the audio
+            # (sync) queue path and could overtake the final word frames. Stamping it
+            # with a PTS just past the last word forces it through the clock queue
+            # too, so the assistant aggregator sees every word before flushing.
+            if self._word_timestamps.last_pts:
+                aggregation_frame.pts = self._word_timestamps.last_pts + 1
+            await self.push_frame(aggregation_frame)
 
     async def _push_stop_silence(self, frame: TTSStoppedFrame):
         """Push the silence configured to follow a TTSStoppedFrame."""
@@ -980,7 +960,6 @@ class TTSService(AIService):
             sample_rate=self.sample_rate,
             num_channels=1,
         )
-        silence_frame.transport_destination = self._transport_destination
         silence_frame.interruptible = frame.interruptible
         await self.push_frame(silence_frame)
 
@@ -1080,15 +1059,7 @@ class TTSService(AIService):
         # Stop the aggregation metric (no-op if already stopped on first sentence).
         await self.stop_text_aggregation_metrics()
         if remaining:
-            await self._push_tts_frames(
-                AggregatedTextFrame(
-                    remaining.text,
-                    remaining.type,
-                    raw_text=remaining.full_match
-                    if isinstance(remaining, PatternMatch)
-                    else remaining.text,
-                )
-            )
+            await self._push_tts_frames(self._aggregated_text_frame(remaining))
 
         # Force-promote any sentence still pending in the sequencer (streaming
         # mode only; a no-op otherwise) — handles a response that ends with no
@@ -1188,6 +1159,7 @@ class TTSService(AIService):
             await self._update_settings(delta)
 
     async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
+        """Reset the turn and drop interruptible audio contexts."""
         self._sent_non_whitespace_in_context = False
         self._llm_response_started = False
         self._streamed_text = ""
@@ -1250,6 +1222,7 @@ class TTSService(AIService):
             await self.resume_processing_frames()
 
     async def _process_text_frame(self, frame: TextFrame):
+        """Aggregate LLM text and speak each aggregation."""
         async for aggregate in self._text_aggregator.aggregate(frame.text):
             includes_inter_frame_spaces = (
                 frame.includes_inter_frame_spaces if aggregate.type == TextType.TOKEN else False
@@ -1257,13 +1230,16 @@ class TTSService(AIService):
             if aggregate.type != TextType.TOKEN:
                 # Stop the aggregation metric on the first sentence only.
                 await self.stop_text_aggregation_metrics()
-            raw_text = (
-                aggregate.full_match if isinstance(aggregate, PatternMatch) else aggregate.text
-            )
             await self._push_tts_frames(
-                AggregatedTextFrame(aggregate.text, aggregate.type, raw_text=raw_text),
-                includes_inter_frame_spaces,
+                self._aggregated_text_frame(aggregate), includes_inter_frame_spaces
             )
+
+    def _aggregated_text_frame(self, aggregation: Aggregation) -> AggregatedTextFrame:
+        """Build the frame for an aggregation, keeping a pattern's delimiters in its raw text."""
+        raw_text = (
+            aggregation.full_match if isinstance(aggregation, PatternMatch) else aggregation.text
+        )
+        return AggregatedTextFrame(aggregation.text, aggregation.type, raw_text=raw_text)
 
     async def _push_sequencer_frames(self, frames: list[Frame], context_id: str | None):
         """Emit frames returned by the aggregated-frame sequencer in audio order.
@@ -1289,11 +1265,10 @@ class TTSService(AIService):
             else:
                 await self.push_frame(f)
 
-    async def _push_frame_respecting_previous_aggregated_frame(
-        self, frame: AggregatedTextFrame, context_id: str
-    ):
-        # Enqueue the skipped frame; returns it immediately if no spoken slot
-        # precedes it, or holds it until the sequencer can flush it in order.
+    async def _push_skipped_text(self, frame: AggregatedTextFrame, context_id: str):
+        """Push text that isn't spoken, in order with the spoken text around it."""
+        # The sequencer returns the frame at once if no spoken slot precedes it,
+        # or holds it until it can flush it in order.
         await self._push_sequencer_frames(
             await self._aggregated_frame_sequencer.register_skipped(
                 frame, context_id, self._transport_destination
@@ -1308,21 +1283,31 @@ class TTSService(AIService):
         append_tts_text_to_context: bool = True,
         push_assistant_aggregation: bool | None = False,
     ):
-        text_type = src_frame.text_type
-        text = src_frame.text
-
+        """Speak aggregated text, or push it on in order if its type is skipped."""
         context_id = self.create_context_id()
+        text = self._trim_text(src_frame.text)
+        if src_frame.text_type in self._skip_text_types:
+            await self._push_skipped_text(src_frame, context_id)
+        elif text is not None:
+            await self._speak_text(
+                src_frame,
+                text,
+                context_id,
+                includes_inter_frame_spaces,
+                append_tts_text_to_context,
+                push_assistant_aggregation,
+            )
 
-        # Skip sending to TTS if the text type is in the skip list. Simply
-        # push the original frame downstream.
-        if text_type in self._skip_text_types:
-            await self._push_frame_respecting_previous_aggregated_frame(src_frame, context_id)
-            return
-
-        text = self._trim_text(text)
-        if text is None:
-            return
-
+    async def _speak_text(
+        self,
+        src_frame: AggregatedTextFrame,
+        text: str,
+        context_id: str,
+        includes_inter_frame_spaces: bool,
+        append_to_context: bool,
+        push_assistant_aggregation: bool | None,
+    ):
+        """Filter, transform and synthesize text, timing it as processing."""
         # Accumulate text for a single debug log at flush time when streaming tokens.
         if self._is_streaming_tokens:
             self._streamed_text += text
@@ -1335,37 +1320,29 @@ class TTSService(AIService):
         if self.supports_processing_metrics and not self._is_streaming_tokens:
             await self.start_processing_metrics()
 
-        text = await self._filter_text(text)
-        if text is None:
-            await self.stop_processing_metrics()
-            return
+        filtered_text = await self._filter_text(text)
+        if filtered_text is not None:
+            prepared_text = await self._transform_text(filtered_text, src_frame.text_type)
+            if prepared_text is not None:
+                self._tts_contexts[context_id] = TTSContext(
+                    append_to_context=append_to_context,
+                    push_assistant_aggregation=push_assistant_aggregation,
+                    interruptible=src_frame.interruptible,
+                )
+                await self._announce_text(src_frame, context_id)
+                await self._call_event_handler("on_tts_request", context_id, prepared_text)
+                await self._start_audio_context(context_id)
+                await self._register_spoken_text(src_frame, prepared_text, context_id)
+                await self._synthesize_text(prepared_text, context_id)
+                await self._push_spoken_text(
+                    src_frame,
+                    filtered_text,
+                    context_id,
+                    includes_inter_frame_spaces,
+                    append_to_context,
+                )
 
-        self._tts_contexts[context_id] = TTSContext(
-            append_to_context=append_tts_text_to_context,
-            push_assistant_aggregation=push_assistant_aggregation,
-            interruptible=src_frame.interruptible,
-        )
-
-        await self._announce_text(src_frame, context_id)
-
-        prepared_text = await self._transform_text(text, text_type)
-        if prepared_text is None:
-            return
-
-        # Trigger event before starting TTS
-        await self._call_event_handler("on_tts_request", context_id, prepared_text)
-
-        await self._start_audio_context(context_id)
-
-        await self._register_spoken_text(src_frame, prepared_text, context_id)
-        await self._synthesize_text(prepared_text, context_id)
-
-        if self.supports_processing_metrics and not self._is_streaming_tokens:
-            await self.stop_processing_metrics()
-
-        await self._push_spoken_text(
-            src_frame, text, context_id, includes_inter_frame_spaces, append_tts_text_to_context
-        )
+        await self.stop_processing_metrics()
 
     def _trim_text(self, text: str) -> str | None:
         """Trim leading whitespace from text to synthesize, or None if nothing is left to say."""
@@ -1379,16 +1356,73 @@ class TTSService(AIService):
         if self._is_streaming_tokens:
             if not self._sent_non_whitespace_in_context:
                 text = text.lstrip()
-            return text or None
-        text = text.lstrip("\n")
-        return text if text.strip() else None
+            has_text = bool(text)
+        else:
+            text = text.lstrip("\n")
+            has_text = bool(text.strip())
+        return text if has_text else None
+
+    async def _filter_text(self, text: str) -> str | None:
+        """Run the text filters on text about to be synthesized.
+
+        Returns:
+            The filtered text, or None if nothing is left to say.
+        """
+        for filter in self._text_filters:
+            await filter.reset_interruption()
+            text = await filter.filter(text)
+
+        # Mirrors the whitespace gate before the filters, so filter output that
+        # collapses to whitespace-only is handled consistently. When streaming
+        # tokens, whitespace is only sent once something else has been.
+        if self._is_streaming_tokens:
+            has_text = bool(text.strip()) or (bool(text) and self._sent_non_whitespace_in_context)
+            if has_text:
+                self._sent_non_whitespace_in_context = True
+        else:
+            has_text = bool(text.strip())
+        return text if has_text else None
+
+    async def _transform_text(self, text: str, text_type: str) -> str | None:
+        """Turn filtered text into the text sent to the TTS.
+
+        Transforms only affect the text sent to the TTS for TTS-specific
+        purposes (e.g. inserting tags for spelling or emotion, or replacing an
+        @ with "at"). For services with word timestamps they can affect the
+        context, since TTSTextFrames are built from the TTS output.
+
+        Returns:
+            The text to synthesize, or None if a transform failed.
+        """
+        transformed_text = text
+        prepared_text = None
+        try:
+            for transform_type, transform in self._text_transforms:
+                if transform_type in (text_type, "*") and (
+                    not isinstance(transform, PronunciationTransform)
+                    or self._can_apply_pronunciations()
+                ):
+                    transformed_text = await transform(transformed_text, text_type)
+            # Apply any final text preparation (e.g., trailing space)
+            prepared_text = self._prepare_text_for_tts(transformed_text)
+        except Exception as e:
+            # Pushing the error with category "APPLICATION" since the failure came
+            # from the application's text transformer. Speaking the untransformed
+            # text isn't safe — a transformer may exist to remove something — so this
+            # turn produces no audio.
+            await self.push_error(
+                error_msg=f"Error transforming text for TTS [{transformed_text}]: {e}",
+                exception=e,
+                category=ErrorCategory.APPLICATION,
+            )
+        return prepared_text
 
     async def _announce_text(self, src_frame: AggregatedTextFrame, context_id: str):
         """Mark text as about to be spoken and push it ahead of its audio."""
         # To support use cases that may want to know the text before it's spoken, we
-        # push the AggregatedTextFrame version before transforming and sending to TTS.
-        # However, we do not want to add this text to the assistant context until it
-        # is spoken, so we set append_to_context to False.
+        # push the AggregatedTextFrame version before sending it to TTS. However, we
+        # do not want to add this text to the assistant context until it is spoken,
+        # so we set append_to_context to False.
         src_frame.append_to_context = False
         src_frame.context_id = context_id
         src_frame.will_be_spoken = True
@@ -1397,18 +1431,14 @@ class TTSService(AIService):
         # listener cares about: the sequencer regroups tokens into a sentence and emits
         # that sentence as the will_be_spoken anchor (see _promote). Pushing src_frame
         # too would emit a second, redundant anchor (for a TTSSpeakFrame, an exact
-        # duplicate). So only the non-streaming path pushes src_frame here.
-        if self._is_streaming_tokens:
-            return
-
-        # Queue AggregatedTextFrame behind the audio contexts so it is emitted
-        # immediately before the TTSStartedFrame of the audio context it describes,
-        # rather than racing ahead of audio frames from a previous context. If the
-        # context already exists, append it to the context's queue instead.
-        if not self.audio_context_available(context_id):
-            await self._audio_context_manager.put_frame(src_frame)
-        else:
-            await self.append_to_audio_context(context_id, src_frame)
+        # duplicate). So only the non-streaming path pushes src_frame, queued behind
+        # the audio contexts so it is emitted immediately before the TTSStartedFrame
+        # of the audio context it describes, or into that context if it exists.
+        if not self._is_streaming_tokens:
+            if self.audio_context_available(context_id):
+                await self.append_to_audio_context(context_id, src_frame)
+            else:
+                await self._audio_context_manager.put_frame(src_frame)
 
     async def _start_audio_context(self, context_id: str):
         """Open an audio context with a TTSStartedFrame, for services that leave it to the base."""
@@ -1417,7 +1447,7 @@ class TTSService(AIService):
         await self.create_audio_context(context_id)
         await self.start_ttfb_metrics()
         # Note: TTSStartedFrame's append_to_context is stamped in
-        # _handle_audio_context, where every TTSStartedFrame
+        # _push_audio_context_item, where every TTSStartedFrame
         # (base-class- and subclass-emitted) funnels through.
         await self.append_to_audio_context(context_id, TTSStartedFrame(context_id=context_id))
 
@@ -1456,12 +1486,12 @@ class TTSService(AIService):
         # services that connect on demand would attempt a handshake per request.
         # The surrounding bookkeeping still runs, so the turn completes with no
         # audio rather than stalling.
-        if not self.is_usable:
+        if self.is_usable:
+            await self.tts_process_generator(context_id, self.run_tts(text, context_id))
+        else:
             # Name the text that goes unspoken: silence from the bot is
             # otherwise hard to trace back to the service that caused it.
             logger.warning(f"{self}: service is no longer usable, not speaking [{text}]")
-            return
-        await self.tts_process_generator(context_id, self.run_tts(text, context_id))
 
     async def _push_spoken_text(
         self,
@@ -1497,62 +1527,6 @@ class TTSService(AIService):
         for f in self._aggregated_frame_sequencer.complete_spoken_slot():
             await self.push_frame(f)
 
-    async def _filter_text(self, text: str) -> str | None:
-        """Run the text filters on text about to be synthesized.
-
-        Returns:
-            The filtered text, or None if nothing is left to say.
-        """
-        for filter in self._text_filters:
-            await filter.reset_interruption()
-            text = await filter.filter(text)
-
-        # Mirrors the whitespace gate before the filters, so filter output that
-        # collapses to whitespace-only is handled consistently.
-        if self._is_streaming_tokens:
-            # If empty, or only-whitespace and we haven't sent any non-whitespace, skip.
-            if not text or (not text.strip() and not self._sent_non_whitespace_in_context):
-                return None
-            self._sent_non_whitespace_in_context = True
-        elif not text.strip():
-            return None
-        return text
-
-    async def _transform_text(self, text: str, text_type: str) -> str | None:
-        """Turn filtered text into the text sent to the TTS.
-
-        Transforms only affect the text sent to the TTS for TTS-specific
-        purposes (e.g. inserting tags for spelling or emotion, or replacing an
-        @ with "at"). For services with word timestamps they can affect the
-        context, since TTSTextFrames are built from the TTS output.
-
-        Returns:
-            The text to synthesize, or None if a transform failed.
-        """
-        transformed_text = text
-        for transform_type, transform in self._text_transforms:
-            if transform_type == text_type or transform_type == "*":
-                if isinstance(transform, PronunciationTransform) and not (
-                    self._can_apply_pronunciations()
-                ):
-                    continue
-                try:
-                    transformed_text = await transform(transformed_text, text_type)
-                except Exception as e:
-                    # Pushing the error with category "APPLICATION" since the failure came
-                    # from the application's text transformer. Speaking the untransformed
-                    # text isn't safe — a transformer may exist to remove something — so this
-                    # turn produces no audio.
-                    await self.push_error(
-                        error_msg=f"Error transforming text for TTS [{transformed_text}]: {e}",
-                        exception=e,
-                        category=ErrorCategory.APPLICATION,
-                    )
-                    return None
-
-        # Apply any final text preparation (e.g., trailing space)
-        return self._prepare_text_for_tts(transformed_text)
-
     async def tts_process_generator(
         self, context_id: str, generator: AsyncGenerator[Frame | None, None]
     ):
@@ -1565,8 +1539,8 @@ class TTSService(AIService):
         WebSocket services yield None to signal that audio will arrive via a separate
         receive loop; those services manage context lifetime themselves (via remove_audio_context
         in the receive loop on "done"). HTTP services never yield None and do NOT call
-        remove_audio_context in run_tts — the caller (_synthesize_text) closes the context
-        after appending any remaining frames (e.g. TTSTextFrame).
+        remove_audio_context in run_tts — on_turn_context_completed closes the context
+        once the turn's remaining frames (e.g. TTSTextFrame) are queued.
 
         Args:
             context_id: The audio context to route frames to.
@@ -1690,7 +1664,7 @@ class TTSService(AIService):
             await self.push_frame(f)
 
     #
-    # Audio context methods (active when using websocket-based TTS with context management)
+    # Audio contexts
     #
 
     async def create_audio_context(self, context_id: str):
@@ -1723,18 +1697,22 @@ class TTSService(AIService):
         if not context_id:
             logger.debug(f"{self} unable to append audio to context: no context ID provided")
             return
-        if not self.audio_context_available(context_id):
-            # In case the frame is None, we should not recreate the context.
-            if context_id == self._turn_context_id and frame:
-                # Sometimes the HTTP service can take more than 3 seconds without sending any audio
-                # So we are now recreating the context id while we are in the same turn
-                logger.debug(f"{self} recreating audio context {context_id}")
-                await self.create_audio_context(context_id)
-            else:
-                logger.debug(f"{self} unable to append audio to context {context_id}")
-                return
-        logger.trace(f"{self} appending audio {frame} to audio context {context_id}")
-        await self._audio_context_manager.append(context_id, frame)
+        # Sometimes the HTTP service can take more than 3 seconds without sending
+        # any audio, so the context is recreated while we are in the same turn.
+        # An end marker (None) never recreates it.
+        if (
+            not self.audio_context_available(context_id)
+            and context_id == self._turn_context_id
+            and frame
+        ):
+            logger.debug(f"{self} recreating audio context {context_id}")
+            await self.create_audio_context(context_id)
+
+        if self.audio_context_available(context_id):
+            logger.trace(f"{self} appending audio {frame} to audio context {context_id}")
+            await self._audio_context_manager.append(context_id, frame)
+        else:
+            logger.debug(f"{self} unable to append audio to context {context_id}")
 
     async def remove_audio_context(self, context_id: str | None):
         """Remove an existing audio context.
@@ -1811,10 +1789,12 @@ class TTSService(AIService):
         self._audio_context_manager.keepalive(context_id)
 
     def _create_audio_context_task(self):
+        """Create the task that plays audio contexts."""
         if not self._audio_context_task:
             self._audio_context_task = self.create_task(self._audio_context_task_handler())
 
     async def _stop_audio_context_task(self):
+        """Cancel the task that plays audio contexts."""
         if self._audio_context_task:
             await self.cancel_task(self._audio_context_task)
             self._audio_context_task = None
@@ -1899,19 +1879,23 @@ class TTSService(AIService):
     async def _handle_audio_context(self, context_id: str):
         """Push an audio context's items in order until it ends or goes quiet."""
         playback = _AudioContextPlayback()
-        while True:
-            try:
-                item = await self._audio_context_manager.get(
-                    context_id, timeout=self._stop_frame_timeout_s
-                )
-            except TimeoutError:
-                # We didn't get audio, so let's consider this context finished.
-                logger.trace(f"{self} time out on audio context {context_id}")
-                break
-            if item is None:
-                break
+        item = await self._next_audio_context_item(context_id)
+        while item is not None:
             await self._push_audio_context_item(context_id, item, playback)
+            item = await self._next_audio_context_item(context_id)
         await self._end_audio_context(context_id, playback)
+
+    async def _next_audio_context_item(self, context_id: str) -> Frame | _WordTimestampEntry | None:
+        """Wait for the context's next item, or None once it ends or goes quiet."""
+        item = None
+        try:
+            item = await self._audio_context_manager.get(
+                context_id, timeout=self._stop_frame_timeout_s
+            )
+        except TimeoutError:
+            # We didn't get audio, so let's consider this context finished.
+            logger.trace(f"{self} time out on audio context {context_id}")
+        return item
 
     async def _push_audio_context_item(
         self, context_id: str, item: Frame | _WordTimestampEntry, playback: _AudioContextPlayback
@@ -1925,34 +1909,31 @@ class TTSService(AIService):
                 item.context_id,
                 includes_inter_frame_spaces=item.includes_inter_frame_spaces,
             )
-            return
-
-        if isinstance(item, TTSAudioRawFrame):
-            # Set the word-timestamp baseline once, on the first audio chunk.
-            if not playback.received_audio:
-                await self.stop_ttfb_metrics()
-                await self.start_word_timestamps()
-            playback.received_audio = True
-            await self.process_ttfa_metrics(item)
-        elif isinstance(item, TTSStartedFrame):
-            playback.stop_frame_due = self._push_stop_frames
-            # Stamp appropriate append_to_context value onto every
-            # TTSStartedFrame here — the single point both base-class- and
-            # subclass-emitted started frames pass through.
-            tts_context = self._tts_contexts.get(context_id)
-            if tts_context is not None:
-                item.append_to_context = tts_context.append_to_context
-        elif isinstance(item, TTSStoppedFrame):
-            # Checking if we have any remaining spoken slots before pushing the TTSStoppedFrame
-            await self._apply_force_complete(context_id)
-            playback.stop_frame_due = False
-            # Setting the last word timestamp as the TTSStoppedFrame PTS
-            if not item.pts:
-                item.pts = self._word_timestamps.last_pts
-
-        if isinstance(item, ErrorFrame):
+        elif isinstance(item, ErrorFrame):
             await self.push_error_frame(item)
         else:
+            if isinstance(item, TTSAudioRawFrame):
+                # Set the word-timestamp baseline once, on the first audio chunk.
+                if not playback.received_audio:
+                    await self.stop_ttfb_metrics()
+                    await self.start_word_timestamps()
+                playback.received_audio = True
+                await self.process_ttfa_metrics(item)
+            elif isinstance(item, TTSStartedFrame):
+                playback.stop_frame_due = self._push_stop_frames
+                # Stamp appropriate append_to_context value onto every
+                # TTSStartedFrame here — the single point both base-class- and
+                # subclass-emitted started frames pass through.
+                tts_context = self._tts_contexts.get(context_id)
+                if tts_context is not None:
+                    item.append_to_context = tts_context.append_to_context
+            elif isinstance(item, TTSStoppedFrame):
+                # Checking if we have any remaining spoken slots before pushing the TTSStoppedFrame
+                await self._apply_force_complete(context_id)
+                playback.stop_frame_due = False
+                # Setting the last word timestamp as the TTSStoppedFrame PTS
+                if not item.pts:
+                    item.pts = self._word_timestamps.last_pts
             await self.push_frame(item)
 
     async def _end_audio_context(self, context_id: str, playback: _AudioContextPlayback):

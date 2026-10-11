@@ -151,10 +151,10 @@ class AudioContextManager:
             TimeoutError: If no item arrives in time.
         """
         queue = self._contexts[context_id]
-        while True:
+        item = self._KEEPALIVE
+        while item is self._KEEPALIVE:
             item = await asyncio.wait_for(queue.get(), timeout=timeout)
-            if item is not self._KEEPALIVE:
-                return item
+        return item
 
     def remove(self, context_id: str):
         """Remove an audio context and its queued items.
@@ -191,11 +191,10 @@ class AudioContextManager:
             self._remainders[context_id] = _AudioRemainder(
                 audio[aligned_length:], frame.sample_rate, frame.num_channels
             )
-        if not aligned_length:
-            return False
-        frame.audio = audio[:aligned_length]
-        frame.num_frames = aligned_length // block_size
-        return True
+        if aligned_length:
+            frame.audio = audio[:aligned_length]
+            frame.num_frames = aligned_length // block_size
+        return aligned_length > 0
 
     async def _flush_audio_remainder(self, context_id: str):
         """Queue a context's held-back partial sample, zero-padded to a whole one."""
