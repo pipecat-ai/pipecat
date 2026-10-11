@@ -189,6 +189,7 @@ async def test_anthropic_run_inference_with_llm_context():
         system_instruction=None,
         ensure_last_message_is_user=False,
         system_prompt_cache_ttl=None,
+        excluded_thought_signatures=set(),
     )
     service._client.beta.messages.create.assert_called_once_with(
         model="claude-3-sonnet-20240229",
@@ -551,6 +552,7 @@ async def test_anthropic_run_inference_system_instruction_overrides_context():
         system_instruction="New system instruction",
         ensure_last_message_is_user=False,
         system_prompt_cache_ttl=None,
+        excluded_thought_signatures=set(),
     )
 
 

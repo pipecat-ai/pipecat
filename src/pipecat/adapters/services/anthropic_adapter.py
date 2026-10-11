@@ -8,6 +8,7 @@
 
 import copy
 import json
+from collections.abc import Collection
 from dataclasses import dataclass
 from typing import Any, Literal, TypedDict, TypeGuard, TypeVar, cast
 
@@ -56,6 +57,14 @@ def anthropic_is_given(value: _T | AnthropicNotGiven) -> TypeGuard[_T]:
     return not isinstance(value, AnthropicNotGiven)
 
 
+def _thought_signature(message: LLMContextMessage) -> str | None:
+    """Return a thought message's signature, or None for any other message."""
+    if isinstance(message, LLMSpecificMessage) and isinstance(message.message, dict):
+        if message.message.get("type") == "thought":
+            return message.message.get("signature")
+    return None
+
+
 class AnthropicLLMInvocationParams(TypedDict):
     """Context-based parameters for invoking Anthropic's LLM API."""
 
@@ -83,6 +92,7 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
         system_instruction: str | None = None,
         ensure_last_message_is_user: bool = False,
         system_prompt_cache_ttl: AnthropicCacheTTL | None = None,
+        excluded_thought_signatures: Collection[str] = (),
     ) -> AnthropicLLMInvocationParams:
         """Get Anthropic-specific LLM invocation parameters from a universal LLM context.
 
@@ -98,13 +108,19 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
             system_prompt_cache_ttl: Lifetime of the system prompt's cache
                 entry when prompt caching is enabled. ``None`` uses Anthropic's
                 default of 5 minutes.
+            excluded_thought_signatures: Signatures of thoughts to leave out.
 
         Returns:
             Dictionary of parameters for invoking Anthropic's LLM API.
         """
         await self.prepare_file_content(context)
+        messages = [
+            m
+            for m in self.get_messages(context)
+            if _thought_signature(m) not in excluded_thought_signatures
+        ]
         converted = self._from_universal_context_messages(
-            self.get_messages(context), system_instruction=system_instruction
+            messages, system_instruction=system_instruction
         )
         if ensure_last_message_is_user:
             self._ensure_last_message_is_user(converted.messages)
@@ -166,6 +182,17 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
                             source["data"] = "..."
             messages_for_logging.append(msg)
         return messages_for_logging
+
+    def thought_signatures(self, context: LLMContext) -> set[str]:
+        """Get the signatures of the thoughts in a context.
+
+        Args:
+            context: The LLM context containing messages.
+
+        Returns:
+            The signature of every thought that can be sent as a thinking block.
+        """
+        return {s for m in self.get_messages(context) if (s := _thought_signature(m))}
 
     def supports_file_url(self, url: str, mime_type: str) -> bool:
         """Anthropic fetches image and PDF URLs itself; other files must be inlined."""
