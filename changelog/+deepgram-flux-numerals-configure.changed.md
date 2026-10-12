@@ -1,0 +1,1 @@
+- `DeepgramFluxSTTService` and `DeepgramFluxSageMakerSTTService` now apply a `numerals` update over the live connection with a Configure message instead of reconnecting.

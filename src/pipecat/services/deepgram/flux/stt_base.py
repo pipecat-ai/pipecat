@@ -149,8 +149,7 @@ class DeepgramFluxSTTSettings(STTSettings):
         keyterm: Keyterms to boost recognition accuracy for specialized terminology.
         min_confidence: Minimum confidence required to create a TranscriptionFrame.
         numerals: Convert spoken numbers to numeral form (e.g. "twenty three" → "23").
-            Read only from the connection URL, so an update is applied by
-            reconnecting.
+            Can be updated mid-stream via ``STTUpdateSettingsFrame``.
         profanity_filter: Mask recognized profanity in the transcript. Can be
             updated mid-stream via ``STTUpdateSettingsFrame``.
         redact: Remove sensitive numbers from the transcript: ``"numbers"`` or
@@ -190,10 +189,11 @@ class DeepgramFluxSTTBase(EagerEndOfTurnSTTServiceMixin, STTService):
         "eager_eot_threshold",
         "eot_timeout_ms",
         "language_hints",
+        "numerals",
         "profanity_filter",
     }
     # Fields Flux only accepts in the connection URL, so changing them reconnects.
-    _CONNECTION_FIELDS = {"model", "numerals", "redact"}
+    _CONNECTION_FIELDS = {"model", "redact"}
     # Fields applied to results as they arrive, so no connection change is needed.
     _LOCAL_FIELDS = {"min_confidence"}
     _MULTILINGUAL_MODEL = "flux-general-multi"
@@ -579,6 +579,9 @@ class DeepgramFluxSTTBase(EagerEndOfTurnSTTServiceMixin, STTService):
         if "keyterm" in fields:
             message["keyterms"] = self._settings.keyterm
 
+        if "numerals" in fields:
+            message["numerals"] = self._settings.numerals
+
         if "profanity_filter" in fields:
             message["profanity_filter"] = self._settings.profanity_filter
 
@@ -646,8 +649,7 @@ class DeepgramFluxSTTBase(EagerEndOfTurnSTTServiceMixin, STTService):
     async def _update_settings(self, delta: Settings) -> dict[str, Any]:
         """Apply a settings delta.
 
-        Configure-able fields (keyterm, eot_threshold, eager_eot_threshold,
-        eot_timeout_ms, language_hints) are sent to Deepgram via a Configure
+        Fields in ``_CONFIGURE_FIELDS`` are sent to Deepgram via a Configure
         message. Fields Flux only reads from the connection URL trigger a
         reconnect, which waits until the user stops speaking.
         """
