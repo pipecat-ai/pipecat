@@ -179,17 +179,18 @@ def _tag_bot_segments(stt: SegmentedSTTService, starts: "deque[float]") -> None:
 
 
 class _BotSpeechGate(FrameProcessor):
-    """Between the bot-speech STT and the turn aggregator: after an interrupting send, only audio from after it gets through.
+    """Between the bot-speech STT and the turn aggregator: after an interrupting send, only the bot's reply gets through.
 
     The aggregator's VAD reports the bot's speech segments upstream, past this
     gate, to the STT; the gate notes when each began and, as each ends, hands
     the start to the STT's tagging (see :func:`_tag_bot_segments`) and tells
     the stream a segment awaits transcription. An ordinary send waits for the
     bot's speech to be transcribed first, so nothing of it is in flight. A send
-    that talks over the bot cannot wait: a tagged transcript whose segment began
-    before that send is the bot finishing what it was saying, however late it
-    lands, and is dropped here so it cannot pass for the reply or be folded
-    into it.
+    that talks over the bot cannot wait, and the bot goes on speaking until it
+    notices the user: a tagged transcript whose segment began before the bot
+    started speaking again is the bot finishing what it was saying, however
+    late it lands, and is dropped here so it cannot pass for the reply or be
+    folded into it.
 
     Both need a segmented STT, which transcribes one segment at a time. With
     any other STT the gate keeps no account of segments and drops nothing, and
@@ -225,10 +226,11 @@ class _BotSpeechGate(FrameProcessor):
             self._segment_started_at = None
             self._stream.bot_segment_ended()
         elif isinstance(frame, _BotSegmentTranscriptionFrame):
-            interrupted_at = self._stream.interrupting_send_at
-            if interrupted_at is not None and frame.segment_started_at < interrupted_at:
+            talked_over_until = self._stream.talked_over_until
+            if talked_over_until is not None and frame.segment_started_at < talked_over_until:
                 self._trace.log(
-                    f"discard: bot speech from before the interrupting send {frame.text!r}"
+                    f"discard: bot speech from before its reply to the interrupting send "
+                    f"{frame.text!r}"
                 )
                 return
         await self.push_frame(frame, direction)

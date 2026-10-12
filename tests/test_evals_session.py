@@ -589,7 +589,7 @@ class TestInterruptingSendDropsOpenBotTurn(unittest.IsolatedAsyncioTestCase):
 
 
 class TestBotSpeechGate(unittest.IsolatedAsyncioTestCase):
-    """After a send that talked over the bot, its speech from before it is dropped by the time its audio began."""
+    """After a send that talked over the bot, its speech from before its reply is dropped by the time its audio began."""
 
     async def _run(self, gate, frames, direction=FrameDirection.DOWNSTREAM):
         return await run_test(gate, frames_to_send=frames, frames_to_send_direction=direction)
@@ -602,6 +602,8 @@ class TestBotSpeechGate(unittest.IsolatedAsyncioTestCase):
         before = time.monotonic()
         stream.frame_to_event(BotStartedSpeakingFrame())  # the send talks over the bot
         stream.input_sent()
+        stream.frame_to_event(BotStoppedSpeakingFrame())
+        stream.frame_to_event(BotStartedSpeakingFrame())  # the reply
         after = time.monotonic()
         stale = _BotSegmentTranscriptionFrame(
             text="He had seen sunken,", user_id="", timestamp="", segment_started_at=before
@@ -611,6 +613,28 @@ class TestBotSpeechGate(unittest.IsolatedAsyncioTestCase):
             user_id="",
             timestamp="",
             segment_started_at=after,
+        )
+        down, _ = await self._run(gate, [stale, fresh])
+        self.assertEqual([f.text for f in down if isinstance(f, TranscriptionFrame)], [fresh.text])
+
+    async def test_a_segment_the_bot_began_after_the_send_but_before_its_reply_is_dropped(self):
+        # The bot goes on speaking until it notices the user talking over it.
+        stream = _stream(bot_audio=True)
+        gate = _BotSpeechGate(stream, EvalTrace(), deque())
+        stream.frame_to_event(BotStartedSpeakingFrame())
+        stream.input_sent()
+        still_speaking = time.monotonic()
+        stream.frame_to_event(BotStoppedSpeakingFrame())
+        stream.frame_to_event(BotStartedSpeakingFrame())  # the reply
+        reply = time.monotonic()
+        stale = _BotSegmentTranscriptionFrame(
+            text="She swam past", user_id="", timestamp="", segment_started_at=still_speaking
+        )
+        fresh = _BotSegmentTranscriptionFrame(
+            text="Why don't oysters donate to charity?",
+            user_id="",
+            timestamp="",
+            segment_started_at=reply,
         )
         down, _ = await self._run(gate, [stale, fresh])
         self.assertEqual([f.text for f in down if isinstance(f, TranscriptionFrame)], [fresh.text])
