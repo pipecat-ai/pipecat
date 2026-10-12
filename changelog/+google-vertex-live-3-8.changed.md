@@ -1,0 +1,1 @@
+- `GeminiLiveVertexLLMService` now defaults to `google/gemini-3.8-live`, the generally available Live model Vertex AI recommends, where it defaulted to `google/gemini-live-2.5-flash-native-audio`, which Vertex retires on 2026-12-13.

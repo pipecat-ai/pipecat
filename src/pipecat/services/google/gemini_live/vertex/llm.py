@@ -138,7 +138,7 @@ class GeminiLiveVertexLLMService(GeminiLiveLLMService):
 
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
-            model="google/gemini-live-2.5-flash-native-audio",
+            model="google/gemini-3.8-live",
             voice="Charon",
             frequency_penalty=None,
             max_tokens=4096,
