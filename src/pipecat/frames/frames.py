@@ -680,6 +680,29 @@ class TranslationFrame(TextFrame):
 
 
 @dataclass
+class UserBackchannelFrame(DataFrame):
+    """A short acknowledgment the user said while the bot talks, such as "mhm".
+
+    Pushed in place of a transcription, so the bot keeps talking and the
+    acknowledgment stays out of the LLM context.
+
+    Parameters:
+        text: What the user said.
+        user_id: Identifier for the user who spoke.
+        timestamp: When the user said it.
+    """
+
+    text: str
+    user_id: str
+    timestamp: str
+
+    def __str__(self):
+        return (
+            f"{self.name}(user: {self.user_id}, text: [{self.text}], timestamp: {self.timestamp})"
+        )
+
+
+@dataclass
 class LLMContextAssistantTimestampFrame(DataFrame):
     """Timestamp information for assistant messages in LLM context.
 
@@ -1004,6 +1027,24 @@ class TTSSpeakFrame(DataFrame):
                 stacklevel=3,
             )
             self.append_to_context = True
+
+
+@dataclass
+class BotBackchannelFrame(TTSSpeakFrame):
+    """A short acknowledgment for the bot to say while the user talks, such as "Mm-hmm.".
+
+    The TTS service speaks it like any :class:`TTSSpeakFrame`, and its text
+    frames have type ``TextType.BACKCHANNEL``. Interruptions don't cut it off
+    unless ``interruptible`` is set to True on the frame.
+
+    Parameters:
+        append_to_context: Whether the spoken text should be appended to the LLM
+            context. Defaults to False.
+    """
+
+    append_to_context: bool = False
+    text_type: TextType | str = field(default=TextType.BACKCHANNEL, init=False)
+    interruptible: bool = field(default=False, init=False)
 
 
 @dataclass

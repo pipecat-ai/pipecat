@@ -41,6 +41,7 @@ import pytest
 from pipecat.frames.frames import (
     AggregatedTextFrame,
     AggregatedTextProgressFrame,
+    BotBackchannelFrame,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     ControlFrame,
@@ -2552,6 +2553,19 @@ async def test_spoken_text_carries_the_id_of_its_segment(mode):
     spoken = next(f for f in frames_received[0] if isinstance(f, TTSTextFrame))
 
     assert spoken.segment_id == segment.id
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", [TextAggregationMode.SENTENCE, TextAggregationMode.TOKEN])
+async def test_bot_backchannel_frame_is_spoken_as_an_uninterruptible_backchannel(mode):
+    """A BotBackchannelFrame is spoken as backchannel text, kept out of the context."""
+    tts = MockHttpPushTextTTSService(text_aggregation_mode=mode)
+    frames_received = await run_test(tts, frames_to_send=[BotBackchannelFrame("Mm-hmm.")])
+    text_frames = [f for f in frames_received[0] if isinstance(f, AggregatedTextFrame)]
+
+    assert text_frames
+    assert {f.text_type for f in text_frames} == {TextType.BACKCHANNEL}
+    assert not any(f.interruptible or f.append_to_context for f in text_frames)
 
 
 @pytest.mark.asyncio

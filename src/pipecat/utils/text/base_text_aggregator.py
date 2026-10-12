@@ -31,9 +31,11 @@ from pipecat.utils.string import resolve_sentence_tokenizer_language
 class TextType(StrEnum):
     """Built-in text types.
 
-    Text can also have a type of its own, such as ``"code"``.
+    ``BACKCHANNEL`` is a short acknowledgment the bot says while the user talks,
+    such as "Mm-hmm.". Text can also have a type of its own, such as ``"code"``.
     """
 
+    BACKCHANNEL = "backchannel"
     SENTENCE = "sentence"
     TOKEN = "token"
     WORD = "word"
