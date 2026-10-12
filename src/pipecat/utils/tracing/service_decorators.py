@@ -680,7 +680,7 @@ def traced_stt(func: Callable | None = None, *, name: str | None = None) -> Call
                 elif isinstance(frame, TranscriptionFrame) and state["span"] is None:
                     open_span(service, state)
 
-            async def handle_post_push(service, frame, state):
+            async def handle_post_push(service, frame, state, direction):
                 """Attach per-frame attrs; close on finalized; record TTFB from MetricsFrame.
 
                 ``metrics.ttfb`` is read off the ``TTFBMetricsData``
@@ -709,6 +709,16 @@ def traced_stt(func: Callable | None = None, *, name: str | None = None) -> Call
                 span. The ``stt.incomplete=true`` flag is only set if
                 neither a finalized transcript nor a TTFB measurement
                 ever finalized for the span.
+
+                Speech-to-speech services (Gemini Live, OpenAI Realtime)
+                push the user transcript ``UPSTREAM`` to the context
+                aggregator, and only ever push a complete one, so an
+                upstream ``TranscriptionFrame`` closes the span even
+                when ``finalized`` is left False. Without this the span
+                would stay open until the next turn's
+                ``UserStoppedSpeakingFrame``: it would outlive its
+                parent ``turn`` span, and the last turn's span would
+                never be exported.
                 """
                 if isinstance(frame, UserStoppedSpeakingFrame):
                     prev_span = state["span"]
@@ -752,7 +762,7 @@ def traced_stt(func: Callable | None = None, *, name: str | None = None) -> Call
                         span.set_attribute("language", str(frame.language))
                     if frame.user_id:
                         span.set_attribute("user_id", frame.user_id)
-                    if frame.finalized:
+                    if frame.finalized or direction == FrameDirection.UPSTREAM:
                         attach_pending_usage(state)
                         span.end()
                         state["span"] = None
@@ -781,7 +791,7 @@ def traced_stt(func: Callable | None = None, *, name: str | None = None) -> Call
 
                 if getattr(self, "_tracing_enabled", False):
                     try:
-                        await handle_post_push(self, frame, state)
+                        await handle_post_push(self, frame, state, direction)
                     except Exception as e:
                         logging.warning(f"Error in STT post-push tracing: {e}")
 
