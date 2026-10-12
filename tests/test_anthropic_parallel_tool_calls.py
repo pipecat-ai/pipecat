@@ -153,3 +153,28 @@ async def test_stream_cut_by_max_tokens_dispatches_no_calls():
     function_calls = await _dispatched_function_calls(_truncated_tool_use_events())
 
     assert function_calls == []
+
+
+@pytest.mark.parametrize(
+    "delta",
+    [SimpleNamespace(stop_reason=None), SimpleNamespace()],
+    ids=["stop-reason-none", "stop-reason-omitted"],
+)
+@pytest.mark.asyncio
+async def test_interim_message_delta_keeps_pending_tools(delta):
+    """An interim message_delta without a stop reason keeps collected calls.
+
+    The stream contract allows more than one message_delta, and the SDK's
+    optional stop_reason is present-but-None on deltas that don't carry one,
+    so only a delta that actually reports a stop reason may consume the
+    collected calls.
+    """
+    events = _parallel_tool_use_events()
+    events.insert(-2, SimpleNamespace(type="message_delta", delta=delta, usage=_usage()))
+
+    function_calls = await _dispatched_function_calls(events)
+
+    assert [(call.tool_call_id, call.function_name, call.arguments) for call in function_calls] == [
+        ("toolu_01A", "get_weather", {"city": "Paris"}),
+        ("toolu_01B", "get_time", {"city": "Paris"}),
+    ]

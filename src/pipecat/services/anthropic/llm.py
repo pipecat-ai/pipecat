@@ -604,7 +604,7 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
                                 json_accumulators.pop(event.index, ""),
                             )
                         )
-                elif event.type == "message_delta" and hasattr(event.delta, "stop_reason"):
+                elif event.type == "message_delta" and getattr(event.delta, "stop_reason", None):
                     # Only a response that stopped to invoke tools executes the
                     # collected calls; a stream cut short by e.g. max_tokens
                     # leaves incomplete tool input undelivered, like the base.
