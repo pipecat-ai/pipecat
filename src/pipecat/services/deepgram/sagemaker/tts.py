@@ -327,6 +327,8 @@ class DeepgramSageMakerTTSService(TTSService):
                                 logger.trace(f"Received metadata: {parsed}")
                             elif msg_type == "Flushed":
                                 logger.trace(f"Received Flushed: {parsed}")
+                                # The flushed context has no more audio to come.
+                                await self.remove_audio_context(self.get_active_audio_context_id())
                             elif msg_type == "Cleared":
                                 logger.trace(f"Received Cleared: {parsed}")
                             elif msg_type == "Warning":
