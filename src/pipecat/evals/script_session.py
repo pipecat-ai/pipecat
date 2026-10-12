@@ -9,7 +9,7 @@
 Example::
 
     for scenario in EvalScenarioFile.load("scenarios/greeting.yaml"):
-        result = await EvalScriptSession.from_scenario(scenario, "ws://localhost:7860").run()
+        result = await EvalScriptSession.from_scenario(scenario, "ws://localhost:7860/ws").run()
         if result.passed:
             print(scenario.name, "PASS")
         else:
@@ -151,7 +151,7 @@ class EvalScriptSession(EvalSession[EvalScriptResult]):
         Pass ``judge``, ``user_tts``, or ``bot_stt`` to use your own. Then await
         :meth:`run`::
 
-            session = EvalScriptSession.from_scenario(scenario, "ws://localhost:7860")
+            session = EvalScriptSession.from_scenario(scenario, "ws://localhost:7860/ws")
             result = await session.run()
 
         Args:
