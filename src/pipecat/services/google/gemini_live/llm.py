@@ -344,20 +344,20 @@ class InputParams(BaseModel):
         context_window_compression: Context compression settings. Defaults to None.
         thinking: Thinking settings. Defaults to None.
             Note that these settings may require specifying a model that
-            supports them, e.g. "gemini-2.5-flash-native-audio-preview-12-2025".
+            supports them, e.g. "gemini-3.8-live".
             Live thinking models require a ``thinking_level``; when none is
             set, the service applies the lowest level the model accepts.
         enable_affective_dialog: Enable affective dialog, which allows Gemini
             to adapt to expression and tone. Defaults to None.
             Note that these settings may require specifying a model that
-            supports them, e.g. "gemini-2.5-flash-native-audio-preview-12-2025".
+            supports them, e.g. "gemini-3.8-live".
             Also note that this setting may require specifying an API version that
             supports it, e.g. HttpOptions(api_version="v1alpha").
         proactivity: Proactivity settings, which allows Gemini to proactively
             decide how to behave, such as whether to avoid responding to
             content that is not relevant. Defaults to None.
             Note that these settings may require specifying a model that
-            supports them, e.g. "gemini-2.5-flash-native-audio-preview-12-2025".
+            supports them, e.g. "gemini-3.8-live".
             Also note that this setting may require specifying an API version that
             supports it, e.g. HttpOptions(api_version="v1alpha").
         extra: Additional parameters. Defaults to empty dict.
