@@ -32,6 +32,7 @@ FAILURE_KINDS = (
     "unexpected_event",  # an `absent:` expectation saw the event it forbade
     "send_after_timeout",  # a turn's `send_after` event never fired
     "connect_failed",  # never connected to the bot's eval transport
+    "closed_before_ready",  # connected, but the bot closed the connection before bot-ready
     "handshake_timeout",  # connected, but the bot never sent bot-ready
     "judge_no_verdict",  # the judge answered nothing usable about a simulation's goal
     "error",  # the harness itself raised (a sub-pipeline, the judge, ...), not the bot
