@@ -28,7 +28,7 @@ class CachedWord:
     includes_inter_frame_spaces: bool
 
 
-class WordTimestamps:
+class WordTimestampTracker:
     """Turns word times reported from the start of their audio into PTS.
 
     Timing starts when a context's audio starts playing, or after the last
@@ -40,7 +40,7 @@ class WordTimestamps:
     """
 
     def __init__(self):
-        """Initialize the word timestamps."""
+        """Initialize the word timestamp tracker."""
         self._baseline: int | None = None
         self._cached: list[CachedWord] = []
         self.last_pts: int = 0

@@ -1523,7 +1523,7 @@ seq.<span class="fn">process_word</span>(<span class="s">"alpha"</span>, pts=100
         <tr><td class="m">interruption</td><td class="m ch-tts">clear</td><td>The turn is cancelled</td></tr>
       </table>
     </div>
-    <p class="note" style="margin-top:1.1rem"><strong>Two ordering problems stay with the service</strong>, because both concern queues the sequencer cannot see: <code class="inl">push_frame</code> stamps the <code class="inl">will_be_spoken</code> anchor with <code class="inl">max(_word_last_pts, clock.now())</code> so it rides the clock queue alongside its progress frames; and <code class="inl">_push_sequencer_frames</code> routes sequencer output through the audio-context queue when streaming, so a single consumer emits anchors, words and audio in order.</p>
+    <p class="note" style="margin-top:1.1rem"><strong>Two ordering problems stay with the service</strong>, because both concern queues the sequencer cannot see: <code class="inl">push_frame</code> stamps the <code class="inl">will_be_spoken</code> anchor with <code class="inl">max(_word_timestamp_tracker.last_pts, clock.now())</code> so it rides the clock queue alongside its progress frames; and <code class="inl">_push_sequencer_frames</code> routes sequencer output through the audio-context queue when streaming, so a single consumer emits anchors, words and audio in order.</p>
   </div>
 </section>
 

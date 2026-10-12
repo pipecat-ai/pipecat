@@ -2861,3 +2861,53 @@ async def test_untimed_words_come_before_the_stop_frame_of_a_quiet_context():
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class _MockFlushedContextTTSService(TTSService):
+    """Labels audio with its request's context and ends a context when it is flushed."""
+
+    def __init__(self):
+        super().__init__(
+            push_start_frame=True,
+            stop_frame_timeout_s=1.0,
+            pause_frame_processing=True,
+            sample_rate=_SAMPLE_RATE,
+        )
+
+    def can_generate_metrics(self) -> bool:
+        return False
+
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:
+        await self.append_to_audio_context(
+            context_id, TTSAudioRawFrame(_FAKE_AUDIO, _SAMPLE_RATE, 1, context_id=context_id)
+        )
+        yield None
+
+    async def flush_audio(self, context_id: str | None = None):
+        await self.append_to_audio_context(context_id, TTSStoppedFrame(context_id=context_id))
+        await self.remove_audio_context(context_id)
+
+
+@pytest.mark.asyncio
+async def test_speak_frame_in_the_middle_of_a_reply_does_not_hold_the_reply():
+    """The reply goes on after a TTSSpeakFrame, and each context ends with its own stop frame."""
+    down, _ = await asyncio.wait_for(
+        run_test(
+            _MockFlushedContextTTSService(),
+            frames_to_send=[
+                LLMFullResponseStartFrame(),
+                AggregatedTextFrame("Sure, checking.", TextType.SENTENCE),
+                TTSSpeakFrame("Let me check.", append_to_context=False),
+                AggregatedTextFrame("One moment.", TextType.SENTENCE),
+                LLMFullResponseEndFrame(),
+                SleepFrame(sleep=0.2),
+            ],
+        ),
+        timeout=5,
+    )
+    audio = [f for f in down if isinstance(f, TTSAudioRawFrame)]
+    stopped = [f for f in down if isinstance(f, TTSStoppedFrame)]
+    reply_context_id = audio[0].context_id
+    assert [f.context_id == reply_context_id for f in audio] == [True, True, False]
+    assert len({f.context_id for f in stopped}) == 2
+    assert sum(isinstance(f, LLMFullResponseEndFrame) for f in down) == 1

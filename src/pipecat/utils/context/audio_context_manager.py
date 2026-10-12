@@ -79,10 +79,10 @@ class AudioContextManager:
             context_id: The audio context to create.
             interruptible: Whether :meth:`reset` drops the context while it waits to play.
         """
+        self._contexts[context_id] = asyncio.Queue()
         frame = AudioContextFrame(context_id)
         frame.interruptible = interruptible
         await self._queue.put(frame)
-        self._contexts[context_id] = asyncio.Queue()
 
     async def append(self, context_id: str, item: Any):
         """Append an item to an audio context. ``None`` ends the context.
@@ -127,12 +127,15 @@ class AudioContextManager:
     async def next(self) -> Frame | None:
         """Wait for the next audio context or frame to play.
 
+        Contexts removed before they play are skipped.
+
         Returns:
             An :class:`AudioContextFrame`, whose context becomes the playing
             one, another queued frame, or ``None`` when playback ends.
         """
-        item = await self._queue.get()
-        self._queue.task_done()
+        item = await self._next_queued()
+        while isinstance(item, AudioContextFrame) and not self.available(item.context_id):
+            item = await self._next_queued()
         if isinstance(item, AudioContextFrame):
             self.playing_context_id = item.context_id
         return item
@@ -166,13 +169,22 @@ class AudioContextManager:
         self._remainders.pop(context_id, None)
 
     def reset(self):
-        """Drop the contexts and frames waiting to play, except uninterruptible ones."""
+        """Drop the frames and contexts waiting to play, except uninterruptible ones.
+
+        The dropped contexts stay available until they are removed.
+        """
         self._queue.reset()
 
     def clear(self):
         """Remove every audio context."""
         self._contexts.clear()
         self._remainders.clear()
+
+    async def _next_queued(self) -> Frame | None:
+        """Take the next item in play order."""
+        item = await self._queue.get()
+        self._queue.task_done()
+        return item
 
     def _align_audio_frame(self, context_id: str, frame: TTSAudioRawFrame) -> bool:
         """Trim an audio frame to whole samples, carrying a split sample forward.

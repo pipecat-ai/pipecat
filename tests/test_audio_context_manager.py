@@ -126,6 +126,22 @@ async def test_reset_keeps_only_uninterruptible_contexts_and_frames():
 
 
 @pytest.mark.asyncio
+async def test_removed_context_is_skipped():
+    """A context removed before it plays is skipped in play order."""
+    manager = AudioContextManager()
+    await manager.create("a", interruptible=False)
+    await manager.create("b")
+    manager.reset()
+    manager.remove("a")
+    await manager.create("c")
+    await manager.end()
+
+    context = await manager.next()
+    assert isinstance(context, AudioContextFrame) and context.context_id == "c"
+    assert await manager.next() is None
+
+
+@pytest.mark.asyncio
 async def test_remove_forgets_the_context_and_its_split_sample():
     """A removed context is no longer available, and its split sample is gone."""
     manager = AudioContextManager()

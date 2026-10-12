@@ -307,7 +307,7 @@ about queues the sequencer cannot see:
 
 | `TTSService` | What it does                                                                            | Why |
 | --- |-----------------------------------------------------------------------------------------| --- |
-| `push_frame` | Stamps the `will_be_spoken` anchor with `max(_word_last_pts, clock.now())`              | Progress frames carry a PTS and travel the transport's clock queue. |
+| `push_frame` | Stamps the `will_be_spoken` anchor with `max(_word_timestamp_tracker.last_pts, clock.now())`              | Progress frames carry a PTS and travel the transport's clock queue. |
 | `_push_sequencer_frames` | Routes all the frames received from the AggregatedFrameSequencer through the audio-context queue when streaming | Keeps a single consumer emitting anchors, words and audio in order, rather than racing the audio-context task |
 
 ### 3.6 End to end: the code-helper example
