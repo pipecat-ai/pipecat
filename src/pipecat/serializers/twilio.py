@@ -163,6 +163,18 @@ class TwilioFrameSerializer(FrameSerializer):
         """
         self._sample_rate = self._params.sample_rate or setup.audio_in_sample_rate
 
+    def set_stream_sid(self, stream_sid: str):
+        """Address subsequent outbound messages to a new Twilio media stream.
+
+        Twilio issues a fresh stream SID for every ``<Connect><Stream>`` and addresses each
+        outbound media/mark message with it, so this must move with the socket when a stream
+        is reconnected mid-call.
+
+        Args:
+            stream_sid: The replacement Twilio Media Stream SID.
+        """
+        self._stream_sid = stream_sid
+
     async def serialize(self, frame: Frame) -> str | bytes | None:
         """Serializes a Pipecat frame to Twilio WebSocket format.
 
