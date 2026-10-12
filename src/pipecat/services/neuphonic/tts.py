@@ -58,7 +58,7 @@ def language_to_neuphonic_lang_code(language: Language) -> str:
         Language.FR: "fr",
         Language.PT: "pt",
         Language.RU: "ru",
-        Language.HI: "HI",
+        Language.HI: "hi",
         Language.ZH: "zh",
     }
 
