@@ -409,14 +409,13 @@ class NvidiaSageMakerTTSService(InterruptibleTTSService):
                 return
             self._playback_started = True
 
-        await self.push_frame(
-            TTSAudioRawFrame(
-                audio=self._audio_buffer,
-                sample_rate=self.sample_rate,
-                num_channels=1,
-                context_id=context_id,
-            )
+        frame = TTSAudioRawFrame(
+            audio=self._audio_buffer,
+            sample_rate=self.sample_rate,
+            num_channels=1,
+            context_id=context_id,
         )
+        await self.append_to_audio_context(context_id, frame)
         self._audio_buffer = b""
 
     async def _receive_messages(self):
