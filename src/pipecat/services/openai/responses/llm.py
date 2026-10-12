@@ -281,9 +281,11 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
             project: OpenAI project ID.
             default_headers: Additional HTTP headers to include in requests.
             service_tier: Service tier to use: "auto", "default", "flex",
-                "scale", "fast" or "priority". "fast" is OpenAI's low-latency
-                tier, the name that replaced "priority"; both values are
-                accepted.
+                "scale", "fast", "priority" or "ultrafast". "fast" is OpenAI's
+                low-latency tier, the name that replaced "priority"; both values
+                are accepted. "ultrafast" is the access-controlled Ultrafast
+                Processing tier, which shortens the time between output tokens
+                on the models that offer it.
             settings: Runtime-updatable settings.
             retry_timeout_secs: How long an inference may go without producing
                 output before it is abandoned and re-issued, when
