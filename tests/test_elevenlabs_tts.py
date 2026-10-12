@@ -478,6 +478,7 @@ def test_language_code_is_gated_by_model():
     assert elevenlabs_language_code("eleven_v3", "de") == "de"
     # Cantonese is v4-only.
     assert elevenlabs_language_code("eleven_v4_turbo", "yue") == "yue"
+    assert elevenlabs_language_code("eleven_v4", "yue") == "yue"
     assert elevenlabs_language_code("eleven_v3", "yue") is None
 
 

@@ -154,9 +154,9 @@ ELEVENLABS_V3_LANGUAGES: frozenset[str] = frozenset(
     }
 )
 
-#: Languages Eleven v4 Turbo accepts as a ``language_code``. A superset of
+#: Languages the Eleven v4 models accept as a ``language_code``. A superset of
 #: :data:`ELEVENLABS_V3_LANGUAGES`. This is the set the API accepts, which
-#: differs from the list ElevenLabs publishes for the model.
+#: differs from the list ElevenLabs publishes for the models.
 ELEVENLABS_V4_LANGUAGES: frozenset[str] = ELEVENLABS_V3_LANGUAGES | frozenset(
     {
         "ast",
@@ -185,6 +185,7 @@ ELEVENLABS_MODEL_LANGUAGES: dict[str, frozenset[str]] = {
     "eleven_turbo_v2_5": ELEVENLABS_V2_5_LANGUAGES,
     "eleven_v3": ELEVENLABS_V3_LANGUAGES,
     "eleven_v3_conversational": ELEVENLABS_V3_LANGUAGES,
+    "eleven_v4": ELEVENLABS_V4_LANGUAGES,
     "eleven_v4_turbo": ELEVENLABS_V4_LANGUAGES,
 }
 
