@@ -20,6 +20,7 @@ from pipecat.evals.services import (
     DEFAULT_OLLAMA_JUDGE_MODEL,
     DEFAULT_OPENAI_MODEL,
 )
+from pipecat.utils.deprecation import warn_deprecated
 
 _DEFAULT_JUDGE = {
     "service": "ollama",
@@ -66,6 +67,19 @@ def _parse_judge_block(judge: Any, path: Path) -> tuple[bool, dict | None, dict]
             "(STT service to transcribe the bot's audio)"
         )
     return True, transcription, eval_cfg
+
+
+def _parse_trigger_disconnect(data: dict, path: Path) -> bool:
+    """A scenario's ``trigger_disconnect:`` field, warning that it is deprecated when given."""
+    if "trigger_disconnect" not in data:
+        return False
+    warn_deprecated(
+        "`trigger_disconnect:` is deprecated since 1.13.0 and will be removed in 2.0.0. "
+        "No replacement. A bot fires on_client_disconnected whenever the harness disconnects. "
+        f"Found in {path}.",
+        stacklevel=3,
+    )
+    return bool(data["trigger_disconnect"])
 
 
 # ANSI codes for the colored config summary (applied only when color=True). The

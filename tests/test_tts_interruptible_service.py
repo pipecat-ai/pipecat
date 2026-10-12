@@ -26,6 +26,7 @@ signal into _bot_speaking would let a turn that produces zero audio look
 "confirmed", leaving nothing to lift the pause it took.
 """
 
+import asyncio
 import unittest
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
@@ -41,7 +42,10 @@ from pipecat.frames.frames import (
     InterruptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
+    StartFrame,
     TextFrame,
+    TTSAudioRawFrame,
+    TTSSpeakFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
 )
@@ -292,6 +296,77 @@ async def test_reconnect_flags_track_full_turn_via_process_frame_and_push_frame(
         await tts._handle_interruption(InterruptionFrame(), FrameDirection.DOWNSTREAM)
 
     assert calls == [], f"Should not reconnect after a clean, already-finished turn: {calls}"
+
+
+class FakeStreamingInterruptibleTTSService(FakeInterruptibleTTSService):
+    """Streams requests in order on one connection and labels audio with the active context.
+
+    Reconnecting drops the audio still to come (e.g. FishAudioTTSService).
+    """
+
+    def __init__(self):
+        super().__init__(
+            push_stop_frames=True, stop_frame_timeout_s=0.2, pause_frame_processing=True
+        )
+        self._requests: asyncio.Queue[str] = asyncio.Queue()
+        self._stream_task: asyncio.Task | None = None
+
+    async def start(self, frame: StartFrame):
+        await super().start(frame)
+        await self._connect()
+
+    async def _connect(self):
+        await super()._connect()
+        self._requests = asyncio.Queue()
+        self._stream_task = self.create_task(self._stream())
+
+    async def _disconnect(self):
+        await super()._disconnect()
+        if self._stream_task:
+            await self.cancel_task(self._stream_task)
+            self._stream_task = None
+
+    async def _stream(self):
+        while True:
+            await self._requests.get()
+            for _ in range(4):
+                await asyncio.sleep(0.05)
+                context_id = self.get_active_audio_context_id()
+                await self.append_to_audio_context(
+                    context_id,
+                    TTSAudioRawFrame(b"\x00" * 320, _SAMPLE_RATE, 1, context_id=context_id),
+                )
+
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:
+        await self._requests.put(text)
+        yield None
+
+
+@pytest.mark.asyncio
+async def test_interrupted_reply_stays_interruptible_behind_uninterruptible_speech():
+    """Uninterruptible speech sent mid-reply doesn't keep the interrupted reply playing."""
+    speech = TTSSpeakFrame("One moment.", append_to_context=False)
+    speech.interruptible = False
+    down, _ = await asyncio.wait_for(
+        run_test(
+            FakeStreamingInterruptibleTTSService(),
+            frames_to_send=[
+                LLMFullResponseStartFrame(),
+                TextFrame("Hello there. "),
+                TextFrame("How"),
+                speech,
+                SleepFrame(sleep=0.1),
+                BotStartedSpeakingFrame(),
+                SleepFrame(sleep=0.05),
+                InterruptionFrame(),
+                SleepFrame(sleep=0.4),
+            ],
+        ),
+        timeout=5,
+    )
+    audio = [f for f in down if isinstance(f, TTSAudioRawFrame)]
+    assert audio
+    assert all(f.interruptible for f in audio)
 
 
 if __name__ == "__main__":
