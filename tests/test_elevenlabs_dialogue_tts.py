@@ -459,7 +459,7 @@ async def test_dialogue_drained_alignment_does_not_disturb_the_next_turn():
     # The next turn is under way with a fresh clock.
     service._cumulative_time = 0.0
     service._partial_word = ""
-    service._audio_context_manager.clear()
+    service._audio_context_manager.remove("ctx-1")
     await service._audio_context_manager.create("ctx-2")
 
     # Late alignment from the interrupted context arrives.

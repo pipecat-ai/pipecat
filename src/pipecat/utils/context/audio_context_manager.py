@@ -175,11 +175,6 @@ class AudioContextManager:
         """
         self._queue.reset()
 
-    def clear(self):
-        """Remove every audio context."""
-        self._contexts.clear()
-        self._remainders.clear()
-
     async def _next_queued(self) -> Frame | None:
         """Take the next item in play order."""
         item = await self._queue.get()

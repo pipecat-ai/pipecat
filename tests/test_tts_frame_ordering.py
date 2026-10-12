@@ -2911,3 +2911,58 @@ async def test_speak_frame_in_the_middle_of_a_reply_does_not_hold_the_reply():
     assert [f.context_id == reply_context_id for f in audio] == [True, True, False]
     assert len({f.context_id for f in stopped}) == 2
     assert sum(isinstance(f, LLMFullResponseEndFrame) for f in down) == 1
+
+
+@pytest.mark.asyncio
+async def test_speak_frame_after_a_reply_commits_its_text():
+    """A TTSSpeakFrame after an LLM reply pushes its own assistant aggregation."""
+    down, _ = await asyncio.wait_for(
+        run_test(
+            _MockFlushedContextTTSService(),
+            frames_to_send=[
+                LLMFullResponseStartFrame(),
+                AggregatedTextFrame("Hello there.", TextType.SENTENCE),
+                LLMFullResponseEndFrame(),
+                SleepFrame(sleep=0.1),
+                TTSSpeakFrame("Welcome."),
+                SleepFrame(sleep=0.2),
+            ],
+        ),
+        timeout=5,
+    )
+    order = [
+        type(f)
+        for f in down
+        if isinstance(f, (TTSTextFrame, LLMFullResponseEndFrame, LLMAssistantPushAggregationFrame))
+    ]
+    assert order == [
+        TTSTextFrame,
+        LLMFullResponseEndFrame,
+        TTSTextFrame,
+        LLMAssistantPushAggregationFrame,
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reuse_context_id_within_turn", [True, False])
+async def test_llm_response_end_follows_the_last_word(reuse_context_id_within_turn):
+    """With word timestamps, the turn's own end frame comes after its words, at their PTS."""
+    end_frame = LLMFullResponseEndFrame()
+    down, _ = await asyncio.wait_for(
+        run_test(
+            _MockWordTimestampWSTTSService(
+                reuse_context_id_within_turn=reuse_context_id_within_turn
+            ),
+            frames_to_send=[
+                LLMFullResponseStartFrame(),
+                TextFrame("Hello there."),
+                end_frame,
+                SleepFrame(sleep=0.2),
+            ],
+        ),
+        timeout=5,
+    )
+    frames = [f for f in down if isinstance(f, (TTSTextFrame, LLMFullResponseEndFrame))]
+    assert [type(f) for f in frames] == [TTSTextFrame, TTSTextFrame, LLMFullResponseEndFrame]
+    assert frames[-1] is end_frame
+    assert end_frame.pts == frames[-2].pts
