@@ -1,0 +1,2 @@
+- Mark completed OpenAI realtime transcriptions as finalized so local turn detection need not wait for further STT results.
+- Accept backend-specific TTS voice names on custom OpenAI-compatible endpoints while retaining voice validation for the OpenAI endpoint.
