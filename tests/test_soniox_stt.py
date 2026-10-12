@@ -618,6 +618,20 @@ async def test_language_update_reconnects_with_that_language_as_the_hint(monkeyp
 
 
 @pytest.mark.asyncio
+async def test_language_update_leaves_the_callers_delta_unchanged(monkeypatch):
+    service = SonioxSTTService(
+        api_key="test-key", settings=SonioxSTTService.Settings(language_hints=[Language.FI])
+    )
+    monkeypatch.setattr(service, "_request_reconnect", AsyncMock())
+    delta = STTSettings(language=Language.SV)
+
+    await service._update_settings(delta)
+
+    assert delta.language == Language.SV
+    assert not hasattr(delta, "language_hints")
+
+
+@pytest.mark.asyncio
 async def test_constructor_language_connects_with_that_language_as_the_hint(monkeypatch):
     websocket = _FakeWebsocket([])
 

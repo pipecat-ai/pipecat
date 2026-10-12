@@ -482,6 +482,7 @@ class SonioxSTTService(WebsocketSTTService):
         Returns:
             Dict mapping changed field names to their previous values.
         """
+        delta = replace(delta)
         _move_language_to_hints(delta)
         changed = await super()._update_settings(delta)
 
