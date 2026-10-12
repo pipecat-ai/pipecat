@@ -55,13 +55,15 @@ class _StubSTTService:
 
 @unittest.skipUnless(HAS_OPENTELEMETRY, "opentelemetry not installed")
 class TestTracedSTTSpanClose(unittest.IsolatedAsyncioTestCase):
-    """The ``stt`` span must close on an upstream transcript, finalized or not.
+    """When ``traced_stt`` closes the ``stt`` span.
 
-    Speech-to-speech services (Gemini Live, OpenAI Realtime) push the user
-    transcript upstream with ``finalized`` left at its default of False.
-    Before this was handled, the span only closed on the next
-    ``UserStoppedSpeakingFrame``, so it outlived its parent ``turn`` span and
-    the last turn's span was never exported.
+    A ``TranscriptionFrame`` is complete, and closes the span, when it is
+    pushed with ``finalized=True`` or pushed upstream (speech-to-speech
+    services such as Gemini Live and OpenAI Realtime push only complete
+    transcripts upstream, with ``finalized`` left False). A downstream
+    non-finalized transcript keeps the span open until a finalized one or
+    the ``UserStoppedSpeakingFrame`` fallback, which tags the span
+    ``stt.incomplete``.
     """
 
     @classmethod
@@ -94,6 +96,7 @@ class TestTracedSTTSpanClose(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(spans), 1)
         self.assertEqual(spans[0].name, "stt")
         self.assertEqual(spans[0].attributes["transcript"], "hello there")
+        self.assertTrue(spans[0].attributes["is_final"])
         self.assertNotIn("stt.incomplete", spans[0].attributes)
 
     async def test_downstream_transcript_without_finalized_keeps_span_open(self):
@@ -104,13 +107,13 @@ class TestTracedSTTSpanClose(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(service._stt_span_state["span"])
         self.assertEqual(len(self._exporter.get_finished_spans()), 0)
 
-        # It still closes on the finalized transcript, as before.
         await service.push_frame(self._transcript("hello there", finalized=True))
 
         self.assertIsNone(service._stt_span_state["span"])
         spans = self._exporter.get_finished_spans()
         self.assertEqual(len(spans), 1)
         self.assertEqual(spans[0].attributes["transcript"], "hello there")
+        self.assertTrue(spans[0].attributes["is_final"])
         self.assertNotIn("stt.incomplete", spans[0].attributes)
 
     async def test_downstream_transcript_without_finalized_closes_on_user_stop(self):
@@ -122,4 +125,5 @@ class TestTracedSTTSpanClose(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(service._stt_span_state["span"])
         spans = self._exporter.get_finished_spans()
         self.assertEqual(len(spans), 1)
+        self.assertFalse(spans[0].attributes["is_final"])
         self.assertTrue(spans[0].attributes["stt.incomplete"])
