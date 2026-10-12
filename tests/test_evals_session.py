@@ -447,6 +447,26 @@ class TestSendWaitsForTheBot(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(TimeoutError):
             await stream.next_event("response", time.monotonic() + 0.05)
 
+    async def test_an_observing_turn_lets_the_previous_reply_finish_transcribing(self):
+        # The bot has finished turn 1's reply when turn 2, which only listens
+        # for the bot's next move, begins, but the reply's last sentence is
+        # still being transcribed: it is not turn 2's response.
+        session = _session(bot_audio=True)
+        driver, stream = session._driver, session._stream
+        stream.bot_turn_started()
+        stream.bot_segment_ended()
+
+        async def transcribe_soon():
+            await asyncio.sleep(0.1)
+            stream.bot_segment_transcribed()
+            await stream.bot_turn_stopped("Spring in Japan is gorgeous.")
+
+        task = asyncio.create_task(transcribe_soon())
+        await driver._await_previous_reply()
+        await task
+        with self.assertRaises(TimeoutError):
+            await stream.next_event("response", time.monotonic() + 0.05)
+
     async def test_a_quiet_bot_holds_nothing_up(self):
         session = _session()
         started = asyncio.get_running_loop().time()
