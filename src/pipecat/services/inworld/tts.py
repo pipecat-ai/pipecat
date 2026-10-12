@@ -769,11 +769,6 @@ class InworldTTSService(WebsocketTTSService):
         # Track the end time of the last word in the current generation
         self._generation_end_time = 0.0
 
-        # Context IDs already sent to the server via _send_context, used to
-        # make _send_context idempotent so on_turn_context_created can eagerly
-        # open contexts without causing duplicate creates in run_tts.
-        self._sent_context_ids: set[str] = set()
-
         # Fallback tracking for when timestamps are not received. Without
         # timestamps, interruptions commit the full text rather than only the
         # portion that was spoken.
@@ -848,17 +843,6 @@ class InworldTTSService(WebsocketTTSService):
         self._cumulative_time = 0.0
         self._generation_end_time = 0.0
 
-    async def on_turn_context_created(self, context_id: str):
-        """Eagerly open the context on the server when a new turn starts.
-
-        This overlaps server-side context creation with sentence aggregation
-        time, so the context is ready by the time text arrives in run_tts.
-        """
-        try:
-            await self._send_context(context_id)
-        except Exception as e:
-            logger.warning(f"{self}: Failed to pre-open context: {e}")
-
     def _calculate_word_times(self, timestamp_info: dict[str, Any]) -> list[tuple[str, float]]:
         """Calculate word timestamps from Inworld WebSocket API response.
 
@@ -906,7 +890,6 @@ class InworldTTSService(WebsocketTTSService):
                 await self._send_close_context(context_id)
             except Exception as e:
                 await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
-        self._sent_context_ids.discard(context_id)
 
     async def on_turn_context_completed(self):
         """Close the server-side context at end of turn.
@@ -915,8 +898,10 @@ class InworldTTSService(WebsocketTTSService):
         last audio byte.
         """
         ctx_id = self._turn_context_id
+        opened = ctx_id is not None and self.audio_context_available(ctx_id)
         await super().on_turn_context_completed()
-        await self._close_context(ctx_id)
+        if opened:
+            await self._close_context(ctx_id)
 
     async def on_audio_context_interrupted(self, context_id: str):
         """Callback invoked when an audio context has been interrupted."""
@@ -1050,7 +1035,6 @@ class InworldTTSService(WebsocketTTSService):
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
             self._websocket = None
-            self._sent_context_ids.clear()
             self._reset_generation_timing()
             self._context_texts.clear()
             self._contexts_with_timestamps.clear()
@@ -1173,16 +1157,9 @@ class InworldTTSService(WebsocketTTSService):
     async def _send_context(self, context_id: str):
         """Send a context to the Inworld WebSocket TTS service.
 
-        Idempotent: skips the send if this context was already opened on the
-        server (e.g., eagerly via on_turn_context_created).
-
         Args:
             context_id: The context ID.
         """
-        if context_id in self._sent_context_ids:
-            return
-        self._sent_context_ids.add(context_id)
-
         audio_config = {
             "audioEncoding": self._audio_encoding,
             "sampleRateHertz": self._audio_sample_rate,
