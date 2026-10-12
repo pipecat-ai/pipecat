@@ -14,6 +14,8 @@ from pipecat.frames.frames import (
     InputAudioRawFrame,
     InterruptionFrame,
     OutputAudioRawFrame,
+    OutputTransportMessageFrame,
+    TTSStartedFrame,
 )
 from pipecat.serializers.jambonz import JambonzFrameSerializer
 from tests.frame_processor_helpers import frame_processor_setup
@@ -106,6 +108,30 @@ class TestJambonzPreambleHandling(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(serializer.jambonz_sample_rate, 8000)
 
+    async def test_a_text_frame_that_is_not_an_object_is_ignored(self):
+        serializer = JambonzFrameSerializer()
+        await serializer.setup(frame_processor_setup(audio_in_sample_rate=PIPELINE_RATE))
+
+        self.assertIsNone(await serializer.deserialize("[1, 2, 3]"))
+        self.assertIsNone(serializer.jambonz_sample_rate)
+
+    async def test_the_whole_preamble_is_available(self):
+        serializer = JambonzFrameSerializer()
+        await serializer.setup(frame_processor_setup(audio_in_sample_rate=PIPELINE_RATE))
+        await serializer.deserialize(PREAMBLE)
+
+        self.assertEqual(serializer.call_meta["sipReason"], "OK")
+        # A copy, so a caller cannot edit the serializer's own record of the call.
+        serializer.call_meta["sipReason"] = "edited"
+        self.assertEqual(serializer.call_meta["sipReason"], "OK")
+
+    async def test_outgoing_audio_before_the_preamble_is_dropped(self):
+        serializer = JambonzFrameSerializer()
+        await serializer.setup(frame_processor_setup(audio_in_sample_rate=PIPELINE_RATE))
+
+        frame = OutputAudioRawFrame(audio=audio(960), sample_rate=PIPELINE_RATE, num_channels=1)
+        self.assertIsNone(await serializer.serialize(frame))
+
 
 class TestJambonzSerializeWireFormat(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
@@ -133,6 +159,23 @@ class TestJambonzSerializeWireFormat(unittest.IsolatedAsyncioTestCase):
     async def test_interruption_becomes_kill_audio(self):
         message = json.loads(await self.serializer.serialize(InterruptionFrame()))
         self.assertEqual(message, {"type": "killAudio"})
+
+    async def test_transport_messages_are_forwarded_as_json(self):
+        frame = OutputTransportMessageFrame(message={"type": "custom", "value": 1})
+
+        self.assertEqual(
+            json.loads(await self.serializer.serialize(frame)),
+            {"type": "custom", "value": 1},
+        )
+
+    async def test_rtvi_messages_are_not_forwarded(self):
+        """RTVI is a browser protocol; jambonz would read it as a command."""
+        frame = OutputTransportMessageFrame(message={"label": "rtvi-ai", "type": "bot-ready"})
+
+        self.assertIsNone(await self.serializer.serialize(frame))
+
+    async def test_an_unhandled_frame_produces_nothing(self):
+        self.assertIsNone(await self.serializer.serialize(TTSStartedFrame()))
 
     async def test_audio_is_withheld_briefly_after_kill_audio(self):
         """Message ordering on the socket is not guaranteed, so audio written
