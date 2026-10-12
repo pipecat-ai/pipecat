@@ -31,6 +31,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.settings import STTSettings
+from pipecat.services.soniox.errors import classify_error_code
 from pipecat.services.stt_latency import SONIOX_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -170,6 +171,7 @@ def language_to_soniox_language(language: Language) -> str:
         Language.ML: "ml",
         Language.MR: "mr",
         Language.MS: "ms",
+        Language.NB: "no",
         Language.NL: "nl",
         Language.NO: "no",
         Language.PA: "pa",
@@ -611,7 +613,10 @@ class SonioxSTTService(WebsocketSTTService):
 
             logger.debug("Connecting to Soniox STT")
 
-            self._websocket = await self._websocket_connect(self._url)
+            self._websocket = await self._websocket_connect(
+                self._url,
+                additional_headers={"Authorization": f"Bearer {self._api_key}"},
+            )
 
             if not self._websocket:
                 await self.push_error(error_msg=f"Unable to connect to Soniox API at {self._url}")
@@ -629,7 +634,6 @@ class SonioxSTTService(WebsocketSTTService):
 
             # Send the initial configuration message.
             config = {
-                "api_key": self._api_key,
                 "model": s.model,
                 "audio_format": self._audio_format,
                 "num_channels": self._num_channels,
@@ -773,7 +777,8 @@ class SonioxSTTService(WebsocketSTTService):
                     # in the buffer) and close any open user turn.
                     await finalize_turn()
                     await self.push_error(
-                        error_msg=f"Error: {error_code} (_receive_messages) - {error_message}"
+                        error_msg=f"Error: {error_code} (_receive_messages) - {error_message}",
+                        category=classify_error_code(error_code),
                     )
 
                 finished = content.get("finished")

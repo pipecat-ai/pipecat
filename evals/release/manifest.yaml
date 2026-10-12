@@ -12,7 +12,7 @@ scenarios_dir: scenarios         # scenario names resolve to <dir>/<name>.yaml
 concurrency: 4
 runs_dir: test-runs              # logs + recordings -> test-runs/<timestamp>/
 record: true                     # set true (or pass -a) to record conversation audio
-spawn: "{python} {bot} -t eval --port {port}"
+spawn: "{python} {bot} --port {port}"
 
 suite:
   #

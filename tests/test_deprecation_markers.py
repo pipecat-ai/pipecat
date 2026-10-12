@@ -22,6 +22,7 @@ import json
 import subprocess
 import sys
 import warnings
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -46,7 +47,7 @@ from pipecat.pipeline.runner import PipelineRunner  # noqa: E402
 from pipecat.pipeline.worker import PipelineTask, PipelineTaskParams  # noqa: E402
 from pipecat.processors.filters.identity_filter import IdentityFilter  # noqa: E402
 from pipecat.utils.asyncio.task_manager import TaskManager  # noqa: E402
-from pipecat.utils.deprecation import warn_deprecated_read  # noqa: E402
+from pipecat.utils.deprecation import renamed_init_field, warn_deprecated_read  # noqa: E402
 
 SRC_ROOT = Path(__file__).parent.parent / "src" / "pipecat"
 _SCAN = dscan.scan_source(SRC_ROOT)
@@ -318,6 +319,38 @@ def test_intercepted_read_warns_through_an_ignore_filter():
     )
     assert result.returncode == 0, result.stderr
     assert "`StartFrame.enable_metrics` is deprecated" in result.stderr
+
+
+# --- Renamed dataclass fields (renamed_init_field) ----------------------------
+#
+# A class's constructor is wrapped the first time the class is built, so each
+# test builds a hierarchy of its own that no other test has built before.
+
+
+@renamed_init_field(
+    "old",
+    "new",
+    "`_RenamedBase.old` is deprecated since 1.0.0 and will be removed in 2.0.0. Use `new` instead.",
+)
+@dataclass
+class _RenamedBase:
+    new: int
+
+
+@dataclass
+class _RenamedChild(_RenamedBase):
+    extra: int = 0
+
+
+class _PassesOldNameToSuper(_RenamedChild):
+    def __init__(self):
+        super().__init__(old=1)
+
+
+def test_renamed_field_reaches_a_constructor_that_passes_it_to_super():
+    with pytest.warns(DeprecationWarning, match="`_RenamedBase.old`"):
+        frame = _PassesOldNameToSuper()
+    assert frame.new == 1
 
 
 # --- Removal history (removals.json) ------------------------------------------

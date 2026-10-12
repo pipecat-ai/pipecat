@@ -15,12 +15,13 @@ import pytest
 from pipecat.classifiers.base_classifier import (
     ChoiceQuestion,
     ClassifierError,
+    ClassifierImage,
     ScoreQuestion,
     YesNoQuestion,
     YesNoResult,
 )
-from pipecat.classifiers.jev.classifier import JEV_MAX_CHOICE_OPTIONS, JevClassifier
-from pipecat.classifiers.jev.client import JevClient
+from pipecat.classifiers.typesafe.jev.classifier import JEV_MAX_CHOICE_OPTIONS, JevClassifier
+from pipecat.classifiers.typesafe.jev.client import JevClient
 from pipecat.metrics.metrics import LLMUsageMetricsData, ProcessingMetricsData
 from pipecat.utils.asyncio.task_manager import TaskManager
 
@@ -86,7 +87,7 @@ class TestJevClient:
         async def no_sleep(seconds):
             waits.append(seconds)
 
-        monkeypatch.setattr("pipecat.classifiers.jev.client.asyncio.sleep", no_sleep)
+        monkeypatch.setattr("pipecat.classifiers.typesafe.jev.client.asyncio.sleep", no_sleep)
 
         def handler(request: httpx.Request) -> httpx.Response:
             status = next(statuses, None)
@@ -108,7 +109,7 @@ class TestJevClient:
         async def no_sleep(seconds):
             pass
 
-        monkeypatch.setattr("pipecat.classifiers.jev.client.asyncio.sleep", no_sleep)
+        monkeypatch.setattr("pipecat.classifiers.typesafe.jev.client.asyncio.sleep", no_sleep)
         client = _client(lambda request: httpx.Response(429), max_retries=2)
 
         with pytest.raises(ClassifierError, match="busy"):
@@ -365,6 +366,25 @@ class TestJevClassifier:
 
         with pytest.raises(ClassifierError, match="noul"):
             (await classifier.yes_no("a", {"answer": YesNoQuestion(instructions="?")}))["answer"]
+        await classifier.client.close()
+
+    @pytest.mark.asyncio
+    async def test_images_are_refused_before_any_request(self):
+        sent = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            sent.append(request)
+            return _reply({"type": "noul", "noul": 0.5})
+
+        classifier = JevClassifier(client=_client(handler))
+        image = ClassifierImage(data=b"jpeg", content_type="image/jpeg")
+
+        assert not classifier.supports_images
+        with pytest.raises(ClassifierError, match="cannot see images"):
+            await classifier.yes_no(
+                "a frame", {"answer": YesNoQuestion(instructions="?")}, images=[image]
+            )
+        assert sent == []
         await classifier.client.close()
 
     def test_needs_a_key_or_a_client(self):

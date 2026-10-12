@@ -35,6 +35,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.settings import TTSSettings
+from pipecat.services.soniox.errors import classify_error_code
 from pipecat.services.tts_service import TextAggregationMode, WebsocketTTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -93,6 +94,7 @@ def language_to_soniox_tts_language(language: Language) -> str | None:
         Language.ML: "ml",
         Language.MR: "mr",
         Language.MS: "ms",
+        Language.NB: "no",
         Language.NL: "nl",
         Language.NO: "no",
         Language.PA: "pa",
@@ -431,9 +433,10 @@ class SonioxTTSService(WebsocketTTSService):
             if self._websocket and self._websocket.state is State.OPEN:
                 return
             logger.debug("Connecting to Soniox TTS")
-            # Soniox expects the api_key in the per-stream config message, not
-            # as a header or query param, so the connect call is bare.
-            self._websocket = await self._websocket_connect(self._url)
+            self._websocket = await self._websocket_connect(
+                self._url,
+                additional_headers={"Authorization": f"Bearer {self._api_key}"},
+            )
             await self._call_event_handler("on_connected")
         except Exception as e:
             self._websocket = None
@@ -463,7 +466,6 @@ class SonioxTTSService(WebsocketTTSService):
         """Build the per-stream configuration message for a new stream_id."""
         s = self._settings
         config: dict[str, Any] = {
-            "api_key": self._api_key,
             "stream_id": context_id,
             "model": s.model,
             "voice": s.voice,
@@ -587,7 +589,8 @@ class SonioxTTSService(WebsocketTTSService):
                     error_msg=(
                         f"Soniox TTS error {error_code} {error_type} "
                         f"(stream {stream_id}): {error_message}"
-                    )
+                    ),
+                    category=classify_error_code(error_code),
                 )
                 if stream_id and self.audio_context_available(stream_id):
                     await self.append_to_audio_context(
@@ -661,11 +664,11 @@ class SonioxTTSService(WebsocketTTSService):
                 await self._get_websocket().send(json.dumps(text_msg))
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
-                yield ErrorFrame(error=f"Unknown error occurred: {e}")
+                yield ErrorFrame(error=f"Unknown error occurred: {e}", exception=e)
                 yield TTSStoppedFrame(context_id=context_id)
                 await self._disconnect()
                 await self._connect()
                 return
             yield None
         except Exception as e:
-            yield ErrorFrame(error=f"Unknown error occurred: {e}")
+            yield ErrorFrame(error=f"Unknown error occurred: {e}", exception=e)

@@ -236,7 +236,7 @@ class _FakeClassifier(BaseClassifier):
         super().__init__()
         self.config = config
 
-    async def _ask(self, state, questions):
+    async def _ask(self, state, questions, images=()):
         raise NotImplementedError
 
 

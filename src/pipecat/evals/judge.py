@@ -21,8 +21,8 @@ was offered. Two classifiers come with Pipecat:
 - :class:`~pipecat.classifiers.llm.classifier.LLMClassifier`, over any
   Pipecat LLM service with ``run_inference()``: OpenAI, Ollama, Together,
   and others. This is the default.
-- :class:`~pipecat.classifiers.jev.classifier.JevClassifier`, over TypeSafe's
-  Jev, a hosted classification model. Jev answers in a few hundred
+- :class:`~pipecat.classifiers.typesafe.jev.classifier.JevClassifier`, over
+  TypeSafe's Jev, a hosted classification model. Jev answers in a few hundred
   milliseconds, costs little, and its probabilities are calibrated, so a
   scenario can tell a sure verdict from a close call.
 

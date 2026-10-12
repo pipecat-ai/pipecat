@@ -25,7 +25,7 @@ from pipecat.utils.context.aggregated_frame_sequencer import (
     _ParallelSentenceAggregator,
 )
 from pipecat.utils.string import match_endofsentence, resolve_sentence_tokenizer_language
-from pipecat.utils.text.base_text_aggregator import AggregationType
+from pipecat.utils.text.base_text_aggregator import TextType
 from pipecat.utils.text.simple_text_aggregator import SimpleTextAggregator
 
 
@@ -185,7 +185,7 @@ async def test_streaming_context_retains_language_after_another_context_starts()
 
     async def feed(context, text, language):
         await sequencer.register_spoken(
-            AggregatedTextFrame(text, AggregationType.TOKEN),
+            AggregatedTextFrame(text, TextType.TOKEN),
             context,
             text,
             append_to_context=True,
@@ -206,7 +206,7 @@ async def test_streaming_context_language_updates_with_incoming_text():
     sequencer = AggregatedFrameSequencer(streaming=True)
     for text, language in [("Das ist bzw.", "de"), (" wichtig. Weiter", "en")]:
         await sequencer.register_spoken(
-            AggregatedTextFrame(text, AggregationType.TOKEN),
+            AggregatedTextFrame(text, TextType.TOKEN),
             "context",
             text,
             append_to_context=True,

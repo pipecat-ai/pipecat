@@ -16,6 +16,7 @@ import weakref
 from typing import Any
 
 from attr import dataclass
+from loguru import logger
 
 from pipecat.frames.frames import Frame
 from pipecat.observers.base_observer import (
@@ -117,8 +118,13 @@ class WorkerObserver(BaseObserver):
             proxy = self._proxies[observer]
             # Remove the proxy so it doesn't get called anymore.
             del self._proxies[observer]
-            # Cancel the proxy worker right away.
-            await self.cancel_task(proxy.task)
+            # Cancel the proxy worker right away. An observer removing itself
+            # runs on that worker, which can't be cancelled from inside, so
+            # the worker ends itself instead.
+            if proxy.task is not asyncio.current_task():
+                await self.cancel_task(proxy.task)
+            # Shutdown only cleans up the observers in _proxies.
+            await observer.cleanup()
 
         # Remove the observer from the list.
         if observer in self._observers:
@@ -140,7 +146,11 @@ class WorkerObserver(BaseObserver):
             await observer.setup(task_manager)
 
     async def cleanup(self):
-        """Cleanup all proxy observers."""
+        """Cleanup all proxy observers.
+
+        Tearing down is best effort: an observer that raises is logged and the
+        rest are still cleaned up.
+        """
         await super().cleanup()
 
         if not self._proxies:
@@ -150,7 +160,10 @@ class WorkerObserver(BaseObserver):
             await self.cancel_task(proxy.task)
 
         for observer in self._proxies:
-            await observer.cleanup()
+            try:
+                await observer.cleanup()
+            except Exception as e:
+                logger.error(f"Error cleaning up {observer}: {e}")
 
     async def on_pipeline_started(self):
         """Forward pipeline started signal to all managed observers."""
@@ -246,3 +259,8 @@ class WorkerObserver(BaseObserver):
                 await observer.on_startup_warmup(data)
 
             queue.task_done()
+
+            # Stop once the observer has removed itself (see remove_observer()).
+            proxy = self._proxies.get(observer) if self._proxies else None
+            if not proxy or proxy.queue is not queue:
+                break

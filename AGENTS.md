@@ -27,8 +27,8 @@ uv run pytest tests/test_name.py::test_function_name
 # Preview changelog
 uv run towncrier build --draft --version Unreleased
 
-# Run a behavioral eval scenario against a running bot (bot started with `-t eval`)
-pipecat eval run scenarios/<name>.yaml --bot-url ws://localhost:7860
+# Run a behavioral eval scenario against a running bot (started with `python bot.py`)
+pipecat eval run scenarios/<name>.yaml --bot-url ws://localhost:7860/ws
 
 # Run the full release-eval suite (spawns bots from a manifest, runs scenarios in parallel)
 pipecat eval suite evals/release/manifest.yaml -p <bot-pattern> -s <scenario>
@@ -228,8 +228,8 @@ There are two kinds of scenario, told apart by the scenario's keys:
 
 To confirm a behavior while developing:
 
-1. Run the bot with its eval transport: `python bot.py -t eval --port 7860`
-2. Run a scenario of either kind against it: `pipecat eval run scenarios/<name>.yaml --bot-url ws://localhost:7860 -v`
+1. Run the bot with the dev runner: `python bot.py --port 7860`
+2. Run a scenario of either kind against it: `pipecat eval run scenarios/<name>.yaml --bot-url ws://localhost:7860/ws -v`
 
 For many bots at once, `pipecat eval suite <manifest.yaml>` spawns each bot and runs its scenarios in parallel; a manifest lists both kinds under `scenarios:`, and `-k simulation` runs only the simulations. A manifest entry may also carry a `runner_body:` (the `/start` body the bot would normally get, as a `path:` to a file or inline `data:`), a `concurrency:` cap of its own, and a `name:` that labels its runs when several entries share one bot. Reusable scenarios and the pre-release validation manifest live in `evals/release/` — see its `README.md` for the full workflow (prerequisites: `TYPESAFE_API_KEY` exported for the Jev judge, a local Ollama `gemma4:12b` for the judge's explainer and the simulated caller, plus Kokoro/Moonshine for audio mode) and the `pipecat.evals.script` and `pipecat.evals.simulation` module docstrings for the two file formats.
 

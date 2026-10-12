@@ -6,7 +6,11 @@
 
 """Unit tests for LLMContext core functionality."""
 
+import base64
+import io
 import unittest
+
+from PIL import Image
 
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter
 from pipecat.processors.aggregators.llm_context import (
@@ -429,6 +433,27 @@ class TestCreateFileMessage(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(messages), 1)
         self.assertEqual(messages[0]["role"], "user")
         self.assertEqual(messages[0]["content"][0]["file"]["filename"], "test.pdf")
+
+
+class TestCreateImageMessage(unittest.IsolatedAsyncioTestCase):
+    """Tests for LLMContext.create_image_message."""
+
+    async def test_encoded_image_keeps_its_bytes_and_type(self):
+        png = b"\x89PNG fake"
+        msg = await LLMContext.create_image_message(format="image/png", size=(2, 2), image=png)
+        url = msg["content"][0]["image_url"]["url"]
+        self.assertEqual(url, "data:image/png;base64," + base64.b64encode(png).decode())
+
+    async def test_pixels_with_alpha_are_encoded_as_a_jpeg(self):
+        pixels = Image.new("RGBA", (4, 4), (255, 0, 0, 128))
+        msg = await LLMContext.create_image_message(
+            format="RGBA", size=(4, 4), image=pixels.tobytes()
+        )
+        url = msg["content"][0]["image_url"]["url"]
+        prefix = "data:image/jpeg;base64,"
+        self.assertTrue(url.startswith(prefix))
+        decoded = Image.open(io.BytesIO(base64.b64decode(url[len(prefix) :])))
+        self.assertEqual((decoded.format, decoded.mode, decoded.size), ("JPEG", "RGB", (4, 4)))
 
 
 class TestRemoveInvalidFileMessage(unittest.IsolatedAsyncioTestCase):

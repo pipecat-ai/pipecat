@@ -311,6 +311,37 @@ class TestPipelineWorker(unittest.IsolatedAsyncioTestCase):
         assert frame_count_1 == 1
         assert frame_count_2 == 1
 
+    async def test_task_observer_can_remove_itself(self):
+        frame_count = 0
+        proxy_task: asyncio.Task | None = None
+        removed = asyncio.Event()
+
+        class SelfRemovingObserver(BaseObserver):
+            async def on_push_frame(self, data: FramePushed):
+                nonlocal frame_count, proxy_task
+
+                if isinstance(data.source, IdentityFilter) and isinstance(data.frame, TextFrame):
+                    frame_count += 1
+                    proxy_task = asyncio.current_task()
+                    await worker.remove_observer(self)
+                    removed.set()
+
+        identity = IdentityFilter()
+        pipeline = Pipeline([identity])
+        worker = PipelineWorker(pipeline)
+        worker.add_observer(SelfRemovingObserver())
+
+        async def push_frames():
+            await worker.queue_frame(TextFrame(text="First frame"))
+            await asyncio.wait_for(removed.wait(), timeout=1.0)
+            await worker.queue_frames([TextFrame(text="Second frame"), EndFrame()])
+
+        await asyncio.gather(worker.run(WorkerParams(task_manager=TaskManager())), push_frames())
+
+        assert frame_count == 1
+        # The observer was running on its own proxy task, which must still end.
+        assert proxy_task is not None and proxy_task.done()
+
     async def test_task_started_ended_event_handler(self):
         start_received = False
         end_received = False

@@ -122,5 +122,75 @@ class TestWorkerObserverMemory(unittest.IsolatedAsyncioTestCase):
         await worker_observer.cleanup()
 
 
+class CleanupRecordingObserver(BaseObserver):
+    """Records its cleanup and fires an event for every text frame."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.cleaned_up = False
+        self._register_event_handler("on_text")
+
+    async def on_push_frame(self, data: FramePushed):
+        if isinstance(data.frame, TextFrame):
+            await self._call_event_handler("on_text")
+
+    async def cleanup(self):
+        await super().cleanup()
+        self.cleaned_up = True
+
+
+class TestWorkerObserverRemoval(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.observer = CleanupRecordingObserver()
+        self.worker_observer = WorkerObserver(observers=[self.observer])
+        await self.worker_observer.setup(TaskManager())
+        self.addAsyncCleanup(self.worker_observer.cleanup)
+
+    async def _push_text(self):
+        source = IdentityFilter()
+        await self.worker_observer.on_push_frame(
+            FramePushed(
+                source=source,
+                destination=source,
+                frame=TextFrame("hello"),
+                direction=FrameDirection.DOWNSTREAM,
+                timestamp=0,
+            )
+        )
+
+    async def test_a_removed_observer_is_cleaned_up(self):
+        await self.worker_observer.remove_observer(self.observer)
+        self.assertTrue(self.observer.cleaned_up)
+
+    async def test_an_observer_can_be_removed_from_its_own_event_handler(self):
+        removed = asyncio.Event()
+
+        @self.observer.event_handler("on_text")
+        async def on_text(observer):
+            await self.worker_observer.remove_observer(observer)
+            removed.set()
+
+        await self._push_text()
+        await asyncio.wait_for(removed.wait(), timeout=1.0)
+        self.assertTrue(self.observer.cleaned_up)
+
+
+class FailingCleanupObserver(BaseObserver):
+    async def cleanup(self):
+        await super().cleanup()
+        raise RuntimeError("cleanup failed")
+
+
+class TestWorkerObserverShutdown(unittest.IsolatedAsyncioTestCase):
+    async def test_an_observer_failing_cleanup_does_not_stop_the_others(self):
+        later = CleanupRecordingObserver()
+        worker_observer = WorkerObserver(observers=[FailingCleanupObserver(), later])
+        await worker_observer.setup(TaskManager())
+
+        await worker_observer.cleanup()
+
+        self.assertTrue(later.cleaned_up)
+
+
 if __name__ == "__main__":
     unittest.main()

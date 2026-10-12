@@ -30,7 +30,6 @@ from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
-    AggregationType,
     CancelFrame,
     EndFrame,
     Frame,
@@ -44,6 +43,7 @@ from pipecat.frames.frames import (
     LLMServiceMetadataFrame,
     LLMTextFrame,
     StartFrame,
+    TextType,
     TranscriptionFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
@@ -840,7 +840,7 @@ class UltravoxRealtimeLLMService(LLMService):
                 frame.append_to_context = False
                 await self.push_frame(frame)
             if delta:
-                tts_frame = TTSTextFrame(text=delta, aggregated_by=AggregationType.WORD)
+                tts_frame = TTSTextFrame(text=delta, text_type=TextType.WORD)
                 tts_frame.includes_inter_frame_spaces = True
                 await self.push_frame(tts_frame)
         elif medium == "text":
