@@ -72,6 +72,20 @@ def test_build_msg_includes_buffer_delay_when_set():
     assert service._build_msg("hi")["max_buffer_delay_ms"] == 1500
 
 
+def test_build_msg_omits_content_filter_by_default():
+    """The server's own default (filter off) applies unless an action is set."""
+    service = _make_service()
+    assert "content_filter" not in service._build_msg("hi")
+
+
+@pytest.mark.parametrize("action", ["reject", "flag"])
+def test_build_msg_enables_content_filter_with_action(action):
+    service = SmallestTTSService(
+        api_key="test-key", settings=SmallestTTSService.Settings(content_filter=action)
+    )
+    assert service._build_msg("hi")["content_filter"] == {"enabled": True, "action": action}
+
+
 @pytest.mark.asyncio
 async def test_flush_audio_closes_the_active_context():
     """flush_audio sends an empty, `continue: false` fragment for the context."""
