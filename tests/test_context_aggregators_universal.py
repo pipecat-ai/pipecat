@@ -60,7 +60,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.aggregators import async_tool_messages
-from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
 from pipecat.processors.aggregators.llm_response_universal import (
     AssistantThoughtMessage,
     AssistantTurnStoppedMessage,
@@ -1519,7 +1519,10 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
         assert all(async_tool_messages.parse_message(m) is None for m in context.messages)
 
     async def test_function_call_seen_by_a_thinking_reply_is_deferred(self):
-        """A result arriving while a thinking reply runs keeps the placeholder it saw."""
+        """A result arriving while a thinking reply runs keeps the placeholder it saw.
+
+        It goes into the context after the reply's thought, which never saw it.
+        """
         context = LLMContext()
         aggregator = LLMAssistantAggregator(context)
         frames_to_send = [
@@ -1547,7 +1550,8 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
         await run_test(aggregator, frames_to_send=frames_to_send)
         tool_messages = [m for m in context.messages if isinstance(m, dict) and m["role"] == "tool"]
         assert tool_messages[0]["content"] == "IN_PROGRESS"
-        payload = async_tool_messages.parse_message(context.messages[-2])
+        assert isinstance(context.messages[-2], LLMSpecificMessage)
+        payload = async_tool_messages.parse_message(context.messages[-1])
         assert payload is not None and payload.kind == "final"
         assert payload.result == '{"answer": 42}'
 
@@ -1631,8 +1635,107 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
             LLMFullResponseEndFrame(),
         ]
         await run_test(aggregator, frames_to_send=frames_to_send)
-        payload = async_tool_messages.parse_message(context.messages[-2])
+        assert isinstance(context.messages[-2], LLMSpecificMessage)
+        payload = async_tool_messages.parse_message(context.messages[-1])
         assert payload is not None and payload.kind == "final"
+
+    async def test_function_call_result_before_the_thought_starts_is_deferred(self):
+        """The reply saw the placeholder when it was requested, before its thought began."""
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        frames_to_send = [
+            FunctionCallInProgressFrame(
+                function_name="lookup",
+                tool_call_id="1",
+                arguments={},
+                cancel_on_interruption=True,
+            ),
+            SleepFrame(),
+            LLMFullResponseStartFrame(),
+            SleepFrame(),
+            FunctionCallResultFrame(
+                function_name="lookup",
+                tool_call_id="1",
+                arguments={},
+                result={"answer": 42},
+                run_llm=False,
+            ),
+            SleepFrame(),
+            LLMThoughtStartFrame(append_to_context=True, llm="anthropic"),
+            LLMThoughtEndFrame(signature="sig"),
+            LLMFullResponseEndFrame(),
+        ]
+        await run_test(aggregator, frames_to_send=frames_to_send)
+        tool_messages = [m for m in context.messages if isinstance(m, dict) and m["role"] == "tool"]
+        assert tool_messages[0]["content"] == "IN_PROGRESS"
+        assert isinstance(context.messages[-2], LLMSpecificMessage)
+        payload = async_tool_messages.parse_message(context.messages[-1])
+        assert payload is not None and payload.kind == "final"
+
+    async def test_function_call_results_during_a_response_run_inference_once(self):
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        frames_to_send = [
+            FunctionCallInProgressFrame(
+                function_name="lookup",
+                tool_call_id="1",
+                arguments={},
+                cancel_on_interruption=True,
+            ),
+            FunctionCallInProgressFrame(
+                function_name="lookup",
+                tool_call_id="2",
+                arguments={},
+                cancel_on_interruption=True,
+            ),
+            SleepFrame(),
+            LLMFullResponseStartFrame(),
+            FunctionCallResultFrame(
+                function_name="lookup", tool_call_id="1", arguments={}, result={"answer": 1}
+            ),
+            SleepFrame(),
+            FunctionCallResultFrame(
+                function_name="lookup", tool_call_id="2", arguments={}, result={"answer": 2}
+            ),
+            SleepFrame(),
+            LLMFullResponseEndFrame(),
+        ]
+        await run_test(
+            aggregator,
+            frames_to_send=frames_to_send,
+            expected_down_frames=[],
+            expected_up_frames=[LLMContextFrame],
+        )
+        tool_messages = [m for m in context.messages if m.get("role") == "tool"]
+        assert [m["content"] for m in tool_messages] == ['{"answer": 1}', '{"answer": 2}']
+
+    async def test_function_call_result_during_an_interrupted_response_is_added(self):
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        frames_to_send = [
+            FunctionCallInProgressFrame(
+                function_name="lookup",
+                tool_call_id="1",
+                arguments={},
+                cancel_on_interruption=True,
+            ),
+            SleepFrame(),
+            LLMFullResponseStartFrame(),
+            FunctionCallResultFrame(
+                function_name="lookup",
+                tool_call_id="1",
+                arguments={},
+                result={"answer": 42},
+                run_llm=False,
+            ),
+            SleepFrame(),
+            InterruptionFrame(),
+        ]
+        await run_test(
+            aggregator, frames_to_send=frames_to_send, expected_down_frames=[InterruptionFrame]
+        )
+        assert context.messages[-1]["content"] == '{"answer": 42}'
+        assert not aggregator.has_function_calls_in_progress
 
     async def test_fast_async_function_call_settles_in_place(self):
         """An async call whose result lands before anything else settles like a sync one."""
