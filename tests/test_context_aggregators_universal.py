@@ -563,17 +563,23 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
         frames_to_send = [
             SlowFrame(),
             TranscriptionFrame(text="Ja.", user_id="", timestamp="now", finalized=True),
-            TranscriptionFrame(text="Kiitos.", user_id="", timestamp="now", finalized=True),
+            TranscriptionFrame(text="Tack.", user_id="", timestamp="now", finalized=True),
             SleepFrame(sleep=0.8),
+        ]
+        expected_down_frames = [
+            UserStartedSpeakingFrame,
+            InterruptionFrame,
+            UserStoppedSpeakingFrame,
+            LLMContextFrame,
         ]
         await run_test(
             Pipeline([user_aggregator]),
             frames_to_send=frames_to_send,
-            expected_down_frames=None,
+            expected_down_frames=expected_down_frames,
         )
         self.assertEqual(
             [m["content"] for m in context.get_messages() if m["role"] == "user"],
-            ["Ja. Kiitos."],
+            ["Ja. Tack."],
         )
 
     async def test_stop_proposed_before_a_turn_does_not_close_it(self):
