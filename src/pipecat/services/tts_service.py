@@ -24,6 +24,7 @@ from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     CancelFrame,
+    EagerEndOfTurnCancelFrame,
     EagerTranscriptionFrame,
     EndFrame,
     ErrorFrame,
@@ -44,12 +45,14 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
     TTSTextFrame,
     TTSUpdateSettingsFrame,
+    UserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.ai_service import AIService
 from pipecat.services.settings import TTSSettings
 from pipecat.services.websocket_service import WebsocketService
 from pipecat.transcriptions.language import Language
+from pipecat.turns.speculation_gate import GatedFrame, SpeculationGate, SpeculationState
 from pipecat.utils.context.aggregated_frame_sequencer import AggregatedFrameSequencer
 from pipecat.utils.context.audio_context_manager import AudioContextFrame, AudioContextManager
 from pipecat.utils.context.word_timestamp_tracker import CachedWord, WordTimestampTracker
@@ -202,6 +205,8 @@ class TTSService(AIService):
         settings: TTSSettings | None = None,
         # if True, the context ID is reused within an LLM turn
         reuse_context_id_within_turn: bool = True,
+        # if True, a speculative response's output is held until its user turn is confirmed
+        enable_speculation_gate: bool = False,
         **kwargs,
     ):
         """Initialize the TTS service.
@@ -267,6 +272,11 @@ class TTSService(AIService):
             settings: The runtime-updatable settings for the TTS service.
             reuse_context_id_within_turn: Whether the service should reuse context IDs within the
                 same turn.
+            enable_speculation_gate: Whether to hold what the service synthesizes for a
+                response generated from an eager end of turn until the user's turn is
+                confirmed, and discard it if the turn isn't over. Use it with
+                ``LLMService(enable_speculation_gate=False)``, so the response is
+                synthesized before the turn is confirmed and plays as soon as it is.
             **kwargs: Additional arguments passed to the parent AIService.
         """
         super().__init__(
@@ -387,6 +397,15 @@ class TTSService(AIService):
         # FunctionCallResultFrame) that must not be lost mid-flight.
         self._audio_context_manager = AudioContextManager()
         self._audio_context_task: asyncio.Task | None = None
+
+        # Holds a speculative response's output until its turn is confirmed.
+        # Frames are routed through it on the way out, in `push_frame`.
+        self._speculation_gate: SpeculationGate | None = (
+            SpeculationGate(name=f"{self}::SpeculationGate") if enable_speculation_gate else None
+        )
+        # When the held response's audio was timed to start playing, so its
+        # timed frames can be moved to when it is released.
+        self._held_audio_start: int | None = None
 
         self._register_event_handler("on_connected")
         self._register_event_handler("on_disconnected")
@@ -1055,6 +1074,9 @@ class TTSService(AIService):
         """
         await super().process_frame(frame, direction)
 
+        if isinstance(frame, LLMFullResponseStartFrame):
+            self._begin_speculation(frame)
+
         if (
             isinstance(frame, (TextFrame, LLMFullResponseStartFrame, LLMFullResponseEndFrame))
             and frame.skip_tts
@@ -1081,6 +1103,9 @@ class TTSService(AIService):
             await self._handle_tts_speak(frame)
         elif isinstance(frame, TTSUpdateSettingsFrame):
             await self._handle_update_settings(frame, direction)
+        elif isinstance(frame, EagerEndOfTurnCancelFrame):
+            await self._handle_eager_end_of_turn_cancel()
+            await self.push_frame(frame, direction)
         else:
             if direction == FrameDirection.DOWNSTREAM and not isinstance(frame, SystemFrame):
                 # Queue non-system downstream frames behind the audio contexts so they
@@ -1107,7 +1132,10 @@ class TTSService(AIService):
             frame.transport_destination = self._transport_destination
         if isinstance(frame, AggregatedTextFrame):
             self._stamp_segment_announcement(frame)
-        await super().push_frame(frame, direction)
+        if self._speculation_gate:
+            await self._push_gated_frame(frame, direction)
+        else:
+            await super().push_frame(frame, direction)
 
     #
     # Settings
@@ -1280,6 +1308,18 @@ class TTSService(AIService):
         # Uninterruptible speech still open keeps holding frames.
         await self._update_frame_processing()
 
+    async def _handle_eager_end_of_turn_cancel(self):
+        """Stop synthesizing a response whose user turn turned out to be unfinished."""
+        # Runs before the frame reaches the gate, which is what clears the
+        # speculation, so this still sees the one being withdrawn.
+        if not self._speculation_gate or not self._speculation_gate.is_speculating:
+            return
+
+        logger.debug(f"{self}: eager end of turn withdrawn, stopping the speculative synthesis")
+        await self._start_interruption()
+        await self.stop_all_metrics()
+        await self._handle_interruption(InterruptionFrame(), FrameDirection.DOWNSTREAM)
+
     async def _interrupt_audio_contexts(self):
         """Discard interruptible contexts while preserving ongoing synthesis and playback."""
         preserved = {
@@ -1380,6 +1420,54 @@ class TTSService(AIService):
         # Only on the word-timestamp path (push_text_frames services have no progress frames).
         if frame.will_be_spoken and frame.pts is None and not self._push_text_frames:
             frame.pts = max(self._word_timestamp_tracker.last_pts, self.get_clock().get_time())
+
+    #
+    # Speculation gate
+    #
+
+    def _begin_speculation(self, frame: LLMFullResponseStartFrame):
+        """Tell the gate whether to hold the response starting here."""
+        if self._speculation_gate:
+            self._speculation_gate.begin_speculation(frame.speculation)
+
+    async def _push_gated_frame(self, frame: Frame, direction: FrameDirection):
+        """Push what the speculation gate lets out, retiming a response it releases."""
+        assert self._speculation_gate is not None
+        was_holding = self._speculation_gate.state == SpeculationState.HOLDING
+        self._note_held_audio(frame, was_holding)
+        emitted = self._speculation_gate.process(frame, direction)
+        released = (
+            was_holding
+            and self._speculation_gate.state != SpeculationState.HOLDING
+            and isinstance(frame, UserStoppedSpeakingFrame)
+        )
+        if released:
+            self._retime_released_frames(emitted)
+        for gated_frame, gated_direction in emitted:
+            await super().push_frame(gated_frame, gated_direction)
+
+    def _note_held_audio(self, frame: Frame, holding: bool):
+        """Remember when the held response's audio was timed to start playing."""
+        if isinstance(frame, LLMFullResponseStartFrame):
+            self._held_audio_start = None
+        elif holding and self._held_audio_start is None and isinstance(frame, TTSAudioRawFrame):
+            # Word timing starts before a context's first audio is pushed.
+            self._held_audio_start = self._word_timestamp_tracker.baseline
+
+    def _retime_released_frames(self, frames: list[GatedFrame]):
+        """Move a released response's timed frames to when its audio starts playing.
+
+        Their PTS were set as if its audio started playing when it reached the
+        gate, but it only starts once released.
+        """
+        if self._held_audio_start is None:
+            return
+        # Audio timed to start later than now is still queued behind earlier audio.
+        offset = max(0, self.get_clock().get_time() - self._held_audio_start)
+        for frame, _ in frames:
+            if frame.pts:
+                frame.pts += offset
+        self._word_timestamp_tracker.shift(offset)
 
     #
     # Text to speech

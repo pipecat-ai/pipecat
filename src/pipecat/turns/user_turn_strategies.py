@@ -176,7 +176,9 @@ class EagerUserTurnStrategies(ExternalUserTurnStrategies):
     :class:`~pipecat.turns.user_stop.EagerUserTurnStopStrategy`.
 
     The response is held by the LLM service until the turn is confirmed, so no
-    extra processor is needed in the pipeline.
+    extra processor is needed in the pipeline. The TTS service can hold it
+    instead (``enable_speculation_gate`` on both), so the response is also
+    synthesized before the turn is confirmed.
 
     The service owns turn detection here, so this replaces the detector chain
     rather than extending it: a local detector running alongside would trigger a

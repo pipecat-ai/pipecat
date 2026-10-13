@@ -4,11 +4,8 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import asyncio
 import unittest
-from unittest.mock import AsyncMock, patch
-
-from loguru import logger
+from unittest.mock import AsyncMock
 
 from pipecat.frames.frames import (
     EagerEndOfTurnCancelFrame,
@@ -252,6 +249,35 @@ class TestPendingSpeculation(unittest.IsolatedAsyncioTestCase):
         speculate(gate, True, "Rescheduling.", end=False)
 
         assert gate.is_speculating
+
+
+class TestTrackingWithoutHolding(unittest.IsolatedAsyncioTestCase):
+    """A gate built not to hold, for a host whose response is held further down."""
+
+    async def test_a_speculative_response_passes_through(self):
+        gate = SpeculationGate(hold=False)
+
+        assert types(speculate(gate, True, "Booking.")) == [
+            LLMFullResponseStartFrame,
+            LLMTextFrame,
+            LLMFullResponseEndFrame,
+        ]
+
+    async def test_the_speculation_is_tracked_until_the_turn_is_confirmed(self):
+        gate = SpeculationGate(hold=False)
+
+        speculate(gate, True, "Booking.")
+        assert gate.is_speculating
+
+        emit(gate, UserStoppedSpeakingFrame())
+        assert not gate.is_speculating
+
+    async def test_a_withdrawal_ends_the_speculation(self):
+        gate = SpeculationGate(hold=False)
+
+        speculate(gate, True, "Booking.")
+        assert types(emit(gate, EagerEndOfTurnCancelFrame())) == [EagerEndOfTurnCancelFrame]
+        assert not gate.is_speculating
 
 
 class TestEagerMatchPolicies(unittest.IsolatedAsyncioTestCase):

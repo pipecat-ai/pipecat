@@ -51,6 +51,11 @@ class WordTimestampTracker:
         """Whether words are being timed."""
         return self._baseline is not None
 
+    @property
+    def baseline(self) -> int | None:
+        """When the audio of the words being timed starts playing, in nanoseconds."""
+        return self._baseline
+
     def start(self, now: int) -> list[CachedWord]:
         """Start timing words, if not started yet.
 
@@ -85,6 +90,20 @@ class WordTimestampTracker:
         """
         assert self._baseline is not None
         return self._baseline + seconds_to_nanoseconds(timestamp)
+
+    def shift(self, offset: int):
+        """Move the words timed so far, and the ones still to come, later.
+
+        Args:
+            offset: How much later, in nanoseconds.
+        """
+        if self._baseline is not None:
+            self._baseline += offset
+        # Zero means no word has been timed, which a shift must not change.
+        if self.last_pts:
+            self.last_pts += offset
+        if self.uninterruptible_last_pts:
+            self.uninterruptible_last_pts += offset
 
     def reset(self):
         """Stop timing words and drop the cached ones."""
