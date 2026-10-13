@@ -38,7 +38,7 @@ from pipecat.processors.frame_processor import (
     FrameProcessorSetup,
 )
 from pipecat.services.dynamo import llm as dynamo_llm
-from pipecat.services.dynamo.llm import DynamoPrefillProcessor, DynamoRealtimeLLMService
+from pipecat.services.dynamo.llm import DynamoRealtimeLLMService, DynamoStreamingPrefillProcessor
 from pipecat.services.llm_service import LLMService
 from pipecat.tests.utils import SleepFrame, run_test
 from pipecat.utils.asyncio.task_manager import TaskManager
@@ -262,7 +262,7 @@ async def test_prefill_processor_forwards_without_waiting_for_connection(make_se
         await release.wait()
 
     service._open = stalled_open
-    processor = DynamoPrefillProcessor(llm=service, context=context)
+    processor = DynamoStreamingPrefillProcessor(llm=service, context=context)
     processor.push_frame = AsyncMock()
     frame = InterimTranscriptionFrame("Hello", "user", "")
     try:
@@ -280,7 +280,7 @@ async def test_prefill_processor_ignores_upstream_transcription(make_service, mo
     monkeypatch.setattr(FrameProcessor, "process_frame", AsyncMock())
     service, _, _ = make_service()
     service.prefill = Mock()
-    processor = DynamoPrefillProcessor(llm=service, context=LLMContext())
+    processor = DynamoStreamingPrefillProcessor(llm=service, context=LLMContext())
     processor.push_frame = AsyncMock()
     frame = InterimTranscriptionFrame("Hello", "user", "")
 
@@ -599,7 +599,7 @@ async def test_managed_pipeline_prefill_finalization_and_interruption(fake_trans
         settings=DynamoRealtimeLLMService.Settings(model="test", system_instruction="Be concise."),
     )
     history = LLMContext()
-    processor = DynamoPrefillProcessor(llm=service, context=history)
+    processor = DynamoStreamingPrefillProcessor(llm=service, context=history)
     frames = []
     if interrupt:
         frames.extend(
@@ -651,7 +651,7 @@ async def test_managed_pipeline_shutdown_closes_idle_prefill(fake_transport, fra
         base_url="http://localhost:8000/v1",
         settings=DynamoRealtimeLLMService.Settings(model="test"),
     )
-    processor = DynamoPrefillProcessor(llm=service, context=LLMContext())
+    processor = DynamoStreamingPrefillProcessor(llm=service, context=LLMContext())
 
     async with asyncio.timeout(3):
         await run_test(
@@ -860,7 +860,7 @@ async def test_prefill_processor_honors_mute_frames_and_forwards_transcriptions(
     service, _, _ = make_service()
     service.prefill = Mock()
     context = LLMContext()
-    processor = DynamoPrefillProcessor(llm=service, context=context)
+    processor = DynamoStreamingPrefillProcessor(llm=service, context=context)
     processor.push_frame = AsyncMock()
     frames = [
         (UserMuteStartedFrame(), mute_direction),

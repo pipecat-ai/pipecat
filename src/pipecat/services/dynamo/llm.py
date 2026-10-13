@@ -46,7 +46,7 @@ class DynamoRealtimeLLMService(LLMService[OpenAILLMAdapter]):
     Only text messages are supported; tools, multimodal input, and sampling
     overrides are not.
 
-    Place :class:`DynamoPrefillProcessor` before the user context aggregator
+    Place :class:`DynamoStreamingPrefillProcessor` before the user context aggregator
     and this service after it. Final context remains authoritative: revised
     transcripts replace speculative input instead of being appended to it.
     Each turn uses one connection for both prefill and generation.
@@ -407,7 +407,7 @@ class DynamoRealtimeLLMService(LLMService[OpenAILLMAdapter]):
             await self._close()
 
 
-class DynamoPrefillProcessor(FrameProcessor):
+class DynamoStreamingPrefillProcessor(FrameProcessor):
     """Forward append-only ASR deltas to Dynamo before user context aggregation.
 
     Use with :class:`~pipecat.services.openai.stt.OpenAIRealtimeSTTService`,
@@ -417,7 +417,7 @@ class DynamoPrefillProcessor(FrameProcessor):
     """
 
     def __init__(self, *, llm: DynamoRealtimeLLMService, context: LLMContext, **kwargs):
-        """Initialize the prefill processor.
+        """Initialize the streaming prefill processor.
 
         Args:
             llm: Dynamo LLM service later in the same pipeline.

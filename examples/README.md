@@ -32,15 +32,22 @@ text LLM, and streaming TTS endpoints. STT interim deltas are sent to the LLM
 while the user speaks. The final Pipecat context remains authoritative, including
 transcript corrections; response generation begins only when the user turn ends.
 
-This example requires a Dynamo build with the **experimental text-input Realtime
-API**, not just an OpenAI-compatible chat-completions endpoint. The LLM backend
+Use Dynamo **1.6.0-rc.0** as the compatibility baseline, including both the
+frontend and vLLM runtime. This example requires its **experimental text-input
+Realtime API**, not just an OpenAI-compatible chat-completions endpoint. The LLM backend
 must support `input_text.append`, `input_text.clear`, and `input_text.commit`,
 alongside `conversation.item.create`, `response.create`, and streamed
 `response.output_text.delta` events. Engine-side incremental prefill must also be
-enabled for the latency optimization to take effect. For Dynamo vLLM workers,
-this requires the experimental realtime-text implementation and `--realtime`;
-an ordinary text-generation worker does not register this capability. No stable
-Dynamo release is assumed to provide these experimental extensions.
+enabled for the latency optimization to take effect. Start the Dynamo vLLM
+worker with `--realtime --enable-prefix-caching`; an ordinary text-generation
+worker does not register this capability. These input events are Dynamo
+extensions, not part of the OpenAI standard, and remain experimental.
+
+Release-candidate images are
+`nvcr.io/nvstaging/ai-dynamo/dynamo-frontend:1.6.0-rc.0` and
+`nvcr.io/nvstaging/ai-dynamo/vllm-runtime:1.6.0-rc.0` (NGC staging access required).
+Speech adapters should use the example source and frontend base image from the
+same release. ASR/TTS NIMs retain their own model-specific image versions.
 
 The STT endpoint must support transcription sessions with 24 kHz PCM input,
 client-side audio-buffer commits, and append-only transcription deltas. The TTS
@@ -66,7 +73,7 @@ frontend on `localhost:8000`. Override `DYNAMO_STT_BASE_URL` (default
 deployment. Set `DYNAMO_API_KEY` when the endpoints require authentication; use
 `wss://` and `https://` for remote authenticated endpoints.
 
-`DynamoPrefillProcessor` belongs between streaming STT and the user context
+`DynamoStreamingPrefillProcessor` belongs between streaming STT and the user context
 aggregator. It expects **append-only deltas**, as emitted by
 `OpenAIRealtimeSTTService`, not cumulative interim hypotheses. The text LLM
 service supports plain-text conversation messages, not tools or multimodal

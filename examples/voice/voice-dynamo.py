@@ -27,7 +27,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.serializers.protobuf import ProtobufFrameSerializer
-from pipecat.services.dynamo.llm import DynamoPrefillProcessor, DynamoRealtimeLLMService
+from pipecat.services.dynamo.llm import DynamoRealtimeLLMService, DynamoStreamingPrefillProcessor
 from pipecat.services.openai.stt import OpenAIRealtimeSTTService
 from pipecat.services.openai.tts import OpenAITTSService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
@@ -88,7 +88,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             transport.input(),
             stt,
             # The user aggregator consumes interim transcripts, so prefill precedes it.
-            DynamoPrefillProcessor(llm=llm, context=context),
+            DynamoStreamingPrefillProcessor(llm=llm, context=context),
             user_aggregator,
             llm,
             tts,
