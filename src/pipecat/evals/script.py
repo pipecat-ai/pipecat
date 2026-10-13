@@ -240,6 +240,16 @@ is sent at its own sample rate, so it need not match the bot's input rate, and
           - event: response
             eval: "the response says the capital of Germany is Berlin"
 
+In audio modality a spoken turn may also pause, as a person does mid-thought:
+``user:`` is then a list of text and ``pause_ms:`` silences, played to the bot
+as one stretch of audio. The judge and ``text_contains`` see the text alone::
+
+    turns:
+      - user:
+          - "So last week I went to"
+          - pause_ms: 2000
+          - "Spain with my family."
+
 ``expect:`` is optional; omit it for a turn that only sends input or only waits.
 
 Top-level optional fields:
@@ -489,6 +499,9 @@ class EvalScriptTurn:
             ``send-text`` in text modality, or synthesized speech (``raw-audio``)
             in audio modality. If absent, the turn just waits for and asserts on
             expected events.
+        parts: The turn's text and pauses, in order, when it pauses: text to
+            speak, or the milliseconds of silence between texts. ``user`` then
+            holds the text alone. Requires ``user.modality: audio``.
         audio: Optional path to an audio file (resolved relative to the scenario
             file) played as this turn instead of synthesizing ``user``. Any
             format ``soundfile`` reads works (WAV, MP3, FLAC, OGG, ...);
@@ -519,6 +532,7 @@ class EvalScriptTurn:
 
     user: str | None
     expect: list[EvalExpectation] = field(default_factory=list)
+    parts: list[str | int] | None = None
     audio: str | None = None
     dtmf: str | None = None
     send_after: EvalSendAfter | None = None
@@ -764,6 +778,11 @@ def _check_user_audio(
                 f"{path}: turn #{idx} has 'audio:' but the scenario is text modality — "
                 "set 'user.modality: audio' to play it to the bot"
             )
+        if turn.parts is not None and not user_audio:
+            raise ValueError(
+                f"{path}: turn #{idx} pauses in 'user:' but the scenario is text modality — "
+                "set 'user.modality: audio' to speak it to the bot"
+            )
 
     # A turn naming a file is played as-is; only the rest need a voice to speak them.
     if user_audio and speech is None:
@@ -800,9 +819,7 @@ def _parse_turn(t: Any, path: Path, idx: int) -> EvalScriptTurn:
     if not isinstance(t, dict):
         raise ValueError(f"{path}: turn #{idx} must be a mapping")
 
-    user = t.get("user")
-    if user is not None and not isinstance(user, str):
-        raise ValueError(f"{path}: turn #{idx} 'user:' must be a string if present")
+    user, parts = _parse_user(t.get("user"), path, idx)
 
     dtmf = _parse_dtmf(t.get("dtmf"), path, idx)
     if user is not None and dtmf is not None:
@@ -839,6 +856,11 @@ def _parse_turn(t: Any, path: Path, idx: int) -> EvalScriptTurn:
                 f"{path}: turn #{idx} has 'audio:' but no 'user:' — give the text the "
                 "recording says, so the judge and 'text_contains' have the turn's input"
             )
+        if parts is not None:
+            raise ValueError(
+                f"{path}: turn #{idx} has both 'audio:' and pauses in 'user:' — "
+                "a recording has its own pauses"
+            )
         audio = str((path.parent / audio).resolve())
 
     # Image paths resolve relative to the scenario file, so a scenario is portable.
@@ -849,7 +871,41 @@ def _parse_turn(t: Any, path: Path, idx: int) -> EvalScriptTurn:
         image = str((path.parent / image).resolve())
 
     return EvalScriptTurn(
-        user=user, dtmf=dtmf, expect=expect, send_after=send_after, image=image, audio=audio
+        user=user,
+        parts=parts,
+        dtmf=dtmf,
+        expect=expect,
+        send_after=send_after,
+        image=image,
+        audio=audio,
+    )
+
+
+def _parse_user(user: Any, path: Path, turn_idx: int) -> tuple[str | None, list[str | int] | None]:
+    """Parse a turn's ``user:``: its text, and its text and pauses when it pauses."""
+    if user is None or isinstance(user, str):
+        return user, None
+    if not isinstance(user, list):
+        raise ValueError(
+            f"{path}: turn #{turn_idx} 'user:' must be a string, or a list of text and pauses"
+        )
+    parts = [_parse_user_part(part, path, turn_idx) for part in user]
+    texts = [part for part in parts if isinstance(part, str)]
+    if not texts:
+        raise ValueError(f"{path}: turn #{turn_idx} 'user:' has pauses but no text")
+    return " ".join(texts), parts
+
+
+def _parse_user_part(part: Any, path: Path, turn_idx: int) -> str | int:
+    """Parse one item of a pausing ``user:``: text, or a pause's milliseconds."""
+    if isinstance(part, str) and part.strip():
+        return part.strip()
+    if isinstance(part, dict) and set(part) == {"pause_ms"}:
+        pause_ms = part["pause_ms"]
+        if isinstance(pause_ms, int) and not isinstance(pause_ms, bool) and pause_ms > 0:
+            return pause_ms
+    raise ValueError(
+        f"{path}: turn #{turn_idx} 'user:' items must be text or 'pause_ms: <positive int>'"
     )
 
 

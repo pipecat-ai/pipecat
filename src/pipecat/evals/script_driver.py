@@ -269,7 +269,7 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
         if turn.image is not None:
             await self._client.send_image(turn.image)
         if turn.user is not None:
-            await self._say(turn.user, audio_file=turn.audio)
+            await self._say(turn.user, audio_file=turn.audio, parts=turn.parts)
         elif turn.dtmf is not None:
             await self._press(turn.dtmf)
 

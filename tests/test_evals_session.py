@@ -1544,6 +1544,28 @@ class TestAudioFileSender(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(injected[1].num_channels, 1)
         self.assertEqual(injected[1].audio, tone.tobytes())
 
+    async def test_pauses_are_silence_between_the_spoken_parts(self):
+        from pipecat.frames.frames import TTSAudioRawFrame, TTSStartedFrame, TTSStoppedFrame
+
+        class _Voice:
+            sample_rate = 16000
+
+            async def synthesize(self, text):
+                return b"\x01\x00" * len(text)
+
+        s = _client(bot_audio=True)
+        s._user_tts = _Voice()
+        injected = _capture_injected(s)
+        await s.say_with_pauses(["Hi", 250, "there"])
+
+        # Spoken as one utterance, the 250 ms pause as 4000 silent samples.
+        self.assertEqual(
+            [type(f) for f in injected], [TTSStartedFrame, TTSAudioRawFrame, TTSStoppedFrame]
+        )
+        silence = b"\x00\x00" * 4000
+        self.assertEqual(injected[1].audio, b"\x01\x00" * 2 + silence + b"\x01\x00" * 5)
+        self.assertEqual(injected[1].sample_rate, 16000)
+
     async def test_non_native_rate_is_preserved(self):
         # The frame carries the file's rate (the output transport resamples it),
         # so a recording need not match the bot.
