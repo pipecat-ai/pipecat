@@ -141,7 +141,7 @@ class OpenRouterLLMService(OpenAILLMService):
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = self.Settings(model="openai/gpt-4.1")
+        default_settings = self.Settings(model="openai/gpt-4.1", provider=None)
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
