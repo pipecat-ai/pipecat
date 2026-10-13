@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Tests for the low-latency thinking defaults in GoogleLLMService."""
+"""Tests for the lowest-thinking defaults in GoogleLLMService."""
 
 import io
 from collections.abc import Callable
@@ -41,17 +41,46 @@ def _warnings_from(build: Callable[[], Any]) -> str:
     return sink.getvalue()
 
 
+def _log_lines(*models: str) -> list[str]:
+    """Return what building params logs, at INFO and above, for each model in turn."""
+    service = GoogleLLMService(
+        api_key="test-key", settings=GoogleLLMService.Settings(model=models[0])
+    )
+    sink = io.StringIO()
+    handler_id = logger.add(sink, level="INFO", format="{level} {message}")
+    try:
+        for model in models:
+            service._settings.model = model
+            service._build_generation_params()
+            service._build_generation_params()
+    finally:
+        logger.remove(handler_id)
+    return sink.getvalue().splitlines()
+
+
 # --- default thinking config per model --------------------------------------
 
 
 def test_gemini_25_flash_disables_thinking_with_a_budget():
     """The 2.5 series takes a budget, and zero turns thinking off."""
     assert _applied_thinking_config("gemini-2.5-flash") == {"thinking_budget": 0}
+    assert _applied_thinking_config("gemini-2.5-flash-lite") == {"thinking_budget": 0}
 
 
-def test_gemini_3_flash_uses_the_minimal_level():
-    """Gemini 3 flash models take a level, and minimal is the fastest."""
-    assert _applied_thinking_config("gemini-3.6-flash") == {"thinking_level": "minimal"}
+def test_gemini_25_pro_gets_its_minimum_budget():
+    """2.5 Pro can't turn thinking off, and 128 tokens is the least it accepts."""
+    assert _applied_thinking_config("gemini-2.5-pro") == {"thinking_budget": 128}
+
+
+@pytest.mark.parametrize("model", ["gemini-3.6-flash", "gemini-3.5-flash-lite", "gemma-4-31b-it"])
+def test_models_that_accept_it_use_the_minimal_level(model):
+    """Gemini 3 and Gemma 4 models take a level, and minimal is the lowest."""
+    assert _applied_thinking_config(model) == {"thinking_level": "minimal"}
+
+
+def test_gemini_31_pro_uses_the_lowest_level_it_accepts():
+    """3.1 Pro doesn't support minimal, so it gets low instead."""
+    assert _applied_thinking_config("gemini-3.1-pro-preview") == {"thinking_level": "low"}
 
 
 def test_gemini_37_flash_uses_the_lowest_level_it_accepts():
@@ -64,19 +93,84 @@ def test_gemini_38_flash_uses_the_lowest_level_it_accepts():
     assert _applied_thinking_config("gemini-3.8-flash") == {"thinking_level": "low"}
 
 
-def test_unrecognized_gemini_3_flash_falls_back_to_minimal():
-    """An unknown flash model is assumed to accept the fastest level."""
-    assert _applied_thinking_config("gemini-3.9-flash") == {"thinking_level": "minimal"}
+def test_gemini_4_argon_uses_the_lowest_level_it_accepts():
+    """4 Argon rejects minimal outright, so it gets low instead."""
+    assert _applied_thinking_config("gemini-4-argon") == {"thinking_level": "low"}
 
 
-def test_image_models_get_no_thinking_default():
-    """Image models are left alone."""
-    assert _applied_thinking_config("gemini-3.1-flash-image") is None
+def test_every_id_form_of_a_listed_model_is_recognized():
+    """Resource paths and version suffixes name the same model."""
+    assert _applied_thinking_config("models/gemini-3.6-flash") == {"thinking_level": "minimal"}
+    assert _applied_thinking_config("publishers/google/models/gemini-3.6-flash") == {
+        "thinking_level": "minimal"
+    }
+    assert _applied_thinking_config("gemini-2.5-flash-001") == {"thinking_budget": 0}
 
 
-def test_non_flash_models_get_no_thinking_default():
-    """Only the flash line trades reasoning for latency by default."""
-    assert _applied_thinking_config("gemini-3.1-pro-preview") is None
+def test_unlisted_models_run_at_googles_default():
+    """Only listed models get a thinking default, so a new model is never guessed at."""
+    for model in ("gemini-3.9-flash", "gemini-flash-latest", "gemini-3.1-flash-image"):
+        assert _applied_thinking_config(model) is None, model
+
+
+def test_thinking_config_in_extra_is_left_alone():
+    """A thinking config passed through extra wins too."""
+    service = GoogleLLMService(
+        api_key="test-key",
+        settings=GoogleLLMService.Settings(
+            model="gemini-3.6-flash", extra={"thinking_config": {"thinking_level": "high"}}
+        ),
+    )
+
+    params = service._build_generation_params()
+
+    assert params["thinking_config"] == {"thinking_level": "high"}
+
+
+def test_the_applied_default_is_logged_once_per_model():
+    """The developer learns what Pipecat sent, and when to change it, once per model."""
+    lines = _log_lines("gemini-3.6-flash", "gemini-3.8-flash")
+
+    assert len(lines) == 2
+    assert all(line.startswith("INFO") for line in lines)
+    assert "thinking_config={'thinking_level': 'minimal'} to gemini-3.6-flash," in lines[0]
+    assert "multistep reasoning" in lines[0]
+    assert "set `thinking` in GoogleLLMService.Settings" in lines[0]
+    assert "to gemini-3.8-flash," in lines[1]
+
+
+@pytest.mark.parametrize("model", ["gemini-3.9-flash", "gemini-flash-latest", "gemma-4-e4b-it"])
+def test_an_unlisted_model_that_can_think_is_warned_about_once(model):
+    """A model without a default may think before replying, so the developer hears."""
+    lines = _log_lines(model)
+
+    assert len(lines) == 1
+    assert lines[0].startswith("WARNING")
+    assert f"no thinking default for {model}" in lines[0]
+
+
+@pytest.mark.parametrize("model", ["gemini-2.0-flash", "gemini-3.1-flash-image"])
+def test_nothing_is_logged_for_a_model_that_cant_think(model):
+    """Models without thinking have no latency to recover."""
+    assert _log_lines(model) == []
+
+
+def test_nothing_is_logged_when_thinking_is_configured():
+    """An explicit setting is the developer's choice, and needs no comment."""
+    service = GoogleLLMService(
+        api_key="test-key",
+        settings=GoogleLLMService.Settings(
+            model="gemini-3.9-flash", thinking=GoogleLLMService.ThinkingConfig(thinking_level="low")
+        ),
+    )
+    sink = io.StringIO()
+    handler_id = logger.add(sink, level="INFO", format="{message}")
+    try:
+        service._build_generation_params()
+    finally:
+        logger.remove(handler_id)
+
+    assert sink.getvalue() == ""
 
 
 def test_a_configured_thinking_config_is_left_alone():
@@ -135,6 +229,36 @@ def test_thinking_budget_on_a_gemini_3_model_warns():
     assert "thinking_budget" in output
     assert "gemini-3.6-flash" in output
     assert "thinking_level" in output
+
+
+def test_thinking_budget_on_a_gemma_4_model_warns():
+    """Gemma 4 takes a level too."""
+    output = _warnings_from(
+        lambda: GoogleLLMService(
+            api_key="test-key",
+            settings=GoogleLLMService.Settings(
+                model="models/gemma-4-31b-it",
+                thinking=GoogleLLMService.ThinkingConfig(thinking_budget=0),
+            ),
+        )
+    )
+
+    assert "thinking_budget" in output
+
+
+def test_thinking_budget_on_a_gemini_4_model_warns():
+    """Gemini 4 takes a level, and rejects a budget."""
+    output = _warnings_from(
+        lambda: GoogleLLMService(
+            api_key="test-key",
+            settings=GoogleLLMService.Settings(
+                model="gemini-4-argon",
+                thinking=GoogleLLMService.ThinkingConfig(thinking_budget=0),
+            ),
+        )
+    )
+
+    assert "thinking_budget" in output
 
 
 def test_thinking_budget_on_a_gemini_25_model_does_not_warn():
