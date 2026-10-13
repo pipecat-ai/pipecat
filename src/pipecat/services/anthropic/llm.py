@@ -66,13 +66,14 @@ except ModuleNotFoundError as e:
 
 # The lowest thinking setting Anthropic documents for each model, sent when the
 # caller configures neither ``thinking`` nor ``effort``, keyed by model name.
-# Each entry sets ``thinking``, or ``effort`` on models whose thinking can't be
-# turned off. "between_tools" is Sonnet 5.5's lowest setting, and "disabled" is
-# already the default on the Claude 4 models.
-_THINKING_DEFAULTS: dict[str, dict[str, Any]] = {
-    "claude-fable-5-1": {"effort": "low"},
-    "claude-fable-5": {"effort": "low"},
-    "claude-opus-5-5": {"effort": "low"},
+# Each entry is the request fields to send: ``thinking``, or ``output_config``
+# with an effort on models whose thinking can't be turned off. "between_tools"
+# is Sonnet 5.5's lowest setting, and "disabled" is already the default on the
+# Claude 4 models.
+_THINKING_DEFAULTS: dict[str, dict[str, dict[str, Any]]] = {
+    "claude-fable-5-1": {"output_config": {"effort": "low"}},
+    "claude-fable-5": {"output_config": {"effort": "low"}},
+    "claude-opus-5-5": {"output_config": {"effort": "low"}},
     "claude-opus-5": {"thinking": {"type": "disabled"}},
     "claude-sonnet-5-5": {"thinking": {"type": "between_tools"}},
     "claude-sonnet-5": {"thinking": {"type": "disabled"}},
@@ -365,7 +366,6 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
         )  # if the client is provided, use it and remove it, otherwise create a new one
         self._retry_timeout_secs = retry_timeout_secs
         self._retry_on_timeout = retry_on_timeout
-        self._logged_thinking_default_model: str | None = None
         if self._settings.system_instruction:
             logger.debug(f"{self}: Using system instruction: {self._settings.system_instruction}")
 
@@ -436,32 +436,14 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
             return
         model = assert_given(self._settings.model) or ""
         name = _model_name(model)
-        default = _THINKING_DEFAULTS.get(name)
-        if default is not None:
-            if "thinking" in default:
-                params["thinking"] = dict(default["thinking"])
-            if "effort" in default:
-                params["output_config"] = {
-                    **params.get("output_config", {}),
-                    "effort": default["effort"],
-                }
-        if model == self._logged_thinking_default_model:
-            return
-        self._logged_thinking_default_model = model
-        if default is not None:
-            setting = ", ".join(f"{key}={value!r}" for key, value in default.items())
-            logger.info(
-                f"{self}: sending {setting} to {model}, its lowest thinking setting, for the "
-                "fastest responses. If your bot needs multistep reasoning, set `thinking` or "
-                "`effort` in AnthropicLLMService.Settings."
-            )
-        elif name.startswith("claude-"):
-            logger.warning(
-                f"{self}: Pipecat has no thinking default for {model}, so it runs at "
-                "Anthropic's default, which can think before replying and slow responses. For "
-                f"the fastest responses, set the lowest `thinking` or `effort` {model} supports "
-                "in AnthropicLLMService.Settings."
-            )
+        self._apply_thinking_default(
+            params,
+            model,
+            _THINKING_DEFAULTS.get(name),
+            can_think=name.startswith("claude-"),
+            provider="Anthropic",
+            settings_fields="`thinking` or `effort`",
+        )
 
     @staticmethod
     def model_supports_response_schema(model: str) -> bool:

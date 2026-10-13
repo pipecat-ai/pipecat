@@ -338,7 +338,6 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
         # Tracks the model we've already warned about (reasoning configured on a
         # non-reasoning model) so we log it once per model rather than per turn.
         self._reasoning_unsupported_warned_for: str | None = None
-        self._logged_thinking_default_model: str | None = None
         self._client = self._create_client(
             api_key=api_key,
             base_url=base_url,
@@ -564,25 +563,14 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
             return
         model = assert_given(self._settings.model) or ""
         effort = _THINKING_DEFAULTS.get(_model_name(model))
-        if effort is not None:
-            params["reasoning"] = {"effort": effort}
-        if model == self._logged_thinking_default_model:
-            return
-        self._logged_thinking_default_model = model
-        settings_class = f"{type(self).__name__}.Settings"
-        if effort is not None:
-            logger.info(
-                f"{self}: sending reasoning={params['reasoning']} to {model}, its lowest "
-                "effort, for the fastest responses. If your bot needs multistep reasoning, "
-                f"set `reasoning` in {settings_class}."
-            )
-        elif _model_supports_reasoning(model):
-            logger.warning(
-                f"{self}: Pipecat has no reasoning default for {model}, so it runs at "
-                "OpenAI's default effort, which can reason before replying and slow "
-                f"responses. For the fastest responses, set `reasoning` in {settings_class} "
-                f"to the lowest effort {model} supports."
-            )
+        self._apply_thinking_default(
+            params,
+            model,
+            {"reasoning": {"effort": effort}} if effort is not None else None,
+            can_think=bool(_model_supports_reasoning(model)),
+            provider="OpenAI",
+            settings_fields="`reasoning`",
+        )
 
     def _warn_if_reasoning_unsupported(self):
         """Log a clear error when reasoning is configured on a model that can't use it.

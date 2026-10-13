@@ -845,7 +845,7 @@ class TestReasoningParams:
     def test_the_applied_default_is_logged_once_per_model(self):
         """The developer learns what Pipecat sent, and when to change it, once per model."""
         service = _make_service(settings=OpenAIResponsesLLMService.Settings(model="gpt-5-mini"))
-        with patch("pipecat.services.openai.responses.llm.logger") as mock_logger:
+        with patch("pipecat.services.llm_service.logger") as mock_logger:
             self._params(service)
             self._params(service)
             service._settings.model = "gpt-5-nano"
@@ -861,18 +861,18 @@ class TestReasoningParams:
     def test_an_unlisted_reasoning_model_is_warned_about_once(self):
         """A reasoning model without a default may reason before replying, so the developer hears."""
         service = _make_service(settings=OpenAIResponsesLLMService.Settings(model="gpt-6.2"))
-        with patch("pipecat.services.openai.responses.llm.logger") as mock_logger:
+        with patch("pipecat.services.llm_service.logger") as mock_logger:
             self._params(service)
             self._params(service)
         mock_logger.info.assert_not_called()
         mock_logger.warning.assert_called_once()
-        assert "no reasoning default for gpt-6.2" in mock_logger.warning.call_args.args[0]
+        assert "no thinking default for gpt-6.2" in mock_logger.warning.call_args.args[0]
 
     def test_nothing_is_logged_for_a_model_that_doesnt_reason(self):
         """Models without reasoning have no latency to recover."""
         for model in ("gpt-4.1", "gpt-5-chat-latest", "my-azure-deployment"):
             service = _make_service(settings=OpenAIResponsesLLMService.Settings(model=model))
-            with patch("pipecat.services.openai.responses.llm.logger") as mock_logger:
+            with patch("pipecat.services.llm_service.logger") as mock_logger:
                 self._params(service)
             mock_logger.info.assert_not_called()
             mock_logger.warning.assert_not_called()
@@ -885,7 +885,7 @@ class TestReasoningParams:
                 reasoning=OpenAIResponsesLLMService.ReasoningConfig(effort="low"),
             )
         )
-        with patch("pipecat.services.openai.responses.llm.logger") as mock_logger:
+        with patch("pipecat.services.llm_service.logger") as mock_logger:
             self._params(service)
         mock_logger.info.assert_not_called()
         mock_logger.warning.assert_not_called()

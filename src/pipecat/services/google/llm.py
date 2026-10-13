@@ -365,7 +365,6 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
         self._stream_idle_timeout_secs = stream_idle_timeout_secs
         self._retry_timeout_secs = retry_timeout_secs
         self._retry_on_timeout = retry_on_timeout
-        self._logged_thinking_default_model: str | None = None
 
         # Initialize the API client. Subclasses can override this if needed.
         self.create_client()
@@ -575,25 +574,14 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
         model = assert_given(self._settings.model) or ""
         name = _model_name(model)
         thinking = _THINKING_DEFAULTS.get(name)
-        if thinking is not None:
-            generation_params["thinking_config"] = dict(thinking)
-        if model == self._logged_thinking_default_model:
-            return
-        self._logged_thinking_default_model = model
-        settings_class = f"{type(self).__name__}.Settings"
-        if thinking is not None:
-            logger.info(
-                f"{self}: sending thinking_config={thinking} to {model}, its lowest thinking "
-                "setting, for the fastest responses. If your bot needs multistep reasoning, "
-                f"set `thinking` in {settings_class}."
-            )
-        elif _can_think(name):
-            logger.warning(
-                f"{self}: Pipecat has no thinking default for {model}, so it runs at Google's "
-                "default, which can think before replying and slow responses. For the fastest "
-                f"responses, set `thinking` in {settings_class} to the lowest setting {model} "
-                "supports."
-            )
+        self._apply_thinking_default(
+            generation_params,
+            model,
+            {"thinking_config": thinking} if thinking is not None else None,
+            can_think=_can_think(name),
+            provider="Google",
+            settings_fields="`thinking`",
+        )
 
     # Models known to accept a request whose contents end with a model turn,
     # continuing that turn as the start of the response. Newer models reject

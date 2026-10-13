@@ -231,7 +231,7 @@ def test_the_applied_default_is_logged_once_per_model():
     assert "multistep reasoning" in lines[0]
     assert "set `thinking` or `effort`" in lines[0]
     assert "to claude-sonnet-5-20260630," in lines[1]
-    assert "effort='low' to claude-opus-5-5," in lines[2]
+    assert "output_config={'effort': 'low'} to claude-opus-5-5," in lines[2]
 
 
 def test_an_unlisted_claude_model_is_warned_about_once():
