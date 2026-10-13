@@ -13,19 +13,25 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+import pytest_asyncio
 
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.clocks.system_clock import SystemClock
 from pipecat.frames.frames import (
     CancelFrame,
+    EagerEndOfTurnCancelFrame,
     EndFrame,
     ErrorFrame,
+    HeartbeatFrame,
     InterimTranscriptionFrame,
     InterruptionFrame,
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMTextFrame,
+    LLMUpdateSettingsFrame,
+    StartFrame,
+    TextFrame,
     TranscriptionFrame,
     UserMuteStartedFrame,
     UserMuteStoppedFrame,
@@ -104,6 +110,24 @@ def fake_transport(monkeypatch):
 
 
 @pytest.fixture
+def blocked_response(monkeypatch):
+    """Hold generated text until the test releases the response."""
+    waiting = asyncio.Event()
+    release = asyncio.Event()
+    receive_json = _Socket.receive_json
+
+    async def receive(self):
+        event = await receive_json(self)
+        if event["type"] == "response.output_text.delta":
+            waiting.set()
+            await release.wait()
+        return event
+
+    monkeypatch.setattr(_Socket, "receive_json", receive)
+    return waiting, release
+
+
+@pytest.fixture
 def make_service(fake_transport):
     """Construct services with isolated fake connections and standard metric spies."""
     sockets, sessions = fake_transport
@@ -136,8 +160,31 @@ def make_service(fake_transport):
     return make
 
 
+@pytest_asyncio.fixture
+async def managed_service(fake_transport):
+    """Run a service with real task management and lifecycle handling."""
+    service = DynamoRealtimeLLMService(
+        base_url="http://localhost:8000/v1",
+        settings=DynamoRealtimeLLMService.Settings(model="test"),
+    )
+    manager = TaskManager()
+    await service.setup(
+        FrameProcessorSetup(
+            clock=SystemClock(),
+            task_manager=manager,
+            pipeline_worker=SimpleNamespace(app_resources=None),  # type: ignore[arg-type]
+        )
+    )
+    try:
+        await service.process_frame(StartFrame(), FrameDirection.DOWNSTREAM)
+        yield service
+    finally:
+        await service.cleanup()
+        assert not manager.current_tasks()
+
+
 async def _wait_for(predicate):
-    """Give background prefill work a bounded opportunity to make progress."""
+    """Give background work a bounded opportunity to make progress."""
     async with asyncio.timeout(1):
         while not predicate():
             await asyncio.sleep(0.001)
@@ -434,6 +481,7 @@ async def test_context_frame_always_finishes_response_lifecycle(make_service, mo
         LLMContextFrame(LLMContext([{"role": "user", "content": "Hello."}])),
         FrameDirection.DOWNSTREAM,
     )
+    await service._generation_task
 
     frames = [call.args[0] for call in service.push_frame.await_args_list]
     assert isinstance(frames[0], LLMFullResponseStartFrame)
@@ -669,6 +717,234 @@ async def test_managed_pipeline_shutdown_closes_idle_prefill(fake_transport, fra
     assert service._prefill_task is None
     assert service._websocket is None
     assert not any(event["type"] == "response.create" for event in sockets[0].sent)
+
+
+@pytest.mark.asyncio
+async def test_generation_forwards_frames_before_response_finishes(
+    fake_transport, blocked_response
+):
+    """Ordinary frames and heartbeats flow while the backend is still generating."""
+    sockets, sessions = fake_transport
+    waiting, release = blocked_response
+    service = DynamoRealtimeLLMService(
+        base_url="http://localhost:8000/v1",
+        settings=DynamoRealtimeLLMService.Settings(model="test"),
+    )
+    heartbeat = HeartbeatFrame(timestamp=1)
+    marker = TextFrame("ordinary frame")
+    forwarded = []
+
+    @service.event_handler("on_after_push_frame")
+    async def on_push(service, frame):
+        forwarded.append(frame)
+
+    async def check_frame_flow():
+        await waiting.wait()
+        try:
+            await service.pipeline_worker.queue_frames([heartbeat, marker])
+            await _wait_for(lambda: heartbeat in forwarded and marker in forwarded)
+            assert not any(isinstance(frame, LLMFullResponseEndFrame) for frame in forwarded)
+            assert not sockets[0].closed
+        finally:
+            release.set()
+            await service.pipeline_worker.queue_frame(EndFrame())
+
+    async with asyncio.timeout(3):
+        pipeline_result, check_result = await asyncio.gather(
+            run_test(
+                service,
+                frames_to_send=[
+                    LLMContextFrame(LLMContext([{"role": "user", "content": "Hello."}]))
+                ],
+                send_end_frame=False,
+            ),
+            check_frame_flow(),
+            return_exceptions=True,
+        )
+
+    if isinstance(check_result, BaseException):
+        raise check_result
+    if isinstance(pipeline_result, BaseException):
+        raise pipeline_result
+    downstream, upstream = pipeline_result
+    assert heartbeat in downstream and marker in downstream
+    assert [frame.text for frame in downstream if isinstance(frame, LLMTextFrame)] == ["Hello", "."]
+    assert isinstance(downstream[-1], EndFrame)
+    assert sockets[0].closed and sessions[0].closed
+    assert not any(isinstance(frame, ErrorFrame) for frame in upstream)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "action", ["interruption", "eager_cancel", "settings", "cancel", "cleanup"]
+)
+async def test_managed_generation_cancellation_discards_pending_responses(
+    managed_service, fake_transport, blocked_response, action
+):
+    """Reset and teardown cancel active and queued work without leaking stale output."""
+    service = managed_service
+    sockets, sessions = fake_transport
+    waiting, release = blocked_response
+    pushed = []
+    timeouts = []
+
+    @service.event_handler("on_after_push_frame")
+    async def on_push(service, frame):
+        pushed.append(frame)
+
+    @service.event_handler("on_completion_timeout")
+    async def on_timeout(service):
+        timeouts.append(service)
+
+    await service.process_frame(
+        LLMContextFrame(
+            LLMContext([{"role": "user", "content": "Active request"}]),
+            speculation=action == "eager_cancel",
+        ),
+        FrameDirection.DOWNSTREAM,
+    )
+    await asyncio.wait_for(waiting.wait(), 1)
+    generation = service._generation_task
+    assert generation in service.task_manager.current_tasks()
+    await service.process_frame(
+        LLMContextFrame(LLMContext([{"role": "user", "content": "Queued request"}])),
+        FrameDirection.DOWNSTREAM,
+    )
+
+    async with asyncio.timeout(1):
+        if action == "cleanup":
+            await service.cleanup()
+        else:
+            frame = {
+                "interruption": InterruptionFrame(),
+                "eager_cancel": EagerEndOfTurnCancelFrame(),
+                "settings": LLMUpdateSettingsFrame(
+                    delta=DynamoRealtimeLLMService.Settings(model="updated-model")
+                ),
+                "cancel": CancelFrame(),
+            }[action]
+            await service.process_frame(frame, FrameDirection.DOWNSTREAM)
+
+    assert generation.done()
+    assert service._generation_task is None
+    assert not service._generation_queue
+    assert sockets[0].closed and sessions[0].closed
+    assert not any(isinstance(frame, (LLMTextFrame, ErrorFrame)) for frame in pushed)
+    assert not timeouts
+
+    release.set()
+    await service.process_frame(
+        LLMContextFrame(LLMContext([{"role": "user", "content": "Fresh request"}])),
+        FrameDirection.DOWNSTREAM,
+    )
+    if action in ("cancel", "cleanup"):
+        assert service._generation_task is None
+        assert len(sockets) == 1
+    else:
+        await asyncio.wait_for(service._generation_task, 1)
+        assert len(sockets) == 2
+        assert sockets[1].closed and sessions[1].closed
+        assert [frame.text for frame in pushed if isinstance(frame, LLMTextFrame)] == ["Hello", "."]
+        assert _items(sockets[1])[-1]["content"][0]["text"] == "Fresh request"
+        if action == "settings":
+            update = next(event for event in sockets[1].sent if event["type"] == "session.update")
+            assert update["session"]["model"] == "updated-model"
+
+
+@pytest.mark.asyncio
+async def test_graceful_shutdown_drains_context_snapshots_in_order(
+    managed_service, fake_transport, blocked_response
+):
+    """Queued requests keep their text and finish their response frames before EndFrame."""
+    service = managed_service
+    sockets, sessions = fake_transport
+    waiting, release = blocked_response
+    pushed = []
+
+    @service.event_handler("on_after_push_frame")
+    async def on_push(service, frame):
+        pushed.append(frame)
+
+    context = LLMContext([{"role": "user", "content": "First request"}])
+    await service.process_frame(LLMContextFrame(context), FrameDirection.DOWNSTREAM)
+    context.set_messages([{"role": "user", "content": "Second request"}])
+    await service.process_frame(LLMContextFrame(context), FrameDirection.DOWNSTREAM)
+    context.set_messages([{"role": "user", "content": "Later context mutation"}])
+    service.prefill(LLMContext(), "Late partial")
+    assert service._prefill_task is None
+    await asyncio.wait_for(waiting.wait(), 1)
+
+    ending = service.create_task(service.process_frame(EndFrame(), FrameDirection.DOWNSTREAM))
+    try:
+        await _wait_for(lambda: service._closing)
+        assert not ending.done()
+        assert len(sockets) == 1
+        release.set()
+        await asyncio.wait_for(ending, 1)
+    finally:
+        release.set()
+        await service.cancel_task(ending)
+
+    assert [_items(socket)[-1]["content"][0]["text"] for socket in sockets] == [
+        "First request",
+        "Second request",
+    ]
+    assert [
+        type(frame)
+        for frame in pushed
+        if isinstance(frame, (LLMFullResponseStartFrame, LLMTextFrame, LLMFullResponseEndFrame))
+    ] == [LLMFullResponseStartFrame, LLMTextFrame, LLMTextFrame, LLMFullResponseEndFrame] * 2
+    assert isinstance(pushed[-1], EndFrame)
+    assert all(socket.closed for socket in sockets)
+    assert all(session.closed for session in sessions)
+    assert service._generation_task is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("timeout_stage", ["handshake", "response"])
+async def test_completion_timeout_notifies_handler_and_reports_error(
+    fake_transport, monkeypatch, timeout_stage
+):
+    """Completion timeouts notify applications and preserve error and response frames."""
+    sockets, sessions = fake_transport
+    receive_json = _Socket.receive_json
+
+    async def receive(self):
+        event = await receive_json(self)
+        if event["type"] == (
+            "session.created" if timeout_stage == "handshake" else "response.output_text.delta"
+        ):
+            await asyncio.Event().wait()
+        return event
+
+    monkeypatch.setattr(_Socket, "receive_json", receive)
+    service = DynamoRealtimeLLMService(
+        base_url="http://localhost:8000/v1",
+        settings=DynamoRealtimeLLMService.Settings(model="test"),
+        timeout=0.01,
+    )
+    notifications = []
+
+    @service.event_handler("on_completion_timeout")
+    async def on_timeout(sender):
+        notifications.append(sender)
+
+    async with asyncio.timeout(3):
+        downstream, upstream = await run_test(
+            service,
+            frames_to_send=[LLMContextFrame(LLMContext([{"role": "user", "content": "Hello."}]))],
+        )
+
+    assert notifications == [service]
+    errors = [frame for frame in upstream if isinstance(frame, ErrorFrame)]
+    assert len(errors) == 1
+    assert isinstance(errors[0].exception, TimeoutError)
+    assert [
+        type(frame)
+        for frame in downstream
+        if isinstance(frame, (LLMFullResponseStartFrame, LLMFullResponseEndFrame))
+    ] == [LLMFullResponseStartFrame, LLMFullResponseEndFrame]
+    assert sockets[0].closed and sessions[0].closed
 
 
 @pytest.mark.asyncio

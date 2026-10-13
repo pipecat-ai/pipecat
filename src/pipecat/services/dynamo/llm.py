@@ -7,7 +7,8 @@
 """Text generation with Dynamo's experimental realtime streaming-prefill API."""
 
 import asyncio
-from copy import deepcopy
+from collections import deque
+from copy import copy, deepcopy
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
@@ -17,6 +18,7 @@ from loguru import logger
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter
 from pipecat.frames.frames import (
     CancelFrame,
+    EagerEndOfTurnCancelFrame,
     EndFrame,
     Frame,
     InterimTranscriptionFrame,
@@ -120,6 +122,8 @@ class DynamoRealtimeLLMService(LLMService[OpenAILLMAdapter]):
         self._text = ""
         self._pending_text = ""
         self._prefill_task: asyncio.Task | None = None
+        self._generation_task: asyncio.Task | None = None
+        self._generation_queue: deque[tuple[LLMContextFrame, FrameDirection]] = deque()
         self._prefill_ready = asyncio.Event()
         self._connection_lock = asyncio.Lock()
         self._prefill_failed = False
@@ -147,6 +151,7 @@ class DynamoRealtimeLLMService(LLMService[OpenAILLMAdapter]):
         candidate = deepcopy(self._settings)
         candidate.apply_update(delta)
         self._validate_settings(candidate)
+        await self._cancel_generation()
         async with self._connection_lock:
             await self._stop_prefill()
             await self._close()
@@ -181,6 +186,7 @@ class DynamoRealtimeLLMService(LLMService[OpenAILLMAdapter]):
             not text
             or not self._incremental_prefill
             or self._generating
+            or (self._generation_task is not None and not self._generation_task.done())
             or self._prefill_failed
             or self._closing
             or self._connection_lock.locked()
@@ -353,30 +359,63 @@ class DynamoRealtimeLLMService(LLMService[OpenAILLMAdapter]):
                 self._generating = False
                 self._prefill_failed = False
 
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        """Generate text from finalized context and forward other frames."""
-        await super().process_frame(frame, direction)
-        if isinstance(frame, LLMContextFrame):
+    async def _generation_loop(self) -> None:
+        while self._generation_queue:
+            frame, direction = self._generation_queue.popleft()
+            # Initialize the speculation gate only when this response starts.
+            await super().process_frame(frame, direction)
             await self.push_frame(LLMFullResponseStartFrame())
             await self.start_processing_metrics()
             await self.start_ttfb_metrics()
             try:
                 await self._process_context(frame.context)
+            except TimeoutError as exc:
+                await self._call_event_handler("on_completion_timeout")
+                await self.push_error("Dynamo completion timeout", exception=exc)
             except Exception as exc:
                 await self.push_error(f"Dynamo completion failed: {exc}", exception=exc)
             finally:
                 await self.stop_ttfb_metrics()
                 await self.stop_processing_metrics()
                 await self.push_frame(LLMFullResponseEndFrame())
-        elif not isinstance(frame, LLMUpdateSettingsFrame):
+
+    async def _cancel_generation(self) -> None:
+        self._generation_queue.clear()
+        if self._generation_task is not None:
+            await self.cancel_task(self._generation_task)
+            self._generation_task = None
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
+        """Queue finalized context for generation and forward other frames."""
+        if isinstance(frame, LLMContextFrame):
+            if not self._closing:
+                snapshot = copy(frame)
+                snapshot.context = LLMContext(
+                    messages=deepcopy(frame.context.get_messages()), tools=frame.context.tools
+                )
+                self._generation_queue.append((snapshot, direction))
+                if self._generation_task is None or self._generation_task.done():
+                    self._generation_task = self.create_task(self._generation_loop())
+            return
+
+        await super().process_frame(frame, direction)
+        if not isinstance(frame, LLMUpdateSettingsFrame):
             await self.push_frame(frame, direction)
 
     async def _handle_interruptions(self, frame: InterruptionFrame):
+        await self._cancel_generation()
         async with self._connection_lock:
             await super()._handle_interruptions(frame)
             await self._stop_prefill()
             await self._close()
             self._prefill_failed = False
+
+    async def _handle_eager_end_of_turn_cancel(self, frame: EagerEndOfTurnCancelFrame) -> None:
+        if self._speculation_gate.is_speculating or any(
+            frame.speculation for frame, _ in self._generation_queue
+        ):
+            await self._cancel_generation()
+        await super()._handle_eager_end_of_turn_cancel(frame)
 
     async def start(self, frame: StartFrame):
         """Enable speculative input when the pipeline starts."""
@@ -384,15 +423,26 @@ class DynamoRealtimeLLMService(LLMService[OpenAILLMAdapter]):
         self._closing = False
 
     async def stop(self, frame: EndFrame):
-        """Close speculative input and the realtime connection on shutdown."""
+        """Finish queued responses and close the realtime connection on shutdown."""
         self._closing = True
-        await self._stop_prefill()
-        await self._close()
+        try:
+            task = self._generation_task
+            if task is not None:
+                try:
+                    await asyncio.shield(task)
+                except asyncio.CancelledError:
+                    if not task.cancelled():
+                        raise
+        finally:
+            await self._cancel_generation()
+            await self._stop_prefill()
+            await self._close()
         await super().stop(frame)
 
     async def cancel(self, frame: CancelFrame):
-        """Cancel speculative input and close the realtime connection."""
+        """Cancel pending responses and prefill, then close the realtime connection."""
         self._closing = True
+        await self._cancel_generation()
         await self._stop_prefill()
         await self._close()
         await super().cancel(frame)
@@ -403,6 +453,7 @@ class DynamoRealtimeLLMService(LLMService[OpenAILLMAdapter]):
         try:
             await super().cleanup()
         finally:
+            await self._cancel_generation()
             await self._stop_prefill()
             await self._close()
 
