@@ -77,6 +77,12 @@ class AzureSTTSettings(STTSettings):
     ``model`` and ``language`` are inherited from ``STTSettings`` /
     ``ServiceSettings``.
 
+    ``model`` selects the Azure recognition model, e.g.
+    ``"mai-transcribe-2-streaming"`` for MAI-Transcribe-2-Streaming (public
+    preview, available in a limited set of regions; see `MAI-Transcribe-2-Streaming
+    <https://learn.microsoft.com/en-us/azure/ai-services/speech-service/mai-transcribe-2-streaming-speech-sdk>`_).
+    ``None`` uses Azure's default model.
+
     Parameters:
         profanity: How Azure handles profanity in transcripts. One of
             ``"raw"``, ``"masked"``, or ``"removed"`` (see ``AzureProfanity``).
@@ -203,6 +209,7 @@ class AzureSTTService(STTService):
 
         self._apply_profanity()
         self._apply_segmentation_silence_timeout()
+        self._apply_model()
 
         self._audio_stream = None
         self._speech_recognizer = None
@@ -250,6 +257,13 @@ class AzureSTTService(STTService):
                 PropertyId.Speech_SegmentationSilenceTimeoutMs, str(timeout_ms)
             )
 
+    def _apply_model(self):
+        """Apply the current ``model`` setting to the speech config.
+
+        ``None`` clears any previously set model, restoring Azure's default.
+        """
+        self._speech_config.model = assert_given(self._settings.model)
+
     async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
         """Apply a settings delta and reconnect if a recognizer setting changed."""
         changed = await super()._update_settings(delta)
@@ -265,6 +279,9 @@ class AzureSTTService(STTService):
         if "segmentation_silence_timeout_ms" in changed:
             self._apply_segmentation_silence_timeout()
 
+        if "model" in changed:
+            self._apply_model()
+
         # These settings are baked into the recognizer at connect time, so a
         # live change only takes effect after a reconnect.
         if (
@@ -273,6 +290,7 @@ class AzureSTTService(STTService):
                 "language",
                 "profanity",
                 "segmentation_silence_timeout_ms",
+                "model",
             }
             and self._audio_stream
         ):
