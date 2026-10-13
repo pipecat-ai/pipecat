@@ -2731,8 +2731,8 @@ class TestExternalFunctionCallEvents(unittest.TestCase):
         self.assertEqual(done["args"], {"tool_call_id": "toolu_2", "cancelled": False})
 
 
-class TestLookBackTo(unittest.IsolatedAsyncioTestCase):
-    """Expectations match in order unless one says ``look_back_to: turn_start``."""
+class TestCheckFrom(unittest.IsolatedAsyncioTestCase):
+    """Expectations match in order unless one says ``check_from: turn_start``."""
 
     def _queue(self, m: ExpectationMatcher, *events: dict) -> None:
         for event in events:
@@ -2777,7 +2777,7 @@ class TestLookBackTo(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIsNone(
             await self._match(
-                m, 1, event="llm_response", text_contains="duck", look_back_to="turn_start"
+                m, 1, event="llm_response", text_contains="duck", check_from="turn_start"
             )
         )
         self.assertIn("duck", m.last_match_text)
@@ -2802,7 +2802,7 @@ class TestLookBackTo(unittest.IsolatedAsyncioTestCase):
                 1,
                 event="llm_response",
                 text_contains="Transferring",
-                look_back_to="turn_start",
+                check_from="turn_start",
             )
         )
         self.assertIsNone(await self._match(m, 2, event="llm_response", text_contains="Boots"))
@@ -2834,7 +2834,7 @@ class TestLookBackTo(unittest.IsolatedAsyncioTestCase):
                 2,
                 event="function_call_stopped",
                 calls=[EvalFunctionCall(name="run_integration_tests", args={"cancelled": True})],
-                look_back_to="turn_start",
+                check_from="turn_start",
             )
         )
 
@@ -2848,7 +2848,7 @@ class TestLookBackTo(unittest.IsolatedAsyncioTestCase):
             0,
             event="function_call",
             calls=[EvalFunctionCall(name="check_ci_status")],
-            look_back_to="turn_start",
+            check_from="turn_start",
         )
         self.assertIn("'check_ci_status' not seen", reason or "")
 
@@ -2865,6 +2865,6 @@ class TestLookBackTo(unittest.IsolatedAsyncioTestCase):
             1,
             event="function_call",
             calls=[EvalFunctionCall(name="delegate")],
-            look_back_to="turn_start",
+            check_from="turn_start",
         )
         self.assertIn("'delegate' not seen", reason or "")
