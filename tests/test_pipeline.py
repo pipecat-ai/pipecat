@@ -1037,6 +1037,55 @@ class TestPipelineWorker(unittest.IsolatedAsyncioTestCase):
         # The failing cleanup must not cost the others theirs.
         assert len(cleaned) == 1
 
+    async def test_task_start_frame_not_held_by_unrelated_setup(self):
+        """A slow service setup (e.g. an LLM connecting) must not delay the
+        StartFrame for processors before it. The input transport only starts
+        reading audio once it gets the StartFrame, so callers' first audio
+        would wait on the slowest connection (#5868)."""
+
+        stt_setup_secs = 0.2
+        llm_setup_secs = 1.0
+        t0 = time.monotonic()
+
+        class StartRecorder(FrameProcessor):
+            def __init__(self, setup_secs: float = 0.0, **kwargs):
+                super().__init__(**kwargs)
+                self._setup_secs = setup_secs
+                self.start_at: float | None = None
+
+            async def setup(self, setup: FrameProcessorSetup):
+                await super().setup(setup)
+                await asyncio.sleep(self._setup_secs)
+
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                await super().process_frame(frame, direction)
+                if isinstance(frame, StartFrame):
+                    self.start_at = time.monotonic() - t0
+                await self.push_frame(frame, direction)
+
+        transport_input = StartRecorder(name="input")
+        stt = StartRecorder(setup_secs=stt_setup_secs, name="stt")
+        llm = StartRecorder(setup_secs=llm_setup_secs, name="llm")
+
+        worker = PipelineWorker(Pipeline([transport_input, stt, llm]))
+
+        started_at = []
+
+        @worker.event_handler("on_pipeline_started")
+        async def on_pipeline_started(_worker, _frame):
+            started_at.append(time.monotonic() - t0)
+
+        await worker.queue_frame(EndFrame())
+        await asyncio.wait_for(worker.run(WorkerParams(task_manager=TaskManager())), timeout=5.0)
+
+        # The input transport has nothing to connect, so it starts right away.
+        assert transport_input.start_at < stt_setup_secs
+        # STT starts once its own connection is up, not the LLM's.
+        assert stt_setup_secs <= stt.start_at < llm_setup_secs
+        # The pipeline still only counts as started once everything is set up.
+        assert llm.start_at >= llm_setup_secs
+        assert len(started_at) == 1 and started_at[0] >= llm_setup_secs
+
     async def test_task_end_frame_blocked_by_paused_tts_service(self):
         """TTSService pauses its process queue while audio is in flight
         (pause_frame_processing=True) and is normally unpaused by a
