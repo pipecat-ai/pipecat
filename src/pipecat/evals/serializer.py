@@ -357,6 +357,9 @@ _REPORTED_EVENT_TYPES = frozenset(
         # doesn't become an InterruptionFrame, which the harness's own user
         # aggregator already broadcasts when our VAD detects the bot speaking.
         "bot-interrupted",
+        # What the bot said and what the user said, read for their backchannels.
+        "bot-output",
+        "user-input",
     }
 )
 

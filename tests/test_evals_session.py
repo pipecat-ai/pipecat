@@ -227,6 +227,41 @@ class TestFramesToEvents(unittest.TestCase):
         # Interim transcriptions are ignored.
         self.assertIsNone(s.frame_to_event(msg({"text": "hel", "final": False})))
 
+    def test_backchannels_from_messages(self):
+        # The bot's backchannel counts once it was spoken to the end; the user's
+        # counts as soon as the bot reports it.
+        s = _stream(bot_audio=True)
+
+        def msg(msg_type, data):
+            return InputTransportMessageFrame(
+                message={"label": RTVI.MESSAGE_LABEL, "type": msg_type, "data": data}
+            )
+
+        def bot_output(text_type, status, accumulated="Mm-hmm."):
+            return msg(
+                "bot-output",
+                {
+                    "text": "Mm-hmm.",
+                    "text_type": text_type,
+                    "spoken_status": status,
+                    "spoken_progress": {"accumulated_text": accumulated, "remaining_text": ""},
+                },
+            )
+
+        self.assertIsNone(s.frame_to_event(bot_output("backchannel", "new", accumulated="")))
+        self.assertEqual(
+            s.frame_to_event(bot_output("backchannel", "completed")),
+            {"type": "bot_backchannel", "text": "Mm-hmm."},
+        )
+        self.assertIsNone(s.frame_to_event(bot_output("sentence", "completed")))
+        self.assertEqual(
+            s.frame_to_event(msg("user-input", {"text": "mhm", "input_type": "backchannel"})),
+            {"type": "user_backchannel", "text": "mhm"},
+        )
+        self.assertIsNone(
+            s.frame_to_event(msg("user-input", {"text": "hello", "input_type": "transcription"}))
+        )
+
     def test_transcription_frame_is_ignored_by_the_sink(self):
         # The user aggregator consumes the STT's TranscriptionFrames to build the
         # bot's turn; the response is emitted from on_user_turn_stopped, not here.

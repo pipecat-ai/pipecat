@@ -43,6 +43,13 @@ scenario ``event:``             RTVI server message(s)
 ``image``                       ``eval-bot-image``: an image the bot output, with
                                 its ``width``, ``height``, and ``format``; sent
                                 only on request
+``bot_backchannel``             ``bot-output`` of type ``backchannel``, once spoken
+                                to the end: a short acknowledgment the bot said
+                                while the user talked, such as "Mm-hmm."
+``user_backchannel``            ``user-input`` of type ``backchannel``: a short
+                                acknowledgment the user said while the bot
+                                talked, which neither interrupted it nor reached
+                                the LLM
 ==========================      ==============================================
 """
 
@@ -536,6 +543,12 @@ class EvalEventStream:
             if data.get("final", True):
                 return {"type": "user_transcription", "transcript": data.get("text", "")}
             return None
+        elif msg_type == "bot-output":
+            return self._bot_backchannel_event(data)
+        elif msg_type == "user-input":
+            if data.get("input_type") == "backchannel":
+                return {"type": "user_backchannel", "text": data.get("text", "")}
+            return None
         elif msg_type == EVAL_BOT_IMAGE_TYPE:
             return {
                 "type": "image",
@@ -544,6 +557,16 @@ class EvalEventStream:
                 "format": data.get("format"),
             }
         return None
+
+    def _bot_backchannel_event(self, data: dict) -> dict | None:
+        """The bot's backchannel, from the ``bot-output`` reporting it was spoken to the end."""
+        if data.get("text_type") != "backchannel" or data.get("spoken_status") != "completed":
+            return None
+        progress = data.get("spoken_progress") or {}
+        return {
+            "type": "bot_backchannel",
+            "text": progress.get("accumulated_text") or data.get("text", ""),
+        }
 
     def _segment_event(self, event_type: str, text: str) -> dict:
         """One response segment; the text may be empty, as after an interruption."""

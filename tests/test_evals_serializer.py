@@ -279,6 +279,13 @@ class TestEvalClientSerializer(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(frame.message["type"], "user-transcription")
         self.assertEqual(frame.message["data"], data)
 
+    async def test_bot_output_and_user_input_stay_raw_messages(self):
+        # Kept as raw messages so the sink can find the backchannels in them.
+        for msg_type in ("bot-output", "user-input"):
+            frame = await self.serializer.deserialize(self._server(msg_type, {"text": "mhm"}))
+            self.assertIsInstance(frame, InputTransportMessageFrame)
+            self.assertEqual(frame.message["type"], msg_type)
+
     async def test_generic_messages_delegate_to_base(self):
         # Non-eval RTVI messages keep the base RTVIClientSerializer mapping.
         self.assertIsInstance(
