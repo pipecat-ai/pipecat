@@ -1401,9 +1401,10 @@ class EagerEndOfTurnCancelFrame(SystemFrame):
 
     Emitted when a service reports the user resumed speaking after an eager end
     of turn, or when the committed transcript doesn't match the eager one. The
-    LLM service stops generating, and its
-    :class:`~pipecat.turns.speculation_gate.SpeculationGate` discards what it
-    was holding — which is everything the response produced, so nothing further
+    LLM service stops generating, and the
+    :class:`~pipecat.turns.speculation_gate.SpeculationGate` holding the
+    response, the LLM service's or the TTS service's, discards what it was
+    holding — which is everything the response produced, so nothing further
     down the pipeline has anything to undo.
 
     A system frame so it overtakes the speculative output it cancels.
@@ -2468,13 +2469,18 @@ class LLMFullResponseStartFrame(ControlFrame):
 
     Parameters:
         skip_tts: Whether the response should be skipped by the TTS service.
+        speculation: Whether the response answers a user turn that may not have
+            ended, generated from an eager end of turn (see
+            :attr:`LLMContextFrame.speculation`). Set by the LLM service.
     """
 
     skip_tts: bool | None = field(init=False)
+    speculation: bool = field(init=False)
 
     def __post_init__(self):
         super().__post_init__()
         self.skip_tts = None
+        self.speculation = False
 
 
 @dataclass

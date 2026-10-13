@@ -323,6 +323,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         group_parallel_tools: bool = True,
         function_call_timeout_secs: float | None = None,
         enable_async_tool_cancellation: bool = False,
+        enable_speculation_gate: bool = True,
         settings: LLMSettings | None = None,
         file_resolver: FileResolver | None = None,
         **kwargs,
@@ -350,6 +351,13 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                     runs long enough to be stopped at all, and whether the model
                     can be trusted to decide its result is unwanted, are per-tool
                     questions rather than ones answered for every tool at once.
+            enable_speculation_gate: Whether to hold a response generated from an
+                eager end of turn until the user's turn is confirmed, and discard
+                it if the turn isn't over. Disable it when the TTS service holds
+                the response instead (``TTSService(enable_speculation_gate=True)``),
+                so the response is synthesized before the turn is confirmed.
+                Observers, and processors between the two services, then see a
+                response that may be withdrawn. Defaults to True.
             settings: The runtime-updatable settings for the LLM service.
             file_resolver: Resolves file URLs in the context that this provider
                 can't fetch itself (see
@@ -394,8 +402,11 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         # enables it over an LLMUpdateSettingsFrame once the pipeline starts.
         self._filter_incomplete_user_turns: bool = False
         # Holds a speculative response until its turn is confirmed. Frames are
-        # routed through it on the way out, in `push_frame`.
-        self._speculation_gate = SpeculationGate(name=f"{self}::SpeculationGate")
+        # routed through it on the way out, in `push_frame`. Without holding,
+        # it still tracks the speculation.
+        self._speculation_gate = SpeculationGate(
+            name=f"{self}::SpeculationGate", hold=enable_speculation_gate
+        )
         self._warn_turn_completion_settings_are_strategy_owned()
         # The per-tool cancel tools currently advertised, by name.
         self._cancel_tool_names: set[str] = set()
@@ -882,6 +893,10 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         if isinstance(frame, (LLMTextFrame, LLMFullResponseStartFrame, LLMFullResponseEndFrame)):
             if self._skip_tts is not None:
                 frame.skip_tts = self._skip_tts
+
+        # Tells a gate further down whether to hold the response.
+        if isinstance(frame, LLMFullResponseStartFrame):
+            frame.speculation = self._speculation_gate.is_speculating
 
         # The gate decides synchronously, so its verdict can't be torn by
         # another task pushing at the same time. Everything it hands back is

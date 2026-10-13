@@ -11,7 +11,6 @@ from pipecat.frames.frames import (
     EagerEndOfTurnCancelFrame,
     EagerTranscriptionFrame,
     FunctionCallFromLLM,
-    InterruptionFrame,
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
@@ -19,7 +18,6 @@ from pipecat.frames.frames import (
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
     TranscriptionFrame,
-    UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
@@ -503,6 +501,42 @@ class TestLLMServiceHoldsTheSpeculation(unittest.IsolatedAsyncioTestCase):
             LLMFullResponseEndFrame,
         ]
 
+    async def test_a_response_says_whether_it_is_speculative(self):
+        for speculation in (True, False):
+            down, _ = await run_test(
+                SpeculativeLLM(),
+                frames_to_send=[
+                    self.context_frame(speculation=speculation),
+                    SleepFrame(),
+                    UserStoppedSpeakingFrame(),
+                    SleepFrame(),
+                ],
+            )
+
+            starts = [f for f in down if isinstance(f, LLMFullResponseStartFrame)]
+            assert [f.speculation for f in starts] == [speculation]
+
+    async def test_without_its_gate_a_speculative_response_leaves_at_once(self):
+        # Held further down instead, by a TTS service with its own gate.
+        down, _ = await run_test(
+            SpeculativeLLM(enable_speculation_gate=False),
+            frames_to_send=[
+                self.context_frame(speculation=True),
+                SleepFrame(),
+                UserStoppedSpeakingFrame(),
+                SleepFrame(),
+            ],
+        )
+
+        confirmed_at = next(
+            i for i, f in enumerate(down) if isinstance(f, UserStoppedSpeakingFrame)
+        )
+        response_at = next(
+            i for i, f in enumerate(down) if isinstance(f, LLMFullResponseStartFrame)
+        )
+        assert response_at < confirmed_at
+        assert down[response_at].speculation
+
 
 class TestATurnOutlastingTheHoldIsStillAnswered(unittest.IsolatedAsyncioTestCase):
     """A hold that runs out must not cost the turn its reply.
@@ -717,6 +751,19 @@ class TestToolCallsAcrossTheConfirmation(unittest.IsolatedAsyncioTestCase):
         # Still speculative: the tool must not run, and the withdrawal names the
         # speculation so the strategy re-runs on the committed transcript.
         llm = StreamingToolCallLLM(stream_for=0.05)
+
+        down, up = await run_test(
+            llm,
+            frames_to_send=[self.context_frame(speculation=True), SleepFrame(sleep=0.8)],
+        )
+
+        assert llm.calls == []
+        assert len(self.withdrawals(down, up)) == 2
+
+    async def test_without_its_gate_a_call_reached_before_the_turn_ends_is_withdrawn(self):
+        # Tools run inside the service, so the call is withdrawn whichever
+        # service holds the response.
+        llm = StreamingToolCallLLM(stream_for=0.05, enable_speculation_gate=False)
 
         down, up = await run_test(
             llm,

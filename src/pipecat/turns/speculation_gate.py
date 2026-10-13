@@ -88,7 +88,12 @@ class SpeculationGate:
     therefore push from several tasks at once — every state transition
     completes without an await for another task to interleave with.
     :class:`~pipecat.services.llm_service.LLMService` hosts one, gating every
-    response it produces.
+    response it produces, and so can
+    :class:`~pipecat.services.tts_service.TTSService`, gating what it
+    synthesizes. When the TTS service holds the response, the LLM service's gate
+    is built with ``hold=False``: it lets the response through but still tracks
+    the speculation, so a withdrawal still stops the inference and a tool call
+    still withdraws it.
 
     Holding is unbounded here. Whoever started the speculation bounds it and
     withdraws it if it goes unresolved — see
@@ -102,13 +107,18 @@ class SpeculationGate:
             await self.push_frame(frame, direction)
     """
 
-    def __init__(self, *, name: str = "SpeculationGate"):
+    def __init__(self, *, name: str = "SpeculationGate", hold: bool = True):
         """Initialize the speculation gate.
 
         Args:
             name: Label used in log messages, typically the owning service's.
+            hold: Whether to hold a speculative response. Without it every frame
+                passes through, and the gate only tracks the speculation (see
+                :attr:`is_speculating`), for a host whose response is held
+                further down the pipeline.
         """
         self._name = name
+        self._hold = hold
         self._state = SpeculationState.OPEN
         # Whether the inference in flight answers a turn that has not been
         # confirmed. Set when the inference starts, cleared when the turn
@@ -238,7 +248,7 @@ class SpeculationGate:
 
         # Whether this response is speculative was settled when its inference
         # started, so a turn confirmed since then already cleared it.
-        if not self._speculating:
+        if not self._speculating or not self._hold:
             return emitted
 
         self._state = SpeculationState.HOLDING
