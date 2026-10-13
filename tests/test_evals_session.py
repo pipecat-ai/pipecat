@@ -448,6 +448,26 @@ class TestSendWaitsForTheBot(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(TimeoutError):
             await stream.next_event("response", time.monotonic() + 0.05)
 
+    async def test_an_observing_turn_lets_the_previous_reply_finish_transcribing(self):
+        # The bot has finished turn 1's reply when turn 2, which only listens
+        # for the bot's next move, begins, but the reply's last sentence is
+        # still being transcribed: it is not turn 2's response.
+        session = _session(bot_audio=True)
+        driver, stream = session._driver, session._stream
+        stream.bot_turn_started()
+        stream.bot_segment_ended()
+
+        async def transcribe_soon():
+            await asyncio.sleep(0.1)
+            stream.bot_segment_transcribed()
+            await stream.bot_turn_stopped("Spring in Japan is gorgeous.")
+
+        task = asyncio.create_task(transcribe_soon())
+        await driver._await_previous_reply()
+        await task
+        with self.assertRaises(TimeoutError):
+            await stream.next_event("response", time.monotonic() + 0.05)
+
     async def test_a_quiet_bot_holds_nothing_up(self):
         session = _session()
         started = asyncio.get_running_loop().time()
@@ -570,7 +590,7 @@ class TestInterruptingSendDropsOpenBotTurn(unittest.IsolatedAsyncioTestCase):
 
 
 class TestBotSpeechGate(unittest.IsolatedAsyncioTestCase):
-    """After a send that talked over the bot, its speech from before it is dropped by the time its audio began."""
+    """After a send that talked over the bot, its speech from before its reply is dropped by the time its audio began."""
 
     async def _run(self, gate, frames, direction=FrameDirection.DOWNSTREAM):
         return await run_test(gate, frames_to_send=frames, frames_to_send_direction=direction)
@@ -583,6 +603,8 @@ class TestBotSpeechGate(unittest.IsolatedAsyncioTestCase):
         before = time.monotonic()
         stream.frame_to_event(BotStartedSpeakingFrame())  # the send talks over the bot
         stream.input_sent()
+        stream.frame_to_event(BotStoppedSpeakingFrame())
+        stream.frame_to_event(BotStartedSpeakingFrame())  # the reply
         after = time.monotonic()
         stale = _BotSegmentTranscriptionFrame(
             text="He had seen sunken,", user_id="", timestamp="", segment_started_at=before
@@ -592,6 +614,28 @@ class TestBotSpeechGate(unittest.IsolatedAsyncioTestCase):
             user_id="",
             timestamp="",
             segment_started_at=after,
+        )
+        down, _ = await self._run(gate, [stale, fresh])
+        self.assertEqual([f.text for f in down if isinstance(f, TranscriptionFrame)], [fresh.text])
+
+    async def test_a_segment_the_bot_began_after_the_send_but_before_its_reply_is_dropped(self):
+        # The bot goes on speaking until it notices the user talking over it.
+        stream = _stream(bot_audio=True)
+        gate = _BotSpeechGate(stream, EvalTrace(), deque())
+        stream.frame_to_event(BotStartedSpeakingFrame())
+        stream.input_sent()
+        still_speaking = time.monotonic()
+        stream.frame_to_event(BotStoppedSpeakingFrame())
+        stream.frame_to_event(BotStartedSpeakingFrame())  # the reply
+        reply = time.monotonic()
+        stale = _BotSegmentTranscriptionFrame(
+            text="She swam past", user_id="", timestamp="", segment_started_at=still_speaking
+        )
+        fresh = _BotSegmentTranscriptionFrame(
+            text="Why don't oysters donate to charity?",
+            user_id="",
+            timestamp="",
+            segment_started_at=reply,
         )
         down, _ = await self._run(gate, [stale, fresh])
         self.assertEqual([f.text for f in down if isinstance(f, TranscriptionFrame)], [fresh.text])

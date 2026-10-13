@@ -44,6 +44,7 @@ scenario ``event:``             RTVI server message(s)
 """
 
 import asyncio
+import math
 import time
 
 from pipecat.evals.results import EvalTrace
@@ -111,11 +112,11 @@ class EvalEventStream:
         # must not be attributed to the new turn.
         self._awaiting_reply: bool = False
         # When the driver last sent user input, and, when that send talked over
-        # the bot, when it did so: the bot's speech from before an interrupting
-        # send is what it was saying, not its reply, however late its
-        # transcription lands (audio mode).
+        # the bot, when the bot started speaking again (infinity until it
+        # does): its speech from before then is what it was saying, not its
+        # reply, however late its transcription lands (audio mode).
         self._input_sent_at: float = 0.0
-        self._interrupting_send_at: float | None = None
+        self._talked_over_until: float | None = None
         # Whether the bot is speaking, by its own report: cleared when it
         # starts, set when it stops or is interrupted. An event, so a driver
         # that must not talk over the bot can wait for it without polling.
@@ -138,9 +139,14 @@ class EvalEventStream:
         return not self._bot_quiet.is_set()
 
     @property
-    def interrupting_send_at(self) -> float | None:
-        """Monotonic time of the user's latest send, when it talked over the bot; else ``None``."""
-        return self._interrupting_send_at
+    def talked_over_until(self) -> float | None:
+        """Monotonic time the bot started speaking again after the user's latest send talked over it.
+
+        The bot's speech that began before then is what it was saying when the
+        send talked over it. Infinity until the bot starts speaking again, and
+        ``None`` when the latest send did not talk over it.
+        """
+        return self._talked_over_until
 
     @property
     def bot_transcribed(self) -> bool:
@@ -370,6 +376,8 @@ class EvalEventStream:
             return None
         elif isinstance(frame, BotStartedSpeakingFrame):
             self._bot_quiet.clear()
+            if self._talked_over_until == math.inf:
+                self._talked_over_until = time.monotonic()
             return {"type": "bot_started_speaking"}
         elif isinstance(frame, BotStoppedSpeakingFrame):
             self._bot_quiet.set()
@@ -402,8 +410,8 @@ class EvalEventStream:
     async def bot_turn_stopped(self, text: str) -> None:
         """Append the bot's finished spoken turn as a ``response``, unless it is stale.
 
-        Speech from before an interrupting send never reaches a turn (the
-        client drops it by its audio's time). A turn is still stale while the
+        Speech the bot was saying when a send talked over it never reaches a
+        turn (the client drops it by its audio's time). A turn is still stale while the
         bot's LLM has not restarted since the send: the bot going on with what
         it was saying, which must not pass for the reply.
 
@@ -426,13 +434,13 @@ class EvalEventStream:
     def turn_boundary(self) -> None:
         """Start a new turn: only what the bot says from now on belongs to it.
 
-        When the bot is speaking at this point, the turn talks over it, and its
-        speech from before this point, however late its transcription lands,
-        is the previous turn's and is discarded.
+        When the bot is speaking at this point, the turn talks over it, and what
+        the bot says until it starts speaking again, however late its
+        transcription lands, is the previous turn's and is discarded.
         """
         self._awaiting_reply = True
         self._input_sent_at = time.monotonic()
-        self._interrupting_send_at = self._input_sent_at if self.bot_speaking else None
+        self._talked_over_until = math.inf if self.bot_speaking else None
 
     def _interrupted(self) -> None:
         """The bot reported an interruption: drop its pending output and wait for a fresh reply."""
