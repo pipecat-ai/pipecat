@@ -176,6 +176,18 @@ def test_a_realtime_frontend_words_the_request():
     assert connector.tool.required == ["request"]
 
 
+def test_a_realtime_frontend_refuses_the_transcript_strategy():
+    connector = BackendConnector(request_strategy=TranscriptBackendRequestStrategy())
+    with pytest.raises(ValueError, match="TranscriptBackendRequestStrategy"):
+        _bound(connector, realtime=True)
+
+
+def test_a_realtime_frontend_takes_a_given_explicit_strategy():
+    strategy = ExplicitBackendRequestStrategy()
+    connector = _bound(BackendConnector(request_strategy=strategy), realtime=True)
+    assert connector.request_strategy is strategy
+
+
 def test_the_tool_description_frames_a_handoff():
     connector = _bound()
     assert "One handoff per reply" in connector.tool.description
