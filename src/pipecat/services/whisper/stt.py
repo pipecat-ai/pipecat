@@ -21,6 +21,7 @@ import numpy as np
 from loguru import logger
 from typing_extensions import override
 
+from pipecat.audio.utils import create_file_resampler
 from pipecat.frames.frames import ErrorFrame, Frame, TranscriptionFrame
 from pipecat.services.settings import STTSettings
 from pipecat.services.stt_service import SegmentedSTTService
@@ -47,6 +48,9 @@ if platform.system() == "Darwin" and platform.machine() == "arm64":
         logger.error(f"Exception: {e}")
         logger.error('In order to use Whisper, you need to `uv add "pipecat-ai[mlx-whisper]"`.')
         raise ImportError(f"Missing module: {e}") from e
+
+# Whisper models read 16 kHz audio; segments arrive at the pipeline's input rate.
+_WHISPER_SAMPLE_RATE = 16000
 
 
 class Model(StrEnum):
@@ -312,8 +316,15 @@ class WhisperSTTService(SegmentedSTTService):
         self._compute_type = compute_type
 
         self._model: WhisperModel | None = None
+        self._resampler = create_file_resampler()
 
         self._load()
+
+    async def _resample_for_whisper(self, audio: bytes) -> bytes:
+        """Resample a segment from the pipeline's input rate to Whisper's 16 kHz."""
+        if not self.sample_rate:
+            return audio
+        return await self._resampler.resample(audio, self.sample_rate, _WHISPER_SAMPLE_RATE)
 
     def can_generate_metrics(self) -> bool:
         """Indicates whether this service can generate metrics.
@@ -423,6 +434,7 @@ class WhisperSTTService(SegmentedSTTService):
 
         await self.start_processing_metrics()
 
+        audio = await self._resample_for_whisper(audio)
         # Divide by 32768 because we have signed 16-bit data.
         audio_float = np.frombuffer(audio, dtype=np.int16).astype(np.float32) / 32768.0
 
@@ -553,6 +565,7 @@ class WhisperSTTServiceMLX(WhisperSTTService):
             settings=default_settings,
             **kwargs,
         )
+        self._resampler = create_file_resampler()
 
         # MLX Whisper loads the model on demand, so only the name is checked here.
         require_given(self._settings.model, "Whisper model")
@@ -590,6 +603,7 @@ class WhisperSTTServiceMLX(WhisperSTTService):
 
             await self.start_processing_metrics()
 
+            audio = await self._resample_for_whisper(audio)
             # Divide by 32768 because we have signed 16-bit data.
             audio_float = np.frombuffer(audio, dtype=np.int16).astype(np.float32) / 32768.0
 
