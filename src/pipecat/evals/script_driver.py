@@ -142,8 +142,7 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
 
     async def _run_turn(self, turn: EvalScriptTurn, turn_idx: int) -> list[EvalAssertionFailure]:
         """Drive one turn: honor ``send_after``, send the input, match the expectations."""
-        # The turn's function calls match by name in any order; start each turn
-        # with an empty buffer so a prior turn's calls can't carry over.
+        # An expectation may look back to the start of its turn, never further.
         self._matcher.reset_turn()
 
         if turn.send_after is not None:
