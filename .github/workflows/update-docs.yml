@@ -236,6 +236,27 @@ jobs:
             exit 1
           fi
 
+      # The docs repo's checker compares reference pages with this source, and
+      # docs CI fails a PR on any finding in a page it changes. Agents asked to
+      # run it themselves skipped findings they hadn't caused, so the workflow
+      # runs it and hands the reviewer the list.
+      - name: Check reference pages
+        if: steps.draft.outputs.changed == 'true'
+        env:
+          BASE: ${{ steps.docs-base.outputs.sha }}
+        run: |
+          FINDINGS="$RUNNER_TEMP/reference-findings.txt"
+          : > "$FINDINGS"
+          if [ ! -f _docs/scripts/check-reference.py ]; then
+            echo "The docs repo has no reference checker; skipping."
+            exit 0
+          fi
+          git -C _docs diff --name-only "$BASE" HEAD > "$RUNNER_TEMP/changed-pages.txt"
+          python3 _docs/scripts/check-reference.py --pipecat . \
+            --pages-from "$RUNNER_TEMP/changed-pages.txt" > "$FINDINGS" || true
+          echo "$(grep -c . "$FINDINGS") finding(s) on the pages this update changes."
+          cat "$FINDINGS"
+
       # A second agent, starting fresh, checks the update against the code. The
       # writer tends to trust the PR description and its own first reading;
       # the reviewer starts from the code. A failed review leaves the writer's
@@ -261,6 +282,12 @@ jobs:
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
             ```
+
+            `$RUNNER_TEMP/reference-findings.txt` lists every mismatch the docs
+            repo's checker found between the pages this update changes and the
+            code. Docs CI fails the PR on each one, whatever caused it, so fix
+            every line in it, in the page's format and STYLE.md's, and re-run the
+            command in the profile's Checks section until those pages are clean.
 
             Write your findings, one line per problem and fix, to
             `$RUNNER_TEMP/review.md`. If you changed the update, revise the
