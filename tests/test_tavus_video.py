@@ -7,15 +7,23 @@
 """Tests for the Tavus video service."""
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from pipecat.expressive.expression import ExpressionDelivery
-from pipecat.frames.frames import InterruptionFrame, StartFrame, TextType, TTSTextFrame
+from pipecat.frames.frames import (
+    BotStartedSpeakingFrame,
+    BotStoppedSpeakingFrame,
+    InterruptionFrame,
+    StartFrame,
+    TextType,
+    TTSTextFrame,
+)
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_service import AIService
 from pipecat.services.tavus.video import TavusVideoService
+from pipecat.tests.utils import run_test
 from pipecat.utils.asyncio.task_manager import TaskManager
 from pipecat.utils.time import seconds_to_nanoseconds
 from tests.frame_processor_helpers import frame_processor_setup
@@ -46,6 +54,13 @@ def _word(text: str, delivery: list[str], delay_secs: float, service: TavusVideo
     return frame
 
 
+def _fake_tavus_client(*args, **kwargs) -> MagicMock:
+    client = MagicMock()
+    for method in ("setup", "join", "cleanup", "start_send_task", "cancel_send_task", "stop"):
+        setattr(client, method, AsyncMock())
+    return client
+
+
 @pytest.mark.asyncio
 async def test_the_emotion_changes_when_the_word_is_heard():
     service, client = await _make_service()
@@ -73,3 +88,15 @@ async def test_an_interruption_drops_the_emotion_of_words_not_yet_heard():
 
     client.update_emotion.assert_not_awaited()
     await service._cancel_emotion_task()
+
+
+@pytest.mark.asyncio
+async def test_bot_speaking_frames_pass_upstream():
+    with patch("pipecat.services.tavus.video.TavusTransportClient", _fake_tavus_client):
+        service = TavusVideoService(api_key="key", replica_id="replica", session=MagicMock())
+        await run_test(
+            service,
+            frames_to_send=[BotStartedSpeakingFrame(), BotStoppedSpeakingFrame()],
+            frames_to_send_direction=FrameDirection.UPSTREAM,
+            expected_up_frames=[BotStartedSpeakingFrame, BotStoppedSpeakingFrame],
+        )
