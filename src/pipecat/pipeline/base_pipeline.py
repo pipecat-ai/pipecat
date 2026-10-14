@@ -43,12 +43,15 @@ class BasePipeline(FrameProcessor):
 
         async def setup_processor(processor: FrameProcessor):
             started_at_ns = time.monotonic_ns()
+            processor._setup_started()
             try:
                 await processor.setup(setup)
             except Exception as e:
                 await processor.push_error(
                     f"Error setting up processor: {e}", exception=e, force_treat_as_permanent=True
                 )
+            finally:
+                processor._setup_finished()
             if setup.observer:
                 await setup.observer.on_processor_setup(
                     ProcessorSetUp(
@@ -58,6 +61,12 @@ class BasePipeline(FrameProcessor):
                     )
                 )
 
+        # This pipeline's own setup is done by now; only its processors are
+        # left. Each of them holds the StartFrame until its own setup is done,
+        # so release this pipeline now. Otherwise one slow processor would hold
+        # the StartFrame here and block every processor in this pipeline,
+        # including those ahead of the slow one.
+        self._setup_finished()
         await asyncio.gather(*[setup_processor(p) for p in processors])
 
     async def _cleanup_processors(self, processors: Sequence[FrameProcessor]):

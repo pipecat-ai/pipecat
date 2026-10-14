@@ -273,6 +273,12 @@ class FrameProcessor(BaseObject):
         # Watches the readiness condition passed to
         # pause_processing_all_frames_until() and lifts the pause it took.
         self.__pause_watcher_task: asyncio.Task | None = None
+        # Clear while a pipeline is setting this processor up. The StartFrame
+        # is held until it is set, so a processor never starts before its own
+        # setup is done, while the ones ahead of it in the pipeline can.
+        self.__setup_done = asyncio.Event()
+        self.__setup_done.set()
+        self.__start_pending = False
 
         # The process task processes non-system frames.  Non-system frames will
         # be processed as soon as they are received by the processing task
@@ -651,6 +657,30 @@ class FrameProcessor(BaseObject):
         if self._metrics is not None:
             await self._metrics.setup(self.task_manager)
 
+    def _setup_started(self):
+        """Hold the StartFrame here and in every sub-processor.
+
+        Called by the pipeline before setting processors up. Each one is let go
+        by :meth:`_setup_finished`.
+        """
+        self.__setup_done.clear()
+        for p in self.processors:
+            p._setup_started()
+
+    def _setup_finished(self, recursive: bool = False):
+        """Let this processor start, once its own setup() has returned.
+
+        Args:
+            recursive: Also let every sub-processor start.
+        """
+        self.__setup_done.set()
+        if self.__start_pending and self._task_manager:
+            self.__start_pending = False
+            self.__create_input_task()
+        if recursive:
+            for p in self.processors:
+                p._setup_finished(recursive=True)
+
     async def cleanup(self):
         """Release this processor's resources at teardown.
 
@@ -714,17 +744,22 @@ class FrameProcessor(BaseObject):
             return
 
         if self._enable_direct_mode:
+            if isinstance(frame, StartFrame):
+                await self.__setup_done.wait()
             await self.__process_frame(frame, direction, callback)
             return
 
         await self.__input_queue.put((frame, direction, callback))
 
-        # Nothing drains the queue until the StartFrame arrives, so a processor
-        # never acts on a frame before it has been started. Frames pushed
-        # between setup and the StartFrame simply wait, and the StartFrame is
-        # dequeued ahead of them.
+        # Nothing drains the queue until the StartFrame arrives and this
+        # processor is set up, so a processor never acts on a frame before it
+        # has been started. Frames pushed before that simply wait, and the
+        # StartFrame is dequeued ahead of them.
         if isinstance(frame, StartFrame):
-            self.__create_input_task()
+            if self.__setup_done.is_set():
+                self.__create_input_task()
+            else:
+                self.__start_pending = True
 
     async def pause_processing_frames(self):
         """Pause processing of queued frames."""
