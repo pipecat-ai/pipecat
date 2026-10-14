@@ -199,7 +199,7 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
         await self._stream.wait_bot_quiet(BOT_QUIET_MAX_WAIT_S)
         await self._stream.wait_bot_transcribed(BOT_QUIET_MAX_WAIT_S)
         self._stream.drop_pending_bot_output("the previous reply")
-        self._stream.turn_boundary()
+        self._stream.observing_boundary()
 
     async def _await_send_after(
         self, send_after: EvalSendAfter, turn_idx: int

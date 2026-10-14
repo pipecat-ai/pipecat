@@ -138,6 +138,10 @@ class EvalEventStream:
         # reply, however late its transcription lands (audio mode).
         self._input_sent_at: float = 0.0
         self._talked_over_until: float | None = None
+        # Whether the turn sends nothing and waits for the bot's next speech,
+        # which is its reply whether or not the bot's LLM produced it (a
+        # presence check, say). Cleared when the bot starts speaking.
+        self._observing: bool = False
         # Whether the bot is speaking, by its own report: cleared when it
         # starts, set when it stops or is interrupted. An event, so a driver
         # that must not talk over the bot can wait for it without polling.
@@ -161,10 +165,11 @@ class EvalEventStream:
 
     @property
     def talked_over_until(self) -> float | None:
-        """Monotonic time the bot started speaking again after the user's latest send talked over it.
+        """Monotonic time the bot started speaking again after the latest turn began.
 
-        The bot's speech that began before then is what it was saying when the
-        send talked over it. Infinity until the bot starts speaking again, and
+        The bot's speech that began before then belongs to the turn before:
+        what it was saying when a send talked over it, or the reply an observing
+        turn waited out. Infinity until the bot starts speaking again, and
         ``None`` when the latest send did not talk over it.
         """
         return self._talked_over_until
@@ -441,6 +446,9 @@ class EvalEventStream:
             self._bot_quiet.clear()
             if self._talked_over_until == math.inf:
                 self._talked_over_until = time.monotonic()
+            if self._observing:
+                self._observing = False
+                self._awaiting_reply = False
             return {"type": "bot_started_speaking"}
         elif isinstance(frame, BotStoppedSpeakingFrame):
             self._bot_quiet.set()
@@ -516,6 +524,18 @@ class EvalEventStream:
         self._awaiting_reply = True
         self._input_sent_at = time.monotonic()
         self._talked_over_until = math.inf if self.bot_speaking else None
+        self._observing = False
+
+    def observing_boundary(self) -> None:
+        """Start a turn that sends nothing: what the bot says next belongs to it.
+
+        What the bot says until it starts speaking again, however late its
+        transcription lands, is the previous turn's and is discarded. What it
+        says from then on is the turn's, even when its LLM did not produce it.
+        """
+        self.turn_boundary()
+        self._talked_over_until = math.inf
+        self._observing = True
 
     def _interrupted(self) -> None:
         """The bot reported an interruption: drop its pending output and wait for a fresh reply."""

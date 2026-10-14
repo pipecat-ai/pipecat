@@ -200,7 +200,8 @@ class _BotSpeechGate(FrameProcessor):
     notices the user: a tagged transcript whose segment began before the bot
     started speaking again is the bot finishing what it was saying, however
     late it lands, and is dropped here so it cannot pass for the reply or be
-    folded into it.
+    folded into it. A turn that sends nothing drops the same way what the bot
+    says before it starts speaking again.
 
     Both need a segmented STT, which transcribes one segment at a time. With
     any other STT the gate keeps no account of segments and drops nothing, and
@@ -238,10 +239,7 @@ class _BotSpeechGate(FrameProcessor):
         elif isinstance(frame, _BotSegmentTranscriptionFrame):
             talked_over_until = self._stream.talked_over_until
             if talked_over_until is not None and frame.segment_started_at < talked_over_until:
-                self._trace.log(
-                    f"discard: bot speech from before its reply to the interrupting send "
-                    f"{frame.text!r}"
-                )
+                self._trace.log(f"discard: bot speech from before the turn's reply {frame.text!r}")
                 return
         await self.push_frame(frame, direction)
 

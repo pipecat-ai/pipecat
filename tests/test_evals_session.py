@@ -486,6 +486,25 @@ class TestSendWaitsForTheBot(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(TimeoutError):
             await stream.next_event("response", time.monotonic() + 0.05)
 
+    async def test_an_observing_turn_takes_the_bots_next_speech_without_its_llm(self):
+        # Once the previous reply is over, what the bot says next is the
+        # observing turn's, even when its LLM did not produce it.
+        session = _session(bot_audio=True)
+        driver, stream = session._driver, session._stream
+        stream.frame_to_event(BotStartedSpeakingFrame())
+
+        async def finish_reply():
+            await asyncio.sleep(0.1)
+            stream.frame_to_event(BotStoppedSpeakingFrame())
+
+        task = asyncio.create_task(finish_reply())
+        await driver._await_previous_reply()
+        await task
+        stream.frame_to_event(BotStartedSpeakingFrame())
+        await stream.bot_turn_stopped("Are you still there?")
+        event = await stream.next_event("response", time.monotonic() + 0.05)
+        self.assertEqual(event["text"], "Are you still there?")
+
     async def test_an_observing_turn_lets_the_previous_reply_finish_transcribing(self):
         # The bot has finished turn 1's reply when turn 2, which only listens
         # for the bot's next move, begins, but the reply's last sentence is
@@ -674,6 +693,24 @@ class TestBotSpeechGate(unittest.IsolatedAsyncioTestCase):
             user_id="",
             timestamp="",
             segment_started_at=reply,
+        )
+        down, _ = await self._run(gate, [stale, fresh])
+        self.assertEqual([f.text for f in down if isinstance(f, TranscriptionFrame)], [fresh.text])
+
+    async def test_a_segment_from_before_an_observing_turn_is_dropped(self):
+        # The previous reply's last segment is transcribed after the observing
+        # turn began; what the bot says once it speaks again gets through.
+        stream = _stream(bot_audio=True)
+        gate = _BotSpeechGate(stream, EvalTrace(), deque())
+        before = time.monotonic()
+        stream.observing_boundary()
+        stream.frame_to_event(BotStartedSpeakingFrame())  # a presence check
+        after = time.monotonic()
+        stale = _BotSegmentTranscriptionFrame(
+            text="Do you have cities in mind?", user_id="", timestamp="", segment_started_at=before
+        )
+        fresh = _BotSegmentTranscriptionFrame(
+            text="Are you still there?", user_id="", timestamp="", segment_started_at=after
         )
         down, _ = await self._run(gate, [stale, fresh])
         self.assertEqual([f.text for f in down if isinstance(f, TranscriptionFrame)], [fresh.text])
