@@ -161,7 +161,7 @@
     },
     "Node": {
       "additionalProperties": false,
-      "description": "One node of the flow.\n\nParameters:\n    task_messages: What the LLM should do at this node.\n    role_message: The bot's role or personality, sent as the LLM's\n        system instruction on entering this node. It persists across\n        transitions until another node sets its own. May contain\n        ``{{ key }}`` placeholders; see :class:`FlowConfig`.\n    functions: Tools offered at this node, in addition to the\n        config's ``global_functions``.\n    pre_actions: Actions run before the LLM responds at this node.\n    post_actions: Actions run after the LLM responds at this node.\n    context_strategy: How the LLM context is updated on entering this\n        node. Defaults to the ``FlowManager``'s strategy.\n    respond_immediately: Whether the LLM responds as soon as the node\n        is entered. Defaults to True.",
+      "description": "One node of the flow.\n\nParameters:\n    task_messages: What the LLM should do at this node.\n    role_message: The bot's role or personality, sent as the LLM's\n        system instruction on entering this node. Either text or a\n        :class:`FlowConfig.RoleMessage` carrying delivery options. It\n        persists across transitions until another node sets its own.\n        May contain ``{{ key }}`` placeholders; see :class:`FlowConfig`.\n    functions: Tools offered at this node, in addition to the\n        config's ``global_functions``.\n    pre_actions: Actions run before the LLM responds at this node.\n    post_actions: Actions run after the LLM responds at this node.\n    context_strategy: How the LLM context is updated on entering this\n        node. Defaults to the ``FlowManager``'s strategy.\n    respond_immediately: Whether the LLM responds as soon as the node\n        is entered. Defaults to True.",
       "properties": {
         "task_messages": {
           "items": {
@@ -174,6 +174,9 @@
           "anyOf": [
             {
               "type": "string"
+            },
+            {
+              "$ref": "#/$defs/RoleMessage"
             },
             {
               "type": "null"
@@ -229,6 +232,26 @@
         "task_messages"
       ],
       "title": "Node",
+      "type": "object"
+    },
+    "RoleMessage": {
+      "additionalProperties": false,
+      "description": "A node's role message, with options for how it is delivered.\n\nParameters:\n    content: The bot's role or personality, sent as the LLM's system\n        instruction. May contain ``{{ key }}`` placeholders; see\n        :class:`FlowConfig`.\n    reach_inactive_services: Whether the system instruction reaches\n        every LLM an ``LLMSwitcher`` manages, not only the active one,\n        so it survives a service switch. Defaults to False.",
+      "properties": {
+        "content": {
+          "title": "Content",
+          "type": "string"
+        },
+        "reach_inactive_services": {
+          "default": false,
+          "title": "Reach Inactive Services",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "content"
+      ],
+      "title": "RoleMessage",
       "type": "object"
     }
   },
