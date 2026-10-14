@@ -43,4 +43,4 @@ The judge sees each reply as the harness attributes it to a turn, so a result th
 uv run python evals/llm-with-backend/predictive_delegation/replay.py --out after.json
 ```
 
-It needs `TYPESAFE_API_KEY` and takes about a minute. Run it, with the text evals, before and after any change to the prompts (see "Prompts" in `pipecat.pipeline.llm_with_backend`), and record the results in [`RESULTS.md`](RESULTS.md), where `results_table.py` turns a suite run into its table.
+It needs `TYPESAFE_API_KEY` and takes about a minute. Run it, with the evals, before and after any change to the prompts (see "Prompts" in `pipecat.pipeline.llm_with_backend`), and record the results in [`RESULTS.md`](RESULTS.md), where `results_table.py` turns a suite run into its table.
