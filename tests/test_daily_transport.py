@@ -6,6 +6,7 @@
 
 """Tests for the Daily transport."""
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -165,3 +166,51 @@ async def test_on_dialin_ready_does_not_report_success_as_error():
         await transport._handle_dialin_ready("sip:test@example.com")
 
     transport._on_error.assert_not_awaited()
+
+
+def _make_dtmf_client(*, dial_out: str = "", dial_in: str = ""):
+    """Return a transport client with session ids set and a fake Daily call client."""
+    transport = _make_transport()
+    client = transport._client
+    client._dial_out_session_id = dial_out
+    client._dial_in_session_id = dial_in
+    client._task_manager = MagicMock()
+    client._task_manager.get_event_loop.return_value = asyncio.get_running_loop()
+
+    def _send_dtmf(settings, completion):
+        completion(None)
+
+    client._client.send_dtmf = MagicMock(side_effect=_send_dtmf)
+    return client
+
+
+@pytest.mark.asyncio
+async def test_send_dtmf_falls_back_to_dial_in_session_id():
+    client = _make_dtmf_client(dial_in="dial-in-session")
+
+    error = await client.send_dtmf({"tones": "1"})
+
+    assert error is None
+    settings = client._client.send_dtmf.call_args.args[0]
+    assert settings["sessionId"] == "dial-in-session"
+
+
+@pytest.mark.asyncio
+async def test_send_dtmf_prefers_dial_out_session_id_over_dial_in():
+    client = _make_dtmf_client(dial_out="dial-out-session", dial_in="dial-in-session")
+
+    error = await client.send_dtmf({"tones": "1"})
+
+    assert error is None
+    settings = client._client.send_dtmf.call_args.args[0]
+    assert settings["sessionId"] == "dial-out-session"
+
+
+@pytest.mark.asyncio
+async def test_send_dtmf_errors_without_any_session_id():
+    client = _make_dtmf_client()
+
+    error = await client.send_dtmf({"tones": "1"})
+
+    assert error == "Can't send DTMF if 'sessionId' is not set"
+    client._client.send_dtmf.assert_not_called()
