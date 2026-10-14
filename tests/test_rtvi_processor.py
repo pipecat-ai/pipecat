@@ -16,17 +16,21 @@ from pydantic import ValidationError
 import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.frames.frames import (
+    ErrorFrame,
     InputAudioRawFrame,
     InputDTMFFrame,
     InputTransportMessageFrame,
     InputTransportStartAudioStreamingFrame,
     LLMConfigureOutputFrame,
     LLMMessagesAppendFrame,
+    OutputTransportMessageUrgentFrame,
     UserFileRawFrame,
     UserImageRawFrame,
 )
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.frameworks.rtvi.frames import RTVISendTextFrame
 from pipecat.processors.frameworks.rtvi.processor import RTVIProcessor
+from pipecat.transports.base_output import BaseOutputTransport
 
 
 class TestRTVIClientReadyVersionHandling(unittest.IsolatedAsyncioTestCase):
@@ -466,6 +470,50 @@ class TestRTVISendText(unittest.IsolatedAsyncioTestCase):
                 LLMConfigureOutputFrame,
             ],
         )
+
+
+class TestRTVIErrorHandling(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.processor = RTVIProcessor()
+        self.processor.push_frame = AsyncMock()
+
+    async def asyncTearDown(self):
+        await self.processor.cleanup()
+
+    def _pushed_frames(self):
+        return [c.args[0] for c in self.processor.push_frame.call_args_list]
+
+    async def test_error_frame_from_output_transport_does_not_send_error_message(self):
+        # When an error originates from an output transport, RTVIProcessor should
+        # NOT emit an OutputTransportMessageUrgentFrame (which would cause an infinite loop).
+        mock_output_transport = Mock(spec=BaseOutputTransport)
+        error_frame = ErrorFrame(
+            error="Unable to send message: Disconnected",
+            processor=mock_output_transport,
+        )
+
+        await self.processor.process_frame(error_frame, FrameDirection.UPSTREAM)
+
+        pushed = self._pushed_frames()
+        # The ErrorFrame should still be forwarded upstream...
+        self.assertIn(error_frame, pushed)
+        # ...but NO OutputTransportMessageUrgentFrame should be pushed downstream
+        self.assertFalse(any(isinstance(f, OutputTransportMessageUrgentFrame) for f in pushed))
+
+    async def test_error_frame_from_service_sends_error_message(self):
+        # When an error originates from a non-output processor (e.g. LLM/TTS),
+        # RTVIProcessor should emit an OutputTransportMessageUrgentFrame to notify client.
+        mock_llm_service = Mock(spec=FrameProcessor)
+        error_frame = ErrorFrame(
+            error="LLM service rate limit exceeded",
+            processor=mock_llm_service,
+        )
+
+        await self.processor.process_frame(error_frame, FrameDirection.UPSTREAM)
+
+        pushed = self._pushed_frames()
+        self.assertIn(error_frame, pushed)
+        self.assertTrue(any(isinstance(f, OutputTransportMessageUrgentFrame) for f in pushed))
 
 
 if __name__ == "__main__":

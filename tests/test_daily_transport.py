@@ -11,7 +11,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from pipecat.frames.frames import BotConnectedFrame, STTMetadataFrame
+from pipecat.frames.frames import (
+    BotConnectedFrame,
+    OutputTransportMessageFrame,
+    STTMetadataFrame,
+)
 from pipecat.services.stt_latency import DEEPGRAM_TTFS_P99
 from pipecat.transports.daily.transport import DailyParams, DailyTransport
 
@@ -214,3 +218,36 @@ async def test_send_dtmf_errors_without_any_session_id():
 
     assert error == "Can't send DTMF if 'sessionId' is not set"
     client._client.send_dtmf.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_output_transport_send_message_suppresses_disconnect_errors():
+    transport = _make_transport()
+    output = transport.output()
+    output.push_error = AsyncMock()
+
+    # Simulate client returning Disconnected signaling error
+    output._client.send_message = AsyncMock(
+        return_value="AppMessage(Signalling(MessageSendFailed(TrySendError { kind: Disconnected })))"
+    )
+
+    frame = OutputTransportMessageFrame(message={"tick": 1})
+    await output.send_message(frame)
+
+    output.push_error.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_output_transport_send_message_pushes_unexpected_errors():
+    transport = _make_transport()
+    output = transport.output()
+    output.push_error = AsyncMock()
+
+    # Simulate unexpected error
+    output._client.send_message = AsyncMock(return_value="Invalid message payload")
+
+    frame = OutputTransportMessageFrame(message={"tick": 1})
+    await output.send_message(frame)
+
+    output.push_error.assert_called_once_with("Unable to send message: Invalid message payload")
+

@@ -47,6 +47,7 @@ from pipecat.processors.frameworks.rtvi.observer import RTVIObserver, RTVIObserv
 from pipecat.services.llm_service import (
     FunctionCallParams,  # TODO(aleix): we shouldn't import `services` from `processors`
 )
+from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport
 from pipecat.utils.deprecation import warn_deprecated
 
@@ -231,7 +232,8 @@ class RTVIProcessor(FrameProcessor):
             await self._cancel(frame)
             await self.push_frame(frame, direction)
         elif isinstance(frame, ErrorFrame):
-            await self._send_error_frame(frame)
+            if not isinstance(frame.processor, BaseOutputTransport):
+                await self._send_error_frame(frame)
             await self.push_frame(frame, direction)
         elif isinstance(frame, InputTransportMessageFrame):
             await self._handle_transport_message(frame)

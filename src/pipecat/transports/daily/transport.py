@@ -2229,6 +2229,9 @@ class DailyOutputTransport(BaseOutputTransport):
         """
         error = await self._client.send_message(frame)
         if error:
+            if "Disconnected" in error or "MessageSendFailed" in error:
+                logger.debug(f"{self}: Unable to send message (transport disconnected): {error}")
+                return
             await self.push_error(f"Unable to send message: {error}")
 
     async def register_video_destination(self, destination: str):
