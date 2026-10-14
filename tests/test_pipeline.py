@@ -1008,7 +1008,7 @@ class TestPipelineWorker(unittest.IsolatedAsyncioTestCase):
         """A cancel that arrives before processors are set up still stops a
         processor that never finishes setting up."""
 
-        class SetupBlocker(FrameProcessor):
+        class SetupBlocker(IdentityFilter):
             def __init__(self, **kwargs):
                 super().__init__(**kwargs)
                 self._block = asyncio.Event()
@@ -1018,12 +1018,42 @@ class TestPipelineWorker(unittest.IsolatedAsyncioTestCase):
                 await self._block.wait()
 
         pipeline = Pipeline([SetupBlocker()])
-        worker = PipelineWorker(pipeline, setup_timeout_secs=5.0, cancel_timeout_secs=0.1)
+        worker = PipelineWorker(pipeline, setup_timeout_secs=0.1)
+
+        timed_out = []
+
+        @worker.event_handler("on_pipeline_timeout")
+        async def on_pipeline_timeout(_worker, frame):
+            timed_out.append(frame)
 
         await worker.cancel()
         await asyncio.wait_for(worker.run(WorkerParams(task_manager=TaskManager())), timeout=2.0)
 
         assert worker.has_finished()
+        assert not timed_out
+
+    async def test_task_cancel_from_setup(self):
+        """A processor can cancel the worker from its own setup(), e.g. when
+        it can't connect."""
+
+        class SetupCanceller(IdentityFilter):
+            async def setup(self, setup: FrameProcessorSetup):
+                await super().setup(setup)
+                await setup.pipeline_worker.cancel(reason="cannot connect")
+
+        pipeline = Pipeline([IdentityFilter(), SetupCanceller()])
+        worker = PipelineWorker(pipeline)
+
+        timed_out = []
+
+        @worker.event_handler("on_pipeline_timeout")
+        async def on_pipeline_timeout(_worker, frame):
+            timed_out.append(frame)
+
+        await asyncio.wait_for(worker.run(WorkerParams(task_manager=TaskManager())), timeout=2.0)
+
+        assert worker.has_finished()
+        assert not timed_out
 
     async def test_task_setup_timeout_still_cleans_the_rest_up(self):
         """Setting up is abandoned part-way, so processors are cleaned up from
