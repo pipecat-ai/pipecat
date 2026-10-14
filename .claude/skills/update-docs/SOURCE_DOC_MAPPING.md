@@ -36,7 +36,10 @@ These source paths don't follow the standard `services/{provider}/{type}.py` →
 | `services/grok/realtime/**`                 | `api-reference/server/services/s2s/grok.mdx`                                                       |
 | `services/openai/realtime/**`               | `api-reference/server/services/s2s/openai.mdx`                                                     |
 | `services/openai/responses/llm.py`          | `api-reference/server/services/llm/openai-responses.mdx`                                           |
-| `processors/frameworks/rtvi.py`             | `api-reference/server/rtvi/rtvi-processor.mdx` and `api-reference/server/rtvi/rtvi-observer.mdx`   |
+| `processors/frameworks/rtvi/processor.py`   | `api-reference/server/rtvi/rtvi-processor.mdx`                                                     |
+| `processors/frameworks/rtvi/observer.py`    | `api-reference/server/rtvi/rtvi-observer.mdx`                                                      |
+| `processors/frameworks/rtvi/models.py`      | `client/rtvi-standard.mdx` (the wire protocol: messages, fields, `PROTOCOL_VERSION`)               |
+| `processors/frameworks/rtvi/frames.py`      | `api-reference/server/rtvi/rtvi-processor.mdx` and `api-reference/server/frames/system-frames.mdx` |
 | `processors/idle_frame_processor.py`        | `api-reference/server/pipeline/pipeline-idle-detection.mdx`                                        |
 | `pipeline/worker.py`                        | `api-reference/server/pipeline/pipeline-worker.mdx`                                                |
 | `pipeline/runner.py`                        | `api-reference/server/utilities/runner/guide.mdx`                                                  |

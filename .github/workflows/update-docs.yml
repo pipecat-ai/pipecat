@@ -23,7 +23,7 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       github.event.pull_request.merged == true
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     permissions:
       contents: read
       # write so a run that fails can say so on the PR that triggered it;
@@ -119,7 +119,8 @@ jobs:
             Also run `gh pr diff ${{ steps.pr.outputs.number }} --name-only` to get the list of changed files.
             Filter to source files matching the profile's Scope section (SKILL.md Step 3).
 
-            If no relevant source files were changed, exit with "No documentation changes needed."
+            If no relevant source files were changed, record a `NOOP:` outcome (see
+            "Recording the outcome") and stop.
 
             ## Follow the skill instructions
 
@@ -149,37 +150,25 @@ jobs:
             Do not ask questions. If you encounter gaps (unmapped files, missing sections,
             ambiguous changes), note them in the PR body under "## Gaps identified".
 
-            ### Creating the docs PR
-            After committing all changes in `_docs`, push and create a PR:
-            ```bash
-            cd _docs
-            git push -u origin docs/pr-${{ steps.pr.outputs.number }}
-            GH_TOKEN=$DOCS_TOKEN gh pr create \
-              --repo pipecat-ai/docs \
-              --label auto-docs \
-              --label pipecat \
-              --title "docs: update for pipecat PR #${{ steps.pr.outputs.number }}" \
-              --body "$(cat <<'BODY'
-            Automated documentation update for [pipecat PR #${{ steps.pr.outputs.number }}](https://github.com/pipecat-ai/pipecat/pull/${{ steps.pr.outputs.number }}).
+            ### Committing the update
+            Commit all changes in `_docs` on the docs branch. Do not push and do not
+            create a PR: later workflow steps review the update, then push it and open
+            the PR.
 
+            Write the PR body to `$RUNNER_TEMP/pr-body.md`, with these two sections:
+            ```
             ## Changes
             <summarize each doc page updated and what changed>
 
             ## Gaps identified
             <any unmapped files, missing doc pages, or missing sections — or "None">
-            BODY
-            )"
             ```
-
-            ### Re-run handling
-            If `gh pr create` fails because a PR from that branch already exists,
-            push the updated commits and use `gh pr edit` to update the body instead.
 
             ### Recording the outcome
             Every run must leave a one-line verdict at
             `$RUNNER_TEMP/docs-update-outcome.txt`, written before you finish:
 
-            - `PR: <url>` — a docs PR was created or updated
+            - `UPDATED: <pages>` — you committed a docs update, naming the pages
             - `NOOP: <reason>` — no docs change was needed, naming the specific
               reason (e.g. "only internal wiring in pipeline/task_manager.py changed;
               no public API affected")
@@ -191,8 +180,8 @@ jobs:
             ### No-op
             If after analyzing the diff you determine no documentation changes are needed
             (e.g., only skip-listed files changed, or changes don't affect public API docs),
-            write the `NOOP:` line described above and exit cleanly without creating a
-            branch or PR.
+            write the `NOOP:` line described above and exit cleanly without committing
+            anything.
 
             A file being a base class or a shared module is NOT by itself a reason to
             skip it. Public constructor parameters, event handlers, and behavior belong
@@ -214,24 +203,97 @@ jobs:
             --max-turns 90
             --allowedTools "Read,Write,Edit,Glob,Grep,Bash"
 
+      # A run either commits an update or says why none was needed. Anything
+      # else is a run that fell short, and fails so it is reported on the PR.
+      - name: Check the update
+        id: draft
+        working-directory: _docs
+        env:
+          BASE: ${{ steps.docs-base.outputs.sha }}
+          BRANCH: docs/pr-${{ steps.pr.outputs.number }}
+        run: |
+          OUTCOME=$(cat "$RUNNER_TEMP/docs-update-outcome.txt" 2>/dev/null || true)
+          echo "Writer outcome: ${OUTCOME:-<none recorded>}"
+
+          if [ "$(git rev-parse --abbrev-ref HEAD)" = "$BRANCH" ]; then
+            # Keep edits the writer left uncommitted.
+            if [ -n "$(git status --porcelain)" ]; then
+              git config user.name "github-actions[bot]"
+              git config user.email "github-actions[bot]@users.noreply.github.com"
+              git add -A
+              git commit -qm "docs: update for pipecat PR #${{ steps.pr.outputs.number }}"
+            fi
+            if [ -n "$(git diff --name-only "$BASE" HEAD)" ]; then
+              echo "changed=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+
+          if printf '%s' "$OUTCOME" | grep -q '^NOOP: '; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::The run neither committed a docs change nor recorded a NOOP reason."
+            exit 1
+          fi
+
+      # A second agent, starting fresh, checks the update against the code. The
+      # writer tends to trust the PR description and its own first reading;
+      # the reviewer starts from the code. A failed review leaves the writer's
+      # update to be published as is.
+      - name: Review the update
+        id: review
+        if: steps.draft.outputs.changed == 'true'
+        continue-on-error: true
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          prompt: |
+            Review the docs update written for PR #${{ steps.pr.outputs.number }} of
+            pipecat-ai/pipecat. Read `.claude/skills/update-docs/REVIEW.md` and follow it,
+            with:
+
+            - DOCS_PATH: `./_docs/`, on branch `docs/pr-${{ steps.pr.outputs.number }}`
+            - BASE: `${{ steps.docs-base.outputs.sha }}`
+
+            Before committing in `_docs`, set:
+            ```bash
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            ```
+
+            Write your findings, one line per problem and fix, to
+            `$RUNNER_TEMP/review.md`. If you changed the update, revise the
+            `## Changes` section of `$RUNNER_TEMP/pr-body.md` to match. If you
+            conclude the update should not exist, also overwrite
+            `$RUNNER_TEMP/docs-update-outcome.txt` with `NOOP: <reason>`.
+
+            Do not push, and do not create, edit, or comment on any pull request.
+          claude_args: |
+            --model claude-sonnet-5-5
+            --max-turns 60
+            --allowedTools "Read,Write,Edit,Glob,Grep,Bash"
+
       # Pinned from the docs repo's own .nvmrc rather than left to whatever the
       # runner image ships, so formatting and generated files match what
       # contributors produce.
       - name: Set up Node
-        if: always()
+        if: steps.draft.outputs.changed == 'true'
         uses: actions/setup-node@v4
         with:
           node-version-file: _docs/.nvmrc
 
       - name: Format docs and regenerate llms.txt
-        if: always()
+        if: steps.draft.outputs.changed == 'true'
         working-directory: _docs
         run: |
-          BRANCH="docs/pr-${{ steps.pr.outputs.number }}"
-          if [ "$(git rev-parse --abbrev-ref HEAD)" != "$BRANCH" ]; then
-            echo "No docs branch checked out; nothing to do."
-            exit 0
+          # A review that stopped partway leaves uncommitted edits; drop them
+          # and keep what it committed.
+          if [ "${{ steps.review.outcome }}" != "success" ]; then
+            echo "::warning::The review step did not finish; publishing the writer's update with any committed review fixes."
           fi
+          git reset -q --hard HEAD
+          git clean -fdq
 
           # Format only the pages this branch touches, so the docs PR diff stays
           # limited to the changes under review.
@@ -239,7 +301,7 @@ jobs:
           git diff --name-only --diff-filter=d -z \
             "${{ steps.docs-base.outputs.sha }}" HEAD > "$CHANGED"
           if [ ! -s "$CHANGED" ]; then
-            echo "No doc changes to format."
+            echo "The review removed the update; nothing to format."
             exit 0
           fi
 
@@ -260,8 +322,59 @@ jobs:
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git commit -am "chore: format docs and regenerate llms.txt"
-          git push origin "$BRANCH"
+          git commit -qam "chore: format docs and regenerate llms.txt"
+
+      - name: Publish docs PR
+        if: steps.draft.outputs.changed == 'true'
+        working-directory: _docs
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          BASE: ${{ steps.docs-base.outputs.sha }}
+          BRANCH: docs/pr-${{ steps.pr.outputs.number }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+        run: |
+          if [ -z "$(git diff --name-only "$BASE" HEAD)" ]; then
+            echo "The review concluded no docs change was needed; no docs PR."
+            exit 0
+          fi
+
+          BODY="$RUNNER_TEMP/pr-body-full.md"
+          {
+            echo "Automated documentation update for [pipecat PR #$PR_NUMBER](https://github.com/pipecat-ai/pipecat/pull/$PR_NUMBER)."
+            echo
+            if [ -s "$RUNNER_TEMP/pr-body.md" ]; then
+              cat "$RUNNER_TEMP/pr-body.md"
+            else
+              echo "## Changes"
+              echo
+              echo "See the diff."
+            fi
+            if [ -s "$RUNNER_TEMP/review.md" ]; then
+              echo
+              echo "<details><summary>Automated review</summary>"
+              echo
+              cat "$RUNNER_TEMP/review.md"
+              echo
+              echo "</details>"
+            fi
+          } > "$BODY"
+
+          git push -u origin "$BRANCH"
+
+          # A re-run updates the PR it opened the first time.
+          EXISTING=$(gh pr list --repo pipecat-ai/docs --head "$BRANCH" \
+            --state open --json url --jq '.[0].url')
+          if [ -n "$EXISTING" ]; then
+            gh pr edit "$EXISTING" --body-file "$BODY"
+          else
+            gh pr create \
+              --repo pipecat-ai/docs \
+              --head "$BRANCH" \
+              --label auto-docs \
+              --label pipecat \
+              --title "docs: update for pipecat PR #$PR_NUMBER" \
+              --body-file "$BODY"
+          fi
 
       - name: Assign docs PR
         if: always()
@@ -295,6 +408,8 @@ jobs:
             --head "docs/pr-$PR_NUMBER" --state all \
             --json url --jq '.[0].url' 2>/dev/null || true)
 
+          # Written to the log as well as the summary: the log is what
+          # `gh run view --log` returns, so skipped runs can be audited later.
           {
             echo "## Docs automation for pipecat PR #$PR_NUMBER"
             echo
@@ -310,7 +425,7 @@ jobs:
               echo "No docs PR and no recorded outcome — the run did not reach the"
               echo "point of stating one. Treat this PR as undocumented."
             fi
-          } >> "$GITHUB_STEP_SUMMARY"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
 
       # Nothing outside the Actions tab surfaces a failed run, so it is reported
       # on the PR that triggered it.
