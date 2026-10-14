@@ -64,21 +64,41 @@ except ModuleNotFoundError as e:
     raise ImportError(f"Missing module: {e}") from e
 
 
-# The first Sonnet generation with adaptive thinking on when a request omits
-# ``thinking``. Earlier Sonnets, and every Haiku, have thinking off unless asked.
-_SONNET_THINKS_BY_DEFAULT_FROM = 5
+# The lowest thinking setting Anthropic documents for each model, sent when the
+# caller configures neither ``thinking`` nor ``effort``, keyed by model name.
+# Each entry is the request fields to send: ``thinking``, or ``output_config``
+# with an effort on models whose thinking can't be turned off. "between_tools"
+# is Sonnet 5.5's lowest setting, and "disabled" is already the default on the
+# Claude 4 models.
+_THINKING_DEFAULTS: dict[str, dict[str, dict[str, Any]]] = {
+    "claude-fable-5-1": {"output_config": {"effort": "low"}},
+    "claude-fable-5": {"output_config": {"effort": "low"}},
+    "claude-opus-5-5": {"output_config": {"effort": "low"}},
+    "claude-opus-5": {"thinking": {"type": "disabled"}},
+    "claude-sonnet-5-5": {"thinking": {"type": "between_tools"}},
+    "claude-sonnet-5": {"thinking": {"type": "disabled"}},
+    "claude-haiku-5-5": {"thinking": {"type": "disabled"}},
+    "claude-opus-4-8": {"thinking": {"type": "disabled"}},
+    "claude-opus-4-7": {"thinking": {"type": "disabled"}},
+    "claude-opus-4-6": {"thinking": {"type": "disabled"}},
+    "claude-sonnet-4-6": {"thinking": {"type": "disabled"}},
+    "claude-opus-4-5": {"thinking": {"type": "disabled"}},
+    "claude-sonnet-4-5": {"thinking": {"type": "disabled"}},
+    "claude-haiku-4-5": {"thinking": {"type": "disabled"}},
+}
 
 
-def _sonnet_generation(model: str) -> int | None:
-    """The generation of a Sonnet model id, or ``None`` for any other model.
+def _model_name(model: str) -> str:
+    """The name a model id refers to, the key it's looked up by in ``_THINKING_DEFAULTS``.
 
-    Searched rather than anchored because the service also takes Bedrock and
-    Vertex clients, whose ids prefix the name (``anthropic.claude-sonnet-5``).
-    Pre-4 ids such as ``claude-3-5-sonnet-20241022`` put the generation before
-    the name and don't match; they don't think either.
+    Bedrock and Vertex ids wrap the name, and a dated snapshot gets its model's
+    entry: ``us.anthropic.claude-sonnet-5-20260630-v1:0``,
+    ``claude-sonnet-5@20260630`` and ``claude-sonnet-5-20260630`` all name
+    ``claude-sonnet-5``.
     """
-    match = re.search(r"sonnet-(\d{1,2})(?!\d)", model.lower())
-    return int(match.group(1)) if match else None
+    name = model.lower().rsplit(".", 1)[-1].split("@", 1)[0]
+    name = re.sub(r"-v\d+:\d+$", "", name)
+    return re.sub(r"-\d{8}$", "", name)
 
 
 def _apply_sampling_settings(params: dict[str, Any], settings: "AnthropicLLMSettings"):
@@ -116,7 +136,10 @@ class AnthropicThinkingConfig(BaseModel):
         type: Thinking mode. "adaptive" lets the model decide when and how deeply
             to think; prefer it. "enabled" is legacy manual thinking, sized by
             ``budget_tokens``: Claude 4.7 and later reject it, and Claude 4.5 and
-            earlier accept only it. "disabled" turns thinking off.
+            earlier accept only it. "disabled" turns thinking off on the models
+            that allow it. "between_tools" is how Claude Sonnet 5.5, which
+            rejects "disabled", runs without up-front thinking; no other model
+            accepts it.
         budget_tokens: Maximum number of tokens for thinking.
             With today's models, the minimum is 1024.
             Required when type is "enabled", not allowed otherwise.
@@ -129,7 +152,7 @@ class AnthropicThinkingConfig(BaseModel):
 
     # Why `| str` here? To not break compatibility in case Anthropic adds
     # more types in the future.
-    type: Literal["adaptive", "enabled", "disabled"] | str
+    type: Literal["adaptive", "enabled", "disabled", "between_tools"] | str
 
     # No client-side validation on budget_tokens — we let the server
     # enforce the rules so we stay forward-compatible if they change.
@@ -151,10 +174,15 @@ class AnthropicLLMSettings(LLMSettings):
             the base input price per cache write instead of 1.25 times.
             Anthropic caches nothing when the tools and system prompt together
             fall below the model's minimum cacheable prompt length.
-        thinking: Thinking configuration. If this is not provided, Pipecat
-            disables thinking on Sonnet 5 and later, which otherwise decide
-            per request whether to think, to reduce latency; Opus and Fable
-            are left at Anthropic's default.
+        thinking: Thinking configuration. If neither this nor ``effort`` is
+            set, Pipecat sends the lowest thinking setting Anthropic documents
+            for the model, for the fastest responses, and logs what it sent.
+            Models Pipecat doesn't list run at Anthropic's default.
+        effort: How much the model spends on its response, thinking included:
+            "low", "medium", "high", "xhigh" or "max". Sent as
+            ``output_config.effort``. ``None`` uses the model's default. Lower
+            effort is Anthropic's recommended way to reduce thinking, and the
+            only one on models whose thinking can't be turned off.
     """
 
     enable_prompt_caching: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -170,6 +198,9 @@ class AnthropicLLMSettings(LLMSettings):
     top_k: int | None | NotGiven | AnthropicNotGiven = field(default_factory=lambda: NOT_GIVEN)
     top_p: float | None | NotGiven | AnthropicNotGiven = field(default_factory=lambda: NOT_GIVEN)
     thinking: Union["AnthropicLLMService.ThinkingConfig", NotGiven, AnthropicNotGiven] = field(
+        default_factory=lambda: NOT_GIVEN
+    )
+    effort: Literal["low", "medium", "high", "xhigh", "max"] | str | None | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
 
@@ -225,9 +256,9 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
             thinking: Extended thinking configuration.
                 Enabling extended thinking causes the model to spend more time "thinking" before responding.
                 It also causes this service to emit LLMThinking*Frames during response generation.
-                If this is not provided, Pipecat disables thinking on Sonnet 5 and later, which
-                otherwise decide per request whether to think, to reduce latency; Opus and
-                Fable are left at Anthropic's default.
+                If this is not provided, Pipecat sends the lowest thinking setting Anthropic
+                documents for the model, for the fastest responses, and logs what it sent.
+                Models Pipecat doesn't list run at Anthropic's default.
             extra: Additional parameters to pass to the API.
         """
 
@@ -301,6 +332,7 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
             filter_incomplete_user_turns=False,
             user_turn_completion_config=None,
             thinking=ANTHROPIC_NOT_GIVEN,
+            effort=None,
             extra={},
         )
 
@@ -370,27 +402,48 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
             response = await api_call(**params)
             return response
 
-    def _maybe_disable_thinking(self, params: dict[str, Any]):
-        """Turn thinking off by default on Sonnet models where it is on unless told not to.
+    def _output_config(self, response_schema: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Build ``output_config`` from the effort setting and a response schema.
 
-        Sonnet 5 and later run adaptive thinking whenever the request omits
-        ``thinking``, which for real-time voice can add seconds before the first
-        answer token, so when the caller hasn't configured thinking, request
-        ``{"type": "disabled"}``. We only do this for the Sonnet line,
-        Anthropic's speed tier: Opus and Fable are left at the provider
-        default, since choosing one is a decision to reason. Mirrors Gemini's
-        ``_maybe_unset_thinking_budget``, which does the same for the Flash
-        line.
+        Args:
+            response_schema: JSON schema the reply must follow, if any.
+
+        Returns:
+            The ``output_config`` request field, empty when there is nothing to send.
+        """
+        output_config: dict[str, Any] = {}
+        effort = assert_given(self._settings.effort)
+        if effort:
+            output_config["effort"] = effort
+        if response_schema is not None:
+            output_config["format"] = {"type": "json_schema", "schema": response_schema}
+        return output_config
+
+    def _maybe_apply_thinking_default(self, params: dict[str, Any]):
+        """Send the model's lowest thinking setting when no reasoning is configured.
+
+        Applies the model's entry in ``_THINKING_DEFAULTS``, if it has one. A
+        request that already sets ``thinking`` or an effort, from the settings
+        or from ``extra``, is left as it is, since the two together decide how
+        much the model thinks. The first request for each model logs the
+        setting sent or, for a Claude model that isn't listed, warns that it
+        runs at Anthropic's default.
 
         Args:
             params: The request params dict (modified in place).
         """
-        if "thinking" in params:
+        if "thinking" in params or "effort" in params.get("output_config", {}):
             return
-        model = assert_given(self._settings.model)
-        generation = _sonnet_generation(model or "")
-        if generation is not None and generation >= _SONNET_THINKS_BY_DEFAULT_FROM:
-            params["thinking"] = {"type": "disabled"}
+        model = assert_given(self._settings.model) or ""
+        name = _model_name(model)
+        self._apply_thinking_default(
+            params,
+            model,
+            _THINKING_DEFAULTS.get(name),
+            can_think=name.startswith("claude-"),
+            provider="Anthropic",
+            settings_fields="`thinking` or `effort`",
+        )
 
     @staticmethod
     def model_supports_response_schema(model: str) -> bool:
@@ -460,16 +513,16 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
         thinking = assert_given(self._settings.thinking)
         if thinking:
             params["thinking"] = thinking.model_dump(exclude_unset=True)
-        response_schema = self._check_response_schema(response_schema)
-        if response_schema is not None:
-            params["output_config"] = {"format": {"type": "json_schema", "schema": response_schema}}
+        output_config = self._output_config(self._check_response_schema(response_schema))
+        if output_config:
+            params["output_config"] = output_config
 
         params.update(self._settings.extra)
         _apply_sampling_settings(params, self._settings)
 
-        # Applied last, so an explicit thinking config from the settings or from
-        # extra wins over the low-latency default.
-        self._maybe_disable_thinking(params)
+        # Applied last, so an explicit thinking or effort setting, from the
+        # settings or from extra, wins over the low-latency default.
+        self._maybe_apply_thinking_default(params)
 
         # LLM completion
         response = await self._client.beta.messages.create(**params)
@@ -549,15 +602,19 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
             if thinking:
                 params["thinking"] = thinking.model_dump(exclude_unset=True)
 
+            output_config = self._output_config()
+            if output_config:
+                params["output_config"] = output_config
+
             # Messages, system, tools
             params.update(params_from_context)
 
             params.update(self._settings.extra)
             _apply_sampling_settings(params, self._settings)
 
-            # Applied last, so an explicit thinking config from the settings or from
-            # extra wins over the low-latency default.
-            self._maybe_disable_thinking(params)
+            # Applied last, so an explicit thinking or effort setting, from the
+            # settings or from extra, wins over the low-latency default.
+            self._maybe_apply_thinking_default(params)
 
             # "Interleaved thinking" needed to allow thinking between sequences
             # of function calls, when extended thinking is enabled.

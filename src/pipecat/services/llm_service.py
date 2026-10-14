@@ -393,6 +393,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         # Turn completion is owned by LLMTurnCompletionUserTurnStopStrategy, which
         # enables it over an LLMUpdateSettingsFrame once the pipeline starts.
         self._filter_incomplete_user_turns: bool = False
+        self._logged_thinking_default_model: str | None = None
         # Holds a speculative response until its turn is confirmed. Frames are
         # routed through it on the way out, in `push_frame`.
         self._speculation_gate = SpeculationGate(name=f"{self}::SpeculationGate")
@@ -612,6 +613,57 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             The reason, or None when the service can take the role.
         """
         return None
+
+    def _apply_thinking_default(
+        self,
+        params: dict[str, Any],
+        model: str,
+        default: dict[str, dict[str, Any]] | None,
+        *,
+        can_think: bool,
+        provider: str,
+        settings_fields: str,
+    ):
+        """Send a model the thinking default its service lists, and log it once per model.
+
+        Services that send each model its lowest thinking setting call this when
+        the request configures no thinking of its own. The first request for
+        each model logs the setting sent or, for a model that can think but has
+        no default, warns that it runs at the provider's default.
+
+        Args:
+            params: The request params, updated in place. Each field of
+                ``default`` is merged into the dict already there, if any.
+            model: The model the request is for.
+            default: The request fields to send, or None if the service lists no
+                default for the model.
+            can_think: Whether the model can think, which decides whether a
+                model with no default is warned about.
+            provider: The provider's name, for the log lines.
+            settings_fields: The settings fields that configure thinking, as the
+                log lines name them, such as ``"`thinking`"``.
+        """
+        if default is not None:
+            for field, value in default.items():
+                params[field] = {**params.get(field, {}), **value}
+        if model == self._logged_thinking_default_model:
+            return
+        self._logged_thinking_default_model = model
+        settings_class = f"{type(self).__name__}.Settings"
+        if default is not None:
+            setting = ", ".join(f"{field}={value!r}" for field, value in default.items())
+            logger.info(
+                f"{self}: sending {setting} to {model}, its lowest thinking setting, for the "
+                "fastest responses. If your bot needs multistep reasoning, set "
+                f"{settings_fields} in {settings_class}."
+            )
+        elif can_think:
+            logger.warning(
+                f"{self}: Pipecat has no thinking default for {model}, so it runs at "
+                f"{provider}'s default, which can think before replying and slow responses. "
+                f"For the fastest responses, set {settings_fields} in {settings_class} to the "
+                f"lowest setting {model} supports."
+            )
 
     def service_metadata_frame(self) -> LLMServiceMetadataFrame:
         """The metadata frame this LLM service broadcasts at start.
