@@ -31,7 +31,7 @@
       # speaks beside the call says a second sentence on the call's result, and
       # the absence check below must find nothing after the one judged here.
       within_ms: 25000
-      eval: "acknowledges the change of plan briefly, without reporting any test results and without promising further work; speaks as itself, without mentioning a backend or handing work off (this reply is complete in itself: answer yes or no, never continue)"
+      eval: "acknowledges the change of plan briefly, without reporting any test results and without promising further work; speaks as itself, without mentioning a backend or saying it passed the request along or handed it off (this reply is complete in itself: answer yes or no, never continue)"
       text_excludes: "backend"
     - event: function_call_stopped
       within_ms: 25000
