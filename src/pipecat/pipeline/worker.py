@@ -1193,6 +1193,9 @@ class PipelineWorker(BaseWorker):
                 "(a processor blocked while connecting?), stopping the pipeline."
             )
             await self._call_event_handler("on_setup_timeout")
+            # The worker may already be cancelled (before setup began), in
+            # which case _cancel() does nothing, so stop setting up here.
+            await self._cancel_pipeline_setup()
             await self._cancel(reason="setup timeout")
 
     def _maybe_start_heartbeat_tasks(self):
@@ -1383,6 +1386,9 @@ class PipelineWorker(BaseWorker):
         self._pipeline_setup_task.add_done_callback(
             lambda _: self._pipeline._setup_finished(recursive=True)
         )
+        # A cancel that arrived before the setup task existed couldn't stop it.
+        if self._cancelled:
+            await self._cancel_pipeline_setup()
 
     async def _cleanup(self, cleanup_pipeline: bool):
         """Clean up the pipeline worker and processors."""
