@@ -335,7 +335,7 @@ class LLMSettings(ServiceSettings):
         use_provider_thinking_default: Whether a model with no thinking configured
             runs at its provider's default. Services that otherwise send each
             model its lowest thinking setting, for the fastest responses, send
-            none. Defaults to False.
+            none. ``BackendLLMWorker`` sets it on its LLM. Defaults to False.
     """
 
     system_instruction: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
