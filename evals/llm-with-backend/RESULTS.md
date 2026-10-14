@@ -83,4 +83,27 @@ The same, with `predictive_delegation=PredictiveDelegation(JevClassifier(...))` 
 
 ## Audio evals
 
-Not recorded yet.
+The thirteen audio scenarios on all five bots, one run each, without predictive delegation (2026-10-14). The user's voice is synthesized with Kokoro, the bot's speech transcribed with Moonshine, and the judge is the release suite's audio judge.
+
+```bash
+uv run python -m pipecat.evals suite evals/llm-with-backend/manifest.yaml -s audio
+```
+
+| scenario | anthropic-frontend | gemini-live-frontend | google-frontend | openai-realtime-frontend | openai-responses-frontend |
+| --- | --- | --- | --- | --- | --- |
+| `accepted_offer/audio` | 1/1 | 1/1 | 1/1 | 1/1 | 1/1 |
+| `aside_while_waiting/audio` | 0/1 | 1/1 | 0/1 | 1/1 | 1/1 |
+| `cancel_and_replace/audio` | 1/1 | 0/1 | 1/1 | 0/1 | 1/1 |
+| `cancel_delegation/audio` | 0/1 | 1/1 | 1/1 | 0/1 | 0/1 |
+| `concurrent_delegations/audio` | 0/1 | 0/1 | 0/1 | 1/1 | 0/1 |
+| `delegate_ack/audio` | 1/1 | 0/1 | 1/1 | 1/1 | 1/1 |
+| `delegate_with_aside/audio` | 1/1 | 1/1 | 0/1 | 1/1 | 0/1 |
+| `frontend_only/audio` | 1/1 | 1/1 | 1/1 | 1/1 | 1/1 |
+| `implicit_cancel/audio` | 0/1 | 1/1 | 1/1 | 0/1 | 0/1 |
+| `partial_cancel/audio` | 1/1 | 1/1 | 1/1 | 1/1 | 1/1 |
+| `progress_inquiry/audio` | 0/1 | 0/1 | 1/1 | 0/1 | 1/1 |
+| `result_during_interruption/audio` | 1/1 | 1/1 | 1/1 | 1/1 | 1/1 |
+| `superseding_delegation/audio` | 1/1 | 1/1 | 1/1 | 1/1 | 1/1 |
+| **total** | **8/13** | **9/13** | **10/13** | **9/13** | **9/13** |
+
+One run per scenario is noisy: the same pass on the code before this change scored 54/65. The failures here are the judge hesitating on acknowledgements, the speech-to-speech bots' `cancel_and_replace` race, and one gpt-4.1 `delegate_with_aside` run that promised the fix without calling `delegate`. Run five times on each bot, `delegate_with_aside` passed 19/25 here against 14/25 before, with one more gpt-4.1 run that skipped the call (none before).
