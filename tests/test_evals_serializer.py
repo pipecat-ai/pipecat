@@ -270,17 +270,18 @@ class TestEvalClientSerializer(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(frame, InputAudioRawFrame)
         self.assertEqual(frame.sample_rate, 16000)
 
-    async def test_user_transcription_stays_a_raw_message(self):
-        # Kept as the raw message (not a TranscriptionFrame) so the sink can tell it
-        # apart from the STT's transcription of the bot's audio.
+    async def test_user_transcription_is_dropped(self):
+        # user-input carries the same transcriptions; the base serializer would
+        # make this a TranscriptionFrame, the STT's transcription of the bot's audio.
         data = {"text": "hello", "user_id": "u", "final": True}
-        frame = await self.serializer.deserialize(self._server("user-transcription", data))
-        self.assertIsInstance(frame, InputTransportMessageFrame)
-        self.assertEqual(frame.message["type"], "user-transcription")
-        self.assertEqual(frame.message["data"], data)
+        self.assertIsNone(
+            await self.serializer.deserialize(self._server("user-transcription", data))
+        )
 
     async def test_bot_output_and_user_input_stay_raw_messages(self):
-        # Kept as raw messages so the sink can find the backchannels in them.
+        # Kept as raw messages (not a TranscriptionFrame) so the sink can tell the
+        # user's transcriptions apart from the STT's transcription of the bot's
+        # audio, and find the backchannels.
         for msg_type in ("bot-output", "user-input"):
             frame = await self.serializer.deserialize(self._server(msg_type, {"text": "mhm"}))
             self.assertIsInstance(frame, InputTransportMessageFrame)

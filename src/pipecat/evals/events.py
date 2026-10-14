@@ -21,7 +21,7 @@ scenario ``event:``             RTVI server message(s)
 ``user_stopped_speaking``       ``user-stopped-speaking``
 ``vad_user_started_speaking``   ``vad-user-started-speaking`` (raw VAD, ungated by turn detection)
 ``vad_user_stopped_speaking``   ``vad-user-stopped-speaking`` (raw VAD, ungated by turn detection)
-``user_transcription``          ``user-transcription`` (final only)
+``user_transcription``          ``user-input`` of type ``transcription`` (final only)
 ``llm_started``                 ``bot-llm-started``
 ``llm_response``                the LLM text: ``bot-llm-text`` joined at ``bot-llm-stopped``
 ``llm_marker``                  ``bot-llm-marker``: the sideband marker the LLM emitted in a
@@ -559,16 +559,10 @@ class EvalEventStream:
             return {"type": "vad_user_started_speaking"}
         elif msg_type == "vad-user-stopped-speaking":
             return {"type": "vad_user_stopped_speaking"}
-        elif msg_type == "user-transcription":
-            if data.get("final", True):
-                return {"type": "user_transcription", "transcript": data.get("text", "")}
-            return None
         elif msg_type == "bot-output":
             return self._bot_backchannel_event(data)
         elif msg_type == "user-input":
-            if data.get("input_type") == "backchannel":
-                return {"type": "user_backchannel", "text": data.get("text", "")}
-            return None
+            return self._user_input_event(data)
         elif msg_type == EVAL_BOT_IMAGE_TYPE:
             return {
                 "type": "image",
@@ -576,6 +570,15 @@ class EvalEventStream:
                 "height": data.get("height"),
                 "format": data.get("format"),
             }
+        return None
+
+    def _user_input_event(self, data: dict) -> dict | None:
+        """The user's final transcription or backchannel, from a ``user-input``."""
+        input_type = data.get("input_type")
+        if input_type == "transcription" and data.get("final"):
+            return {"type": "user_transcription", "transcript": data.get("text", "")}
+        elif input_type == "backchannel":
+            return {"type": "user_backchannel", "text": data.get("text", "")}
         return None
 
     def _bot_backchannel_event(self, data: dict) -> dict | None:

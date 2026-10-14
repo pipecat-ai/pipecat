@@ -211,21 +211,26 @@ class TestFramesToEvents(unittest.TestCase):
         )
 
     def test_user_transcription_from_message(self):
-        # The bot's reported user-transcription arrives as a raw RTVI message frame,
+        # The bot's reported user-input arrives as a raw RTVI message frame,
         # not a TranscriptionFrame (which the eval reserves for the bot's response).
         s = _stream()
 
         def msg(data):
             return InputTransportMessageFrame(
-                message={"label": RTVI.MESSAGE_LABEL, "type": "user-transcription", "data": data}
+                message={"label": RTVI.MESSAGE_LABEL, "type": "user-input", "data": data}
             )
 
         self.assertEqual(
-            s.frame_to_event(msg({"text": "hello", "final": True})),
+            s.frame_to_event(msg({"text": "hello", "input_type": "transcription", "final": True})),
             {"type": "user_transcription", "transcript": "hello"},
         )
-        # Interim transcriptions are ignored.
-        self.assertIsNone(s.frame_to_event(msg({"text": "hel", "final": False})))
+        # Interim transcriptions and chat text are ignored.
+        self.assertIsNone(
+            s.frame_to_event(msg({"text": "hel", "input_type": "transcription", "final": False}))
+        )
+        self.assertIsNone(
+            s.frame_to_event(msg({"text": "hello", "input_type": "chat", "final": True}))
+        )
 
     def test_backchannels_from_messages(self):
         # The bot's backchannel counts once it was spoken to the end; the user's
@@ -1831,16 +1836,23 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.passed, f"failures: {[str(f) for f in result.failures]}")
 
     async def test_user_transcription_aggregates_pieces(self):
-        # An STT that finalizes an utterance in pieces emits one user-transcription
+        # An STT that finalizes an utterance in pieces emits one user-input
         # per piece; text_contains accumulates the finals (skipping interims), so a
         # phrase spanning pieces matches however each piece is spaced.
         self.server.on_text(
             "what is the capital of Germany?",
-            _rtvi("user-transcription", {"text": " What is", "final": False}),
-            _rtvi("user-transcription", {"text": " What", "final": True}),
-            _rtvi("user-transcription", {"text": " is the capital", "final": True}),
-            _rtvi("user-transcription", {"text": " of", "final": True}),
-            _rtvi("user-transcription", {"text": " Germany?", "final": True}),
+            _rtvi(
+                "user-input", {"text": " What is", "input_type": "transcription", "final": False}
+            ),
+            _rtvi("user-input", {"text": " What", "input_type": "transcription", "final": True}),
+            _rtvi(
+                "user-input",
+                {"text": " is the capital", "input_type": "transcription", "final": True},
+            ),
+            _rtvi("user-input", {"text": " of", "input_type": "transcription", "final": True}),
+            _rtvi(
+                "user-input", {"text": " Germany?", "input_type": "transcription", "final": True}
+            ),
             _rtvi("bot-llm-started"),
             _rtvi("bot-llm-text", {"text": "Berlin."}),
             _rtvi("bot-llm-stopped"),
