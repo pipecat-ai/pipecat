@@ -109,13 +109,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         # To speed up responses that need backend involvement, add predictive
         # delegation, which uses a classifier to determine whether it needs to
         # wait for the frontend's inference or can go ahead and trigger an
-        # early backend delegation. The cost is money, not time: the
-        # classifier runs in parallel with the frontend, but on every turn,
-        # and an early delegation abandons a frontend request already under
-        # way. With it, OpenAIResponsesHttpLLMService may be the better
-        # frontend: this WebSocket service waits for an abandoned request to
-        # finish before sending the next one, which delays the reply that
-        # follows an early delegation.
+        # early backend delegation. The cost is money, not time (barring an
+        # OpenAI Responses WebSocket issue): the classifier runs in parallel
+        # with the frontend, but on every turn, and an early delegation
+        # abandons a frontend request already under way.
         # from pipecat.classifiers.typesafe.jev.classifier import JevClassifier
         # from pipecat.pipeline.llm_with_backend import PredictiveDelegation
         # predictive_delegation=PredictiveDelegation(
