@@ -1004,6 +1004,27 @@ class TestPipelineWorker(unittest.IsolatedAsyncioTestCase):
         # Nothing else tells the application its pipeline never came up.
         assert len(timed_out) == 1
 
+    async def test_task_cancel_before_setup_never_finishes(self):
+        """A cancel that arrives before processors are set up still stops a
+        processor that never finishes setting up."""
+
+        class SetupBlocker(FrameProcessor):
+            def __init__(self, **kwargs):
+                super().__init__(**kwargs)
+                self._block = asyncio.Event()
+
+            async def setup(self, setup: FrameProcessorSetup):
+                await super().setup(setup)
+                await self._block.wait()
+
+        pipeline = Pipeline([SetupBlocker()])
+        worker = PipelineWorker(pipeline, setup_timeout_secs=5.0, cancel_timeout_secs=0.1)
+
+        await worker.cancel()
+        await asyncio.wait_for(worker.run(WorkerParams(task_manager=TaskManager())), timeout=2.0)
+
+        assert worker.has_finished()
+
     async def test_task_setup_timeout_still_cleans_the_rest_up(self):
         """Setting up is abandoned part-way, so processors are cleaned up from
         states they never finished reaching."""
