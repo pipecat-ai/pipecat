@@ -578,12 +578,7 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
 
     @property
     def _supports_response_scheduling(self) -> bool:
-        """Whether a NON_BLOCKING call's responses take a scheduling hint and can stay open.
-
-        Live thinking models close the session (1007) on a response that
-        carries ``scheduling``, and answer a call that a response left open
-        (``will_continue``) as if the tool had failed.
-        """
+        """Whether NON_BLOCKING responses can take a scheduling hint and stay open."""
         return self._supports_non_blocking_tools and not self._expects_interaction_status
 
     def _tag_tool_behaviors(self, tools: list) -> None:
@@ -2105,9 +2100,9 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
             is_final: Whether this result completes the call. An intermediate
                 one keeps it open (``will_continue``), which only a NON_BLOCKING
                 call allows.
-            spoken: Whether the model should address the result. It is told to
-                stay silent otherwise, so the result is context it can draw on
-                if the conversation turns that way.
+            spoken: Whether the model should address the result. A model that
+                takes a scheduling hint is told to stay silent otherwise, so the
+                result is context it can draw on if the conversation turns that way.
         """
         if self._disconnecting or not self._session:
             return

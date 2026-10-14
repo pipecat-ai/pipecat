@@ -396,7 +396,7 @@ class TestGeminiLiveIntermediateResults(unittest.IsolatedAsyncioTestCase):
         # These models close the session on a response that carries scheduling.
         self.assertIsNone(response.scheduling)
         self.assertNotIn("scheduling", response.response)
-        self.assertFalse(response.will_continue)
+        self.assertIs(response.will_continue, False)
 
 
 class TestNovaSonicIntermediateResults(unittest.IsolatedAsyncioTestCase):
