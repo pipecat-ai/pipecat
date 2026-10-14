@@ -151,7 +151,8 @@ class OpenAIResponsesLLMSettings(LLMSettings):
         reasoning: Reasoning configuration for reasoning-capable models. ``None``
             (the default) leaves reasoning unconfigured: the service then sends
             the lowest effort OpenAI documents for the model, for the fastest
-            responses, and logs what it sent. Models Pipecat doesn't list run at
+            responses, and logs what it sent. Models Pipecat doesn't list, and
+            any model when ``use_provider_thinking_default`` is set, run at
             OpenAI's default. The default model, ``gpt-4.1``, does not reason.
     """
 
@@ -554,9 +555,10 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
 
         Applies the model's entry in ``_THINKING_DEFAULTS``, if it has one. A
         request that already sets ``reasoning``, from the settings or from
-        ``extra``, is left as it is. The first request for each model logs the
-        effort sent or, for a reasoning model that isn't listed, warns that it
-        runs at OpenAI's default.
+        ``extra``, is left as it is. So is every request when
+        ``use_provider_thinking_default`` is set. The first request for each model
+        logs the effort sent, or that the model runs at OpenAI's default,
+        warning for an unlisted reasoning model.
 
         Args:
             params: The response params dict (modified in place).

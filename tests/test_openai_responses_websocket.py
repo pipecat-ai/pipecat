@@ -890,6 +890,38 @@ class TestReasoningParams:
         mock_logger.info.assert_not_called()
         mock_logger.warning.assert_not_called()
 
+    def test_use_provider_thinking_default_runs_at_openais_default(self):
+        """The setting sends no default and logs the reason at DEBUG."""
+        service = _make_service(
+            settings=OpenAIResponsesLLMService.Settings(
+                model="gpt-5.5", use_provider_thinking_default=True
+            )
+        )
+        with patch("pipecat.services.llm_service.logger") as mock_logger:
+            params = self._params(service)
+            self._params(service)
+        assert "reasoning" not in params
+        mock_logger.debug.assert_called_once()
+        assert (
+            "use_provider_thinking_default is set, so gpt-5.5 runs"
+            in mock_logger.debug.call_args.args[0]
+        )
+        mock_logger.info.assert_not_called()
+        mock_logger.warning.assert_not_called()
+
+    def test_use_provider_thinking_default_on_a_model_that_doesnt_reason_logs_nothing(self):
+        """A model without reasoning has no default to skip."""
+        service = _make_service(
+            settings=OpenAIResponsesLLMService.Settings(
+                model="gpt-4.1", use_provider_thinking_default=True
+            )
+        )
+        with patch("pipecat.services.llm_service.logger") as mock_logger:
+            self._params(service)
+        mock_logger.debug.assert_not_called()
+        mock_logger.info.assert_not_called()
+        mock_logger.warning.assert_not_called()
+
     def test_gpt_6_1_sol_explicit_effort_honored(self):
         """An explicit effort on gpt-6.1-sol reaches the request unchanged."""
         service = _make_service(

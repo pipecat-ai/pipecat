@@ -374,6 +374,10 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             or LLMSettings(),
             **kwargs,
         )
+        # Filled in here rather than in every service's default settings, since
+        # only the services with thinking defaults read it.
+        if not is_given(self._settings.use_provider_thinking_default):
+            self._settings.use_provider_thinking_default = False
         # Validated here so a bad value stops the bot at startup; otherwise it
         # would surface on the first inference, and only with DEBUG enabled.
         _get_llm_context_log_mode()
@@ -627,9 +631,10 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         """Send a model the thinking default its service lists, and log it once per model.
 
         Services that send each model its lowest thinking setting call this when
-        the request configures no thinking of its own. The first request for
-        each model logs the setting sent or, for a model that can think but has
-        no default, warns that it runs at the provider's default.
+        the request configures no thinking of its own. With
+        ``use_provider_thinking_default`` set, the service sends no default. The
+        first request for each model logs the setting sent, or that the model
+        runs at the provider's default, warning when it has no default.
 
         Args:
             params: The request params, updated in place. Each field of
@@ -643,14 +648,21 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             settings_fields: The settings fields that configure thinking, as the
                 log lines name them, such as ``"`thinking`"``.
         """
-        if default is not None:
+        provider_default = assert_given(self._settings.use_provider_thinking_default)
+        if default is not None and not provider_default:
             for field, value in default.items():
                 params[field] = {**params.get(field, {}), **value}
         if model == self._logged_thinking_default_model:
             return
         self._logged_thinking_default_model = model
         settings_class = f"{type(self).__name__}.Settings"
-        if default is not None:
+        if provider_default:
+            if can_think:
+                logger.debug(
+                    f"{self}: use_provider_thinking_default is set, so {model} runs at {provider}'s "
+                    f"default thinking. To change it, set {settings_fields} in {settings_class}."
+                )
+        elif default is not None:
             setting = ", ".join(f"{field}={value!r}" for field, value in default.items())
             logger.info(
                 f"{self}: sending {setting} to {model}, its lowest thinking setting, for the "

@@ -81,6 +81,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMUserAggregatorParams,
 )
 from pipecat.services.llm_service import LLMService
+from pipecat.services.settings import LLMSettings
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.errors import ErrorCategory
 from pipecat.workers.base_worker import BaseWorker
@@ -442,6 +443,10 @@ class BackendLLMWorker(LLMContextWorker):
     to that conversation as user messages and run the model.
     :class:`_BackendSession` is the caller side.
 
+    The worker's LLM does the reasoning its frontend hands off, so it runs at
+    its provider's default thinking unless its settings configure thinking
+    (see ``LLMSettings.use_provider_thinking_default``).
+
     Job contract:
 
     - ``attach``: no payload. Its first update is ``{"type": "attached",
@@ -524,6 +529,7 @@ class BackendLLMWorker(LLMContextWorker):
         """
         if objection := llm.llm_with_backend_role_objection("backend"):
             raise ValueError(objection)
+        llm.settings.apply_update(LLMSettings(use_provider_thinking_default=True))
         if user_params is None:
             user_params = LLMUserAggregatorParams(user_turn_strategies=ExternalUserTurnStrategies())
         super().__init__(
