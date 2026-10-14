@@ -15,6 +15,15 @@ page looks like, where it gets registered — comes from that repo's **profile**
 being documented. The skill never hardcodes a source path, a page template, or a
 navigation group. See `PROFILE_CONTRACT.md` for what a profile must provide.
 
+How pages read — what to document, what to leave out, page templates, prose —
+comes from the docs repo's style guide, `DOCS_PATH/STYLE.md`. This skill covers
+the process: finding what changed, deciding what the docs need, and checking
+the result.
+
+`REVIEW.md` is a second pass over a finished update, run in a fresh session
+that did not write it. The automation runs it after this skill; run it by hand
+the same way after a local update.
+
 ## Arguments
 
 ```
@@ -30,7 +39,7 @@ Examples:
 
 ## Instructions
 
-### Step 1: Resolve docs path and profile
+### Step 1: Resolve docs path, profile, and style guide
 
 If `DOCS_PATH` was provided as an argument, use it. Otherwise, ask the user for the path to their docs repository.
 
@@ -41,6 +50,10 @@ Read the profile at `.claude/skills/update-docs/SOURCE_DOC_MAPPING.md` in the
 template, and registration steps. If it is missing, stop and say so — without it
 there is no way to resolve a file to a page, and guessing produces edits to
 pages that don't exist.
+
+Read `DOCS_PATH/STYLE.md` in full. Every edit follows it. Where it and this
+skill disagree about how a page reads, the style guide wins. If it is missing,
+follow the Guidelines at the end of this skill.
 
 ### Step 2: Create docs branch
 
@@ -106,7 +119,49 @@ Reaching step 6 is a finding, not a dead end: an unmapped file means public API
 with no home on the docs site, which is exactly what Step 8 exists to surface.
 Never resolve a file by dropping it.
 
-### Step 5: Analyze each source-doc pair
+### Step 5: Work out what the docs need
+
+#### List what changed for a reader
+
+Before opening any page for editing, read the full PR: its description
+(including any **Breaking Changes** section), every changelog fragment it adds,
+and the diff. Then write down, for yourself, the list of **reader-facing
+changes**: things a user can now set, call, observe, or act on differently.
+Every bullet of a **Breaking Changes** section goes on the list, one item per
+bullet, unless it only affects code that subclasses or calls internals; it is
+there because a user's code or expectations change.
+
+For each item, record the facts from the source, not from prose about it:
+
+- The name, type, and default as declared in the code
+- Allowed values, limits, and required combinations
+- What raises, and when
+- Side effects a caller would notice: reconnects, clipping, values passed
+  through to the provider, ordering
+- What it replaces, if anything is deprecated or removed
+
+Verify every consequence you intend to state by reading the code that produces
+it. The PR description, changelog, and docstrings say what the author intended;
+the code says what happens. When they disagree, document the code, and check
+the Breaking Changes section for the cases the summary leaves out.
+
+Docstrings, comments, PR descriptions, and changelog entries are sources of
+**facts**, never of sentences. They are written for maintainers and carry
+rationale ("Early Access", error codes, why the code works this way) that a
+reader does not need. Restate the fact for the reader in the page's own words.
+
+**Before deciding there is nothing to document, check what the docs already
+say.** Search the mapped pages for the behavior the diff touches, and compare
+each statement with the code after the change. A statement the change made
+false is an item on the list, even when the code change is only a docstring or
+comment: docs often repeat the old docstring's wording, and it is now wrong.
+
+**If the list is still empty, the change needs no docs.** Typical cases: an
+internal refactor, a fix that restores documented behavior, a change to log
+text. Record the reason (the automation's NOOP line) and stop. Do not write
+something because a file changed.
+
+#### Analyze each source-doc pair
 
 For each mapped pair:
 
@@ -114,122 +169,86 @@ For each mapped pair:
 2. **Read the diff** for that file: `git diff main..HEAD -- <source_file>`
 3. **Read the current doc page** in full
 
-Identify what changed by comparing source to docs. The profile's **Section
-vocabulary** names the sections this repo's pages use and what each is built
-from; check each one that applies:
+For each item on the Step 5 list, find where the page already covers it, if
+anywhere. The profile's **Section vocabulary** names the sections this repo's
+pages use and what each is built from; check each one that applies:
 
 - **Constructor / initializer parameters**: compare the signature to the Configuration section's `<ParamField>` entries
 - **Options or settings objects**: compare the declared fields to the page's table for them
 - **Event handlers**: compare registered events and handler signatures to the Event Handlers section
 - **Class names / imports**: check that Usage examples reference correct names
-- **Behavioral changes**: check whether the Notes section needs updating
+- **Behavioral changes**: check whether any statement on the page is now false
 - **Command-line surface**, where the repo ships one: compare flags, arguments, defaults, and exit behavior to the command reference
 
 ### Step 6: Make targeted edits
 
-For each doc page that needs updates, edit **only the sections that need changes**. Preserve all other content exactly as-is.
+Each item on the Step 5 list goes in the one place a reader would look for it,
+in the page's existing format. STYLE.md's "Changing Existing Pages" table gives
+the expected size of each kind of edit: a new parameter is one entry, with no
+Note, no example, and no overview change.
 
 #### Rules
 
-- **Never remove content** unless the corresponding source code was removed
-- **Never rewrite sections** that are already accurate
-- **Match existing formatting** — if the page uses `<ParamField>` tags, use them; if it uses tables, use tables
-- **Keep descriptions concise** — match the tone and length of surrounding content
-- **Preserve CardGroup, links, and examples** unless they reference removed functionality
-- **Don't touch frontmatter** unless the class was renamed
-
-#### Proportionality
-
-Match the size of the doc change to the size of the source change. A changed
-default is a changed default: edit the value and, if it needs one, the clause
-beside it. A two-line source change should not produce a paragraph. When a diff
-suggests more prose than the change warrants, that prose is usually explaining
-the change rather than the API.
-
-Add a note only when the behavior would surprise **a reader who has never seen
-the previous behavior**. Judge it with the diff covered up: if the note only
-makes sense as an explanation of what changed, it belongs in the changelog, not
-here.
-
-A behavior change is not by itself a reason to add a note. The question is
-whether the _new_ behavior needs explaining on its own terms. A default that
-moved from `True` to `None` needs the default updated; it needs a note only if
-`None` is confusing to someone meeting it for the first time — and then the note
-explains `None`, not the move.
-
-Do not add a `<Note>`, `<Warning>`, or `<Tip>` for a change that fits in the
-sentence that is already there. Callouts are for behavior a reader would
-otherwise get wrong, not for drawing attention to what a PR happened to touch.
-
-#### Section-specific guidance
-
-**Configuration** (constructor params):
-
-- Use `<ParamField path="name" type="type" default="value">` format if the page already uses it
-- Add new params in logical order (required first, then optional)
-- Remove params that no longer exist in source
-- Update types/defaults that changed
-
-**Options / settings objects** (runtime settings):
-
-- Use whichever form the page already uses — a markdown table or `<ParamField>` entries
-- Match the field names and types from the declaring class
-- Include the default values from the source
-
-**Usage** (code examples):
-
-- Update import paths, class names, and parameter names
-- Only modify examples if they would break or be misleading with the new API
-- Don't rewrite working examples just to add new optional params
-
-**Notes**:
-
-- Add notes for new behavioral gotchas or breaking changes
-- Remove notes about limitations that were fixed
-- Keep existing notes that are still accurate
-
-**Event Handlers**:
-
-- Update the event table and example code
-- Add new events, remove deleted ones
-- Update handler signatures if they changed
-
-**Overview / Key Features / Prerequisites**:
-
-- Only update if the PR fundamentally changes what the thing does (new capability, removed capability, renamed class)
-- Most PRs will NOT need changes to these sections
+- **Edit a line only if the change makes it false or incomplete.** Do not
+  reword, tighten, or merge neighboring sentences or bullets. Rewording text the
+  change didn't touch is where errors and lost facts come from.
+- **A line that contradicts or repeats an entry you added counts as made
+  false.** After adding or changing an entry, read the rest of the page for
+  statements about the same thing. Delete one that only repeats the entry; fix
+  one that contradicts it (checking the code to see which is right).
+- **State each fact once.** Before adding a sentence, search the page for the
+  fact. If it is already there, update that occurrence instead of adding
+  another. A Note must not restate a `<ParamField>` or table row.
+- **Fix what the change made wrong**, including examples and recipes. An example
+  that now misbehaves, uses a deprecated parameter, or contradicts the new
+  behavior is updated even though it was accurate before.
+- **Never remove content** unless the corresponding source was removed, or the
+  change made it false.
+- **Match existing formatting** — if the page uses `<ParamField>` tags, use them; if it uses tables, use tables.
+- **Preserve CardGroup, links, and examples** unless they reference removed functionality.
+- **Don't touch frontmatter** unless the class was renamed.
+- **Undocumented surface the change touches** — when the change modifies
+  public API that was never documented, document it, briefly: the entries
+  themselves, without a new section of explanation.
 
 #### Deprecations
 
 When source marks something deprecated — a `DeprecationWarning`, a
 `@deprecated` decorator, a docstring note, or a removal version — the doc entry
-for it says so too. Mark the entry itself rather than adding a separate note
-elsewhere on the page: readers find the parameter, not the changelog.
+for it says so too, in the format STYLE.md gives. Mark the entry itself rather
+than adding a separate note elsewhere on the page.
 
-- Use the `deprecated` attribute on `<ParamField>` where the page uses ParamFields
 - State the replacement and the removal version when source names them
-- Never delete a deprecated item that still exists in source — a reader with it
-  in their code needs to find it and learn what to move to
+- Never delete a deprecated item that still exists in source
+- When the deprecated API has no doc entry, but a page about it has a migration
+  table or section, add a row there. Otherwise report it in Step 8.
 
-### Step 7: Update guides
+### Step 7: Find what else the change made wrong
 
-Guides reference specific class names, parameters, imports, and code patterns.
-After completing reference doc edits, check whether any guides need updates too.
-The profile's **Guide directories** section lists the directories to search for
-this repo.
+Pages other than the mapped ones can be made wrong by the change. Search
+`DOCS_PATH` (the profile's **Guide directories**, plus `api-reference/`) for
+each of these:
 
-For each changed source file, collect the class names, renamed parameters, and changed imports from the diff, then search those directories:
+1. **Changed names**: class names, renamed parameters, and changed imports from
+   the diff. Update every reference that is now incorrect.
+2. **Siblings of a new class.** When the change adds a class to a family
+   (a new classifier, service, transport, serializer), find the pages that list
+   its siblings: grep for two or three sibling class names together, and check
+   supported-services and comparison tables, feature lists, and counts ("two
+   classifiers"). Add the new class to every one, in that list's own form: a
+   comparison table gains a column or row, not a sentence beside it, and a count
+   changes along with the table or list it counts.
+3. **Recipes that use changed behavior.** When behavior changes, grep for the
+   affected class, event, and parameters across all of `DOCS_PATH`. For each
+   snippet or instruction you find, trace what it does under the new behavior,
+   step by step: what runs, what fires, what the user hears. If the result is
+   now wrong, duplicated, or redundant (for example, the snippet does by hand
+   what the framework now does by default), fix the snippet.
+4. **Migration tables** that should gain a row for a deprecation.
 
-```bash
-grep -rl "ClassName\|old_param_name" DOCS_PATH/<guide dirs from profile>
-```
-
-For each guide that references changed code:
-
-1. Read the full guide
-2. Update class names, parameter names, import paths, and code examples that are now incorrect
-3. **Don't rewrite prose** — only fix the specific references that changed
-4. Leave guides alone if they reference the subject generally but don't use any changed APIs
+For each guide that references changed code: read it in full, fix the specific
+references that changed, and don't rewrite its prose. Leave guides alone if
+they mention the subject but don't use any changed API.
 
 ### Step 8: Identify doc gaps
 
@@ -249,7 +268,8 @@ Flag these and offer to add them.
 If a new page is wanted, follow the profile's **New pages** section, which
 provides the page template, the destination path, and every registration step
 this repo requires (navigation, and any index or support-matrix page). Do all of
-them: a page that exists but isn't registered is invisible.
+them: a page that exists but isn't registered is invisible. Follow STYLE.md for
+the page's structure, and CLAUDE.md in the docs repo for frontmatter.
 
 #### Frontmatter conventions
 
@@ -262,6 +282,21 @@ citation label in AI tools, and the docs repo's metadata lint enforces them:
   modality acronym (STT/TTS/LLM/VAD) where relevant. Must be unique site-wide,
   as must the effective unfurl title (`og:title` if set, else `title`) — add an
   `og:title` when another page already uses the same short title.
+
+#### Review every edited page
+
+Last, re-read each page you edited, in full, as a reader who never saw the diff:
+
+- Every item on the Step 5 list appears, once, in the right place
+- No fact appears twice on the page (check the overview, feature lists, Notes,
+  and Usage comments against the entries)
+- No sentence narrates the change or explains maintainer rationale
+- Every example still runs against the current API: no deprecated parameters,
+  no undefined names
+- Counts and lists in prose match the tables they describe
+- The diff contains only the edits you intended: `git diff` in `DOCS_PATH`
+
+Fix anything that fails before continuing.
 
 ### Step 9: Format and regenerate llms.txt
 
@@ -312,30 +347,33 @@ After all edits are complete, print a summary:
 
 ## Guidelines
 
-- **Write for a future reader, not the diff** — docs describe the API as it currently stands. Never narrate the change itself: no "newly added," "this replaces," "recently changed," or references to prior behavior. A reader landing on the page should see no sign that a PR just edited it. Match the weight of the prose to the feature — a routine new parameter gets a one-line description, not a paragraph.
-- **Don't carry the changelog's reasoning into the docs** — the PR body and the changelog entry argue for a change to someone who knew the old behavior. The docs describe the current state to someone who doesn't. Those need different prose, so the changelog is a source of _facts_ here — the new default, the new name, what a parameter now does — and never a source of sentences. Copying its justification across is the most common way a small change turns into a paragraph, and it survives the rule above because a justification carries no "newly" or "previously" to strip out.
-- **Avoid LLM tells** — write plainly. Skip filler and AI-signalling phrases ("delve," "seamless," "leverage," "it is worth noting," "this underscores"), formulaic "not just X, but Y" contrasts, and overuse of em dashes or boldface. Never leave placeholder text (`[X]`, `{placeholder}`) or assistant meta ("I hope this helps") in a page — this skill runs unattended in CI, so nothing downstream will catch it.
-- **Keep code and prose in sync** — when a page names a parameter, class, or identifier, spell it in prose exactly as the source and the `<ParamField>`/table entry do. After editing a code example or renaming a param, re-read the surrounding prose for stale references.
-- **Backtick inline technical terms** — wrap parameter names, class names, filenames, env vars, and config keys in backticks when they appear in prose (Overview, Notes, descriptions). Structured elements like `<ParamField>` already format these inside tables.
-- **Be conservative** — only change what the diff warrants. Don't "improve" docs beyond what changed in source.
+STYLE.md is the authority on how pages read. These are the minimum when it is
+absent:
+
+- **Write for a future reader, not the diff** — docs describe the API as it currently stands. Never narrate the change itself: no "newly added," "this replaces," "recently changed," or references to prior behavior.
+- **No rationale, no internals** — leave out why the code works this way and how it works inside, unless the reader must account for it in their own code.
+- **Callouts only for what a reader would otherwise get wrong** — a fact that fits in an existing sentence goes in that sentence.
+- **Keep code and prose in sync** — when a page names a parameter, class, or identifier, spell it in prose exactly as the source and the `<ParamField>`/table entry do.
+- **Backtick inline technical terms** — parameter names, class names, filenames, env vars, and config keys.
+- **Plain prose** — no filler, no placeholder text, no assistant meta. This skill runs unattended in CI, so nothing downstream will catch it.
+
+Process:
+
 - **Read before editing** — always read the full doc page before making changes so you understand the existing structure.
-- **Preserve voice** — match the writing style of the existing doc page, don't impose a different tone.
 - **One PR at a time** — this skill operates on the current branch's diff against main. Don't look at other branches.
-- **Parallel analysis** — when multiple source files map to different doc pages, analyze and edit them in parallel for efficiency.
 - **Shared source files** — base classes and shared modules affect everything that imports them. Check which pages cover those consumers and update all of them.
 
 ## Checklist
 
 Before finishing, verify:
 
-- [ ] The source repo's profile was read, and every changed file was checked against its tables
-- [ ] Each doc page edit matches the actual source code change (not guessed)
-- [ ] No content was removed unless the corresponding source was removed
-- [ ] New parameters have accurate types and defaults from source
-- [ ] Deprecated items are marked as deprecated rather than deleted or left unmarked
-- [ ] The edit is no larger than the change: no note or paragraph that only makes sense as an explanation of what changed
-- [ ] Formatting matches the existing page style
-- [ ] Guides referencing changed APIs were checked and updated
+- [ ] The profile and STYLE.md were read
+- [ ] The Step 5 list of reader-facing changes was written, with facts checked against the code; an empty list ended the run as a NOOP
+- [ ] Each item on the list is documented once, in the page's existing format
+- [ ] No line was edited that the change didn't make false or incomplete
+- [ ] Deprecated items are marked, and migration tables gained rows
+- [ ] Sibling lists, recipes, and guides affected by the change were searched (Step 7)
+- [ ] Every edited page passed the review at the end of Step 8
 - [ ] New pages were registered everywhere the profile requires
 - [ ] Edited pages were formatted, then `llms.txt` and `llms-full.txt` regenerated and committed
 - [ ] Unmapped files were reported

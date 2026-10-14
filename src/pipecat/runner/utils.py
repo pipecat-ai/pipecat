@@ -111,6 +111,16 @@ def _detect_transport_type_from_message(message_data: dict) -> str:
     return "unknown"
 
 
+def _parse_eval_connect(message: dict):
+    """The eval flags of an ``eval-connect`` message, or ``None`` for any other message."""
+    # A cheap check first, so non-eval connections don't import the evals package.
+    if not isinstance(message, dict) or message.get("type") != "client-message":
+        return None
+    from pipecat.evals.serializer import parse_eval_connect
+
+    return parse_eval_connect(message)
+
+
 async def parse_telephony_websocket(websocket: "WebSocket"):
     """Parse telephony WebSocket messages and return transport type and call data.
 
@@ -160,6 +170,15 @@ async def parse_telephony_websocket(websocket: "WebSocket"):
                 "to": str,
             }
 
+        - Eval (the harness's ``eval-connect`` message, sent first)::
+
+            {
+                "body": dict  # the connection's eval flags
+            }
+
+        An eval is recognized from the first message alone; no second message
+        is read, so the harness's next message reaches the eval transport.
+
     Raises:
         ValueError: If WebSocket closes before sending any messages.
 
@@ -197,6 +216,13 @@ async def parse_telephony_websocket(websocket: "WebSocket"):
         pass
     except StopAsyncIteration:
         raise ValueError("WebSocket closed before receiving telephony handshake messages")
+
+    eval_flags = _parse_eval_connect(first_message)
+    if eval_flags is not None:
+        logger.debug("Detected transport: eval (from first message)")
+        result = ("eval", CallData(body=eval_flags.model_dump()))
+        setattr(websocket, "_pipecat_parsed_telephony", result)  # noqa: B010
+        return result
 
     try:
         # Second message - optional, some providers may only send one
@@ -514,6 +540,31 @@ def _get_transport_params(transport_key: str, transport_params: dict[str, Callab
     return params
 
 
+def _get_eval_transport_params(transport_params: dict[str, Callable]) -> Any:
+    """Get the eval transport's parameters, with its serializer defaulted.
+
+    Defaulting the serializer to ``EvalSerializer`` means a bot only has to opt
+    into audio input.
+
+    Raises:
+        ValueError: If the ``"eval"`` entry is missing or doesn't build an
+            ``EvalTransportParams``.
+    """
+    from pipecat.evals.serializer import EvalSerializer
+    from pipecat.evals.transport import EvalTransportParams
+
+    params = _get_transport_params("eval", transport_params)
+    if not isinstance(params, EvalTransportParams):
+        raise ValueError(
+            "Eval transport params must be an EvalTransportParams instance. "
+            "Set transport_params['eval'] to a lambda returning "
+            "EvalTransportParams(audio_in_enabled=True)."
+        )
+    if params.serializer is None:
+        params.serializer = EvalSerializer()
+    return params
+
+
 async def _create_telephony_transport(
     websocket: "WebSocket",
     params: Any,
@@ -727,6 +778,16 @@ async def create_transport(
         runner_args.transport_type = transport_type
         runner_args.call_data = call_data
 
+        if transport_type == "eval":
+            from pipecat.evals.fastapi_transport import EvalFastAPIWebsocketTransport
+            from pipecat.evals.serializer import EvalConnectionFlags
+
+            return EvalFastAPIWebsocketTransport(
+                runner_args.websocket,
+                _get_eval_transport_params(transport_params),
+                EvalConnectionFlags.model_validate(call_data.body),
+            )
+
         params = _get_transport_params(transport_type, transport_params)
 
         # Create telephony transport with pre-parsed data
@@ -750,18 +811,9 @@ async def create_transport(
         # RTVIProcessor and pass an RTVIObserver to the task. Default the
         # serializer to EvalSerializer so examples only need to opt into
         # audio input.
-        from pipecat.evals.serializer import EvalSerializer
-        from pipecat.evals.transport import EvalTransport, EvalTransportParams
+        from pipecat.evals.transport import EvalTransport
 
-        params = _get_transport_params("eval", transport_params)
-        if not isinstance(params, EvalTransportParams):
-            raise ValueError(
-                "Eval transport params must be an EvalTransportParams instance. "
-                "Set transport_params['eval'] to a lambda returning "
-                "EvalTransportParams(audio_in_enabled=True)."
-            )
-        if params.serializer is None:
-            params.serializer = EvalSerializer()
+        params = _get_eval_transport_params(transport_params)
 
         # EvalTransport handles the eval-only behavior: the virtual mic, skip-TTS
         # before an on-connect greeting, and audio capture/recording.

@@ -1,0 +1,1 @@
+- `BackendConnector` now refuses a request strategy that reads the frontend's context, such as `TranscriptBackendRequestStrategy`, on a speech-to-speech frontend, whose context lags the audio: `LLMWithBackend` raises `ValueError`. Strategies mark this with the new `BackendRequestStrategy.requires_context` attribute.

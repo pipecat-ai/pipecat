@@ -142,8 +142,7 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
 
     async def _run_turn(self, turn: EvalScriptTurn, turn_idx: int) -> list[EvalAssertionFailure]:
         """Drive one turn: honor ``send_after``, send the input, match the expectations."""
-        # The turn's function calls match by name in any order; start each turn
-        # with an empty buffer so a prior turn's calls can't carry over.
+        # An expectation may look back to the start of its turn, never further.
         self._matcher.reset_turn()
 
         if turn.send_after is not None:
@@ -188,13 +187,13 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
             )
 
     async def _await_previous_reply(self) -> None:
-        """Let a reply the bot is still speaking end before an observing turn starts.
+        """Let a reply the bot is still speaking, or that is still being transcribed, end before an observing turn starts.
 
         A turn that sends nothing waits for what the bot says next, so what
         the bot is still saying belongs to the turn before it, however late its
         transcription lands. The first turn keeps the bot's greeting.
         """
-        if not self._stream.bot_speaking:
+        if not self._stream.bot_speaking and self._stream.bot_transcribed:
             return
         self._trace.log("observe: waiting for the bot to finish the previous reply")
         await self._stream.wait_bot_quiet(BOT_QUIET_MAX_WAIT_S)

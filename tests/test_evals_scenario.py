@@ -6,6 +6,7 @@
 
 import tempfile
 import unittest
+import warnings
 from pathlib import Path
 
 from loguru import logger
@@ -973,5 +974,54 @@ class TestTurnAudioFile(unittest.TestCase):
         self.assertIn("turn(s) [1]", str(cm.exception))
 
 
+class TestDeprecatedTriggerDisconnect(unittest.TestCase):
+    def test_the_field_is_deprecated_and_still_read(self):
+        path = _write("name: t\ntrigger_disconnect: true\nturns: [{user: hi}]\n")
+        with self.assertWarns(DeprecationWarning) as cm:
+            scenario = _script(path)
+        self.assertTrue(scenario.trigger_disconnect)
+        self.assertIn("`trigger_disconnect:`", str(cm.warning))
+
+    def test_a_scenario_without_it_does_not_warn(self):
+        path = _write("name: t\nturns: [{user: hi}]\n")
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            scenario = _script(path)
+        self.assertFalse(scenario.trigger_disconnect)
+        self.assertEqual([w for w in caught if "trigger_disconnect" in str(w.message)], [])
+
+
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestCheckFrom(unittest.TestCase):
+    """The ``check_from:`` key on an expectation."""
+
+    def _turns(self, expectation: str):
+        return (
+            "name: g\nscenarios:\n  - name: a\n    turns:\n      - user: hi\n"
+            f"        expect:\n          - {expectation}\n"
+        )
+
+    def test_defaults_to_previous(self):
+        scenario = EvalScenarioFile.load(_write(self._turns("{event: response}"))).scenarios[0]
+        self.assertEqual(scenario.turns[0].expect[0].check_from, "previous")
+
+    def test_turn_start_is_accepted(self):
+        scenario = EvalScenarioFile.load(
+            _write(self._turns("{event: response, check_from: turn_start}"))
+        ).scenarios[0]
+        self.assertEqual(scenario.turns[0].expect[0].check_from, "turn_start")
+
+    def test_other_values_are_rejected(self):
+        with self.assertRaises(ValueError) as cm:
+            EvalScenarioFile.load(_write(self._turns("{event: response, check_from: later}")))
+        self.assertIn("'check_from:' must be one of previous, turn_start", str(cm.exception))
+
+    def test_not_combined_with_absent(self):
+        with self.assertRaises(ValueError) as cm:
+            EvalScenarioFile.load(
+                _write(self._turns("{event: response, absent: true, check_from: turn_start}"))
+            )
+        self.assertIn("cannot be combined with 'check_from'", str(cm.exception))

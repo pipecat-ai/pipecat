@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field
 
-from pipecat.utils.deprecation import warn_deprecated
+from pipecat.utils.deprecation import deprecated, warn_deprecated
 from pipecat.utils.file_storage import FileStorage
 
 if TYPE_CHECKING:
@@ -260,6 +260,10 @@ class LiveKitRunnerArguments(RunnerArguments):
     token: str
 
 
+@deprecated(
+    "`EvalRunnerArguments` is deprecated since 1.13.0 and will be removed in 2.0.0. "
+    "Use `WebSocketRunnerArguments` instead."
+)
 @dataclass
 class EvalRunnerArguments(RunnerArguments):
     """Eval transport session arguments for the runner.
@@ -268,6 +272,11 @@ class EvalRunnerArguments(RunnerArguments):
     (via ``EvalSerializer``). The eval harness connects as an RTVI client,
     sends scripted user input, and asserts on the RTVI events the bot emits.
     Intended for fast pipeline behavioral evaluations.
+
+    .. deprecated:: 1.13.0
+        Use :class:`WebSocketRunnerArguments` instead: the dev runner hands an
+        eval harness's connection to the bot like any WebSocket session.
+        Will be removed in 2.0.0.
 
     Parameters:
         host: Host address to bind the eval transport's WebSocket server to.

@@ -34,6 +34,8 @@ python openai-responses-frontend.py
 
 Each frontend has a commented-out `connector=BackendConnector(client_trace=True)`: with it, every exchange with the backend is sent to the client as an RTVI server message and shows in the prebuilt UI's Events panel.
 
+The behavioral evals for these bots are in [`evals/llm-with-backend/`](../../../evals/llm-with-backend/).
+
 ### A conversation to try
 
 A longer session exercises more of what the pair does: delegating a quick lookup, delegating a judgment call, work that takes a while, and a change of course. One that works well, as a sequence of things to say:

@@ -597,7 +597,7 @@ class ProjectGenerator:
                 else "evals/starter_audio.yaml"
             )
             console.print(
-                "  • Test it headless: [bold cyan]uv run bot.py -t eval[/bold cyan], then in "
+                "  • Test it with evals: [bold cyan]uv run bot.py[/bold cyan], then in "
                 f"another terminal [bold cyan]uv run pipecat eval run {starter} -v[/bold cyan]"
             )
         if has_telephony:

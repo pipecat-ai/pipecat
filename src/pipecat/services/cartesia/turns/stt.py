@@ -57,8 +57,10 @@ class CartesiaTurnsSTTSettings(STTSettings):
 
     The four ``turn_*`` fields tune server-side turn detection. Cartesia binds
     them to a connection, so updating any of them at runtime triggers a
-    reconnect. See https://docs.cartesia.ai/use-the-api/stt/turns for the
-    Balanced, Responsive and Patient starting profiles.
+    reconnect, and requires the three thresholds to stay in order:
+    ``turn_start_threshold`` > ``turn_eager_end_threshold`` >
+    ``turn_end_threshold``. See https://docs.cartesia.ai/use-the-api/stt/turns
+    for the Balanced, Responsive and Patient starting profiles.
 
     Parameters:
         keyterm: Key terms or phrases to bias transcription towards, sent as
@@ -69,9 +71,9 @@ class CartesiaTurnsSTTSettings(STTSettings):
         turn_start_threshold: Likelihood above which the server emits
             ``turn.start``. 0.5–0.9; Cartesia defaults to 0.8.
         turn_eager_end_threshold: Likelihood below which the server emits
-            ``turn.eager_end``. 0.3–0.6; Cartesia defaults to 0.4.
+            ``turn.eager_end``. 0.3–0.8; Cartesia defaults to 0.6.
         turn_end_threshold: Likelihood below which the server emits
-            ``turn.end``. 0.05–0.5; Cartesia defaults to 0.2.
+            ``turn.end``. 0.05–0.5; Cartesia defaults to 0.3.
         turn_end_timeout_ms: Milliseconds to wait after the user stops speaking
             before emitting ``turn.end``. 640–11200; Cartesia defaults to 5600.
     """

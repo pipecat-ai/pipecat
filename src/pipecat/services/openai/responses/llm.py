@@ -149,10 +149,10 @@ class OpenAIResponsesLLMSettings(LLMSettings):
     Parameters:
         max_completion_tokens: Maximum completion tokens to generate.
         reasoning: Reasoning configuration for reasoning-capable models. ``None``
-            (the default) leaves reasoning unconfigured — the service then disables
-            reasoning by default for whatever models possible, to keep latency low
-            for real-time voice. Note that the default model, ``gpt-4.1``, does
-            not reason.
+            (the default) leaves reasoning unconfigured: the service then sends
+            the lowest effort OpenAI documents for the model, for the fastest
+            responses, and logs what it sent. Models Pipecat doesn't list run at
+            OpenAI's default. The default model, ``gpt-4.1``, does not reason.
     """
 
     # Override inherited LLMSettings fields to also accept the OpenAI SDK's
@@ -178,35 +178,45 @@ def _is_o_series(model: str) -> bool:
     return bool(re.match(r"o\d", model.lower()))
 
 
-def _default_reasoning_effort(model: str) -> str | None:
-    """The effort to request for a model when ``reasoning`` isn't configured.
+# The lowest reasoning effort OpenAI documents for each model, sent when the
+# caller doesn't configure ``reasoning``, keyed by model name. The pro models
+# accept nothing below "medium", and gpt-5-pro only "high".
+_THINKING_DEFAULTS: dict[str, str] = {
+    "gpt-5": "minimal",
+    "gpt-5-mini": "minimal",
+    "gpt-5-nano": "minimal",
+    "gpt-5-pro": "high",
+    "gpt-5.1": "none",
+    "gpt-5.2": "none",
+    "gpt-5.2-pro": "medium",
+    "gpt-5.4": "none",
+    "gpt-5.4-mini": "none",
+    "gpt-5.4-nano": "none",
+    "gpt-5.4-pro": "medium",
+    "gpt-5.5": "none",
+    "gpt-5.5-pro": "medium",
+    "gpt-5.6-luna": "none",
+    "gpt-5.6-sol": "none",
+    "gpt-5.6-terra": "none",
+    "gpt-6-astra": "low",
+    "gpt-6-luna": "none",
+    "gpt-6-sol": "none",
+    "gpt-6.1-sol": "low",
+    "o1": "low",
+    "o1-pro": "low",
+    "o3": "low",
+    "o3-mini": "low",
+    "o3-pro": "low",
+    "o4-mini": "low",
+}
 
-    ``"none"`` switches reasoning off on the mainline gpt series from gpt-5.1
-    onward. The original ``gpt-5``, ``gpt-5-mini`` and ``gpt-5-nano`` reject
-    ``"none"``, so they get their lowest effort, ``"minimal"``. Models that
-    accept neither are left at the provider default: the o-series, the ``-pro``
-    models, ``gpt-6-astra`` and ``gpt-6.1-sol``.
 
-    Args:
-        model: The model name, optionally with a snapshot date
-            (e.g. ``"gpt-5.4"``, ``"gpt-5-2025-08-07"``, ``"o3"``).
+def _model_name(model: str) -> str:
+    """The name a model id refers to, the key it's looked up by in ``_THINKING_DEFAULTS``.
 
-    Returns:
-        The effort level, or ``None`` to leave the provider default, which is
-        also the case for models that don't reason or aren't recognized (see
-        :func:`_model_supports_reasoning`).
+    A dated snapshot (``gpt-5-2025-08-07``) gets its model's entry.
     """
-    if not _model_supports_reasoning(model):
-        return None
-    model = model.lower()
-    if _is_o_series(model) or model.startswith(("gpt-6-astra", "gpt-6.1-sol")):
-        return None
-    name = re.sub(r"-\d{4}-\d{2}-\d{2}$", "", model)
-    if name.endswith("-pro"):
-        return None
-    if name in ("gpt-5", "gpt-5-mini", "gpt-5-nano"):
-        return "minimal"
-    return "none"
+    return re.sub(r"-\d{4}-\d{2}-\d{2}$", "", model.lower())
 
 
 def _model_supports_reasoning(model: str) -> bool | None:
@@ -281,9 +291,11 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
             project: OpenAI project ID.
             default_headers: Additional HTTP headers to include in requests.
             service_tier: Service tier to use: "auto", "default", "flex",
-                "scale", "fast" or "priority". "fast" is OpenAI's low-latency
-                tier, the name that replaced "priority"; both values are
-                accepted.
+                "scale", "fast", "priority" or "ultrafast". "fast" is OpenAI's
+                low-latency tier, the name that replaced "priority"; both values
+                are accepted. "ultrafast" is the access-controlled Ultrafast
+                Processing tier, which shortens the time between output tokens
+                on the models that offer it.
             settings: Runtime-updatable settings.
             retry_timeout_secs: How long an inference may go without producing
                 output before it is abandoned and re-issued, when
@@ -427,13 +439,13 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
             # turns, preserving reasoning context across the conversation.
             params["include"] = ["reasoning.encrypted_content"]
             self._warn_if_reasoning_unsupported()
-        else:
-            # No reasoning configured: disable it by default on the mainline gpt
-            # series from gpt-5 onward, for real-time latency (see the helper).
-            self._maybe_disable_reasoning(params)
 
         # Extra settings
         params.update(self._settings.extra)
+
+        # Applied last, so reasoning configured in the settings or in extra wins
+        # over the low-latency default.
+        self._maybe_apply_thinking_default(params)
 
         return params
 
@@ -537,25 +549,30 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
 
     # -- reasoning ------------------------------------------------------------
 
-    def _maybe_disable_reasoning(self, params: dict):
-        """Disable reasoning by default on the mainline gpt series for real-time voice.
+    def _maybe_apply_thinking_default(self, params: dict):
+        """Send the model's lowest reasoning effort when no reasoning is configured.
 
-        When the caller hasn't configured ``reasoning``, request ``effort="none"``
-        for whatever models possible, or ``"minimal"`` for models whose lowest
-        effort it is (see :func:`_default_reasoning_effort`). Note that this is a
-        no-op for models like ``gpt-5.4`` that already default to ``none``. Models
-        that accept neither are left at the provider default, as are gpt-4.x and
-        earlier, which don't reason at all. Mirrors Gemini's
-        ``_maybe_unset_thinking_budget``, which disables or minimizes thinking on
-        its latency-sensitive models.
+        Applies the model's entry in ``_THINKING_DEFAULTS``, if it has one. A
+        request that already sets ``reasoning``, from the settings or from
+        ``extra``, is left as it is. The first request for each model logs the
+        effort sent or, for a reasoning model that isn't listed, warns that it
+        runs at OpenAI's default.
 
         Args:
             params: The response params dict (modified in place).
         """
-        model = assert_given(self._settings.model)
-        effort = _default_reasoning_effort(model) if model else None
-        if effort:
-            params["reasoning"] = {"effort": effort}
+        if "reasoning" in params:
+            return
+        model = assert_given(self._settings.model) or ""
+        effort = _THINKING_DEFAULTS.get(_model_name(model))
+        self._apply_thinking_default(
+            params,
+            model,
+            {"reasoning": {"effort": effort}} if effort is not None else None,
+            can_think=bool(_model_supports_reasoning(model)),
+            provider="OpenAI",
+            settings_fields="`reasoning`",
+        )
 
     def _warn_if_reasoning_unsupported(self):
         """Log a clear error when reasoning is configured on a model that can't use it.

@@ -796,47 +796,99 @@ class TestReasoningParams:
         assert "reasoning" not in params
         assert "include" not in params
 
-    def test_gpt5_series_disabled_by_default(self):
-        """Mainline gpt models from gpt-5 onward default to effort="none"."""
-        # gpt-6.x stands in for a future mainline series we assume will reason.
-        for model in ("gpt-5.4", "gpt-5.5", "gpt-6", "gpt-6.2"):
-            service = _make_service(settings=OpenAIResponsesLLMService.Settings(model=model))
-            params = self._params(service)
-            assert params["reasoning"] == {"effort": "none"}, model
-            assert "include" not in params
-
-    def test_o_series_left_untouched(self):
-        """The o-series reasons but rejects effort="none", so leave it at the default."""
-        service = _make_service(settings=OpenAIResponsesLLMService.Settings(model="o3"))
-        params = self._params(service)
-        assert "reasoning" not in params
-
-    def test_gpt_6_astra_left_untouched(self):
-        """gpt-6-astra reasons but rejects effort="none", so leave it at the default."""
-        service = _make_service(settings=OpenAIResponsesLLMService.Settings(model="gpt-6-astra"))
-        params = self._params(service)
-        assert "reasoning" not in params
-
-    def test_gpt_6_1_sol_left_untouched(self):
-        """gpt-6.1-sol reasons but rejects effort="none", so leave it at the default."""
-        service = _make_service(settings=OpenAIResponsesLLMService.Settings(model="gpt-6.1-sol"))
-        params = self._params(service)
-        assert "reasoning" not in params
-
     def test_original_gpt_5_gets_minimal(self):
-        """The original gpt-5 models reject effort="none", so they get "minimal"."""
+        """The original gpt-5 models reason before most replies and reject "none"."""
         for model in ("gpt-5", "gpt-5-mini", "gpt-5-nano", "gpt-5-2025-08-07"):
             service = _make_service(settings=OpenAIResponsesLLMService.Settings(model=model))
             params = self._params(service)
             assert params["reasoning"] == {"effort": "minimal"}, model
             assert "include" not in params
 
-    def test_pro_models_left_untouched(self):
-        """The -pro models reject effort="none", so leave them at the default."""
-        for model in ("gpt-5-pro", "gpt-5.5-pro", "gpt-5.4-pro-2026-03-05"):
+    def test_later_models_get_none(self):
+        """From gpt-5.1 on, most models can skip reasoning entirely."""
+        for model in ("gpt-5.1", "gpt-5.4-mini", "gpt-5.5", "gpt-5.6-sol", "gpt-6-luna"):
+            service = _make_service(settings=OpenAIResponsesLLMService.Settings(model=model))
+            params = self._params(service)
+            assert params["reasoning"] == {"effort": "none"}, model
+            assert "include" not in params
+
+    def test_models_that_must_reason_get_their_lowest_effort(self):
+        """Models that reject "none" get the lowest effort they accept."""
+        for model, effort in (
+            ("gpt-6-astra", "low"),
+            ("gpt-6.1-sol", "low"),
+            ("o3", "low"),
+            ("gpt-5.5-pro", "medium"),
+            ("gpt-5-pro", "high"),
+        ):
+            service = _make_service(settings=OpenAIResponsesLLMService.Settings(model=model))
+            params = self._params(service)
+            assert params["reasoning"] == {"effort": effort}, model
+
+    def test_unlisted_models_run_at_openais_default(self):
+        """Only listed models get an effort, so a model is never sent one it rejects."""
+        for model in ("gpt-6.2", "gpt-5-codex", "gpt-4.1", "gpt-5-chat-latest"):
             service = _make_service(settings=OpenAIResponsesLLMService.Settings(model=model))
             params = self._params(service)
             assert "reasoning" not in params, model
+
+    def test_reasoning_in_extra_replaces_the_default(self):
+        """Reasoning passed through extra wins over the lowest-effort default."""
+        service = _make_service(
+            settings=OpenAIResponsesLLMService.Settings(
+                model="gpt-5-mini", extra={"reasoning": {"effort": "low"}}
+            )
+        )
+        params = self._params(service)
+        assert params["reasoning"] == {"effort": "low"}
+
+    def test_the_applied_default_is_logged_once_per_model(self):
+        """The developer learns what Pipecat sent, and when to change it, once per model."""
+        service = _make_service(settings=OpenAIResponsesLLMService.Settings(model="gpt-5-mini"))
+        with patch("pipecat.services.llm_service.logger") as mock_logger:
+            self._params(service)
+            self._params(service)
+            service._settings.model = "gpt-5-nano"
+            self._params(service)
+        messages = [call.args[0] for call in mock_logger.info.call_args_list]
+        assert len(messages) == 2
+        assert "to gpt-5-mini," in messages[0]
+        assert "multistep reasoning" in messages[0]
+        assert "set `reasoning` in OpenAIResponsesLLMService.Settings" in messages[0]
+        assert "to gpt-5-nano," in messages[1]
+        mock_logger.warning.assert_not_called()
+
+    def test_an_unlisted_reasoning_model_is_warned_about_once(self):
+        """A reasoning model without a default may reason before replying, so the developer hears."""
+        service = _make_service(settings=OpenAIResponsesLLMService.Settings(model="gpt-6.2"))
+        with patch("pipecat.services.llm_service.logger") as mock_logger:
+            self._params(service)
+            self._params(service)
+        mock_logger.info.assert_not_called()
+        mock_logger.warning.assert_called_once()
+        assert "no thinking default for gpt-6.2" in mock_logger.warning.call_args.args[0]
+
+    def test_nothing_is_logged_for_a_model_that_doesnt_reason(self):
+        """Models without reasoning have no latency to recover."""
+        for model in ("gpt-4.1", "gpt-5-chat-latest", "my-azure-deployment"):
+            service = _make_service(settings=OpenAIResponsesLLMService.Settings(model=model))
+            with patch("pipecat.services.llm_service.logger") as mock_logger:
+                self._params(service)
+            mock_logger.info.assert_not_called()
+            mock_logger.warning.assert_not_called()
+
+    def test_nothing_is_logged_when_reasoning_is_configured(self):
+        """An explicit setting is the developer's choice, and needs no comment."""
+        service = _make_service(
+            settings=OpenAIResponsesLLMService.Settings(
+                model="gpt-6.2",
+                reasoning=OpenAIResponsesLLMService.ReasoningConfig(effort="low"),
+            )
+        )
+        with patch("pipecat.services.llm_service.logger") as mock_logger:
+            self._params(service)
+        mock_logger.info.assert_not_called()
+        mock_logger.warning.assert_not_called()
 
     def test_gpt_6_1_sol_explicit_effort_honored(self):
         """An explicit effort on gpt-6.1-sol reaches the request unchanged."""
@@ -882,15 +934,15 @@ class TestReasoningParams:
         assert params["reasoning"] == {"effort": "low", "mode": "pro"}
 
     def test_empty_reasoning_config_falls_back_to_default(self):
-        """An all-unset config is treated as unconfigured (none default on gpt-5.x)."""
+        """An all-unset config is treated as unconfigured."""
         service = _make_service(
             settings=OpenAIResponsesLLMService.Settings(
-                model="gpt-5.5",
+                model="gpt-5-mini",
                 reasoning=OpenAIResponsesLLMService.ReasoningConfig(),
             )
         )
         params = self._params(service)
-        assert params["reasoning"] == {"effort": "none"}
+        assert params["reasoning"] == {"effort": "minimal"}
         assert "include" not in params
 
 
