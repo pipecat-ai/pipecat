@@ -47,7 +47,13 @@ You did not write the update. Your job is to find what it got wrong and fix it.
    need. No rewording of lines the change didn't make false: restore those to
    their `BASE` wording. Tables stay well formed (escape `|` inside a cell as
    `\|`). Examples use the current API.
-5. **Size.** STYLE.md's "Changing Existing Pages" table gives the expected size
+5. **The profile's Checks.** Run each command in the **Checks** section of
+   `.claude/skills/update-docs/SOURCE_DOC_MAPPING.md`, if it has one. Fix every
+   finding on a page the update edited, whatever caused it: the docs repo's CI
+   fails a PR on any finding in the pages it changes, so this overrides the
+   rule against rewording lines the change didn't make false. Also fix every
+   finding elsewhere that this PR's diff caused. Leave the rest.
+6. **Size.** STYLE.md's "Changing Existing Pages" table gives the expected size
    of each kind of edit. Cut what exceeds it.
 
 If the update should not exist at all, because nothing a reader needs has
