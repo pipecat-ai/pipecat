@@ -96,6 +96,27 @@ BACKEND_PREFIXES = (
     BACKEND_WORKING_PREFIX,
 )
 
+# ---------------------------------------------------------------------------
+# Prompts
+#
+# What follows is read by the frontend's model, and the pairing instruction
+# and the tool descriptions are also read by predictive delegation's
+# classifier. A small change in wording can change what a model does in ways
+# no unit test catches: gpt-4.1 stops delegating a "never mind", or the
+# classifier starts delegating questions about how the work is going. Before
+# and after changing any of these, run:
+#
+# - the text evals on the three cascade frontends, five times each:
+#   `uv run python -m pipecat.evals suite evals/llm-with-backend/manifest.yaml -s text --repeat 5`
+# - the classifier replay:
+#   `uv run python evals/llm-with-backend/predictive_delegation/replay.py`
+# - the audio evals, which cover the speech-to-speech frontends:
+#   `uv run python -m pipecat.evals suite evals/llm-with-backend/manifest.yaml -s audio`
+#
+# and record the results in evals/llm-with-backend/RESULTS.md, in the same
+# commit as the change: its history holds the numbers before.
+# ---------------------------------------------------------------------------
+
 #: Carried on each spoken backend message, so the frontend relays it on whatever
 #: turn it lands on, a user's turn included, where the standing instruction
 #: alone leaves it unsaid.
@@ -121,6 +142,7 @@ STRATEGY_PLACEHOLDER = "{strategy}"
 #: guidance in a paragraph of its own, gpt-4.1 answers a user's "never mind"
 #: with "I won't make any changes" and no delegate call in nearly every run,
 #: where this order delegates the stop every time.
+#: Before changing it, see "Prompts" above.
 FRONTEND_PAIRING_INSTRUCTION = (
     "DELEGATING: Delegate to the backend when any part of what the user asks needs a backend "
     "tool or careful reasoning, and whenever the user says anything about work already "
@@ -179,6 +201,7 @@ FRONTEND_PAIRING_INSTRUCTION = (
 )
 
 #: The transcript strategy's guidance, in the pairing instruction's delegating paragraph.
+#: Before changing it, see "Prompts" above.
 TRANSCRIPT_FRONTEND_INSTRUCTION = (
     "A delegation hands over the whole conversation, not one item: the backend reads it and "
     "does everything in it that is its job, so delegate once per reply however many things "
@@ -186,6 +209,7 @@ TRANSCRIPT_FRONTEND_INSTRUCTION = (
 )
 
 #: How the transcript strategy describes the ``delegate`` tool.
+#: Before changing it, see "Prompts" above.
 TRANSCRIPT_TOOL_DESCRIPTION = (
     "Hand the conversation over to the backend, which reads it and does everything in it "
     "that needs a backend tool or careful reasoning. Call this as soon as any part of what "
@@ -199,6 +223,7 @@ TRANSCRIPT_TOOL_DESCRIPTION = (
 )
 
 #: The explicit strategy's guidance, in the pairing instruction's delegating paragraph.
+#: Before changing it, see "Prompts" above.
 EXPLICIT_FRONTEND_INSTRUCTION = (
     "Word the request so it stands on its own: the user's goal, the exact "
     "details they gave and their latest correction, with everything new they asked for in "
@@ -208,6 +233,7 @@ EXPLICIT_FRONTEND_INSTRUCTION = (
 )
 
 #: How the explicit strategy describes the ``delegate`` tool.
+#: Before changing it, see "Prompts" above.
 EXPLICIT_TOOL_DESCRIPTION = (
     "Hand a request to the backend, which does everything in it that needs a backend tool "
     "or careful reasoning. Call this as soon as any part of what the user asks needs that, "

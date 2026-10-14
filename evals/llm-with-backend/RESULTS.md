@@ -1,0 +1,86 @@
+# LLMWithBackend eval results
+
+The latest results of the checks that "Prompts" in `pipecat.pipeline.llm_with_backend` asks for whenever a prompt changes. Each update is committed with the change it measures, so `git log -p` on this file ties every number to its commit and shows the numbers before it.
+
+## Classifier replay
+
+Predictive delegation's classifier on the recorded turns in `predictive_delegation/`, with `jev-1.13.0` (2026-10-14):
+
+```bash
+uv run python evals/llm-with-backend/predictive_delegation/replay.py
+```
+
+```
+107 turns, threshold 0.6
+  false "yes" (delegated early, not needed): 0/59
+  missed "yes" (left to the frontend):       0/48
+  latency: p50 139ms, p90 201ms
+
+probability of a "yes" per utterance: median (min-max)
+  no  0.17 (0.14-0.19)  What is a race condition in programming?
+  yes 0.96 (0.96-0.97)  Can you fix the flaky retry test in the HTTP client for me?
+  no  0.13 (0.12-0.15)  While we wait, tell me a quick joke.
+  no  0.37 (0.33-0.56)  How's it going with the fix?
+  yes 0.94 (0.92-0.95)  Also, what's the CI status on main?
+  no  0.19 (0.15-0.27)  What's the capital of Australia?
+  yes 0.95 (0.93-0.95)  Can you find our internal docs on the deploy process?
+  yes 0.94 (0.92-0.95)  Actually, never mind the docs.
+  no  0.25 (0.19-0.30)  Thanks. What year was the first moon landing?
+```
+
+## Text evals
+
+The twelve text scenarios on the three cascade bots, five runs each (2026-10-14). The frontends run on their services' default models (`gpt-4.1`, `gemini-3.6-flash`, `claude-sonnet-4-6`), the backend on `claude-sonnet-4-6`, and the judge is the release suite's text judge. Each table comes from the run's `results.jsonl` through `results_table.py`:
+
+```bash
+uv run python -m pipecat.evals suite evals/llm-with-backend/manifest.yaml -s text --repeat 5
+uv run python evals/llm-with-backend/results_table.py <runs-dir>/<run>/results.jsonl
+```
+
+### Without predictive delegation
+
+| scenario | anthropic-frontend | google-frontend | openai-responses-frontend |
+| --- | --- | --- | --- |
+| `accepted_offer/text` | 5/5 | 5/5 | 5/5 |
+| `aside_while_waiting/text` | 5/5 | 5/5 | 5/5 |
+| `cancel_and_replace/text` | 5/5 | 5/5 | 5/5 |
+| `cancel_delegation/text` | 4/5 | 5/5 | 1/5 |
+| `concurrent_delegations/text` | 0/5 | 1/5 | 1/5 |
+| `delegate_ack/text` | 5/5 | 5/5 | 5/5 |
+| `delegate_with_aside/text` | 5/5 | 5/5 | 5/5 |
+| `frontend_only/text` | 5/5 | 5/5 | 5/5 |
+| `implicit_cancel/text` | 1/5 | 5/5 | 2/5 |
+| `partial_cancel/text` | 5/5 | 5/5 | 0/5 |
+| `progress_inquiry/text` | 5/5 | 5/5 | 3/5 |
+| `superseding_delegation/text` | 5/5 | 5/5 | 2/5 |
+| **total** | **50/60** | **56/60** | **39/60** |
+
+### With predictive delegation
+
+The same, with `predictive_delegation=PredictiveDelegation(JevClassifier(...))` added to each bot's `LLMWithBackend`.
+
+| scenario | anthropic-frontend | google-frontend | openai-responses-frontend |
+| --- | --- | --- | --- |
+| `accepted_offer/text` | 5/5 | 5/5 | 5/5 |
+| `aside_while_waiting/text` | 5/5 | 4/5 | 5/5 |
+| `cancel_and_replace/text` | 5/5 | 5/5 | 5/5 |
+| `cancel_delegation/text` | 4/5 | 5/5 | 5/5 |
+| `concurrent_delegations/text` | 0/5 | 0/5 | 1/5 |
+| `delegate_ack/text` | 5/5 | 5/5 | 5/5 |
+| `delegate_with_aside/text` | 5/5 | 5/5 | 5/5 |
+| `frontend_only/text` | 5/5 | 5/5 | 5/5 |
+| `implicit_cancel/text` | 1/5 | 5/5 | 5/5 |
+| `partial_cancel/text` | 5/5 | 5/5 | 5/5 |
+| `progress_inquiry/text` | 5/5 | 5/5 | 2/5 |
+| `superseding_delegation/text` | 5/5 | 5/5 | 5/5 |
+| **total** | **50/60** | **54/60** | **53/60** |
+
+### Known failures
+
+- `concurrent_delegations` fails on every frontend most of the time: the judge rejects the reply that reports both results.
+- gpt-4.1 often answers a stop itself, with no `delegate` call, so the backend carries on (`cancel_delegation`, `implicit_cancel`, `partial_cancel`, `superseding_delegation`). With predictive delegation, the classifier delegates those stops early, and they pass.
+- The other failures are the judge answering "continue" to a correct one-line acknowledgement.
+
+## Audio evals
+
+Not recorded yet.
