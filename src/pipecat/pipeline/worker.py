@@ -1163,10 +1163,14 @@ class PipelineWorker(BaseWorker):
         if not self._cancelled:
             logger.debug(f"Cancelling pipeline worker {self}")
             self._cancelled = True
-            await self._cancel_pipeline_setup()
             if not self._pipeline_start_event.is_set():
                 self._pipeline_start_event.set()
             await self.queue_frame(CancelFrame(reason=reason))
+            # Only request it: a processor's setup() may be what is cancelling,
+            # and awaiting the setup task from inside it never returns. The
+            # task is awaited before the CancelFrame is pushed.
+            if self._pipeline_setup_task and not self._pipeline_setup_task.done():
+                self._pipeline_setup_task.cancel()
 
     async def _create_tasks(self):
         """Create and start all pipeline processing tasks."""
@@ -1386,9 +1390,6 @@ class PipelineWorker(BaseWorker):
         self._pipeline_setup_task.add_done_callback(
             lambda _: self._pipeline._setup_finished(recursive=True)
         )
-        # A cancel that arrived before the setup task existed couldn't stop it.
-        if self._cancelled:
-            await self._cancel_pipeline_setup()
 
     async def _cleanup(self, cleanup_pipeline: bool):
         """Clean up the pipeline worker and processors."""
