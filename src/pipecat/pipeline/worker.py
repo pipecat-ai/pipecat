@@ -1181,6 +1181,8 @@ class PipelineWorker(BaseWorker):
         being set up, so the pipeline is cancelled rather than just cleaned up.
         Cancelling setup releases the StartFrame and the CancelFrame behind it.
         """
+        if not self._pipeline_setup_task:
+            return
         try:
             await asyncio.wait_for(
                 asyncio.shield(self._pipeline_setup_task), timeout=self._setup_timeout_secs
