@@ -1528,7 +1528,7 @@ async def test_no_deadlock_on_interrupt_before_audio_with_uninterruptible():
       - BotStoppedSpeakingFrame is never sent (no audio played).
       - resume_processing_frames() is never called → deadlock.
 
-    With the fix (_update_frame_processing() inside _handle_interruption()),
+    With the fix (_release_frames_if_audio_contexts_ended() inside _handle_interruption()),
     the event is set and the process task unblocks, allowing subsequent frames
     (FooFrame, EndFrame) to be processed.
 
@@ -1539,7 +1539,7 @@ async def test_no_deadlock_on_interrupt_before_audio_with_uninterruptible():
     4. Process task picks up UninterruptibleMarkerFrame, blocks at wait().
     5. InterruptionFrame → _start_interruption() keeps the task running
        (uninterruptible) but WITHOUT the fix __should_block_frames stays True.
-    6. With the fix: _handle_interruption() calls _update_frame_processing()
+    6. With the fix: _handle_interruption() calls _release_frames_if_audio_contexts_ended()
        → __process_event.set() → process task unblocked.
     7. FooFrame arrives downstream.
     """
@@ -1567,7 +1567,7 @@ async def test_no_deadlock_on_interrupt_before_audio_with_uninterruptible():
     foo_frames = [f for f in down if isinstance(f, FooFrame)]
     assert any(f.label == "after_interrupt" for f in foo_frames), (
         "FooFrame after interruption was not received — pipeline deadlocked "
-        "(missing _update_frame_processing() in _handle_interruption)"
+        "(missing _release_frames_if_audio_contexts_ended() in _handle_interruption)"
     )
 
 

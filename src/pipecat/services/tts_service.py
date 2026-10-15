@@ -1178,7 +1178,7 @@ class TTSService(AIService):
             self._turn_context_id,
         )
 
-        await self._update_frame_processing()
+        await self._hold_frames_while_audio_contexts_open()
 
         # Log accumulated streamed text and emit aggregated usage metric.
         if self._streamed_text:
@@ -1234,7 +1234,7 @@ class TTSService(AIService):
         self._sent_non_whitespace_in_context = saved_sent_non_whitespace
         # Inside an LLM turn, the end of the turn holds the next frames.
         if not saved_turn_context_id:
-            await self._update_frame_processing()
+            await self._hold_frames_while_audio_contexts_open()
 
     async def _handle_update_settings(
         self, frame: TTSUpdateSettingsFrame, direction: FrameDirection
@@ -1267,8 +1267,12 @@ class TTSService(AIService):
 
         await self._interrupt_audio_contexts()
         self._create_audio_context_task()
-        # Uninterruptible speech still open keeps holding frames.
-        await self._update_frame_processing()
+        # Uninterruptible speech still open holds frames, even when the reply
+        # it was part of never ended to hold them.
+        await self._hold_frames_while_audio_contexts_open()
+        # Dropped contexts never reach _end_audio_context, so frames held for
+        # them are released here.
+        await self._release_frames_if_audio_contexts_ended()
 
     async def _interrupt_audio_contexts(self):
         """Discard interruptible contexts while preserving ongoing synthesis and playback."""
@@ -1303,19 +1307,20 @@ class TTSService(AIService):
         if self._turn_context_id not in preserved:
             self._turn_context_id = None
 
-    async def _update_frame_processing(self):
-        """Hold incoming frames while an audio context is open, resume them otherwise.
+    async def _hold_frames_while_audio_contexts_open(self):
+        """Hold incoming frames while an audio context is open.
 
         Services whose audio doesn't carry its request's context ID label
         incoming audio with the context still open, so the next request waits
         for every open context to end. Contexts play in order, so audio from
         different requests never overlaps.
         """
-        if not self._pause_frame_processing:
-            return
-        if self.get_audio_contexts():
+        if self._pause_frame_processing and self.get_audio_contexts():
             await self.pause_processing_frames()
-        else:
+
+    async def _release_frames_if_audio_contexts_ended(self):
+        """Let held frames through once no audio context is open."""
+        if self._pause_frame_processing and not self.get_audio_contexts():
             await self.resume_processing_frames()
 
     def _apply_context_interruptible(self, frame: Frame):
@@ -1920,9 +1925,7 @@ class TTSService(AIService):
         except Exception as e:
             logger.warning(f"{self} on_audio_context_completed failed for {context_id}: {e}")
         self.reset_active_audio_context()
-        # Frames held for open contexts go on once the last one ends.
-        if not self.get_audio_contexts():
-            await self._update_frame_processing()
+        await self._release_frames_if_audio_contexts_ended()
 
     async def _record_context_audio_outcome(self, context_id: str, received_audio: bool):
         """Track whether contexts are producing audio, and act when they stop.
