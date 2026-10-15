@@ -38,6 +38,7 @@ from pipecat.utils.string import TextPartForConcatenation, concatenate_aggregate
 def _service(language: str) -> CartesiaTTSService:
     service = CartesiaTTSService.__new__(CartesiaTTSService)
     service._settings = TTSSettings(language=language)
+    service._event_handlers = {}
     return service
 
 
