@@ -23,18 +23,39 @@ how each output is rendered into the conversation.
 """
 
 import asyncio
-from dataclasses import dataclass
+import uuid
+from dataclasses import dataclass, field
+from enum import Enum
 from typing import Any
 
 from loguru import logger
 
 from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.frames.frames import FunctionCallResultProperties, LLMMessagesAppendFrame
+from pipecat.classifiers.base_classifier import BaseClassifier, YesNoQuestion
+from pipecat.frames.frames import (
+    Frame,
+    FunctionCallFromLLM,
+    FunctionCallResultProperties,
+    InterruptionFrame,
+    LLMContextFrame,
+    LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
+    LLMMessagesAppendFrame,
+    MetricsFrame,
+    SystemFrame,
+    UserStartedSpeakingFrame,
+)
+from pipecat.metrics.metrics import MetricsData
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.aggregators.llm_context import LLMContextMessage
-from pipecat.processors.frame_processor import FrameProcessorSetup
+from pipecat.processors.frame_processor import (
+    FrameDirection,
+    FrameProcessor,
+    FrameProcessorSetup,
+)
 from pipecat.processors.frameworks.rtvi.frames import RTVIServerMessageFrame
 from pipecat.services.llm_service import FunctionCallParams, LLMService
+from pipecat.services.settings import LLMSettings
 from pipecat.workers.base_worker import BaseWorker
 from pipecat.workers.llm.backend_llm_worker import (
     EXPLICIT_REQUEST_INSTRUCTION,
@@ -108,9 +129,10 @@ FRONTEND_PAIRING_INSTRUCTION = (
     "backend decides. You cannot stop or change that work yourself, and nothing you say "
     "reaches the backend: only a delegate call does, so saying you will stop without one "
     "leaves the work running. A request that arrives while the backend is already working "
-    "is delegated like any other. Do not delegate only when the message neither needs "
-    "backend work nor concerns work already handed over: small talk, or a question you can "
-    "answer from a result you already have, or when you need a brief clarification first. "
+    "is delegated like any other. Do not delegate small talk, a question you can answer from "
+    "a result you already have, a question about how work already handed over is going, "
+    "which you answer from the backend's latest messages, or a message you need a brief "
+    "clarification on first. "
     "Delegate before giving any answer that depends on backend work, and do not guess the "
     "result while waiting. To delegate, call the delegate tool at once, in that same reply, "
     f"and do the rest of the reply yourself around it. {STRATEGY_PLACEHOLDER}\n\n"
@@ -250,6 +272,10 @@ class BackendRequestStrategy:
     #: A speech-to-speech frontend's context lags the audio, so the connector
     #: refuses such a strategy there.
     requires_context: bool = False
+    #: Whether a ``delegate`` call has to carry arguments for the request to
+    #: be built. Predictive delegation makes its ``delegate`` call with none,
+    #: so it works only with a strategy that sets this False.
+    delegate_needs_arguments: bool = True
 
     async def compose_request(self, params: FunctionCallParams) -> str | None:
         """Turn a ``delegate`` call into the text put to the backend.
@@ -283,6 +309,7 @@ class TranscriptBackendRequestStrategy(BackendRequestStrategy):
     """
 
     requires_context = True
+    delegate_needs_arguments = False
 
     def __init__(
         self,
@@ -740,6 +767,424 @@ class BackendConnector:
 
 
 # ---------------------------------------------------------------------------
+# Predictive delegation
+#
+# Predictive delegation (PredictiveDelegation, passed as
+# `LLMWithBackend(predictive_delegation=...)`) is an optimization that can
+# speed up responses that need backend involvement. Normally, a text frontend
+# spends a whole inference deciding to call `delegate` before the backend can
+# start. Predictive delegation uses a fast yes/no classifier to determine
+# whether it needs to wait for that inference or can go ahead and trigger an
+# early backend delegation.
+#
+# How it works: when a user's turn ends, the frontend runs in parallel (i.e.
+# in a race) with the classifier (see `pipecat.classifiers`) that decides
+# whether the turn needs the backend.
+#
+# - If the classifier says "yes" before the frontend has produced output:
+#   - the frontend's inference is cancelled;
+#   - a `delegate` call to the backend is made right away, in its place.
+# - Otherwise, the frontend handles the turn as usual, having waited for
+#   nothing (note that it may still choose to `delegate`).
+#
+# _PredictiveDelegationRace tracks whether a classifier "yes" arrives before the
+# frontend's first output, and so whether the turn is delegated early or
+# handled by the frontend as usual. A classifier "no" plays no part. The
+# frontend is normally idle when a turn ends (the user's speech interrupts
+# it), so its inference starts at once; a "yes" that comes while it is still
+# busy is kept until it starts. The race is attached to the frontend, which
+# consults it from LLMService's process_frame, push_frame and
+# run_function_calls.
+# ---------------------------------------------------------------------------
+
+
+class _RaceState(Enum):
+    """Where the predictive delegation race for a user's turn stands.
+
+    - ``QUEUED``: the frontend has the user's turn but hasn't started its
+      inference for it yet: normally for a moment, longer only if it's still
+      busy with another response. A classifier "yes" now is kept until the
+      race opens.
+    - ``OPEN``: the frontend's inference is running with no output yet. A
+      classifier "yes" now, or one kept from ``QUEUED``, delegates the turn
+      early.
+    - ``FRONTEND_HANDLES``: the frontend handles the turn as usual: its
+      inference produced output before any classifier "yes", or was
+      interrupted.
+    - ``DELEGATED_EARLY``: a classifier "yes" came first: the turn is
+      delegated early, and the frontend's inference is cancelled.
+    """
+
+    QUEUED = "queued"
+    OPEN = "open"
+    FRONTEND_HANDLES = "frontend handles"
+    DELEGATED_EARLY = "delegated early"
+
+
+@dataclass
+class _EarlyDelegationFrame(SystemFrame):
+    """Asks the frontend to delegate a user's turn now, in place of its own inference.
+
+    Sent by PredictiveDelegation when its classifier says "yes". If the
+    frontend's inference for the turn hasn't produced anything yet, the
+    frontend makes the given calls and cancels the inference; otherwise the
+    frame does nothing. A system frame, so the frontend handles it at once,
+    while the inference runs on another task.
+
+    Parameters:
+        turn: The context frame of the user's turn.
+        function_calls: The calls made in place of the inference (the
+            ``delegate`` call).
+    """
+
+    turn: LLMContextFrame | None = None
+    function_calls: list[FunctionCallFromLLM] = field(default_factory=list)
+
+
+class _PredictiveDelegationRace:
+    """Tracks whether a classifier "yes" arrives before the frontend's first output for a turn.
+
+    See "Predictive delegation" above. Early delegation makes the
+    frame's calls, then cancels the inference with
+    ``FrameProcessor._cancel_frame_in_progress``, which keeps the frontend's
+    queue, including the acknowledgement run the call starts. Downstream sees
+    an ordinary response holding the call; any other output the inference
+    pushes before it's cancelled is dropped.
+
+    The inference's own frames are recognized by the task they come from, the
+    frontend's process task; everything else the frontend pushes is left
+    alone. All checks are synchronous, so the frontend's first output and
+    early delegation can't interleave.
+    """
+
+    def __init__(self):
+        """Initialize with no race started."""
+        self._turn: LLMContextFrame | None = None
+        # The frontend's process task, which runs the turn's inference and
+        # goes on to process the frames after it.
+        self._inference_task: asyncio.Task | None = None
+        self._state = _RaceState.FRONTEND_HANDLES
+        self._frontend: LLMService[Any] | None = None
+        # A "yes" that arrived while QUEUED, carried out once the inference
+        # starts its response.
+        self._pending_early_delegation: _EarlyDelegationFrame | None = None
+
+    def start(self, frame: LLMContextFrame) -> None:
+        """Start a race for a user's turn, just before the turn is passed to the frontend.
+
+        Args:
+            frame: The context frame of the user's turn.
+        """
+        self._turn = frame
+        self._inference_task = None
+        self._state = _RaceState.QUEUED
+        self._pending_early_delegation = None
+
+    async def process_frame(self, frontend: LLMService[Any], frame: Frame) -> None:
+        """Follow the race through the frames the frontend processes.
+
+        The race opens when its turn's inference starts, an interruption
+        leaves the turn to the frontend, and an early delegation frame is
+        carried out once the race is open.
+
+        Args:
+            frontend: The frontend service.
+            frame: The frame it is processing.
+        """
+        if isinstance(frame, LLMContextFrame):
+            if frame is self._turn and self._state == _RaceState.QUEUED:
+                self._frontend = frontend
+                self._inference_task = asyncio.current_task()
+                self._state = _RaceState.OPEN
+        elif isinstance(frame, InterruptionFrame):
+            # The interruption cancels the inference: there is nothing left
+            # for early delegation to replace.
+            if self._state in (_RaceState.QUEUED, _RaceState.OPEN):
+                self._state = _RaceState.FRONTEND_HANDLES
+        elif isinstance(frame, _EarlyDelegationFrame):
+            await self._delegate_early(frontend, frame)
+
+    def before_push(self, frame: Frame) -> bool:
+        """Called before the frontend pushes a frame; notes the inference's first output.
+
+        Any output from the inference but the start of its response or a
+        system frame leaves the turn to the frontend.
+
+        Args:
+            frame: The frame the frontend is about to push.
+
+        Returns:
+            Whether the frontend may push the frame: False only for what the
+            inference pushes after the turn was delegated early and before its
+            cancellation lands, other than the end of its response.
+        """
+        if self._inference_task is None or asyncio.current_task() is not self._inference_task:
+            return True
+        if self._state == _RaceState.OPEN:
+            if (
+                isinstance(frame, LLMFullResponseStartFrame)
+                and self._pending_early_delegation
+                and self._frontend
+            ):
+                # Carried out on the frontend's input task, like any early
+                # delegation frame, once this start frame is downstream.
+                pending, self._pending_early_delegation = self._pending_early_delegation, None
+                self._frontend.create_task(self._frontend.queue_frame(pending))
+            elif not isinstance(frame, (SystemFrame, LLMFullResponseStartFrame)):
+                self._state = _RaceState.FRONTEND_HANDLES
+            return True
+        if self._state == _RaceState.DELEGATED_EARLY:
+            return isinstance(frame, (SystemFrame, LLMFullResponseEndFrame))
+        return True
+
+    def before_function_calls(self) -> bool:
+        """Called before the frontend runs function calls; notes the inference's first call.
+
+        A call from the inference leaves the turn to the frontend.
+
+        Returns:
+            Whether the frontend may run them: False only for calls the
+            inference reaches after the turn was delegated early and before
+            its cancellation lands.
+        """
+        if self._inference_task is None or asyncio.current_task() is not self._inference_task:
+            return True
+        if self._state == _RaceState.OPEN:
+            self._state = _RaceState.FRONTEND_HANDLES
+        return self._state != _RaceState.DELEGATED_EARLY
+
+    async def _delegate_early(
+        self, frontend: LLMService[Any], frame: _EarlyDelegationFrame
+    ) -> None:
+        """If the race for the turn is open, make the frame's calls and cancel the inference.
+
+        A frame that arrives before the race opens is kept for when it does.
+        """
+        turn = frame.turn
+        if turn is None or turn is not self._turn:
+            return
+        if self._state == _RaceState.QUEUED:
+            logger.debug("Predictive delegation: turn queued; keeping the early delegation")
+            self._pending_early_delegation = frame
+            return
+        if self._state != _RaceState.OPEN:
+            logger.debug(f"Predictive delegation: not delegating early (race {self._state.value})")
+            return
+        logger.debug("Predictive delegation: delegating early, cancelling the frontend's inference")
+        self._state = _RaceState.DELEGATED_EARLY
+        await frontend.run_function_calls(frame.function_calls)
+        await frontend._cancel_frame_in_progress(turn)
+
+
+#: How likely a classifier "yes" must be for a turn to be delegated early.
+_DELEGATION_PREDICTION_THRESHOLD = 0.6
+
+#: How many of the conversation's latest messages the classifier sees.
+_DELEGATION_PREDICTION_HISTORY_LENGTH = 12
+
+
+class PredictiveDelegation(FrameProcessor):
+    """An optimization that can speed up responses that need backend involvement.
+
+    **Alpha.** It uses a fast yes/no classifier to determine, after each user
+    request, whether it needs to wait for the frontend's inference or can go
+    ahead and trigger an early backend delegation. See "Predictive delegation"
+    above for how it works. Pass one to
+    ``LLMWithBackend(predictive_delegation=...)``, which puts it just in front
+    of the frontend; it needs a text frontend and a request strategy whose
+    ``delegate`` call needs no arguments, such as the default
+    :class:`TranscriptBackendRequestStrategy`.
+
+    It races every turn that ends with a new user message, spoken or typed,
+    and so also a user-role message the app appends and runs the frontend on.
+    The classifier is asked whether that message needs the backend, given
+    the frontend's system instruction (where the app says what the backend
+    is for, and the pairing instruction when to delegate), the ``delegate``
+    tool's description, and the latest messages of the conversation, the
+    backend's included. A turn the frontend sees as speculative (eager end of
+    turn), or with incomplete-turn filtering on, is left to the frontend.
+
+    Example::
+
+        llm = LLMWithBackend(
+            frontend=OpenAILLMService(...),
+            backend=BackendLLMWorker(...),
+            predictive_delegation=PredictiveDelegation(JevClassifier(api_key=...)),
+        )
+    """
+
+    def __init__(self, classifier: BaseClassifier, **kwargs):
+        """Initialize predictive delegation.
+
+        Args:
+            classifier: The yes/no classifier to ask. It answers within a bound
+                of its own; an answer that comes after the frontend's first
+                output is ignored.
+            **kwargs: Additional arguments passed to the parent class.
+        """
+        super().__init__(**kwargs)
+        self._classifier = classifier
+        self._race = _PredictiveDelegationRace()
+        self._frontend: LLMService[Any] | None = None
+        self._question: YesNoQuestion | None = None
+        self._last_raced: LLMContextMessage | None = None
+        self._classify_task: asyncio.Task | None = None
+        self._warned: set[str] = set()
+
+    def _bind(self, frontend: LLMService[Any], connector: BackendConnector) -> None:
+        """Attach the race to the frontend and build the classifier's question."""
+        self._frontend = frontend
+        frontend._llm_with_backend_predictive_delegation = self._race
+        self._question = YesNoQuestion(
+            instructions=(
+                "Does the user's latest message need to be handed to the assistant's backend "
+                "now? The handoff works like this: " + connector.request_strategy.tool_description
+            ),
+            no="The assistant's instructions say not to hand this message to the backend.",
+        )
+
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the classifier, reporting its metrics in the pipeline."""
+        await super().setup(setup)
+        await self._classifier.setup(self.task_manager)
+        self._classifier.add_event_handler("on_metrics", self._on_classifier_metrics)
+
+    async def cleanup(self):
+        """Stop any classification in progress and clean up the classifier."""
+        await self._cancel_classification()
+        await self._classifier.cleanup()
+        await super().cleanup()
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Race each new user turn; pass every frame on.
+
+        Args:
+            frame: The frame to process.
+            direction: The direction of frame processing.
+        """
+        await super().process_frame(frame, direction)
+        if isinstance(frame, (InterruptionFrame, UserStartedSpeakingFrame)):
+            await self._cancel_classification()
+        if (
+            direction == FrameDirection.DOWNSTREAM
+            and isinstance(frame, LLMContextFrame)
+            and self._should_start_race(frame)
+        ):
+            await self._cancel_classification()
+            self._race.start(frame)
+            state = self._classifier_state(frame)
+            await self.push_frame(frame, direction)
+            self._classify_task = self.create_task(
+                self._classify(frame, state), f"{self}::classify"
+            )
+            return
+        await self.push_frame(frame, direction)
+
+    def _should_start_race(self, frame: LLMContextFrame) -> bool:
+        """Whether a context frame should start a race.
+
+        It should when it asks for a reply to a user message that hasn't been
+        raced yet, unless the turn is speculative (eager end of turn) or the
+        frontend filters incomplete user turns.
+        """
+        assert self._frontend is not None, "predictive delegation not bound"
+        if frame.speculation:
+            self._warn_once(
+                "speculation",
+                "Predictive delegation: speculative turns (eager end of turn) are left to the "
+                "frontend",
+            )
+            return False
+        if self._frontend_settings().filter_incomplete_user_turns:
+            self._warn_once(
+                "filtering",
+                "Predictive delegation: turns are left to the frontend while it filters "
+                "incomplete user turns",
+            )
+            return False
+        messages = frame.context.get_messages()
+        last = messages[-1] if messages else None
+        if not isinstance(last, dict) or last.get("role") != "user":
+            return False
+        if last is self._last_raced:
+            return False
+        self._last_raced = last
+        return True
+
+    def _classifier_state(self, frame: LLMContextFrame) -> dict[str, Any]:
+        """What the classifier is told about the turn."""
+        # The instruction the frontend's model reads, the pairing instruction
+        # included, so the classifier follows the same rules for delegating.
+        return {
+            "assistant": str(self._frontend_settings().system_instruction or ""),
+            "conversation": _render_for_classifier(frame.context.get_messages()),
+        }
+
+    async def _classify(self, frame: LLMContextFrame, state: dict[str, Any]) -> None:
+        """Ask the classifier about a turn; on a "yes", ask the frontend to delegate it early."""
+        assert self._question is not None
+        try:
+            answers = await self._classifier.yes_no(state, {"needs_backend": self._question})
+        except Exception as e:
+            logger.warning(f"Predictive delegation: the classifier failed: {e}")
+            return
+        probability = answers["needs_backend"].probability
+        logger.debug(f"Predictive delegation: classifier says {probability:.2f}")
+        if probability < _DELEGATION_PREDICTION_THRESHOLD:
+            return
+        call = FunctionCallFromLLM(
+            function_name=DELEGATE_TOOL_NAME,
+            tool_call_id=f"early_delegation_{uuid.uuid4().hex[:16]}",
+            arguments={},
+            context=frame.context,
+        )
+        await self.push_frame(_EarlyDelegationFrame(turn=frame, function_calls=[call]))
+
+    def _frontend_settings(self) -> LLMSettings:
+        assert self._frontend is not None, "predictive delegation not bound"
+        settings = self._frontend.settings
+        assert isinstance(settings, LLMSettings)
+        return settings
+
+    async def _cancel_classification(self) -> None:
+        if self._classify_task is not None:
+            await self.cancel_task(self._classify_task)
+            self._classify_task = None
+
+    async def _on_classifier_metrics(self, classifier: BaseClassifier, data: list[MetricsData]):
+        await self.push_frame(MetricsFrame(data=data))
+
+    def _warn_once(self, key: str, message: str) -> None:
+        if key not in self._warned:
+            self._warned.add(key)
+            logger.warning(message)
+
+
+def _render_for_classifier(messages: list[LLMContextMessage]) -> list[dict[str, str]]:
+    """The conversation's latest messages, as speaker and text, for the classifier."""
+    rendered: list[dict[str, str]] = []
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        role, content = message.get("role"), message.get("content")
+        if role == "user" and isinstance(content, str):
+            rendered.append({"speaker": "user", "text": content})
+        elif role == "assistant":
+            if isinstance(content, str) and content:
+                rendered.append({"speaker": "assistant", "text": content})
+            for call in message.get("tool_calls") or []:
+                if call.get("function", {}).get("name") == DELEGATE_TOOL_NAME:
+                    rendered.append(
+                        {"speaker": "assistant", "action": "handed the request to the backend"}
+                    )
+        elif _is_backend_message(message) and isinstance(content, str):
+            rendered.append(
+                {"speaker": "backend", "text": content.removesuffix(f"\n\n{RELAY_NOTE}")}
+            )
+    return rendered[-_DELEGATION_PREDICTION_HISTORY_LENGTH:]
+
+
+# ---------------------------------------------------------------------------
 # The service
 # ---------------------------------------------------------------------------
 
@@ -788,6 +1233,7 @@ class LLMWithBackend(Pipeline):
         frontend: LLMService[Any],
         backend: BackendLLMWorker | str,
         connector: BackendConnector | None = None,
+        predictive_delegation: PredictiveDelegation | None = None,
     ):
         """Initialize the service.
 
@@ -798,11 +1244,18 @@ class LLMWithBackend(Pipeline):
                 A worker given here is added to the pipeline worker at setup.
             connector: How delegation works. A default
                 :class:`BackendConnector` when omitted.
+            predictive_delegation: A :class:`PredictiveDelegation`, to speed
+                up responses that need backend involvement: its classifier
+                determines whether to wait for the frontend's inference or go
+                ahead and trigger an early backend delegation. Only for a text
+                frontend.
 
         Raises:
-            ValueError: If the frontend service declines the role, or the
+            ValueError: If the frontend service declines the role; if the
                 connector's request strategy reads the frontend's context and
-                the frontend is speech-to-speech.
+                the frontend is speech-to-speech; or if predictive delegation
+                is given with a speech-to-speech frontend or with a request
+                strategy whose ``delegate`` call needs arguments.
         """
         logger.warning("LLMWithBackend is alpha: its API is likely to change between releases.")
         if objection := frontend.llm_with_backend_role_objection("frontend"):
@@ -810,19 +1263,39 @@ class LLMWithBackend(Pipeline):
         self._frontend = frontend
         self._backend = backend
         self._connector = connector or BackendConnector()
+        frontend_is_realtime = frontend.service_metadata_frame().is_realtime_service
         self._connector.bind(
             ConnectorContext(
                 backend_name=backend if isinstance(backend, str) else backend.name,
-                frontend_is_realtime=frontend.service_metadata_frame().is_realtime_service,
+                frontend_is_realtime=frontend_is_realtime,
             )
         )
+        if predictive_delegation is not None:
+            if frontend_is_realtime:
+                raise ValueError(
+                    "Predictive delegation needs a text frontend: a speech-to-speech frontend "
+                    "replies to the user's audio before the turn's transcript reaches its "
+                    "context, so there is no turn to classify in time."
+                )
+            if self._connector.request_strategy.delegate_needs_arguments:
+                raise ValueError(
+                    f"Predictive delegation makes its delegate call with no arguments, which "
+                    f"{type(self._connector.request_strategy).__name__} can't build a request "
+                    "from. Use a strategy that needs none, such as "
+                    "TranscriptBackendRequestStrategy."
+                )
         if instruction := self._connector.frontend_instruction:
             frontend.append_system_instruction(instruction)
         for tool in self._connector.tools:
             frontend.register_function(tool.name, tool.handler, cancel_on_interruption=False)
             frontend.get_llm_adapter().builtin_tools[tool.name] = tool
+        self._predictive_delegation = predictive_delegation
         self._session_task: asyncio.Task | None = None
-        super().__init__([frontend])
+        if predictive_delegation is not None:
+            predictive_delegation._bind(frontend, self._connector)
+            super().__init__([predictive_delegation, frontend])
+        else:
+            super().__init__([frontend])
 
     @property
     def frontend(self) -> LLMService[Any]:
@@ -838,6 +1311,11 @@ class LLMWithBackend(Pipeline):
     def connector(self) -> BackendConnector:
         """The connector joining the two layers."""
         return self._connector
+
+    @property
+    def predictive_delegation(self) -> PredictiveDelegation | None:
+        """The PredictiveDelegation in front of the frontend, if there is one."""
+        return self._predictive_delegation
 
     @property
     def tool(self) -> FunctionSchema:
