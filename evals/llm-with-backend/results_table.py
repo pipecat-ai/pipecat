@@ -6,8 +6,8 @@
 
 """Print a suite run's results as a Markdown table, for RESULTS.md.
 
-Each row is a scenario and each column a bot, with how many of the runs
-passed::
+Each row is a scenario and each column a bot (a manifest entry's name, or
+its bot's file name), with how many of the runs passed::
 
     uv run python evals/llm-with-backend/results_table.py test-runs/<run>/results.jsonl
 """
@@ -26,7 +26,8 @@ def main():
     passed: dict[tuple[str, str], list[bool]] = defaultdict(list)
     for line in args.results.open():
         result = json.loads(line)
-        bot = result["bot"].removesuffix(".py")
+        # An entry's name labels its runs; the bot's file name is the default.
+        bot = Path(result.get("name") or result["bot"]).name.removesuffix(".py")
         passed[(result["scenario"], bot)].append(result["passed"])
 
     bots = sorted({bot for _, bot in passed})
