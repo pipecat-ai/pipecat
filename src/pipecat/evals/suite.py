@@ -216,7 +216,11 @@ def _append_result(
     runs that did not pass, since that is what a failure is diagnosed from.
     """
     artifacts = {"log": str(logs_dir / f"{stem}.log")}
-    for suffix, key in ((".eval.log", "eval_log"), (".debug.log", "debug_log")):
+    for suffix, key in (
+        (".eval.log", "eval_log"),
+        (".debug.log", "debug_log"),
+        (".conversation.json", "conversation"),
+    ):
         path = logs_dir / f"{stem}{suffix}"
         if path.exists():
             artifacts[key] = str(path)
@@ -335,6 +339,7 @@ def _simulation_result_from_dict(data: dict) -> EvalSimulationResult:
             for m in data.get("metrics", [])
         ],
         messages=data.get("messages", []),
+        conversation=data.get("conversation", []),
         turns=data.get("turns", 0),
         ended_by=data.get("ended_by", "error"),
         end_call=data.get("end_call"),
@@ -823,6 +828,7 @@ class _RunFiles:
         log: The bot's output.
         harness_log: The harness worker's output, kept only when it crashed.
         trace: The harness's decision trace, ``<prefix>.eval.log``.
+        conversation: A simulation's conversation, ``<prefix>.conversation.json``.
         config: The worker's config, the handoff in.
         result: The worker's result, the handoff out.
         body: The bot's runner-args body, written when the manifest gives it inline.
@@ -833,6 +839,7 @@ class _RunFiles:
     log: Path
     harness_log: Path
     trace: Path
+    conversation: Path
     config: Path
     result: Path
     body: Path
@@ -859,6 +866,7 @@ class _RunFiles:
             log=logs_dir / f"{prefix}.log",
             harness_log=logs_dir / f"{prefix}.harness.log",
             trace=logs_dir / f"{prefix}.eval.log",
+            conversation=logs_dir / f"{prefix}.conversation.json",
             config=logs_dir / f"{prefix}.config.json",
             result=logs_dir / f"{prefix}.result.json",
             body=logs_dir / f"{prefix}.body.json",
@@ -1208,6 +1216,8 @@ class EvalSuite(BaseObject):
                 handoff.unlink()
         if run.result is not None and run.result.debug_log:
             files.trace.write_text("\n".join(run.result.debug_log) + "\n")
+        if isinstance(run.result, EvalSimulationResult):
+            files.conversation.write_text(json.dumps(run.result.conversation, indent=2) + "\n")
         if results_path is not None:
             _append_result(results_path, run, files.prefix, logs_dir, record_dir)
 

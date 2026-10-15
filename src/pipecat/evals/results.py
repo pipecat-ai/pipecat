@@ -261,6 +261,9 @@ class EvalSimulationResult:
         messages: The conversation, with the persona's turns as ``user`` messages
             and the bot's as ``assistant`` (the convention scenarios' judges use);
             the ``assistant`` messages are the bot turns the metrics scored.
+        conversation: The conversation as a conversation file holds it, the
+            ``messages`` with the bot's function calls in place (see
+            :mod:`pipecat.evals.conversation`).
         turns: How many turns the persona took.
         ended_by: How the run ended, one of ``SIMULATION_ENDINGS``.
         end_call: The persona's own ``end_call`` claim (``success``, ``reason``)
@@ -276,6 +279,7 @@ class EvalSimulationResult:
     error: str | None = None
     metrics: list[EvalSimulationMetricScore] = field(default_factory=list)
     messages: list[dict] = field(default_factory=list)
+    conversation: list[dict] = field(default_factory=list)
     turns: int = 0
     ended_by: str = "error"
     end_call: dict | None = None

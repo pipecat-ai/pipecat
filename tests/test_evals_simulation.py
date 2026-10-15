@@ -724,6 +724,21 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
                 {"role": "assistant", "content": "Let me check. Six is free, booked."},
             ],
         )
+        # The conversation file has the call in place too.
+        self.assertEqual(
+            result.conversation,
+            [
+                {"role": "assistant", "content": "Hello!"},
+                {"role": "user", "content": "A table at six, please."},
+                {
+                    "role": "tool_call",
+                    "name": "check_availability",
+                    "arguments": {"time": "6"},
+                    "cancelled": False,
+                },
+                {"role": "assistant", "content": "Let me check. Six is free, booked."},
+            ],
+        )
 
     async def test_the_conversation_is_reported_as_it_happens(self):
         records: list = []
@@ -819,6 +834,11 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
         with self.assertWarns(DeprecationWarning):
             transcript = driver.transcript()
         self.assertEqual([e["content"] for e in transcript if e["role"] == "tool"], calls)
+        result = driver.result(failures=[], duration_ms=0, events_seen=[], debug_log=[])
+        self.assertEqual(
+            [(m["name"], m["cancelled"]) for m in result.conversation],
+            [("check_availability", False), ("end_conversation", True)],
+        )
 
     async def test_wall_clock_cap_ends_the_run(self):
         driver, _, _, _ = _driver(_simulation(max_duration_s=0.05), _FakeConversationJudge(["no"]))
