@@ -17,6 +17,7 @@ from typing import (
 )
 
 from loguru import logger
+from websockets.protocol import State
 
 from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
@@ -2011,6 +2012,11 @@ class WebsocketTTSService(TTSService, WebsocketService):
     Combines TTS functionality with websocket connectivity, providing automatic
     error handling and reconnection capabilities.
 
+    Includes an optional keepalive for providers that close an idle connection.
+    A subclass enables it by overriding ``_send_keepalive()`` to send its
+    provider's keepalive message, and calling ``_create_keepalive_task(interval)``
+    / ``_cancel_keepalive_task()`` from its ``_connect()`` / ``_disconnect()``.
+
     Event handlers:
         on_connection_error: Called when a websocket connection error occurs.
 
@@ -2030,6 +2036,7 @@ class WebsocketTTSService(TTSService, WebsocketService):
         """
         TTSService.__init__(self, **kwargs)
         WebsocketService.__init__(self, reconnect_on_error=reconnect_on_error, **kwargs)
+        self._keepalive_task: asyncio.Task | None = None
 
     @property
     def supports_processing_metrics(self) -> bool:
@@ -2100,6 +2107,55 @@ class WebsocketTTSService(TTSService, WebsocketService):
     async def _report_error(self, error: ErrorFrame, force_treat_as_permanent: bool = False):
         await self._call_event_handler("on_connection_error", error.error)
         await self.push_error_frame(error, force_treat_as_permanent=force_treat_as_permanent)
+
+    def _create_keepalive_task(self, interval: float):
+        """Start the keepalive task if it isn't running.
+
+        Args:
+            interval: Seconds between keepalive messages.
+        """
+        if self._keepalive_task and not self._keepalive_task.done():
+            return
+        self._keepalive_task = self.create_task(
+            self._keepalive_task_handler(interval), name="keepalive"
+        )
+
+    async def _cancel_keepalive_task(self):
+        """Stop the keepalive task if running."""
+        if self._keepalive_task:
+            await self.cancel_task(self._keepalive_task)
+            self._keepalive_task = None
+
+    async def _keepalive_task_handler(self, interval: float):
+        """Send a keepalive every ``interval`` seconds while connected.
+
+        A failed send is logged and the loop keeps going: the receive loop
+        handles a lost connection, and the next keepalive goes out on the
+        reconnected socket.
+        """
+        while True:
+            await asyncio.sleep(interval)
+            try:
+                if self._is_keepalive_ready():
+                    await self._send_keepalive()
+            except Exception as e:
+                logger.warning(f"{self} keepalive error: {e}")
+
+    def _is_keepalive_ready(self) -> bool:
+        """Check if the service is ready to send a keepalive.
+
+        Returns:
+            True if the websocket is open.
+        """
+        return self._websocket is not None and self._websocket.state is State.OPEN
+
+    async def _send_keepalive(self):
+        """Send a keepalive message over the websocket.
+
+        Subclasses that enable keepalive must override this to send their
+        provider's keepalive message.
+        """
+        raise NotImplementedError("Subclasses must override _send_keepalive")
 
 
 class InterruptibleTTSService(WebsocketTTSService):
