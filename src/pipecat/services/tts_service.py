@@ -1218,7 +1218,7 @@ class TTSService(AIService):
         await self.on_turn_context_created(speak_context_id)
         text_frame = AggregatedTextFrame(frame.text, frame.text_type, raw_text=frame.text)
         text_frame.interruptible = frame.interruptible
-        await self._handle_aggregated_text(text_frame)
+        await self._handle_aggregated_text(text_frame, speak_context_id)
         # Force-promote the utterance's pending sentence into a real slot (streaming
         # mode only; a no-op otherwise). A TTSSpeakFrame is a self-contained sentence
         # with no following token to confirm its boundary, so without this it would
@@ -1400,9 +1400,11 @@ class TTSService(AIService):
         )
         return AggregatedTextFrame(aggregation.text, aggregation.type, raw_text=raw_text)
 
-    async def _handle_aggregated_text(self, src_frame: AggregatedTextFrame):
-        """Speak aggregated text, or push it on in order if its type is skipped."""
-        context_id = self.create_context_id()
+    async def _handle_aggregated_text(
+        self, src_frame: AggregatedTextFrame, context_id: str | None = None
+    ):
+        """Speak aggregated text in ``context_id`` or a new context, or push it on if skipped."""
+        context_id = context_id or self.create_context_id()
         text = self._trim_text(src_frame.text)
         if src_frame.text_type in self._skip_text_types:
             await self._push_skipped_text(src_frame, context_id)

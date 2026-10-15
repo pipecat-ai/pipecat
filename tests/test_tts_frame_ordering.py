@@ -2966,3 +2966,22 @@ async def test_llm_response_end_follows_the_last_word(reuse_context_id_within_tu
     assert [type(f) for f in frames] == [TTSTextFrame, TTSTextFrame, LLMFullResponseEndFrame]
     assert frames[-1] is end_frame
     assert end_frame.pts == frames[-2].pts
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reuse_context_id_within_turn", [True, False])
+async def test_speak_frame_settings_reach_its_spoken_context(reuse_context_id_within_turn):
+    """A TTSSpeakFrame's append_to_context, and its aggregation push, apply to its speech."""
+    down, _ = await run_test(
+        _MockWordTimestampHttpTTSService(reuse_context_id_within_turn=reuse_context_id_within_turn),
+        frames_to_send=[
+            TTSSpeakFrame(text="secret note", append_to_context=False),
+            TTSSpeakFrame(text="hello there"),
+        ],
+    )
+    started = [f for f in down if isinstance(f, TTSStartedFrame)]
+    assert [f.append_to_context for f in started] == [False, True]
+    words = {f.text: f.append_to_context for f in down if isinstance(f, TTSTextFrame)}
+    assert words == {"secret": False, "note": False, "hello": True, "there": True}
+    # Only the speak frame that goes into the context commits it once spoken.
+    assert len([f for f in down if isinstance(f, LLMAssistantPushAggregationFrame)]) == 1
