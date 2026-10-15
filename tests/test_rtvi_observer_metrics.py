@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock
 
 from pipecat.frames.frames import MetricsFrame
 from pipecat.metrics.metrics import (
+    AICAudioQualityMetricsData,
     LLMTokenUsage,
     LLMUsageMetricsData,
     ProcessingMetricsData,
@@ -87,6 +88,17 @@ class TestRTVIObserverMetrics(unittest.IsolatedAsyncioTestCase):
                         value=STTUsage(audio_seconds=1.5),
                     ),
                     TTSUsageMetricsData(processor="cartesia_tts", value=42),
+                    AICAudioQualityMetricsData(
+                        processor="tyto",
+                        model="tyto-1.1-l-16khz",
+                        risk_score=0.7,
+                        speaker_reverb=0.1,
+                        speaker_loudness=0.5,
+                        interfering_speech=0.2,
+                        codec_degradation=0.3,
+                        noise=0.4,
+                        packet_loss=0.05,
+                    ),
                 ]
             )
         )
@@ -106,6 +118,8 @@ class TestRTVIObserverMetrics(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(data["stt_usage"][0]["value"]["audio_seconds"], 1.5)
         self.assertEqual(data["stt_usage"][0]["processor"], "soniox_stt")
         self.assertEqual(data["characters"][0]["value"], 42)
+        self.assertEqual(data["audio_quality"][0]["risk_score"], 0.7)
+        self.assertEqual(data["audio_quality"][0]["model"], "tyto-1.1-l-16khz")
 
 
 if __name__ == "__main__":
