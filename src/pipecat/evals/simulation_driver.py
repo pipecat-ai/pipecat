@@ -100,6 +100,8 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
         self._end_call: dict | None = None
         self._succeeded = False
         self._reason = ""
+        self._goal_confidence: float | None = None
+        self._goal_probabilities: dict[str, float] = {}
         self._metrics: list[EvalSimulationMetricScore] = []
         # The conversation as the events tell it, built as they arrive, and how
         # far into the stream's events the build has read.
@@ -200,6 +202,8 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
             simulation_name=self._simulation.name,
             succeeded=self._succeeded and error is None,
             reason=error or self._reason,
+            confidence=self._goal_confidence,
+            probabilities=self._goal_probabilities,
             error=error,
             metrics=self._metrics,
             messages=self.conversation(),
@@ -345,6 +349,8 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
         )
         self._succeeded = judgement.goal.verdict == "yes"
         self._reason = judgement.goal.reason
+        self._goal_confidence = judgement.goal.confidence
+        self._goal_probabilities = judgement.goal.probabilities
         if judgement.goal.verdict == "none":
             self._trace.log(f"judge: no verdict on the goal: {self._reason}")
             return [

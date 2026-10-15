@@ -837,7 +837,9 @@ class TestSimulationRecords(unittest.TestCase):
                     min_score=1.0,
                     verdicts=[
                         EvalSimulationTurnVerdict(1, True, "warm"),
-                        EvalSimulationTurnVerdict(2, False, "curt"),
+                        EvalSimulationTurnVerdict(
+                            2, False, "curt", "no", 0.9, {"meets": 0.1, "fails": 0.9}
+                        ),
                     ],
                 )
             ],
@@ -850,6 +852,8 @@ class TestSimulationRecords(unittest.TestCase):
             ended_by="end_call",
             end_call={"success": True, "reason": "done"},
             duration_ms=1234,
+            confidence=0.8,
+            probabilities={"yes": 0.8, "no": 0.2},
         )
         rebuilt = _simulation_result_from_dict(json.loads(json.dumps(dataclasses.asdict(result))))
         self.assertEqual(rebuilt, result)

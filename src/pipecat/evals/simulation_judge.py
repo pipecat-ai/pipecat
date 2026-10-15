@@ -152,6 +152,8 @@ class EvalSimulationJudge:
                 passed=verdict.verdict == "yes",
                 reason=verdict.reason,
                 verdict=verdict.verdict,
+                confidence=verdict.confidence,
+                probabilities=verdict.probabilities,
             )
             for index, verdict in enumerate(judged, 1)
         ]

@@ -199,15 +199,22 @@ class EvalSimulationTurnVerdict:
             something; it indexes the ``assistant`` messages of the run's
             conversation.
         passed: Whether the turn satisfied the criterion.
-        reason: The judge's one-sentence justification.
+        reason: The explainer's one-sentence reason for the verdict, or the
+            classifier's probabilities when nothing explained it.
         verdict: The judge's answer: ``yes``, ``no``, or ``none`` when it gave
             no verdict on the turn, which counts as a no.
+        confidence: How sure the judge is of the verdict, from 0 to 1; ``None``
+            when it gave none.
+        probabilities: The probability of each outcome the classifier was
+            offered; empty when it gave no verdict.
     """
 
     turn: int
     passed: bool
     reason: str
     verdict: str = "no"
+    confidence: float | None = None
+    probabilities: dict[str, float] = field(default_factory=dict)
 
 
 @dataclass
@@ -271,6 +278,10 @@ class EvalSimulationResult:
         duration_ms: Wall-clock time the run took, in milliseconds.
         events_seen: Every friendly event observed, for diagnostics.
         debug_log: Timestamped trace of the harness's own decisions.
+        confidence: How sure the judge is of its goal verdict, from 0 to 1;
+            ``None`` when it gave none.
+        probabilities: The probability of each answer to the goal question;
+            empty when the judge gave none.
     """
 
     simulation_name: str
@@ -286,6 +297,8 @@ class EvalSimulationResult:
     duration_ms: int = 0
     events_seen: list[dict] = field(default_factory=list)
     debug_log: list[str] = field(default_factory=list)
+    confidence: float | None = None
+    probabilities: dict[str, float] = field(default_factory=dict)
 
     @property
     def passed(self) -> bool:

@@ -64,10 +64,22 @@ class _FakeJudge:
 
     async def evaluate_run(self, criteria, success):
         return RunVerdicts(
-            goal=JudgeVerdict(verdict="yes", reason="booked", raw_response=""),
+            goal=JudgeVerdict(
+                verdict="yes",
+                reason="booked",
+                raw_response="",
+                confidence=0.8,
+                probabilities={"yes": 0.8, "no": 0.2},
+            ),
             turns={
                 name: [
-                    JudgeVerdict(verdict="yes", reason="polite", raw_response="")
+                    JudgeVerdict(
+                        verdict="yes",
+                        reason="polite",
+                        raw_response="",
+                        confidence=0.9,
+                        probabilities={"meets": 0.9, "fails": 0.1},
+                    )
                     for _ in range(self.bot_turns)
                 ]
                 for name in criteria
@@ -114,6 +126,8 @@ class TestEvalJudge(unittest.TestCase):
         self.assertEqual(record["scenario"], "book/available")
         self.assertTrue(record["passed"])
         self.assertEqual(record["reason"], "booked")
+        self.assertEqual(record["confidence"], 0.8)
+        self.assertEqual(record["probabilities"], {"yes": 0.8, "no": 0.2})
         # The measured metric is left out: a conversation has nothing to measure.
         [politeness] = record["metrics"]
         self.assertEqual(politeness["name"], "politeness")
@@ -124,6 +138,8 @@ class TestEvalJudge(unittest.TestCase):
                     "turn": 1,
                     "passed": True,
                     "verdict": "yes",
+                    "confidence": 0.9,
+                    "probabilities": {"meets": 0.9, "fails": 0.1},
                     "reason": "polite",
                     "text": "Booked for six.",
                 }
