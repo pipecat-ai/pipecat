@@ -295,8 +295,8 @@ service owns one `AggregatedFrameSequencer`; the sequencer builds a
 
 | `TTSService` | Sequencer method | When |
 | --- | --- | --- |
-| `_push_tts_frames` | `register_spoken` | A frame is dispatched to the TTS |
-| `_push_tts_frames` | `register_skipped` | A frame bypasses TTS (e.g. a code block) |
+| `_handle_aggregated_text` | `register_spoken` | A frame is dispatched to the TTS |
+| `_handle_aggregated_text` | `register_skipped` | A frame bypasses TTS (e.g. a code block) |
 | `_add_word_timestamps` | `process_word` | A word-timestamp event arrives |
 | `_apply_force_complete` | `force_complete` | An audio context ends |
 | end of text input | `finalize` | No more tokens for this context |

@@ -1515,8 +1515,8 @@ seq.<span class="fn">process_word</span>(<span class="s">"alpha"</span>, pts=100
     <div class="scroll">
       <table class="tbl">
         <tr><th>TTSService</th><th>Sequencer method</th><th>When</th></tr>
-        <tr><td class="m">_push_tts_frames</td><td class="m ch-tts">register_spoken</td><td>A frame is dispatched to the TTS</td></tr>
-        <tr><td class="m">_push_tts_frames</td><td class="m ch-tts">register_skipped</td><td>A frame bypasses TTS (e.g. a code block)</td></tr>
+        <tr><td class="m">_handle_aggregated_text</td><td class="m ch-tts">register_spoken</td><td>A frame is dispatched to the TTS</td></tr>
+        <tr><td class="m">_handle_aggregated_text</td><td class="m ch-tts">register_skipped</td><td>A frame bypasses TTS (e.g. a code block)</td></tr>
         <tr><td class="m">_add_word_timestamps</td><td class="m ch-tts">process_word</td><td>A word-timestamp event arrives</td></tr>
         <tr><td class="m">_apply_force_complete</td><td class="m ch-tts">force_complete</td><td>An audio context ends</td></tr>
         <tr><td class="m">end of text input</td><td class="m ch-tts">finalize</td><td>No more tokens for this context</td></tr>

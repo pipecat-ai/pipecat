@@ -26,16 +26,16 @@ async def test_contexts_and_frames_play_in_queue_order():
     await manager.create("a")
     await manager.put_frame(frame)
     await manager.create("b")
-    await manager.end()
+    await manager.end_playback()
 
-    first = await manager.next()
+    first = await manager.next_for_playback()
     assert isinstance(first, AudioContextFrame) and first.context_id == "a"
     assert manager.playing_context_id == "a"
-    assert await manager.next() is frame
-    second = await manager.next()
+    assert await manager.next_for_playback() is frame
+    second = await manager.next_for_playback()
     assert isinstance(second, AudioContextFrame) and second.context_id == "b"
     assert manager.playing_context_id == "b"
-    assert await manager.next() is None
+    assert await manager.next_for_playback() is None
 
 
 @pytest.mark.asyncio
@@ -117,12 +117,12 @@ async def test_reset_keeps_only_uninterruptible_contexts_and_frames():
     await manager.put_frame(kept_frame)
     await manager.create("b", interruptible=False)
     manager.reset()
-    await manager.end()
+    await manager.end_playback()
 
-    assert await manager.next() is kept_frame
-    context = await manager.next()
+    assert await manager.next_for_playback() is kept_frame
+    context = await manager.next_for_playback()
     assert isinstance(context, AudioContextFrame) and context.context_id == "b"
-    assert await manager.next() is None
+    assert await manager.next_for_playback() is None
 
 
 @pytest.mark.asyncio
@@ -134,11 +134,11 @@ async def test_removed_context_is_skipped():
     manager.reset()
     manager.remove("a")
     await manager.create("c")
-    await manager.end()
+    await manager.end_playback()
 
-    context = await manager.next()
+    context = await manager.next_for_playback()
     assert isinstance(context, AudioContextFrame) and context.context_id == "c"
-    assert await manager.next() is None
+    assert await manager.next_for_playback() is None
 
 
 @pytest.mark.asyncio

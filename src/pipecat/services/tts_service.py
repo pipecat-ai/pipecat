@@ -340,7 +340,7 @@ class TTSService(AIService):
         self._transport_destination: str | None = transport_destination
 
         # Ordered sequence of every AggregatedTextFrame slot that passes through
-        # _push_tts_frames (both spoken and skipped). Skipped frames are held here
+        # _handle_aggregated_text (both spoken and skipped). Skipped frames are held here
         # until all preceding spoken slots are complete, then flushed downstream so
         # their append_to_context=True arrives at the assistant aggregator in the
         # correct order relative to the TTSTextFrames from spoken sentences.
@@ -522,7 +522,7 @@ class TTSService(AIService):
         await super().stop(frame)
         if self._audio_context_task:
             # Playback ends once all pending contexts and frames have played.
-            await self._audio_context_manager.end()
+            await self._audio_context_manager.end_playback()
             await self._audio_context_task
             self._audio_context_task = None
 
@@ -1051,7 +1051,7 @@ class TTSService(AIService):
         ):
             await self.push_frame(frame, direction)
         elif isinstance(frame, AggregatedTextFrame):
-            await self._push_tts_frames(frame)
+            await self._handle_aggregated_text(frame)
         elif (
             isinstance(frame, TextFrame)
             and not isinstance(frame, InterimTranscriptionFrame)
@@ -1059,7 +1059,7 @@ class TTSService(AIService):
             and not isinstance(frame, EagerTranscriptionFrame)
         ):
             await self.start_text_aggregation_metrics()
-            await self._process_text_frame(frame)
+            await self._handle_text(frame)
         elif isinstance(frame, InterruptionFrame):
             await self._handle_interruption(frame, direction)
             await self.push_frame(frame, direction)
@@ -1168,7 +1168,7 @@ class TTSService(AIService):
         # Stop the aggregation metric (no-op if already stopped on first sentence).
         await self.stop_text_aggregation_metrics()
         if remaining:
-            await self._push_tts_frames(self._aggregated_text_frame(remaining))
+            await self._handle_aggregated_text(self._aggregated_text_frame(remaining))
 
         # Force-promote any sentence still pending in the sequencer (streaming
         # mode only; a no-op otherwise) — handles a response that ends with no
@@ -1218,7 +1218,7 @@ class TTSService(AIService):
         await self.on_turn_context_created(speak_context_id)
         text_frame = AggregatedTextFrame(frame.text, frame.text_type, raw_text=frame.text)
         text_frame.interruptible = frame.interruptible
-        await self._push_tts_frames(text_frame)
+        await self._handle_aggregated_text(text_frame)
         # Force-promote the utterance's pending sentence into a real slot (streaming
         # mode only; a no-op otherwise). A TTSSpeakFrame is a self-contained sentence
         # with no following token to confirm its boundary, so without this it would
@@ -1380,13 +1380,13 @@ class TTSService(AIService):
         """Whether the service is streaming tokens directly without sentence aggregation."""
         return self._text_aggregation_mode == TextAggregationMode.TOKEN
 
-    async def _process_text_frame(self, frame: TextFrame):
+    async def _handle_text(self, frame: TextFrame):
         """Aggregate LLM text and speak each aggregation."""
         async for aggregate in self._text_aggregator.aggregate(frame.text):
             if aggregate.type != TextType.TOKEN:
                 # Stop the aggregation metric on the first sentence only.
                 await self.stop_text_aggregation_metrics()
-            await self._push_tts_frames(self._aggregated_text_frame(aggregate))
+            await self._handle_aggregated_text(self._aggregated_text_frame(aggregate))
 
     def _aggregated_text_frame(self, aggregation: Aggregation) -> AggregatedTextFrame:
         """Build the frame for an aggregation, keeping a pattern's delimiters in its raw text."""
@@ -1395,7 +1395,7 @@ class TTSService(AIService):
         )
         return AggregatedTextFrame(aggregation.text, aggregation.type, raw_text=raw_text)
 
-    async def _push_tts_frames(self, src_frame: AggregatedTextFrame):
+    async def _handle_aggregated_text(self, src_frame: AggregatedTextFrame):
         """Speak aggregated text, or push it on in order if its type is skipped."""
         context_id = self.create_context_id()
         text = self._trim_text(src_frame.text)
@@ -1828,7 +1828,7 @@ class TTSService(AIService):
         """
         running = True
         while running:
-            context_value = await self._audio_context_manager.next()
+            context_value = await self._audio_context_manager.next_for_playback()
             if isinstance(context_value, AudioContextFrame):
                 await self._handle_audio_context(context_value.context_id)
             elif isinstance(context_value, Frame):

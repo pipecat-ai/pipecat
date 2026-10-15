@@ -39,11 +39,11 @@ class AudioContextManager:
 
     Each audio context has its own queue of items (audio, other frames, word
     timestamps), so a context's audio can arrive while an earlier one is still
-    playing. :meth:`next` returns the next context or frame to play, and
-    :meth:`get` returns a context's items until the context ends.
+    playing. :meth:`next_for_playback` returns the next context or frame to
+    play, and :meth:`get` returns a context's items until the context ends.
 
-    ``playing_context_id`` is the context :meth:`next` returned last. The
-    caller sets it back to ``None`` when that context stops playing.
+    ``playing_context_id`` is the context :meth:`next_for_playback` returned
+    last. The caller sets it back to ``None`` when that context stops playing.
     """
 
     _KEEPALIVE = object()
@@ -120,11 +120,11 @@ class AudioContextManager:
         """
         await self._queue.put(frame)
 
-    async def end(self):
+    async def end_playback(self):
         """End playback once everything already queued has played."""
         await self._queue.put(None)
 
-    async def next(self) -> Frame | None:
+    async def next_for_playback(self) -> Frame | None:
         """Wait for the next audio context or frame to play.
 
         Contexts removed before they play are skipped.
