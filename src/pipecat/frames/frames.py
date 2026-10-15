@@ -732,6 +732,24 @@ class LLMContextAssistantTurnFrame(DataFrame):
 
 
 @dataclass
+class LLMContextUserTurnFrame(DataFrame):
+    """The aggregated text of a user turn, as written to the LLM context.
+
+    Pushed downstream by the LLM user aggregator each time it writes what the
+    user said to the context, so it holds what the bot heard: a transcription
+    the aggregator leaves out, such as one while the user is muted, is not in
+    it.
+
+    Parameters:
+        text: The user's aggregated transcript for this turn.
+        timestamp: ISO-8601 timestamp of when the user turn started.
+    """
+
+    text: str
+    timestamp: str
+
+
+@dataclass
 class LLMContextFrame(Frame):
     """Frame containing a universal LLM context.
 
