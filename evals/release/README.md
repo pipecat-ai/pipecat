@@ -383,6 +383,27 @@ docstring. Run one by hand with `pipecat eval run
 scenarios/simulated/<name>.yaml --bot-url ws://localhost:7860/ws -v`, which prints
 the conversation as it happens.
 
+### Judging a conversation again
+
+Every simulation run saves its conversation to
+`logs/<bot>__<scenario>.conversation.json`. `pipecat eval judge` judges saved
+conversations against a simulation's `success` and its judged metrics, without
+running the bot again, so you can change the wording of either and see what
+the judge makes of the same conversations:
+
+```sh
+uv run python -m pipecat.evals judge evals/release/scenarios/simulated/book_table.yaml \
+    -s available evals/release/test-runs/<name>/logs/*__book_table__available.conversation.json
+```
+
+Each conversation gets one line in `judged.jsonl` (`-o` to change it):
+whether the goal was met and every metric's score, with a reason for every
+verdict, passes included, and the text of the turn each one is about.
+Measured metrics are left out, since a conversation has nothing to measure. A
+conversation saved from a real call in the same format is judged the same
+way. Run it from the repository root, as above, where a judge `factory:` such
+as `evals.judges` resolves.
+
 ## Adding coverage
 
 - New bot: add an entry to `manifest.yaml` with `bot:` and the `scenarios:` it
