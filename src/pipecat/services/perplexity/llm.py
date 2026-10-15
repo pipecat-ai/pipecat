@@ -11,10 +11,18 @@ search over the OpenAI Responses protocol, and for its Sonar chat completions
 API.
 """
 
+from collections.abc import AsyncGenerator, AsyncIterator
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
-from openai.types.responses import ResponseUsage
+from openai import AsyncStream
+from openai.types.responses import (
+    ResponseFunctionToolCall,
+    ResponseOutputItemAddedEvent,
+    ResponseOutputItemDoneEvent,
+    ResponseStreamEvent,
+    ResponseUsage,
+)
 
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
 from pipecat.adapters.services.open_ai_responses_adapter import (
@@ -58,6 +66,49 @@ _MODEL_OR_PRESET_REQUIRED = "PerplexityAgentHttpLLMService needs a `model`, a `p
 
 def _has_model_or_preset(settings: PerplexityAgentLLMSettings) -> bool:
     return bool(assert_given(settings.model) or assert_given(settings.preset))
+
+
+class _WithoutServerToolCalls:
+    """A Responses event stream without the function calls the server runs itself.
+
+    With a preset, Perplexity runs its web search on the server: it announces the
+    search as a function call and completes that output as another kind of item,
+    such as ``search_results``. Each function call's announcement is held until
+    its output completes, and dropped unless it completes as a function call, so
+    the search never reaches the service as a call to run. The service takes a
+    call's arguments from its completed item, so argument events pass through.
+    """
+
+    def __init__(self, stream: AsyncStream[ResponseStreamEvent]):
+        self._stream = stream
+
+    def __aiter__(self) -> AsyncIterator[ResponseStreamEvent]:
+        return self._events()
+
+    async def _events(self) -> AsyncIterator[ResponseStreamEvent]:
+        announced: dict[int, ResponseOutputItemAddedEvent] = {}  # output_index -> event
+        events = self._stream.__aiter__()
+        try:
+            async for event in events:
+                if isinstance(event, ResponseOutputItemAddedEvent) and isinstance(
+                    event.item, ResponseFunctionToolCall
+                ):
+                    announced[event.output_index] = event
+                    continue
+                if isinstance(event, ResponseOutputItemDoneEvent):
+                    added = announced.pop(event.output_index, None)
+                    if added and isinstance(event.item, ResponseFunctionToolCall):
+                        yield added
+                yield event
+        finally:
+            # Closing the stream's iterator first releases the HTTP response
+            # through its nested generators, as the service's own cleanup does.
+            if isinstance(events, AsyncGenerator):
+                await events.aclose()
+
+    async def close(self):
+        """Close the underlying stream."""
+        await self._stream.close()
 
 
 class PerplexityAgentHttpLLMService(OpenAIResponsesHttpLLMService):
@@ -165,6 +216,19 @@ class PerplexityAgentHttpLLMService(OpenAIResponsesHttpLLMService):
             params["extra_body"] = {**params.get("extra_body", {}), **perplexity_fields}
 
         return params
+
+    async def _create_stream(self, params: dict) -> AsyncStream[ResponseStreamEvent]:
+        """Open a streaming Agent API request without the server's own tool calls.
+
+        Args:
+            params: Parameters for the Agent API call.
+
+        Returns:
+            Async stream of response events.
+        """
+        stream = await super()._create_stream(params)
+        # The service only iterates the stream and closes it.
+        return cast(AsyncStream[ResponseStreamEvent], _WithoutServerToolCalls(stream))
 
     def _token_usage(self, usage: ResponseUsage) -> LLMTokenUsage:
         """Convert a completed response's usage into Pipecat's token usage.

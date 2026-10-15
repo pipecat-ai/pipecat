@@ -6,16 +6,23 @@
 
 """Tests for the requests and usage of PerplexityAgentHttpLLMService."""
 
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from openai.types.responses import ResponseUsage
+from openai.types.responses import (
+    ResponseFunctionCallArgumentsDeltaEvent,
+    ResponseFunctionToolCall,
+    ResponseOutputItemAddedEvent,
+    ResponseOutputItemDoneEvent,
+    ResponseTextDeltaEvent,
+    ResponseUsage,
+)
 from openai.types.responses.response_usage import InputTokensDetails, OutputTokensDetails
 
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.services.perplexity.llm import PerplexityAgentHttpLLMService
+from pipecat.services.perplexity.llm import PerplexityAgentHttpLLMService, _WithoutServerToolCalls
 
 
 async def _request(
@@ -172,3 +179,138 @@ async def test_a_preset_update_leaves_the_model_alone():
     await service._update_settings(PerplexityAgentHttpLLMService.Settings(preset="high"))
 
     assert service._settings.model == "openai/gpt-5.6-luna"
+
+
+class _FakeStream:
+    """Stand-in for openai.AsyncStream that yields preset events."""
+
+    def __init__(self, events):
+        self._events = list(events)
+        self.closed = False
+        self.iterator_closed = False
+
+    async def _iterator(self):
+        try:
+            for event in self._events:
+                yield event
+        finally:
+            self.iterator_closed = True
+
+    def __aiter__(self):
+        return self._iterator()
+
+    async def close(self):
+        self.closed = True
+
+
+def _call_added(output_index, item_id, name):
+    item = MagicMock(spec=ResponseFunctionToolCall)
+    item.id = item_id
+    item.name = name
+    item.call_id = f"call_{item_id}"
+    event = MagicMock(spec=ResponseOutputItemAddedEvent)
+    event.output_index = output_index
+    event.item = item
+    return event
+
+
+def _arguments_delta(output_index, item_id, delta):
+    event = MagicMock(spec=ResponseFunctionCallArgumentsDeltaEvent)
+    event.output_index = output_index
+    event.item_id = item_id
+    event.delta = delta
+    return event
+
+
+def _call_done(output_index, item_id, name, arguments):
+    item = MagicMock(spec=ResponseFunctionToolCall)
+    item.id = item_id
+    item.name = name
+    item.call_id = f"call_{item_id}"
+    item.arguments = arguments
+    event = MagicMock(spec=ResponseOutputItemDoneEvent)
+    event.output_index = output_index
+    event.item = item
+    return event
+
+
+def _search_results_done(output_index):
+    event = MagicMock(spec=ResponseOutputItemDoneEvent)
+    event.output_index = output_index
+    event.item = MagicMock()  # a search_results item, with no id
+    return event
+
+
+def _text_delta(delta):
+    event = MagicMock(spec=ResponseTextDeltaEvent)
+    event.delta = delta
+    return event
+
+
+async def _filtered(*events):
+    return [event async for event in _WithoutServerToolCalls(_FakeStream(events))]
+
+
+@pytest.mark.asyncio
+async def test_a_search_the_server_runs_is_dropped():
+    search_added = _call_added(0, "fc_1", "search_web")
+    search_done = _search_results_done(0)
+    text = _text_delta("Sunny.")
+
+    assert await _filtered(search_added, search_done, text) == [search_done, text]
+
+
+@pytest.mark.asyncio
+async def test_a_function_call_passes_through_in_order():
+    added = _call_added(1, "fc_2", "get_weather")
+    delta = _arguments_delta(1, "fc_2", '{"city": "Paris"}')
+    text = _text_delta("Checking.")
+    done = _call_done(1, "fc_2", "get_weather", '{"city": "Paris"}')
+
+    # The announcement waits for the call's output to complete; other events don't.
+    assert await _filtered(added, delta, text, done) == [delta, text, added, done]
+
+
+@pytest.mark.asyncio
+async def test_closing_the_filter_closes_the_stream():
+    stream = _FakeStream([_text_delta("a"), _text_delta("b")])
+    filtered = _WithoutServerToolCalls(stream)
+    events = filtered.__aiter__()
+
+    await events.__anext__()
+    await events.aclose()
+    await filtered.close()
+
+    assert stream.iterator_closed
+    assert stream.closed
+
+
+@pytest.mark.asyncio
+async def test_only_application_function_calls_run():
+    service = PerplexityAgentHttpLLMService(api_key="test-key")
+    service.start_ttfb_metrics = AsyncMock()
+    service.stop_ttfb_metrics = AsyncMock()
+    service.start_llm_usage_metrics = AsyncMock()
+    service._push_llm_text = AsyncMock()
+    service.run_function_calls = AsyncMock()
+    adapter = MagicMock()
+    adapter.get_messages_for_logging.return_value = []
+    adapter.get_llm_invocation_params = AsyncMock(return_value={})
+    service.get_llm_adapter = MagicMock(return_value=adapter)
+    service._build_response_params = MagicMock(return_value={})
+    service._client = AsyncMock()
+    service._client.responses.create = AsyncMock(
+        return_value=_FakeStream(
+            [
+                _call_added(0, "fc_1", "search_web"),
+                _search_results_done(0),
+                _call_added(1, "fc_2", "get_weather"),
+                _call_done(1, "fc_2", "get_weather", '{"city": "Paris"}'),
+            ]
+        )
+    )
+
+    await service._process_context(MagicMock(spec=LLMContext))
+
+    function_calls = service.run_function_calls.call_args.args[0]
+    assert [fc.function_name for fc in function_calls] == ["get_weather"]
