@@ -117,10 +117,72 @@ class TestJevClient:
         await client.close()
 
     @pytest.mark.asyncio
+    async def test_sends_assets_with_the_images_header(self):
+        seen = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen["header"] = request.headers.get("TypeSafe-Danger-Zone-Images")
+            seen["body"] = json.loads(request.content)
+            return _reply({"type": "noul", "noul": 0.9})
+
+        client = _client(handler)
+        asset = {"type": "image", "format": "jpg", "data_base64": "anBlZw=="}
+        await client.ask(
+            {"images": ["ref-1"], "state": "a frame"},
+            {"answer": {"type": "noul", "instructions": "a person?"}},
+            {"ref-1": asset},
+        )
+
+        assert seen["header"] == "true"
+        assert seen["body"]["assets"] == {"ref-1": asset}
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_no_images_header_without_assets(self):
+        seen = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen["header"] = request.headers.get("TypeSafe-Danger-Zone-Images")
+            seen["body"] = json.loads(request.content)
+            return _reply({"type": "noul", "noul": 0.9})
+
+        client = _client(handler)
+        await client.ask("a", {"answer": {"type": "noul", "instructions": "?"}}, {})
+
+        assert seen["header"] is None
+        assert "assets" not in seen["body"]
+        await client.close()
+
+    @pytest.mark.asyncio
     async def test_rejected_request_is_an_error(self):
         client = _client(lambda request: httpx.Response(401))
 
         with pytest.raises(ClassifierError, match="401"):
+            await client.ask("a", {"answer": {"type": "noul", "instructions": "?"}})
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_rejected_request_error_carries_jev_reason(self):
+        reply = {"detail": {"error_type": "api_usage_error", "message": "Invalid image request."}}
+        client = _client(lambda request: httpx.Response(400, json=reply))
+
+        with pytest.raises(ClassifierError, match=r"HTTP 400: Invalid image request\.$"):
+            await client.ask("a", {"answer": {"type": "noul", "instructions": "?"}})
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_rejected_request_error_carries_a_plain_reason(self):
+        client = _client(lambda request: httpx.Response(413, json={"detail": "Too large."}))
+
+        with pytest.raises(ClassifierError, match=r"HTTP 413: Too large\.$"):
+            await client.ask("a", {"answer": {"type": "noul", "instructions": "?"}})
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_rejected_request_without_a_reason_reports_the_status(self):
+        client = _client(lambda request: httpx.Response(422, json={"detail": [{"loc": ["x"]}]}))
+
+        with pytest.raises(ClassifierError, match=r"HTTP 422$"):
             await client.ask("a", {"answer": {"type": "noul", "instructions": "?"}})
         await client.close()
 

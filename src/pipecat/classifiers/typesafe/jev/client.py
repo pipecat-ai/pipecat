@@ -38,6 +38,8 @@ _OVERLOADED = 529
 #: new TLS handshake on the next one. Jev closes idle connections after about
 #: five minutes, so this stays under that.
 _KEEPALIVE_EXPIRY = 240.0
+#: Jev reads images only in requests that send this header.
+_IMAGES_HEADER = "TypeSafe-Danger-Zone-Images"
 
 #: Where the API is served.
 DEFAULT_BASE_URL = "https://api.typesafe.ai"
@@ -146,7 +148,10 @@ class JevClient:
         await self._http.aclose()
 
     async def ask(
-        self, state: str | dict[str, Any] | list[Any], questions: Mapping[str, dict[str, Any]]
+        self,
+        state: str | dict[str, Any] | list[Any],
+        questions: Mapping[str, dict[str, Any]],
+        assets: Mapping[str, dict[str, Any]] | None = None,
     ) -> tuple[dict[str, dict[str, Any]], JevUsage]:
         """Send questions about one state and return Jev's answers.
 
@@ -155,6 +160,10 @@ class JevClient:
             questions: The questions by name, each in Jev's own format: a
                 ``type`` of ``noul``, ``choice`` or ``score``,
                 ``instructions``, and ``criteria``.
+            assets: Images by reference, each in Jev's own format: a
+                ``format`` and the ``data_base64`` bytes. Each reference
+                must appear in the state or the questions, where Jev reads
+                the image in its place.
 
         Returns:
             The answers by the same names, in Jev's own format, and the
@@ -166,11 +175,15 @@ class JevClient:
                 unanswered.
         """
         body = {"model": self._model, "state": state, "questions": dict(questions)}
+        headers: dict[str, str] = {}
+        if assets:
+            body["assets"] = dict(assets)
+            headers[_IMAGES_HEADER] = "true"
         attempt = 0
         while True:
             attempt += 1
             try:
-                response = await self._http.post("/v1/systemone", json=body)
+                response = await self._http.post("/v1/systemone", json=body, headers=headers)
             except httpx.HTTPError as e:
                 # Some httpx errors, such as a timeout, carry no message.
                 raise ClassifierError(f"Jev request failed: {e!r}") from e
@@ -186,7 +199,10 @@ class JevClient:
                 await asyncio.sleep(wait)
                 continue
             if response.status_code != 200:
-                raise ClassifierError(f"Jev rejected the request: HTTP {response.status_code}")
+                message = f"Jev rejected the request: HTTP {response.status_code}"
+                if reason := self._error_message(response):
+                    message += f": {reason}"
+                raise ClassifierError(message)
             try:
                 data = response.json()
             except ValueError as e:
@@ -206,3 +222,13 @@ class JevClient:
             if missing:
                 raise ClassifierError(f"Jev reply has no answer for {', '.join(missing)}")
             return {name: answers[name] for name in questions}, request_usage
+
+    def _error_message(self, response: httpx.Response) -> str | None:
+        """The reason Jev gave for rejecting a request, if it gave one."""
+        try:
+            detail = response.json().get("detail")
+        except (ValueError, AttributeError):
+            return None
+        if isinstance(detail, dict):
+            detail = detail.get("message")
+        return detail if isinstance(detail, str) and detail else None
