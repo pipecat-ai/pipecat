@@ -562,6 +562,7 @@ class DeepgramSTTService(STTService):
         if self._connection:
             try:
                 await self._connection.send_media(audio)
+                self.record_sent_audio(audio)
             except Exception as e:
                 logger.warning(f"{self}: send_media failed, connection will reconnect: {e}")
                 self._connection = None
@@ -670,6 +671,8 @@ class DeepgramSTTService(STTService):
                     async with self._client.listen.v1.connect(**connect_kwargs) as connection:
                         connected_at = time.monotonic()
                         self._connection = connection
+                        # Deepgram times words from the start of each connection.
+                        self.reset_sent_audio()
                         self._connection_settled.set()
                         connection.on(EventType.MESSAGE, self._on_message)
                         connection.on(EventType.ERROR, self._on_error)
@@ -764,6 +767,19 @@ class DeepgramSTTService(STTService):
                     # Report usage before the transcription frame so tracing can
                     # attach it to the STT span the frame closes.
                     await self.emit_stt_usage_metrics()
+                    words = message.channel.alternatives[0].words or []
+                    if words:
+                        await self._call_event_handler(
+                            "on_word_timestamps",
+                            [
+                                (
+                                    word.punctuated_word or word.word,
+                                    self.sent_audio_pts(word.start),
+                                    self.sent_audio_pts(word.end, end=True),
+                                )
+                                for word in words
+                            ],
+                        )
                     await self.push_frame(
                         TranscriptionFrame(
                             transcript,
