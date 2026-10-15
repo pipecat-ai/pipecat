@@ -538,6 +538,18 @@ class CartesiaTTSService(WebsocketTTSService):
                 result.append((cleaned, start))
         return result
 
+    def _normalize_word_ends(self, words: list[str], ends: list[float]) -> list[float]:
+        """The end of each word :meth:`_normalize_word_timestamps` keeps, in order.
+
+        Args:
+            words: List of words/characters from Cartesia.
+            ends: List of end timestamps for each word/character.
+
+        Returns:
+            The end times of the words that survive normalization.
+        """
+        return [end for word, end in zip(words, ends) if self._strip_cartesia_tags(word)]
+
     def _word_timestamps_include_inter_frame_spaces(self) -> bool:
         """Whether timestamp text should be treated as carrying its own spacing."""
         current_language = assert_given(self._settings.language)
@@ -729,14 +741,21 @@ class CartesiaTTSService(WebsocketTTSService):
                 await self.remove_audio_context(ctx_id)
             elif msg["type"] == "timestamps":
                 # Process the timestamps based on language before adding them
+                timestamps = msg["word_timestamps"]
                 processed_timestamps = self._normalize_word_timestamps(
-                    msg["word_timestamps"]["words"], msg["word_timestamps"]["start"]
+                    timestamps["words"], timestamps["start"]
                 )
+                ends = timestamps.get("end")
                 await self.add_word_timestamps(
                     processed_timestamps,
                     ctx_id,
                     includes_inter_frame_spaces=(
                         True if self._word_timestamps_include_inter_frame_spaces() else None
+                    ),
+                    word_ends=(
+                        None
+                        if ends is None
+                        else self._normalize_word_ends(timestamps["words"], ends)
                     ),
                 )
             elif msg["type"] == "chunk":

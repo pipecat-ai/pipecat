@@ -125,6 +125,9 @@ class TTSService(AIService):
         on_disconnected: Called when disconnected from the TTS service.
         on_connection_error: Called when a connection to the TTS service error occurs.
         on_tts_request: Called before a TTS request is made, with the context ID and text.
+        on_word_timestamps: Called with the context ID and the words a provider timed
+            for it, as ``(word, start, end)`` tuples in seconds from the start of the
+            context's audio. ``end`` is ``None`` when the provider reports no end.
 
     Example::
 
@@ -143,6 +146,12 @@ class TTSService(AIService):
         @tts.event_handler("on_tts_request")
         async def on_tts_request(tts: TTSService, context_id: str, text: str):
             logger.debug(f"TTS request: {context_id} - {text}")
+
+        @tts.event_handler("on_word_timestamps")
+        async def on_word_timestamps(
+            tts: TTSService, context_id: str | None, words: list[tuple[str, float, float | None]]
+        ):
+            logger.debug(f"TTS words: {context_id} - {words}")
     """
 
     _settings: TTSSettings
@@ -383,6 +392,8 @@ class TTSService(AIService):
         self._register_event_handler("on_disconnected")
         self._register_event_handler("on_connection_error")
         self._register_event_handler("on_tts_request")
+        # Inline, so handlers see each context's words in the order reported.
+        self._register_event_handler("on_word_timestamps", sync=True)
 
         # Whether the TTS process is currently yielding audio frames synchronously.
         self._is_yielding_frames_synchronously = False
@@ -865,6 +876,7 @@ class TTSService(AIService):
         context_id: str | None = None,
         includes_inter_frame_spaces: bool | None = None,
         pre_merge_tokens: bool = False,
+        word_ends: list[float] | None = None,
     ):
         """Add word timestamps for processing.
 
@@ -886,11 +898,29 @@ class TTSService(AIService):
                 TTS, which emits spaces and punctuation as separate tokens). After merging
                 the resulting tokens are clean word strings, so ``includes_inter_frame_spaces``
                 should be left False (its default).
+            word_ends: The end of each word in ``word_times``, in seconds, for a provider
+                that reports one. Reported through ``on_word_timestamps`` only.
+
+        Raises:
+            ValueError: If ``word_ends`` does not have one end per word, or is combined
+                with ``pre_merge_tokens``, which would leave merged tokens without one.
         """
+        if word_ends is not None and len(word_ends) != len(word_times):
+            raise ValueError(f"{len(word_ends)} word ends for {len(word_times)} words")
+        if word_ends is not None and pre_merge_tokens:
+            raise ValueError("word_ends cannot be combined with pre_merge_tokens")
         if pre_merge_tokens:
             word_times = merge_punct_tokens(word_times)
 
         ifs = bool(includes_inter_frame_spaces)
+        accepted = context_id is None or self.audio_context_available(context_id)
+        if accepted and word_times:
+            ends = word_ends or [None] * len(word_times)
+            await self._call_event_handler(
+                "on_word_timestamps",
+                context_id,
+                [(word, start, end) for (word, start), end in zip(word_times, ends)],
+            )
         if context_id and self.audio_context_available(context_id):
             for word, timestamp in word_times:
                 await self.append_to_audio_context(
