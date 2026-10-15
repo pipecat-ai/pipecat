@@ -242,7 +242,7 @@ async def test_update_settings_reconnects_for_connection_only_field():
     """Fields Flux only reads from the connection URL are applied by reconnecting."""
     service = _make_fake_flux_service()
 
-    await service._update_settings(DeepgramFluxSTTSettings(numerals=True))
+    await service._update_settings(DeepgramFluxSTTSettings(redact="numbers"))
 
     assert service.reconnect_requests == 1
     assert service.sent_messages == []
@@ -256,6 +256,17 @@ async def test_update_settings_configures_without_reconnecting():
     await service._update_settings(DeepgramFluxSTTSettings(eot_threshold=0.9))
 
     assert service.sent_messages == [{"type": "Configure", "thresholds": {"eot_threshold": 0.9}}]
+    assert service.reconnect_requests == 0
+
+
+@pytest.mark.asyncio
+async def test_update_settings_configures_numerals():
+    """Numerals are toggled over the live connection rather than by reconnecting."""
+    service = _make_fake_flux_service()
+
+    await service._update_settings(DeepgramFluxSTTSettings(numerals=True))
+
+    assert service.sent_messages == [{"type": "Configure", "numerals": True}]
     assert service.reconnect_requests == 0
 
 

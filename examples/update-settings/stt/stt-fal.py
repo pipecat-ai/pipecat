@@ -25,6 +25,7 @@ from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.fal.stt import FalSTTService
 from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.livekit.transport import LiveKitParams
@@ -117,9 +118,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         await worker.queue_frames([LLMRunFrame()])
 
         await asyncio.sleep(10)
-        logger.info('Updating Fal STT settings: worker="translate"')
+        logger.info("Updating Fal STT settings: language=es")
         await worker.queue_frame(
-            STTUpdateSettingsFrame(delta=FalSTTService.Settings(worker="translate"))
+            STTUpdateSettingsFrame(delta=FalSTTService.Settings(language=Language.ES))
         )
 
     @transport.event_handler("on_client_disconnected")

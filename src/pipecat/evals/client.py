@@ -27,6 +27,8 @@ from urllib.parse import urlsplit
 
 from loguru import logger
 from pydantic import BaseModel, Field
+from websockets.asyncio.client import ClientConnection
+from websockets.exceptions import InvalidHandshake
 
 import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.audio.vad.silero import SileroVADAnalyzer
@@ -112,6 +114,14 @@ _BOT_FRAMES = (
 )
 
 
+def _close_description(websocket: ClientConnection) -> str:
+    """How the bot closed the connection, with its close code and reason when it sent them."""
+    if websocket.close_code is None:
+        return "the bot closed the connection before bot-ready"
+    reason = f" {websocket.close_reason}" if websocket.close_reason else ""
+    return f"the bot closed the connection before bot-ready ({websocket.close_code}{reason})"
+
+
 @dataclass
 class _BotSegmentTranscriptionFrame(TranscriptionFrame):
     """A transcription of one segment of the bot's speech, with when that audio began.
@@ -179,17 +189,18 @@ def _tag_bot_segments(stt: SegmentedSTTService, starts: "deque[float]") -> None:
 
 
 class _BotSpeechGate(FrameProcessor):
-    """Between the bot-speech STT and the turn aggregator: after an interrupting send, only audio from after it gets through.
+    """Between the bot-speech STT and the turn aggregator: after an interrupting send, only the bot's reply gets through.
 
     The aggregator's VAD reports the bot's speech segments upstream, past this
     gate, to the STT; the gate notes when each began and, as each ends, hands
     the start to the STT's tagging (see :func:`_tag_bot_segments`) and tells
     the stream a segment awaits transcription. An ordinary send waits for the
     bot's speech to be transcribed first, so nothing of it is in flight. A send
-    that talks over the bot cannot wait: a tagged transcript whose segment began
-    before that send is the bot finishing what it was saying, however late it
-    lands, and is dropped here so it cannot pass for the reply or be folded
-    into it.
+    that talks over the bot cannot wait, and the bot goes on speaking until it
+    notices the user: a tagged transcript whose segment began before the bot
+    started speaking again is the bot finishing what it was saying, however
+    late it lands, and is dropped here so it cannot pass for the reply or be
+    folded into it.
 
     Both need a segmented STT, which transcribes one segment at a time. With
     any other STT the gate keeps no account of segments and drops nothing, and
@@ -225,10 +236,11 @@ class _BotSpeechGate(FrameProcessor):
             self._segment_started_at = None
             self._stream.bot_segment_ended()
         elif isinstance(frame, _BotSegmentTranscriptionFrame):
-            interrupted_at = self._stream.interrupting_send_at
-            if interrupted_at is not None and frame.segment_started_at < interrupted_at:
+            talked_over_until = self._stream.talked_over_until
+            if talked_over_until is not None and frame.segment_started_at < talked_over_until:
                 self._trace.log(
-                    f"discard: bot speech from before the interrupting send {frame.text!r}"
+                    f"discard: bot speech from before its reply to the interrupting send "
+                    f"{frame.text!r}"
                 )
                 return
         await self.push_frame(frame, direction)
@@ -414,6 +426,23 @@ class EvalClientParams(BaseModel):
     trigger_disconnect: bool = False
 
 
+class EvalBotUnavailableError(Exception):
+    """The bot refused the connection, or closed it, before sending ``bot-ready``."""
+
+    def __init__(self, kind: str, reason: str):
+        """Initialize the error.
+
+        Args:
+            kind: The failure kind the run records: ``connect_failed`` when the
+                bot refused the connection, ``closed_before_ready`` when it
+                closed the connection before ``bot-ready``.
+            reason: What happened, with the close code and reason when there
+                was one.
+        """
+        super().__init__(reason)
+        self.kind = kind
+
+
 class EvalClient:
     """The eval pipeline that talks to the bot, and the user's sends into it.
 
@@ -490,9 +519,11 @@ class EvalClient:
         # Records the conversation audio (bot + user) when record_path is set and
         # the scenario is audio mode; fed raw audio by the transport, written on stop().
         self._recorder: EvalClientRecorder | None = None
-        # Set by the transport's on_bot_ready handler once the bot completes the
-        # RTVI handshake; handshake() waits on it.
-        self._bot_ready_event = asyncio.Event()
+        # Set once the handshake is over: by the bot's bot-ready, or by the bot
+        # refusing or closing the connection first, which leaves _refusal set.
+        # handshake() waits on it.
+        self._handshake_over = asyncio.Event()
+        self._refusal: EvalBotUnavailableError | None = None
         self._next_id = 0
 
     @property
@@ -549,6 +580,10 @@ class EvalClient:
 
         @self._worker.event_handler("on_pipeline_error")
         async def _on_pipeline_error(_worker, frame):
+            # The transport connects as it starts, so a refused connection (an
+            # HTTP 403 for a spent token, nothing listening) surfaces here.
+            if isinstance(frame.exception, (InvalidHandshake, OSError)):
+                self._refuse("connect_failed", str(frame.exception))
             await self._stream.append({"type": HARNESS_ERROR_EVENT, "text": str(frame.error)})
 
         runner = WorkerRunner()
@@ -562,15 +597,19 @@ class EvalClient:
         instead of sending turns to a half-started bot.
 
         Raises:
+            EvalBotUnavailableError: If the bot refuses the connection or closes
+                it before sending ``bot-ready``.
             TimeoutError: If the bot never sends ``bot-ready``.
         """
         # The transport sends client-ready on connect and fires on_bot_ready when
-        # the bot answers; our handler sets _bot_ready_event.
+        # the bot answers; our handler sets _handshake_over.
         timeout_s = self._session_params.bot_ready_timeout_s
         try:
-            await asyncio.wait_for(self._bot_ready_event.wait(), timeout=timeout_s)
+            await asyncio.wait_for(self._handshake_over.wait(), timeout=timeout_s)
         except TimeoutError:
             raise TimeoutError(f"bot-ready not received within {int(timeout_s * 1000)}ms") from None
+        if self._refusal is not None:
+            raise self._refusal
 
         # Ask the bot's RTVIObserver to expose what this scenario needs, for the
         # duration of this eval only (bots keep their defaults; only the eval
@@ -731,6 +770,12 @@ class EvalClient:
         assert self._persona is not None
         self._persona.hang_up()
 
+    def _refuse(self, kind: str, reason: str) -> None:
+        """End the handshake with a refusal, unless it is already over."""
+        if not self._handshake_over.is_set():
+            self._refusal = EvalBotUnavailableError(kind, reason)
+            self._handshake_over.set()
+
     def _connection_flags(self) -> EvalConnectionFlags:
         """What this connection asks of the bot.
 
@@ -796,14 +841,18 @@ class EvalClient:
 
         @transport.event_handler("on_bot_ready")
         async def _on_bot_ready(_transport):
-            self._bot_ready_event.set()
+            self._handshake_over.set()
 
         @transport.event_handler("on_disconnected")
-        async def _on_disconnected(_transport, _websocket):
+        async def _on_disconnected(_transport, websocket):
             # The bot ended the call by closing the connection; our own teardown
             # closes it too, and that is not the bot's doing.
-            if not self._stopping:
-                await self._stream.append({"type": BOT_ENDED_EVENT})
+            if self._stopping:
+                return
+            # Before bot-ready a close is a refusal, such as Pipecat Cloud's
+            # bot-starter turning away a session over the agent's limit.
+            self._refuse("closed_before_ready", _close_description(websocket))
+            await self._stream.append({"type": BOT_ENDED_EVENT})
 
         return transport
 

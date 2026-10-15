@@ -1,0 +1,1 @@
+- `SarvamLLMService` now accepts `deepseekv4.1-flash` and `glm5.3`, Sarvam's current open-weight models, in place of the retired `deepseekv4-flash` and `glm5.2`.

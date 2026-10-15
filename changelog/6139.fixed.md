@@ -1,0 +1,1 @@
+- `NeuphonicTTSService` and `NeuphonicHttpTTSService` now send `hi` for `Language.HI`, matching the language code Neuphonic documents and returns for its Hindi voices.

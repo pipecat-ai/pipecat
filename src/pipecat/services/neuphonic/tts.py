@@ -58,7 +58,7 @@ def language_to_neuphonic_lang_code(language: Language) -> str:
         Language.FR: "fr",
         Language.PT: "pt",
         Language.RU: "ru",
-        Language.HI: "HI",
+        Language.HI: "hi",
         Language.ZH: "zh",
     }
 
@@ -73,10 +73,14 @@ class NeuphonicTTSSettings(TTSSettings):
         speed: Speech speed multiplier. Defaults to 1.0.
         temperature: Randomness introduced into the synthesis, from 0.0 to 1.0.
             Left to Neuphonic's own default when unset.
+        ipa_key: Regional variant whose sounds ``<phoneme:...>`` tags in the text are
+            read with, either ``es-castilian`` or ``pt-br``. Left to Neuphonic's own
+            default when unset.
     """
 
     speed: float | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     temperature: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    ipa_key: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class NeuphonicTTSService(InterruptibleTTSService):
@@ -160,6 +164,7 @@ class NeuphonicTTSService(InterruptibleTTSService):
             language=Language.EN,
             speed=1.0,
             temperature=None,
+            ipa_key=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -282,6 +287,7 @@ class NeuphonicTTSService(InterruptibleTTSService):
                 "encoding": self._encoding,
                 "sampling_rate": self._sampling_rate,
                 "voice_id": self._settings.voice,
+                "ipa_key": self._settings.ipa_key,
             }
 
             query_params = []
@@ -462,6 +468,7 @@ class NeuphonicHttpTTSService(TTSService):
             language=Language.EN,
             speed=1.0,
             temperature=None,
+            ipa_key=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -587,6 +594,9 @@ class NeuphonicHttpTTSService(TTSService):
 
         if self._settings.temperature is not None:
             payload["temperature"] = self._settings.temperature
+
+        if self._settings.ipa_key is not None:
+            payload["ipa_key"] = self._settings.ipa_key
 
         try:
             async with self._session.post(url, json=payload, headers=headers) as response:

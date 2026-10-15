@@ -36,7 +36,10 @@ These source paths don't follow the standard `services/{provider}/{type}.py` →
 | `services/grok/realtime/**`                 | `api-reference/server/services/s2s/grok.mdx`                                                       |
 | `services/openai/realtime/**`               | `api-reference/server/services/s2s/openai.mdx`                                                     |
 | `services/openai/responses/llm.py`          | `api-reference/server/services/llm/openai-responses.mdx`                                           |
-| `processors/frameworks/rtvi.py`             | `api-reference/server/rtvi/rtvi-processor.mdx` and `api-reference/server/rtvi/rtvi-observer.mdx`   |
+| `processors/frameworks/rtvi/processor.py`   | `api-reference/server/rtvi/rtvi-processor.mdx`                                                     |
+| `processors/frameworks/rtvi/observer.py`    | `api-reference/server/rtvi/rtvi-observer.mdx`                                                      |
+| `processors/frameworks/rtvi/models.py`      | `client/rtvi-standard.mdx` (the wire protocol: messages, fields, `PROTOCOL_VERSION`)               |
+| `processors/frameworks/rtvi/frames.py`      | `api-reference/server/rtvi/rtvi-processor.mdx` and `api-reference/server/frames/system-frames.mdx` |
 | `processors/idle_frame_processor.py`        | `api-reference/server/pipeline/pipeline-idle-detection.mdx`                                        |
 | `pipeline/worker.py`                        | `api-reference/server/pipeline/pipeline-worker.mdx`                                                |
 | `pipeline/runner.py`                        | `api-reference/server/utilities/runner/guide.mdx`                                                  |
@@ -205,6 +208,20 @@ Prose that cites pipecat API lives in:
 - `pipecat/features/` — feature-specific guides (Gemini Live, OpenAI audio, WhatsApp, etc.)
 - `pipecat/telephony/` — telephony integration guides (Twilio, Plivo, Telnyx, etc.)
 - `pipecat/flows/` — Pipecat Flows guides (nodes-and-messages, functions, context-strategies, state-management, actions); check these when `src/pipecat/flows/**` changed
+
+## Checks
+
+`DOCS_PATH/scripts/check-reference.py` compares the server API reference with
+this repository's source: constructor parameters, `Settings` fields and the
+defaults set in `default_settings`, registered events, and deprecations. Run it
+from the root of this repository, so it reads the source being documented:
+
+```bash
+python3 DOCS_PATH/scripts/check-reference.py --pipecat .
+```
+
+Each line names a page, a kind of mismatch, and what the code says. The docs
+repo's CI runs the same check on the pages a docs PR changes.
 
 ## New pages
 

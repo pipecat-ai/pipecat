@@ -58,9 +58,9 @@ def test_sarvam_llm_constructor_rejects_unsupported_model():
 @pytest.mark.parametrize(
     "model",
     [
-        "deepseekv4-flash",
+        "deepseekv4.1-flash",
         "gemma4",
-        "glm5.2",
+        "glm5.3",
         "sarvam-105b",
         "sarvam-105b-conversations",
     ],
@@ -84,9 +84,9 @@ def test_sarvam_llm_default_model_is_sarvam_105b():
     "model, expected_base_url",
     [
         ("sarvam-105b", "https://api.sarvam.ai/v2"),
-        ("deepseekv4-flash", "https://api.sarvam.ai/v2"),
+        ("deepseekv4.1-flash", "https://api.sarvam.ai/v2"),
         ("gemma4", "https://api.sarvam.ai/v2"),
-        ("glm5.2", "https://api.sarvam.ai/v2"),
+        ("glm5.3", "https://api.sarvam.ai/v2"),
         ("sarvam-105b-conversations", "https://api.sarvam.ai/v1"),
     ],
 )
@@ -572,12 +572,12 @@ def test_sarvam_llm_conversations_supports_tool_calling():
     assert built_params["tools"][0]["function"]["name"] == "get_weather"
 
 
-def test_sarvam_llm_glm52_supports_reasoning_effort():
+def test_sarvam_llm_glm53_supports_reasoning_effort():
     with patch.object(SarvamLLMService, "create_client"):
         service = SarvamLLMService(
             api_key="test-key",
             settings=SarvamLLMService.Settings(
-                model="glm5.2",
+                model="glm5.3",
                 reasoning_effort="high",
             ),
         )
@@ -592,12 +592,12 @@ def test_sarvam_llm_glm52_supports_reasoning_effort():
 
 
 @pytest.mark.asyncio
-async def test_sarvam_llm_glm52_rejects_wiki_grounding():
+async def test_sarvam_llm_glm53_rejects_wiki_grounding():
     with patch.object(SarvamLLMService, "create_client"):
         service = SarvamLLMService(
             api_key="test-key",
             settings=SarvamLLMService.Settings(
-                model="glm5.2",
+                model="glm5.3",
                 wiki_grounding=True,
             ),
         )
@@ -619,11 +619,11 @@ async def test_sarvam_llm_glm52_rejects_wiki_grounding():
 
 
 @pytest.mark.asyncio
-async def test_sarvam_llm_glm52_rejects_image_input():
+async def test_sarvam_llm_glm53_rejects_image_input():
     with patch.object(SarvamLLMService, "create_client"):
         service = SarvamLLMService(
             api_key="test-key",
-            settings=SarvamLLMService.Settings(model="glm5.2"),
+            settings=SarvamLLMService.Settings(model="glm5.3"),
         )
         service._client = AsyncMock()
 

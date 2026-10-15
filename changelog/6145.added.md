@@ -1,0 +1,1 @@
+- `TogetherTTSService.Settings` gained `extra_params`, the model-specific options Together accepts in its session update — a `pronunciation_dict` of `"<source>/<replacement>"` entries, for example.

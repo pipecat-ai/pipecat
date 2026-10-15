@@ -993,3 +993,35 @@ class TestDeprecatedTriggerDisconnect(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestCheckFrom(unittest.TestCase):
+    """The ``check_from:`` key on an expectation."""
+
+    def _turns(self, expectation: str):
+        return (
+            "name: g\nscenarios:\n  - name: a\n    turns:\n      - user: hi\n"
+            f"        expect:\n          - {expectation}\n"
+        )
+
+    def test_defaults_to_previous(self):
+        scenario = EvalScenarioFile.load(_write(self._turns("{event: response}"))).scenarios[0]
+        self.assertEqual(scenario.turns[0].expect[0].check_from, "previous")
+
+    def test_turn_start_is_accepted(self):
+        scenario = EvalScenarioFile.load(
+            _write(self._turns("{event: response, check_from: turn_start}"))
+        ).scenarios[0]
+        self.assertEqual(scenario.turns[0].expect[0].check_from, "turn_start")
+
+    def test_other_values_are_rejected(self):
+        with self.assertRaises(ValueError) as cm:
+            EvalScenarioFile.load(_write(self._turns("{event: response, check_from: later}")))
+        self.assertIn("'check_from:' must be one of previous, turn_start", str(cm.exception))
+
+    def test_not_combined_with_absent(self):
+        with self.assertRaises(ValueError) as cm:
+            EvalScenarioFile.load(
+                _write(self._turns("{event: response, absent: true, check_from: turn_start}"))
+            )
+        self.assertIn("cannot be combined with 'check_from'", str(cm.exception))

@@ -178,6 +178,27 @@ Supported expectation fields (per event):
           absent: true
           within_ms: 30000
 
+``check_from: turn_start``
+    Expectations are met in order: each is looked for only once the one
+    above it has been met, and an event of another type that arrives in the
+    meantime is passed over. ``check_from: turn_start`` lets an expectation
+    run against events since the beginning of the turn that were not used by
+    the expectations above it. The default, ``previous``, looks only from
+    where the expectation above it was met. Use it for an event whose timing
+    the bot does not control, such as a call a backend makes at its own pace,
+    or a reply some models give before the tool call that others give after::
+
+        - event: function_call
+          calls:
+            - name: delegate
+        - event: response
+          eval: "tells a joke"
+          check_from: turn_start    # a model may say it before it delegates
+        - event: function_call
+          calls:
+            - name: check_ci_status
+          check_from: turn_start    # the backend makes it in its own time
+
 Instead of ``user:``, a turn may press DTMF keys with ``dtmf:`` (the two are
 mutually exclusive — you press keys or you talk)::
 
@@ -322,6 +343,10 @@ FUNCTION_CALL_EVENTS = ("function_call", "function_call_stopped")
 # accepts ``short`` or ``long``.
 MARKER_KINDS = ("complete", "short", "long", "incomplete")
 
+# Where an expectation checks for its event from: where the expectation above
+# it was met, or the beginning of the turn.
+CHECK_FROM = ("previous", "turn_start")
+
 
 @dataclass
 class EvalFunctionCall:
@@ -382,6 +407,10 @@ class EvalExpectation:
             raw text must hold.
         text_after: For an ``llm_marker`` event, whether text must (True) or
             must not (False) follow the first marker in the raw text.
+        check_from: Where the expectation checks for its event from:
+            ``previous`` (the default), where the expectation above it was
+            met; or ``turn_start``, the beginning of the turn, at events the
+            expectations above it did not use.
         absent: When True, the expectation is inverted: it passes only when NO
             event of this type arrives before the ``within_ms`` budget expires,
             and fails as soon as one does. Matches on event type only;
@@ -399,6 +428,7 @@ class EvalExpectation:
     marker_first: bool | None = None
     markers: int | None = None
     text_after: bool | None = None
+    check_from: str = "previous"
     absent: bool = False
 
     @property
@@ -902,6 +932,19 @@ def _parse_expectation(e: Any, path: Path, turn_idx: int, exp_idx: int) -> EvalE
         raise ValueError(
             f"{path}: turn #{turn_idx} expectation #{exp_idx} 'absent:' must be a boolean"
         )
+    check_from = e.get("check_from", "previous")
+    if check_from not in CHECK_FROM:
+        raise ValueError(
+            f"{path}: turn #{turn_idx} expectation #{exp_idx} 'check_from:' must be one of "
+            f"{', '.join(CHECK_FROM)}, not {check_from!r}"
+        )
+    if absent and "check_from" in e:
+        # An absence is about what arrives after the expectations before it;
+        # looking back for it has no meaning.
+        raise ValueError(
+            f"{path}: turn #{turn_idx} expectation #{exp_idx} 'absent: true' "
+            f"cannot be combined with 'check_from'"
+        )
     if absent:
         # An absent expectation matches on event type only: content and call
         # checks describe an event that must arrive, which contradicts absence.
@@ -959,6 +1002,7 @@ def _parse_expectation(e: Any, path: Path, turn_idx: int, exp_idx: int) -> EvalE
         marker_first=e.get("marker_first"),
         markers=e.get("markers"),
         text_after=e.get("text_after"),
+        check_from=check_from,
         absent=absent,
     )
 

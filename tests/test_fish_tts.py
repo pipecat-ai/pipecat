@@ -42,6 +42,30 @@ async def _start_request(settings=None):
     return message["request"]
 
 
+async def _connect_headers(settings=None):
+    """Connect with a mocked socket and return the handshake headers."""
+    service = FishAudioTTSService(api_key="key", settings=settings)
+    service._websocket_connect = AsyncMock(return_value=AsyncMock())
+
+    await service._connect_websocket()
+
+    return service._websocket_connect.await_args.kwargs["additional_headers"]
+
+
+@pytest.mark.asyncio
+async def test_default_model_is_s2_1_pro():
+    headers = await _connect_headers()
+
+    assert headers["model"] == "s2.1-pro"
+
+
+@pytest.mark.asyncio
+async def test_drama_3_model_is_sent_in_handshake():
+    headers = await _connect_headers(FishAudioTTSService.Settings(model="drama-3"))
+
+    assert headers["model"] == "drama-3"
+
+
 @pytest.mark.asyncio
 async def test_start_message_omits_unset_request_settings():
     request = await _start_request()

@@ -16,7 +16,7 @@ import json
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 
 from loguru import logger
 from websockets.protocol import State
@@ -109,10 +109,18 @@ class SmallestTTSSettings(TTSSettings):
         math_notation: Read digit-flanked math operators as words (``2 + 2`` as
             "two plus two") instead of leaving them to the default number reader.
             If None, the API default (off) applies.
+        content_filter: Check the text against Smallest's profanity word list
+            before synthesis, taking this action on a match: ``"reject"`` fails
+            the request with a ``CONTENT_FILTER_BLOCKED`` error and synthesizes
+            nothing; ``"flag"`` synthesizes normally and records the match. The
+            text is never rewritten. If None, the API default (off) applies.
     """
 
     speed: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     math_notation: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    content_filter: Literal["reject", "flag"] | str | None | NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
 
 
 class SmallestTTSService(InterruptibleTTSService):
@@ -191,6 +199,7 @@ class SmallestTTSService(InterruptibleTTSService):
             language=Language.EN,
             speed=None,
             math_notation=None,
+            content_filter=None,
         )
 
         if settings is not None:
@@ -293,6 +302,9 @@ class SmallestTTSService(InterruptibleTTSService):
         if self._settings.math_notation is not None:
             msg["math_notation"] = self._settings.math_notation
 
+        if self._settings.content_filter is not None:
+            msg["content_filter"] = {"enabled": True, "action": self._settings.content_filter}
+
         if self._word_timestamps:
             msg["word_timestamps"] = True
 
@@ -337,8 +349,8 @@ class SmallestTTSService(InterruptibleTTSService):
     async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
         """Apply a settings delta.
 
-        All fields (model, speed, math_notation, voice, language) take effect on
-        the next ``_build_msg`` call without reconnecting.
+        All fields (model, speed, math_notation, content_filter, voice, language)
+        take effect on the next ``_build_msg`` call without reconnecting.
         """
         return await super()._update_settings(delta)
 

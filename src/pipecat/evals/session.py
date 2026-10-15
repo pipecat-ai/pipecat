@@ -457,9 +457,16 @@ class EvalSession(BaseObject, Generic[R]):
 
     async def _converse(self) -> list[EvalAssertionFailure]:
         """Run the handshake, then the driver; a bot that never says ready is a failure."""
+        # The client imports this module, so its error is imported here.
+        from pipecat.evals.client import EvalBotUnavailableError
+
         self._trace.log("connected")
         try:
             await self._client.handshake()
+        except EvalBotUnavailableError as e:
+            self._trace.log(f"handshake: failed ({e})")
+            where = "<connect>" if e.kind == "connect_failed" else "<bot-ready>"
+            return [self._failure(where, str(e), e.kind)]
         except TimeoutError as e:
             self._trace.log("handshake: failed (bot-ready not received)")
             return [self._failure("<bot-ready>", str(e), "handshake_timeout")]

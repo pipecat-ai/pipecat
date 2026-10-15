@@ -38,7 +38,7 @@ as inline base64 bytes or as a URL, and both flow through to a
 """
 
 # -- Constants --
-PROTOCOL_VERSION = "2.3.0"
+PROTOCOL_VERSION = "2.2.0"
 
 # -- Version compatibility --
 # Any 1.x client is deprecated but still supported with the old bot-output format.
@@ -572,6 +572,9 @@ class BotLLMTextMessage(BaseModel):
     """Message containing bot LLM text output.
 
     Sent when the bot's LLM generates text.
+
+    .. deprecated:: 1.13.0
+        Use :class:`LLMRawTextMessage` instead. Will be removed in 2.0.0.
     """
 
     label: MessageLiteral = MESSAGE_LABEL
@@ -616,22 +619,13 @@ class BotTTSTextMessage(BaseModel):
     """Message containing bot TTS text output.
 
     Sent when text is being processed by TTS.
+
+    .. deprecated:: 1.13.0
+        Use :class:`TTSRawTextMessage` instead. Will be removed in 2.0.0.
     """
 
     label: MessageLiteral = MESSAGE_LABEL
     type: Literal["bot-tts-text"] = "bot-tts-text"
-    data: TextMessageData
-
-
-class BotBackchannelMessage(BaseModel):
-    """Message containing a short acknowledgment the bot says, such as "Mm-hmm.".
-
-    Sent when the bot starts saying text of type ``backchannel``, in place of
-    ``bot-output`` and ``bot-tts-text``.
-    """
-
-    label: MessageLiteral = MESSAGE_LABEL
-    type: Literal["bot-backchannel"] = "bot-backchannel"
     data: TextMessageData
 
 
@@ -661,6 +655,9 @@ class UserTranscriptionMessageData(BaseModel):
     """Data for user transcription messages.
 
     Contains transcription text and metadata.
+
+    .. deprecated:: 1.13.0
+        Use :class:`STTRawTextMessageData` instead. Will be removed in 2.0.0.
     """
 
     text: str
@@ -673,6 +670,10 @@ class UserTranscriptionMessage(BaseModel):
     """Message containing user transcription.
 
     Sent when user speech is transcribed.
+
+    .. deprecated:: 1.13.0
+        Use :class:`STTRawTextMessage` instead, or :class:`UserInputMessage` for what
+        the user said. Will be removed in 2.0.0.
     """
 
     label: MessageLiteral = MESSAGE_LABEL
@@ -680,29 +681,43 @@ class UserTranscriptionMessage(BaseModel):
     data: UserTranscriptionMessageData
 
 
-class UserBackchannelMessageData(BaseModel):
-    """Data for user backchannel messages.
+UserInputType = Literal["transcription", "chat", "backchannel"]
+
+
+class UserInputMessageData(BaseModel):
+    """Data for user input messages.
 
     Parameters:
-        text: What the user said.
-        user_id: Identifier for the user who spoke.
-        timestamp: When the user said it.
+        text: What the user said or typed.
+        input_type: What kind of input it is: ``"transcription"`` for speech
+            transcribed by the STT, ``"chat"`` for text the client sent, or
+            ``"backchannel"`` for a short acknowledgment the user said while the
+            bot talks, such as "mhm".
+        timestamp: When the user said or sent it.
+        final: Whether the text is final. Only an interim transcription isn't.
+        user_id: Identifier for the user who spoke or typed. For chat, set only
+            when the transport knows the sender, such as Daily and LiveKit.
+        msg_id: For chat, the id of the client's ``send-text`` message.
     """
 
     text: str
-    user_id: str
+    input_type: UserInputType
     timestamp: str
+    final: bool
+    user_id: str | None = None
+    msg_id: str | None = None
 
 
-class UserBackchannelMessage(BaseModel):
-    """Message containing a short acknowledgment the user said while the bot talks.
+class UserInputMessage(BaseModel):
+    """Message containing what the user said or typed.
 
-    An acknowledgment such as "mhm" doesn't interrupt the bot or reach the LLM.
+    The user's counterpart of ``bot-output``. A backchannel doesn't interrupt the
+    bot or reach the LLM.
     """
 
     label: MessageLiteral = MESSAGE_LABEL
-    type: Literal["user-backchannel"] = "user-backchannel"
-    data: UserBackchannelMessageData
+    type: Literal["user-input"] = "user-input"
+    data: UserInputMessageData
 
 
 class UserLLMTextMessage(BaseModel):
@@ -713,6 +728,46 @@ class UserLLMTextMessage(BaseModel):
 
     label: MessageLiteral = MESSAGE_LABEL
     type: Literal["user-llm-text"] = "user-llm-text"
+    data: TextMessageData
+
+
+class STTRawTextMessageData(BaseModel):
+    """Data for STT raw text messages.
+
+    Parameters:
+        text: The transcribed text.
+        user_id: Identifier for the user who spoke.
+        timestamp: When the user said it.
+        final: Whether the transcription is final, as opposed to interim.
+    """
+
+    text: str
+    user_id: str
+    timestamp: str
+    final: bool
+
+
+class STTRawTextMessage(BaseModel):
+    """Message reporting a transcription as the STT produced it, interim ones included."""
+
+    label: MessageLiteral = MESSAGE_LABEL
+    type: Literal["stt-raw-text"] = "stt-raw-text"
+    data: STTRawTextMessageData
+
+
+class LLMRawTextMessage(BaseModel):
+    """Message reporting a chunk of text as the LLM streamed it."""
+
+    label: MessageLiteral = MESSAGE_LABEL
+    type: Literal["llm-raw-text"] = "llm-raw-text"
+    data: TextMessageData
+
+
+class TTSRawTextMessage(BaseModel):
+    """Message reporting text the TTS speaks, as it is spoken."""
+
+    label: MessageLiteral = MESSAGE_LABEL
+    type: Literal["tts-raw-text"] = "tts-raw-text"
     data: TextMessageData
 
 

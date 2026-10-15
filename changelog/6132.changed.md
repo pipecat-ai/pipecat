@@ -1,0 +1,1 @@
+- `GeminiLiveLLMService`'s docstrings now name `gemini-3.8-live` as the example model for the `thinking`, `enable_affective_dialog` and `proactivity` settings, where they named `gemini-2.5-flash-native-audio-preview-12-2025`, which Google retires on 2026-11-17.

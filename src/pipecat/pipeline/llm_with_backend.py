@@ -116,7 +116,9 @@ FRONTEND_PAIRING_INSTRUCTION = (
     f"and do the rest of the reply yourself around it. {STRATEGY_PLACEHOLDER}\n\n"
     "ONE ASSISTANT: To the user there is one assistant, you: never mention the backend, "
     "delegation, a handoff or tools. Say what is being done as your own doing, such as \"I'm "
-    'checking" or "I\'ve fixed it", never "the backend is checking".\n\n'
+    'checking" or "I\'ve fixed it", never "the backend is checking". A stop or a change you '
+    "hand over is your own doing too: never say that you passed it along, relayed it, handed "
+    "it over or told anyone.\n\n"
     "AFTER DELEGATING: Acknowledge briefly, without offering updates or asking whether to "
     "go ahead, and do whatever else the user asked that you can do yourself. The result says "
     "whether the backend was idle or already working; if it was working, your request joins "
@@ -128,9 +130,10 @@ FRONTEND_PAIRING_INSTRUCTION = (
     "or look into something is not doing it: "
     "the backend hears nothing until you call delegate, so a reply that promises backend "
     "work calls delegate in that same reply. When the user asks whether work is under way, "
-    "look at the conversation: if you never delegated it, say so and delegate it then. When "
-    "you hand over a stop or a change, the backend stops or changes the work as told: say "
-    "so plainly, and do not promise results from work the user called off.\n\n"
+    "look at the conversation: if you never delegated it, say it is not started yet and delegate "
+    "it then. When you hand over a stop or a change, the backend stops or changes the work as "
+    "told: tell the user plainly that you are stopping or changing it, and do not promise results "
+    "from work the user called off.\n\n"
     "BACKEND MESSAGES: The backend works on its own after you delegate and may be doing "
     "several things at once. What it has to say arrives as messages in the conversation "
     f'marked "{BACKEND_MESSAGE_PREFIX.strip()}": a result, a question for the user, or news '
@@ -242,6 +245,11 @@ class BackendRequestStrategy:
     frontend_instruction: str | None = None
     #: How the ``delegate`` tool is described to the frontend model.
     tool_description: str = ""
+    #: Whether the strategy reads the conversation from the frontend's context,
+    #: so it needs that context to be current when the ``delegate`` tool runs.
+    #: A speech-to-speech frontend's context lags the audio, so the connector
+    #: refuses such a strategy there.
+    requires_context: bool = False
 
     async def compose_request(self, params: FunctionCallParams) -> str | None:
         """Turn a ``delegate`` call into the text put to the backend.
@@ -273,6 +281,8 @@ class TranscriptBackendRequestStrategy(BackendRequestStrategy):
     carries what matters. A call that finds no new turn since the previous
     delegation sends nothing.
     """
+
+    requires_context = True
 
     def __init__(
         self,
@@ -393,7 +403,9 @@ class BackendConnector:
     It may be given, or left to the connector to pick by frontend kind once
     bound: :class:`TranscriptBackendRequestStrategy` for a text frontend,
     :class:`ExplicitBackendRequestStrategy` for a speech-to-speech one, whose
-    context lags the audio.
+    context lags the audio. A given strategy that reads the frontend's
+    context (:attr:`BackendRequestStrategy.requires_context`) is refused for
+    a speech-to-speech frontend.
 
     The connector holds the session with the backend for the frontend's life,
     and turns each output the backend sends into a message appended to the
@@ -488,6 +500,10 @@ class BackendConnector:
 
         Args:
             context: The layers.
+
+        Raises:
+            ValueError: If the frontend is speech-to-speech and the strategy
+                reads the frontend's context, which lags the audio there.
         """
         self._context = context
         if self._request_strategy is None:
@@ -495,6 +511,13 @@ class BackendConnector:
                 ExplicitBackendRequestStrategy()
                 if context.frontend_is_realtime
                 else TranscriptBackendRequestStrategy()
+            )
+        if context.frontend_is_realtime and self._request_strategy.requires_context:
+            raise ValueError(
+                f"{type(self._request_strategy).__name__} reads the conversation from the "
+                "frontend's context, which lags the audio on a speech-to-speech frontend. "
+                "Use a request strategy that doesn't read the context, such as "
+                "ExplicitBackendRequestStrategy."
             )
         self._tools = self.build_tools()
 
@@ -777,7 +800,9 @@ class LLMWithBackend(Pipeline):
                 :class:`BackendConnector` when omitted.
 
         Raises:
-            ValueError: If the frontend service declines the role.
+            ValueError: If the frontend service declines the role, or the
+                connector's request strategy reads the frontend's context and
+                the frontend is speech-to-speech.
         """
         logger.warning("LLMWithBackend is alpha: its API is likely to change between releases.")
         if objection := frontend.llm_with_backend_role_objection("frontend"):

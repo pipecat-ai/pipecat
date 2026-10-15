@@ -1,0 +1,1 @@
+- Fixed the `examples/update-settings/stt/stt-fal.py` settings update, which passed a field `FalSTTService.Settings` does not define and raised a `TypeError` mid-call. It now switches `language`, like the other STT settings examples.
