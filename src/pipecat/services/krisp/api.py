@@ -146,6 +146,61 @@ async def list_tts_voices(
     return body.get("data") or []
 
 
+async def select_tts_voice(
+    api_key: str,
+    language: str,
+    *,
+    voice: str | None = None,
+    gender: str | None = None,
+    model_name: str = "krisp-tts-v1",
+    base_url: str = KRISP_REST_BASE_URL,
+    session: aiohttp.ClientSession | None = None,
+) -> str:
+    """Pick a catalog voice that can speak ``language``.
+
+    Call it before creating :class:`~pipecat.services.krisp.tts.KrispTTSService`
+    and pass the result as the ``voice`` setting together with the same
+    ``language``, so the session handshake isn't rejected with
+    ``invalid_voice`` or ``invalid_language``.
+
+    Args:
+        api_key: Krisp master API key.
+        language: Language the bot will speak, e.g. ``de-DE``.
+        voice: Preferred voice name. It is validated against the catalog and
+            returned in its canonical spelling.
+        gender: Optional filter used when no ``voice`` is given.
+        model_name: TTS model to select a voice for.
+        base_url: Krisp REST API base URL.
+        session: Optional aiohttp session to reuse.
+
+    Returns:
+        The voice name to pass as the ``voice`` setting.
+
+    Raises:
+        KrispServiceError: If no voice (or not the preferred one) speaks
+            ``language``.
+    """
+    voices = await list_tts_voices(
+        api_key,
+        model_name=model_name,
+        language=language,
+        gender=None if voice else gender,
+        base_url=base_url,
+        session=session,
+    )
+    names = [v["name"] for v in voices if v.get("name")]
+    if voice:
+        for name in names:
+            if name.lower() == voice.lower():
+                return name
+        raise KrispServiceError(
+            f"Voice {voice!r} does not speak {language}; available: {', '.join(names) or 'none'}"
+        )
+    if not names:
+        raise KrispServiceError(f"No {model_name} voice speaks {language}")
+    return names[0]
+
+
 async def _request_json(
     method: str,
     url: str,

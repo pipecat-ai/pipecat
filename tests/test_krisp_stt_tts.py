@@ -21,7 +21,12 @@ from pipecat.frames.frames import (
 )
 from pipecat.services.krisp import stt as krisp_stt
 from pipecat.services.krisp import tts as krisp_tts
-from pipecat.services.krisp.api import KrispServiceError, create_session_token, open_session
+from pipecat.services.krisp.api import (
+    KrispServiceError,
+    create_session_token,
+    open_session,
+    select_tts_voice,
+)
 from pipecat.services.krisp.stt import KrispSTTService
 from pipecat.services.krisp.tts import KrispTTSService, _spread_words
 from pipecat.transcriptions.language import Language
@@ -175,6 +180,50 @@ async def test_create_session_token_raises_classified_error():
 
     assert exc_info.value.code == "PRODUCT_NOT_ALLOWED"
     assert classify_http_exception(exc_info.value) == ErrorCategory.AUTHORIZATION
+
+
+_CATALOG = [
+    {"name": "Gero", "gender": "male", "languages": ["de-DE"]},
+    {"name": "Amy", "gender": "female", "languages": ["en-US", "de-DE"]},
+]
+
+
+async def _voices_server(queries: list) -> TestServer:
+    async def handler(request):
+        queries.append(dict(request.query))
+        return web.json_response({"success": True, "data": _CATALOG})
+
+    app = web.Application()
+    app.router.add_get("/v2/sdk/tts/voices", handler)
+    server = TestServer(app)
+    await server.start_server()
+    return server
+
+
+@pytest.mark.asyncio
+async def test_select_tts_voice_picks_a_voice_for_the_language():
+    queries = []
+    server = await _voices_server(queries)
+    try:
+        base_url = str(server.make_url("")).rstrip("/")
+        voice = await select_tts_voice("master", "de-DE", gender="male", base_url=base_url)
+    finally:
+        await server.close()
+
+    assert voice == "Gero"
+    assert queries == [{"model_name": "krisp-tts-v1", "language": "de-DE", "gender": "male"}]
+
+
+@pytest.mark.asyncio
+async def test_select_tts_voice_validates_the_preferred_voice():
+    server = await _voices_server([])
+    try:
+        base_url = str(server.make_url("")).rstrip("/")
+        assert await select_tts_voice("master", "de-DE", voice="amy", base_url=base_url) == "Amy"
+        with pytest.raises(KrispServiceError, match="'Clara' does not speak de-DE"):
+            await select_tts_voice("master", "de-DE", voice="Clara", base_url=base_url)
+    finally:
+        await server.close()
 
 
 # --- STT --------------------------------------------------------------------
