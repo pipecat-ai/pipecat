@@ -12,8 +12,8 @@ from pipecat.utils.time import seconds_to_nanoseconds
 
 
 @dataclass
-class CachedWord:
-    """A word reported before its audio started playing.
+class WordTimestamp:
+    """A word a TTS provider reported, and when it is spoken.
 
     Parameters:
         word: The word.
@@ -25,7 +25,7 @@ class CachedWord:
     word: str
     timestamp: float
     context_id: str | None
-    includes_inter_frame_spaces: bool
+    includes_inter_frame_spaces: bool = False
 
 
 class WordTimestampTracker:
@@ -42,7 +42,7 @@ class WordTimestampTracker:
     def __init__(self):
         """Initialize the word timestamp tracker."""
         self._baseline: int | None = None
-        self._cached: list[CachedWord] = []
+        self._cached: list[WordTimestamp] = []
         self.last_pts: int = 0
         self.uninterruptible_last_pts: int = 0
 
@@ -51,7 +51,7 @@ class WordTimestampTracker:
         """Whether words are being timed."""
         return self._baseline is not None
 
-    def start(self, now: int) -> list[CachedWord]:
+    def start(self, now: int) -> list[WordTimestamp]:
         """Start timing words, if not started yet.
 
         Args:
@@ -66,7 +66,7 @@ class WordTimestampTracker:
         cached, self._cached = self._cached, []
         return cached
 
-    def cache(self, word: CachedWord):
+    def cache(self, word: WordTimestamp):
         """Hold a word until timing starts.
 
         Args:

@@ -52,7 +52,7 @@ from pipecat.services.websocket_service import WebsocketService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.context.aggregated_frame_sequencer import AggregatedFrameSequencer
 from pipecat.utils.context.audio_context_manager import AudioContextFrame, AudioContextManager
-from pipecat.utils.context.word_timestamp_tracker import CachedWord, WordTimestampTracker
+from pipecat.utils.context.word_timestamp_tracker import WordTimestamp, WordTimestampTracker
 from pipecat.utils.deprecation import deprecated, warn_deprecated
 from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.string import resolve_sentence_tokenizer_language
@@ -102,16 +102,6 @@ class TTSContext:
     append_to_context: bool = True
     push_assistant_aggregation: bool = False
     interruptible: bool = True
-
-
-@dataclass
-class _WordTimestampEntry:
-    """Internal: word timestamp routed through an audio context queue."""
-
-    word: str
-    timestamp: float
-    context_id: str
-    includes_inter_frame_spaces: bool = False
 
 
 @dataclass
@@ -904,7 +894,7 @@ class TTSService(AIService):
             for word, timestamp in word_times:
                 await self.append_to_audio_context(
                     context_id,
-                    _WordTimestampEntry(
+                    WordTimestamp(
                         word=word,
                         timestamp=timestamp,
                         context_id=context_id,
@@ -934,7 +924,7 @@ class TTSService(AIService):
         logger.trace(f"{self} created audio context {context_id}")
 
     async def append_to_audio_context(
-        self, context_id: str | None, frame: Frame | _WordTimestampEntry | None
+        self, context_id: str | None, frame: Frame | WordTimestamp | None
     ):
         """Append a frame or word-timestamp entry to an existing audio context queue.
 
@@ -1760,7 +1750,7 @@ class TTSService(AIService):
     ):
         """Process word timestamps directly, building and pushing TTSTextFrames inline.
 
-        Used both from _handle_audio_context (via _WordTimestampEntry) and from services
+        Used both from _handle_audio_context (via WordTimestamp items) and from services
         that do not use audio contexts. Each entry emits a TTSTextFrame with a PTS
         relative to when start_word_timestamps() was called. Entries that come
         before that are cached and timed once it is called (i.e. when the first
@@ -1769,7 +1759,7 @@ class TTSService(AIService):
         for word, timestamp in word_times:
             if not self._word_timestamp_tracker.started:
                 self._word_timestamp_tracker.cache(
-                    CachedWord(word, timestamp, context_id, includes_inter_frame_spaces)
+                    WordTimestamp(word, timestamp, context_id, includes_inter_frame_spaces)
                 )
                 continue
             # Build TTSTextFrame(s) for this word token, advancing the active
@@ -1881,7 +1871,7 @@ class TTSService(AIService):
             item = await self._next_audio_context_item(context_id)
         await self._end_audio_context(context_id, playback)
 
-    async def _next_audio_context_item(self, context_id: str) -> Frame | _WordTimestampEntry | None:
+    async def _next_audio_context_item(self, context_id: str) -> Frame | WordTimestamp | None:
         """Wait for the context's next item, or None once it ends or goes quiet."""
         item = None
         try:
@@ -1894,10 +1884,10 @@ class TTSService(AIService):
         return item
 
     async def _push_audio_context_item(
-        self, context_id: str, item: Frame | _WordTimestampEntry, playback: _AudioContextPlayback
+        self, context_id: str, item: Frame | WordTimestamp, playback: _AudioContextPlayback
     ):
         """Push one item of the playing audio context."""
-        if isinstance(item, _WordTimestampEntry):
+        if isinstance(item, WordTimestamp):
             # Route word timestamps through _add_word_timestamps so they are
             # processed in playback order alongside audio frames.
             await self._add_word_timestamps(

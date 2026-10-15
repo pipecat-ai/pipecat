@@ -428,7 +428,7 @@ class _MockWordTimestampHttpTTSService(TTSService):
 class _MockWordTimestampWSTTSService(TTSService):
     """WebSocket-style TTS: delivers audio asynchronously via the audio context.
 
-    Word timestamps are enqueued as ``_WordTimestampEntry`` items (audio context
+    Word timestamps are enqueued as ``WordTimestamp`` items (audio context
     already exists at call time) and processed by ``_handle_audio_context`` in
     playback order.
 

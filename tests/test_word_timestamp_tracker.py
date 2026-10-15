@@ -6,13 +6,13 @@
 
 """Tests for WordTimestampTracker."""
 
-from pipecat.utils.context.word_timestamp_tracker import CachedWord, WordTimestampTracker
+from pipecat.utils.context.word_timestamp_tracker import WordTimestamp, WordTimestampTracker
 
 _SECOND = 1_000_000_000
 
 
-def _word(word: str, timestamp: float) -> CachedWord:
-    return CachedWord(word, timestamp, "ctx", False)
+def _word(word: str, timestamp: float) -> WordTimestamp:
+    return WordTimestamp(word, timestamp, "ctx", False)
 
 
 def test_words_are_timed_from_when_timing_starts():
