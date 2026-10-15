@@ -34,3 +34,13 @@ The backend is an engineering assistant's: a code change that loops through sear
 ## Reading a verdict
 
 The judge sees each reply as the harness attributes it to a turn, so a result that arrives inside the previous turn's reply can fail the turn that expected it, and audio the user talks over is discarded. When a verdict looks wrong, read the run's logs and recording under `test-runs/<timestamp>/` before changing anything: the bot log says what the backend sent and when, and whether the frontend spoke it. Budgets in the scenarios are generous on purpose, since the eval clock lags the bot by seconds and a `response` needs the bot to stop speaking and its speech to be transcribed.
+
+## Predictive delegation's classifier
+
+`predictive_delegation/` checks the classifier that `PredictiveDelegation` asks whether a user's turn needs the backend. `turns.jsonl` holds 107 turns recorded from the three text example bots in a ten-turn conversation that mixes requests for the backend with ones the frontend answers itself: each is the frontend's context when the user's turn ended, and whether the turn needs the backend. `replay.py` builds the classifier's input from each turn as a running bot would, with the prompts as they are in the code, and reports the turns it gets wrong at the threshold for delegating early. A false "yes" delegates a turn the frontend would have answered itself; a missed "yes" leaves a turn to the frontend that could have been delegated early.
+
+```bash
+uv run python evals/llm-with-backend/predictive_delegation/replay.py --out after.json
+```
+
+It needs `TYPESAFE_API_KEY` and takes about a minute. Run it, with the evals, before and after any change to the prompts (see "Prompts" in `pipecat.pipeline.llm_with_backend`), and record the results in [`RESULTS.md`](RESULTS.md), where `results_table.py` turns a suite run into its table.
