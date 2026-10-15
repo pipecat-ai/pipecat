@@ -25,6 +25,7 @@ from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMarkerFrame,
+    LLMMarkerResponseFrame,
     LLMMessagesAppendFrame,
     LLMRunFrame,
     LLMTextFrame,
@@ -143,83 +144,38 @@ def _render_completion_instructions(complete: str, short: str, long: str) -> str
         The prompt text with the markers substituted in.
     """
     return f"""
-CRITICAL INSTRUCTION - MANDATORY RESPONSE FORMAT:
-Every single response MUST begin with a turn completion indicator. This is not optional.
+TURN COMPLETION PROTOCOL (mandatory):
+The user's words reach you from speech recognition, usually without punctuation, and sometimes before they have finished talking. Before you reply, decide whether their turn is complete, and start every response with exactly one of these markers as its very first character:
 
-TURN COMPLETION DECISION FRAMEWORK:
-Ask yourself: "Has the user provided enough information for me to give a meaningful, substantive response?"
+{complete}  the user's turn is complete: answer them. Write {complete}, a space, then your full reply. Never write {complete} on its own.
+{short}  the user stopped mid-sentence and will continue in a few seconds. Write {short} and nothing else.
+{long}  the user needs time to think or asked you to wait. Write {long} and nothing else.
 
-Mark as COMPLETE ({complete}) when:
-- The user has answered your question with actual content
-- The user has made a complete request or statement
-- The user has provided all necessary information for you to respond meaningfully
-- The conversation can naturally progress to your substantive response
+Deciding:
+- Complete means conversationally complete, not long. One word can be a complete answer to your question: "yes", "no thanks", "Tuesday", "Japan", "four". A question to you is complete. A correction, or a request to repeat yourself, is complete.
+- Grammatically complete is not the same as conversationally complete. If the user has only acknowledged your question or reacted to what you said, without answering it ("that's a good question", "oh wow, okay", "that's interesting", "hmm", "well"), they have not taken their turn yet: {long}.
+- Cut off ({short}): the last words leave a phrase open, in whatever language the user speaks: a sentence that ends on a conjunction, a preposition, an article, or the word for "because"; a list that is still going; a number that is only partly said. A fragment like this is not a request for help. Do not answer it, do not ask what they need, and do not guess the rest: wait with {short}.
+- Needs time ({long}): "hold on", "let me think", "give me a second", "one moment". Filler followed by a real answer, such as "hmm, I'd go to Japan for the food", is complete.
+- When the user's latest words continue an earlier fragment (your previous response was {short} or {long}), judge the fragments together as one turn. If the combined turn still ends open, {short}; if it now answers your question, {complete}.
+- If a tool call is the right response, make the tool call; the turn is complete.
 
-Mark as INCOMPLETE SHORT ({short}) when the user will likely continue soon:
-- The user was clearly cut off mid-sentence or mid-word
-- The user is in the middle of a thought that got interrupted
-- Brief technical interruption (they'll resume in a few seconds)
+Format rules:
+- The marker is the first character. No text, quotes, backticks or explanation before it.
+- After {short} or {long}, output nothing: no words, no explanation, no nudge. The system waits and prompts you again later.
+- Exactly one marker per response.
 
-Mark as INCOMPLETE LONG ({long}) when the user needs more time:
-- The user explicitly asks for time: "let me think", "give me a minute", "hold on"
-- The user is clearly pondering or deliberating: "hmm", "well...", "that's a good question"
-- The user acknowledged but hasn't answered yet: "That's interesting..."
-- The response feels like a preamble before the actual answer
-
-RESPOND in one of these three formats:
-1. If COMPLETE: `{complete}` followed by a space and your full substantive response
-2. If INCOMPLETE SHORT: ONLY the character `{short}` (user will continue in a few seconds)
-3. If INCOMPLETE LONG: ONLY the character `{long}` (user needs more time to think)
-
-KEY INSIGHT: Grammatically complete ≠ conversationally complete
-- "That's a really good question." is grammatically complete but conversationally incomplete (use {long})
-- "I'd go to Japan because I love" is mid-sentence (use {short})
-
-EXAMPLES:
-
-You ask: "Where would you travel?"
-User: "I'd go to Japan because I love"
-→ `{short}`
-(Cut off mid-sentence - they'll continue in seconds)
-
-You ask: "Where would you travel?"
-User: "That's a good question. Let me think..."
-→ `{long}`
-(User is deliberating - give them time)
-
-You ask: "Where would you travel?"
-User: "Hmm, hold on a second."
-→ `{long}`
-(User explicitly asked for time)
-
-You ask: "Where would you travel?"
-User: "I'd go to Japan because I love the culture."
-→ `{complete} Japan is a wonderful choice! The blend of ancient traditions and modern innovation is truly unique. Have you been before?`
-(Complete answer - give full response)
-
-User: "I need help with"
-→ `{short}`
-(Cut off mid-request - they'll finish soon)
-
-User: "Well, let me think about that for a moment."
-→ `{long}`
-(User needs time to think)
-
-User: "Can you help me book a flight to New York next week?"
-→ `{complete} I'd be happy to help you with that! Let me gather some information...`
-(Complete request - provide full response)
-
-User: "Give me a minute to gather my thoughts."
-→ `{long}`
-(User explicitly asked for time)
-
-FORMAT REQUIREMENTS:
-- ALWAYS use single-character indicators: `{complete}` (complete), `{short}` (short wait), or `{long}` (long wait)
-- For COMPLETE: `{complete}` followed by a space and your full response
-- For INCOMPLETE: ONLY the single character (`{short}` or `{long}`) with absolutely nothing else
-- Your turn indicator must be the very first character in your response
-
-Remember: Focus on conversational completeness and how long the user might need. Was it a mid-sentence cutoff ({short}) or do they need time to think ({long})?"""
+Examples:
+- You asked where they would go and the user says "i'd go to japan because i love". Respond with only {short}.
+- The user says "i need help with". Respond with only {short}.
+- You asked for their phone number and the user says "it's five five five". Respond with only {short}.
+- You asked what they want to order and the user says "a large pepperoni pizza a garden salad and". Respond with only {short}.
+- You asked where they would go and the user says "that's a good question let me think". Respond with only {long}.
+- You asked where they would go and the user says "that's interesting". Respond with only {long}.
+- The user says "hold on a second". Respond with only {long}.
+- You asked where they would go and the user says "japan". Respond with {complete} followed by your reply, for example "{complete} Japan is a wonderful choice. What draws you there?"
+- You asked whether to book it and the user says "yes". Respond with {complete} followed by your reply, for example "{complete} Done, I'll book it now."
+- The user says "can you help me book a flight to new york next week". Respond with {complete} followed by your reply, for example "{complete} Of course. What day would you like to leave, and from which city?"
+- Your previous response was {short} after the user said "i'd go to", and now the user says "japan because". Together that is still open: respond with only {short}."""
 
 
 USER_TURN_COMPLETION_INSTRUCTIONS = _render_completion_instructions(
@@ -317,6 +273,10 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
         """
         super().__init__(*args, **kwargs)
         self._turn_text_buffer = ""
+        # The current response as the LLM produced it, and the marker read
+        # from it, reported together when the response ends.
+        self._response_raw = ""
+        self._response_marker: tuple[str, str] | None = None
         # Completion verdict for the current LLM response, set when a marker is
         # detected in the text stream. ``None`` means no marker yet, so keep
         # buffering text until one appears. ``INCOMPLETE`` also doubles as a
@@ -535,10 +495,43 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
             # between the timeout firing and a ● arriving: whichever inference
             # starts first cancels the timeout before its text is parsed.
             await self._cancel_incomplete_timeout()
+            self._response_raw = ""
+            self._response_marker = None
         elif isinstance(frame, LLMFullResponseEndFrame):
+            await self._report_response()
             await self._turn_reset()
 
         await super().push_frame(frame, direction)
+
+    async def _push_marker(
+        self, marker: str, kind: str, append_to_context_immediately: bool = True
+    ):
+        """Push the marker read from the response, and remember it for the response's report."""
+        self._response_marker = (marker, kind)
+        await self.push_frame(
+            LLMMarkerFrame(marker, append_to_context_immediately=append_to_context_immediately)
+        )
+
+    async def _report_response(self):
+        """Push the response's raw text and marker, once there was a response to read."""
+        if not self._response_raw and self._response_marker is None:
+            return
+        config = self._user_turn_completion_config
+        marker, kind = self._response_marker or (None, None)
+        await self.push_frame(
+            LLMMarkerResponseFrame(
+                raw=self._response_raw,
+                marker=marker,
+                kind=kind,
+                markers=[
+                    config.complete_marker,
+                    config.incomplete_short_marker,
+                    config.incomplete_long_marker,
+                ],
+            )
+        )
+        self._response_raw = ""
+        self._response_marker = None
 
     async def _push_turn_text(self, text: str):
         """Push LLM text with turn completion detection.
@@ -554,6 +547,8 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
         Args:
             text: The text content from the LLM to push.
         """
+        self._response_raw += text
+
         # One spoken completion per user turn: once a ● has been voiced this
         # user turn, drop text from any later inference (the acoustic detector
         # can trigger several within one turn). ``_turn_marker is None`` scopes
@@ -606,7 +601,7 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
             # message via LLMMarkerFrame: the bot produces no spoken
             # output for incomplete turns, so the marker is the entire
             # context entry.
-            await self.push_frame(LLMMarkerFrame(marker))
+            await self._push_marker(marker, incomplete_type.value)
 
             self._turn_text_buffer = ""
             await self._start_incomplete_timeout(incomplete_type)
@@ -624,7 +619,7 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
                     f"treating as stale: suppressing text"
                 )
                 self._turn_marker = TurnMarker.INCOMPLETE
-                await self.push_frame(LLMMarkerFrame(config.incomplete_short_marker))
+                await self._push_marker(config.incomplete_short_marker, IncompleteType.SHORT.value)
                 self._turn_text_buffer = ""
                 await self._start_incomplete_timeout(IncompleteType.SHORT)
                 return
@@ -651,8 +646,10 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
             # Push the marker as a sideband signal that the assistant
             # aggregator will prepend to the upcoming aggregated text,
             # so the context message ends up as "● <response>".
-            await self.push_frame(
-                LLMMarkerFrame(config.complete_marker, append_to_context_immediately=False)
+            await self._push_marker(
+                config.complete_marker,
+                TurnMarker.COMPLETE.value,
+                append_to_context_immediately=False,
             )
 
             # Split buffer at the marker to handle cases where marker and text

@@ -449,7 +449,8 @@ class WebsocketClientOutputTransport(BaseOutputTransport):
         """Write a frame to the WebSocket after serialization.
 
         Returns:
-            Whether the frame was sent.
+            Whether the transport took the frame. A serializer that emits no
+            payload has still taken it; see :meth:`FrameSerializer.serialize`.
         """
         if self._session.is_closing or not self._session.is_connected:
             return False
@@ -460,9 +461,8 @@ class WebsocketClientOutputTransport(BaseOutputTransport):
         payload = await self._params.serializer.serialize(frame)
         if payload:
             await self._session.send(payload)
-            return True
 
-        return False
+        return True
 
     async def _write_audio_sleep(self):
         """Simulate audio playback timing with sleep delays."""

@@ -5,31 +5,36 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Publish what a provider-watch run has produced locally.
+"""Publish the provider research produced for one date.
 
-Works entirely from disk — the reports for a date under ``_reports`` and the
-local ``provider-watch/*`` branches they name — so it can run after every batch
-of a publishing run, once at the end of a dry run, or by hand to finish a run
-that died. Every step is idempotent: branches already on origin are not pushed
-again, a branch with an open PR adopts that PR, reports already pointing at a
-PR URL are left alone, and the digest issue is edited rather than duplicated.
+Works entirely from disk — the date's reports under ``_reports`` and the local
+``provider-watch/*`` branches they name — so it composes across research runs:
+any number of ``/provider-research`` invocations can write for the same date,
+and each publish pass picks up whatever is new. Every step is idempotent:
+branches already on origin are not pushed again, a branch with an open PR
+adopts that PR, reports already pointing at a PR URL are left alone, and the
+digest issue is edited rather than duplicated.
 
 For each report whose ``prs`` list has an entry in ``state: branch``:
 
 1. push the branch and open a draft PR (title and body from the branch's
    commit messages — a single commit verbatim, several stitched with the
-   report's summary as the title — plus a link to the report), subject to
-   the per-run cap, then rename the branch's ``+slug`` changelog fragments
-   to the PR's number;
+   report's summary as the title — plus a link to the report);
 2. rewrite the report — frontmatter entry to ``state: open`` with the URL,
    and the body's branch/review line to the URL.
 
-Then commit and push ``_reports``. With ``--finalize`` it also renders the
-digest and opens (or updates) the digest issue on the reports repo when there
-is anything to show. Run::
+A sweep over the open provider-watch PRs then renames every ``+slug``
+changelog fragment to its PR's number — the PRs this pass opened, plus any
+left misnamed from a previous killed run.
+
+Then commit and push ``_reports``. With ``--finalize`` it also publishes the
+digest — the ``digests/<date>.md`` that ``/provider-research-digest`` rendered,
+or a highlights-less render made here when none exists — and opens (or
+updates) the digest issue on the reports repo when there is anything to show.
+Run::
 
     uv run python scripts/provider-watch/publish.py --date 2026-08-20
-    uv run python scripts/provider-watch/publish.py --date 2026-08-20 --finalize --highlights h.md
+    uv run python scripts/provider-watch/publish.py --date 2026-08-20 --finalize
 """
 
 from __future__ import annotations
@@ -53,7 +58,6 @@ import digest  # noqa: E402
 REPO_ROOT = HERE.parents[1]
 DEFAULT_REPORTS = REPO_ROOT / "_reports"
 PR_LABEL = "provider-watch"
-DEFAULT_PR_CAP = 8
 
 # The line a researcher writes under "## PRs" for a local branch; rewritten to
 # the PR URL once the PR exists.
@@ -102,7 +106,6 @@ class Report:
 class Outcome:
     opened: list[str] = field(default_factory=list)
     adopted: list[str] = field(default_factory=list)
-    capped: list[str] = field(default_factory=list)
     skipped: list[str] = field(default_factory=list)
     reports_pushed: bool = False
     issue_url: str | None = None
@@ -145,24 +148,29 @@ def _fragment_type(name: str) -> str:
 
 
 def _rename_changelog_fragments(sh: Shell, repo_root: Path, branch: str, pr_url: str) -> None:
-    """Give the branch's changelog fragments the PR's number.
+    """Give a PR's changelog fragments the PR's number.
 
     Researchers write towncrier's ``+slug`` orphan form because no PR exists
     when a branch is committed, and must not guess a number. Once the PR is
     open its number is known: one follow-up commit renames every fragment the
     branch adds that does not already carry it — orphans and wrong guesses
     alike — to ``<number>.<type>.md``, with ``.2``/``.3`` counters when a
-    branch adds several of one type.
+    branch adds several of one type. Works from the branch as pushed, in a
+    detached worktree, so it needs no local branch and cannot collide with a
+    leftover researcher worktree still holding one.
     """
     number = pr_url.rstrip("/").split("/")[-1]
     if not number.isdigit():
         return
+    sh.run("git", "fetch", "--quiet", "origin", branch, cwd=repo_root)
     added = sh.run(
         "git",
         "diff",
         "--name-only",
         "--diff-filter=A",
-        f"{_main_base(sh, repo_root)}..{branch}",
+        # Three-dot: only what the branch itself adds, however far main has
+        # moved since the branch was cut.
+        f"{_main_base(sh, repo_root)}...FETCH_HEAD",
         "--",
         "changelog/",
         cwd=repo_root,
@@ -177,7 +185,9 @@ def _rename_changelog_fragments(sh: Shell, repo_root: Path, branch: str, pr_url:
             counters[fragment_type] = counters.get(fragment_type, 0) + 1
     workdir = tempfile.mkdtemp(prefix="pw-fragments-")
     try:
-        sh.run("git", "worktree", "add", "--quiet", workdir, branch, cwd=repo_root)
+        sh.run(
+            "git", "worktree", "add", "--quiet", "--detach", workdir, "FETCH_HEAD", cwd=repo_root
+        )
         for path in rename:
             fragment_type = _fragment_type(Path(path).name)
             counters[fragment_type] = counters.get(fragment_type, 0) + 1
@@ -198,9 +208,58 @@ def _rename_changelog_fragments(sh: Shell, repo_root: Path, branch: str, pr_url:
             f"Name the changelog fragments after PR #{number}",
             cwd=Path(workdir),
         )
-        sh.run("git", "push", "origin", branch, cwd=Path(workdir))
+        sh.run("git", "push", "origin", f"HEAD:refs/heads/{branch}", cwd=Path(workdir))
     finally:
         sh.run("git", "worktree", "remove", "--force", workdir, cwd=repo_root, check=False)
+
+
+def rename_open_pr_fragments(sh: Shell, repo_root: Path, pipecat_repo: str) -> list[str]:
+    """Rename the ``+slug`` fragments on every open provider-watch PR to its number.
+
+    This sweep is the only place fragments are named: freshly opened PRs still
+    carry their researchers' ``+slug`` fragments, and a killed run's publish
+    can leave PRs misnamed with no local branch surviving — so naming works
+    from the PRs themselves, whatever run opened them. A correctly named PR
+    costs one lookup. Returns the failures, as skip messages.
+    """
+    skipped: list[str] = []
+    owner = pipecat_repo.split("/")[0]
+    prs = json.loads(
+        sh.run(
+            "gh",
+            "pr",
+            "list",
+            "--repo",
+            pipecat_repo,
+            "--label",
+            PR_LABEL,
+            "--state",
+            "open",
+            "--json",
+            "number,headRefName,headRepositoryOwner",
+        )
+        or "[]"
+    )
+    for pr in prs:
+        number = str(pr.get("number") or "")
+        head = pr.get("headRefName") or ""
+        head_owner = (pr.get("headRepositoryOwner") or {}).get("login", "")
+        # Only branches the bot owns; never push to a fork or a human's branch.
+        if not head.startswith("provider-watch/") or head_owner != owner:
+            continue
+        files = json.loads(
+            sh.run("gh", "pr", "view", number, "--repo", pipecat_repo, "--json", "files") or "{}"
+        ).get("files")
+        fragments = [f["path"] for f in files or [] if f["path"].startswith("changelog/")]
+        if all(Path(p).name.startswith(f"{number}.") for p in fragments):
+            continue
+        try:
+            _rename_changelog_fragments(
+                sh, repo_root, head, f"https://github.com/{pipecat_repo}/pull/{number}"
+            )
+        except RuntimeError as exc:
+            skipped.append(f"{head}: fragments not renamed: {exc}")
+    return skipped
 
 
 def _pr_title_body(sh: Shell, repo_root: Path, branch: str, summary: str) -> tuple[str, str]:
@@ -235,16 +294,9 @@ def publish_prs(
     pipecat_repo: str,
     reports_repo: str,
     date: str,
-    cap: int,
 ) -> Outcome:
-    """Open PRs for branch-state entries (up to ``cap`` per run) and rewrite the reports."""
+    """Open PRs for branch-state entries and rewrite the reports."""
     outcome = Outcome()
-    opened_this_run = sum(
-        1
-        for r in reports
-        for pr in r.meta.get("prs") or []
-        if pr.get("state") == "open" and pr.get("opened") == date
-    )
 
     for report in reports:
         changed = False
@@ -259,11 +311,6 @@ def publish_prs(
             url = _open_pr_for_branch(sh, pipecat_repo, branch)
             if url:
                 outcome.adopted.append(url)
-            elif opened_this_run >= cap:
-                pr["capped"] = True
-                outcome.capped.append(branch)
-                changed = True
-                continue
             else:
                 sh.run("git", "push", "-u", "origin", branch, cwd=repo_root)
                 subject, body = _pr_title_body(sh, repo_root, branch, str(pr.get("summary") or ""))
@@ -290,15 +337,9 @@ def publish_prs(
                     .strip()
                     .splitlines()[-1]
                 )
-                opened_this_run += 1
                 outcome.opened.append(url)
-                try:
-                    _rename_changelog_fragments(sh, repo_root, branch, url)
-                except RuntimeError as exc:
-                    outcome.skipped.append(f"{branch}: changelog fragments not renamed: {exc}")
 
             pr.update({"state": "open", "url": url, "opened": date})
-            pr.pop("capped", None)
             report.body = BRANCH_LINE.sub(
                 lambda m, b=branch, u=url: f"- {u}" if m.group("branch") == b else m.group(0),
                 report.body,
@@ -327,13 +368,17 @@ def push_reports(sh: Shell, reports_dir: Path, date: str) -> bool:
     return True
 
 
-def render_digest(reports_dir: Path, date: str, highlights: Path | None, reports_repo: str) -> Path:
+def ensure_digest(reports_dir: Path, date: str, reports_repo: str) -> Path:
+    """The digest to publish: the one ``/provider-research-digest`` rendered, untouched,
+    else a highlights-less render so ``--finalize`` still has a digest to publish."""
     out = reports_dir / "digests" / f"{date}.md"
+    if out.exists():
+        return out
     out.parent.mkdir(parents=True, exist_ok=True)
     text = digest.render(
         digest.load_reports(reports_dir, date),
         date=date,
-        highlights=highlights.read_text() if highlights else None,
+        highlights=None,
         repo_url=f"https://github.com/{reports_repo}",
     )
     out.write_text(text)
@@ -409,12 +454,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--pipecat-repo", default="pipecat-ai/pipecat")
     parser.add_argument("--reports-repo", default="pipecat-ai/provider-watch-reports")
-    parser.add_argument("--pr-cap", type=int, default=DEFAULT_PR_CAP, help="max PRs opened per run")
     parser.add_argument(
-        "--finalize", action="store_true", help="also render the digest and open/update the issue"
-    )
-    parser.add_argument(
-        "--highlights", type=Path, help="Markdown inserted at the top of the digest"
+        "--finalize",
+        action="store_true",
+        help="also publish the digest (digests/<date>.md, rendered by "
+        "/provider-research-digest; a highlights-less one is rendered here if "
+        "missing) and open/update the digest issue",
     )
     args = parser.parse_args(argv)
 
@@ -427,15 +472,13 @@ def main(argv: list[str] | None = None) -> int:
         pipecat_repo=args.pipecat_repo,
         reports_repo=args.reports_repo,
         date=args.date,
-        cap=args.pr_cap,
     )
+    outcome.skipped += rename_open_pr_fragments(sh, args.repo_root, args.pipecat_repo)
     if args.finalize:
-        render_digest(args.reports, args.date, args.highlights, args.reports_repo)
+        digest_file = ensure_digest(args.reports, args.date, args.reports_repo)
     outcome.reports_pushed = push_reports(sh, args.reports, args.date)
     if args.finalize and worth_an_issue(reports):
-        outcome.issue_url = open_or_update_issue(
-            sh, args.reports_repo, args.date, args.reports / "digests" / f"{args.date}.md"
-        )
+        outcome.issue_url = open_or_update_issue(sh, args.reports_repo, args.date, digest_file)
 
     print(json.dumps(outcome.__dict__, indent=2))
     return 0

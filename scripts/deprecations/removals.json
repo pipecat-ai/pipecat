@@ -3,6 +3,61 @@
   "schema_version": 1,
   "removals": [
     {
+      "subject": "LmntTTSService.language",
+      "module": "pipecat.services.lmnt.tts",
+      "kind": "parameter",
+      "deprecated_in": "0.0.106",
+      "removed_in": "1.10.0",
+      "announced_removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "settings=LmntTTSService.Settings(language=...)",
+      "message": "Use ``settings=LmntTTSService.Settings(language=...)`` instead. Will be removed in 2.0.0."
+    },
+    {
+      "subject": "LmntTTSService.model",
+      "module": "pipecat.services.lmnt.tts",
+      "kind": "parameter",
+      "deprecated_in": "0.0.105",
+      "removed_in": "1.10.0",
+      "announced_removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "settings=LmntTTSService.Settings(model=...)",
+      "message": "Use ``settings=LmntTTSService.Settings(model=...)`` instead. Will be removed in 2.0.0."
+    },
+    {
+      "subject": "LmntTTSService.voice_id",
+      "module": "pipecat.services.lmnt.tts",
+      "kind": "parameter",
+      "deprecated_in": "0.0.105",
+      "removed_in": "1.10.0",
+      "announced_removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "settings=LmntTTSService.Settings(voice=...)",
+      "message": "Use ``settings=LmntTTSService.Settings(voice=...)`` instead. Will be removed in 2.0.0."
+    },
+    {
+      "subject": "SpeechmaticsSTTService.UpdateParams",
+      "module": "pipecat.services.speechmatics.stt",
+      "kind": "class",
+      "deprecated_in": "0.0.104",
+      "removed_in": "1.10.0",
+      "announced_removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "SpeechmaticsSTTService.Settings",
+      "message": "`SpeechmaticsSTTService.UpdateParams` is deprecated since 0.0.104 and will be removed in 2.0.0. Use `SpeechmaticsSTTService.Settings` instead."
+    },
+    {
+      "subject": "SpeechmaticsSTTService.update_params",
+      "module": "pipecat.services.speechmatics.stt",
+      "kind": "method",
+      "deprecated_in": "0.0.104",
+      "removed_in": "1.10.0",
+      "announced_removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "STTUpdateSettingsFrame",
+      "message": "`SpeechmaticsSTTService.update_params` is deprecated since 0.0.104 and will be removed in 2.0.0. Use `STTUpdateSettingsFrame` instead."
+    },
+    {
       "subject": "AICFilter.create_vad_analyzer",
       "module": "pipecat.audio.filters.aic_filter",
       "kind": "method",

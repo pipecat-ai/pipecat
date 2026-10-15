@@ -47,6 +47,7 @@ PARAM_TO_ENV_SUFFIX = {
     "endpoint": "ENDPOINT",
     "hf_token": "HF_TOKEN",
     "aws_access_key_id": "ACCESS_KEY_ID",
+    "aws_session_token": "SESSION_TOKEN",
     "aws_secret_access_key": "SECRET_ACCESS_KEY",
     "access_key_id": "ACCESS_KEY_ID",
     "secret_access_key": "SECRET_ACCESS_KEY",

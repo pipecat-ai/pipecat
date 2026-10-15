@@ -324,6 +324,8 @@ class FrameProcessorMetrics(BaseObject):
         logstr = f"{self._processor_name()} prompt tokens: {tokens.prompt_tokens}, completion tokens: {tokens.completion_tokens}"
         if tokens.cache_read_input_tokens:
             logstr += f", cache read input tokens: {tokens.cache_read_input_tokens}"
+        if tokens.cache_creation_input_tokens:
+            logstr += f", cache creation input tokens: {tokens.cache_creation_input_tokens}"
         if tokens.reasoning_tokens:
             logstr += f", reasoning tokens: {tokens.reasoning_tokens}"
         if tokens.input_audio_tokens:

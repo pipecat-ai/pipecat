@@ -15,7 +15,6 @@ import asyncio
 import json
 import os
 import time
-import warnings
 from dataclasses import dataclass, field
 
 from pipecat.utils.tracing.service_decorators import traced_stt
@@ -41,7 +40,7 @@ from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import GOOGLE_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language, resolve_language
-from pipecat.utils.deprecation import deprecated
+from pipecat.utils.deprecation import deprecated, warn_deprecated
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 
@@ -468,6 +467,14 @@ class GoogleSTTSettings(STTSettings):
             service. The telephony model rejects adaptation and transcribes
             without it; support otherwise varies by model and language — see
             https://cloud.google.com/speech-to-text/v2/docs/speech-to-text-supported-languages
+
+        denoiser_config: Background-noise removal, as a ``DenoiserConfig``
+            message or an equivalent dict::
+
+                denoiser_config={"denoise_audio": True}
+
+            Only the Chirp 3 models denoise; see
+            https://cloud.google.com/speech-to-text/docs/models/chirp-3
     """
 
     languages: list[Language] | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -482,6 +489,9 @@ class GoogleSTTSettings(STTSettings):
     enable_interim_results: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     enable_voice_activity_events: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     adaptation: dict[str, Any] | cloud_speech.SpeechAdaptation | None | NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
+    denoiser_config: dict[str, Any] | cloud_speech.DenoiserConfig | None | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
 
@@ -624,6 +634,7 @@ class GoogleSTTService(STTService):
             enable_interim_results=True,
             enable_voice_activity_events=False,
             adaptation=None,
+            denoiser_config=None,
         )
 
         # 2. No direct init arg overrides
@@ -766,6 +777,15 @@ class GoogleSTTService(STTService):
         # Already a message: normalizing on the way in leaves nothing to convert.
         return _normalize_speech_adaptation(adaptation)
 
+    def _get_denoiser_config(self) -> cloud_speech.DenoiserConfig | None:
+        """Build the DenoiserConfig message from settings."""
+        denoiser_config = self._settings.denoiser_config
+        if not is_given(denoiser_config) or denoiser_config is None:
+            return None
+        if isinstance(denoiser_config, cloud_speech.DenoiserConfig):
+            return denoiser_config
+        return cloud_speech.DenoiserConfig(denoiser_config)
+
     async def _reconnect_if_needed(self):
         """Reconnect the stream if it's currently active."""
         if self._streaming_task:
@@ -812,14 +832,12 @@ class GoogleSTTService(STTService):
 
         # Warn on deprecated language_codes usage
         if is_given(delta.language_codes):
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    "self.Settings.language_codes is deprecated. "
-                    "Use self.Settings.languages (List[Language]) instead.",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
+            warn_deprecated(
+                "`GoogleSTTService.Settings.language_codes` is deprecated since 0.0.104 and "
+                "will be removed in 2.0.0. Use `GoogleSTTService.Settings.languages` "
+                "(`list[Language]`) instead.",
+                stacklevel=2,
+            )
 
         if is_given(delta.adaptation) and delta.adaptation is not None:
             delta.adaptation = _normalize_speech_adaptation(delta.adaptation)
@@ -964,6 +982,10 @@ class GoogleSTTService(STTService):
                 enable_word_confidence=self._settings.enable_word_confidence,
             ),
         )
+
+        denoiser_config = self._get_denoiser_config()
+        if denoiser_config is not None:
+            recognition_config.denoiser_config = denoiser_config
 
         speech_adaptation = self._get_speech_adaptation()
         if speech_adaptation is not None:

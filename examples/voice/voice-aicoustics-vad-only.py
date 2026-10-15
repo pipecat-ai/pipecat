@@ -64,6 +64,7 @@ from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.livekit.transport import LiveKitParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 from pipecat.workers.runner import WorkerRunner
 
@@ -156,6 +157,10 @@ aic_vad_analyzer = LoggingAICQuailVADAnalyzer(
 # analyzer is wired via VADProcessor below.
 transport_params = {
     "daily": lambda: DailyParams(
+        audio_in_enabled=True,
+        audio_in_filter=aic_filter,
+    ),
+    "livekit": lambda: LiveKitParams(
         audio_in_enabled=True,
         audio_in_filter=aic_filter,
     ),

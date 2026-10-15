@@ -73,6 +73,11 @@ class AzureTTSSettings(TTSSettings):
     """Settings for AzureTTSService and AzureHttpTTSService.
 
     Parameters:
+        effect: Audio effect processor that compensates for playback distortion on
+            a target device, as SSML's ``effect`` attribute on ``<voice>``:
+            ``"eq_car"`` for enclosed vehicles, ``"eq_telecomhp8k"`` for narrowband
+            telephony (pair it with an 8 kHz pipeline, or the output is not
+            optimized). Azure ignores an unrecognized value.
         emphasis: Emphasis level for speech ("strong", "moderate", "reduced").
         force_locale: Wrap synthesized text in SSML's ``<lang xml:lang>`` so the
             voice speaks in the configured ``language`` rather than the one it
@@ -88,9 +93,15 @@ class AzureTTSSettings(TTSSettings):
         role: Voice role for expression (e.g., "YoungAdultFemale").
         style: Speaking style (e.g., "cheerful", "sad", "excited").
         style_degree: Intensity of the speaking style (0.01 to 2.0).
+        voice_parameters: Model parameters for HD voices, as SSML's
+            semicolon-separated ``parameters`` attribute on ``<voice>`` (e.g.
+            ``"temperature=0.7;top_p=0.8;top_k=22;cfg_scale=1.4"``, or
+            ``"enhancePronunciation=true"``). Which keys apply depends on the
+            voice's base model; standard neural voices ignore the attribute.
         volume: Volume level (e.g., "+20%", "loud", "x-soft").
     """
 
+    effect: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     emphasis: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     force_locale: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     pitch: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -98,6 +109,7 @@ class AzureTTSSettings(TTSSettings):
     role: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     style: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     style_degree: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    voice_parameters: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     volume: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
@@ -194,11 +206,17 @@ class AzureBaseTTSService:
         # Escape special characters
         escaped_text = self._escape_text(text)
 
+        voice_attrs = f"name='{self._settings.voice}'"
+        if self._settings.effect:
+            voice_attrs += f" effect='{self._settings.effect}'"
+        if self._settings.voice_parameters:
+            voice_attrs += f" parameters='{self._settings.voice_parameters}'"
+
         ssml = (
             f"<speak version='1.0' xml:lang='{language}' "
             "xmlns='http://www.w3.org/2001/10/synthesis' "
             "xmlns:mstts='http://www.w3.org/2001/mstts'>"
-            f"<voice name='{self._settings.voice}'>"
+            f"<voice {voice_attrs}>"
             "<mstts:silence type='Sentenceboundary' value='20ms' />"
         )
 
@@ -331,6 +349,7 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
             model=None,
             voice="en-US-SaraNeural",
             language="en-US",
+            effect=None,
             emphasis=None,
             force_locale=False,
             pitch=None,
@@ -338,6 +357,7 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
             role=None,
             style=None,
             style_degree=None,
+            voice_parameters=None,
             volume=None,
         )
 
@@ -883,6 +903,7 @@ class AzureHttpTTSService(TTSService, AzureBaseTTSService):
             model=None,
             voice="en-US-SaraNeural",
             language="en-US",
+            effect=None,
             emphasis=None,
             force_locale=False,
             pitch=None,
@@ -890,6 +911,7 @@ class AzureHttpTTSService(TTSService, AzureBaseTTSService):
             role=None,
             style=None,
             style_degree=None,
+            voice_parameters=None,
             volume=None,
         )
 

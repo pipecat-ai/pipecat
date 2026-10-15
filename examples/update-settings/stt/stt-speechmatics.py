@@ -28,6 +28,7 @@ from pipecat.services.speechmatics.stt import SpeechmaticsSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.livekit.transport import LiveKitParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 from pipecat.workers.runner import WorkerRunner
 
@@ -39,6 +40,10 @@ transport_params = {
         audio_out_enabled=True,
     ),
     "daily": lambda: DailyParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
+    "livekit": lambda: LiveKitParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
     ),
@@ -61,7 +66,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         settings=SpeechmaticsSTTService.Settings(
             enable_diarization=True,
             speaker_active_format="<{speaker_id}>{text}</{speaker_id}>",
-            speaker_passive_format="<PASSIVE><{speaker_id}>{text}</{speaker_id}></PASSIVE>",
         ),
     )
 
@@ -123,12 +127,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         logger.info("Updating Speechmatics STT settings: language=es")
         await worker.queue_frame(
             STTUpdateSettingsFrame(delta=SpeechmaticsSTTService.Settings(language=Language.ES))
-        )
-
-        await asyncio.sleep(10)
-        logger.info("Updating Speechmatics STT settings: focus_speakers=['S1']")
-        await worker.queue_frame(
-            STTUpdateSettingsFrame(delta=SpeechmaticsSTTService.Settings(focus_speakers=["S1"]))
         )
 
         await asyncio.sleep(10)

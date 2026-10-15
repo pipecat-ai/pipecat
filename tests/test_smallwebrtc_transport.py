@@ -51,7 +51,9 @@ from aiortc.mediastreams import MediaStreamError  # noqa: E402
 from av import AudioFrame, VideoFrame  # noqa: E402
 
 from pipecat.frames.frames import OutputTransportMessageUrgentFrame  # noqa: E402
-from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection  # noqa: E402
+from pipecat.transports.smallwebrtc.connection import (  # noqa: E402
+    SmallWebRTCConnection,
+)
 from pipecat.transports.smallwebrtc.transport import (  # noqa: E402
     CAM_VIDEO_SOURCE,
     SCREEN_VIDEO_SOURCE,
@@ -93,7 +95,10 @@ async def _noop(*args):
 def _make_client():
     connection = SmallWebRTCConnection()
     callbacks = SmallWebRTCCallbacks(
-        on_app_message=_noop, on_client_connected=_noop, on_client_disconnected=_noop
+        on_app_message=_noop,
+        on_client_connected=_noop,
+        on_client_disconnected=_noop,
+        on_track_status=_noop,
     )
     return SmallWebRTCClient(connection, callbacks), connection
 
@@ -324,6 +329,160 @@ class TestReadVideoFrameMediaStreamError(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(dead.recv.await_count, 1)
         self.assertGreaterEqual(yielded, 2)
+
+
+def _browser_like_client():
+    """An aiortc peer whose offer is shaped like the browser client's.
+
+    Audio, camera and screen share transceivers plus a data channel, all
+    bundled onto one transport, as browsers do by default.
+    """
+    from aiortc import RTCBundlePolicy, RTCConfiguration, RTCPeerConnection
+
+    client = RTCPeerConnection(RTCConfiguration(bundlePolicy=RTCBundlePolicy.MAX_BUNDLE))
+    client.addTransceiver("audio", direction="sendrecv")
+    client.addTransceiver("video", direction="sendrecv")
+    screen = client.addTransceiver("video", direction="sendonly")
+    client.createDataChannel("chat")
+    return client, screen
+
+
+class TestBundledTransceivers(unittest.IsolatedAsyncioTestCase):
+    """Every media section of a bundled offer shares one transport."""
+
+    async def test_screen_share_transceiver_shares_the_transport(self):
+        client, _screen = _browser_like_client()
+        await client.setLocalDescription(await client.createOffer())
+
+        connection = SmallWebRTCConnection()
+        await connection.initialize(
+            sdp=client.localDescription.sdp, type=client.localDescription.type
+        )
+
+        transports = {t.receiver.transport for t in connection.pc.getTransceivers()}
+        self.assertEqual(len(connection.pc.getTransceivers()), 3)
+        self.assertEqual(len(transports), 1)
+
+        await connection.disconnect()
+        await client.close()
+
+
+class TestScreenShareDelivery(unittest.IsolatedAsyncioTestCase):
+    """A screen share started after connecting reaches the bot's screen track.
+
+    Both peers run in this process and connect over localhost, so the frames
+    go through real ICE, DTLS and RTP, and through aiortc's routing of packets
+    to receivers.
+    """
+
+    async def test_screen_share_frames_reach_the_screen_track(self):
+        from aiortc import RTCSessionDescription
+        from aiortc.mediastreams import VideoStreamTrack
+
+        client, screen = _browser_like_client()
+        await client.setLocalDescription(await client.createOffer())
+
+        connection = SmallWebRTCConnection()
+        try:
+            await connection.initialize(
+                sdp=client.localDescription.sdp, type=client.localDescription.type
+            )
+            answer = connection.get_answer()
+            await client.setRemoteDescription(
+                RTCSessionDescription(sdp=answer["sdp"], type=answer["type"])
+            )
+            for _ in range(100):
+                if connection.pc.connectionState == "connected":
+                    break
+                await asyncio.sleep(0.1)
+            self.assertEqual(connection.pc.connectionState, "connected")
+
+            # The user starts sharing their screen after the call connects.
+            screen.sender.replaceTrack(VideoStreamTrack())
+
+            frame = await asyncio.wait_for(connection.screen_video_input_track().recv(), 10)
+            self.assertIsInstance(frame, VideoFrame)
+        finally:
+            await connection.disconnect()
+            await client.close()
+
+
+class TestVideoJitterBuffer(unittest.IsolatedAsyncioTestCase):
+    """The screen share receiver assembles frames larger than aiortc's default buffer."""
+
+    def _connection(self):
+        receivers = []
+        for kind in ("audio", "video", "video"):
+            receiver = MagicMock()
+            receiver.track.kind = kind
+            receiver._RTCRtpReceiver__jitter_buffer = default_buffer = object()
+            receivers.append((receiver, default_buffer))
+        connection = SmallWebRTCConnection()
+        connection._pc = MagicMock()
+        connection._pc.getTransceivers.return_value = [
+            MagicMock(receiver=receiver) for receiver, _ in receivers
+        ]
+        return connection, receivers
+
+    async def test_screen_share_frame_of_many_packets_is_assembled(self):
+        from aiortc.rtp import RtpPacket
+
+        connection, receivers = self._connection()
+        connection.screen_video_input_track()
+        jitter_buffer = receivers[2][0]._RTCRtpReceiver__jitter_buffer
+
+        # A keyframe of 300 packets, then the first packet of the next frame,
+        # which completes it.
+        frame = None
+        for seq in range(301):
+            packet = RtpPacket(
+                payload_type=96, sequence_number=seq, timestamp=0 if seq < 300 else 3000
+            )
+            packet._data = b"x"
+            pli, assembled = jitter_buffer.add(packet)
+            self.assertFalse(pli)
+            frame = assembled or frame
+
+        self.assertIsNotNone(frame)
+        self.assertEqual(len(frame.data), 300)
+
+    async def test_camera_keeps_the_default_buffer(self):
+        connection, receivers = self._connection()
+        connection.video_input_track()
+
+        receiver, default_buffer = receivers[1]
+        self.assertIs(receiver._RTCRtpReceiver__jitter_buffer, default_buffer)
+
+
+class TestTrackStatus(unittest.IsolatedAsyncioTestCase):
+    """The peer turning a source on or off is reported with the source."""
+
+    async def test_turning_sources_on_and_off_reports_them(self):
+        track_status = AsyncMock()
+        connection = SmallWebRTCConnection()
+        callbacks = SmallWebRTCCallbacks(
+            on_app_message=_noop,
+            on_client_connected=_noop,
+            on_client_disconnected=_noop,
+            on_track_status=track_status,
+        )
+        SmallWebRTCClient(connection, callbacks)
+
+        for receiver_index, enabled in ((2, True), (2, False), (1, False), (0, False)):
+            await connection._handle_signalling_message(
+                {"type": "trackStatus", "receiver_index": receiver_index, "enabled": enabled}
+            )
+        await asyncio.sleep(0.05)
+
+        self.assertEqual(
+            [c.args for c in track_status.await_args_list],
+            [
+                ("screenVideo", True),
+                ("screenVideo", False),
+                ("camera", False),
+                ("microphone", False),
+            ],
+        )
 
 
 if __name__ == "__main__":

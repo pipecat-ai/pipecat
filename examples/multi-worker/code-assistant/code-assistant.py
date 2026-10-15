@@ -35,6 +35,7 @@ from pipecat.adapters.schemas.direct_function import tool_options
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMMessagesAppendFrame, LLMRunFrame
+from pipecat.pipeline.job_context import JobParams
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -50,6 +51,7 @@ from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.livekit.transport import LiveKitParams
 from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
@@ -62,6 +64,10 @@ transport_params = {
         audio_out_enabled=True,
     ),
     "daily": lambda: DailyParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
+    "livekit": lambda: LiveKitParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
     ),
@@ -83,7 +89,9 @@ async def ask_code(params: FunctionCallParams, question: str):
             dependencies, or anything in the project.
     """
     logger.info(f"Asking code worker: '{question}'")
-    async with params.pipeline_worker.job("code-worker", payload={"question": question}) as job:
+    async with params.pipeline_worker.job(
+        "code-worker", params=JobParams(payload={"question": question})
+    ) as job:
         await params.llm.queue_frame(
             LLMMessagesAppendFrame(
                 messages=[{"role": "developer", "content": "Give me a moment."}],

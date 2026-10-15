@@ -58,6 +58,7 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.bus import BusJobRequestMessage
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMMessagesAppendFrame, LLMRunFrame
+from pipecat.pipeline.job_context import JobParams
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -74,6 +75,7 @@ from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.livekit.transport import LiveKitParams
 from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
@@ -85,6 +87,10 @@ transport_params = {
         audio_out_enabled=True,
     ),
     "daily": lambda: DailyParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
+    "livekit": lambda: LiveKitParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
     ),
@@ -197,7 +203,7 @@ def build_sensor_controller() -> PipelineWorker:
 
     @worker.event_handler("on_job_request")
     async def on_request(_worker, message: BusJobRequestMessage):
-        question = message.payload["question"]
+        question = (message.payload or {})["question"]
         logger.info(f"Controller: received question '{question}'")
         state["job_id"] = message.job_id
         await worker.queue_frame(
@@ -249,7 +255,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         """
         logger.info(f"Voice agent: forwarding to controller: '{question}'")
         async with params.pipeline_worker.job(
-            "sensor-controller", payload={"question": question}, timeout=30
+            "sensor-controller", params=JobParams(payload={"question": question}, timeout=30)
         ) as t:
             pass
         await params.result_callback(t.response["answer"])

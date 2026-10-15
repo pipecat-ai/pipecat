@@ -112,13 +112,6 @@ class InceptionLLMService(OpenAILLMService):
         ):
             params["reasoning_effort"] = self._settings.reasoning_effort
 
-        # realtime is Inception-specific and unknown to the OpenAI SDK,
-        # so it must be passed via extra_body to avoid validation errors.
-        extra_body = {}
-        if is_given(self._settings.realtime) and self._settings.realtime is not None:
-            extra_body["realtime"] = self._settings.realtime
-
-        if extra_body:
-            params["extra_body"] = extra_body
+        self._merge_extra_body(params, {"realtime": self._settings.realtime})
 
         return params

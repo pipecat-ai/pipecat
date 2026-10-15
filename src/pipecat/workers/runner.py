@@ -43,7 +43,6 @@ import asyncio
 import gc
 import signal
 import uuid
-import warnings
 from dataclasses import dataclass, field
 
 from loguru import logger
@@ -68,6 +67,7 @@ from pipecat.utils.asyncio.task_manager import (
     TaskManager,
 )
 from pipecat.utils.base_object import BaseObject
+from pipecat.utils.deprecation import warn_deprecated
 from pipecat.utils.startup import run_setup_hook
 from pipecat.workers.base_worker import BaseWorker, WorkerParams
 
@@ -147,14 +147,11 @@ class WorkerRunner(BaseObject, BusSubscriber):
         self._check_dangling_tasks = check_dangling_tasks
 
         if loop is not None:
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    "`loop` is deprecated since 1.5.0 and will be removed in 2.0.0. "
-                    "Use `task_manager` instead.",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
+            warn_deprecated(
+                "`loop` is deprecated since 1.5.0 and will be removed in 2.0.0. "
+                "Use `task_manager` instead.",
+                stacklevel=2,
+            )
 
         self._entries: dict[str, _WorkerEntry] = {}
         self._known_runners: set[str] = set()
@@ -267,10 +264,9 @@ class WorkerRunner(BaseObject, BusSubscriber):
                 called.
         """
         if worker is not None:
-            warnings.warn(
-                "Passing a worker to WorkerRunner.run() is deprecated; "
-                "register it with WorkerRunner.add_workers() before calling run() instead.",
-                DeprecationWarning,
+            warn_deprecated(
+                "`WorkerRunner.run(worker)` is deprecated since 1.3.0 and will be removed in "
+                "2.0.0. Use `WorkerRunner.add_workers()` before `run()` instead.",
                 stacklevel=2,
             )
 
@@ -390,10 +386,12 @@ class WorkerRunner(BaseObject, BusSubscriber):
 
         await self._load_setup_files()
 
-        for entry in self._entries.values():
-            await self._start_worker(entry)
-
+        # Running from here on, so a worker that adds another one while it
+        # starts gets it started right away through add_workers().
         self._running = True
+
+        for entry in list(self._entries.values()):
+            await self._start_worker(entry)
 
     async def _cancel_spawned_workers(self) -> None:
         """Cancel every worker still going and wait for it to finish.

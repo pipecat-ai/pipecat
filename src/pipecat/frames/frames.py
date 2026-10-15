@@ -9,6 +9,14 @@
 This module contains all frame types used throughout the Pipecat pipeline system,
 including data frames, system frames, and control frames for audio, video, text,
 and LLM processing.
+
+Attributes:
+    AggregationType: Deprecated alias for
+        :class:`~pipecat.utils.text.base_text_aggregator.TextType`.
+
+        .. deprecated:: 1.13.0
+            Use :class:`~pipecat.utils.text.base_text_aggregator.TextType` instead.
+            Will be removed in 2.0.0.
 """
 
 from __future__ import annotations
@@ -34,9 +42,9 @@ from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.metrics.metrics import MetricsData
 from pipecat.services.settings import LLMSettings, ServiceSettings, STTSettings, TTSSettings
 from pipecat.transcriptions.language import Language
-from pipecat.utils.deprecation import deprecated, warn_deprecated_read
+from pipecat.utils.deprecation import deprecated, renamed_init_field, warn_deprecated
 from pipecat.utils.errors import ErrorCategory
-from pipecat.utils.text.base_text_aggregator import AggregationType
+from pipecat.utils.text.base_text_aggregator import TextType
 from pipecat.utils.time import nanoseconds_to_str
 from pipecat.utils.utils import obj_count, obj_id
 
@@ -78,6 +86,11 @@ class Frame:
         metadata: Dictionary for arbitrary frame metadata.
         transport_source: Name of the transport source that created this frame.
         transport_destination: Name of the transport destination for this frame.
+        interruptible: Whether an interruption may drop this frame from a
+            processor's queue or cancel its processing. True unless the frame's
+            class declares ``interruptible: bool = field(default=False,
+            init=False)``, as :class:`EndFrame` does. Set it on a frame before
+            pushing it to decide for that frame alone.
     """
 
     id: int = field(init=False)
@@ -87,6 +100,7 @@ class Frame:
     metadata: dict[str, Any] = field(init=False)
     transport_source: str | None = field(init=False)
     transport_destination: str | None = field(init=False)
+    interruptible: bool = field(default=True, init=False)
 
     def __post_init__(self):
         self.id: int = obj_id()
@@ -96,6 +110,8 @@ class Frame:
         self.metadata: dict[str, Any] = {}
         self.transport_source: str | None = None
         self.transport_destination: str | None = None
+        if isinstance(self, UninterruptibleFrame):
+            self.interruptible = False
 
     def __str__(self):
         return self.name
@@ -143,15 +159,22 @@ class ControlFrame(Frame):
 #
 
 
+@deprecated(
+    "`UninterruptibleFrame` is deprecated since 1.11.0 and will be removed in 2.0.0. "
+    "Use the `interruptible` field with `default=False` instead."
+)
 @dataclass
 class UninterruptibleFrame:
-    """A marker for data or control frames that must not be interrupted.
+    """A marker for frames that are uninterruptible by default.
 
-    Frames with this mixin are still ordered normally, but unlike other frames,
-    they are preserved during interruptions: they remain in internal queues and
-    any task processing them will not be cancelled. This ensures the frame is
-    always delivered and processed to completion.
+    .. deprecated:: 1.11.0
+        Use the ``interruptible`` field with ``default=False`` instead::
 
+            interruptible: bool = field(default=False, init=False)
+
+        Will be removed in 2.0.0.
+
+    Frames with this mixin start with :attr:`Frame.interruptible` False.
     """
 
     pass
@@ -190,6 +213,26 @@ class ImageRawFrame:
     image: bytes
     size: tuple[int, int]
     format: str | None
+
+
+FileSourceType = Literal["bytes", "url"]
+
+
+@dataclass
+class FileRawFrame:
+    """A frame containing a raw file.
+
+    Parameters:
+        file: A base64 data URL, or a URL string, depending on ``type``.
+        type: Type of the file ('bytes' or 'url').
+        filename: Optional name of the file.
+        format: File format (expected in Mime Format).
+    """
+
+    file: str
+    type: FileSourceType
+    filename: str | None
+    format: str
 
 
 #
@@ -384,14 +427,48 @@ class LLMMarkerFrame(DataFrame):
 
 
 @dataclass
+class LLMMarkerResponseFrame(DataFrame):
+    """What a marker-reading LLM service made of one whole response.
+
+    Pushed when the response ends, after the :class:`LLMMarkerFrame` and the
+    spoken text: the marker it found, what it meant, and the raw text the LLM
+    produced before anything was held back. A diagnostic, for consumers that
+    check how well the LLM follows the marker protocol; it plays no part in the
+    conversation.
+
+    Parameters:
+        raw: The response text as the LLM produced it, markers included.
+        marker: The marker found, or ``None`` when the response carried none.
+        kind: What the marker meant, in the emitter's own vocabulary, for
+            consumers that should not depend on the marker text (which is
+            configurable). The turn-completion mixin uses ``"complete"``,
+            ``"short"`` and ``"long"``.
+        markers: Every marker the emitter recognizes, so a consumer can find
+            them in ``raw`` without knowing the emitter's configuration.
+    """
+
+    raw: str
+    marker: str | None = None
+    kind: str | None = None
+    markers: list[str] = field(default_factory=list)
+
+
+@renamed_init_field(
+    "aggregated_by",
+    "text_type",
+    "`AggregatedTextFrame.aggregated_by` is deprecated since 1.13.0 and will be removed "
+    "in 2.0.0. Use `text_type` instead.",
+)
+@dataclass
 class AggregatedTextFrame(TextFrame):
     """Text frame representing an aggregation of TextFrames.
 
     This frame contains multiple TextFrames aggregated together for processing
-    or output along with a field to indicate how they are aggregated.
+    or output along with a field to indicate what kind of text they make.
 
     Parameters:
-        aggregated_by: Method used to aggregate the text frames.
+        text_type: The kind of text, such as a sentence, a word or a custom
+            type like ``"code"``.
         context_id: Unique identifier for the TTS context that generated this text.
         raw_text: The full matched text including start/end pattern delimiters, set when
             this frame was produced from a PatternMatch (e.g. a ``<code>...</code>`` block).
@@ -400,10 +477,33 @@ class AggregatedTextFrame(TextFrame):
             by the TTS service just before synthesis. Defaults to ``False``.
     """
 
-    aggregated_by: AggregationType | str
+    text_type: TextType | str
     context_id: str | None = None
     raw_text: str | None = None
     will_be_spoken: bool = field(default=False, init=False)
+
+    @property
+    @deprecated(
+        "`AggregatedTextFrame.aggregated_by` is deprecated since 1.13.0 and will be removed "
+        "in 2.0.0. Use `text_type` instead."
+    )
+    def aggregated_by(self) -> TextType | str:
+        """Deprecated alias for :attr:`text_type`.
+
+        .. deprecated:: 1.13.0
+            Use :attr:`text_type` instead.
+            Will be removed in 2.0.0.
+        """
+        return self.text_type
+
+    @aggregated_by.setter
+    def aggregated_by(self, value: TextType | str):
+        warn_deprecated(
+            "`AggregatedTextFrame.aggregated_by` is deprecated since 1.13.0 and will be removed "
+            "in 2.0.0. Use `text_type` instead.",
+            stacklevel=2,
+        )
+        self.text_type = value
 
 
 @dataclass
@@ -415,11 +515,23 @@ class VisionTextFrame(LLMTextFrame):
 
 @dataclass
 class TTSTextFrame(AggregatedTextFrame):
-    """Text frame generated by Text-to-Speech services."""
+    """Text frame generated by Text-to-Speech services.
 
-    pass
+    Parameters:
+        segment_id: ID of the AggregatedTextFrame this text is part of, when the
+            TTS service built it from one. A word reported by the TTS carries the
+            ID of the sentence or other segment it was spoken in.
+    """
+
+    segment_id: int | None = None
 
 
+@renamed_init_field(
+    "aggregated_by",
+    "text_type",
+    "`AggregatedTextProgressFrame.aggregated_by` is deprecated since 1.13.0 and will be "
+    "removed in 2.0.0. Use `text_type` instead.",
+)
 @dataclass
 class AggregatedTextProgressFrame(DataFrame):
     """Progress frame emitted alongside each TTSTextFrame during word-timestamp playback.
@@ -433,7 +545,7 @@ class AggregatedTextProgressFrame(DataFrame):
         segment_id: ID of the AggregatedTextFrame being spoken.
         context_id: TTS context this frame belongs to.
         text: Full original text of the source AggregatedTextFrame.
-        aggregated_by: Aggregation type of the source AggregatedTextFrame.
+        text_type: Text type of the source AggregatedTextFrame.
         accumulated_text: Text already spoken in this slot (including the current word).
         remaining_text: Text not yet spoken in this slot.
     """
@@ -441,9 +553,32 @@ class AggregatedTextProgressFrame(DataFrame):
     segment_id: int
     context_id: str | None
     text: str
-    aggregated_by: AggregationType | str
+    text_type: TextType | str
     accumulated_text: str
     remaining_text: str
+
+    @property
+    @deprecated(
+        "`AggregatedTextProgressFrame.aggregated_by` is deprecated since 1.13.0 and will be "
+        "removed in 2.0.0. Use `text_type` instead."
+    )
+    def aggregated_by(self) -> TextType | str:
+        """Deprecated alias for :attr:`text_type`.
+
+        .. deprecated:: 1.13.0
+            Use :attr:`text_type` instead.
+            Will be removed in 2.0.0.
+        """
+        return self.text_type
+
+    @aggregated_by.setter
+    def aggregated_by(self, value: TextType | str):
+        warn_deprecated(
+            "`AggregatedTextProgressFrame.aggregated_by` is deprecated since 1.13.0 and will be "
+            "removed in 2.0.0. Use `text_type` instead.",
+            stacklevel=2,
+        )
+        self.text_type = value
 
 
 @dataclass
@@ -487,7 +622,33 @@ class InterimTranscriptionFrame(TextFrame):
         result: Raw result from the STT service.
     """
 
-    text: str
+    user_id: str
+    timestamp: str
+    language: Language | None = None
+    result: Any | None = None
+
+    def __str__(self):
+        return f"{self.name}(user: {self.user_id}, text: [{self.text}], language: {self.language}, timestamp: {self.timestamp})"
+
+
+@dataclass
+class EagerTranscriptionFrame(TextFrame):
+    """Transcript of a turn a service predicts has ended, before it commits.
+
+    Some STT services emit a provisional end of turn ahead of the real one, so a
+    response can be generated during the gap. The prediction may be withdrawn
+    (:class:`EagerEndOfTurnCancelFrame`) and the committed transcript may differ
+    from this one, so nothing produced from it may reach the user or the context
+    until it is confirmed. See
+    :class:`~pipecat.turns.user_stop.EagerUserTurnStopStrategy`.
+
+    Parameters:
+        user_id: Identifier for the user who spoke.
+        timestamp: When the eager end of turn occurred.
+        language: Detected or specified language of the speech.
+        result: Raw result from the STT service.
+    """
+
     user_id: str
     timestamp: str
     language: Language | None = None
@@ -516,6 +677,29 @@ class TranslationFrame(TextFrame):
 
     def __str__(self):
         return f"{self.name}(user: {self.user_id}, text: [{self.text}], language: {self.language}, timestamp: {self.timestamp})"
+
+
+@dataclass
+class UserBackchannelFrame(DataFrame):
+    """A short acknowledgment the user said while the bot talks, such as "mhm".
+
+    Pushed in place of a transcription, so the bot keeps talking and the
+    acknowledgment stays out of the LLM context.
+
+    Parameters:
+        text: What the user said.
+        user_id: Identifier for the user who spoke.
+        timestamp: When the user said it.
+    """
+
+    text: str
+    user_id: str
+    timestamp: str
+
+    def __str__(self):
+        return (
+            f"{self.name}(user: {self.user_id}, text: [{self.text}], timestamp: {self.timestamp})"
+        )
 
 
 @dataclass
@@ -556,9 +740,14 @@ class LLMContextFrame(Frame):
 
     Parameters:
         context: The LLM context containing messages, tools, and configuration.
+        speculation: Whether this inference is speculative, run from a
+            provisional context that is not part of the conversation. Its
+            response must not reach the user or the context until the turn is
+            confirmed, and the service must not execute tool calls for it.
     """
 
     context: LLMContext
+    speculation: bool = False
 
 
 @dataclass
@@ -754,11 +943,13 @@ class FunctionCallResultProperties:
         is_final: Whether this is the final result for the function call. When
             ``False`` the result is treated as an intermediate update. Defaults to ``True``.
             Only meaningful for async function calls (``cancel_on_interruption=False``).
-            Note: realtime LLM services do not support streamed intermediate
-            results; they deliver only the final result to the provider. An
-            intermediate result reported to a realtime service is dropped
-            and an error is raised. Use a non-realtime LLM service if your
-            tool needs to stream intermediate results.
+            A speech-to-speech service takes one output per call, so it puts an
+            intermediate result to its model some other way — a conversation
+            item, a text event, a response that keeps the call open — and
+            ``run_llm`` says whether the model should answer it or just take it
+            in. A service that can't do that at all says so with
+            ``accepts_intermediate_function_call_results`` and drops
+            intermediate results with a warning.
     """
 
     run_llm: bool | None = None
@@ -767,7 +958,7 @@ class FunctionCallResultProperties:
 
 
 @dataclass
-class FunctionCallResultFrame(DataFrame, UninterruptibleFrame):
+class FunctionCallResultFrame(DataFrame):
     """Frame containing the result of an LLM function call.
 
     This is an uninterruptible frame because once a result is generated we
@@ -780,8 +971,13 @@ class FunctionCallResultFrame(DataFrame, UninterruptibleFrame):
         result: The result returned by the function.
         run_llm: Whether to run the LLM after this result.
         properties: Additional properties for result handling.
+        error: What went wrong, when the call ended because its handler raised.
+            The ``result`` is then a stand-in message written for the LLM to
+            read, rather than anything the handler returned.
 
     """
+
+    interruptible: bool = field(default=False, init=False)
 
     function_name: str
     tool_call_id: str
@@ -789,6 +985,7 @@ class FunctionCallResultFrame(DataFrame, UninterruptibleFrame):
     result: Any
     run_llm: bool | None = None
     properties: FunctionCallResultProperties | None = None
+    error: str | None = None
 
 
 @dataclass
@@ -798,15 +995,23 @@ class TTSSpeakFrame(DataFrame):
     A frame that contains text that should be spoken by the TTS service
     in the pipeline (if any).
 
+    Set ``interruptible=False`` on the frame to preserve its synthesis and
+    generated audio and text through interruptions.
+
     Parameters:
         text: The text to be spoken.
         append_to_context: Whether the spoken text should be appended to the LLM
             context. Defaults to True. (Note that, as of version 1.4.0, ``None`` —
             the previous default — is no longer a supported value.)
+        text_type: The text type of the text frames the TTS service pushes for
+            the spoken text, a sentence by default. A custom type lets them be
+            told apart, for example to keep them from the client with
+            ``RTVIObserverParams.skip_text_types``.
     """
 
     text: str
     append_to_context: bool = True
+    text_type: TextType | str = TextType.SENTENCE
 
     def __post_init__(self):
         super().__post_init__()
@@ -814,15 +1019,32 @@ class TTSSpeakFrame(DataFrame):
         # Coerce it to the new default of True and warn, so existing code keeps
         # working while surfacing the change.
         if self.append_to_context is None:
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    "TTSSpeakFrame.append_to_context=None is deprecated and has been "
-                    "converted to True, the new default.",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
+            warn_deprecated(
+                "`TTSSpeakFrame(append_to_context=None)` is deprecated since 1.4.0 and will "
+                "be removed in 2.0.0. Use `append_to_context=True`, the default, instead. "
+                "`None` is treated as `True`.",
+                # The caller of the generated __init__ that calls __post_init__.
+                stacklevel=3,
+            )
             self.append_to_context = True
+
+
+@dataclass
+class BotBackchannelFrame(TTSSpeakFrame):
+    """A short acknowledgment for the bot to say while the user talks, such as "Mm-hmm.".
+
+    The TTS service speaks it like any :class:`TTSSpeakFrame`, and its text
+    frames have type ``TextType.BACKCHANNEL``. Interruptions don't cut it off
+    unless ``interruptible`` is set to True on the frame.
+
+    Parameters:
+        append_to_context: Whether the spoken text should be appended to the LLM
+            context. Defaults to False.
+    """
+
+    append_to_context: bool = False
+    text_type: TextType | str = field(default=TextType.BACKCHANNEL, init=False)
+    interruptible: bool = field(default=False, init=False)
 
 
 @dataclass
@@ -986,10 +1208,10 @@ class StartFrame(SystemFrame):
         if name in _START_FRAME_DEPRECATED_FIELDS:
             value = object.__getattribute__(self, name)
             if value is not None:
-                warn_deprecated_read(
-                    f"`StartFrame.{name}` is deprecated since 1.8.0, "
-                    f"read `{name}` in `FrameProcessorSetup.setup()` instead. "
-                    "Will be removed in 2.0.0."
+                warn_deprecated(
+                    f"`StartFrame.{name}` is deprecated since 1.8.0 and will be removed in "
+                    f"2.0.0. Use `FrameProcessorSetup.{name}` instead.",
+                    stacklevel=2,
                 )
             return value
         return object.__getattribute__(self, name)
@@ -1053,20 +1275,18 @@ class ErrorFrame(SystemFrame):
         # Only a set flag carries behavior worth warning about, and
         # `FatalErrorFrame` already warns about itself.
         if self.fatal and not isinstance(self, FatalErrorFrame):
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    "`ErrorFrame.fatal` is deprecated since 1.8.0 and will be removed in "
-                    "2.0.0. If the error leaves its originating processor unable to do its "
-                    "job, report it with `push_error(..., force_treat_as_permanent=True)`: "
-                    "that marks the processor unusable, and the PipelineWorker acts on it "
-                    "according to its `processor_unusable_policy` "
-                    "(`ProcessorUnusablePolicy.CANCEL` does what `fatal=True` did). "
-                    "Otherwise, push this ErrorFrame without `fatal` and follow it with an "
-                    "`EndWorkerFrame` to end the pipeline.",
-                    DeprecationWarning,
-                    stacklevel=3,
-                )
+            warn_deprecated(
+                "`ErrorFrame.fatal` is deprecated since 1.8.0 and will be removed in "
+                "2.0.0. Use `push_error(..., force_treat_as_permanent=True)` or an "
+                "`EndWorkerFrame` instead. If the error leaves its originating processor "
+                "unable to do its job, `force_treat_as_permanent=True` marks the processor "
+                "unusable, and the PipelineWorker acts on it "
+                "according to its `processor_unusable_policy` "
+                "(`ProcessorUnusablePolicy.CANCEL` does what `fatal=True` did). "
+                "Otherwise, push this ErrorFrame without `fatal` and follow it with an "
+                "`EndWorkerFrame` to end the pipeline.",
+                stacklevel=3,
+            )
 
     def __str__(self):
         category = (
@@ -1166,7 +1386,27 @@ class UserStoppedSpeakingFrame(SystemFrame):
     """Frame indicating that the user turn has ended.
 
     Emitted when the user turn ends. This usually coincides with the start of
-    the bot turn.
+    the bot turn. A
+    :class:`~pipecat.turns.speculation_gate.SpeculationGate` releases whatever
+    speculative response it is holding on this frame, since the turn that
+    response answers has now ended.
+    """
+
+    pass
+
+
+@dataclass
+class EagerEndOfTurnCancelFrame(SystemFrame):
+    """Frame withdrawing an eager end of turn.
+
+    Emitted when a service reports the user resumed speaking after an eager end
+    of turn, or when the committed transcript doesn't match the eager one. The
+    LLM service stops generating, and its
+    :class:`~pipecat.turns.speculation_gate.SpeculationGate` discards what it
+    was holding — which is everything the response produced, so nothing further
+    down the pipeline has anything to undo.
+
+    A system frame so it overtakes the speculative output it cancels.
     """
 
     pass
@@ -1370,6 +1610,99 @@ class FunctionCallsStartedFrame(SystemFrame):
 
 
 @dataclass
+class ExternalFunctionCall:
+    """A function call made outside this pipeline, as announced to it.
+
+    What :class:`ExternalFunctionCallsStartedFrame` carries, one per call.
+
+    Parameters:
+        function_name: Name of the function called.
+        tool_call_id: Unique identifier of the call.
+    """
+
+    function_name: str
+    tool_call_id: str
+
+
+@dataclass
+class ExternalFunctionCallsStartedFrame(SystemFrame):
+    """Function calls were made outside this pipeline: ``FunctionCallsStartedFrame``'s counterpart.
+
+    Nothing in the pipeline acts on one; observers report it as they report
+    the pipeline's own. The calls ran elsewhere, e.g. in a backend worker's
+    pipeline on behalf of a tool here, and belong to that pipeline's
+    conversation, not this one. Like its counterpart it carries every call
+    announced together, which may be one. Each call's later phases come as
+    ``ExternalFunctionCallInProgressFrame``, ``ExternalFunctionCallResultFrame``
+    and ``ExternalFunctionCallCancelFrame``.
+
+    Parameters:
+        function_calls: The calls made.
+    """
+
+    function_calls: Sequence[ExternalFunctionCall]
+
+
+@dataclass
+class ExternalFunctionCallInProgressFrame(SystemFrame):
+    """An external function call is running: ``FunctionCallInProgressFrame``'s counterpart.
+
+    Nothing in the pipeline acts on one; observers report it as they report
+    the pipeline's own. The call ran elsewhere, e.g. in a backend worker's
+    pipeline on behalf of a tool here, and belongs to that pipeline's
+    conversation, not this one.
+
+    Parameters:
+        function_name: Name of the function called.
+        tool_call_id: Unique identifier of the call.
+        arguments: Arguments passed to the function.
+    """
+
+    function_name: str
+    tool_call_id: str
+    arguments: Any
+
+
+@dataclass
+class ExternalFunctionCallResultFrame(SystemFrame):
+    """An external function call produced a result: ``FunctionCallResultFrame``'s counterpart.
+
+    Nothing in the pipeline acts on one; observers report it as they report
+    the pipeline's own.
+
+    Parameters:
+        function_name: Name of the function called.
+        tool_call_id: Unique identifier of the call.
+        arguments: Arguments passed to the function.
+        result: The result.
+        is_final: Whether this result completes the call, or is one of a stream
+            of intermediate results before the final one.
+    """
+
+    function_name: str
+    tool_call_id: str
+    arguments: Any
+    result: Any
+    is_final: bool = True
+
+
+@dataclass
+class ExternalFunctionCallCancelFrame(SystemFrame):
+    """An external function call was cancelled: ``FunctionCallCancelFrame``'s counterpart.
+
+    Nothing in the pipeline acts on one; observers report it as they report
+    the pipeline's own.
+
+    Parameters:
+        function_name: Name of the function called.
+        tool_call_id: Unique identifier of the call.
+    """
+
+    function_name: str
+    tool_call_id: str
+
+
+@dataclass
 class FunctionCallCancelFrame(SystemFrame):
     """Frame signaling that a function call has been cancelled.
 
@@ -1488,6 +1821,18 @@ class InputImageRawFrame(SystemFrame, ImageRawFrame):
 
 
 @dataclass
+class InputFileRawFrame(SystemFrame, FileRawFrame):
+    """Raw file input frame.
+
+    A file usually coming from RTVI.
+    """
+
+    def __str__(self):
+        pts = format_pts(self.pts)
+        return f"{self.name}(pts: {pts}, type: {self.type})"
+
+
+@dataclass
 class InputTextRawFrame(SystemFrame, TextFrame):
     """Raw text input frame from transport.
 
@@ -1529,16 +1874,48 @@ class UserImageRawFrame(InputImageRawFrame):
         text: An optional text associated to this image.
         append_to_context: Whether the requested image should be appended to the LLM context.
         request: The original image request frame if this is a response.
+        run_llm: Whether appending this image should trigger an LLM completion.
+            None (the default) preserves the old unconditional-trigger behavior;
+            only an explicit False suppresses it.
     """
 
     user_id: str = ""
     text: str | None = None
     append_to_context: bool | None = None
     request: UserImageRequestFrame | None = None
+    run_llm: bool | None = None
 
     def __str__(self):
         pts = format_pts(self.pts)
         return f"{self.name}(pts: {pts}, user: {self.user_id}, source: {self.transport_source}, size: {self.size}, format: {self.format}, text: {self.text}, append_to_context: {self.append_to_context})"
+
+
+@dataclass
+class UserFileRawFrame(InputFileRawFrame):
+    """Raw file input frame associated with a specific user.
+
+    A file associated to a user.
+
+    Parameters:
+        user_id: Identifier of the user who provided this file.
+        text: Text associated to this file.
+        append_to_context: Whether the requested file should be appended to the LLM context.
+        custom_options: Dictionary of custom llm-specific options to be used when processing
+            this file, like 'detail' in openAI or 'citations' in Bedrock.
+        run_llm: Whether appending this file should trigger an LLM completion.
+            None (the default) preserves the old unconditional-trigger behavior;
+            only an explicit False suppresses it.
+    """
+
+    user_id: str = ""
+    text: str = ""
+    append_to_context: bool | None = None
+    custom_options: dict | None = None
+    run_llm: bool | None = None
+
+    def __str__(self):
+        pts = format_pts(self.pts)
+        return f"{self.name}(pts: {pts}, user: {self.user_id}, format: {self.format}, type: {self.type}, text: {self.text}, append_to_context: {self.append_to_context})"
 
 
 @dataclass
@@ -1742,7 +2119,7 @@ class WorkerSystemFrame(SystemFrame):
 
 
 @dataclass
-class EndWorkerFrame(WorkerFrame, UninterruptibleFrame):
+class EndWorkerFrame(WorkerFrame):
     """Frame to request graceful pipeline worker closure.
 
     This is used to notify the pipeline worker that the pipeline should be
@@ -1754,6 +2131,8 @@ class EndWorkerFrame(WorkerFrame, UninterruptibleFrame):
         reason: Optional reason for pushing an end frame.
     """
 
+    interruptible: bool = field(default=False, init=False)
+
     reason: Any | None = None
 
     def __str__(self):
@@ -1761,7 +2140,7 @@ class EndWorkerFrame(WorkerFrame, UninterruptibleFrame):
 
 
 @dataclass
-class StopWorkerFrame(WorkerFrame, UninterruptibleFrame):
+class StopWorkerFrame(WorkerFrame):
     """Frame to request pipeline worker stop while keeping processors running.
 
     This is used to notify the pipeline worker that it should be stopped as
@@ -1770,7 +2149,7 @@ class StopWorkerFrame(WorkerFrame, UninterruptibleFrame):
     (the default direction) so frames queued ahead of it are flushed first.
     """
 
-    pass
+    interruptible: bool = field(default=False, init=False)
 
 
 @dataclass
@@ -1906,7 +2285,7 @@ with warnings.catch_warnings():
 
 
 @dataclass
-class EndFrame(ControlFrame, UninterruptibleFrame):
+class EndFrame(ControlFrame):
     """Frame indicating pipeline has ended and should shut down.
 
     Indicates that a pipeline has ended and frame processors and pipelines
@@ -1915,13 +2294,15 @@ class EndFrame(ControlFrame, UninterruptibleFrame):
     that this is a control frame, which means it will be received in the order it
     was sent.
 
-    This frame is marked as UninterruptibleFrame to ensure it is not lost when
-    an InterruptionFrame is processed. Terminal frames must survive interruption
-    to guarantee proper pipeline shutdown.
+    This frame is uninterruptible so it is not lost when an InterruptionFrame
+    is processed. Terminal frames must survive interruption to guarantee proper
+    pipeline shutdown.
 
     Parameters:
         reason: Optional reason for pushing an end frame.
     """
+
+    interruptible: bool = field(default=False, init=False)
 
     reason: Any | None = None
 
@@ -1930,23 +2311,23 @@ class EndFrame(ControlFrame, UninterruptibleFrame):
 
 
 @dataclass
-class StopFrame(ControlFrame, UninterruptibleFrame):
+class StopFrame(ControlFrame):
     """Frame indicating pipeline should stop but keep processors running.
 
     Indicates that a pipeline should be stopped but that the pipeline
     processors should be kept in a running state. This is normally queued from
     the pipeline task.
 
-    This frame is marked as UninterruptibleFrame to ensure it is not lost when
-    an InterruptionFrame is processed. Terminal frames must survive interruption
-    to guarantee proper pipeline control.
+    This frame is uninterruptible so it is not lost when an InterruptionFrame
+    is processed. Terminal frames must survive interruption to guarantee proper
+    pipeline control.
     """
 
-    pass
+    interruptible: bool = field(default=False, init=False)
 
 
 @dataclass
-class PipelineFlushFrame(ControlFrame, UninterruptibleFrame):
+class PipelineFlushFrame(ControlFrame):
     """Probe frame used to flush all in-flight frames from the pipeline.
 
     Pushed downstream; the pipeline worker's sink bounces it back upstream, the
@@ -1956,8 +2337,8 @@ class PipelineFlushFrame(ControlFrame, UninterruptibleFrame):
     upstream. Useful to wait for the pipeline to drain (e.g. after an
     interruption) before injecting a new frame.
 
-    This frame is marked as UninterruptibleFrame so the probe survives an
-    InterruptionFrame and still completes its trip.
+    This frame is uninterruptible so the probe survives an InterruptionFrame
+    and still completes its trip.
 
     Parameters:
         event: Set by the worker when the probe completes its round-trip. The
@@ -1972,6 +2353,8 @@ class PipelineFlushFrame(ControlFrame, UninterruptibleFrame):
             into another pipeline is answered there, out of sight of whoever is
             waiting, so the answering worker reports progress back to this name.
     """
+
+    interruptible: bool = field(default=False, init=False)
 
     event: asyncio.Event | None = field(default=None, compare=False)
     returning: bool = field(default=False, compare=False)
@@ -2082,6 +2465,9 @@ class LLMFullResponseStartFrame(ControlFrame):
 
     Used to indicate the beginning of an LLM response. Followed by one or
     more TextFrames and a final LLMFullResponseEndFrame.
+
+    Parameters:
+        skip_tts: Whether the response should be skipped by the TTS service.
     """
 
     skip_tts: bool | None = field(init=False)
@@ -2093,7 +2479,11 @@ class LLMFullResponseStartFrame(ControlFrame):
 
 @dataclass
 class LLMFullResponseEndFrame(ControlFrame):
-    """Frame indicating the end of an LLM response."""
+    """Frame indicating the end of an LLM response.
+
+    Parameters:
+        skip_tts: Whether the response should be skipped by the TTS service.
+    """
 
     skip_tts: bool | None = field(init=False)
 
@@ -2160,7 +2550,7 @@ class LLMContextSummaryRequestFrame(ControlFrame):
 
 
 @dataclass
-class LLMContextSummaryResultFrame(ControlFrame, UninterruptibleFrame):
+class LLMContextSummaryResultFrame(ControlFrame):
     """Frame containing the result of context summarization.
 
     Sent by LLM services back to aggregators after generating a summary.
@@ -2175,6 +2565,8 @@ class LLMContextSummaryResultFrame(ControlFrame, UninterruptibleFrame):
         error: Error message if summarization failed, None on success.
     """
 
+    interruptible: bool = field(default=False, init=False)
+
     request_id: str
     summary: str
     last_summarized_index: int
@@ -2182,7 +2574,7 @@ class LLMContextSummaryResultFrame(ControlFrame, UninterruptibleFrame):
 
 
 @dataclass
-class FunctionCallInProgressFrame(ControlFrame, UninterruptibleFrame):
+class FunctionCallInProgressFrame(ControlFrame):
     """Frame signaling that a function call is currently executing.
 
     This is an uninterruptible frame because we always want to update the
@@ -2193,13 +2585,17 @@ class FunctionCallInProgressFrame(ControlFrame, UninterruptibleFrame):
         tool_call_id: Unique identifier for this function call.
         arguments: Arguments passed to the function.
         cancel_on_interruption: Whether to cancel this call if interrupted.
-            When ``False`` the call is treated as asynchronous: the LLM
-            continues the conversation immediately without waiting for the
-            result, and the result is injected later via a developer message.
+            When ``False`` the call is treated as asynchronous: the
+            conversation is not held while it runs, and a result that arrives
+            after the conversation has moved on is injected via a developer
+            message. A result that arrives before then settles in place like
+            a synchronous call's.
         group_id: Identifier shared by all function calls originating from the
             same LLM response batch. Used to determine when the last call in a
             group completes so the LLM can be triggered exactly once.
     """
+
+    interruptible: bool = field(default=False, init=False)
 
     function_name: str
     tool_call_id: str
@@ -2269,7 +2665,7 @@ TSettings = TypeVar("TSettings", bound=ServiceSettings, default=ServiceSettings,
 
 
 @dataclass
-class ServiceUpdateSettingsFrame(ControlFrame, UninterruptibleFrame, Generic[TSettings]):
+class ServiceUpdateSettingsFrame(ControlFrame, Generic[TSettings]):
     """Base frame for updating service settings.
 
     Supports both a ``settings`` dict (for backward compatibility) and a
@@ -2293,6 +2689,8 @@ class ServiceUpdateSettingsFrame(ControlFrame, UninterruptibleFrame, Generic[TSe
             rather than only the active one. Set this for provider-neutral
             settings that must survive a service switch.
     """
+
+    interruptible: bool = field(default=False, init=False)
 
     settings: Mapping[str, Any] = field(default_factory=dict)
     delta: TSettings | None = None
@@ -2381,13 +2779,17 @@ class FilterEnableFrame(FilterControlFrame):
 
 
 @dataclass
-class AudioBufferStartRecordingFrame(ControlFrame, UninterruptibleFrame):
+class AudioBufferStartRecordingFrame(ControlFrame):
     """Frame instructing audio buffer processors to start recording."""
+
+    interruptible: bool = field(default=False, init=False)
 
 
 @dataclass
-class AudioBufferStopRecordingFrame(ControlFrame, UninterruptibleFrame):
+class AudioBufferStopRecordingFrame(ControlFrame):
     """Frame instructing audio buffer processors to stop recording and flush."""
+
+    interruptible: bool = field(default=False, init=False)
 
 
 @dataclass
@@ -2420,6 +2822,44 @@ class MixerEnableFrame(MixerControlFrame):
 
 
 @dataclass
+class VolumeFrame(ControlFrame):
+    """Frame that sets the volume of the output transport's audio.
+
+    The volume holds until the next ``VolumeFrame``, and starts at the
+    transport's ``audio_out_volume``. Audio plays at the volume times the gain
+    set by :class:`VolumeGainFrame`. The frame takes effect in order with the
+    audio before it, and an interruption doesn't drop it.
+
+    Parameters:
+        volume: The volume, as a multiplier on the audio's samples: 1.0 leaves
+            it unchanged, 0.5 halves it.
+    """
+
+    volume: float
+    interruptible: bool = field(default=False, init=False)
+
+
+@dataclass
+class VolumeGainFrame(ControlFrame):
+    """Frame that sets a gain on the output transport's volume.
+
+    A gain adjusts the volume for some audio and is reset afterwards, for
+    example ``VolumeGainFrame(0.5)`` before a ``TTSSpeakFrame`` and
+    ``VolumeGainFrame(1.0)`` after it, which plays that utterance at half the
+    volume without changing the volume set by :class:`VolumeFrame`. The frame
+    takes effect in order with the audio before it, and an interruption
+    doesn't drop it.
+
+    Parameters:
+        gain: The gain, as a multiplier on the volume: 1.0 leaves it
+            unchanged, 0.5 halves it.
+    """
+
+    gain: float
+    interruptible: bool = field(default=False, init=False)
+
+
+@dataclass
 class ServiceSwitcherFrame(ControlFrame):
     """A base class for frames that affect ServiceSwitcher behavior."""
 
@@ -2434,3 +2874,19 @@ class ManuallySwitchServiceFrame(ServiceSwitcherFrame):
     """
 
     service: FrameProcessor
+
+
+if TYPE_CHECKING:
+    AggregationType = TextType
+else:
+
+    def __getattr__(name: str):
+        """Resolve the deprecated ``AggregationType`` alias."""
+        if name == "AggregationType":
+            warn_deprecated(
+                "`AggregationType` is deprecated since 1.13.0 and will be removed in 2.0.0. "
+                "Use `TextType` instead.",
+                stacklevel=2,
+            )
+            return TextType
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

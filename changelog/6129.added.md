@@ -1,0 +1,1 @@
+- Added a `mode` setting to `GeminiSTTService.Settings`, selecting Gemini Live's `VERBATIM` (default) or `SMART` transcription, where the model removes disfluencies and applies light grammatical cleanup and formatting.

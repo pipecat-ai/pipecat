@@ -16,7 +16,6 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import traceback
-import warnings
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from enum import Enum
@@ -40,14 +39,13 @@ from pipecat.frames.frames import (
     StartFrame,
     SystemFrame,
     TTSAudioRawFrame,
-    UninterruptibleFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage, MetricsData, STTUsage
 from pipecat.observers.base_observer import BaseObserver, FrameProcessed, FramePushed
 from pipecat.processors.metrics.frame_processor_metrics import FrameProcessorMetrics
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
 from pipecat.utils.base_object import BaseObject
-from pipecat.utils.deprecation import deprecated, warn_deprecated_read
+from pipecat.utils.deprecation import deprecated, warn_deprecated
 from pipecat.utils.errors import ErrorCategory, classify_http_exception
 from pipecat.utils.frame_queue import FrameQueue
 
@@ -121,9 +119,10 @@ class FrameProcessorSetup:
         if name == "tool_resources":
             value = object.__getattribute__(self, "tool_resources")
             if value is not None:
-                warn_deprecated_read(
-                    "`FrameProcessorSetup.tool_resources` is deprecated since 1.2.0; "
-                    "read `setup.pipeline_worker.app_resources` instead."
+                warn_deprecated(
+                    "`FrameProcessorSetup.tool_resources` is deprecated since 1.2.0 and will "
+                    "be removed in 2.0.0. Use `setup.pipeline_worker.app_resources` instead.",
+                    stacklevel=2,
                 )
             return value
         return object.__getattribute__(self, name)
@@ -926,19 +925,17 @@ class FrameProcessor(BaseObject):
             ```
         """
         if fatal:
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    "`push_error(fatal=True)` is deprecated since 1.8.0 and will be removed "
-                    "in 2.0.0. If the error leaves its originating processor unable to do "
-                    "its job, pass `force_treat_as_permanent=True` instead: that marks the "
-                    "processor unusable, and the PipelineWorker acts on it according to its "
-                    "`processor_unusable_policy` (`ProcessorUnusablePolicy.CANCEL` does what "
-                    "`fatal=True` did). Otherwise, drop `fatal` and push an "
-                    "`EndWorkerFrame` after the error to end the pipeline.",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
+            warn_deprecated(
+                "`push_error(fatal=True)` is deprecated since 1.8.0 and will be removed "
+                "in 2.0.0. Use `force_treat_as_permanent=True` or an `EndWorkerFrame` "
+                "instead. If the error leaves its originating processor unable to do its "
+                "job, `force_treat_as_permanent=True` marks the processor unusable, and the "
+                "PipelineWorker acts on it according to its "
+                "`processor_unusable_policy` (`ProcessorUnusablePolicy.CANCEL` does what "
+                "`fatal=True` did). Otherwise, drop `fatal` and push an "
+                "`EndWorkerFrame` after the error to end the pipeline.",
+                stacklevel=2,
+            )
 
         error_frame = ErrorFrame(
             error=error_msg,
@@ -957,7 +954,11 @@ class FrameProcessor(BaseObject):
         else:
             await self.push_error_frame(error=error_frame)
 
-    async def push_error_frame(self, error: ErrorFrame, force_treat_as_permanent: bool = False):
+    async def push_error_frame(
+        self,
+        error: ErrorFrame,
+        force_treat_as_permanent: bool = False,
+    ):
         """Push an error frame upstream.
 
         Args:
@@ -1130,9 +1131,8 @@ class FrameProcessor(BaseObject):
     async def _start_interruption(self):
         """Start handling an interruption by cancelling current tasks."""
         try:
-            current_is_uninterruptible = isinstance(
-                self.__process_current_frame, UninterruptibleFrame
-            )
+            current = self.__process_current_frame
+            current_is_uninterruptible = current is not None and not current.interruptible
             if current_is_uninterruptible:
                 # The frame currently being processed is uninterruptible, so we
                 # must not cancel it. Just flush non-uninterruptible frames from
@@ -1241,15 +1241,14 @@ class FrameProcessor(BaseObject):
         """Reset non-system frame processing queue."""
         self.__process_queue.reset()
 
-    def has_queued_frame(self, frame_type: type[Frame] | type[UninterruptibleFrame]) -> bool:
+    def has_queued_frame(self, frame_type: type[Frame]) -> bool:
         """Return True if a frame of the given type is waiting in the processing queue.
 
         Delegates to :meth:`FrameQueue.has_frame` so the check is O(distinct
-        enqueued types) with no queue scanning.  ``frame_type`` may be any
-        ``Frame`` subclass or ``UninterruptibleFrame`` (a mixin).
+        enqueued types) with no queue scanning.
 
         Args:
-            frame_type: The frame class (or mixin) to look for.
+            frame_type: The frame class to look for.
 
         Returns:
             True if at least one matching frame is queued.

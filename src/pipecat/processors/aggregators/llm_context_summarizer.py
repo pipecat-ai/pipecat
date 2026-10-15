@@ -21,7 +21,11 @@ from pipecat.frames.frames import (
     LLMFullResponseStartFrame,
     LLMSummarizeContextFrame,
 )
-from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
+from pipecat.processors.aggregators.llm_context import (
+    LLMContext,
+    LLMContextMessage,
+    LLMSpecificMessage,
+)
 from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.utils.base_object import BaseObject
 from pipecat.utils.context.llm_context_summarization import (
@@ -125,8 +129,58 @@ class LLMContextSummarizer(BaseObject):
         self._summarization_in_progress = False
         self._pending_summary_request_id: str | None = None
 
+        # The summary message injected by the last applied summary, tracked by
+        # identity so the message-count trigger can exclude it only while it is
+        # still at the head of the context.
+        self._summary_message: LLMContextMessage | None = None
+
         self._register_event_handler("on_request_summarization", sync=True)
         self._register_event_handler("on_summary_applied")
+
+    @staticmethod
+    def _leading_system_message_count(messages: list[LLMContextMessage]) -> int:
+        """Return 1 if the first message is a system message, else 0.
+
+        Mirrors the messages[0] system-message check used elsewhere when
+        selecting messages to summarize and when reconstructing the context
+        after a summary, so the message count stays consistent with what
+        those steps actually preserve.
+
+        Args:
+            messages: The context messages to check.
+
+        Returns:
+            1 if ``messages[0]`` is a system message, otherwise 0.
+        """
+        if (
+            messages
+            and not isinstance(messages[0], LLMSpecificMessage)
+            and messages[0].get("role") == "system"
+        ):
+            return 1
+        return 0
+
+    def _messages_since_summary(self) -> int:
+        """Count the conversation messages added since the last applied summary.
+
+        Excludes the leading system message, if present, and the summary
+        message injected by the last summary while it still sits directly
+        after it. Both are computed from the current context so that replacing
+        the messages (for example, resetting the conversation) resets the
+        count as well.
+
+        Returns:
+            The number of messages that count toward ``max_unsummarized_messages``.
+        """
+        messages = self._context.messages
+        excluded = self._leading_system_message_count(messages)
+        if (
+            self._summary_message is not None
+            and len(messages) > excluded
+            and messages[excluded] is self._summary_message
+        ):
+            excluded += 1
+        return len(messages) - excluded
 
     async def setup(self, setup: FrameProcessorSetup):
         """Set up the summarizer.
@@ -229,7 +283,7 @@ class LLMContextSummarizer(BaseObject):
         token_limit_exceeded = token_limit is not None and total_tokens >= token_limit
 
         # Check if we've exceeded max unsummarized messages
-        messages_since_summary = len(self._context.messages) - 1
+        messages_since_summary = self._messages_since_summary()
         message_threshold = self._auto_config.max_unsummarized_messages
         message_threshold_exceeded = (
             message_threshold is not None and messages_since_summary >= message_threshold
@@ -420,13 +474,8 @@ class LLMContextSummarizer(BaseObject):
         # Only messages[0] is treated as the system preamble — system messages at
         # other positions are mid-conversation injections and are not preserved
         # separately (they will be part of the summary or the recent messages).
-        first_system_msg = None
-        if (
-            messages
-            and not isinstance(messages[0], LLMSpecificMessage)
-            and messages[0].get("role") == "system"
-        ):
-            first_system_msg = messages[0]
+        num_system_preserved = self._leading_system_message_count(messages)
+        first_system_msg = messages[0] if num_system_preserved else None
 
         # Get recent messages to keep
         recent_messages = messages[last_summarized_index + 1 :]
@@ -434,7 +483,7 @@ class LLMContextSummarizer(BaseObject):
         # Create summary message as a user message (the summary is context
         # provided *to* the assistant, not something the assistant said)
         summary_content = config.summary_message_template.format(summary=summary)
-        summary_message = {"role": "user", "content": summary_content}
+        summary_message: LLMContextMessage = {"role": "user", "content": summary_content}
 
         # Reconstruct context
         new_messages = []
@@ -445,8 +494,9 @@ class LLMContextSummarizer(BaseObject):
 
         # Update context
         original_message_count = len(messages)
-        num_system_preserved = 1 if first_system_msg else 0
         self._context.set_messages(new_messages)
+
+        self._summary_message = summary_message
 
         # Messages actually summarized = index range minus the preserved system message
         summarized_count = last_summarized_index + 1 - num_system_preserved

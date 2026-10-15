@@ -13,6 +13,7 @@ Source: scripts/cli/imports/import_generator.py
 IMPORTS = {
     # Transports - WebRTC
     "daily": ["from pipecat.transports.daily.transport import DailyParams"],
+    "livekit": ["from pipecat.transports.livekit.transport import LiveKitParams"],
     "smallwebrtc": ["from pipecat.transports.base_transport import TransportParams"],
     "websocket": [
         "from pipecat.serializers.protobuf import ProtobufFrameSerializer",
@@ -72,6 +73,7 @@ IMPORTS = {
     "google_stt": ["from pipecat.services.google.stt import GoogleSTTService"],
     "gradium_stt": ["from pipecat.services.gradium.stt import GradiumSTTService"],
     "groq_stt": ["from pipecat.services.groq.stt import GroqSTTService"],
+    "meta_stt": ["from pipecat.services.meta.stt import MetaSTTService"],
     "mistral_stt": ["from pipecat.services.mistral.stt import MistralSTTService"],
     "nvidia_stt": ["from pipecat.services.nvidia.stt import NvidiaSTTService"],
     "nvidia_sagemaker_stt": [
@@ -140,7 +142,6 @@ IMPORTS = {
     "hume_tts": ["from pipecat.services.hume.tts import HumeTTSService"],
     "inworld_tts": ["from pipecat.services.inworld.tts import InworldTTSService"],
     "kokoro_tts": ["from pipecat.services.kokoro.tts import KokoroTTSService"],
-    "lmnt_tts": ["from pipecat.services.lmnt.tts import LmntTTSService"],
     "minimax_tts": ["from pipecat.services.minimax.tts import MiniMaxHttpTTSService"],
     "mistral_tts": ["from pipecat.services.mistral.tts import MistralTTSService"],
     "neuphonic_tts": ["from pipecat.services.neuphonic.tts import NeuphonicTTSService"],
@@ -164,6 +165,10 @@ IMPORTS = {
     "azure_realtime": [
         "from pipecat.services.azure.realtime.llm import AzureRealtimeLLMService",
         "from pipecat.services.openai.realtime.events import SessionProperties, InputAudioTranscription",
+    ],
+    "azure_voice_live": [
+        "from pipecat.services.azure.voice_live.llm import AzureVoiceLiveLLMService",
+        "from pipecat.services.azure.voice_live.events import AzureStandardVoice, InputAudioTranscription, SessionProperties, TurnDetection",
     ],
     "gemini_live_realtime": [
         "from pipecat.services.google.gemini_live.llm import GeminiLiveLLMService"
@@ -224,6 +229,7 @@ FEATURE_IMPORTS = {
     "observability": ["from pipecat_whisker import WhiskerObserver"],
     "create_transport": ["from pipecat.runner.utils import create_transport"],
     "eval": ["from pipecat.evals.transport import EvalTransportParams"],
+    "video_in_sources": ["from pipecat.transports.base_transport import VideoInSourceParams"],
 }
 
 # Base imports always included in generated bot files

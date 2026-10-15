@@ -22,7 +22,7 @@ Also covers LLM response flow with push_text_frames=True (non-word-timestamp TTS
 verifies TTSTextFrame ordering relative to LLMFullResponseEndFrame.
 
 Also covers smart-text / WordCompletionTracker features:
-- Skipped frames (skip_aggregator_types) held until preceding spoken slots complete.
+- Skipped frames (skip_text_types) held until preceding spoken slots complete.
 - raw_text on AggregatedTextFrame propagated as spans to TTSTextFrames.
 - Overflow: a single TTS word straddling two AggregatedTextFrame boundaries produces
   two correctly-attributed TTSTextFrames.
@@ -34,13 +34,14 @@ Also covers the interruption-during-pause deadlock scenario (see test_no_deadloc
 import asyncio
 import unittest
 from collections.abc import AsyncGenerator, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import pytest
 
 from pipecat.frames.frames import (
     AggregatedTextFrame,
     AggregatedTextProgressFrame,
+    BotBackchannelFrame,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     ControlFrame,
@@ -57,12 +58,12 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
     TTSTextFrame,
-    UninterruptibleFrame,
+    VADUserStartedSpeakingFrame,
 )
 from pipecat.services.tts_service import TextAggregationMode, TTSService
 from pipecat.tests.utils import SleepFrame, run_test
 from pipecat.utils.string import TextPartForConcatenation, concatenate_aggregated_text
-from pipecat.utils.text.base_text_aggregator import AggregationType
+from pipecat.utils.text.base_text_aggregator import TextType
 from pipecat.utils.text.base_text_filter import BaseTextFilter
 from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
 
@@ -82,13 +83,15 @@ class FooFrame(DataFrame):
 
 
 @dataclass
-class UninterruptibleMarkerFrame(ControlFrame, UninterruptibleFrame):
+class UninterruptibleMarkerFrame(ControlFrame):
     """Test-only uninterruptible marker frame used to trigger the deadlock code path.
 
     When this is in the process queue with __should_block_frames=True, and an
     InterruptionFrame arrives, _start_interruption() takes the non-cancel path
     (because of the UninterruptibleFrame) leaving __should_block_frames=True.
     """
+
+    interruptible: bool = field(default=False, init=False)
 
     label: str = ""
 
@@ -928,7 +931,7 @@ class _MockPerCallWordTimestampHttpTTSService(TTSService):
 
 
 # ---------------------------------------------------------------------------
-# Tests: skipped frame ordering (skip_aggregator_types)
+# Tests: skipped frame ordering (skip_text_types)
 # ---------------------------------------------------------------------------
 
 
@@ -939,18 +942,18 @@ async def test_http_skipped_frame_waits_for_spoken_words():
 
     Sequence sent:
         AggregatedTextFrame("hello world", SENTENCE)  — spoken; yields 2 TTSTextFrames
-        AggregatedTextFrame("some code", "code")       — in skip_aggregator_types; must wait
+        AggregatedTextFrame("some code", "code")       — in skip_text_types; must wait
 
     Expected downstream order:
         TTSTextFrame("hello")
         TTSTextFrame("world")
         AggregatedTextFrame("some code", append_to_context=True)
     """
-    tts = _MockWordTimestampHttpTTSService(skip_aggregator_types=["code"])
+    tts = _MockWordTimestampHttpTTSService(skip_text_types=["code"])
     frames_received = await run_test(
         tts,
         frames_to_send=[
-            AggregatedTextFrame("hello world", AggregationType.SENTENCE),
+            AggregatedTextFrame("hello world", TextType.SENTENCE),
             AggregatedTextFrame("some code", "code"),
         ],
     )
@@ -979,11 +982,11 @@ async def test_ws_skipped_frame_waits_for_spoken_words():
     *before* the spoken slot's word timestamps have been processed, directly
     exercising the hold-and-flush path.
     """
-    tts = _MockWordTimestampWSTTSService(skip_aggregator_types=["code"])
+    tts = _MockWordTimestampWSTTSService(skip_text_types=["code"])
     frames_received = await run_test(
         tts,
         frames_to_send=[
-            AggregatedTextFrame("hello world", AggregationType.SENTENCE),
+            AggregatedTextFrame("hello world", TextType.SENTENCE),
             AggregatedTextFrame("some code", "code"),
         ],
     )
@@ -1013,12 +1016,12 @@ async def test_skipped_frame_before_spoken_emits_immediately():
 
     Expected: AggregatedTextFrame("some code") appears *before* TTSTextFrame("hello").
     """
-    tts = _MockWordTimestampHttpTTSService(skip_aggregator_types=["code"])
+    tts = _MockWordTimestampHttpTTSService(skip_text_types=["code"])
     frames_received = await run_test(
         tts,
         frames_to_send=[
             AggregatedTextFrame("some code", "code"),
-            AggregatedTextFrame("hello world", AggregationType.SENTENCE),
+            AggregatedTextFrame("hello world", TextType.SENTENCE),
         ],
     )
     down = frames_received[0]
@@ -1048,12 +1051,12 @@ async def test_skipped_frame_flushed_when_word_timestamps_incomplete():
     """
     tts = _MockWordTimestampHttpTTSService(
         word_times=[("hello", 0.0)],  # "world" is never sent
-        skip_aggregator_types=["code"],
+        skip_text_types=["code"],
     )
     frames_received = await run_test(
         tts,
         frames_to_send=[
-            AggregatedTextFrame("hello world", AggregationType.SENTENCE),
+            AggregatedTextFrame("hello world", TextType.SENTENCE),
             AggregatedTextFrame("some code", "code"),
         ],
     )
@@ -1086,9 +1089,7 @@ async def test_raw_text_propagated_to_tts_text_frames():
     frames_received = await run_test(
         tts,
         frames_to_send=[
-            AggregatedTextFrame(
-                "4111 1111", AggregationType.SENTENCE, raw_text="<card>4111 1111</card>"
-            )
+            AggregatedTextFrame("4111 1111", TextType.SENTENCE, raw_text="<card>4111 1111</card>")
         ],
     )
     word_frames = [f for f in frames_received[0] if isinstance(f, TTSTextFrame)]
@@ -1134,8 +1135,8 @@ async def test_overflow_word_spanning_two_aggregated_frames():
         tts,
         frames_to_send=[
             LLMFullResponseStartFrame(),
-            AggregatedTextFrame("abc", AggregationType.SENTENCE),
-            AggregatedTextFrame("def", AggregationType.SENTENCE),
+            AggregatedTextFrame("abc", TextType.SENTENCE),
+            AggregatedTextFrame("def", TextType.SENTENCE),
             LLMFullResponseEndFrame(),
         ],
     )
@@ -1378,9 +1379,7 @@ async def test_http_force_complete_raw_text_propagated():
     frames_received = await run_test(
         tts,
         frames_to_send=[
-            AggregatedTextFrame(
-                "4111 1111", AggregationType.SENTENCE, raw_text="<card>4111 1111</card>"
-            )
+            AggregatedTextFrame("4111 1111", TextType.SENTENCE, raw_text="<card>4111 1111</card>")
         ],
     )
     word_frames = [f for f in frames_received[0] if isinstance(f, TTSTextFrame)]
@@ -2065,7 +2064,7 @@ async def test_token_mode_progress_and_context_across_whole_sentence():
        WordCompletionTracker, so AggregatedTextProgressFrame reported a degenerate
        one-word accumulated_text. The sequencer now groups tokens back into a
        sentence, so progress grows across the whole sentence, and a single
-       ``AggregationType.SENTENCE`` frame (``will_be_spoken=True``) is emitted as
+       ``TextType.SENTENCE`` frame (``will_be_spoken=True``) is emitted as
        the anchor the progress frames' ``segment_id`` references.
 
     2. Context: the per-word TTSTextFrames were stamped
@@ -2105,9 +2104,7 @@ async def test_token_mode_progress_and_context_across_whole_sentence():
 
     # --- The anchor: one SENTENCE AggregatedTextFrame, will_be_spoken, matching id ---
     sentence_frames = [
-        f
-        for f in down
-        if type(f) is AggregatedTextFrame and f.aggregated_by == AggregationType.SENTENCE
+        f for f in down if type(f) is AggregatedTextFrame and f.text_type == TextType.SENTENCE
     ]
     assert len(sentence_frames) == 1, (
         f"Expected 1 SENTENCE AggregatedTextFrame anchor, got {len(sentence_frames)}"
@@ -2155,9 +2152,7 @@ async def test_token_mode_coarse_chunk_straddling_sentence_boundary():
 
     # --- Two sentence anchors, sliced at the boundary inside the coarse chunk ---
     sentence_frames = [
-        f
-        for f in down
-        if type(f) is AggregatedTextFrame and f.aggregated_by == AggregationType.SENTENCE
+        f for f in down if type(f) is AggregatedTextFrame and f.text_type == TextType.SENTENCE
     ]
     assert [f.text for f in sentence_frames] == ["Hey there!", " I'm here."], (
         f"Boundary must be sliced inside the chunk; got {[f.text for f in sentence_frames]}"
@@ -2290,9 +2285,7 @@ async def test_token_mode_push_text_frames_groups_into_sentences():
 
     # --- One SENTENCE anchor for the whole response, not one per token ---
     sentence_frames = [
-        f
-        for f in down
-        if type(f) is AggregatedTextFrame and f.aggregated_by == AggregationType.SENTENCE
+        f for f in down if type(f) is AggregatedTextFrame and f.text_type == TextType.SENTENCE
     ]
     assert [f.text for f in sentence_frames] == ["Hi there."], (
         f"Expected one sentence-level anchor, got {[f.text for f in sentence_frames]}"
@@ -2528,6 +2521,301 @@ async def test_token_inline_tts_markup_tracks_word_by_word():
         "the word completing the tagged span must commit it with its tag, got "
         f"{word_frames[-1].raw_text!r}"
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", [TextAggregationMode.SENTENCE, TextAggregationMode.TOKEN])
+async def test_tts_speak_frame_labels_its_text(mode):
+    """The text frames pushed for a TTSSpeakFrame carry its aggregation type."""
+    tts = MockHttpPushTextTTSService(text_aggregation_mode=mode)
+    frames_received = await run_test(
+        tts,
+        frames_to_send=[
+            TTSSpeakFrame(text="One moment, please.", append_to_context=False, text_type="status")
+        ],
+    )
+    text_frames = [f for f in frames_received[0] if isinstance(f, AggregatedTextFrame)]
+
+    assert text_frames
+    assert {f.text_type for f in text_frames} == {"status"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", [TextAggregationMode.SENTENCE, TextAggregationMode.TOKEN])
+async def test_spoken_text_carries_the_id_of_its_segment(mode):
+    """A TTSTextFrame names the AggregatedTextFrame it speaks."""
+    tts = MockHttpPushTextTTSService(text_aggregation_mode=mode)
+    frames_received = await run_test(
+        tts,
+        frames_to_send=[TTSSpeakFrame(text="One moment, please.", append_to_context=False)],
+    )
+    segment = next(f for f in frames_received[0] if type(f) is AggregatedTextFrame)
+    spoken = next(f for f in frames_received[0] if isinstance(f, TTSTextFrame))
+
+    assert spoken.segment_id == segment.id
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", [TextAggregationMode.SENTENCE, TextAggregationMode.TOKEN])
+async def test_bot_backchannel_frame_is_spoken_as_an_uninterruptible_backchannel(mode):
+    """A BotBackchannelFrame is spoken as backchannel text, kept out of the context."""
+    tts = MockHttpPushTextTTSService(text_aggregation_mode=mode)
+    frames_received = await run_test(tts, frames_to_send=[BotBackchannelFrame("Mm-hmm.")])
+    text_frames = [f for f in frames_received[0] if isinstance(f, AggregatedTextFrame)]
+
+    assert text_frames
+    assert {f.text_type for f in text_frames} == {TextType.BACKCHANNEL}
+    assert not any(f.interruptible or f.append_to_context for f in text_frames)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("delivery", ["http", "websocket", "words", "tokens"])
+async def test_uninterruptible_speech_survives_before_audio(delivery):
+    """An uninterruptible request finishes synthesis across VAD and turn interruptions."""
+    words = delivery in ("words", "tokens")
+
+    class DelayedTTS(TTSService):
+        def __init__(self):
+            super().__init__(
+                push_start_frame=True,
+                push_stop_frames=True,
+                push_text_frames=not words,
+                sample_rate=_SAMPLE_RATE,
+                text_aggregation_mode=(
+                    TextAggregationMode.TOKEN
+                    if delivery == "tokens"
+                    else TextAggregationMode.SENTENCE
+                ),
+            )
+            self.release = asyncio.Event()
+            self.interrupted = []
+
+        async def process_frame(self, frame, direction):
+            await super().process_frame(frame, direction)
+            if isinstance(frame, InterruptionFrame):
+                self.release.set()
+
+        async def on_audio_context_interrupted(self, context_id):
+            self.interrupted.append(context_id)
+
+        async def run_tts(self, text, context_id):
+            async def deliver():
+                await self.release.wait()
+                if words:
+                    await self.add_word_timestamps([(text, 0.0)], context_id)
+                await self.append_to_audio_context(
+                    context_id,
+                    TTSAudioRawFrame(_FAKE_AUDIO, _SAMPLE_RATE, 1, context_id=context_id),
+                )
+                await self.append_to_audio_context(
+                    context_id, TTSStoppedFrame(context_id=context_id)
+                )
+                await self.remove_audio_context(context_id)
+
+            if delivery == "http":
+                await self.release.wait()
+                yield TTSAudioRawFrame(_FAKE_AUDIO, _SAMPLE_RATE, 1, context_id=context_id)
+            else:
+                self.create_task(deliver())
+                yield None
+
+    tts = DelayedTTS()
+    speech = TTSSpeakFrame("Mm-hmm.", append_to_context=False)
+    speech.interruptible = False
+    down, _ = await asyncio.wait_for(
+        run_test(
+            tts,
+            frames_to_send=[
+                speech,
+                SleepFrame(sleep=0.05),
+                VADUserStartedSpeakingFrame(),
+                InterruptionFrame(),
+                SleepFrame(sleep=0.1),
+                TTSSpeakFrame("Next reply."),
+                SleepFrame(sleep=0.1),
+            ],
+        ),
+        timeout=5,
+    )
+    texts = [f for f in down if isinstance(f, TTSTextFrame)]
+    assert [f.text for f in texts] == ["Mm-hmm.", "Next reply."]
+    assert [f.interruptible for f in texts] == [False, True]
+    for frame_type in (TTSAudioRawFrame, TTSStartedFrame, TTSStoppedFrame):
+        assert [f.interruptible for f in down if isinstance(f, frame_type)] == [False, True]
+    assert tts.interrupted == []
+
+
+@pytest.mark.asyncio
+async def test_queued_uninterruptible_synthesis_survives_an_interrupted_context():
+    """A queued uninterruptible context survives while the preceding regular one is dropped."""
+
+    class QueuedTTS(TTSService):
+        def __init__(self):
+            super().__init__(push_start_frame=True, push_text_frames=True, sample_rate=_SAMPLE_RATE)
+            self.release = asyncio.Event()
+            self.interrupted = []
+            self.requests = {}
+
+        async def process_frame(self, frame, direction):
+            await super().process_frame(frame, direction)
+            if isinstance(frame, InterruptionFrame):
+                self.release.set()
+
+        async def on_audio_context_interrupted(self, context_id):
+            self.interrupted.append(context_id)
+
+        async def run_tts(self, text, context_id):
+            self.requests[text] = context_id
+
+            async def deliver():
+                await self.release.wait()
+                if not self.audio_context_available(context_id):
+                    return
+                await self.append_to_audio_context(
+                    context_id,
+                    TTSAudioRawFrame(_FAKE_AUDIO, _SAMPLE_RATE, 1, context_id=context_id),
+                )
+                await self.append_to_audio_context(
+                    context_id, TTSStoppedFrame(context_id=context_id)
+                )
+                await self.remove_audio_context(context_id)
+
+            self.create_task(deliver())
+            yield None
+
+    tts = QueuedTTS()
+    speech = TTSSpeakFrame("Keep this.")
+    speech.interruptible = False
+    down, _ = await asyncio.wait_for(
+        run_test(
+            tts,
+            frames_to_send=[
+                TTSSpeakFrame("Drop this."),
+                speech,
+                SleepFrame(sleep=0.05),
+                InterruptionFrame(),
+                SleepFrame(sleep=0.1),
+            ],
+        ),
+        timeout=5,
+    )
+    assert tts.interrupted == [tts.requests["Drop this."]]
+    audio = [f for f in down if isinstance(f, TTSAudioRawFrame)]
+    assert len(audio) == 1
+    assert audio[0].context_id == tts.requests["Keep this."]
+    assert not audio[0].interruptible
+    assert any(isinstance(f, TTSTextFrame) and f.text == "Keep this." for f in down)
+
+
+@pytest.mark.asyncio
+async def test_words_after_an_interruption_follow_uninterruptible_words_still_to_play():
+    """Uninterruptible words outlive their synthesis, so the next words are timed after them."""
+    tts = _MockPerCallWordTimestampWSTTSService(
+        word_times_per_call=[[("Keep", 0.0), ("this.", 5.0)], [("Next.", 0.0)]]
+    )
+    speech = TTSSpeakFrame("Keep this.", append_to_context=False)
+    speech.interruptible = False
+    down, _ = await asyncio.wait_for(
+        run_test(
+            tts,
+            frames_to_send=[
+                speech,
+                # Synthesis finishes long before "this." plays.
+                SleepFrame(sleep=0.1),
+                InterruptionFrame(),
+                SleepFrame(sleep=0.05),
+                TTSSpeakFrame("Next.", append_to_context=False),
+                SleepFrame(sleep=0.1),
+            ],
+        ),
+        timeout=5,
+    )
+    texts = [f for f in down if isinstance(f, TTSTextFrame)]
+    assert [f.text for f in texts] == ["Keep", "this.", "Next."]
+    assert texts[2].pts >= texts[1].pts
+
+
+class _MockActiveContextTTSService(TTSService):
+    """Labels audio with the active context and never ends one (e.g. FishAudioTTSService).
+
+    Contexts end with the stop-frame timeout, a while after their audio arrives.
+    """
+
+    def __init__(self):
+        super().__init__(
+            push_start_frame=True,
+            push_stop_frames=True,
+            stop_frame_timeout_s=0.2,
+            pause_frame_processing=True,
+            sample_rate=_SAMPLE_RATE,
+        )
+
+    def can_generate_metrics(self) -> bool:
+        return False
+
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:
+        active_context_id = self.get_active_audio_context_id()
+
+        async def deliver():
+            await self.append_to_audio_context(
+                active_context_id,
+                TTSAudioRawFrame(_FAKE_AUDIO, _SAMPLE_RATE, 1, context_id=active_context_id),
+            )
+
+        self.create_task(deliver())
+        yield None
+
+
+@pytest.mark.asyncio
+async def test_reply_after_uninterruptible_speech_waits_for_its_context_to_end():
+    """The bot stops before uninterruptible speech ends, and the reply stays interruptible."""
+    speech = TTSSpeakFrame("Keep this.", append_to_context=False)
+    speech.interruptible = False
+    down, _ = await asyncio.wait_for(
+        run_test(
+            _MockActiveContextTTSService(),
+            frames_to_send=[
+                speech,
+                SleepFrame(sleep=0.05),
+                BotStartedSpeakingFrame(),
+                BotStoppedSpeakingFrame(),
+                LLMFullResponseStartFrame(),
+                TextFrame("Hello there."),
+                LLMFullResponseEndFrame(),
+                SleepFrame(sleep=0.4),
+                BotStoppedSpeakingFrame(),
+            ],
+        ),
+        timeout=5,
+    )
+    audio = [f for f in down if isinstance(f, TTSAudioRawFrame)]
+    assert [f.interruptible for f in audio] == [False, True]
+
+
+@pytest.mark.asyncio
+async def test_interruption_keeps_the_pause_while_uninterruptible_speech_is_open():
+    """An interruption doesn't let the reply start before uninterruptible speech ends."""
+    speech = TTSSpeakFrame("Keep this.", append_to_context=False)
+    speech.interruptible = False
+    down, _ = await asyncio.wait_for(
+        run_test(
+            _MockActiveContextTTSService(),
+            frames_to_send=[
+                speech,
+                SleepFrame(sleep=0.05),
+                BotStartedSpeakingFrame(),
+                InterruptionFrame(),
+                LLMFullResponseStartFrame(),
+                TextFrame("Hello there."),
+                LLMFullResponseEndFrame(),
+                SleepFrame(sleep=0.4),
+                BotStoppedSpeakingFrame(),
+            ],
+        ),
+        timeout=5,
+    )
+    audio = [f for f in down if isinstance(f, TTSAudioRawFrame)]
+    assert [f.interruptible for f in audio] == [False, True]
 
 
 if __name__ == "__main__":

@@ -6,6 +6,7 @@
 
 """Main project generator that orchestrates file creation."""
 
+import json
 import shutil
 import subprocess
 import sys
@@ -287,6 +288,9 @@ class ProjectGenerator:
             "transcription": self.config.transcription,
             "observability": self.config.enable_observability,
             "eval": self.config.enable_eval,
+            # Only the Daily and SmallWebRTC transport entries list video sources.
+            "video_in_sources": self.config.video_input
+            and bool({"daily", "daily_pstn_dialin", "smallwebrtc"} & set(self.config.transports)),
         }
 
         # Get imports
@@ -355,10 +359,10 @@ class ProjectGenerator:
         if self.config.enable_eval:
             extras.add("evals")
 
-        # Build the pipecat-ai dependency string. Floor at 1.4.0: generated bots use
-        # create_transport + the typed CallData/runner-args API, which land in 1.4.0.
+        # Build the pipecat-ai dependency string. The floor tracks the release the
+        # templates are written against, so new projects get the APIs they use.
         pipecat_extras = ",".join(sorted(extras))
-        pipecat_dependency = f"pipecat-ai[{pipecat_extras}]>=1.4.0"
+        pipecat_dependency = f"pipecat-ai[{pipecat_extras}]>=1.12.0"
 
         context = {
             "project_name": self.config.project_name,
@@ -441,7 +445,7 @@ class ProjectGenerator:
 
         # Categorize transports for the run instructions
         telephony_transports = {"twilio", "telnyx", "plivo", "exotel"}
-        webrtc_transports = {"smallwebrtc", "daily"}
+        webrtc_transports = {"smallwebrtc", "daily", "livekit"}
         has_telephony = any(t in telephony_transports for t in self.config.transports)
         has_webrtc = any(t in webrtc_transports for t in self.config.transports)
 
@@ -593,7 +597,7 @@ class ProjectGenerator:
                 else "evals/starter_audio.yaml"
             )
             console.print(
-                "  • Test it headless: [bold cyan]uv run bot.py -t eval[/bold cyan], then in "
+                "  • Test it with evals: [bold cyan]uv run bot.py[/bold cyan], then in "
                 f"another terminal [bold cyan]uv run pipecat eval run {starter} -v[/bold cyan]"
             )
         if has_telephony:
@@ -645,6 +649,11 @@ class ProjectGenerator:
 
         # Copy all files and render .jinja2 templates
         self._copy_and_render_directory(source_template_dir, client_path)
+
+        # React clients also get the vendored Pipecat UI component source, which
+        # the shadcn CLI would otherwise install into src/.
+        if self.config.client_framework == "react":
+            self._copy_and_render_directory(self._pipecat_ui_dir() / "src", client_path / "src")
 
     def _copy_and_render_directory(self, source_dir: Path, dest_dir: Path) -> None:
         """Recursively copy directory contents, rendering .jinja2 templates.
@@ -701,18 +710,63 @@ class ProjectGenerator:
             console.print(f"[red]{e}[/red]")
             raise
 
-        # Prepare context - only need transport values and project name
+        # Prepare context - transport values, the npm packages those transports
+        # need in the client, project name and the npm dependencies the vendored
+        # Pipecat UI snapshot needs
         # Transform transport strings to objects for template iteration
         transport_objects = [{"value": t} for t in self.config.transports]
 
         context = {
             "project_name": self.config.project_name,
             "transports": transport_objects,
+            "transport_packages": self._client_transport_packages(),
+            "ui_dependencies": self._pipecat_ui_dependencies(),
         }
 
         # Render and write
         rendered = template.render(**context)
         dest_file.write_text(rendered, encoding="utf-8")
+
+    def _client_transport_packages(self) -> dict[str, str]:
+        """Return the npm packages the selected web transports need in the client."""
+        packages: dict[str, str] = {}
+        for value in self.config.transports:
+            service = ServiceLoader.get_service_by_value(ServiceRegistry.WEBRTC_TRANSPORTS, value)
+            if service and service.client_package and service.client_package_version:
+                packages[service.client_package] = service.client_package_version
+        return packages
+
+    @staticmethod
+    def _pipecat_ui_dir() -> Path:
+        """Return the vendored Pipecat UI snapshot directory.
+
+        The snapshot is what ``npx shadcn add @pipecat/...`` installs into a
+        project; ``scripts/cli/sync-pipecat-ui.mjs`` refreshes it from the registry.
+        """
+        import pipecat.cli
+
+        return Path(pipecat.cli.__file__).parent / "templates" / "client" / "_pipecat_ui"
+
+    def _pipecat_ui_dependencies(self) -> dict[str, str]:
+        """Return the npm dependency ranges recorded with the Pipecat UI snapshot.
+
+        Raises:
+            RuntimeError: If the snapshot manifest is missing or malformed.
+        """
+        manifest = self._pipecat_ui_dir() / "dependencies.json"
+        try:
+            dependencies = json.loads(manifest.read_text(encoding="utf-8"))["dependencies"]
+        except (OSError, ValueError, KeyError, TypeError) as e:
+            raise RuntimeError(
+                f"Pipecat UI snapshot manifest missing or malformed at {manifest}; "
+                "regenerate it with `node scripts/cli/sync-pipecat-ui.mjs`"
+            ) from e
+        if not isinstance(dependencies, dict):
+            raise RuntimeError(
+                f"Pipecat UI snapshot manifest at {manifest} has no dependency map; "
+                "regenerate it with `node scripts/cli/sync-pipecat-ui.mjs`"
+            )
+        return dependencies
 
     def _ruff_command(self) -> list[str]:
         """Resolve the command used to invoke Ruff.

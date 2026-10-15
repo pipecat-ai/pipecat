@@ -77,7 +77,8 @@ def test_extra_passes_provider_specific_params(service_factory):
     assert params["reasoning_effort"] == "low"
 
 
-def test_developer_messages_are_sent_as_is(service_factory):
+@pytest.mark.asyncio
+async def test_developer_messages_are_sent_as_is(service_factory):
     """Cerebras maps the "developer" role to its developer instruction layer."""
     service = service_factory(model="gpt-oss-120b")
     context = LLMContext(
@@ -87,7 +88,7 @@ def test_developer_messages_are_sent_as_is(service_factory):
         ]
     )
 
-    params = service.get_llm_adapter().get_llm_invocation_params(
+    params = await service.get_llm_adapter().get_llm_invocation_params(
         context, convert_developer_to_user=not service.supports_developer_role
     )
 

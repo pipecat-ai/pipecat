@@ -40,13 +40,14 @@ from pipecat.services.aws.utils import resolve_credentials
 from pipecat.services.llm_service import LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.utils.deprecation import deprecated
+from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.tracing.service_decorators import traced_llm
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
 try:
     import aiobotocore.session
     from botocore.config import Config
-    from botocore.exceptions import ReadTimeoutError
+    from botocore.exceptions import ClientError, ReadTimeoutError
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
@@ -62,6 +63,11 @@ class AWSBedrockLLMSettings(LLMSettings):
     Parameters:
         stop_sequences: List of strings that stop generation.
         latency: Performance mode - "standard" or "optimized".
+        effort: How much reasoning the model spends before answering — "low",
+            "medium", "high", "xhigh" or "max". Sent as Converse's
+            ``outputConfig.effort``; only reasoning models accept it, and a model
+            that does not support it rejects the request. See:
+            https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_OutputConfig.html
         enable_prompt_caching: Whether to enable prompt caching by adding cachePoint
             markers to system prompts and tool definitions. Can reduce TTFT by up to
             85% for multi-turn conversations. See:
@@ -71,6 +77,7 @@ class AWSBedrockLLMSettings(LLMSettings):
 
     stop_sequences: list[str] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     latency: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    effort: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     enable_prompt_caching: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     additional_model_request_fields: dict[str, Any] | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
@@ -186,6 +193,7 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
             user_turn_completion_config=None,
             stop_sequences=None,
             latency=None,
+            effort=None,
             enable_prompt_caching=False,
             additional_model_request_fields={},
         )
@@ -278,6 +286,7 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
         context: LLMContext,
         max_tokens: int | None = None,
         system_instruction: str | None = None,
+        response_schema: dict[str, Any] | None = None,
     ) -> str | None:
         """Run a one-shot, out-of-band (i.e. out-of-pipeline) inference with the given LLM context.
 
@@ -287,17 +296,20 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
                 overrides the service's default max_tokens setting.
             system_instruction: Optional system instruction to use for this inference.
                 If provided, overrides any system instruction in the context.
+            response_schema: Accepted for interface compatibility. Bedrock's
+                Converse API has no reply schema, so it is not enforced.
 
         Returns:
             The LLM's response as a string, or None if no response is generated.
         """
+        self._check_response_schema(response_schema)
         messages = []
         system = []
         effective_instruction = system_instruction or assert_given(
             self._settings.system_instruction
         )
         adapter = self.get_llm_adapter()
-        params = adapter.get_llm_invocation_params(
+        params = await adapter.get_llm_invocation_params(
             context,
             system_instruction=effective_instruction,
             ensure_last_message_is_user=self._should_inject_trailing_user_message(),
@@ -320,6 +332,9 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
 
         if inference_config:
             request_params["inferenceConfig"] = inference_config
+
+        if self._settings.effort:
+            request_params["outputConfig"] = {"effort": self._settings.effort}
 
         if system:
             request_params["system"] = system
@@ -422,9 +437,11 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
             return False
         return not any(p in model for p in self._PREFILL_SUPPORTED_PATTERNS)
 
-    def _get_llm_invocation_params(self, context: LLMContext) -> AWSBedrockLLMInvocationParams:
+    async def _get_llm_invocation_params(
+        self, context: LLMContext
+    ) -> AWSBedrockLLMInvocationParams:
         adapter = self.get_llm_adapter()
-        params = adapter.get_llm_invocation_params(
+        params = await adapter.get_llm_invocation_params(
             context,
             system_instruction=assert_given(self._settings.system_instruction),
             ensure_last_message_is_user=self._should_inject_trailing_user_message(),
@@ -449,7 +466,7 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
 
             await self.start_ttfb_metrics()
 
-            params_from_context = self._get_llm_invocation_params(context)
+            params_from_context = await self._get_llm_invocation_params(context)
             messages = params_from_context["messages"]
             system = params_from_context["system"]
             tools = params_from_context["tools"]
@@ -510,6 +527,9 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
             if self._settings.latency in ["standard", "optimized"]:
                 request_params["performanceConfig"] = {"latency": self._settings.latency}
 
+            if self._settings.effort:
+                request_params["outputConfig"] = {"effort": self._settings.effort}
+
             # Add cache checkpoints to system prompts and tool definitions.
             # This enables prompt caching for providers that support it (e.g.
             # Anthropic Claude on Bedrock), reducing TTFT by up to 85% on
@@ -528,10 +548,7 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
                     if not any("cachePoint" in t for t in tools_list):
                         tools_list.append({"cachePoint": {"type": "default"}})
 
-            # Log request params with messages redacted for logging
-            adapter = self.get_llm_adapter()
-            messages_for_logging = adapter.get_messages_for_logging(context)
-            logger.debug(f"{self}: Generating chat from context {messages_for_logging}")
+            self._log_llm_response(context)
 
             async with self._aws_session.create_client(
                 service_name="bedrock-runtime", **self._aws_params
@@ -630,6 +647,38 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
             await self._call_event_handler("on_completion_timeout")
         except LLMContextConversionError as e:
             await self.push_error(error_msg=str(e), exception=e)
+            # A conversion failure (e.g. an unsupported file MIME type, corrupt
+            # base64 data) can't reach the API at all, but is just as much
+            # evidence of an invalid file as a rejection from Bedrock itself, so
+            # it gets the same best-effort cleanup.
+            context.remove_invalid_file_message()
+        except ClientError as e:
+            # botocore uses a single exception class for the whole 4xx/5xx
+            # range, so check the error code directly rather than the status
+            # code: ValidationException (bad document name, unsupported
+            # format, etc.) is grounds to remove a pending file message on a
+            # best-effort basis, but AccessDeniedException, ThrottlingException,
+            # and the rest say nothing about whether our request (or its
+            # file) was bad, and removing the file there would discard it
+            # for no benefit. When a message is removed as a result of this
+            # error, the fault lay in application-supplied content and the
+            # context is repaired, so the error is pushed as APPLICATION
+            # instead of letting the rejection classify as permanent and cost
+            # the service its usability.
+            # Compared case-insensitively: an up-front request rejection
+            # reports ValidationException, but a rejection arriving mid-stream
+            # (an EventStreamError, e.g. the model refusing a file's content)
+            # reports the event stream's modeled code, validationException.
+            error_code = e.response.get("Error", {}).get("Code") or ""
+            removed = (
+                error_code.lower() == "validationexception"
+                and context.remove_invalid_file_message()
+            )
+            await self.push_error(
+                error_msg=f"Unknown error occurred: {e}",
+                exception=e,
+                category=ErrorCategory.APPLICATION if removed else None,
+            )
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:

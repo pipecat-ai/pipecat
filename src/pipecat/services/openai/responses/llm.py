@@ -17,7 +17,6 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-import httpx
 from loguru import logger
 from openai import NOT_GIVEN as OPENAI_NOT_GIVEN
 from openai import APITimeoutError, AsyncOpenAI, AsyncStream, DefaultAsyncHttpxClient
@@ -63,7 +62,9 @@ from pipecat.services.llm_service import (
     WebsocketLLMService,
     WebsocketReconnectedError,
 )
+from pipecat.services.openai.base_llm import OPENAI_MODEL_WITHOUT_RESPONSE_SCHEMA
 from pipecat.services.settings import LLMSettings
+from pipecat.utils.http import TIMEOUT_EXCEPTIONS, connection_limits
 from pipecat.utils.tracing.service_decorators import traced_llm
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
@@ -104,12 +105,13 @@ class _ResponseTimeoutError(_RetryableError):
 class OpenAIResponsesReasoningConfig(BaseModel):
     """Reasoning configuration for reasoning-capable OpenAI Responses models.
 
-    Only reasoning-capable models use this — the gpt-5.x series and the o-series.
-    The service's default model, ``gpt-4.1``, does not reason, so this config has
-    no effect there; select a reasoning-capable model to use it. See OpenAI's
-    reasoning guide (https://platform.openai.com/docs/guides/reasoning) and model
-    list (https://platform.openai.com/docs/models) to choose one and to check
-    which effort levels it accepts.
+    Only reasoning-capable models use this — the mainline gpt series from gpt-5
+    onward and the o-series. The service's default model, ``gpt-4.1``, does not
+    reason, so this config has no effect there; select a reasoning-capable model
+    to use it. See OpenAI's reasoning guide
+    (https://platform.openai.com/docs/guides/reasoning) and model list
+    (https://platform.openai.com/docs/models) to choose one and to check which
+    effort levels it accepts.
 
     Reasoning models use internal reasoning tokens before producing a response.
     This controls how much reasoning they do and whether a human-readable summary
@@ -126,12 +128,18 @@ class OpenAIResponsesReasoningConfig(BaseModel):
             default) requests no summary. Any summary is surfaced via thought
             frames (the ``on_assistant_thought`` event); the encrypted reasoning
             itself is preserved across turns regardless of this setting.
+        mode: Reasoning mode for models that offer one, such as the gpt-5.6
+            series: ``"standard"`` or the slower, more thorough ``"pro"``.
+            ``None`` (the default) leaves the field unset, so the model's own
+            default applies. ``effort`` selects the reasoning intensity within
+            the chosen mode.
     """
 
     # ``| str`` for forward compatibility: if OpenAI adds new levels, users can
     # pass the new string without waiting for a Pipecat release.
     effort: Literal["none", "minimal", "low", "medium", "high", "xhigh", "max"] | str | None = None
     summary: Literal["auto", "concise", "detailed"] | str | None = None
+    mode: Literal["standard", "pro"] | str | None = None
 
 
 @dataclass
@@ -141,10 +149,11 @@ class OpenAIResponsesLLMSettings(LLMSettings):
     Parameters:
         max_completion_tokens: Maximum completion tokens to generate.
         reasoning: Reasoning configuration for reasoning-capable models. ``None``
-            (the default) leaves reasoning unconfigured — the service then disables
-            reasoning by default for whatever models possible, to keep latency low
-            for real-time voice. Note that the default model, ``gpt-4.1``, does
-            not reason.
+            (the default) leaves reasoning unconfigured: the service then sends
+            the lowest effort OpenAI documents for the model, for the fastest
+            responses, and logs what it sent. Models Pipecat doesn't list, and
+            any model when ``use_provider_thinking_default`` is set, run at
+            OpenAI's default. The default model, ``gpt-4.1``, does not reason.
     """
 
     # Override inherited LLMSettings fields to also accept the OpenAI SDK's
@@ -168,6 +177,47 @@ class OpenAIResponsesLLMSettings(LLMSettings):
 def _is_o_series(model: str) -> bool:
     """Whether the model is an o-series reasoning model (o1, o3, o4-mini, ...)."""
     return bool(re.match(r"o\d", model.lower()))
+
+
+# The lowest reasoning effort OpenAI documents for each model, sent when the
+# caller doesn't configure ``reasoning``, keyed by model name. The pro models
+# accept nothing below "medium", and gpt-5-pro only "high".
+_THINKING_DEFAULTS: dict[str, str] = {
+    "gpt-5": "minimal",
+    "gpt-5-mini": "minimal",
+    "gpt-5-nano": "minimal",
+    "gpt-5-pro": "high",
+    "gpt-5.1": "none",
+    "gpt-5.2": "none",
+    "gpt-5.2-pro": "medium",
+    "gpt-5.4": "none",
+    "gpt-5.4-mini": "none",
+    "gpt-5.4-nano": "none",
+    "gpt-5.4-pro": "medium",
+    "gpt-5.5": "none",
+    "gpt-5.5-pro": "medium",
+    "gpt-5.6-luna": "none",
+    "gpt-5.6-sol": "none",
+    "gpt-5.6-terra": "none",
+    "gpt-6-astra": "low",
+    "gpt-6-luna": "none",
+    "gpt-6-sol": "none",
+    "gpt-6.1-sol": "low",
+    "o1": "low",
+    "o1-pro": "low",
+    "o3": "low",
+    "o3-mini": "low",
+    "o3-pro": "low",
+    "o4-mini": "low",
+}
+
+
+def _model_name(model: str) -> str:
+    """The name a model id refers to, the key it's looked up by in ``_THINKING_DEFAULTS``.
+
+    A dated snapshot (``gpt-5-2025-08-07``) gets its model's entry.
+    """
+    return re.sub(r"-\d{4}-\d{2}-\d{2}$", "", model.lower())
 
 
 def _model_supports_reasoning(model: str) -> bool | None:
@@ -217,6 +267,8 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
 
     adapter_class = OpenAIResponsesLLMAdapter
 
+    supports_response_schema: bool = True
+
     def __init__(
         self,
         *,
@@ -239,7 +291,12 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
             organization: OpenAI organization ID.
             project: OpenAI project ID.
             default_headers: Additional HTTP headers to include in requests.
-            service_tier: Service tier to use (e.g., "auto", "flex", "priority").
+            service_tier: Service tier to use: "auto", "default", "flex",
+                "scale", "fast", "priority" or "ultrafast". "fast" is OpenAI's
+                low-latency tier, the name that replaced "priority"; both values
+                are accepted. "ultrafast" is the access-controlled Ultrafast
+                Processing tier, which shortens the time between output tokens
+                on the models that offer it.
             settings: Runtime-updatable settings.
             retry_timeout_secs: How long an inference may go without producing
                 output before it is abandoned and re-issued, when
@@ -321,7 +378,7 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
             organization=organization,
             project=project,
             http_client=DefaultAsyncHttpxClient(
-                limits=httpx.Limits(
+                limits=connection_limits(
                     max_keepalive_connections=100, max_connections=1000, keepalive_expiry=None
                 )
             ),
@@ -383,21 +440,33 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
             # turns, preserving reasoning context across the conversation.
             params["include"] = ["reasoning.encrypted_content"]
             self._warn_if_reasoning_unsupported()
-        else:
-            # No reasoning configured: disable it by default on the gpt-5.x series
-            # for real-time latency (see the helper).
-            self._maybe_disable_reasoning(params)
 
         # Extra settings
         params.update(self._settings.extra)
 
+        # Applied last, so reasoning configured in the settings or in extra wins
+        # over the low-latency default.
+        self._maybe_apply_thinking_default(params)
+
         return params
+
+    @staticmethod
+    def model_supports_response_schema(model: str) -> bool:
+        """Whether a model can enforce a response schema.
+
+        OpenAI models before gpt-4o-mini and gpt-4o-2024-08-06 cannot.
+
+        Args:
+            model: The model name.
+        """
+        return not OPENAI_MODEL_WITHOUT_RESPONSE_SCHEMA.match(model)
 
     async def run_inference(
         self,
         context: LLMContext,
         max_tokens: int | None = None,
         system_instruction: str | None = None,
+        response_schema: dict[str, Any] | None = None,
     ) -> str | None:
         """Run a one-shot, out-of-band inference with the given LLM context.
 
@@ -407,6 +476,9 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
             context: The LLM context containing conversation history.
             max_tokens: Optional maximum number of tokens to generate.
             system_instruction: Optional system instruction for this inference.
+            response_schema: Optional JSON schema the reply must follow. The
+                service asks the provider to enforce it, so the reply is JSON
+                text matching the schema.
 
         Returns:
             The LLM's response as a string, or None if no response is generated.
@@ -415,8 +487,9 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
         effective_instruction = system_instruction or assert_given(
             self._settings.system_instruction
         )
-        invocation_params = adapter.get_llm_invocation_params(
-            context, system_instruction=effective_instruction
+        invocation_params = await adapter.get_llm_invocation_params(
+            context,
+            system_instruction=effective_instruction,
         )
 
         params = self._build_response_params(invocation_params)
@@ -426,6 +499,17 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
 
         if max_tokens is not None:
             params["max_output_tokens"] = max_tokens
+
+        response_schema = self._check_response_schema(response_schema)
+        if response_schema is not None:
+            params["text"] = {
+                "format": {
+                    "type": "json_schema",
+                    "name": "response",
+                    "schema": response_schema,
+                    "strict": True,
+                }
+            }
 
         response = await self._client.responses.create(**params)
 
@@ -466,27 +550,31 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
 
     # -- reasoning ------------------------------------------------------------
 
-    def _maybe_disable_reasoning(self, params: dict):
-        """Disable reasoning by default on the mainline gpt series for real-time voice.
+    def _maybe_apply_thinking_default(self, params: dict):
+        """Send the model's lowest reasoning effort when no reasoning is configured.
 
-        When the caller hasn't configured ``reasoning``, request ``effort="none"``
-        for whatever models possible. Note that this is a no-op for models like
-        ``gpt-5.4`` that already default to ``none``. Some models are left at the
-        provider default: the reasoning-first o-series doesn't accept
-        ``effort="none"`` (and choosing one is a deliberate decision to reason),
-        and gpt-4.x and earlier don't reason at all. Mirrors Gemini's
-        ``_maybe_unset_thinking_budget``, which disables or minimizes thinking on
-        its latency-sensitive models.
+        Applies the model's entry in ``_THINKING_DEFAULTS``, if it has one. A
+        request that already sets ``reasoning``, from the settings or from
+        ``extra``, is left as it is. So is every request when
+        ``use_provider_thinking_default`` is set. The first request for each model
+        logs the effort sent, or that the model runs at OpenAI's default,
+        warning for an unlisted reasoning model.
 
         Args:
             params: The response params dict (modified in place).
         """
-        model = assert_given(self._settings.model)
-        # Lower reasoning only for models that reason *and* accept effort="none".
-        # The o-series reasons but rejects "none" (and choosing it is a deliberate
-        # decision to reason), so exclude it.
-        if model and _model_supports_reasoning(model) and not _is_o_series(model):
-            params["reasoning"] = {"effort": "none"}
+        if "reasoning" in params:
+            return
+        model = assert_given(self._settings.model) or ""
+        effort = _THINKING_DEFAULTS.get(_model_name(model))
+        self._apply_thinking_default(
+            params,
+            model,
+            {"reasoning": {"effort": effort}} if effort is not None else None,
+            can_think=bool(_model_supports_reasoning(model)),
+            provider="OpenAI",
+            settings_fields="`reasoning`",
+        )
 
     def _warn_if_reasoning_unsupported(self):
         """Log a clear error when reasoning is configured on a model that can't use it.
@@ -506,7 +594,8 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
         logger.error(
             f"{self}: `reasoning` is configured but model '{model}' does not support "
             "reasoning, so requests will fail. Reasoning is supported only by "
-            "reasoning-capable models — the gpt-5.x series and the o-series; see "
+            "reasoning-capable models — the mainline gpt series from gpt-5 onward "
+            "and the o-series; see "
             "OpenAI's reasoning guide (https://platform.openai.com/docs/guides/reasoning). "
             "Remove the `reasoning` setting or select a reasoning-capable model."
         )
@@ -955,13 +1044,11 @@ class OpenAIResponsesLLMService(
             await self._drain_cancelled_response()
 
         adapter = self.get_llm_adapter()
-        logger.debug(
-            f"{self}: Generating response from universal context "
-            f"{adapter.get_messages_for_logging(context)}"
-        )
+        self._log_llm_response(context)
 
-        invocation_params = adapter.get_llm_invocation_params(
-            context, system_instruction=assert_given(self._settings.system_instruction)
+        invocation_params = await adapter.get_llm_invocation_params(
+            context,
+            system_instruction=assert_given(self._settings.system_instruction),
         )
 
         full_input = invocation_params["input"]
@@ -1154,6 +1241,7 @@ class OpenAIResponsesLLMService(
                         completion_tokens=usage.get("output_tokens", 0),
                         total_tokens=usage.get("total_tokens", 0),
                         cache_read_input_tokens=input_details.get("cached_tokens", 0),
+                        cache_creation_input_tokens=input_details.get("cache_write_tokens", 0),
                         reasoning_tokens=output_details.get("reasoning_tokens", 0),
                     )
                     await self.start_llm_usage_metrics(tokens)
@@ -1241,7 +1329,7 @@ class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
                 await self.push_frame(LLMFullResponseStartFrame())
                 await self.start_processing_metrics()
                 await self._process_context(frame.context)
-            except httpx.TimeoutException as e:
+            except TIMEOUT_EXCEPTIONS as e:
                 await self._call_event_handler("on_completion_timeout")
                 await self.push_error(error_msg="LLM completion timeout", exception=e)
             except Exception as e:
@@ -1276,13 +1364,11 @@ class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
     @traced_llm
     async def _process_context(self, context: LLMContext):
         adapter = self.get_llm_adapter()
-        logger.debug(
-            f"{self}: Generating response from universal context "
-            f"{adapter.get_messages_for_logging(context)}"
-        )
+        self._log_llm_response(context)
 
-        invocation_params = adapter.get_llm_invocation_params(
-            context, system_instruction=assert_given(self._settings.system_instruction)
+        invocation_params = await adapter.get_llm_invocation_params(
+            context,
+            system_instruction=assert_given(self._settings.system_instruction),
         )
 
         params = self._build_response_params(invocation_params)
@@ -1396,6 +1482,11 @@ class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
                             completion_tokens=usage.output_tokens or 0,
                             total_tokens=usage.total_tokens or 0,
                             cache_read_input_tokens=(input_details.cached_tokens or 0)
+                            if input_details
+                            else 0,
+                            cache_creation_input_tokens=(
+                                getattr(input_details, "cache_write_tokens", None) or 0
+                            )
                             if input_details
                             else 0,
                             reasoning_tokens=(output_details.reasoning_tokens or 0)

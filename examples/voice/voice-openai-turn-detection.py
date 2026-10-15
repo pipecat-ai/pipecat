@@ -23,6 +23,7 @@ from pipecat.services.openai.stt import OpenAIRealtimeSTTService
 from pipecat.services.openai.tts import OpenAITTSService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.livekit.transport import LiveKitParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 from pipecat.workers.runner import WorkerRunner
 
@@ -36,6 +37,10 @@ transport_params = {
         audio_out_enabled=True,
     ),
     "daily": lambda: DailyParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
+    "livekit": lambda: LiveKitParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
     ),
@@ -82,7 +87,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         turn_detection={"type": "server_vad"},  # Use OpenAI's server-side VAD
         settings=OpenAIRealtimeSTTService.Settings(
             # gpt-realtime-whisper (the default) rejects turn detection.
-            model="gpt-4o-transcribe",
+            model="gpt-transcribe",
         ),
     )
 

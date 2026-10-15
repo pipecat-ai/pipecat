@@ -199,6 +199,9 @@ class DeepgramSTTSettings(STTSettings):
         search: Search terms to highlight (str or list of str).
         smart_format: Apply smart formatting to transcripts.
         utterance_end_ms: Silence duration in ms before an utterance-end event.
+        version: Model version to transcribe with, e.g. a dated standard-model
+            version such as ``"2021-03-17.0"`` or a custom model's version id.
+            ``None`` omits the parameter, leaving Deepgram on ``"latest"``.
     """
 
     detect_entities: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -216,6 +219,7 @@ class DeepgramSTTSettings(STTSettings):
     search: Any | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     smart_format: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     utterance_end_ms: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    version: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
     def _sync_extra_to_fields(self) -> None:
         """Sync values from extra dict to declared fields.
@@ -363,6 +367,7 @@ class DeepgramSTTService(STTService):
             search=None,
             smart_format=False,
             utterance_end_ms=None,
+            version=None,
         )
 
         # 2. (No step 2, as there are no deprecated direct args)
@@ -406,6 +411,11 @@ class DeepgramSTTService(STTService):
 
         # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
+            # Sync the delta first: on a delta, an unset field is NOT_GIVEN, so a
+            # matching extra key can still be promoted. On the merged store every
+            # field already holds a default and the value would be dropped.
+            settings = settings.copy()
+            settings._sync_extra_to_fields()
             default_settings.apply_update(settings)
 
         # Sync extra to top-level fields so self._settings is unambiguous
@@ -491,6 +501,10 @@ class DeepgramSTTService(STTService):
 
     async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
         """Apply a settings delta and reconnect if anything changed."""
+        if isinstance(delta, self.Settings):
+            delta = delta.copy()
+            delta._sync_extra_to_fields()
+
         changed = await super()._update_settings(delta)
 
         if not changed:

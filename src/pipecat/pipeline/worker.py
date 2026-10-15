@@ -13,8 +13,7 @@ including heartbeats, idle detection, and observer integration.
 
 import asyncio
 import time
-import warnings
-from collections.abc import AsyncIterable, Iterable
+from collections.abc import AsyncIterable, Iterable, Iterator
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, TypeVar
@@ -32,8 +31,8 @@ from pipecat.bus import (
 )
 from pipecat.bus.bridge_processor import _BusEdgeProcessor
 from pipecat.bus.ui.messages import (
-    _UI_CANCEL_JOB_GROUP_BUS_EVENT_NAME,
-    _UI_SNAPSHOT_BUS_EVENT_NAME,
+    UI_CANCEL_JOB_GROUP_EVENT_NAME,
+    UI_SNAPSHOT_EVENT_NAME,
     BusUICommandMessage,
     BusUIDataMessage,
     BusUIEventMessage,
@@ -53,6 +52,7 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     HeartbeatFrame,
+    InterimTranscriptionFrame,
     InterruptionFrame,
     InterruptionWorkerFrame,
     MetricsFrame,
@@ -60,14 +60,17 @@ from pipecat.frames.frames import (
     StartFrame,
     StopFrame,
     StopWorkerFrame,
+    TranscriptionFrame,
     TTSSpeakFrame,
     UserSpeakingFrame,
+    UserStartedSpeakingFrame,
 )
 from pipecat.metrics.metrics import ProcessingMetricsData, TTFBMetricsData
 from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.observers.turn_tracking_observer import TurnTrackingObserver
 from pipecat.observers.user_bot_latency_observer import UserBotLatencyObserver
 from pipecat.pipeline.base_pipeline import BasePipeline
+from pipecat.pipeline.capabilities import BotCapabilities
 from pipecat.pipeline.pipeline import Pipeline, PipelineSink, PipelineSource
 from pipecat.pipeline.worker_observer import WorkerObserver
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
@@ -82,9 +85,10 @@ from pipecat.processors.frameworks.rtvi.models import (
     UIJobUpdateData,
     UISnapshotMessage,
 )
+from pipecat.transports.base_input import BaseInputTransport
+from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
-from pipecat.utils.deprecation import deprecated
-from pipecat.utils.prewarm import warm_deferred_imports
+from pipecat.utils.deprecation import deprecated, warn_deprecated
 from pipecat.utils.startup import run_setup_hook
 from pipecat.utils.tracing.setup import is_tracing_available
 from pipecat.utils.tracing.tracing_context import TracingContext
@@ -125,10 +129,9 @@ class IdleFrameObserver(BaseObserver):
             idle_event: The event to set if the idle timeout frames are being pushed.
             idle_timeout_frames: A tuple with the frames that should set the event when received
         """
-        super().__init__()
+        super().__init__(observe_every_push=False)
         self._idle_event = idle_event
         self._idle_timeout_frames = idle_timeout_frames
-        self._processed_frames = set()
 
     async def on_push_frame(self, data: FramePushed):
         """Callback executed when a frame is pushed in the pipeline.
@@ -136,12 +139,6 @@ class IdleFrameObserver(BaseObserver):
         Args:
             data: The frame push event data.
         """
-        # Skip already processed frames
-        if data.frame.id in self._processed_frames:
-            return
-
-        self._processed_frames.add(data.frame.id)
-
         if isinstance(data.frame, StartFrame) or isinstance(data.frame, self._idle_timeout_frames):
             self._idle_event.set()
 
@@ -287,15 +284,22 @@ class PipelineWorker(BaseWorker):
         cancel_on_idle_timeout: bool = True,
         cancel_runner_on_idle_timeout: bool = True,
         cancel_timeout_secs: float = CANCEL_TIMEOUT_SECS,
+        capabilities: BotCapabilities | None = None,
         check_dangling_tasks: bool = True,
         clock: BaseClock | None = None,
         conversation_id: str | None = None,
         enable_tracing: bool = False,
         enable_turn_tracking: bool = True,
         handle_flush_frame: bool | None = None,
-        enable_rtvi: bool = True,
+        enable_rtvi: bool | None = None,
         exclude_frames: tuple[type[Frame], ...] | None = None,
-        idle_timeout_frames: tuple[type[Frame], ...] = (BotSpeakingFrame, UserSpeakingFrame),
+        idle_timeout_frames: tuple[type[Frame], ...] = (
+            BotSpeakingFrame,
+            InterimTranscriptionFrame,
+            TranscriptionFrame,
+            UserSpeakingFrame,
+            UserStartedSpeakingFrame,
+        ),
         idle_timeout_secs: float | None = IDLE_TIMEOUT_SECS,
         name: str | None = None,
         observers: list[BaseObserver] | None = None,
@@ -356,19 +360,28 @@ class PipelineWorker(BaseWorker):
                 peers.
             cancel_timeout_secs: Timeout (in seconds) to wait for cancellation to happen
                 cleanly.
+            capabilities: What the bot does, for fields the pipeline can't show.
+                Its known fields replace the ones derived from the pipeline's
+                transports and parameters. See :attr:`capabilities`.
             check_dangling_tasks: Whether to warn about tasks left running when
                 the worker finishes. Only applies when the worker owns its task
                 manager; otherwise the runner reports dangling tasks.
             clock: Clock implementation for timing operations.
             conversation_id: Optional custom ID for the conversation.
-            enable_rtvi: Whether to automatically add RTVI support to the pipeline.
+            enable_rtvi: Whether to automatically add RTVI support to the
+                pipeline. ``None``, the default, adds it unless the pipeline
+                is bridged: a bridged worker has no client of its own, and
+                its RTVI would report every frame a second time as it
+                crosses the bridge.
             enable_tracing: Whether to enable tracing.
             enable_turn_tracking: Whether to enable turn tracking.
             exclude_frames: When ``bridged`` is set, extra frame types
                 that should not cross the bus (lifecycle frames are
                 always excluded).
             idle_timeout_frames: A tuple with the frames that should trigger an idle
-                timeout if not received within `idle_timeout_seconds`.
+                timeout if not received within `idle_timeout_secs`. The default
+                pairs the VAD-only `UserSpeakingFrame` with the turn and
+                transcription frames a provider-driven pipeline reports instead.
             idle_timeout_secs: Timeout (in seconds) to consider pipeline idle or
                 None. If a pipeline is idle the pipeline worker will be cancelled
                 automatically.
@@ -408,17 +421,15 @@ class PipelineWorker(BaseWorker):
             handle_flush_frame if handle_flush_frame is not None else bridged is None
         )
         if tool_resources is not None:
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    "`PipelineWorker(tool_resources=...)` is deprecated since 1.2.0, "
-                    "use `app_resources` instead.",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
+            warn_deprecated(
+                "`PipelineWorker(tool_resources=...)` is deprecated since 1.2.0 and will be "
+                "removed in 2.0.0. Use `app_resources` instead.",
+                stacklevel=2,
+            )
             if app_resources is None:
                 app_resources = tool_resources
         self._params = params or PipelineParams()
+        self._capabilities_override = capabilities or BotCapabilities()
         self._additional_span_attributes = additional_span_attributes or {}
         self._cancel_on_idle_timeout = cancel_on_idle_timeout
         self._cancel_runner_on_idle_timeout = cancel_runner_on_idle_timeout
@@ -482,9 +493,11 @@ class PipelineWorker(BaseWorker):
         self._heartbeat_monitor_task: asyncio.Task | None = None
 
         # RTVI support
+        if enable_rtvi is None:
+            enable_rtvi = bridged is None
         self._rtvi = None
         prepend_rtvi = False
-        external_rtvi = self._find_processor(pipeline, RTVIProcessor)
+        external_rtvi = next(self._iter_processors(pipeline, RTVIProcessor), None)
         external_observer_found = any(isinstance(o, RTVIObserver) for o in observers)
 
         if external_rtvi and not external_observer_found:
@@ -613,6 +626,25 @@ class PipelineWorker(BaseWorker):
             The pipeline parameters configuration.
         """
         return self._params
+
+    @property
+    def capabilities(self) -> BotCapabilities:
+        """What the bot does in this session.
+
+        Derived from the media the pipeline's transports send and receive and
+        from :attr:`PipelineParams.enable_metrics`, with the ``capabilities``
+        passed to the constructor applied on top. A field no transport reports
+        is ``None`` (unknown). RTVI sends this to the client in ``bot-ready``.
+
+        Returns:
+            The bot's capabilities.
+        """
+        derived = BotCapabilities(metrics=self._params.enable_metrics)
+        for processor in self._iter_processors(
+            self._pipeline, (BaseInputTransport, BaseOutputTransport)
+        ):
+            derived = derived.combine(processor.capabilities)
+        return derived.override(self._capabilities_override)
 
     @property
     def bridged(self) -> bool:
@@ -869,6 +901,7 @@ class PipelineWorker(BaseWorker):
             logger.debug(f"Pipeline worker {self} is finishing...")
             await self._cancel_tasks()
             self._print_dangling_tasks()
+            await self._cancel_children()
             self._finished = True
             logger.debug(f"Pipeline worker {self} has finished")
 
@@ -1090,10 +1123,10 @@ class PipelineWorker(BaseWorker):
             event_name = message.data.event
             payload = message.data.payload
         elif isinstance(message, UISnapshotMessage):
-            event_name = _UI_SNAPSHOT_BUS_EVENT_NAME
+            event_name = UI_SNAPSHOT_EVENT_NAME
             payload = message.data.tree.model_dump(exclude_none=True)
         elif isinstance(message, UICancelJobGroupMessage):
-            event_name = _UI_CANCEL_JOB_GROUP_BUS_EVENT_NAME
+            event_name = UI_CANCEL_JOB_GROUP_EVENT_NAME
             payload = {
                 "job_id": message.data.job_id,
                 "reason": message.data.reason,
@@ -1274,10 +1307,6 @@ class PipelineWorker(BaseWorker):
         # Start worker observer.
         await self._observer.setup(self.task_manager)
 
-        # Services spend most of the start sequence waiting on the network, which
-        # leaves room to load the imports while setup is happening.
-        lazy_imports_task = self.create_task(asyncio.to_thread(warm_deferred_imports))
-
         # Setup processors
         setup = FrameProcessorSetup(
             audio_in_sample_rate=self._params.audio_in_sample_rate,
@@ -1300,9 +1329,6 @@ class PipelineWorker(BaseWorker):
         )
         await self.create_task(self._pipeline.setup(setup))
 
-        # Make sure lazy imports are done at this point.
-        await lazy_imports_task
-
     async def _cleanup(self, cleanup_pipeline: bool):
         """Clean up the pipeline worker and processors."""
         # Cleanup base object.
@@ -1321,6 +1347,21 @@ class PipelineWorker(BaseWorker):
 
         # Nothing left to answer a probe we are still holding.
         self._foreign_probes.clear()
+
+    async def _cancel_children(self) -> None:
+        """Cancel the children once this worker's pipeline is over.
+
+        A pipeline that ends on its own (an ``EndFrame`` it queued itself, an
+        idle timeout, a fatal error) is never told to end over the bus, so
+        nothing has passed the end on to its children. A child that has
+        already finished takes no notice.
+        """
+        for child in self._children:
+            await self.send_bus_message(
+                BusCancelWorkerMessage(
+                    source=self.name, target=child.name, reason=f"{self.name} finished"
+                )
+            )
 
     async def _handle_worker_end(self, message: BusEndWorkerMessage) -> None:
         """End the pipeline after propagating end to children.
@@ -1649,16 +1690,14 @@ class PipelineWorker(BaseWorker):
 
         return start_metadata
 
-    def _find_processor(self, processor: FrameProcessor, processor_type: type[T]) -> T | None:
-        """Recursively find a processor of the given type in the pipeline."""
+    def _iter_processors(
+        self, processor: FrameProcessor, processor_type: type[T] | tuple[type[T], ...]
+    ) -> Iterator[T]:
+        """Recursively yield the processors of the given type(s) in the pipeline."""
         if isinstance(processor, processor_type):
-            return processor
-
+            yield processor
         for p in processor.processors:
-            found = self._find_processor(p, processor_type)
-            if found:
-                return found
-        return None
+            yield from self._iter_processors(p, processor_type)
 
 
 @deprecated(

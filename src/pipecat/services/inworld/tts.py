@@ -37,10 +37,10 @@ from pydantic import BaseModel
 from websockets.protocol import State
 
 from pipecat.frames.frames import (
-    AggregationType,
     ErrorFrame,
     Frame,
     InterruptionFrame,
+    TextType,
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
@@ -51,6 +51,7 @@ from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TextAggregationMode, TTSService, WebsocketTTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.deprecation import deprecated
+from pipecat.utils.text.phonemes import normalize_ipa
 from pipecat.utils.tracing.service_decorators import traced_tts
 from pipecat.utils.types import NOT_GIVEN, NotGiven
 
@@ -83,6 +84,25 @@ def language_to_inworld_language(language: Language) -> str:
         Language.ZH: "zh-CN",
     }
     return resolve_language(language, LANGUAGE_MAP, use_base_code=False)
+
+
+def format_inworld_pronunciation(word: str, ipa: str) -> str | None:
+    """Render a pronunciation as IPA between slashes, as Inworld reads it.
+
+    Inworld speaks the IPA wherever it appears inline, one word per pair of
+    slashes, so a pronunciation covering several words cannot be written. Only
+    English IPA symbols are read.
+
+    Args:
+        word: The word being pronounced (unused: the IPA replaces it).
+        ipa: The pronunciation, in IPA.
+
+    Returns:
+        The IPA wrapped in slashes, e.g. ``/kriːt/``, or None for an empty
+        pronunciation or one spanning several words.
+    """
+    ipa = normalize_ipa(ipa)
+    return f"/{ipa}/" if ipa and " " not in ipa else None
 
 
 @dataclass
@@ -258,6 +278,21 @@ class InworldHttpTTSService(TTSService):
         self._audio_sample_rate = 0  # Set in start()
         self._timestamp_transport_strategy = timestamp_transport_strategy
 
+    @classmethod
+    def format_pronunciation(cls, word: str, ipa: str) -> str | None:
+        """Render a pronunciation as IPA between slashes.
+
+        See :func:`format_inworld_pronunciation`.
+
+        Args:
+            word: The word being pronounced.
+            ipa: The pronunciation, in IPA.
+
+        Returns:
+            The IPA wrapped in slashes, or None when the pronunciation cannot be used.
+        """
+        return format_inworld_pronunciation(word, ipa)
+
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
 
@@ -409,7 +444,7 @@ class InworldHttpTTSService(TTSService):
                         f"{self}: No timestamps received, pushing fallback text: [{text_clean}]"
                     )
                     fallback = TTSTextFrame(
-                        text_clean, aggregated_by=AggregationType.SENTENCE, context_id=context_id
+                        text_clean, text_type=TextType.SENTENCE, context_id=context_id
                     )
                     ctx = self._tts_contexts.get(context_id)
                     fallback.append_to_context = ctx.append_to_context if ctx else True
@@ -752,6 +787,21 @@ class InworldTTSService(WebsocketTTSService):
         self._apply_text_normalization = apply_text_normalization
         self._timestamp_transport_strategy = timestamp_transport_strategy
 
+    @classmethod
+    def format_pronunciation(cls, word: str, ipa: str) -> str | None:
+        """Render a pronunciation as IPA between slashes.
+
+        See :func:`format_inworld_pronunciation`.
+
+        Args:
+            word: The word being pronounced.
+            ipa: The pronunciation, in IPA.
+
+        Returns:
+            The IPA wrapped in slashes, or None when the pronunciation cannot be used.
+        """
+        return format_inworld_pronunciation(word, ipa)
+
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
 
@@ -890,7 +940,7 @@ class InworldTTSService(WebsocketTTSService):
         if had_timestamps or not text:
             return
         logger.debug(f"{self}: No timestamps for context {context_id}, pushing fallback: [{text}]")
-        fallback = TTSTextFrame(text, aggregated_by=AggregationType.SENTENCE)
+        fallback = TTSTextFrame(text, text_type=TextType.SENTENCE)
         fallback.context_id = context_id
         ctx = self._tts_contexts.get(context_id)
         fallback.append_to_context = ctx.append_to_context if ctx else True
@@ -999,7 +1049,6 @@ class InworldTTSService(WebsocketTTSService):
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
-            await self.remove_active_audio_context()
             self._websocket = None
             self._sent_context_ids.clear()
             self._reset_generation_timing()

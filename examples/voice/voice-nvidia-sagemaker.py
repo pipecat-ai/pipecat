@@ -28,6 +28,7 @@ from pipecat.services.nvidia.sagemaker.stt import NvidiaSageMakerSTTService
 from pipecat.services.nvidia.sagemaker.tts import NvidiaSageMakerTTSService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.livekit.transport import LiveKitParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 from pipecat.workers.runner import WorkerRunner
 
@@ -41,6 +42,10 @@ transport_params = {
         audio_out_enabled=True,
     ),
     "daily": lambda: DailyParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
+    "livekit": lambda: LiveKitParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
     ),
@@ -66,7 +71,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm = NvidiaLLMService(
         api_key=os.environ["NVIDIA_API_KEY"],
         settings=NvidiaLLMService.Settings(
-            model="meta/llama-3.3-70b-instruct",
             system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
         ),
     )

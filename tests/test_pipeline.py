@@ -19,12 +19,15 @@ from pipecat.frames.frames import (
     Frame,
     HeartbeatFrame,
     InputAudioRawFrame,
+    InterimTranscriptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     StartFrame,
     StopFrame,
     TextFrame,
     TTSStoppedFrame,
+    UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame,
 )
 from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.pipeline.parallel_pipeline import ParallelPipeline
@@ -307,6 +310,37 @@ class TestPipelineWorker(unittest.IsolatedAsyncioTestCase):
         assert frame_received
         assert frame_count_1 == 1
         assert frame_count_2 == 1
+
+    async def test_task_observer_can_remove_itself(self):
+        frame_count = 0
+        proxy_task: asyncio.Task | None = None
+        removed = asyncio.Event()
+
+        class SelfRemovingObserver(BaseObserver):
+            async def on_push_frame(self, data: FramePushed):
+                nonlocal frame_count, proxy_task
+
+                if isinstance(data.source, IdentityFilter) and isinstance(data.frame, TextFrame):
+                    frame_count += 1
+                    proxy_task = asyncio.current_task()
+                    await worker.remove_observer(self)
+                    removed.set()
+
+        identity = IdentityFilter()
+        pipeline = Pipeline([identity])
+        worker = PipelineWorker(pipeline)
+        worker.add_observer(SelfRemovingObserver())
+
+        async def push_frames():
+            await worker.queue_frame(TextFrame(text="First frame"))
+            await asyncio.wait_for(removed.wait(), timeout=1.0)
+            await worker.queue_frames([TextFrame(text="Second frame"), EndFrame()])
+
+        await asyncio.gather(worker.run(WorkerParams(task_manager=TaskManager())), push_frames())
+
+        assert frame_count == 1
+        # The observer was running on its own proxy task, which must still end.
+        assert proxy_task is not None and proxy_task.done()
 
     async def test_task_started_ended_event_handler(self):
         start_received = False
@@ -740,6 +774,62 @@ class TestPipelineWorker(unittest.IsolatedAsyncioTestCase):
 
         # Wait for the pending tasks to complete.
         await asyncio.gather(*pending)
+
+    async def test_idle_task_external_user_activity(self):
+        idle_timeout_secs = 0.4
+        activity_period_secs = 0.1
+
+        # A pipeline whose turns are detected by a provider instead of local VAD
+        # pushes no UserSpeakingFrame, so the default idle timeout frames have to
+        # pick up the turn and transcription frames it does push.
+        identity = IdentityFilter()
+        pipeline = Pipeline([identity])
+        worker = PipelineWorker(
+            pipeline,
+            idle_timeout_secs=idle_timeout_secs,
+            cancel_on_idle_timeout=False,
+        )
+
+        started = asyncio.Event()
+        idle_timeouts = 0
+        idle_timeouts_during_turn = 0
+
+        @worker.event_handler("on_pipeline_started")
+        async def on_pipeline_started(worker: PipelineWorker, frame: StartFrame):
+            started.set()
+
+        @worker.event_handler("on_idle_timeout")
+        async def on_idle_timeout(worker: PipelineWorker):
+            nonlocal idle_timeouts
+            idle_timeouts += 1
+
+        async def external_user_turn():
+            """Sending a single user turn that outlasts the idle timeout."""
+            nonlocal idle_timeouts_during_turn
+
+            # The idle monitor only watches frames the running pipeline pushes,
+            # so nothing sent before this point counts as activity.
+            await asyncio.wait_for(started.wait(), timeout=5)
+
+            await worker.queue_frame(UserStartedSpeakingFrame())
+            for _ in range(6):
+                await asyncio.sleep(activity_period_secs)
+                await worker.queue_frame(
+                    InterimTranscriptionFrame(text="Hello Pipecat!", user_id="cat", timestamp="")
+                )
+            await worker.queue_frame(UserStoppedSpeakingFrame())
+            idle_timeouts_during_turn = idle_timeouts
+
+            # The timeout still fires once the user goes quiet.
+            await asyncio.sleep(idle_timeout_secs * 2)
+            await worker.queue_frame(EndFrame())
+
+        await asyncio.gather(
+            worker.run(WorkerParams(task_manager=TaskManager())), external_user_turn()
+        )
+
+        assert idle_timeouts_during_turn == 0
+        assert idle_timeouts > 0
 
     async def test_idle_task_swallowed_frames(self):
         idle_timeout_secs = 0.2

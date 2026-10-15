@@ -375,9 +375,9 @@ class TestPatternPairAggregator(unittest.IsolatedAsyncioTestCase):
 
 class TestPatternPairAggregatorTokenMode(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
-        from pipecat.utils.text.base_text_aggregator import AggregationType
+        from pipecat.utils.text.base_text_aggregator import TextType
 
-        self.aggregator = PatternPairAggregator(aggregation_type=AggregationType.TOKEN)
+        self.aggregator = PatternPairAggregator(aggregation_type=TextType.TOKEN)
         self.handler = AsyncMock()
         self.aggregator.add_pattern(
             type="think",

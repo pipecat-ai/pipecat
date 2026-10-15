@@ -320,8 +320,18 @@ class TestDrainBeforeTransition(unittest.IsolatedAsyncioTestCase):
         runner = WorkerRunner(bus=self.bus, handle_sigint=False)
         await runner.add_workers(worker)
 
+        running = asyncio.Event()
+
+        @worker.event_handler("on_pipeline_started")
+        async def _on_pipeline_started(worker, frame):
+            running.set()
+
         async def drive():
-            await asyncio.sleep(0.05)
+            # Only a running pipeline is drained, so wait for the StartFrame to
+            # reach the end of it. Acting on a fixed delay instead races worker
+            # setup, and a host slow enough to lose that race sees the action
+            # arrive before there is a pipeline to drain.
+            await running.wait()
             await action()
             await worker.queue_frame(EndFrame())
 
@@ -1476,6 +1486,26 @@ class TestJobLifecycle(unittest.IsolatedAsyncioTestCase):
         # Yield to let the cancel coroutine complete its work.
         await asyncio.sleep(0.05)
         self.assertNotIn("t1", worker.active_jobs)
+
+    async def test_stop_cancels_a_job_handler_still_running(self):
+        """A handler holding a long-lived job open does not outlive the worker."""
+
+        class Holder(BaseWorker):
+            @job(name="hold")
+            async def hold(self, message):
+                await asyncio.Event().wait()
+
+        worker = await self._attach(Holder("worker"))
+        await worker.on_bus_message(
+            BusJobRequestMessage(source="parent", target="worker", job_id="t1", job_name="hold")
+        )
+        await asyncio.sleep(0.05)
+        (task,) = list(worker._job_handler_tasks.values())
+
+        await worker.stop()
+
+        self.assertTrue(task.done())
+        self.assertEqual(worker._job_handler_tasks, {})
 
     async def test_on_job_cancelled_fires(self):
         """BusJobCancelMessage triggers on_job_cancelled with the message."""

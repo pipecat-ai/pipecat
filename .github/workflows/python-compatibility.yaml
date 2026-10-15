@@ -35,7 +35,7 @@ jobs:
           sudo timeout 300 apt-get install -y \
             portaudio19-dev \
             libcairo2-dev \
-            libgirepository1.0-dev \
+            libgirepository-2.0-dev \
             pkg-config
 
       - name: Install uv

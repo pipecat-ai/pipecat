@@ -6,9 +6,13 @@
 
 """Tests for the typed settings infrastructure in pipecat.services.settings."""
 
-from unittest.mock import patch
+import asyncio
+from unittest.mock import AsyncMock, patch
 
-from pipecat.services.deepgram.sagemaker.stt import DeepgramSageMakerSTTSettings
+from pipecat.services.deepgram.sagemaker.stt import (
+    DeepgramSageMakerSTTService,
+    DeepgramSageMakerSTTSettings,
+)
 from pipecat.services.deepgram.stt import DeepgramSTTService, DeepgramSTTSettings
 from pipecat.services.inworld.realtime import events as inworld_events
 from pipecat.services.inworld.realtime.llm import InworldRealtimeLLMSettings
@@ -633,6 +637,73 @@ class TestDeepgramSTTSettingsExtraSync:
         kwargs = svc._build_connect_kwargs()
         assert kwargs["numerals"] == "true"
         assert kwargs["custom_param"] == "test"
+
+
+# ---------------------------------------------------------------------------
+# DeepgramSTTSettings.version: pinning a model version
+# ---------------------------------------------------------------------------
+
+
+class TestDeepgramVersionSetting:
+    """Test that `version` reaches Deepgram as a request parameter."""
+
+    def _make_service(self, **kwargs):
+        with patch("pipecat.services.deepgram.stt.AsyncDeepgramClient"):
+            return DeepgramSTTService(api_key="test-key", sample_rate=16000, **kwargs)
+
+    def _make_sagemaker_service(self, **kwargs):
+        return DeepgramSageMakerSTTService(
+            endpoint_name="test-endpoint", region="us-east-1", sample_rate=16000, **kwargs
+        )
+
+    def test_version_omitted_by_default(self):
+        """Without a version, the parameter is left off so Deepgram picks the default."""
+        assert "version" not in self._make_service()._build_connect_kwargs()
+
+    def test_version_forwarded_when_set(self):
+        svc = self._make_service(settings=DeepgramSTTService.Settings(version="2021-03-17.0"))
+
+        assert svc._build_connect_kwargs()["version"] == "2021-03-17.0"
+
+    def test_version_forwarded_from_extra(self):
+        """A version passed through `extra` is promoted to the declared field."""
+        svc = self._make_service(
+            settings=DeepgramSTTService.Settings(extra={"version": "2021-03-17.0"})
+        )
+
+        assert svc._settings.version == "2021-03-17.0"
+        assert svc._build_connect_kwargs()["version"] == "2021-03-17.0"
+
+    def test_version_updated_by_delta(self):
+        """A settings delta repins the version without disturbing other fields."""
+        svc = self._make_service(settings=DeepgramSTTService.Settings(version="2021-03-17.0"))
+
+        svc._settings.apply_update(DeepgramSTTSettings(version="2024-01-09.0"))
+
+        assert svc._build_connect_kwargs()["version"] == "2024-01-09.0"
+        assert svc._build_connect_kwargs()["model"] == "nova-3-general"
+
+    def test_version_updated_from_extra_at_runtime(self):
+        """A runtime update passing version through `extra` still repins it."""
+        svc = self._make_service()
+
+        with patch.object(svc, "_request_reconnect", new=AsyncMock()):
+            asyncio.run(
+                svc._update_settings(DeepgramSTTSettings(extra={"version": "2024-01-09.0"}))
+            )
+
+        assert svc._settings.version == "2024-01-09.0"
+        assert svc._build_connect_kwargs()["version"] == "2024-01-09.0"
+
+    def test_sagemaker_version_omitted_by_default(self):
+        assert "version" not in self._make_sagemaker_service()._build_query_string()
+
+    def test_sagemaker_version_forwarded_when_set(self):
+        svc = self._make_sagemaker_service(
+            settings=DeepgramSageMakerSTTSettings(version="2021-03-17.0")
+        )
+
+        assert "version=2021-03-17.0" in svc._build_query_string()
 
 
 # ---------------------------------------------------------------------------

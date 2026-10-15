@@ -242,8 +242,8 @@ def _version_mismatch_warning(metadata: dict[str, str], cwd: Path | None) -> str
     if indexed_mm is None or project_mm is None:
         return None
 
-    # An unpinned refresh tracks the default branch, so the recorded tag is a
-    # floor: the index already contains commits published after it. Allow a
+    # A refresh pinned to the framework's default branch leaves the recorded tag
+    # as a floor: the index already contains commits published after it. Allow a
     # minor of slack in that case, or every developer on a source checkout gets
     # warned about an index that is in fact newer than its own tag.
     slack = 0
