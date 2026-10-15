@@ -35,6 +35,14 @@ The backend is an engineering assistant's: a code change that loops through sear
 
 The judge sees each reply as the harness attributes it to a turn, so a result that arrives inside the previous turn's reply can fail the turn that expected it, and audio the user talks over is discarded. When a verdict looks wrong, read the run's logs and recording under `test-runs/<timestamp>/` before changing anything: the bot log says what the backend sent and when, and whether the frontend spoke it. Budgets in the scenarios are generous on purpose, since the eval clock lags the bot by seconds and a `response` needs the bot to stop speaking and its speech to be transcribed.
 
+## Frontend replay
+
+`frontend_replay/` is the fast loop for the pairing instruction. `turns.jsonl` holds 75 user turns recorded from the text scenarios on the three cascade bots: the frontend's context when the turn ended, and whether the turn should be delegated. `replay.py` runs a frontend model on each of them several times, with the prompts as they are in the code, and reports the turns where its decision differs: a stop it answered itself, or small talk it delegated. It needs the frontend's key and takes a few minutes; run it on each frontend before and after changing a prompt.
+
+```bash
+uv run python evals/llm-with-backend/frontend_replay/replay.py --frontend openai --samples 10
+```
+
 ## Predictive delegation's classifier
 
 `predictive_delegation/` checks the classifier that `PredictiveDelegation` asks whether a user's turn needs the backend. `turns.jsonl` holds 107 turns recorded from the three text example bots in a ten-turn conversation that mixes requests for the backend with ones the frontend answers itself: each is the frontend's context when the user's turn ended, and whether the turn needs the backend. `replay.py` builds the classifier's input from each turn as a running bot would, with the prompts as they are in the code, and reports the turns it gets wrong at the threshold for delegating early. A false "yes" delegates a turn the frontend would have answered itself; a missed "yes" leaves a turn to the frontend that could have been delegated early.
