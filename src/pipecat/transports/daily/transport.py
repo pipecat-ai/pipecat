@@ -15,6 +15,7 @@ import asyncio
 from collections.abc import Awaitable, Callable, Mapping
 from concurrent.futures import CancelledError as FuturesCancelledError
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import Any
 
 import aiohttp
@@ -496,6 +497,19 @@ class DailyVideoTrack:
 CallClientError = str
 
 
+class _CallState(Enum):
+    """Where the client is in a call.
+
+    ``LEFT`` covers both ``leave()`` and a call that ends without it (the bot
+    is ejected, or the room or meeting ends). daily-core fails every app
+    message sent after that.
+    """
+
+    NOT_JOINED = "not_joined"
+    JOINED = "joined"
+    LEFT = "left"
+
+
 class DailyTransportClient(EventHandler):
     """Core client for interacting with Daily's API.
 
@@ -549,7 +563,7 @@ class DailyTransportClient(EventHandler):
         self._dial_out_session_id: str = ""
         self._dial_in_session_id: str = ""
 
-        self._joined = False
+        self._call_state = _CallState.NOT_JOINED
         self._joined_event = asyncio.Event()
 
         self._task_manager: BaseTaskManager | None = None
@@ -632,8 +646,14 @@ class DailyTransportClient(EventHandler):
         Returns:
             An error description, or None on success.
         """
-        if not self._joined:
+        if self._call_state == _CallState.NOT_JOINED:
             self._join_message_queue.append(frame)
+            return None
+
+        # The disconnect was already reported once; reporting every dropped
+        # message would let a processor that relays errors as app messages
+        # (e.g. RTVIProcessor) feed on its own failures.
+        if self._call_state == _CallState.LEFT:
             return None
 
         participant_id = None
@@ -861,7 +881,7 @@ class DailyTransportClient(EventHandler):
             await self._callbacks.on_error(error_msg)
             return
 
-        self._joined = True
+        self._call_state = _CallState.JOINED
 
         participant_id = data.get("participants", {}).get("local", {}).get("id")
         meeting_id = data.get("meetingSession", {}).get("id")
@@ -949,10 +969,13 @@ class DailyTransportClient(EventHandler):
     async def leave(self):
         """Leave the Daily room and cleanup resources."""
         # Transport not joined, ignore.
-        if not self._joined:
+        if self._call_state == _CallState.NOT_JOINED:
             return
 
-        self._joined = False
+        # A call that ended without leave() has nothing left to leave.
+        call_ended = self._call_state == _CallState.LEFT
+
+        self._call_state = _CallState.LEFT
         self._joined_event.clear()
 
         logger.info(f"Leaving {self._room_url}")
@@ -966,7 +989,7 @@ class DailyTransportClient(EventHandler):
         for track_name, _ in self._custom_video_tracks.items():
             await self.remove_custom_video_track(track_name)
 
-        error = await self._leave()
+        error = None if call_ended else await self._leave()
         if not error:
             logger.info(f"Left {self._room_url}")
             await self._callbacks.on_left()
@@ -1173,7 +1196,7 @@ class DailyTransportClient(EventHandler):
         Returns:
             An error description, or None on success.
         """
-        if not self._joined:
+        if self._call_state != _CallState.JOINED:
             return "Can't send message if not joined"
 
         future = self._get_event_loop().create_future()
@@ -1192,7 +1215,7 @@ class DailyTransportClient(EventHandler):
             return
 
         self._transcription_ids.append(participant_id)
-        if self._joined and self._transcription_status:
+        if self._call_state == _CallState.JOINED and self._transcription_status:
             await self.update_transcription(self._transcription_ids)
 
     async def capture_participant_audio(
@@ -1564,7 +1587,7 @@ class DailyTransportClient(EventHandler):
         Args:
             state: The new call state.
         """
-        self._call_event_callback(self._callbacks.on_call_state_updated, state)
+        self._call_event_callback(self._handle_call_state_updated, state)
 
     def on_dialin_connected(self, data: Any):
         """Handle dial-in connected events.
@@ -1815,6 +1838,17 @@ class DailyTransportClient(EventHandler):
         for frame in self._join_message_queue:
             await self.send_message(frame)
         self._join_message_queue.clear()
+
+    async def _handle_call_state_updated(self, state: str):
+        """Track whether app messages can still be sent, then report the state."""
+        # leave() moves to LEFT before leaving, so reaching "left" while still
+        # joined means the call ended underneath us.
+        if state == "left" and self._call_state == _CallState.JOINED:
+            self._call_state = _CallState.LEFT
+            await self._callbacks.on_error(
+                f"Disconnected from {self._room_url}; app messages will not be sent"
+            )
+        await self._callbacks.on_call_state_updated(state)
 
     def _get_event_loop(self) -> asyncio.AbstractEventLoop:
         """Get the event loop from the task manager."""

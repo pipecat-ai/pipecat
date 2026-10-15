@@ -12,7 +12,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from pipecat.audio.dtmf.types import KeypadEntry
-from pipecat.frames.frames import BotConnectedFrame, STTMetadataFrame
+from pipecat.frames.frames import (
+    BotConnectedFrame,
+    OutputTransportMessageUrgentFrame,
+    STTMetadataFrame,
+)
 from pipecat.services.stt_latency import DEEPGRAM_TTFS_P99
 from pipecat.transports.daily.transport import (
     DailyOutputDTMFFrame,
@@ -321,3 +325,107 @@ async def test_join_omits_connection_without_initial_receive_bitrate():
     client_settings = await _join_client_settings(transport)
 
     assert "connection" not in client_settings
+
+
+async def _make_joined_client():
+    """Return a joined transport client with fake callbacks and Daily calls."""
+    transport = _make_transport()
+    client = transport._client
+    client._task_manager = MagicMock()
+    client._task_manager.get_event_loop.return_value = asyncio.get_running_loop()
+    for name in ("on_joined", "on_left", "on_before_leave", "on_error", "on_call_state_updated"):
+        setattr(client._callbacks, name, AsyncMock())
+
+    def _complete(*args, completion, **kwargs):
+        completion(None)
+
+    client._client.send_app_message = MagicMock(side_effect=_complete)
+    client._client.leave = MagicMock(side_effect=_complete)
+    client._join = AsyncMock(return_value=({}, None))
+
+    await client.join()
+    return client
+
+
+@pytest.mark.asyncio
+async def test_send_message_sends_while_connected():
+    client = await _make_joined_client()
+
+    error = await client.send_message(OutputTransportMessageUrgentFrame(message={"n": 1}))
+
+    assert error is None
+    client._client.send_app_message.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_call_ending_without_leave_reports_once_and_drops_messages():
+    client = await _make_joined_client()
+
+    await client._handle_call_state_updated("left")
+    for n in range(3):
+        error = await client.send_message(OutputTransportMessageUrgentFrame(message={"n": n}))
+        assert error is None
+
+    client._callbacks.on_error.assert_awaited_once()
+    client._callbacks.on_call_state_updated.assert_awaited_once_with("left")
+    client._client.send_app_message.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_repeated_left_reports_once():
+    client = await _make_joined_client()
+
+    await client._handle_call_state_updated("left")
+    await client._handle_call_state_updated("left")
+
+    client._callbacks.on_error.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_left_after_leave_is_not_an_error():
+    client = await _make_joined_client()
+
+    await client.leave()
+    await client._handle_call_state_updated("left")
+
+    client._client.leave.assert_called_once()
+    client._callbacks.on_left.assert_awaited_once()
+    client._callbacks.on_error.assert_not_awaited()
+    client._callbacks.on_call_state_updated.assert_awaited_once_with("left")
+
+
+@pytest.mark.asyncio
+async def test_leave_after_call_ends_skips_daily_leave():
+    client = await _make_joined_client()
+
+    await client._handle_call_state_updated("left")
+    await client.leave()
+
+    client._client.leave.assert_not_called()
+    client._callbacks.on_before_leave.assert_awaited_once()
+    client._callbacks.on_left.assert_awaited_once()
+    client._callbacks.on_error.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_messages_after_leave_are_dropped():
+    client = await _make_joined_client()
+
+    await client.leave()
+    error = await client.send_message(OutputTransportMessageUrgentFrame(message={"n": 1}))
+
+    assert error is None
+    assert not client._join_message_queue
+    client._client.send_app_message.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_other_call_states_keep_messages_flowing():
+    client = await _make_joined_client()
+
+    await client._handle_call_state_updated("leaving")
+    error = await client.send_message(OutputTransportMessageUrgentFrame(message={"n": 1}))
+
+    assert error is None
+    client._callbacks.on_error.assert_not_awaited()
+    client._client.send_app_message.assert_called_once()
