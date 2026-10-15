@@ -295,6 +295,8 @@ def _simulation_record(run: "EvalRun", artifacts: dict) -> dict:
         "passed": bool(result and result.passed),
         "succeeded": bool(result and result.succeeded),
         "error": run.error or (result.error if result else None),
+        "confidence": result.confidence if result else None,
+        "probabilities": result.probabilities if result else {},
         "ended_by": result.ended_by if result else "error",
         "turns": result.turns if result else 0,
         "metrics": [
@@ -307,7 +309,14 @@ def _simulation_record(run: "EvalRun", artifacts: dict) -> dict:
                 "reason": m.reason,
                 "failure_kind": m.failure_kind,
                 "verdicts": [
-                    {"turn": v.turn, "passed": v.passed, "verdict": v.verdict, "reason": v.reason}
+                    {
+                        "turn": v.turn,
+                        "passed": v.passed,
+                        "verdict": v.verdict,
+                        "confidence": v.confidence,
+                        "probabilities": v.probabilities,
+                        "reason": v.reason,
+                    }
                     for v in m.verdicts
                 ],
             }
@@ -330,6 +339,8 @@ def _simulation_result_from_dict(data: dict) -> EvalSimulationResult:
         simulation_name=data["simulation_name"],
         succeeded=data["succeeded"],
         reason=data.get("reason", ""),
+        confidence=data.get("confidence"),
+        probabilities=data.get("probabilities", {}),
         error=data.get("error"),
         metrics=[
             EvalSimulationMetricScore(

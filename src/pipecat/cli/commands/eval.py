@@ -564,6 +564,8 @@ async def _judge_conversation(
         simulation_name=simulation.name,
         succeeded=goal.verdict == "yes",
         reason=goal.reason,
+        confidence=goal.confidence,
+        probabilities=goal.probabilities,
         error=f"judge gave no verdict on the goal: {goal.reason}"
         if goal.verdict == "none"
         else None,
@@ -587,6 +589,8 @@ def _judgement_record(path: Path, result: EvalSimulationResult) -> dict:
         "passed": result.passed,
         "succeeded": result.succeeded,
         "error": result.error,
+        "confidence": result.confidence,
+        "probabilities": result.probabilities,
         "reason": result.reason,
         "metrics": [
             {
@@ -601,6 +605,8 @@ def _judgement_record(path: Path, result: EvalSimulationResult) -> dict:
                         "turn": v.turn,
                         "passed": v.passed,
                         "verdict": v.verdict,
+                        "confidence": v.confidence,
+                        "probabilities": v.probabilities,
                         "reason": v.reason,
                         "text": bot_turns[v.turn - 1] if v.turn <= len(bot_turns) else "",
                     }
