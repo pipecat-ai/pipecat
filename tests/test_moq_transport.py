@@ -63,6 +63,7 @@ pytest.importorskip("moq")
 import moq  # noqa: E402
 
 import pipecat.transports.moq.transport as moq_transport  # noqa: E402
+from pipecat.frames.frames import OutputAudioRawFrame  # noqa: E402
 from pipecat.runner.types import MOQRunnerArguments  # noqa: E402
 from pipecat.runner.utils import create_transport  # noqa: E402
 from pipecat.transports.moq.transport import (  # noqa: E402
@@ -1046,6 +1047,69 @@ class TestEpochReanchor(unittest.IsolatedAsyncioTestCase):
         client._publish_audio_clock = time.monotonic() - 1.0
         await client.publish_audio(b"\x00" * 480)
         client._audio_out.reset_epoch.assert_called_once()
+
+
+class TestPublishedAudioTimestamps(unittest.IsolatedAsyncioTestCase):
+    """Each write reports where its first sample landed on the track: the
+    encoder's epoch plus the samples written since, as the encoder stamps it."""
+
+    def _client_with_audio(self, rate=24000):
+        client, _stream = _client_with_fake_moq()
+        client._audio_out = MagicMock(name="audio_out")
+        client._audio_out_sample_rate = rate
+        return client
+
+    async def test_writes_report_the_encoders_sample_timeline(self):
+        client = self._client_with_audio()
+        client._publish_pts_us = 5_000
+        # Seven samples at 24 kHz is 291.67 us, which a per-chunk sum of
+        # whole microseconds would truncate.
+        published = [await client.publish_audio(b"\x00" * 14) for _ in range(4)]
+        self.assertEqual(
+            published,
+            [
+                ("bot-audio", 5_000),
+                ("bot-audio", 5_291),
+                ("bot-audio", 5_583),
+                ("bot-audio", 5_875),
+            ],
+        )
+
+    async def test_an_idle_gap_reports_from_the_new_epoch(self):
+        client = self._client_with_audio()
+        await client.publish_audio(b"\x00" * 480)
+        client._publish_audio_clock = time.monotonic() - 1.0
+        anchored = client._publish_pts_us
+        self.assertEqual(await client.publish_audio(b"\x00" * 480), ("bot-audio", anchored))
+
+    async def test_a_rebuilt_track_reports_from_its_own_epoch(self):
+        client = self._client_with_audio()
+        await client.publish_audio(b"\x00" * 480)
+        with patch.object(moq_transport.moq, "OriginProducer"):
+            await client._rebuild_publish_side()
+        anchored = client._publish_pts_us
+        self.assertEqual(await client.publish_audio(b"\x00" * 480), ("bot-audio", anchored))
+
+    async def test_nothing_written_reports_nothing(self):
+        client, _stream = _client_with_fake_moq()
+        self.assertIsNone(await client.publish_audio(b"\x00" * 480))
+
+    async def test_the_event_sees_the_frame_before_the_write_returns(self):
+        with patch("pipecat.transports.moq.transport.moq"):
+            transport = MOQTransport(
+                params=MOQParams(audio_out_enabled=True), host="localhost", port=4080
+            )
+        output = transport.output()
+        transport._client.publish_audio = AsyncMock(return_value=("bot-audio", 1_234))  # type: ignore[method-assign]
+        seen = []
+
+        @transport.event_handler("on_audio_published")
+        async def on_audio_published(_transport, frame, track, timestamp_us):
+            seen.append((frame, track, timestamp_us))
+
+        frame = OutputAudioRawFrame(audio=b"\x00" * 480, sample_rate=24000, num_channels=1)
+        self.assertTrue(await output.write_audio_frame(frame))
+        self.assertEqual(seen, [(frame, "bot-audio", 1_234)])
 
 
 # ----------------------------------------------------------------------
