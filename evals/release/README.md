@@ -399,10 +399,26 @@ uv run python -m pipecat.evals judge evals/release/scenarios/simulated/book_tabl
 Each conversation gets one line in `judged.jsonl` (`-o` to change it):
 whether the goal was met and every metric's score, with a reason for every
 verdict, passes included, and the text of the turn each one is about.
-Measured metrics are left out, since a conversation has nothing to measure. A
-conversation saved from a real call in the same format is judged the same
-way. Run it from the repository root, as above, where a judge `factory:` such
-as `evals.judges` resolves.
+Measured metrics are left out, since a conversation has nothing to measure.
+Run it from the repository root, as above, where a judge `factory:` such as
+`evals.judges` resolves.
+
+A real call is judged the same way. `EvalConversationObserver` records a bot's
+conversation in the same format and reports it once the pipeline is done:
+
+```python
+from pipecat.evals.conversation_observer import EvalConversationObserver
+
+observer = EvalConversationObserver()
+
+
+@observer.event_handler("on_conversation_ended")
+async def on_conversation_ended(observer, message):
+    Path("call.conversation.json").write_text(json.dumps(message.conversation, indent=2))
+
+
+worker = PipelineWorker(pipeline, observers=[observer])
+```
 
 ## Adding coverage
 
