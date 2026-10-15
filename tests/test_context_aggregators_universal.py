@@ -29,6 +29,7 @@ from pipecat.frames.frames import (
     LLMContextAssistantTimestampFrame,
     LLMContextAssistantTurnFrame,
     LLMContextFrame,
+    LLMContextUserTurnFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesAppendFrame,
@@ -325,13 +326,21 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
             UserStartedSpeakingFrame,
             InterruptionFrame,
             VADUserStoppedSpeakingFrame,
+            LLMContextUserTurnFrame,
             LLMContextFrame,
+            UserStoppedSpeakingFrame,
+        ]
+        expected_up_frames = [
+            UserStartedSpeakingFrame,
+            InterruptionFrame,
+            LLMContextUserTurnFrame,
             UserStoppedSpeakingFrame,
         ]
         await run_test(
             pipeline,
             frames_to_send=frames_to_send,
             expected_down_frames=expected_down_frames,
+            expected_up_frames=expected_up_frames,
         )
         self.assertTrue(should_start)
         self.assertTrue(should_stop)
@@ -392,6 +401,7 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
         expected_down_frames = [
             UserStartedSpeakingFrame,
             InterruptionFrame,
+            LLMContextUserTurnFrame,
             LLMContextFrame,
             UserStoppedSpeakingFrame,
         ]
@@ -486,6 +496,7 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
         expected_down_frames = [
             UserStartedSpeakingFrame,
             InterruptionFrame,
+            LLMContextUserTurnFrame,
             LLMContextFrame,
             UserStoppedSpeakingFrame,
         ]
@@ -561,6 +572,7 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
         expected_down_frames = [
             UserStartedSpeakingFrame,
             UserStoppedSpeakingFrame,
+            LLMContextUserTurnFrame,
             LLMContextFrame,
         ]
         await run_test(
