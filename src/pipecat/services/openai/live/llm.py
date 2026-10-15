@@ -317,6 +317,7 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
             seed=None,
             filter_incomplete_user_turns=False,
             user_turn_completion_config=None,
+            tool_call_text_policy=None,
             voice=None,
             store=None,
         )

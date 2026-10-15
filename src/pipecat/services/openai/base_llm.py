@@ -45,7 +45,7 @@ from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
-from pipecat.services.settings import LLMSettings
+from pipecat.services.settings import LLMSettings, ToolCallTextPolicy
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.http import TIMEOUT_EXCEPTIONS, connection_limits
@@ -224,6 +224,7 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
             top_k=None,
             max_tokens=OPENAI_NOT_GIVEN,
             max_completion_tokens=OPENAI_NOT_GIVEN,
+            tool_call_text_policy=ToolCallTextPolicy.PRESERVE,
             filter_incomplete_user_turns=False,
             user_turn_completion_config=None,
             extra={},
@@ -595,6 +596,7 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
                         # here rather than going unmeasured.
                         await self.stop_ttfat_metrics()
 
+                        self._note_tool_call_detected()
                         # We're streaming the LLM response to enable the fastest response times.
                         # For text, we just yield each chunk as we receive it and count on consumers
                         # to do whatever coalescing they need (eg. to pass full sentences to TTS)

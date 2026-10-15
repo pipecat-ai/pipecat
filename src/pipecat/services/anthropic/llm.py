@@ -40,7 +40,7 @@ from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
-from pipecat.services.settings import LLMSettings
+from pipecat.services.settings import LLMSettings, ToolCallTextPolicy
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.http import TIMEOUT_EXCEPTIONS
@@ -334,6 +334,7 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
             user_turn_completion_config=None,
             thinking=ANTHROPIC_NOT_GIVEN,
             effort=None,
+            tool_call_text_policy=ToolCallTextPolicy.PRESERVE,
             extra={},
         )
 
@@ -657,6 +658,7 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
                         # the call itself is what the caller gets and TTFAT ends
                         # here rather than going unmeasured.
                         await self.stop_ttfat_metrics()
+                        self._note_tool_call_detected()
                         tool_use_block = event.content_block
                         json_accumulator = ""
                     elif event.content_block.type == "thinking":
