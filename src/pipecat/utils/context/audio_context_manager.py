@@ -141,7 +141,9 @@ class AudioContextManager:
         return item
 
     async def get(self, context_id: str, timeout: float) -> Any:
-        """Wait for an audio context's next item.
+        """Return an audio context's next item, waiting up to ``timeout`` for it.
+
+        A keepalive restarts the wait and is not returned.
 
         Args:
             context_id: The audio context to read.
