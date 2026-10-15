@@ -111,6 +111,13 @@ class SmallestSTTSettings(STTSettings):
         keywords: Comma-separated ``KEYWORD:INTENSIFIER`` pairs to boost
             recognition of domain-specific words/phrases (e.g. ``"NVIDIA:2"``).
         format: Apply punctuation and capitalization to transcripts.
+        itn_normalize: Run inverse text normalization so spoken numbers come
+            back as digits (e.g. "twenty five" -> "25").
+        no_format_delay: With ``itn_normalize`` on, a number still being
+            dictated at the end of a final is held back and merged into the
+            next final so it normalizes whole. Set to ``True`` to emit every
+            final as soon as it is ready instead. No effect unless
+            ``itn_normalize`` is ``True``; text is never dropped either way.
     """
 
     word_timestamps: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -123,6 +130,8 @@ class SmallestSTTSettings(STTSettings):
     endpointing: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     keywords: str | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     format: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    itn_normalize: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    no_format_delay: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class SmallestSTTService(WebsocketSTTService):
@@ -187,6 +196,8 @@ class SmallestSTTService(WebsocketSTTService):
             endpointing=True,
             keywords="",
             format=True,
+            itn_normalize=False,
+            no_format_delay=False,
         )
 
         if settings is not None:
@@ -321,6 +332,8 @@ class SmallestSTTService(WebsocketSTTService):
                 "diarize": str(self._settings.diarize).lower(),
                 "endpointing": str(self._settings.endpointing).lower(),
                 "format": str(self._settings.format).lower(),
+                "itn_normalize": str(self._settings.itn_normalize).lower(),
+                "no_format_delay": str(self._settings.no_format_delay).lower(),
             }
 
             # An empty `keywords` value would register a single empty keyword,
