@@ -8,7 +8,7 @@
 
 This module provides services for Perplexity's Agent API, which answers with web
 search over the OpenAI Responses protocol, and for its Sonar chat completions
-API.
+API, which Perplexity no longer supports.
 """
 
 from collections.abc import AsyncGenerator, AsyncIterator
@@ -36,6 +36,7 @@ from pipecat.services.openai.responses.llm import (
     OpenAIResponsesHttpLLMService,
     OpenAIResponsesLLMSettings,
 )
+from pipecat.utils.deprecation import deprecated
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
 
@@ -291,11 +292,19 @@ class PerplexityLLMSettings(BaseOpenAILLMService.Settings):
     pass
 
 
+@deprecated(
+    "`PerplexityLLMService` is deprecated since 1.13.0 and will be removed in 2.0.0. "
+    "Use `PerplexityAgentHttpLLMService` instead."
+)
 class PerplexityLLMService(OpenAILLMService):
-    """A service for interacting with Perplexity's API.
+    """A service for Perplexity's Sonar chat completions API.
 
     This service extends OpenAILLMService to work with Perplexity's API while maintaining
     compatibility with the OpenAI-style interface.
+
+    .. deprecated:: 1.13.0
+        Use :class:`PerplexityAgentHttpLLMService` instead. Perplexity has ended support
+        for Sonar chat completions in favor of its Agent API. Will be removed in 2.0.0.
     """
 
     adapter_class = PerplexityLLMAdapter
