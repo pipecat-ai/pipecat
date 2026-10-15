@@ -9,7 +9,7 @@ uv run python -m pipecat.evals suite -d evals/llm-with-backend/manifest.yaml -k 
 
 ## Layout
 
-The conversations live once, in `scenarios/turns/`, and are included by two scenario files each: `scenarios/text/<name>.yaml`, which judges the frontend's text, and `scenarios/audio/<name>.yaml`, which synthesizes the user's voice and judges a transcription of the bot's speech. Text mode drives the cascade bots only, since the speech-to-speech bots take audio, and is the fast loop while working on prompts or code; audio mode runs against every bot and is the judgment. The manifest lists which bots run which.
+The conversations live once, in `scenarios/turns/`, and are included by two scenario files each: `scenarios/text/<name>.yaml`, which judges the frontend's text, and `scenarios/audio/<name>.yaml`, which synthesizes the user's voice and judges a transcription of the bot's speech. Text mode drives the cascade bots only, since the speech-to-speech bots take audio, and is the fast loop while working on prompts or code; audio mode runs against every bot and is the judgment. The manifest lists which bots run which. `bots/no-progress-frontend.py` is a cascade bot of the suite's own, run with each cascade frontend in turn (the manifest's `runner_body` picks it): its connector records none of the backend's progress in the frontend's context, for the scenario that needs that.
 
 ## Scenarios
 
@@ -27,6 +27,7 @@ The backend is an engineering assistant's: a code change that loops through sear
 | `implicit_cancel`        | A change of mind while the integration tests run, with no "stop" said: the backend cancels `run_integration_tests`, the bot acknowledges once, and nothing arrives later. |
 | `partial_cancel`         | Integration tests and a runbook lookup in flight, then "forget the tests": `run_integration_tests` is cancelled, the runbook answer still arrives, no test result does.    |
 | `progress_inquiry`       | "How's it going?" mid-fix: answered from the backend's silent progress messages, without delegating again.                                   |
+| `progress_inquiry_no_progress` | The same, on the bot whose context holds none of the backend's progress: the bot says it has no update yet, without describing work it cannot see, and still reports the fix. |
 | `aside_while_waiting`    | Small talk while the fix is in progress: the chat is answered, and the fix is still reported when it lands.                                  |
 | `result_during_interruption` | A lookup bundled with a request for a long story, so its result lands while the story is being spoken, which the user then cuts off: the result is reported all the same. Audio only. |
 | `accepted_offer`         | "Yes, go ahead and check CI, and tell me a joke while we wait": the check is delegated, not merely promised, and "is it done?" is answered from the backend's report.       |
