@@ -33,6 +33,9 @@ pipecat eval run scenarios/<name>.yaml --bot-url ws://localhost:7860/ws
 # Run the full release-eval suite (spawns bots from a manifest, runs scenarios in parallel)
 pipecat eval suite evals/release/manifest.yaml -p <bot-pattern> -s <scenario>
 
+# Judge saved simulation conversations (<stem>.conversation.json) again, without the bot
+pipecat eval judge scenarios/<name>.yaml -s <scenario> logs/*.conversation.json -o judged.jsonl
+
 # Lint and format check
 uv run ruff check
 uv run ruff format --check
@@ -230,6 +233,8 @@ To confirm a behavior while developing:
 
 1. Run the bot with the dev runner: `python bot.py --port 7860`
 2. Run a scenario of either kind against it: `pipecat eval run scenarios/<name>.yaml --bot-url ws://localhost:7860/ws -v`
+
+Every simulation run saves its conversation (what each side said and the bot's function calls) to `<stem>.conversation.json`, in the format the `pipecat.evals.conversation` module docstring describes. `pipecat eval judge <scenario.yaml> -s <name> <files...>` judges saved conversations again against the simulation's `success` and judged metrics, with a reason for every verdict and without the bot; from Python, `EvalSimulationJudge(simulation).judge(messages)` (`src/pipecat/evals/simulation_judge.py`) does the same. Use it to tune a criterion's wording on runs you already have.
 
 For many bots at once, `pipecat eval suite <manifest.yaml>` spawns each bot and runs its scenarios in parallel; a manifest lists both kinds under `scenarios:`, and `-k simulation` runs only the simulations. A manifest entry may also carry a `runner_body:` (the `/start` body the bot would normally get, as a `path:` to a file or inline `data:`), a `concurrency:` cap of its own, and a `name:` that labels its runs when several entries share one bot. Reusable scenarios and the pre-release validation manifest live in `evals/release/` — see its `README.md` for the full workflow (prerequisites: `TYPESAFE_API_KEY` exported for the Jev judge, a local Ollama `gemma4:12b` for the judge's explainer and the simulated caller, plus Kokoro/Moonshine for audio mode) and the `pipecat.evals.script` and `pipecat.evals.simulation` module docstrings for the two file formats.
 

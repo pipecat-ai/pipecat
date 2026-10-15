@@ -6,7 +6,6 @@
 
 """The simulation driver: lets the persona hold the conversation, then judges the whole of it."""
 
-import json
 import time
 from collections.abc import Awaitable, Callable
 
@@ -27,11 +26,11 @@ from pipecat.evals.results import (
     EvalSimulationMetricScore,
     EvalSimulationProgress,
     EvalSimulationResult,
-    EvalSimulationTurnVerdict,
     EvalTrace,
 )
 from pipecat.evals.script import EvalFunctionCall
 from pipecat.evals.simulation import EvalSimulationMetric, EvalSimulationScenario
+from pipecat.evals.simulation_judge import EvalSimulationJudge
 from pipecat.frames.frames import FunctionCallResultProperties
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.utils.deprecation import deprecated
@@ -107,7 +106,6 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
         self._bot_said = "response" if simulation.bot_audio else "llm_response"
         self._conversation = EvalConversation()
         self._observed = 0
-        self._criteria = {m.name: m.criterion for m in simulation.metrics if m.criterion}
 
     async def run(self) -> list[EvalAssertionFailure]:
         """Watch the conversation until it ends, then judge it."""
@@ -225,7 +223,7 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
         evidence: list[str] = []
         for message in self._conversation.messages:
             if message["role"] == "tool_call":
-                evidence.extend(self._call_lines(message))
+                evidence.extend(EvalSimulationJudge.call_lines(message))
             else:
                 lines.append(
                     {
@@ -250,7 +248,9 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
         entries: list[dict] = []
         for message in self._conversation.messages:
             if message["role"] == "tool_call":
-                entries.extend({"role": "tool", "content": c} for c in self._call_lines(message))
+                entries.extend(
+                    {"role": "tool", "content": c} for c in EvalSimulationJudge.call_lines(message)
+                )
             else:
                 entries.append({"role": message["role"], "content": message["content"]})
         return entries
@@ -268,7 +268,7 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
         lines = []
         for message in self._conversation.messages:
             if message["role"] == "tool_call":
-                lines.extend(self._call_lines(message))
+                lines.extend(EvalSimulationJudge.call_lines(message))
         return lines
 
     async def _report(self, status: str, text: str) -> None:
@@ -321,25 +321,6 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
             elif kind == "function_call_stopped" and (event.get("args") or {}).get("cancelled"):
                 self._conversation.cancel_tool_call(name)
 
-    def _call_lines(self, message: dict) -> list[str]:
-        """A ``tool_call`` message as evidence: the call on one line, and one more when it was cancelled."""
-        name, arguments = message["name"], message["arguments"]
-        lines = [f"{name}({json.dumps(arguments) if arguments else ''})"]
-        if message["cancelled"]:
-            lines.append(f"{name} was cancelled")
-        return lines
-
-    def _tell_judge(self, judge: EvalJudge) -> None:
-        """Give the judge the conversation, each tool call where it was made."""
-        for message in self._conversation.messages:
-            if message["role"] == "user":
-                judge.add_user_message(message["content"])
-            elif message["role"] == "assistant":
-                judge.add_assistant_message(message["content"])
-            else:
-                for line in self._call_lines(message):
-                    judge.add_tool_call(line)
-
     async def _judge_conversation(self) -> list[EvalAssertionFailure]:
         """Score the measured metrics, then ask the judge once about the goal and every judged criterion.
 
@@ -355,32 +336,16 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
             self._metrics.extend(measured.values())
             self._reason = "no judge configured"
             return []
-        self._tell_judge(self._judge)
-        evidence = self.tool_calls()
-        if evidence:
-            self._trace.log(f"judge: the bot's tool calls: {'; '.join(evidence)}")
-        judged = await self._judge.evaluate_run(self._criteria, self._simulation.success)
-        for metric in self._simulation.metrics:
-            if metric.name in measured:
-                self._metrics.append(measured[metric.name])
-                continue
-            verdicts = [
-                EvalSimulationTurnVerdict(
-                    turn=index,
-                    passed=verdict.verdict == "yes",
-                    reason=verdict.reason,
-                    verdict=verdict.verdict,
-                )
-                for index, verdict in enumerate(judged.turns.get(metric.name, []), 1)
-            ]
-            for verdict in verdicts:
-                self._trace.log(
-                    f"judge: turn {verdict.turn} {metric.name} {verdict.verdict}: {verdict.reason}"
-                )
-            self._metrics.append(self._score(metric, verdicts))
-        self._succeeded = judged.goal.verdict == "yes"
-        self._reason = judged.goal.reason
-        if judged.goal.verdict == "none":
+        judgement = await EvalSimulationJudge(
+            self._simulation, judge=self._judge, trace=self._trace
+        ).judge(self._conversation.messages)
+        judged = {metric.name: metric for metric in judgement.metrics}
+        self._metrics.extend(
+            measured.get(metric.name) or judged[metric.name] for metric in self._simulation.metrics
+        )
+        self._succeeded = judgement.goal.verdict == "yes"
+        self._reason = judgement.goal.reason
+        if judgement.goal.verdict == "none":
             self._trace.log(f"judge: no verdict on the goal: {self._reason}")
             return [
                 EvalAssertionFailure(
@@ -395,44 +360,6 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
             f"judge: goal {'achieved' if self._succeeded else 'not achieved'}: {self._reason}"
         )
         return []
-
-    def _score(
-        self, metric: EvalSimulationMetric, verdicts: list[EvalSimulationTurnVerdict]
-    ) -> EvalSimulationMetricScore:
-        """A metric's score over its turn verdicts: the share of turns that passed.
-
-        A metric that fell short only on turns the judge left unanswered is
-        judge trouble, and its failure kind says so.
-        """
-        failure_kind = None
-        if not verdicts:
-            score, reason, passed = None, "no bot turn to judge", True
-        else:
-            score = sum(1 for v in verdicts if v.passed) / len(verdicts)
-            failed = [v for v in verdicts if not v.passed]
-            reason = (
-                f"all {len(verdicts)} turn(s)"
-                if not failed
-                else "; ".join(f"turn {v.turn}: {v.reason}" for v in failed)
-            )
-            passed = metric.min_score is None or score >= metric.min_score
-            if not passed:
-                failure_kind = (
-                    "judge_no" if any(v.verdict == "no" for v in failed) else "judge_no_verdict"
-                )
-        self._trace.log(
-            f"judge: {metric.name} = {'unscored' if score is None else f'{score:.2f}'}"
-            f"{'' if passed else f' (below {metric.min_score:.2f})'}: {reason}"
-        )
-        return EvalSimulationMetricScore(
-            name=metric.name,
-            score=score,
-            passed=passed,
-            reason=reason,
-            min_score=metric.min_score,
-            verdicts=verdicts,
-            failure_kind=failure_kind,
-        )
 
     def _measure(self, metric: EvalSimulationMetric) -> EvalSimulationMetricScore:
         """A measured metric's outcome: its value against its range, or the bot's calls against the list."""
