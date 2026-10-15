@@ -96,6 +96,8 @@ suite:
     scenarios: [capital_question]
   - bot: voice/voice-krisp-viva.py
     scenarios: [capital_question]
+  - bot: voice/voice-krisp-stt-tts.py
+    scenarios: [capital_question, interruption_audio]
   - bot: voice/voice-langchain.py
     scenarios: [capital_question]
   - bot: voice/voice-lmnt.py
