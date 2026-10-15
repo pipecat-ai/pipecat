@@ -44,6 +44,7 @@ from pipecat.services.settings import LLMSettings, ServiceSettings, STTSettings,
 from pipecat.transcriptions.language import Language
 from pipecat.utils.deprecation import deprecated, renamed_init_field, warn_deprecated
 from pipecat.utils.errors import ErrorCategory
+from pipecat.utils.security.redaction import redact_secrets
 from pipecat.utils.text.base_text_aggregator import TextType
 from pipecat.utils.time import nanoseconds_to_str
 from pipecat.utils.utils import obj_count, obj_id
@@ -1242,7 +1243,10 @@ class ErrorFrame(SystemFrame):
     the pipeline.
 
     Parameters:
-        error: Description of the error that occurred.
+        error: Description of the error that occurred. Credentials it quotes
+            (an API key, a signed URL's signature, an auth header) are masked,
+            since the description is logged and reported wherever the error
+            goes.
         fatal: Whether the error is fatal and requires bot shutdown.
 
             .. deprecated:: 1.8.0
@@ -1272,6 +1276,8 @@ class ErrorFrame(SystemFrame):
 
     def __post_init__(self):
         super().__post_init__()
+        if isinstance(self.error, str):
+            self.error = redact_secrets(self.error)
         # Only a set flag carries behavior worth warning about, and
         # `FatalErrorFrame` already warns about itself.
         if self.fatal and not isinstance(self, FatalErrorFrame):
