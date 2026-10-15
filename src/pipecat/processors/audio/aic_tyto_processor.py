@@ -303,6 +303,7 @@ class AICTytoProcessor(FrameProcessor):
             # Scores of a window that is part silence padding do not describe
             # the call.
             if self._audio_secs < _TYTO_WINDOW_SECS:
+                delay = _TYTO_WINDOW_SECS - self._audio_secs
                 continue
 
             audio_secs = self._audio_secs
