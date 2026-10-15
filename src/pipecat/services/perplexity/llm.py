@@ -48,7 +48,8 @@ class PerplexityAgentLLMSettings(OpenAIResponsesLLMSettings):
             search budget and how much it reasons, such as ``"fast"``,
             ``"low"``, ``"medium"``, ``"high"`` or ``"xhigh"``. ``model``
             replaces the preset's model; set ``model=None`` to use it. With
-            ``None``, a model must be set.
+            ``None``, a model must be set, and a request with no ``reasoning``
+            either gets the ``"fast"`` preset.
         web_search: Whether to offer the ``web_search`` tool on every request,
             alongside any tools from the context. A preset searches the web
             whatever this is set to.
@@ -66,6 +67,11 @@ _MODEL_OR_PRESET_REQUIRED = "PerplexityAgentHttpLLMService needs a `model`, a `p
 
 def _has_model_or_preset(settings: PerplexityAgentLLMSettings) -> bool:
     return bool(assert_given(settings.model) or assert_given(settings.preset))
+
+
+# Perplexity's lowest-latency preset, which keeps reasoning low for models from
+# every provider it serves.
+_THINKING_DEFAULT = {"extra_body": {"preset": "fast"}}
 
 
 class _WithoutServerToolCalls:
@@ -119,9 +125,11 @@ class PerplexityAgentHttpLLMService(OpenAIResponsesHttpLLMService):
     function calling and multi-turn context work as they do with
     :class:`~pipecat.services.openai.responses.llm.OpenAIResponsesHttpLLMService`.
 
-    By default the service uses ``openai/gpt-5.6-luna`` with web search on.
-    Answers can carry citation markers such as ``[1]``. Anthropic models need
-    ``max_completion_tokens`` set.
+    By default the service uses ``openai/gpt-5.6-luna`` with web search on. When
+    neither ``preset`` nor ``reasoning`` is set, it sends Perplexity's ``fast``
+    preset, its lowest-latency configuration, with the model in place of the
+    preset's own. Answers can carry citation markers such as ``[1]``. Anthropic
+    models need ``max_completion_tokens`` set.
 
     Example::
 
@@ -229,6 +237,33 @@ class PerplexityAgentHttpLLMService(OpenAIResponsesHttpLLMService):
         stream = await super()._create_stream(params)
         # The service only iterates the stream and closes it.
         return cast(AsyncStream[ResponseStreamEvent], _WithoutServerToolCalls(stream))
+
+    def _maybe_apply_thinking_default(self, params: dict):
+        """Send the ``fast`` preset when no preset or reasoning is configured.
+
+        A request that already sets ``reasoning`` or a preset, from the settings
+        or from ``extra``, is left as it is. So is every request when
+        ``use_provider_thinking_default`` is set. The first request for each
+        model logs the preset sent, or that the model runs at Perplexity's
+        default.
+
+        Args:
+            params: The response params dict (modified in place).
+        """
+        if (
+            "reasoning" in params
+            or "preset" in params.get("extra_body", {})
+            or assert_given(self._settings.preset)
+        ):
+            return
+        self._apply_thinking_default(
+            params,
+            assert_given(self._settings.model) or "",
+            _THINKING_DEFAULT,
+            can_think=True,
+            provider="Perplexity",
+            settings_fields="`preset` or `reasoning`",
+        )
 
     def _token_usage(self, usage: ResponseUsage) -> LLMTokenUsage:
         """Convert a completed response's usage into Pipecat's token usage.
