@@ -621,6 +621,11 @@ class DailyTransportClient(EventHandler):
         Returns:
             An error description, or None on success.
         """
+        if not self._client:
+            # The client is released and set to None during teardown, so a
+            # message arriving that late is dropped.
+            return None
+
         if not self._joined:
             self._join_message_queue.append(frame)
             return None
