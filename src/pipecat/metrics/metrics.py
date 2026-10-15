@@ -255,6 +255,17 @@ class AudioQualityScores(BaseModel):
     codec_degradation: float
 
 
+# risk_score combines the other scores and speaker_loudness is a neutral level,
+# so neither can be the largest degradation.
+AUDIO_QUALITY_DEGRADATION_FIELDS = (
+    "noise",
+    "speaker_reverb",
+    "interfering_speech",
+    "packet_loss",
+    "codec_degradation",
+)
+
+
 class AudioQualityMetricsData(MetricsData):
     """Audio quality metrics data for one analysis window.
 

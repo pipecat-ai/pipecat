@@ -32,6 +32,7 @@ from loguru import logger
 
 from pipecat.audio.filters.aic_filter import _AIC_SDK_PIPECAT_ID, AICFilter, AICModelManager
 from pipecat.frames.frames import (
+    AudioQualityFrame,
     CancelFrame,
     EndFrame,
     Frame,
@@ -40,6 +41,7 @@ from pipecat.frames.frames import (
     StartFrame,
 )
 from pipecat.metrics.metrics import (
+    AUDIO_QUALITY_DEGRADATION_FIELDS,
     AudioQualityMetricsData,
     AudioQualityScores,
     AudioQualitySummary,
@@ -56,10 +58,6 @@ _INT16_SCALE = 32768.0
 
 _SCORE_FIELDS = tuple(AudioQualityScores.model_fields)
 
-# risk_score combines the other scores and speaker_loudness is a neutral level,
-# so neither can be the dominant degradation.
-_DEGRADATION_FIELDS = tuple(f for f in _SCORE_FIELDS if f not in ("risk_score", "speaker_loudness"))
-
 
 class AICTytoProcessor(FrameProcessor):
     """Scores the quality of the user's audio with the ai-coustics Tyto model.
@@ -67,7 +65,8 @@ class AICTytoProcessor(FrameProcessor):
     The processor buffers the user's audio and analyzes the latest 5 s window
     every ``analysis_interval`` seconds in a background thread. The first
     analysis waits until 5 s of audio are buffered. Each result goes to the
-    ``on_analysis_result`` event. When the call ends, the processor combines
+    ``on_analysis_result`` event and downstream in an
+    :class:`~pipecat.frames.frames.AudioQualityFrame`. When the call ends, the processor combines
     the results into one summary and gives it to the ``on_call_summary``
     event. When pipeline metrics are enabled, the processor also pushes each
     result and the summary in a ``MetricsFrame``. On ``CancelFrame`` it calls
@@ -333,6 +332,7 @@ class AICTytoProcessor(FrameProcessor):
             processor=self.name, model=self._model.get_id(), value=scores, audio_secs=audio_secs
         )
         await self._call_event_handler("on_analysis_result", data)
+        await self.push_frame(AudioQualityFrame(scores=scores, audio_secs=audio_secs))
         if self.metrics_enabled:
             await self.push_frame(MetricsFrame(data=[data]))
 
@@ -368,5 +368,7 @@ class AICTytoProcessor(FrameProcessor):
             max=to_scores(values.max(axis=0)),
             degraded_threshold=self._degraded_threshold,
             degraded_fraction=float(np.mean(risk >= self._degraded_threshold)),
-            dominant_dimension=max(_DEGRADATION_FIELDS, key=lambda f: mean[_SCORE_FIELDS.index(f)]),
+            dominant_dimension=max(
+                AUDIO_QUALITY_DEGRADATION_FIELDS, key=lambda f: mean[_SCORE_FIELDS.index(f)]
+            ),
         )

@@ -39,7 +39,7 @@ from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.audio.turn.base_turn_analyzer import BaseTurnParams
 from pipecat.audio.vad.vad_analyzer import VADParams
-from pipecat.metrics.metrics import MetricsData
+from pipecat.metrics.metrics import AudioQualityScores, MetricsData
 from pipecat.services.settings import LLMSettings, ServiceSettings, STTSettings, TTSSettings
 from pipecat.transcriptions.language import Language
 from pipecat.utils.deprecation import deprecated, renamed_init_field, warn_deprecated
@@ -1574,6 +1574,24 @@ class MetricsFrame(SystemFrame):
     """
 
     data: list[MetricsData]
+
+
+@dataclass
+class AudioQualityFrame(SystemFrame):
+    """Frame containing the audio quality scores of one window of user audio.
+
+    Emitted downstream by audio quality analyzers such as
+    :class:`~pipecat.processors.audio.aic_tyto_processor.AICTytoProcessor`,
+    whether or not metrics are enabled.
+
+    Parameters:
+        scores: Scores for the window.
+        audio_secs: Seconds of user audio received when the window was
+            analyzed.
+    """
+
+    scores: AudioQualityScores
+    audio_secs: float
 
 
 @dataclass
