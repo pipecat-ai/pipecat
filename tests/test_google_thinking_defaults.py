@@ -352,3 +352,29 @@ def test_vertex_warns_on_a_thinking_budget_for_gemini_3():
     )
 
     assert "thinking_budget" in output
+
+
+# --- use_provider_thinking_default -------------------------------------------
+
+
+def test_use_provider_thinking_default_runs_at_googles_default():
+    """The setting sends no default and logs the reason at DEBUG."""
+    service = GoogleLLMService(
+        api_key="test-key",
+        settings=GoogleLLMService.Settings(
+            model="gemini-3.6-flash", use_provider_thinking_default=True
+        ),
+    )
+    sink = io.StringIO()
+    handler_id = logger.add(sink, level="DEBUG", format="{level} {message}")
+    try:
+        params = service._build_generation_params()
+        service._build_generation_params()
+    finally:
+        logger.remove(handler_id)
+    lines = sink.getvalue().splitlines()
+
+    assert "thinking_config" not in params
+    assert len(lines) == 1
+    assert lines[0].startswith("DEBUG")
+    assert "use_provider_thinking_default is set, so gemini-3.6-flash runs" in lines[0]

@@ -265,6 +265,33 @@ def test_nothing_is_logged_when_reasoning_is_configured():
     assert sink.getvalue() == ""
 
 
+# --- use_provider_thinking_default -------------------------------------------
+
+
+def test_use_provider_thinking_default_runs_at_anthropics_default():
+    """The setting sends no default and logs the reason at DEBUG."""
+    service = AnthropicLLMService(
+        api_key="test-key",
+        settings=AnthropicLLMService.Settings(
+            model="claude-opus-5-5", use_provider_thinking_default=True
+        ),
+    )
+    params: dict[str, Any] = {}
+    sink = io.StringIO()
+    handler_id = logger.add(sink, level="DEBUG", format="{level} {message}")
+    try:
+        service._maybe_apply_thinking_default(params)
+        service._maybe_apply_thinking_default(params)
+    finally:
+        logger.remove(handler_id)
+    lines = sink.getvalue().splitlines()
+
+    assert params == {}
+    assert len(lines) == 1
+    assert lines[0].startswith("DEBUG")
+    assert "use_provider_thinking_default is set, so claude-opus-5-5 runs" in lines[0]
+
+
 # --- every inference path ----------------------------------------------------
 
 

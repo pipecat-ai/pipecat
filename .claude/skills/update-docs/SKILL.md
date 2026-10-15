@@ -296,6 +296,15 @@ Last, re-read each page you edited, in full, as a reader who never saw the diff:
 - Counts and lists in prose match the tables they describe
 - The diff contains only the edits you intended: `git diff` in `DOCS_PATH`
 
+Then run each command in the profile's **Checks** section, if it has one. Fix
+every finding on a page you edited, whatever caused it: the docs repo's CI runs
+the same checks on every page a PR changes and fails the PR on any finding, so
+this overrides Step 6's rule against editing lines the change didn't make
+false. Fix each in the page's format and STYLE.md's (types in Python syntax).
+A finding on a page you didn't edit is yours to fix when this change caused it
+(a setting the diff added, a default it changed); otherwise leave it and list
+it under gaps.
+
 Fix anything that fails before continuing.
 
 ### Step 9: Format and regenerate llms.txt
@@ -373,7 +382,7 @@ Before finishing, verify:
 - [ ] No line was edited that the change didn't make false or incomplete
 - [ ] Deprecated items are marked, and migration tables gained rows
 - [ ] Sibling lists, recipes, and guides affected by the change were searched (Step 7)
-- [ ] Every edited page passed the review at the end of Step 8
+- [ ] Every edited page passed the review at the end of Step 8, including the profile's Checks
 - [ ] New pages were registered everywhere the profile requires
 - [ ] Edited pages were formatted, then `llms.txt` and `llms-full.txt` regenerated and committed
 - [ ] Unmapped files were reported

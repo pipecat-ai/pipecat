@@ -178,7 +178,8 @@ class AnthropicLLMSettings(LLMSettings):
         thinking: Thinking configuration. If neither this nor ``effort`` is
             set, Pipecat sends the lowest thinking setting Anthropic documents
             for the model, for the fastest responses, and logs what it sent.
-            Models Pipecat doesn't list run at Anthropic's default.
+            Models Pipecat doesn't list, and any model when
+            ``use_provider_thinking_default`` is set, run at Anthropic's default.
         effort: How much the model spends on its response, thinking included:
             "low", "medium", "high", "xhigh" or "max". Sent as
             ``output_config.effort``. ``None`` uses the model's default. Lower
@@ -427,9 +428,10 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
         Applies the model's entry in ``_THINKING_DEFAULTS``, if it has one. A
         request that already sets ``thinking`` or an effort, from the settings
         or from ``extra``, is left as it is, since the two together decide how
-        much the model thinks. The first request for each model logs the
-        setting sent or, for a Claude model that isn't listed, warns that it
-        runs at Anthropic's default.
+        much the model thinks. So is every request when
+        ``use_provider_thinking_default`` is set. The first request for each model
+        logs the setting sent, or that the model runs at Anthropic's default,
+        warning for an unlisted Claude model.
 
         Args:
             params: The request params dict (modified in place).

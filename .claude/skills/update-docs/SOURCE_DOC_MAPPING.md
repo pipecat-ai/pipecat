@@ -209,6 +209,20 @@ Prose that cites pipecat API lives in:
 - `pipecat/telephony/` — telephony integration guides (Twilio, Plivo, Telnyx, etc.)
 - `pipecat/flows/` — Pipecat Flows guides (nodes-and-messages, functions, context-strategies, state-management, actions); check these when `src/pipecat/flows/**` changed
 
+## Checks
+
+`DOCS_PATH/scripts/check-reference.py` compares the server API reference with
+this repository's source: constructor parameters, `Settings` fields and the
+defaults set in `default_settings`, registered events, and deprecations. Run it
+from the root of this repository, so it reads the source being documented:
+
+```bash
+python3 DOCS_PATH/scripts/check-reference.py --pipecat .
+```
+
+Each line names a page, a kind of mismatch, and what the code says. The docs
+repo's CI runs the same check on the pages a docs PR changes.
+
 ## New pages
 
 ### Location and template
