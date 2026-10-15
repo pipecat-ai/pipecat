@@ -63,6 +63,7 @@ pytest.importorskip("moq")
 import moq  # noqa: E402
 
 import pipecat.transports.moq.transport as moq_transport  # noqa: E402
+from pipecat.frames.frames import InputAudioRawFrame  # noqa: E402
 from pipecat.runner.types import MOQRunnerArguments  # noqa: E402
 from pipecat.runner.utils import create_transport  # noqa: E402
 from pipecat.transports.moq.transport import (  # noqa: E402
@@ -2081,6 +2082,46 @@ class TestTrackCancelledAsPeerGone(unittest.IsolatedAsyncioTestCase):
         client._callbacks.on_audio_received.assert_awaited_once()
         self.assertEqual(client._callbacks.on_message_received.await_count, 2)
         client._callbacks.on_error.assert_not_awaited()
+
+
+class TestReceivedAudioCarriesMediaTime(unittest.IsolatedAsyncioTestCase):
+    """Received audio keeps the peer's media timestamp, so a processor can place
+    it on the peer's track timeline across decode gaps."""
+
+    async def test_the_pump_forwards_each_frames_timestamp(self):
+        client, _stream = _client_with_fake_moq()
+        peer_broadcast = MagicMock()
+        peer_broadcast.subscribe_catalog = AsyncMock(return_value=_FakeCatalogs([_opus_catalog()]))
+        pcm = b"\x00\x01" * 160
+        peer_broadcast.decode_audio = AsyncMock(
+            return_value=_FakeTrackEndingWith(
+                [
+                    SimpleNamespace(data=pcm, timestamp_us=1_000_000),
+                    # A skipped group leaves a gap the timestamps keep.
+                    SimpleNamespace(data=pcm, timestamp_us=1_060_000),
+                ],
+                moq.Error.Audio("moq: cancelled"),
+            )
+        )
+        await client._forward_peer_audio(peer_broadcast)
+        rate = client._params.audio_in_sample_rate
+        self.assertEqual(
+            [call.args for call in client._callbacks.on_audio_received.await_args_list],
+            [(pcm, rate, 1_000_000), (pcm, rate, 1_060_000)],
+        )
+
+    async def test_the_input_frame_pts_is_the_media_timestamp(self):
+        with patch("pipecat.transports.moq.transport.moq"):
+            transport = MOQTransport(
+                params=MOQParams(audio_in_enabled=True), host="localhost", port=4080
+            )
+        transport.input()
+        transport._input._audio_task = MagicMock()
+        transport._input.push_audio_frame = AsyncMock()  # type: ignore[method-assign]
+        await transport._on_audio_received(b"\x00\x01" * 160, 16000, 1_060_000)
+        frame = transport._input.push_audio_frame.await_args.args[0]
+        self.assertIsInstance(frame, InputAudioRawFrame)
+        self.assertEqual(frame.pts, 1_060_000_000)
 
 
 class TestIsUnauthorized(unittest.TestCase):
