@@ -207,17 +207,21 @@ def test_the_frontend_guidance_covers_delegation_and_the_backends_messages():
     assert "delegate tool" in guidance
     assert 'marked "Backend:"' in guidance
     assert '"Backend (working):"' in guidance
-    assert "calling it off, in any words" in guidance
+    assert "to start, change or stop its work" in guidance
 
 
 def test_the_strategys_guidance_sits_inside_the_delegating_paragraph():
     guidance = _bound().frontend_instruction or ""
-    assert guidance.startswith("DELEGATING:")
+    assert guidance.startswith("THE BACKEND:")
     delegating = guidance.split("\n\n")[0]
     assert delegating.endswith(" " + TRANSCRIPT_FRONTEND_INSTRUCTION)
     assert "{strategy}" not in guidance
     assert guidance.index("ONE ASSISTANT:") < guidance.index("AFTER DELEGATING:")
     assert guidance.index("AFTER DELEGATING:") < guidance.index("BACKEND MESSAGES:")
+    # The instruction ends by restating its rule for messages about delegated work.
+    assert guidance.split("\n\n")[-1].startswith(
+        "Whatever else a reply does, a user message about work"
+    )
 
 
 def test_an_app_can_replace_the_frontends_pairing_instruction():
@@ -242,7 +246,7 @@ async def test_a_strategy_takes_its_three_texts_as_arguments():
         request_instruction="Do it now.",
     )
     connector = _bound(BackendConnector(request_strategy=strategy))
-    assert "around it. Say it plainly." in (connector.frontend_instruction or "")
+    assert "waiting. Say it plainly." in (connector.frontend_instruction or "")
     assert connector.tool.description == "Hand it over."
     request = await strategy.compose_request(_params(arguments={"request": "Book a taxi"}))
     assert request == "Book a taxi\n\nDo it now."
@@ -907,7 +911,7 @@ async def test_the_classifier_sees_the_frontends_instruction_and_the_latest_conv
     (state,) = classifier.states
     # What the frontend's model reads: the app's instruction, then the pairing
     # instruction appended to it.
-    assert state["assistant"].startswith("You are Pip.\n\nDELEGATING:")
+    assert state["assistant"].startswith("You are Pip.\n\nTHE BACKEND:")
     assert state["conversation"] == [
         {"speaker": "user", "text": "Fix the flaky test."},
         {"speaker": "assistant", "action": "handed the request to the backend"},
