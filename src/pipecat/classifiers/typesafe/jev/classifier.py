@@ -10,6 +10,8 @@
 into a result, through a :class:`~pipecat.classifiers.typesafe.jev.client.JevClient`.
 """
 
+import base64
+import uuid
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -40,6 +42,9 @@ from pipecat.utils.asyncio.task_manager import BaseTaskManager
 #: The most options Jev takes in one choice question.
 JEV_MAX_CHOICE_OPTIONS = 255
 
+#: Jev's name for each image type it reads.
+_JEV_IMAGE_FORMATS = {"image/png": "png", "image/jpeg": "jpg"}
+
 
 class JevClassifier(BaseClassifier):
     """Answers questions by asking Jev.
@@ -48,6 +53,10 @@ class JevClassifier(BaseClassifier):
     client of its own, or pass a :class:`JevClient` to share one between
     several classifiers. A client the classifier created is closed in
     :meth:`cleanup`; a shared one is left to whoever made it.
+
+    Jev can see PNG and JPEG images, 256 to 1568 pixels on each side. It
+    reads them as part of the state. TypeSafe offers images as a preview,
+    so their limits may change between Jev releases.
 
     Example::
 
@@ -117,6 +126,11 @@ class JevClassifier(BaseClassifier):
         """The Jev model the questions go to."""
         return self._client.model
 
+    @property
+    def supports_images(self) -> bool:
+        """Jev can see images."""
+        return True
+
     async def _ask(
         self,
         state: str | dict[str, Any] | list[Any],
@@ -124,8 +138,13 @@ class JevClassifier(BaseClassifier):
         images: Sequence[ClassifierImage] = (),
     ) -> tuple[dict[str, ClassifierResult], LLMTokenUsage]:
         """Answer the questions in one request."""
+        assets = {str(uuid.uuid4()): self._asset(image) for image in images}
+        if assets:
+            # Jev reads an image wherever its reference appears, so the
+            # references go ahead of the state they come with.
+            state = {"images": list(assets), "state": state}
         answers, usage = await self._client.ask(
-            state, {name: self._to_jev(q) for name, q in questions.items()}
+            state, {name: self._to_jev(q) for name, q in questions.items()}, assets
         )
         results = {
             name: self._from_jev(question, answers[name]) for name, question in questions.items()
@@ -135,6 +154,17 @@ class JevClassifier(BaseClassifier):
             completion_tokens=usage.output_tokens,
             total_tokens=usage.input_tokens + usage.output_tokens,
         )
+
+    def _asset(self, image: ClassifierImage) -> dict[str, Any]:
+        """An image in Jev's own format."""
+        format = _JEV_IMAGE_FORMATS.get(image.content_type)
+        if not format:
+            raise ClassifierError(f"Jev takes PNG or JPEG images, got {image.content_type}")
+        return {
+            "type": "image",
+            "format": format,
+            "data_base64": base64.b64encode(image.data).decode(),
+        }
 
     def _to_jev(self, question: ClassifierQuestion) -> dict[str, Any]:
         """A question in Jev's own format."""

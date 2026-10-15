@@ -6,13 +6,14 @@
 
 """Ask a classifier about an image, such as a frame from the user's camera.
 
-By default the questions go to Cloudflare's Clef; with ``--openai`` they go
-to OpenAI's Decisions API, and with ``--llm`` to an OpenAI vision model
-through ``LLMClassifier``.
+By default the questions go to Jev; with ``--clef`` they go to Cloudflare's
+Clef, with ``--openai`` to OpenAI's Decisions API, and with ``--llm`` to an
+OpenAI vision model through ``LLMClassifier``.
 
 Usage::
 
-    CLOUDFLARE_ACCOUNT_ID=... CLOUDFLARE_API_KEY=... python features-classifiers-images.py
+    TYPESAFE_API_KEY=... python features-classifiers-images.py
+    CLOUDFLARE_ACCOUNT_ID=... CLOUDFLARE_API_KEY=... python features-classifiers-images.py --clef
     OPENAI_API_KEY=... python features-classifiers-images.py --openai
     OPENAI_API_KEY=... python features-classifiers-images.py --llm gpt-4.1-mini
 """
@@ -35,6 +36,7 @@ from pipecat.classifiers.base_classifier import (
 from pipecat.classifiers.cloudflare.clef.classifier import ClefClassifier
 from pipecat.classifiers.llm.classifier import LLMClassifier
 from pipecat.classifiers.openai.decisions.classifier import OpenAIDecisionsClassifier
+from pipecat.classifiers.typesafe.jev.classifier import JevClassifier
 from pipecat.frames.frames import ImageRawFrame
 from pipecat.services.openai.llm import OpenAILLMService
 
@@ -95,16 +97,30 @@ async def main(classifier: BaseClassifier):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
+        "--clef",
+        metavar="MODEL",
+        nargs="?",
+        const="clef",
+        help="use Clef (clef or clef-flash) instead of Jev",
+    )
+    parser.add_argument(
         "--openai",
         metavar="MODEL",
         nargs="?",
         const="gpt-6-luna",
-        help="use OpenAI's Decisions API instead of Clef",
+        help="use OpenAI's Decisions API instead of Jev",
     )
-    parser.add_argument("--llm", metavar="MODEL", help="use an OpenAI vision model instead of Clef")
+    parser.add_argument("--llm", metavar="MODEL", help="use an OpenAI vision model instead of Jev")
     args = parser.parse_args()
 
-    if args.openai:
+    if args.clef:
+        classifier = ClefClassifier(
+            account_id=os.environ["CLOUDFLARE_ACCOUNT_ID"],
+            api_key=os.environ["CLOUDFLARE_API_KEY"],
+            model=args.clef,
+        )
+        asyncio.run(main(classifier))
+    elif args.openai:
         classifier = OpenAIDecisionsClassifier(
             api_key=os.environ["OPENAI_API_KEY"], model=args.openai
         )
@@ -116,8 +132,4 @@ if __name__ == "__main__":
         )
         asyncio.run(main(LLMClassifier(llm=llm)))
     else:
-        classifier = ClefClassifier(
-            account_id=os.environ["CLOUDFLARE_ACCOUNT_ID"],
-            api_key=os.environ["CLOUDFLARE_API_KEY"],
-        )
-        asyncio.run(main(classifier))
+        asyncio.run(main(JevClassifier(api_key=os.environ["TYPESAFE_API_KEY"])))
