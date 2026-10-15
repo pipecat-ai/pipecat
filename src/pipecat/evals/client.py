@@ -338,6 +338,10 @@ class _PersonaTurnRelay(FrameProcessor):
     reply with words in it is one ``persona_turn`` event; a reply that only
     calls ``end_call``, or that the bot's speech cut off before a word went
     out, is not a turn.
+
+    The persona's ``end_call`` event follows the turn of the reply that made
+    the call: in audio mode the reply is still being spoken when the persona
+    calls it.
     """
 
     def __init__(
@@ -358,6 +362,21 @@ class _PersonaTurnRelay(FrameProcessor):
         # What the persona said in the current response: the one text turn, or
         # the sentences the user TTS spoke.
         self._spoken: list[str] = []
+        # Whether a response is on its way to the bot, and the end_call event
+        # held until it has gone out.
+        self._replying = False
+        self._end_call: dict | None = None
+
+    async def end_call(self, event: dict) -> None:
+        """Append the persona's ``end_call`` event once the response in progress has gone out.
+
+        Args:
+            event: The ``end_call`` event.
+        """
+        if self._replying:
+            self._end_call = event
+        else:
+            await self._stream.append(event)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
@@ -365,6 +384,9 @@ class _PersonaTurnRelay(FrameProcessor):
         if isinstance(frame, (LLMFullResponseStartFrame, InterruptionFrame)):
             self._text = []
             self._spoken = []
+            self._replying = isinstance(frame, LLMFullResponseStartFrame)
+            if not self._replying:
+                await self._append_end_call()
         elif isinstance(frame, LLMTextFrame) and frame.skip_tts:
             self._text.append(frame.text)
         elif isinstance(frame, LLMFullResponseEndFrame):
@@ -381,10 +403,18 @@ class _PersonaTurnRelay(FrameProcessor):
                     {"type": PERSONA_TURN_EVENT, "text": " ".join(self._spoken)}
                 )
             self._spoken = []
+            self._replying = False
+            await self._append_end_call()
         elif isinstance(frame, TTSTextFrame):
             self._trace.log(f"send: {frame.text!r} (persona, audio)")
             self._spoken.append(frame.text)
         await self.push_frame(frame, direction)
+
+    async def _append_end_call(self) -> None:
+        """Append the end_call event held for the response that just ended, if any."""
+        if self._end_call is not None:
+            await self._stream.append(self._end_call)
+            self._end_call = None
 
 
 class EvalClientParams(BaseModel):
@@ -513,6 +543,8 @@ class EvalClient:
         self._stopping = False
         # Where the user's turns enter the pipeline (built with the processors).
         self._sink: _BotFrameSink | None = None
+        # What sends the persona's replies to the bot (built with the processors).
+        self._relay: _PersonaTurnRelay | None = None
         self._run_task: asyncio.Task | None = None
         # Records the conversation audio (bot + user) when record_path is set and
         # the scenario is audio mode; fed raw audio by the transport, written on stop().
@@ -794,6 +826,15 @@ class EvalClient:
         assert self._persona is not None
         self._persona.hang_up()
 
+    async def report_end_call(self, event: dict) -> None:
+        """Append the persona's ``end_call`` event once the reply that made the call has gone out.
+
+        Args:
+            event: The ``end_call`` event.
+        """
+        assert self._relay is not None  # pipeline built before the persona replies
+        await self._relay.end_call(event)
+
     def _refuse(self, kind: str, reason: str) -> None:
         """End the handshake with a refusal, unless it is already over."""
         if not self._handshake_over.is_set():
@@ -907,11 +948,11 @@ class EvalClient:
         if persona is None:
             outbound: list = [*speech, transport.output()]
         else:
-            relay = _PersonaTurnRelay(self._text_turn_message, self._trace, self._stream)
+            self._relay = _PersonaTurnRelay(self._text_turn_message, self._trace, self._stream)
             outbound = [
                 persona.llm,
                 *speech,
-                relay,
+                self._relay,
                 transport.output(),
                 LLMAssistantAggregator(context),
             ]

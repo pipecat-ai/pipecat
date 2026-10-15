@@ -1529,6 +1529,41 @@ class TestPersonaTurnRelay(unittest.IsolatedAsyncioTestCase):
             await relay.process_frame(frame, FrameDirection.DOWNSTREAM)
         self.assertEqual(relay._stream.events_seen, [])
 
+    async def test_an_end_call_made_while_the_response_is_spoken_follows_its_turn(self):
+        # In audio mode the persona calls end_call before the TTS has spoken
+        # the response it came with.
+        relay, _, _ = self._relay()
+        await relay.process_frame(LLMFullResponseStartFrame(), FrameDirection.DOWNSTREAM)
+        await relay.end_call({"type": "end_call", "text": "done"})
+        self.assertEqual(relay._stream.events_seen, [])
+        for frame in (
+            TTSTextFrame(text="Goodbye!", text_type=TextType.SENTENCE),
+            LLMFullResponseEndFrame(),
+        ):
+            await relay.process_frame(frame, FrameDirection.DOWNSTREAM)
+        self.assertEqual(
+            _untimed(relay._stream.events_seen),
+            [
+                {"type": "persona_turn", "text": "Goodbye!"},
+                {"type": "end_call", "text": "done"},
+            ],
+        )
+
+    async def test_an_end_call_with_no_response_going_out_is_appended_at_once(self):
+        relay, _, _ = self._relay()
+        # The response already went out.
+        for frame in (LLMFullResponseStartFrame(), LLMFullResponseEndFrame()):
+            await relay.process_frame(frame, FrameDirection.DOWNSTREAM)
+        await relay.end_call({"type": "end_call", "text": "first"})
+        # The bot's speech cut the response off.
+        await relay.process_frame(LLMFullResponseStartFrame(), FrameDirection.DOWNSTREAM)
+        await relay.end_call({"type": "end_call", "text": "second"})
+        await relay.process_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
+        self.assertEqual(
+            [e["text"] for e in relay._stream.events_seen],
+            ["first", "second"],
+        )
+
     async def test_an_interrupted_response_is_not_a_turn(self):
         relay, _, _ = self._relay()
         for frame in (
