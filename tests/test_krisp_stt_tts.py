@@ -354,6 +354,77 @@ async def test_stt_sends_80ms_chunks():
     assert len(service._audio_buffer) == 440
 
 
+@pytest.mark.asyncio
+async def test_stt_keeps_audio_while_disconnected_and_sends_it_once_open():
+    service = _stt()
+    service._sample_rate = 16000
+    service._websocket.state = State.CLOSED
+
+    async for _ in service.run_stt(b"\x01" * 2560 * 2):
+        pass
+
+    service._websocket.send.assert_not_called()
+    assert len(service._audio_buffer) == 2560 * 2
+
+    service._websocket.state = State.OPEN
+    async for _ in service.run_stt(b"\x02" * 2560):
+        pass
+
+    sent = [c.args[0] for c in service._websocket.send.call_args_list]
+    assert sent == [b"\x01" * 2560, b"\x01" * 2560, b"\x02" * 2560]
+    assert not service._audio_buffer
+
+
+@pytest.mark.asyncio
+async def test_stt_keeps_only_the_newest_pending_audio():
+    service = _stt()
+    service._sample_rate = 16000
+    service._websocket.state = State.CLOSED
+
+    async for _ in service.run_stt(b"\x00" * 2 * 16000 * 6):
+        pass
+
+    assert len(service._audio_buffer) == 2 * 16000 * 5
+
+
+@pytest.mark.asyncio
+async def test_stt_reconnect_pushes_pending_finals_and_keeps_the_turn_open(monkeypatch):
+    service = _stt([_final(" hello")])
+    await service._receive_messages()
+    monkeypatch.setattr(
+        "pipecat.services.stt_service.WebsocketSTTService._reconnect_websocket",
+        AsyncMock(return_value=True),
+    )
+
+    assert await service._reconnect_websocket(1)
+
+    (frame,) = _pushed(service)
+    assert isinstance(frame, TranscriptionFrame) and frame.text == "hello"
+    assert service._in_turn
+
+
+@pytest.mark.asyncio
+async def test_stt_websocket_is_exposed_only_after_ready(monkeypatch):
+    monkeypatch.setattr(krisp_stt, "create_session_token", AsyncMock(return_value="tok"))
+    service = KrispSTTService(api_key="k")
+    seen_during_handshake = []
+
+    class _HandshakeWebsocket(_FakeWebsocket):
+        async def recv(self):
+            seen_during_handshake.append(service._websocket)
+            return await super().recv()
+
+    async def fake_connect(url, **kwargs):
+        return _HandshakeWebsocket([{"type": "ready"}])
+
+    monkeypatch.setattr("pipecat.services.websocket_service.websocket_connect", fake_connect)
+
+    await service._connect_websocket()
+
+    assert seen_during_handshake == [None]
+    assert service._websocket is not None
+
+
 # --- TTS --------------------------------------------------------------------
 
 
@@ -480,3 +551,20 @@ async def test_tts_interrupt_when_idle_sends_nothing():
 def test_spread_words_by_length():
     assert _spread_words("ab cd", 1.0, 2.0) == [("ab", 1.0), ("cd", 1.5)]
     assert _spread_words("   ", 0.0, 1.0) == []
+
+
+@pytest.mark.asyncio
+async def test_tts_connect_replaces_a_finished_receive_task(monkeypatch):
+    service = KrispTTSService(api_key="k")
+    finished = AsyncMock()
+    finished.done = lambda: True
+    service._receive_task = finished
+    service.cancel_task = AsyncMock()
+    service._websocket = _FakeWebsocket()
+    new_task = object()
+    service.create_task = lambda coro, *a, **kw: (coro.close(), new_task)[1]
+
+    await service._connect()
+
+    service.cancel_task.assert_awaited_once_with(finished)
+    assert service._receive_task is new_task

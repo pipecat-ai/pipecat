@@ -56,6 +56,10 @@ KRISP_STT_URL = "wss://streaming.krisp.ai/stt"
 KRISP_STT_SAMPLE_RATE = 16000
 _CHUNK_BYTES = KRISP_STT_SAMPLE_RATE * 2 * 80 // 1000
 
+# Audio that can't be sent yet (e.g. during a reconnect) is kept and sent once
+# the connection is ready; only the newest 5 seconds are kept.
+_MAX_PENDING_AUDIO_BYTES = KRISP_STT_SAMPLE_RATE * 2 * 5
+
 # How long to wait for the server's ``end`` message after ``end_of_audio``.
 _END_OF_STREAM_TIMEOUT = 3.0
 
@@ -146,6 +150,7 @@ class KrispSTTService(WebsocketSTTService):
         self._receive_task = None
         self._input_resampler = create_stream_resampler()
         self._audio_buffer = bytearray()
+        self._send_lock = asyncio.Lock()
         self._end_received = asyncio.Event()
 
         # Transcript state for the current user turn.
@@ -245,17 +250,22 @@ class KrispSTTService(WebsocketSTTService):
             audio = await self._input_resampler.resample(
                 audio, self.sample_rate, KRISP_STT_SAMPLE_RATE
             )
-        self._audio_buffer.extend(audio)
-        while len(self._audio_buffer) >= _CHUNK_BYTES:
-            chunk = bytes(self._audio_buffer[:_CHUNK_BYTES])
-            del self._audio_buffer[:_CHUNK_BYTES]
-            if not self._websocket or self._websocket.state is not State.OPEN:
-                continue
-            try:
-                await self._websocket.send(chunk)
-            except Exception as e:
-                logger.warning(f"{self}: send failed: {e}")
-                break
+        # run_stt and the keepalive task both send; the lock keeps a chunk from
+        # being sent twice.
+        async with self._send_lock:
+            self._audio_buffer.extend(audio)
+            excess = len(self._audio_buffer) - _MAX_PENDING_AUDIO_BYTES
+            if excess > 0:
+                del self._audio_buffer[: excess + excess % 2]
+            while len(self._audio_buffer) >= _CHUNK_BYTES:
+                if not self._websocket or self._websocket.state is not State.OPEN:
+                    break
+                try:
+                    await self._websocket.send(bytes(self._audio_buffer[:_CHUNK_BYTES]))
+                except Exception as e:
+                    logger.warning(f"{self}: send failed: {e}")
+                    break
+                del self._audio_buffer[:_CHUNK_BYTES]
 
     async def _send_json(self, msg: dict):
         if not self._websocket or self._websocket.state is not State.OPEN:
@@ -310,6 +320,11 @@ class KrispSTTService(WebsocketSTTService):
 
         await self._connect_websocket()
 
+        # A receive loop that ended (e.g. the server closed the socket) can't
+        # serve the new connection.
+        if self._receive_task and self._receive_task.done():
+            await self.cancel_task(self._receive_task)
+            self._receive_task = None
         if self._websocket and not self._receive_task:
             self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
@@ -321,6 +336,27 @@ class KrispSTTService(WebsocketSTTService):
             self._receive_task = None
 
         await self._disconnect_websocket()
+        self._reset_stream_state()
+
+    async def _reconnect_websocket(self, attempt_number: int) -> bool:
+        """Push the dropped connection's finals, then reconnect.
+
+        The server's transcript state goes with the connection, so the turn's
+        finals received so far are pushed as a transcription. An open turn
+        stays open for the new connection's turn event to end, and unsent audio
+        stays buffered until the new connection is ready.
+
+        Args:
+            attempt_number: Current retry attempt number for logging.
+
+        Returns:
+            True if reconnection and verification succeeded.
+        """
+        in_turn = self._in_turn
+        await self._push_turn_transcription({})
+        self._in_turn = in_turn
+        self._partial_text = ""
+        return await super()._reconnect_websocket(attempt_number)
 
     async def _connect_websocket(self):
         try:
@@ -328,17 +364,20 @@ class KrispSTTService(WebsocketSTTService):
                 return
 
             logger.debug(f"Connecting to Krisp STT ({self._url}, tokens: {self._rest_base_url})")
-            self._reset_stream_state()
             token = await create_session_token(self._api_key, "stt", base_url=self._rest_base_url)
-            self._websocket = await self._websocket_connect(
+            websocket = await self._websocket_connect(
                 self._url, additional_headers=session_headers(token)
             )
-            ready = await open_session(self._websocket, self._build_handshake())
+            try:
+                ready = await open_session(websocket, self._build_handshake())
+            except Exception:
+                await websocket.close()
+                raise
+            # Exposed only once ready: no audio may be sent before that.
+            self._websocket = websocket
             logger.debug(f"Connected to Krisp STT (request_id={ready.get('request_id')})")
             await self._call_event_handler("on_connected")
         except Exception as e:
-            if self._websocket:
-                await self._websocket.close()
             self._websocket = None
             await self.push_error(error_msg=f"Unable to connect to Krisp STT: {e}", exception=e)
 

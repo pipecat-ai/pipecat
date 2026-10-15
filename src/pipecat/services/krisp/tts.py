@@ -163,6 +163,7 @@ class KrispTTSService(WebsocketTTSService):
         self._rest_base_url = rest_base_url
 
         self._receive_task = None
+        self._connect_lock = asyncio.Lock()
         self._done_received = asyncio.Event()
 
         self._sentences: deque[_Sentence] = deque()
@@ -245,6 +246,11 @@ class KrispTTSService(WebsocketTTSService):
 
         await self._connect_websocket()
 
+        # A receive loop that ended (e.g. the server closed the socket) can't
+        # serve the new connection.
+        if self._receive_task and self._receive_task.done():
+            await self.cancel_task(self._receive_task)
+            self._receive_task = None
         if self._websocket and not self._receive_task:
             self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
@@ -270,6 +276,12 @@ class KrispTTSService(WebsocketTTSService):
         return handshake
 
     async def _connect_websocket(self):
+        # run_tts and the receive loop's reconnect can both connect; the lock
+        # makes the second caller reuse the first one's connection.
+        async with self._connect_lock:
+            await self._open_session()
+
+    async def _open_session(self):
         try:
             if self._websocket and self._websocket.state is State.OPEN:
                 return
@@ -277,10 +289,16 @@ class KrispTTSService(WebsocketTTSService):
             logger.debug(f"Connecting to Krisp TTS ({self._url}, tokens: {self._rest_base_url})")
             self._reset_stream_state()
             token = await create_session_token(self._api_key, "tts", base_url=self._rest_base_url)
-            self._websocket = await self._websocket_connect(
+            websocket = await self._websocket_connect(
                 self._url, additional_headers=session_headers(token)
             )
-            ready = await open_session(self._websocket, self._build_handshake())
+            try:
+                ready = await open_session(websocket, self._build_handshake())
+            except Exception:
+                await websocket.close()
+                raise
+            # Exposed only once ready: no text may be sent before that.
+            self._websocket = websocket
             if ready.get("warning"):
                 logger.warning(f"{self}: {ready['warning']}")
             logger.debug(
@@ -289,8 +307,6 @@ class KrispTTSService(WebsocketTTSService):
             )
             await self._call_event_handler("on_connected")
         except Exception as e:
-            if self._websocket:
-                await self._websocket.close()
             self._websocket = None
             await self.push_error(error_msg=f"Unable to connect to Krisp TTS: {e}", exception=e)
             await self._call_event_handler("on_connection_error", f"{e}")
