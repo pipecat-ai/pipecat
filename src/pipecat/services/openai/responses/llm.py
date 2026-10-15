@@ -35,6 +35,7 @@ from openai.types.responses import (
     ResponseReasoningSummaryTextDeltaEvent,
     ResponseStreamEvent,
     ResponseTextDeltaEvent,
+    ResponseUsage,
 )
 from pydantic import BaseModel
 from websockets.exceptions import ConnectionClosed
@@ -1361,6 +1362,36 @@ class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
             logger.debug(f"{self}: Retrying response creation due to timeout")
             return await self._client.responses.create(**params)
 
+    def _token_usage(self, usage: ResponseUsage) -> LLMTokenUsage:
+        """Convert a completed response's usage into Pipecat's token usage.
+
+        Subclasses for servers that report usage fields OpenAI doesn't override
+        this.
+
+        Args:
+            usage: The usage reported with the completed response.
+
+        Returns:
+            The token usage to report.
+        """
+        # Third-party Responses API servers may omit fields the OpenAI SDK treats
+        # as required. The SDK's lenient streaming decoder leaves anything omitted
+        # as None — at the top level (token counts), as a missing detail
+        # sub-object, or as a missing field inside one. Coalesce each to 0 so a
+        # partial usage payload can't raise or leak None into metrics.
+        input_details = usage.input_tokens_details
+        output_details = usage.output_tokens_details
+        return LLMTokenUsage(
+            prompt_tokens=usage.input_tokens or 0,
+            completion_tokens=usage.output_tokens or 0,
+            total_tokens=usage.total_tokens or 0,
+            cache_read_input_tokens=(input_details.cached_tokens or 0) if input_details else 0,
+            cache_creation_input_tokens=(getattr(input_details, "cache_write_tokens", None) or 0)
+            if input_details
+            else 0,
+            reasoning_tokens=(output_details.reasoning_tokens or 0) if output_details else 0,
+        )
+
     @traced_llm
     async def _process_context(self, context: LLMContext):
         adapter = self.get_llm_adapter()
@@ -1467,33 +1498,7 @@ class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
                 elif isinstance(event, ResponseCompletedEvent):
                     response = event.response
                     if response.usage:
-                        usage = response.usage
-                        # Third-party Responses API servers may omit fields the
-                        # OpenAI SDK treats as required. The SDK's lenient
-                        # streaming decoder leaves anything omitted as None — at
-                        # the top level (token counts), as a missing detail
-                        # sub-object, or as a missing field inside one. Coalesce
-                        # each to 0 so a partial usage payload can't raise or
-                        # leak None into metrics.
-                        input_details = usage.input_tokens_details
-                        output_details = usage.output_tokens_details
-                        tokens = LLMTokenUsage(
-                            prompt_tokens=usage.input_tokens or 0,
-                            completion_tokens=usage.output_tokens or 0,
-                            total_tokens=usage.total_tokens or 0,
-                            cache_read_input_tokens=(input_details.cached_tokens or 0)
-                            if input_details
-                            else 0,
-                            cache_creation_input_tokens=(
-                                getattr(input_details, "cache_write_tokens", None) or 0
-                            )
-                            if input_details
-                            else 0,
-                            reasoning_tokens=(output_details.reasoning_tokens or 0)
-                            if output_details
-                            else 0,
-                        )
-                        await self.start_llm_usage_metrics(tokens)
+                        await self.start_llm_usage_metrics(self._token_usage(response.usage))
 
                     # This field is used by @traced_llm for more detailed
                     # model name in tracing spans
