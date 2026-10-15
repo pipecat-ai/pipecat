@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import asyncio
 import json
 from unittest.mock import AsyncMock
 
@@ -423,6 +424,47 @@ async def test_stt_websocket_is_exposed_only_after_ready(monkeypatch):
 
     assert seen_during_handshake == [None]
     assert service._websocket is not None
+
+
+def _stt_ending_stream() -> KrispSTTService:
+    """An STT service whose fake server answers end_of_audio with end."""
+    service = _stt()
+    service._sample_rate = 16000
+
+    async def send(message):
+        if isinstance(message, str) and json.loads(message)["type"] == "end_of_audio":
+            service._end_received.set()
+
+    service._websocket.send = AsyncMock(side_effect=send)
+    return service
+
+
+@pytest.mark.asyncio
+async def test_stt_end_of_stream_flushes_in_chunks_then_blocks_audio():
+    service = _stt_ending_stream()
+    service._audio_buffer.extend(b"\x01" * (2560 * 2 + 100))
+
+    await service._end_audio_stream()
+    async for _ in service.run_stt(b"\x02" * 2560):
+        pass
+    await service._send_keepalive(b"\x00" * 3200)
+
+    sent = [c.args[0] for c in service._websocket.send.call_args_list]
+    assert [len(m) for m in sent[:3]] == [2560, 2560, 100]
+    assert [json.loads(m) for m in sent[3:]] == [{"type": "end_of_audio"}]
+
+
+@pytest.mark.asyncio
+async def test_stt_end_of_stream_waits_for_an_in_flight_send():
+    service = _stt_ending_stream()
+
+    async with service._send_lock:
+        end_task = asyncio.create_task(service._end_audio_stream())
+        await asyncio.sleep(0.01)
+        service._websocket.send.assert_not_called()
+    await end_task
+
+    assert service._websocket.send.await_count == 1
 
 
 # --- TTS --------------------------------------------------------------------

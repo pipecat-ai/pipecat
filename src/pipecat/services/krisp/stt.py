@@ -151,6 +151,8 @@ class KrispSTTService(WebsocketSTTService):
         self._input_resampler = create_stream_resampler()
         self._audio_buffer = bytearray()
         self._send_lock = asyncio.Lock()
+        # Set once end_of_audio is sent; no audio may follow it.
+        self._audio_ended = False
         self._end_received = asyncio.Event()
 
         # Transcript state for the current user turn.
@@ -253,6 +255,8 @@ class KrispSTTService(WebsocketSTTService):
         # run_stt and the keepalive task both send; the lock keeps a chunk from
         # being sent twice.
         async with self._send_lock:
+            if self._audio_ended:
+                return
             self._audio_buffer.extend(audio)
             excess = len(self._audio_buffer) - _MAX_PENDING_AUDIO_BYTES
             if excess > 0:
@@ -283,10 +287,12 @@ class KrispSTTService(WebsocketSTTService):
         self._disconnecting = True
         self._end_received.clear()
         try:
-            if self._audio_buffer:
-                await websocket.send(bytes(self._audio_buffer))
-                self._audio_buffer.clear()
-            await websocket.send(json.dumps({"type": "end_of_audio"}))
+            async with self._send_lock:
+                self._audio_ended = True
+                while self._audio_buffer:
+                    await websocket.send(bytes(self._audio_buffer[:_CHUNK_BYTES]))
+                    del self._audio_buffer[:_CHUNK_BYTES]
+                await websocket.send(json.dumps({"type": "end_of_audio"}))
             await asyncio.wait_for(self._end_received.wait(), _END_OF_STREAM_TIMEOUT)
         except TimeoutError:
             logger.warning(f"{self}: no 'end' message within {_END_OF_STREAM_TIMEOUT}s")
@@ -374,6 +380,7 @@ class KrispSTTService(WebsocketSTTService):
                 await websocket.close()
                 raise
             # Exposed only once ready: no audio may be sent before that.
+            self._audio_ended = False
             self._websocket = websocket
             logger.debug(f"Connected to Krisp STT (request_id={ready.get('request_id')})")
             await self._call_event_handler("on_connected")
