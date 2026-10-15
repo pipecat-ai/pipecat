@@ -13,6 +13,7 @@ that module. Mounted as the ``eval`` subcommand of the ``pipecat`` CLI (see
 
 import asyncio
 import contextlib
+import json
 import shutil
 import sys
 import time
@@ -297,8 +298,9 @@ async def _execute_scenario(
     Updates ``run`` in place.
 
     The ``eval run`` counterpart to the suite's _run_one: it connects to a fixed
-    URL instead of spawning, always writes the decision trace (``<scenario>.eval.log``)
-    and, under ``--debug``, the combined ``<scenario>.debug.log``.
+    URL instead of spawning, always writes the decision trace (``<scenario>.eval.log``),
+    a simulation's ``<scenario>.conversation.json``, and, under ``--debug``, the
+    combined ``<scenario>.debug.log``.
     """
     run.status = "running"
     run.started_at = time.monotonic()
@@ -316,10 +318,14 @@ async def _execute_scenario(
                 if isinstance(loaded, EvalSimulationScenario):
                     print(f"    {_bold('conversation:')}")
             run.result = await session.run()
+        Path(logs_dir).mkdir(parents=True, exist_ok=True)
         if run.result.debug_log:
-            Path(logs_dir).mkdir(parents=True, exist_ok=True)
             (Path(logs_dir) / f"{run.stem}.eval.log").write_text(
                 "\n".join(run.result.debug_log) + "\n"
+            )
+        if isinstance(run.result, EvalSimulationResult):
+            (Path(logs_dir) / f"{run.stem}.conversation.json").write_text(
+                json.dumps(run.result.conversation, indent=2) + "\n"
             )
     except Exception as e:  # noqa: BLE001
         # Errors raised inside the session's run() are caught there and returned
@@ -430,7 +436,8 @@ def run(
     logs_dir: str = typer.Option(
         ".",
         "--logs-dir",
-        help="Directory for each scenario's logs: <logs-dir>/<scenario>.eval.log (+ .debug.log).",
+        help="Directory for each scenario's logs: <logs-dir>/<scenario>.eval.log (+ .debug.log, "
+        "and a simulation's .conversation.json).",
     ),
     debug: bool = typer.Option(
         False,

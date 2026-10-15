@@ -134,6 +134,9 @@ Each run writes to `test-runs/<name>/`, a timestamp unless you pass `-n`:
   here when a run fails.
 - `logs/<bot>__<scenario>.debug.log`: the full logs of every pipeline the
   harness ran (user speech, transcription, judge, harness).
+- `logs/<bot>__<scenario>.conversation.json`: a simulation's conversation,
+  what each side said and the calls the bot made, one bot turn per
+  `assistant` message (see `pipecat.evals.conversation`).
 - `recordings/<bot>__<scenario>.wav`: the conversation audio of an audio
   scenario. The manifest sets `record: true`; `-a` forces it on.
 

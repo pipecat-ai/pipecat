@@ -842,6 +842,10 @@ class TestSimulationRecords(unittest.TestCase):
                 )
             ],
             messages=[{"role": "user", "content": "hi"}],
+            conversation=[
+                {"role": "user", "content": "hi"},
+                {"role": "tool_call", "name": "book", "arguments": {}, "cancelled": False},
+            ],
             turns=2,
             ended_by="end_call",
             end_call={"success": True, "reason": "done"},
@@ -882,6 +886,46 @@ class TestSimulationRecords(unittest.TestCase):
             self.assertEqual(record["ended_by"], "bot")
             self.assertEqual(record["reason"], "no table")
             self.assertEqual(record["events_seen"], [{"type": "llm_started"}])
+
+
+class TestSimulationConversationFile(unittest.IsolatedAsyncioTestCase):
+    async def test_a_finished_simulation_writes_its_conversation_and_the_record_points_to_it(self):
+        from pipecat.evals.suite import _RunFiles
+
+        conversation = [
+            {"role": "user", "content": "A table at six."},
+            {"role": "tool_call", "name": "book", "arguments": {"time": "6"}, "cancelled": False},
+            {"role": "assistant", "content": "Booked."},
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            run = EvalRun(
+                bot="flows/x.py",
+                scenario="book",
+                scenario_path=base / "book.yaml",
+                kind=EvalKind.SIMULATION,
+                result=EvalSimulationResult(
+                    simulation_name="book", succeeded=True, conversation=conversation
+                ),
+            )
+            suite = EvalSuite(
+                EvalManifest(
+                    runs=[run],
+                    spawn=DEFAULT_SPAWN,
+                    python=sys.executable,
+                    concurrency=1,
+                    repeat=1,
+                    base_port=7900,
+                    runs_dir=None,
+                    record=False,
+                    cache_dir=None,
+                )
+            )
+            files = _RunFiles.for_run(run, base, None)
+            await suite._finish(run, files, None, None, base / "results.jsonl", base, None)
+            self.assertEqual(json.loads(files.conversation.read_text()), conversation)
+            record = json.loads((base / "results.jsonl").read_text())
+            self.assertEqual(record["artifacts"]["conversation"], str(files.conversation))
 
 
 class TestEntryQueues(unittest.TestCase):

@@ -17,6 +17,7 @@ from pipecat.evals.client import (
     PERSONA_TURN_EVENT,
     EvalClient,
 )
+from pipecat.evals.conversation import EvalConversation
 from pipecat.evals.events import EvalEventStream
 from pipecat.evals.judge import EvalJudge
 from pipecat.evals.persona import EvalPersona
@@ -100,14 +101,10 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
         self._succeeded = False
         self._reason = ""
         self._metrics: list[EvalSimulationMetricScore] = []
-        # The conversation as the events tell it, built as they arrive (see
-        # :meth:`timeline`): the lines so far, the bot's words since the last
-        # persona turn, the tool calls made so far, and how far into the stream's
-        # events the build has read.
+        # The conversation as the events tell it, built as they arrive, and how
+        # far into the stream's events the build has read.
         self._bot_said = "response" if simulation.bot_audio else "llm_response"
-        self._lines: list[dict] = []
-        self._pending: list[str] = []
-        self._evidence: list[str] = []
+        self._conversation = EvalConversation()
         self._observed = 0
         self._criteria = {m.name: m.criterion for m in simulation.metrics if m.criterion}
 
@@ -156,7 +153,7 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
                 # The persona says nothing more from here. The bot still gets
                 # its turn if the persona hung up on its own last line.
                 await self._client.hang_up()
-                if self._pending or not self._lines or self._lines[-1]["role"] != "user":
+                if not self._conversation.user_spoke_last:
                     self._ended_by = "end_call"
                 else:
                     self._trace.log("persona: hung up; waiting for the bot's closing turn")
@@ -182,7 +179,7 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
         self._trace.log(f"persona: ended by {self._ended_by} after {self._turns} turn(s)")
         # Whatever the bot said last closes the conversation.
         self._observe_new_events()
-        self._close_bot_turn()
+        self._conversation.end_bot_turn()
         await self._report("ended", self._ended_by)
         if failures:
             return failures
@@ -206,6 +203,7 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
             error=error,
             metrics=self._metrics,
             messages=self.conversation(),
+            conversation=self._conversation.messages,
             turns=self._turns,
             ended_by=self._ended_by or "error",
             end_call=self._end_call,
@@ -219,9 +217,22 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
 
         A bot turn is everything the bot said between two persona turns, however
         turn detection or a function call split it; a turn in which the bot said
-        nothing is not a turn. Built as the events arrive.
+        nothing is not a turn.
         """
-        return list(self._lines)
+        lines: list[dict] = []
+        evidence: list[str] = []
+        for message in self._conversation.messages:
+            if message["role"] == "tool_call":
+                evidence.extend(self._call_lines(message))
+            else:
+                lines.append(
+                    {
+                        "role": message["role"],
+                        "content": message["content"],
+                        "evidence": evidence[:],
+                    }
+                )
+        return lines
 
     @deprecated(
         "`EvalSimulationDriver.transcript` is deprecated since 1.11.0 and will be removed in "
@@ -235,25 +246,27 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
             Will be removed in 2.0.0.
         """
         entries: list[dict] = []
-        placed = 0
-        for line in self._lines:
-            for call in line["evidence"][placed:]:
-                entries.append({"role": "tool", "content": call})
-            placed = len(line["evidence"])
-            entries.append({"role": line["role"], "content": line["content"]})
-        for call in self._evidence[placed:]:
-            entries.append({"role": "tool", "content": call})
+        for message in self._conversation.messages:
+            if message["role"] == "tool_call":
+                entries.extend({"role": "tool", "content": c} for c in self._call_lines(message))
+            else:
+                entries.append({"role": message["role"], "content": message["content"]})
         return entries
 
     def conversation(self) -> list[dict]:
         """The conversation with the persona as ``user`` and the bot as ``assistant``, without the tool calls."""
-        return [{"role": line["role"], "content": line["content"]} for line in self.timeline()]
+        return [
+            {"role": message["role"], "content": message["content"]}
+            for message in self._conversation.messages
+            if message["role"] != "tool_call"
+        ]
 
     def tool_calls(self) -> list[str]:
         """The bot's function calls in order, one line each; a cancelled call is listed as cancelled."""
         lines = []
-        for event in self._stream.events_seen:
-            lines.extend(self._evidence_line(event))
+        for message in self._conversation.messages:
+            if message["role"] == "tool_call":
+                lines.extend(self._call_lines(message))
         return lines
 
     async def _report(self, status: str, text: str) -> None:
@@ -287,51 +300,40 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
         )
 
     def _observe_new_events(self) -> None:
-        """Read the stream's events not yet read into the timeline."""
+        """Read the stream's events not yet read into the conversation."""
         events = self._stream.events_seen
         while self._observed < len(events):
             event = events[self._observed]
             self._observed += 1
             kind = event["type"]
+            name = event.get("name") or "?"
             if kind == self._bot_said and event.get("text"):
-                self._pending.append(event["text"])
+                self._conversation.add_assistant_message(event["text"])
             elif kind == PERSONA_TURN_EVENT:
-                self._close_bot_turn()
-                text = (event.get("text") or "").strip()
-                if text:
-                    self._add_line("user", text)
-            elif kind in ("function_call", "function_call_stopped"):
-                for call in self._evidence_line(event):
-                    self._evidence.append(call)
-                    if self._judge is not None:
-                        self._judge.add_tool_call(call)
+                self._conversation.add_user_message(event.get("text") or "")
+            elif kind == "function_call":
+                self._conversation.add_tool_call(name, event.get("args") or {})
+            elif kind == "function_call_stopped" and (event.get("args") or {}).get("cancelled"):
+                self._conversation.cancel_tool_call(name)
 
-    def _close_bot_turn(self) -> None:
-        """End the bot's turn: what it said since the persona last spoke becomes a line."""
-        text = " ".join(self._pending).strip()
-        self._pending.clear()
-        if text:
-            self._add_line("assistant", text)
+    def _call_lines(self, message: dict) -> list[str]:
+        """A ``tool_call`` message as evidence: the call on one line, and one more when it was cancelled."""
+        name, arguments = message["name"], message["arguments"]
+        lines = [f"{name}({json.dumps(arguments) if arguments else ''})"]
+        if message["cancelled"]:
+            lines.append(f"{name} was cancelled")
+        return lines
 
-    def _add_line(self, role: str, content: str) -> None:
-        """Append a line to the timeline, and to the conversation the judge sees."""
-        self._lines.append({"role": role, "content": content, "evidence": list(self._evidence)})
-        if self._judge is None:
-            return
-        if role == "user":
-            self._judge.add_user_message(content)
-        else:
-            self._judge.add_assistant_message(content)
-
-    def _evidence_line(self, event: dict) -> list[str]:
-        """The evidence line a function-call event contributes, if any."""
-        name = event.get("name") or "?"
-        if event["type"] == "function_call":
-            arguments = event.get("args") or {}
-            return [f"{name}({json.dumps(arguments) if arguments else ''})"]
-        if event["type"] == "function_call_stopped" and (event.get("args") or {}).get("cancelled"):
-            return [f"{name} was cancelled"]
-        return []
+    def _tell_judge(self, judge: EvalJudge) -> None:
+        """Give the judge the conversation, each tool call where it was made."""
+        for message in self._conversation.messages:
+            if message["role"] == "user":
+                judge.add_user_message(message["content"])
+            elif message["role"] == "assistant":
+                judge.add_assistant_message(message["content"])
+            else:
+                for line in self._call_lines(message):
+                    judge.add_tool_call(line)
 
     async def _judge_conversation(self) -> list[EvalAssertionFailure]:
         """Score the measured metrics, then ask the judge once about the goal and every judged criterion.
@@ -348,6 +350,7 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
             self._metrics.extend(measured.values())
             self._reason = "no judge configured"
             return []
+        self._tell_judge(self._judge)
         evidence = self.tool_calls()
         if evidence:
             self._trace.log(f"judge: the bot's tool calls: {'; '.join(evidence)}")
@@ -472,7 +475,7 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
             longest = max(
                 (
                     len(line["content"].split())
-                    for line in self.timeline()
+                    for line in self.conversation()
                     if line["role"] == "assistant"
                 ),
                 default=None,
@@ -526,15 +529,8 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
 
     def _calls_made(self) -> list[EvalFunctionCall]:
         """The bot's function calls in order, less the ones it cancelled."""
-        made: list[EvalFunctionCall] = []
-        for event in self._stream.events_seen:
-            if event["type"] == "function_call":
-                made.append(EvalFunctionCall(name=event.get("name"), args=event.get("args") or {}))
-            elif event["type"] == "function_call_stopped" and (event.get("args") or {}).get(
-                "cancelled"
-            ):
-                for index in range(len(made) - 1, -1, -1):
-                    if made[index].name == event.get("name"):
-                        del made[index]
-                        break
-        return made
+        return [
+            EvalFunctionCall(name=message["name"], args=message["arguments"])
+            for message in self._conversation.messages
+            if message["role"] == "tool_call" and not message["cancelled"]
+        ]
