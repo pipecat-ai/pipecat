@@ -177,7 +177,7 @@ class _ParallelSentenceAggregator:
 class _AggregatedFrameSlot:
     """Ordered slot tracking one AggregatedTextFrame through TTS processing.
 
-    Every frame that passes through _push_tts_frames — whether spoken or skipped —
+    Every frame that passes through _handle_aggregated_text — whether spoken or skipped —
     occupies a slot in the sequencer. Skipped frames wait at their position and are
     emitted downstream only after all preceding spoken slots are complete, preserving
     correct context ordering.
@@ -316,7 +316,7 @@ class AggregatedFrameSequencer:
     ) -> list[Frame]:
         """Register a spoken AggregatedTextFrame slot.
 
-        Called from _push_tts_frames for every frame sent to the TTS service (one
+        Called from _handle_aggregated_text for every frame sent to the TTS service (one
         call per token when ``streaming=True``, one call per complete unit
         otherwise). Builds the :class:`WordCompletionTracker` internally when
         ``build_tracker`` is set — callers never construct one themselves. A
@@ -405,7 +405,7 @@ class AggregatedFrameSequencer:
 
         Args:
             frame: The skipped AggregatedTextFrame (e.g. a code block).
-            context_id: The context ID assigned in _push_tts_frames.
+            context_id: The context ID assigned in _handle_aggregated_text.
             transport_destination: Transport routing value to attach at flush time.
 
         Returns:
