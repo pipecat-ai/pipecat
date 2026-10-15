@@ -1830,27 +1830,7 @@ class TTSService(AIService):
         while running:
             context_value = await self._audio_context_manager.next()
             if isinstance(context_value, AudioContextFrame):
-                context_id = context_value.context_id
-
-                # Process the audio context until the context doesn't have more
-                # audio available (i.e. we find None).
-                await self._handle_audio_context(context_id)
-
-                # We just finished processing the context, so we can safely
-                # remove it. If audio resumes after a timeout, the context is
-                # recreated without the partial sample held here.
-                self._audio_context_manager.remove(context_id)
-                # A failing hook must not end this task, or no more audio is played.
-                try:
-                    await self.on_audio_context_completed(context_id=context_id)
-                except Exception as e:
-                    logger.warning(
-                        f"{self} on_audio_context_completed failed for {context_id}: {e}"
-                    )
-                self.reset_active_audio_context()
-                # Frames held for open contexts go on once the last one ends.
-                if not self.get_audio_contexts():
-                    await self._update_frame_processing()
+                await self._handle_audio_context(context_value.context_id)
             elif isinstance(context_value, Frame):
                 self._stamp_llm_response_end(context_value)
                 await self.push_frame(context_value)
@@ -1930,6 +1910,19 @@ class TTSService(AIService):
             await self.push_frame(TTSStoppedFrame(context_id=context_id))
         await self.reset_word_timestamps()
         await self._record_context_audio_outcome(context_id, playback.received_audio)
+
+        # If audio resumes after a timeout, the context is recreated without
+        # the partial sample held here.
+        self._audio_context_manager.remove(context_id)
+        # A failing hook must not end the playback task, or no more audio is played.
+        try:
+            await self.on_audio_context_completed(context_id=context_id)
+        except Exception as e:
+            logger.warning(f"{self} on_audio_context_completed failed for {context_id}: {e}")
+        self.reset_active_audio_context()
+        # Frames held for open contexts go on once the last one ends.
+        if not self.get_audio_contexts():
+            await self._update_frame_processing()
 
     async def _record_context_audio_outcome(self, context_id: str, received_audio: bool):
         """Track whether contexts are producing audio, and act when they stop.
