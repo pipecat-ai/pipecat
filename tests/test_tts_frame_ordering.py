@@ -2985,3 +2985,25 @@ async def test_speak_frame_settings_reach_its_spoken_context(reuse_context_id_wi
     assert words == {"secret": False, "note": False, "hello": True, "there": True}
     # Only the speak frame that goes into the context commits it once spoken.
     assert len([f for f in down if isinstance(f, LLMAssistantPushAggregationFrame)]) == 1
+
+
+@pytest.mark.asyncio
+async def test_llm_response_end_of_a_reply_without_timed_words_has_no_pts():
+    """A reply that times no words leaves its end frame unstamped, behind its start frame."""
+    first_end, second_end = LLMFullResponseEndFrame(), LLMFullResponseEndFrame()
+    down, _ = await run_test(
+        _MockWordTimestampHttpTTSService(skip_text_types=["code"]),
+        frames_to_send=[
+            LLMFullResponseStartFrame(),
+            TextFrame("hello world."),
+            first_end,
+            SleepFrame(sleep=0.2),
+            LLMFullResponseStartFrame(),
+            AggregatedTextFrame("some code", "code"),
+            second_end,
+            SleepFrame(sleep=0.2),
+        ],
+    )
+    words = [f for f in down if isinstance(f, TTSTextFrame)]
+    assert first_end.pts == words[-1].pts
+    assert not second_end.pts

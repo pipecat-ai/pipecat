@@ -37,12 +37,14 @@ class WordTimestampTracker:
 
     ``last_pts`` is the PTS of the last word frame, and
     ``uninterruptible_last_pts`` that of the last uninterruptible one.
+    :attr:`reply_last_pts` is that of the last word since :meth:`start_reply`.
     """
 
     def __init__(self):
         """Initialize the word timestamp tracker."""
         self._baseline: int | None = None
         self._cached: list[WordTimestamp] = []
+        self._reply_start_pts: int = 0
         self.last_pts: int = 0
         self.uninterruptible_last_pts: int = 0
 
@@ -50,6 +52,15 @@ class WordTimestampTracker:
     def started(self) -> bool:
         """Whether words are being timed."""
         return self._baseline is not None
+
+    @property
+    def reply_last_pts(self) -> int | None:
+        """The PTS of the reply's last word, or ``None`` if the reply timed no words."""
+        return self.last_pts if self.last_pts != self._reply_start_pts else None
+
+    def start_reply(self):
+        """Note where a reply's words start, for :attr:`reply_last_pts`."""
+        self._reply_start_pts = self.last_pts
 
     def start(self, now: int) -> list[WordTimestamp]:
         """Start timing words, if not started yet.

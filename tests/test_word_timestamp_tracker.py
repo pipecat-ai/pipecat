@@ -56,3 +56,16 @@ def test_reset_stops_timing_and_drops_cached_words():
     assert not tracker.started
     assert tracker.start(20 * _SECOND) == []
     assert tracker.pts(0) == 20 * _SECOND
+
+
+def test_reply_last_pts_counts_only_the_replys_own_words():
+    """A reply that times no words has no last word, even after an earlier reply's."""
+    tracker = WordTimestampTracker()
+    tracker.start_reply()
+    assert tracker.reply_last_pts is None
+
+    tracker.last_pts = 2 * _SECOND
+    assert tracker.reply_last_pts == 2 * _SECOND
+
+    tracker.start_reply()
+    assert tracker.reply_last_pts is None

@@ -1839,15 +1839,17 @@ class TTSService(AIService):
             if isinstance(context_value, AudioContextFrame):
                 await self._handle_audio_context(context_value.context_id)
             elif isinstance(context_value, Frame):
-                self._stamp_llm_response_end(context_value)
+                self._stamp_llm_response_frame(context_value)
                 await self.push_frame(context_value)
             else:
                 running = False
 
-    def _stamp_llm_response_end(self, frame: Frame):
-        """Send a turn's LLMFullResponseEndFrame after its word frames, through the clock queue."""
-        if isinstance(frame, LLMFullResponseEndFrame) and not self._push_text_frames:
-            frame.pts = self._word_timestamp_tracker.last_pts
+    def _stamp_llm_response_frame(self, frame: Frame):
+        """Send a reply's end frame after its words, or behind its start frame if it timed none."""
+        if isinstance(frame, LLMFullResponseStartFrame):
+            self._word_timestamp_tracker.start_reply()
+        elif isinstance(frame, LLMFullResponseEndFrame) and not self._push_text_frames:
+            frame.pts = self._word_timestamp_tracker.reply_last_pts
 
     async def _handle_audio_context(self, context_id: str):
         """Push an audio context's items in order until it ends or goes quiet."""
