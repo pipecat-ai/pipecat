@@ -125,3 +125,24 @@ suite:
       - audio/aside_while_waiting
       - audio/result_during_interruption
       - audio/accepted_offer
+  - bot: ../../../evals/llm-with-backend/bots/no-progress-frontend.py
+    name: openai-responses-no-progress
+    runner_body:
+      data: {frontend: openai}
+    scenarios:
+      - text/progress_inquiry_no_progress
+      - audio/progress_inquiry_no_progress
+  - bot: ../../../evals/llm-with-backend/bots/no-progress-frontend.py
+    name: google-no-progress
+    runner_body:
+      data: {frontend: google}
+    scenarios:
+      - text/progress_inquiry_no_progress
+      - audio/progress_inquiry_no_progress
+  - bot: ../../../evals/llm-with-backend/bots/no-progress-frontend.py
+    name: anthropic-no-progress
+    runner_body:
+      data: {frontend: anthropic}
+    scenarios:
+      - text/progress_inquiry_no_progress
+      - audio/progress_inquiry_no_progress
