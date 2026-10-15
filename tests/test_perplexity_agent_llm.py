@@ -6,9 +6,11 @@
 
 """Tests for the requests and usage of PerplexityAgentHttpLLMService."""
 
+from contextlib import contextmanager
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from loguru import logger
 from openai.types.responses import (
     ResponseFunctionCallArgumentsDeltaEvent,
     ResponseFunctionToolCall,
@@ -25,6 +27,17 @@ from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.services.perplexity.llm import PerplexityAgentHttpLLMService, _WithoutServerToolCalls
 
 
+@contextmanager
+def _captured_logs():
+    """Collect INFO-and-above log records emitted within the block."""
+    records = []
+    sink_id = logger.add(lambda m: records.append(m.record), level="INFO")
+    try:
+        yield records
+    finally:
+        logger.remove(sink_id)
+
+
 async def _request(
     service: PerplexityAgentHttpLLMService, context: LLMContext | None = None
 ) -> dict:
@@ -34,11 +47,13 @@ async def _request(
 
 
 @pytest.mark.asyncio
-async def test_default_request_uses_a_pinned_model_with_web_search():
+async def test_default_request_uses_the_fast_preset_with_a_pinned_model():
     params = await _request(PerplexityAgentHttpLLMService(api_key="test-key"))
 
     assert params["model"] == "openai/gpt-5.6-luna"
-    assert "extra_body" not in params
+    assert params["extra_body"] == {"preset": "fast"}
+    # The preset decides how much to reason.
+    assert "reasoning" not in params
     assert params["tools"] == [{"type": "web_search"}]
 
 
@@ -71,6 +86,22 @@ async def test_update_leaving_neither_model_nor_preset_reports_an_error():
     await service._update_settings(PerplexityAgentHttpLLMService.Settings(model=None))
 
     service.push_error.assert_called_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "model",
+    ["openai/gpt-5.5", "anthropic/claude-haiku-4-5", "google/gemini-3.8-flash", "xai/grok-4.6"],
+)
+async def test_every_model_gets_the_fast_preset(model):
+    service = PerplexityAgentHttpLLMService(
+        api_key="test-key", settings=PerplexityAgentHttpLLMService.Settings(model=model)
+    )
+    params = await _request(service)
+
+    assert params["model"] == model
+    assert params["extra_body"] == {"preset": "fast"}
+    assert "reasoning" not in params
 
 
 @pytest.mark.asyncio
@@ -110,6 +141,7 @@ async def test_perplexity_fields_join_extra_body():
 
     assert (await _request(service))["extra_body"] == {
         "language_preference": "en",
+        "preset": "fast",
         "max_steps": 2,
     }
 
@@ -169,7 +201,20 @@ async def test_explicit_reasoning_is_sent_as_configured():
         ),
     )
 
-    assert (await _request(service))["reasoning"] == {"effort": "low"}
+    params = await _request(service)
+
+    assert params["reasoning"] == {"effort": "low"}
+    assert "extra_body" not in params
+
+
+@pytest.mark.asyncio
+async def test_a_preset_in_extra_is_left_alone():
+    service = PerplexityAgentHttpLLMService(
+        api_key="test-key",
+        settings=PerplexityAgentHttpLLMService.Settings(extra={"extra_body": {"preset": "high"}}),
+    )
+
+    assert (await _request(service))["extra_body"] == {"preset": "high"}
 
 
 @pytest.mark.asyncio
@@ -179,6 +224,58 @@ async def test_a_preset_update_leaves_the_model_alone():
     await service._update_settings(PerplexityAgentHttpLLMService.Settings(preset="high"))
 
     assert service._settings.model == "openai/gpt-5.6-luna"
+
+
+@pytest.mark.asyncio
+async def test_provider_thinking_default_sends_no_preset():
+    service = PerplexityAgentHttpLLMService(
+        api_key="test-key",
+        settings=PerplexityAgentHttpLLMService.Settings(use_provider_thinking_default=True),
+    )
+    params = await _request(service)
+
+    assert params["model"] == "openai/gpt-5.6-luna"
+    assert "extra_body" not in params
+    assert "reasoning" not in params
+
+
+@pytest.mark.asyncio
+async def test_provider_thinking_default_keeps_a_chosen_preset():
+    service = PerplexityAgentHttpLLMService(
+        api_key="test-key",
+        settings=PerplexityAgentHttpLLMService.Settings(
+            preset="fast", use_provider_thinking_default=True
+        ),
+    )
+
+    assert (await _request(service))["extra_body"] == {"preset": "fast"}
+
+
+@pytest.mark.asyncio
+async def test_the_default_preset_is_logged_once():
+    service = PerplexityAgentHttpLLMService(api_key="test-key")
+
+    with _captured_logs() as records:
+        await _request(service)
+        await _request(service)
+
+    infos = [
+        r["message"] for r in records if r["level"].name == "INFO" and "preset" in r["message"]
+    ]
+    assert len(infos) == 1
+    assert "'preset': 'fast'" in infos[0]
+
+
+@pytest.mark.asyncio
+async def test_a_chosen_preset_is_not_logged():
+    service = PerplexityAgentHttpLLMService(
+        api_key="test-key", settings=PerplexityAgentHttpLLMService.Settings(preset="high")
+    )
+
+    with _captured_logs() as records:
+        await _request(service)
+
+    assert not [r for r in records if "preset" in r["message"]]
 
 
 class _FakeStream:
