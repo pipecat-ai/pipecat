@@ -1,0 +1,106 @@
+########################################################################
+# 1/3 CORRECTNESS - concurrent Run() on a shared session is thread-safe
+########################################################################
+2026-06-15 20:48:38.121 | INFO     | pipecat:<module>:14 - ᓚᘏᗢ Pipecat 1.1.0 (Python 3.13.9 (main, Oct 14 2025, 21:21:21) [Clang 20.1.4 ]) ᓚᘏᗢ
+========================================================================
+Environment
+------------------------------------------------------------------------
+  platform            : macOS-15.7.7-x86_64-i386-64bit-Mach-O
+  python              : 3.13.9
+  onnxruntime         : 1.24.4
+  logical CPUs        : 12
+  ORT providers       : ['CPUExecutionProvider']
+  model               : <pipecat-install>/pipecat/audio/turn/smart_turn/data/smart-turn-v3.2-cpu.onnx
+  model size on disk  : 8.28 MB
+========================================================================
+
+Concurrent runs : 3200 (16 threads x 200 reps over 4 inputs)
+RESULT: PASS - every concurrent output bit-for-bit matched its single-threaded reference.
+=> Concurrent Run() on a single shared session is correct (CPU EP).
+
+########################################################################
+# 2/3 LATENCY / THROUGHPUT - shared vs per-call, concurrency sweep
+########################################################################
+2026-06-15 20:49:46.333 | INFO     | pipecat:<module>:14 - ᓚᘏᗢ Pipecat 1.1.0 (Python 3.13.9 (main, Oct 14 2025, 21:21:21) [Clang 20.1.4 ]) ᓚᘏᗢ
+========================================================================
+Environment
+------------------------------------------------------------------------
+  platform            : macOS-15.7.7-x86_64-i386-64bit-Mach-O
+  python              : 3.13.9
+  onnxruntime         : 1.24.4
+  logical CPUs        : 12
+  ORT providers       : ['CPUExecutionProvider']
+  model               : <pipecat-install>/pipecat/audio/turn/smart_turn/data/smart-turn-v3.2-cpu.onnx
+  model size on disk  : 8.28 MB
+========================================================================
+
+SHARED (1 session, all threads) vs PER-CALL (1 session per thread), intra_op=1
+------------------------------------------------------------------------
+  SHARED 1 session           N=  2  median=   89.8ms  p90=  111.6ms  mean=   91.8ms  throughput=  18.7 inf/s
+  PER-CALL N sessions        N=  2  median=   81.6ms  p90=   87.0ms  mean=   82.0ms  throughput=  20.7 inf/s
+
+  SHARED 1 session           N=  4  median=   99.3ms  p90=  115.4ms  mean=  101.6ms  throughput=  33.1 inf/s
+  PER-CALL N sessions        N=  4  median=  100.0ms  p90=  106.4ms  mean=  100.7ms  throughput=  34.0 inf/s
+
+  SHARED 1 session           N=  8  median=  163.3ms  p90=  178.6ms  mean=  164.6ms  throughput=  41.5 inf/s
+  PER-CALL N sessions        N=  8  median=  168.5ms  p90=  214.3ms  mean=  177.8ms  throughput=  37.6 inf/s
+
+  SHARED 1 session           N= 16  median=  321.7ms  p90=  343.4ms  mean=  321.6ms  throughput=  41.6 inf/s
+  PER-CALL N sessions        N= 16  median=  355.3ms  p90=  467.1ms  mean=  379.6ms  throughput=  36.5 inf/s
+
+  SHARED 1 session           N= 32  median=  724.3ms  p90=  832.5ms  mean=  740.3ms  throughput=  36.2 inf/s
+  PER-CALL N sessions        N= 32  median=  798.8ms  p90=  950.2ms  mean=  810.4ms  throughput=  32.8 inf/s
+
+  SHARED 1 session           N= 64  median= 1528.1ms  p90= 1724.7ms  mean= 1545.4ms  throughput=  35.7 inf/s
+  PER-CALL N sessions        N= 64  median= 1447.2ms  p90= 1697.7ms  mean= 1481.5ms  throughput=  36.5 inf/s
+
+"More threads on the shared session?" - intra_op_num_threads sweep
+------------------------------------------------------------------------
+  SHARED intra=4             N=  4  median=   95.3ms  p90=  115.2ms  mean=   97.6ms  throughput=  35.0 inf/s
+  PER-CALL intra=4           N=  4  median=  170.8ms  p90=  268.3ms  mean=  180.0ms  throughput=  19.0 inf/s
+  SHARED intra=4 (overload)  N= 64  median= 1587.0ms  p90= 1801.3ms  mean= 1603.9ms  throughput=  34.2 inf/s
+  SHARED intra=1 (overload)  N= 64  median= 1477.2ms  p90= 1598.8ms  mean= 1481.5ms  throughput=  36.6 inf/s
+
+########################################################################
+# 3/3 MEMORY - per-call cost vs shared fixed+arena cost
+########################################################################
+2026-06-15 20:55:37.677 | INFO     | pipecat:<module>:14 - ᓚᘏᗢ Pipecat 1.1.0 (Python 3.13.9 (main, Oct 14 2025, 21:21:21) [Clang 20.1.4 ]) ᓚᘏᗢ
+========================================================================
+Environment
+------------------------------------------------------------------------
+  platform            : macOS-15.7.7-x86_64-i386-64bit-Mach-O
+  python              : 3.13.9
+  onnxruntime         : 1.24.4
+  logical CPUs        : 12
+  ORT providers       : ['CPUExecutionProvider']
+  model               : <pipecat-install>/pipecat/audio/turn/smart_turn/data/smart-turn-v3.2-cpu.onnx
+  model size on disk  : 8.28 MB
+========================================================================
+2026-06-15 20:55:38.115 | INFO     | pipecat:<module>:14 - ᓚᘏᗢ Pipecat 1.1.0 (Python 3.13.9 (main, Oct 14 2025, 21:21:21) [Clang 20.1.4 ]) ᓚᘏᗢ
+
+A. PER-CALL: N independent sessions (status quo)
+------------------------------------------------------------------------
+  baseline (no session)         RSS=   43.5 MB
+    1 sessions (warmed)         RSS=   92.6 MB  (+   49.1 over base, ~ 49.1 MB/session)
+    2 sessions (warmed)         RSS=  126.0 MB  (+   82.5 over base, ~ 41.2 MB/session)
+    4 sessions (warmed)         RSS=  183.5 MB  (+  140.0 over base, ~ 35.0 MB/session)
+    8 sessions (warmed)         RSS=  301.7 MB  (+  258.2 over base, ~ 32.3 MB/session)
+   16 sessions (warmed)         RSS=  526.4 MB  (+  482.9 over base, ~ 30.2 MB/session)
+2026-06-15 20:55:42.725 | INFO     | pipecat:<module>:14 - ᓚᘏᗢ Pipecat 1.1.0 (Python 3.13.9 (main, Oct 14 2025, 21:21:21) [Clang 20.1.4 ]) ᓚᘏᗢ
+
+B. SHARED: 1 session under N simultaneous inferences
+------------------------------------------------------------------------
+  baseline (no session)         RSS=   42.6 MB
+  1 shared session, idle arena  RSS=   89.6 MB  (+   47.0 over base = fixed cost)
+    1 simultaneous inferences   RSS=   99.6 MB  (+   10.0 over idle, ~ 10.0 MB/in-flight)
+    2 simultaneous inferences   RSS=  114.1 MB  (+   24.5 over idle, ~ 12.2 MB/in-flight)
+    4 simultaneous inferences   RSS=  145.2 MB  (+   55.6 over idle, ~ 13.9 MB/in-flight)
+    8 simultaneous inferences   RSS=  217.5 MB  (+  127.8 over idle, ~ 16.0 MB/in-flight)
+   16 simultaneous inferences   RSS=  366.1 MB  (+  276.4 over idle, ~ 17.3 MB/in-flight)
+
+Interpretation:
+  per-call total memory  ~= (concurrent CALLS)        x MB/session
+  shared total memory    ~= fixed + (SIMULTANEOUS inferences) x MB/in-flight
+  Smart-turn fires only at end-of-turn (~tens of ms), so simultaneous
+  inferences are far fewer than concurrent calls -> large saving.
+
