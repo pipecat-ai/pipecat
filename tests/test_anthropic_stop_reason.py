@@ -138,3 +138,58 @@ async def test_message_delta_without_stop_reason_logs_no_warning():
     _, warnings = await _stream(_text("Partial"), _stop(None))
 
     assert warnings == []
+
+
+async def _run_inference(text, stop_reason, category=None):
+    """Run a one-shot inference against a canned, complete message.
+
+    Returns:
+        The returned text and any warnings logged during the call.
+    """
+    service = AnthropicLLMService(
+        api_key="test-key", settings=AnthropicLLMService.Settings(model="claude-sonnet-5-5")
+    )
+    details = SimpleNamespace(type="refusal", category=category) if category else None
+    content = [SimpleNamespace(type="text", text=text)] if text is not None else []
+    message = SimpleNamespace(content=content, stop_reason=stop_reason, stop_details=details)
+
+    async def create(**params):
+        return message
+
+    with (
+        patch.object(service._client.beta.messages, "create", create),
+        _captured_warnings() as warnings,
+    ):
+        result = await service.run_inference(LLMContext())
+
+    return result, warnings
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stop_reason", ["end_turn", "tool_use", "stop_sequence"])
+async def test_run_inference_normal_stop_logs_no_warning(stop_reason):
+    """A one-shot reply that ended normally is returned without a warning."""
+    result, warnings = await _run_inference("Hello there.", stop_reason)
+
+    assert result == "Hello there."
+    assert warnings == []
+
+
+@pytest.mark.asyncio
+async def test_run_inference_refusal_logs_the_reason_and_category():
+    """A refused one-shot inference returns None and logs why."""
+    result, warnings = await _run_inference(None, "refusal", category="reasoning_extraction")
+
+    assert result is None
+    assert len(warnings) == 1
+    assert "refusal (reasoning_extraction)" in warnings[0]
+
+
+@pytest.mark.asyncio
+async def test_run_inference_truncated_reply_is_returned_with_a_warning():
+    """A reply cut off at max_tokens is still returned, with a warning naming the cause."""
+    result, warnings = await _run_inference("The conversation so far cove", "max_tokens")
+
+    assert result == "The conversation so far cove"
+    assert len(warnings) == 1
+    assert "max_tokens" in warnings[0]
