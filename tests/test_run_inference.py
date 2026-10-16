@@ -118,7 +118,9 @@ async def test_openai_run_inference_client_exception():
 async def test_openrouter_run_inference_converts_developer_messages_to_user():
     """Test OpenRouter requests convert developer messages for broad model compatibility."""
     with patch.object(OpenRouterLLMService, "create_client"):
-        service = OpenRouterLLMService(settings=OpenRouterLLMService.Settings(model="gpt-4"))
+        service = OpenRouterLLMService(
+            api_key="test-key", settings=OpenRouterLLMService.Settings(model="gpt-4")
+        )
         service._client = AsyncMock()
 
         mock_context = MagicMock(spec=LLMContext)
