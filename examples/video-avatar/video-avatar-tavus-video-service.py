@@ -51,8 +51,9 @@ transport_params = {
         audio_out_auto_silence=False,
         # Send the avatar as a single full-resolution 2 Mbps layer, starting at
         # 2 Mbps, instead of three simulcast layers: the picture is sharper at the
-        # same bitrate. For 720p from the first frame, the client should also set
-        # `initialReceiveBitrate` (e.g. 2.5 Mbps) when it joins.
+        # same bitrate. For the avatar to reach full quality sooner on the user's
+        # side, the client should also set `initialReceiveBitrate` (e.g. 2.5 Mbps)
+        # when it joins.
         camera_out_send_settings={
             "maxQuality": "low",
             "startBitrate": 2_000_000,
@@ -109,8 +110,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             api_key=os.environ["TAVUS_API_KEY"],
             replica_id=os.environ["TAVUS_REPLICA_ID"],
             session=session,
-            # Start the SFU's estimate at 2.5 Mbps so the replica's video reaches
-            # 720p within about a second instead of ramping up from 1 Mbps.
+            # Start the SFU's estimate at 2.5 Mbps instead of 1 Mbps, so the
+            # replica's video reaches full quality sooner.
             initial_receive_bitrate=2_500_000,
         )
 
