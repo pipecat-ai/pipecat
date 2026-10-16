@@ -754,8 +754,67 @@ class TestConnectionLifecycle:
 
         # Connection should be preserved, not closed
         assert service._websocket is mock_ws
-        # Should be flagged for draining before next inference
+        # response.create was written before recv was cancelled, so drain.
         assert service._needs_drain
+        assert service._cancel_pending_response
+        assert not service._response_create_sent
+
+    @pytest.mark.asyncio
+    async def test_cancellation_before_response_create_does_not_arm_drain(self):
+        """A cancel before response.create leaves nothing to drain — the next
+        inference must not wait out the drain timeout."""
+        service = _make_service()
+        service.stop_processing_metrics = AsyncMock()
+        service.push_frame = AsyncMock()
+        service._ensure_connected = AsyncMock(side_effect=asyncio.CancelledError)
+
+        mock_ws = AsyncMock()
+        mock_ws.send = AsyncMock()
+        service._websocket = mock_ws
+
+        context = MagicMock(spec=LLMContext)
+        context.tools = None
+        context.tool_choice = None
+        context.messages = [{"role": "user", "content": "hi"}]
+
+        from pipecat.frames.frames import LLMContextFrame
+
+        with pytest.raises(asyncio.CancelledError):
+            await service.process_frame(LLMContextFrame(context=context), FrameDirection.DOWNSTREAM)
+
+        assert service._websocket is mock_ws
+        assert not service._needs_drain
+        assert not service._cancel_pending_response
+        assert not service._response_create_sent
+        mock_ws.send.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_cancellation_during_prior_drain_leaves_drain_armed(self):
+        """If a new turn is cancelled while draining a prior cancelled response,
+        keep the existing drain armed and do not invent a pending cancel."""
+        service = _make_service()
+        service.stop_processing_metrics = AsyncMock()
+        service.push_frame = AsyncMock()
+        service._needs_drain = True
+
+        mock_ws = AsyncMock()
+        mock_ws.recv = AsyncMock(side_effect=asyncio.CancelledError)
+        mock_ws.send = AsyncMock()
+        service._websocket = mock_ws
+
+        context = MagicMock(spec=LLMContext)
+        context.tools = None
+        context.tool_choice = None
+        context.messages = [{"role": "user", "content": "hi"}]
+
+        from pipecat.frames.frames import LLMContextFrame
+
+        with pytest.raises(asyncio.CancelledError):
+            await service.process_frame(LLMContextFrame(context=context), FrameDirection.DOWNSTREAM)
+
+        assert service._needs_drain
+        assert not service._cancel_pending_response
+        mock_ws.send.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_ensure_connected_raises_on_failure(self):
