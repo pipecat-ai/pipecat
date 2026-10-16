@@ -6,6 +6,7 @@
 
 """Tests for RimeV1TTSService."""
 
+import json
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from typing import Any
@@ -240,6 +241,76 @@ async def test_runtime_settings_are_validated_against_the_endpoint() -> None:
     mist = RimeV1TTSService(api_key="key", websocket_url="wss://api.rime.ai/mist/ws")
     with pytest.raises(ValueError, match="text_lookahead_tokens requires the Coda model"):
         await mist._update_settings(RimeV1TTSService.Settings(text_lookahead_tokens=4))
+
+
+# ---------------------------------------------------------------------------
+# Wire format
+# ---------------------------------------------------------------------------
+
+# Fixed envelopes for each message the service sends or reads. The local server
+# below shares the installed rime-api schema with the service, so only these
+# catch a schema release that renumbers or renames a field.
+_REQUEST_ENVELOPES = [
+    (
+        {
+            "contextId": "ctx",
+            "start": {
+                "language": "eng",
+                "speaker": "luna",
+                "text": "Hello.",
+                "audioParameters": {
+                    "audioFormat": "audio/pcm",
+                    "samplingRate": 24000,
+                    "timeScaleFactor": 1.25,
+                },
+                "splitStrategy": "SPLIT_STRATEGY_NONE",
+                "codaParameters": {"textLookaheadTokens": 0},
+            },
+        },
+        "0a036374781a2f1203656e671a046c756e61220648656c6c6f2e2a140a09617564696f2f70636d"
+        "10c0bb011d0000a03f300242024000",
+    ),
+    ({"contextId": "ctx", "text": "Hello."}, "0a03637478220648656c6c6f2e"),
+    ({"contextId": "ctx", "end": {}}, "0a036374782a00"),
+    ({"contextId": "ctx", "cancel": {}}, "0a036374783200"),
+]
+_RESPONSE_ENVELOPES = [
+    (
+        {"ready": {"protocol": 1, "languages": ["eng", "spa"], "defaultLanguage": "eng"}},
+        "121108011203656e6712037370611a03656e67",
+    ),
+    ({"contextId": "ctx", "started": {"requestId": "req"}}, "0a036374781a050a03726571"),
+    ({"contextId": "ctx", "audio": "AAH+/w=="}, "0a0363747822040001feff"),
+    ({"contextId": "ctx", "done": {}}, "0a036374782a00"),
+    ({"contextId": "ctx", "cancelled": {}}, "0a036374783200"),
+    (
+        {
+            "contextId": "ctx",
+            "error": {"kind": "invalid_input", "message": "test error", "requestId": "req"},
+        },
+        "0a036374783a200a0d696e76616c69645f696e707574120a74657374206572726f721a03726571",
+    ),
+]
+
+
+@pytest.mark.parametrize("envelope, binary", _REQUEST_ENVELOPES)
+def test_requests_match_fixed_wire_envelopes(envelope: dict[str, Any], binary: str) -> None:
+    request = json_format.ParseDict(envelope, proto.WebSocketRequest())
+
+    assert RimeV1TTSService(api_key="key")._encode(request) == bytes.fromhex(binary)
+    encoded_json = RimeV1TTSService(api_key="key", websocket_protocol="json")._encode(request)
+    assert json.loads(encoded_json) == envelope
+
+
+@pytest.mark.parametrize("envelope, binary", _RESPONSE_ENVELOPES)
+def test_responses_match_fixed_wire_envelopes(envelope: dict[str, Any], binary: str) -> None:
+    from_binary = RimeV1TTSService(api_key="key")._decode(bytes.fromhex(binary))
+    from_json = RimeV1TTSService(api_key="key", websocket_protocol="json")._decode(
+        json.dumps(envelope)
+    )
+
+    assert json_format.MessageToDict(from_binary) == envelope
+    assert json_format.MessageToDict(from_json) == envelope
 
 
 # ---------------------------------------------------------------------------
