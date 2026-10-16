@@ -42,6 +42,7 @@ from pipecat.services.stt_latency import DEFAULT_TTFS_P99
 from pipecat.services.websocket_service import WebsocketService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.deprecation import deprecated, warn_deprecated
+from pipecat.utils.sent_audio_timeline import SentAudioTimeline
 from pipecat.utils.types import is_given
 
 # Duration in seconds of silent audio sent for WebSocket keepalive (100ms).
@@ -73,6 +74,10 @@ class STTService(AIService):
         on_connected: Called when connected to the STT service.
         on_disconnected: Called when disconnected from the STT service.
         on_connection_error: Called when a connection to the STT service error occurs.
+        on_word_timestamps: Called with the words of a final transcript as
+            ``(word, start, end)`` tuples, each the PTS in nanoseconds of the input
+            audio it was spoken in, or ``None`` where that audio carried no PTS.
+            Raised by services that report word times; see :meth:`record_sent_audio`.
 
     Example::
 
@@ -87,6 +92,12 @@ class STTService(AIService):
         @stt.event_handler("on_connection_error")
         async def on_connection_error(stt: STTService, error: str):
             logger.error(f"STT connection error: {error}")
+
+        @stt.event_handler("on_word_timestamps")
+        async def on_word_timestamps(
+            stt: STTService, words: list[tuple[str, int | None, int | None]]
+        ):
+            logger.debug(f"STT words: {words}")
     """
 
     _settings: STTSettings
@@ -196,6 +207,13 @@ class STTService(AIService):
         self._register_event_handler("on_connected")
         self._register_event_handler("on_disconnected")
         self._register_event_handler("on_connection_error")
+        # Inline, so handlers see a transcript's words before its frame moves on.
+        self._register_event_handler("on_word_timestamps", sync=True)
+
+        # Audio sent on the current provider stream, for mapping word times back
+        # to the input's PTS, and the frame whose audio run_stt is sending.
+        self._sent_audio = SentAudioTimeline()
+        self._sending_frame: InputAudioRawFrame | None = None
 
     @property
     def is_muted(self) -> bool:
@@ -460,7 +478,44 @@ class STTService(AIService):
 
         self._record_stt_audio_usage(frame.audio)
 
-        await self.process_generator(self.run_stt(frame.audio))
+        self._sending_frame = frame
+        try:
+            await self.process_generator(self.run_stt(frame.audio))
+        finally:
+            self._sending_frame = None
+
+    def record_sent_audio(self, audio: bytes):
+        """Note that the provider now has ``audio``, from the frame being processed.
+
+        A service that reports word times calls this from :meth:`run_stt` once the
+        audio is actually sent, and :meth:`reset_sent_audio` when a new provider
+        stream starts. :meth:`sent_audio_pts` then maps the provider's word offsets
+        to the input audio's PTS, accounting for audio the provider never got.
+
+        Args:
+            audio: The audio just sent, from the frame passed to :meth:`run_stt`.
+        """
+        frame = self._sending_frame
+        if frame is None:
+            raise RuntimeError(f"{self}: record_sent_audio() called outside run_stt()")
+        num_frames = len(audio) // (2 * frame.num_channels)
+        self._sent_audio.append(frame.pts, num_frames, frame.sample_rate)
+
+    def reset_sent_audio(self):
+        """Start a new provider stream, whose offsets start again from zero."""
+        self._sent_audio.reset()
+
+    def sent_audio_pts(self, seconds: float, *, end: bool = False) -> int | None:
+        """Get the input PTS of an offset on the current provider stream.
+
+        Args:
+            seconds: Offset from the start of the provider stream, in seconds.
+            end: Whether the offset ends a span (a word's end), rather than starts one.
+
+        Returns:
+            The PTS in nanoseconds, or ``None`` if the audio there carried no PTS.
+        """
+        return self._sent_audio.to_pts(seconds, end=end)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames, handling VAD events and audio segmentation.

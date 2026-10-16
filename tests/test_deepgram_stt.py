@@ -15,9 +15,11 @@ import pytest
 from deepgram.core import ApiError
 from loguru import logger
 
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.deepgram.stt import DeepgramSTTService, _derive_deepgram_urls
 from pipecat.utils.asyncio.task_manager import TaskManager
 from pipecat.utils.network import QuickFailureTracker
+from pipecat.utils.sent_audio_timeline import SentAudioTimeline
 from tests.frame_processor_helpers import frame_processor_setup
 
 
@@ -32,6 +34,7 @@ def _make_bare_service() -> DeepgramSTTService:
     service._connection = None
     service._connection_settled = asyncio.Event()
     service._quick_failure_tracker = QuickFailureTracker()
+    service._sent_audio = SentAudioTimeline()
     service._build_connect_kwargs = MagicMock(return_value={})
     service.push_error = AsyncMock()
     service.create_task = lambda coro, name=None: asyncio.create_task(coro)
@@ -305,7 +308,7 @@ async def test_connection_handler_backs_off_after_non_quick_failure(monkeypatch)
     assert sleep_calls == [4, 4]  # exponential_backoff_time's min_wait, not skipped
 
 
-def _results_message(transcript: str, is_final: bool):
+def _results_message(transcript: str, is_final: bool, words: list | None = None):
     from deepgram.listen.v1.types import ListenV1Results
 
     return ListenV1Results.model_validate(
@@ -317,7 +320,9 @@ def _results_message(transcript: str, is_final: bool):
             "is_final": is_final,
             "speech_final": is_final,
             "channel": {
-                "alternatives": [{"transcript": transcript, "confidence": 0.99, "words": []}]
+                "alternatives": [
+                    {"transcript": transcript, "confidence": 0.99, "words": words or []}
+                ]
             },
             "metadata": {
                 "request_id": "req-123",
@@ -467,3 +472,88 @@ async def test_connection_handler_does_not_reconnect_after_cancel():
         for task in remaining:
             task.cancel()
         await asyncio.gather(*remaining, return_exceptions=True)
+
+
+def _word(word: str, start: float, end: float) -> dict:
+    return {"word": word, "start": start, "end": end, "confidence": 0.9, "punctuated_word": word}
+
+
+@pytest.mark.asyncio
+async def test_final_words_are_timed_on_the_input_audio(monkeypatch):
+    """Deepgram times words in seconds of audio it received on this connection;
+    each is reported at the PTS of the input audio it was spoken in, across a
+    gap where the input skipped ahead."""
+    from pipecat.frames.frames import InputAudioRawFrame
+
+    service = DeepgramSTTService(api_key="test-key", sample_rate=16000)
+    service._setup = frame_processor_setup(TaskManager())
+    service._sample_rate = 16000
+    service._connection = MagicMock(send_media=AsyncMock())
+    monkeypatch.setattr(service, "push_frame", AsyncMock())
+    seen = []
+
+    @service.event_handler("on_word_timestamps")
+    async def on_word_timestamps(_service, words):
+        seen.append(words)
+
+    # Two 20 ms frames, the second four seconds later on the input's timeline.
+    for pts in (1_000_000_000, 5_000_000_000):
+        frame = InputAudioRawFrame(audio=b"\x00\x00" * 320, sample_rate=16000, num_channels=1)
+        frame.pts = pts
+        await service.process_audio_frame(frame, FrameDirection.DOWNSTREAM)
+
+    await service._on_message(
+        _results_message(
+            "hi there",
+            is_final=True,
+            words=[_word("hi", 0.005, 0.02), _word("there", 0.02, 0.035)],
+        )
+    )
+    assert seen == [[("hi", 1_005_000_000, 1_020_000_000), ("there", 5_000_000_000, 5_015_000_000)]]
+
+
+@pytest.mark.asyncio
+async def test_audio_the_provider_never_got_does_not_shift_words(monkeypatch):
+    """A frame dropped while there is no connection never reached Deepgram, so
+    it must not move the offsets of the words after it."""
+    from pipecat.frames.frames import InputAudioRawFrame
+
+    service = DeepgramSTTService(api_key="test-key", sample_rate=16000)
+    service._setup = frame_processor_setup(TaskManager())
+    service._sample_rate = 16000
+    monkeypatch.setattr(service, "push_frame", AsyncMock())
+    seen = []
+
+    @service.event_handler("on_word_timestamps")
+    async def on_word_timestamps(_service, words):
+        seen.append(words)
+
+    connection = MagicMock(send_media=AsyncMock())
+    for pts, connected in ((1_000_000_000, False), (2_000_000_000, True)):
+        service._connection = connection if connected else None
+        frame = InputAudioRawFrame(audio=b"\x00\x00" * 320, sample_rate=16000, num_channels=1)
+        frame.pts = pts
+        await service.process_audio_frame(frame, FrameDirection.DOWNSTREAM)
+
+    await service._on_message(_results_message("hi", is_final=True, words=[_word("hi", 0.0, 0.01)]))
+    assert seen == [[("hi", 2_000_000_000, 2_010_000_000)]]
+
+
+@pytest.mark.asyncio
+async def test_each_connection_starts_a_new_timeline():
+    """Deepgram's offsets restart on every connection, so a new connection drops
+    the audio recorded on the last one."""
+    service = _make_bare_service()
+    service._sent_audio.append(1_000_000_000, 320, 16000)
+    mock_client = MagicMock()
+    mock_client.listen.v1.connect = MagicMock(
+        side_effect=[
+            _dropping_connect_cm(ConnectionError("dropped")),
+            _failing_connect_cm(ApiError(status_code=401, body="invalid credentials")),
+        ]
+    )
+    service._client = mock_client
+
+    await service._connection_handler()
+
+    assert service._sent_audio.to_pts(0.0) is None
