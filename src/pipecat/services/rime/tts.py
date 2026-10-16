@@ -391,8 +391,10 @@ class RimeTTSService(WebsocketTTSService):
         """Convenience method to support inline speeds."""
         if not self._extra_msg_fields:
             self._extra_msg_fields = {}
-        speed_vals = self._extra_msg_fields.get("inlineSpeedAlpha", "").split(",")
-        self._extra_msg_fields["inlineSpeedAlpha"] = ",".join(speed_vals + [str(speed)])
+        existing = self._extra_msg_fields.get("inlineSpeedAlpha")
+        self._extra_msg_fields["inlineSpeedAlpha"] = (
+            f"{existing},{speed}" if existing else str(speed)
+        )
         return f"[{text}]"
 
     async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:

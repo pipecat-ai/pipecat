@@ -281,3 +281,15 @@ async def test_dtmf_frame_pushes_no_error_when_send_succeeds():
 
     output._client.send_dtmf.assert_awaited_once()
     output.push_error.assert_not_awaited()
+
+
+@pytest.mark.parametrize("event_name", ["on_transcription_stopped", "on_transcription_error"])
+def test_transcription_events_accept_handlers(event_name):
+    transport = _make_transport()
+
+    async def handler(*args):
+        pass
+
+    transport.add_event_handler(event_name, handler)
+
+    assert transport._event_handlers[event_name].handlers == [handler]
