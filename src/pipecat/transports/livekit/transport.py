@@ -1934,6 +1934,10 @@ class LiveKitTransport(BaseTransport):
     async def send_message(self, message: str, participant_id: str | None = None):
         """Send a message to participants in the room.
 
+        Sends at once, ahead of audio still queued in the pipeline. To send the
+        message after queued audio has played, push a
+        :class:`LiveKitOutputTransportMessageFrame` instead.
+
         Args:
             message: The message string to send.
             participant_id: Optional specific participant to send to.
