@@ -37,6 +37,7 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     TTSAudioRawFrame,
+    TTSStoppedFrame,
 )
 from pipecat.services.aws.sagemaker.bidi_client import (
     SageMakerBidiClient,
@@ -129,7 +130,7 @@ class DeepgramSageMakerTTSService(TTSService):
         super().__init__(
             sample_rate=sample_rate,
             push_start_frame=True,
-            push_stop_frames=True,
+            push_stop_frames=False,
             pause_frame_processing=True,
             append_trailing_space=True,
             settings=default_settings,
@@ -327,8 +328,11 @@ class DeepgramSageMakerTTSService(TTSService):
                                 logger.trace(f"Received metadata: {parsed}")
                             elif msg_type == "Flushed":
                                 logger.trace(f"Received Flushed: {parsed}")
-                                # The flushed context has no more audio to come.
-                                await self.remove_audio_context(self.get_active_audio_context_id())
+                                ctx_id = self.get_active_audio_context_id()
+                                await self.append_to_audio_context(
+                                    ctx_id, TTSStoppedFrame(context_id=ctx_id)
+                                )
+                                await self.remove_audio_context(ctx_id)
                             elif msg_type == "Cleared":
                                 logger.trace(f"Received Cleared: {parsed}")
                             elif msg_type == "Warning":
