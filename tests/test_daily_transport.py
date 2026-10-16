@@ -293,3 +293,31 @@ def test_transcription_events_accept_handlers(event_name):
     transport.add_event_handler(event_name, handler)
 
     assert transport._event_handlers[event_name].handlers == [handler]
+
+
+async def _join_client_settings(transport: DailyTransport) -> dict:
+    client = transport._client
+    client._get_event_loop = MagicMock(return_value=asyncio.get_running_loop())
+    client._client.join.side_effect = lambda *args, completion, **kwargs: completion({}, None)
+
+    await client._join()
+
+    return client._client.join.call_args.kwargs["client_settings"]
+
+
+@pytest.mark.asyncio
+async def test_join_sets_initial_receive_bitrate():
+    transport = _make_transport(initial_receive_bitrate=2_500_000)
+
+    client_settings = await _join_client_settings(transport)
+
+    assert client_settings["connection"] == {"initialReceiveBitrate": 2_500_000}
+
+
+@pytest.mark.asyncio
+async def test_join_omits_connection_without_initial_receive_bitrate():
+    transport = _make_transport()
+
+    client_settings = await _join_client_settings(transport)
+
+    assert "connection" not in client_settings
