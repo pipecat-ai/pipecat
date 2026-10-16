@@ -56,6 +56,7 @@ class SarvamLLMService(OpenAILLMService):
     _V1_MODELS = frozenset({"sarvam-105b-conversations"})
     Settings = SarvamLLMSettings
     _settings: Settings
+    _requires_api_key = True
 
     _DEFAULT_BASE_URL = "https://api.sarvam.ai"
 
