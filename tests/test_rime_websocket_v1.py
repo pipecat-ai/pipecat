@@ -4,18 +4,17 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Tests for Rime WebSocket v1 framing and state management."""
+"""Tests for RimeV1TTSService."""
 
-import asyncio
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
 from typing import Any
-from unittest.mock import AsyncMock
 
 import pytest
 import websockets
 from google.protobuf import json_format
 from rime_api import text_to_speech_pb2 as proto
 from websockets.asyncio.server import serve
-from websockets.protocol import State
 
 from pipecat.frames.frames import (
     AggregatedTextFrame,
@@ -31,607 +30,101 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
     TTSTextFrame,
 )
-from pipecat.services.rime import tts_v1 as rime_tts_v1
-from pipecat.services.rime.tts_v1 import (
-    AudioEvent,
-    CancelledEvent,
-    ConnectionErrorEvent,
-    ContextErrorEvent,
-    DoneEvent,
-    RimeV1ConnectionError,
-    RimeV1ProtocolError,
-    RimeV1ProviderError,
-    RimeV1StateError,
-    RimeV1TTSService,
-    RimeWebSocketV1Client,
-    StartedEvent,
-    SynthesisOptions,
-    model_from_websocket_url,
-    subprotocol_for_protocol,
-    validate_websocket_url,
-)
+from pipecat.services.rime.tts_v1 import RimeV1TTSService
 from pipecat.services.tts_service import TextAggregationMode
 from pipecat.tests.utils import SleepFrame, run_test
+from pipecat.utils.errors import ErrorCategory
+
+Reply = Callable[[proto.WebSocketRequest], list[proto.WebSocketResponse]]
 
 
-class _ScriptedSocket:
-    def __init__(self, protocol: str) -> None:
-        self.subprotocol = protocol
-        self.sent: list[str | bytes] = []
-        self.incoming: asyncio.Queue[str | bytes | Exception] = asyncio.Queue()
-        self.closed = False
-        self.fail_writes = False
-
-    async def send(self, message: str | bytes) -> None:
-        if self.fail_writes:
-            raise ConnectionError("secret write failure")
-        self.sent.append(message)
-
-    async def recv(self) -> str | bytes:
-        message = await self.incoming.get()
-        if isinstance(message, Exception):
-            raise message
-        return message
-
-    async def close(self, code: int = 1000, reason: str = "") -> None:
-        self.closed = True
-
-
-class _TerminalRaceSocket(_ScriptedSocket):
-    def __init__(self, request_payload: str, response_payload: str) -> None:
-        super().__init__("rime.v1.binary")
-        self._request_payload = request_payload
-        self._response_payload = response_payload
-        self.allow_send_to_return = asyncio.Event()
-
-    async def send(self, message: str | bytes) -> None:
-        await super().send(message)
-        request = _request(message)
-        if request.WhichOneof("payload") == self._request_payload:
-            await self.incoming.put(
-                _response(
-                    "binary",
-                    contextId=request.context_id,
-                    **{self._response_payload: {}},
-                )
-            )
-            await self.allow_send_to_return.wait()
-
-
-class _StartErrorRaceSocket(_ScriptedSocket):
-    def __init__(self) -> None:
-        super().__init__("rime.v1.binary")
-        self.allow_send_to_return = asyncio.Event()
-
-    async def send(self, message: str | bytes) -> None:
-        await super().send(message)
-        request = _request(message)
-        if request.WhichOneof("payload") == "start":
-            await self.incoming.put(
-                _response(
-                    "binary",
-                    contextId=request.context_id,
-                    error={"kind": "invalid_input", "message": "rejected"},
-                )
-            )
-            await self.allow_send_to_return.wait()
-
-
-def _response(protocol: str, **payload: Any) -> str | bytes:
-    response = proto.WebSocketResponse()
-    json_format.ParseDict(payload, response)
-    if protocol == "binary":
-        return response.SerializeToString()
-    return json_format.MessageToJson(response, preserving_proto_field_name=False, indent=None)
-
-
-def _request(message: str | bytes) -> proto.WebSocketRequest:
-    request = proto.WebSocketRequest()
-    if isinstance(message, bytes):
-        request.ParseFromString(message)
-    else:
-        json_format.Parse(message, request)
-    return request
-
-
-async def _ready_client(protocol: str = "binary") -> tuple[RimeWebSocketV1Client, _ScriptedSocket]:
-    socket = _ScriptedSocket(subprotocol_for_protocol(protocol))
-    await socket.incoming.put(_response(protocol, ready={"protocol": 1, "languages": ["eng"]}))
-    client = RimeWebSocketV1Client(socket, protocol=protocol)
-    ready = await client.wait_ready(0.1)
-    assert ready.protocol == 1
-    return client, socket
-
-
-async def _queued_items(service: RimeV1TTSService, context_id: str, count: int) -> list[Any]:
-    return [await service._audio_context_manager.get(context_id, timeout=0.1) for _ in range(count)]
-
-
-def _options(**kwargs: Any) -> SynthesisOptions:
-    values = {
-        "model": "coda",
-        "speaker": "astra",
-        "language": "eng",
-        "sample_rate": 24000,
-    }
-    values.update(kwargs)
-    return SynthesisOptions(**values)
-
-
-def test_binary_envelope_goldens_match_rime_field_numbers() -> None:
-    request = proto.WebSocketRequest(context_id="turn-42", text="hello")
-    response = proto.WebSocketResponse(context_id="turn-42", audio=b"\x01\x02")
-
-    assert request.SerializeToString() == b"\x0a\x07turn-42\x22\x05hello"
-    assert response.SerializeToString() == b"\x0a\x07turn-42\x22\x02\x01\x02"
-
-
-@pytest.mark.parametrize("protocol", ["binary", "json"])
-@pytest.mark.asyncio
-async def test_start_text_and_end_use_one_typed_context(protocol: str) -> None:
-    client, socket = await _ready_client(protocol)
-
-    await client.send_text("turn", _options(text_lookahead_tokens=3), "First. ")
-    await client.send_text("turn", _options(speaker="ignored"), "Second. ")
-    await client.end("turn")
-
-    requests = [_request(message) for message in socket.sent]
-    assert [request.WhichOneof("payload") for request in requests] == [
-        "start",
-        "text",
-        "text",
-        "end",
-    ]
-    assert all(request.context_id == "turn" for request in requests)
-    assert requests[0].start.text == ""
-    assert requests[0].start.speaker == "astra"
-    assert requests[0].start.audio_parameters.audio_format == "audio/pcm"
-    assert requests[0].start.audio_parameters.sampling_rate == 24000
-    assert requests[0].start.coda_parameters.text_lookahead_tokens == 3
-    assert [request.text for request in requests[1:3]] == ["First. ", "Second. "]
-
-
-@pytest.mark.parametrize("protocol", ["binary", "json"])
-@pytest.mark.parametrize("payload", ["start", "text", "end", "cancel"])
-@pytest.mark.asyncio
-async def test_service_blocked_write_closes_connection_and_allows_reconnect(
-    protocol: str, payload: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(rime_tts_v1, "_V1_START_TIMEOUT_S", 0.02)
-    monkeypatch.setattr(rime_tts_v1, "_V1_TERMINAL_TIMEOUT_S", 0.02)
-    monkeypatch.setattr(rime_tts_v1, "_V1_CANCEL_TIMEOUT_S", 0.02)
-    service = RimeV1TTSService(
-        api_key="key",
-        websocket_url="wss://api.rime.ai/coda/ws",
-        websocket_protocol=protocol,
-        sample_rate=24000,
+def _started(request: proto.WebSocketRequest) -> proto.WebSocketResponse:
+    return proto.WebSocketResponse(
+        context_id=request.context_id, started=proto.WebSocketStarted(request_id="request-1")
     )
-    client, socket = await _ready_client(protocol)
-    socket.state = State.OPEN
-    service._websocket = socket
-    service._v1_client = client
-    service._v1_receiving_client = client
-    service._turn_context_id = "turn"
-    await service.create_audio_context("turn")
-    if payload in ("end", "cancel"):
-        service._v1_options_by_context["turn"] = _options()
-        await client.send_text("turn", _options(), "Hello.")
 
-    write_cancelled = asyncio.Event()
-    original_send = socket.send
 
-    async def blocked_send(message: str | bytes) -> None:
-        if _request(message).WhichOneof("payload") == payload:
-            try:
-                await asyncio.Event().wait()
-            finally:
-                write_cancelled.set()
-        await original_send(message)
+def _audio(request: proto.WebSocketRequest, audio: bytes) -> proto.WebSocketResponse:
+    return proto.WebSocketResponse(context_id=request.context_id, audio=audio)
 
-    socket.send = blocked_send
 
-    async def send() -> None:
+def _done(request: proto.WebSocketRequest) -> proto.WebSocketResponse:
+    return proto.WebSocketResponse(context_id=request.context_id, done=proto.WebSocketDone())
+
+
+def _error(request: proto.WebSocketRequest, kind: str) -> proto.WebSocketResponse:
+    return proto.WebSocketResponse(
+        context_id=request.context_id,
+        error=proto.WebSocketError(kind=kind, message="rejected"),
+    )
+
+
+def _speaking_reply(audio: bytes = b"\x01\x02") -> Reply:
+    """Reply like Rime: started on start, audio per text, done on end."""
+
+    def reply(request: proto.WebSocketRequest) -> list[proto.WebSocketResponse]:
+        payload = request.WhichOneof("payload")
+        if payload == "start":
+            return [_started(request)]
+        if payload == "text":
+            return [_audio(request, audio)]
         if payload == "end":
-            await service.flush_audio("turn")
-        elif payload == "cancel":
-            await service.on_audio_context_interrupted("turn")
-        else:
-            frames = [frame async for frame in service.run_tts("Hello.", "turn")]
-            assert any(isinstance(frame, ErrorFrame) for frame in frames)
+            return [_done(request)]
+        return []
 
-    await asyncio.wait_for(send(), timeout=0.5)
-    assert write_cancelled.is_set()
-    assert socket.closed
-    assert not client.context_ids
-    with pytest.raises(RimeV1ConnectionError, match="closed"):
-        await client.send_text("later", _options(), "Too late.")
-    assert not service._v1_options_by_context
-    assert not service._v1_keepalive_tasks
-    assert not service._v1_start_watchdogs
-    assert not service._v1_terminal_watchdogs
-    assert not service._v1_cancel_watchdogs
+    return reply
 
-    _, replacement = await _ready_client(protocol)
-    replacement.state = State.OPEN
-    replacement.ping = AsyncMock()
-    await replacement.incoming.put(_response(protocol, ready={"protocol": 1}))
-    service._websocket_connect = AsyncMock(return_value=replacement)
-    assert await service._reconnect_websocket(1)
-    assert service._v1_client is not client
-    await service._v1_client.send_text("next-turn", _options(), "Recovered.")
-    assert [_request(message).WhichOneof("payload") for message in replacement.sent] == [
-        "start",
-        "text",
-    ]
-    await service._v1_client.close()
 
+@asynccontextmanager
+async def _rime_server(
+    reply: Reply,
+    *,
+    ready: proto.WebSocketResponse | None = None,
+) -> AsyncIterator[tuple[str, list[proto.WebSocketRequest]]]:
+    """Serve Rime v1 locally; yield the server's base URL and the requests it receives."""
+    requests: list[proto.WebSocketRequest] = []
+    ready = ready or proto.WebSocketResponse(ready=proto.WebSocketReady(protocol=1))
 
-@pytest.mark.parametrize("operation", ["send_text", "end", "cancel"])
-@pytest.mark.asyncio
-async def test_send_timeout_includes_lock_wait(operation: str) -> None:
-    client, socket = await _ready_client()
-    args = ("turn", _options(), "Hello.") if operation == "send_text" else ("turn",)
-    async with client._send_lock:
-        with pytest.raises(RimeV1ConnectionError, match="Timed out writing"):
-            await asyncio.wait_for(getattr(client, operation)(*args, timeout_s=0.02), timeout=0.5)
+    async def handler(websocket) -> None:
+        binary = websocket.subprotocol == "rime.v1.binary"
 
-    with pytest.raises(RimeV1ConnectionError, match="closed"):
-        await client.send_text("later", _options(), "Too late.")
-    assert socket.sent == []
-    await client.close()
+        def encode(response: proto.WebSocketResponse) -> str | bytes:
+            return response.SerializeToString() if binary else json_format.MessageToJson(response)
 
+        await websocket.send(encode(ready))
+        try:
+            async for message in websocket:
+                request = proto.WebSocketRequest()
+                if binary:
+                    request.ParseFromString(message)
+                else:
+                    json_format.Parse(message, request)
+                requests.append(request)
+                for response in reply(request):
+                    await websocket.send(encode(response))
+        except websockets.ConnectionClosed:
+            pass
 
-@pytest.mark.asyncio
-async def test_queued_send_rejects_connection_after_another_write_times_out() -> None:
-    client, socket = await _ready_client()
-    write_started = asyncio.Event()
+    async with serve(handler, "127.0.0.1", 0, subprotocols=["rime.v1.binary", "rime.v1.json"]) as s:
+        host, port = next(iter(s.sockets)).getsockname()[:2]
+        yield f"ws://{host}:{port}", requests
 
-    async def blocked_send(message: str | bytes) -> None:
-        socket.sent.append(message)
-        write_started.set()
-        await asyncio.Event().wait()
 
-    socket.send = blocked_send
-    first = asyncio.create_task(client.send_text("first", _options(), "First.", timeout_s=0.02))
-    try:
-        await asyncio.wait_for(write_started.wait(), timeout=0.5)
-        second = asyncio.create_task(
-            client.send_text("second", _options(), "Second.", timeout_s=0.5)
-        )
-        results = await asyncio.wait_for(
-            asyncio.gather(first, second, return_exceptions=True), timeout=1.0
-        )
-        assert all(isinstance(result, RimeV1ConnectionError) for result in results)
-        assert "Timed out writing" in str(results[0])
-        assert "closed" in str(results[1])
-        assert len(socket.sent) == 1
-        assert _request(socket.sent[0]).context_id == "first"
-    finally:
-        first.cancel()
-        await asyncio.gather(first, return_exceptions=True)
-        await client.close()
+def _payloads(requests: list[proto.WebSocketRequest]) -> list[str | None]:
+    return [request.WhichOneof("payload") for request in requests]
 
 
-@pytest.mark.parametrize("protocol", ["binary", "json"])
-@pytest.mark.asyncio
-async def test_multiplexed_events_remain_attached_to_their_context(protocol: str) -> None:
-    client, socket = await _ready_client(protocol)
-    await client.send_text("a", _options(), "A.")
-    await client.send_text("b", _options(), "B.")
-    await client.end("a")
-    await client.end("b")
+def _texts(frames: list[Any]) -> list[str]:
+    return [frame.text for frame in frames if isinstance(frame, TTSTextFrame)]
 
-    responses = (
-        {"contextId": "a", "started": {"requestId": "request-a"}},
-        {"contextId": "b", "started": {"requestId": "request-b"}},
-        {"contextId": "b", "audio": "AwQ="},
-        {"contextId": "a", "audio": "AQI="},
-        {"contextId": "b", "done": {}},
-        {"contextId": "a", "done": {}},
-    )
-    for response in responses:
-        await socket.incoming.put(_response(protocol, **response))
 
-    events = client.events()
-    received = [await anext(events) for _ in responses]
+def _audio_bytes(frames: list[Any]) -> bytes:
+    return b"".join(frame.audio for frame in frames if isinstance(frame, TTSAudioRawFrame))
 
-    assert received == [
-        StartedEvent("a", "request-a"),
-        StartedEvent("b", "request-b"),
-        AudioEvent("b", b"\x03\x04"),
-        AudioEvent("a", b"\x01\x02"),
-        DoneEvent("b"),
-        DoneEvent("a"),
-    ]
 
-
-@pytest.mark.asyncio
-async def test_cancel_accepts_cancelled_and_a_racing_done() -> None:
-    for payload, expected_type in (("cancelled", CancelledEvent), ("done", DoneEvent)):
-        client, socket = await _ready_client()
-        await client.send_text("turn", _options(), "Hello.")
-        await client.cancel("turn")
-        await socket.incoming.put(
-            _response("binary", contextId="turn", started={"requestId": "request"})
-        )
-        await socket.incoming.put(_response("binary", contextId="turn", **{payload: {}}))
-
-        events = client.events()
-        assert isinstance(await anext(events), StartedEvent)
-        assert isinstance(await anext(events), expected_type)
-
-
-@pytest.mark.parametrize(
-    ("request_payload", "response_payload", "expected_type"),
-    [
-        ("end", "done", DoneEvent),
-        ("cancel", "cancelled", CancelledEvent),
-    ],
-)
-@pytest.mark.asyncio
-async def test_terminal_response_can_arrive_before_send_returns(
-    request_payload: str,
-    response_payload: str,
-    expected_type: type[DoneEvent] | type[CancelledEvent],
-) -> None:
-    socket = _TerminalRaceSocket(request_payload, response_payload)
-    await socket.incoming.put(_response("binary", ready={"protocol": 1}))
-    client = RimeWebSocketV1Client(socket, protocol="binary")
-    await client.wait_ready(0.1)
-    await client.send_text("turn", _options(), "Hello.")
-    await socket.incoming.put(
-        _response("binary", contextId="turn", started={"requestId": "request"})
-    )
-    events = client.events()
-    assert isinstance(await anext(events), StartedEvent)
-
-    send_terminal = asyncio.create_task(getattr(client, request_payload)("turn"))
-    try:
-        event = await asyncio.wait_for(anext(events), timeout=0.1)
-    finally:
-        socket.allow_send_to_return.set()
-        await send_terminal
-
-    assert isinstance(event, expected_type)
-
-
-@pytest.mark.asyncio
-async def test_context_error_during_start_prevents_the_text_write() -> None:
-    socket = _StartErrorRaceSocket()
-    await socket.incoming.put(_response("binary", ready={"protocol": 1}))
-    client = RimeWebSocketV1Client(socket, protocol="binary")
-    await client.wait_ready(0.1)
-
-    send_text = asyncio.create_task(client.send_text("turn", _options(), "Hello."))
-    event = await asyncio.wait_for(anext(client.events()), timeout=0.1)
-    socket.allow_send_to_return.set()
-    await send_text
-
-    assert event == ContextErrorEvent("turn", "invalid_input", None)
-    assert [_request(message).WhichOneof("payload") for message in socket.sent] == ["start"]
-
-
-@pytest.mark.asyncio
-async def test_started_accepts_an_empty_request_id() -> None:
-    client, socket = await _ready_client()
-    await client.send_text("turn", _options(), "Hello.")
-    await socket.incoming.put(_response("binary", contextId="turn", started={"requestId": ""}))
-
-    assert await anext(client.events()) == StartedEvent("turn", "")
-
-
-@pytest.mark.asyncio
-async def test_audio_before_started_invalidates_the_protocol() -> None:
-    client, socket = await _ready_client()
-    await client.send_text("turn", _options(), "Hello.")
-    await socket.incoming.put(_response("binary", contextId="turn", audio="AQI="))
-
-    with pytest.raises(RimeV1ProtocolError, match="audio before started"):
-        await anext(client.events())
-
-
-@pytest.mark.asyncio
-async def test_json_rejects_invalid_base64_without_echoing_the_value() -> None:
-    client, socket = await _ready_client("json")
-    await client.send_text("turn", _options(), "Hello.")
-    await socket.incoming.put('{"contextId":"turn","audio":"secret%%%"}')
-
-    with pytest.raises(RimeV1ProtocolError, match="invalid Base64") as exc_info:
-        await anext(client.events())
-    assert "secret" not in str(exc_info.value)
-
-
-@pytest.mark.asyncio
-async def test_client_rejects_work_before_ready() -> None:
-    socket = _ScriptedSocket("rime.v1.binary")
-    client = RimeWebSocketV1Client(socket, protocol="binary")
-
-    with pytest.raises(RimeV1StateError, match="not ready"):
-        await client.send_text("turn", _options(), "Hello.")
-
-
-@pytest.mark.asyncio
-async def test_ready_gate_rejects_wrong_scope_version_and_sanitizes_errors() -> None:
-    socket = _ScriptedSocket("rime.v1.binary")
-    await socket.incoming.put(_response("binary", contextId="turn", ready={"protocol": 1}))
-    with pytest.raises(RimeV1ProtocolError, match="connection-level"):
-        await RimeWebSocketV1Client(socket, protocol="binary").wait_ready(0.1)
-
-    socket = _ScriptedSocket("rime.v1.binary")
-    await socket.incoming.put(_response("binary", ready={"protocol": 2}))
-    with pytest.raises(RimeV1ProtocolError, match="protocol version"):
-        await RimeWebSocketV1Client(socket, protocol="binary").wait_ready(0.1)
-
-    socket = _ScriptedSocket("rime.v1.binary")
-    await socket.incoming.put(
-        _response(
-            "binary",
-            error={"kind": "unauthenticated", "message": "secret provider detail"},
-        )
-    )
-    with pytest.raises(RimeV1ProviderError, match="unauthenticated") as exc_info:
-        await RimeWebSocketV1Client(socket, protocol="binary").wait_ready(0.1)
-    assert "secret provider detail" not in str(exc_info.value)
-
-
-@pytest.mark.asyncio
-async def test_empty_text_and_repeated_terminal_commands_send_no_extra_work() -> None:
-    client, socket = await _ready_client()
-
-    await client.send_text("turn", _options(), "")
-    assert socket.sent == []
-
-    await client.send_text("turn", _options(), "Hello.")
-    await client.end("turn")
-    await client.end("turn")
-    await client.cancel("turn")
-    await client.cancel("turn")
-
-    assert [_request(message).WhichOneof("payload") for message in socket.sent] == [
-        "start",
-        "text",
-        "end",
-        "cancel",
-    ]
-    with pytest.raises(RimeV1StateError, match="no longer accepts text"):
-        await client.send_text("turn", _options(), "Too late.")
-
-
-@pytest.mark.asyncio
-async def test_context_and_connection_errors_have_the_correct_scope() -> None:
-    client, socket = await _ready_client()
-    await client.send_text("a", _options(), "A.")
-    await client.send_text("b", _options(), "B.")
-    await socket.incoming.put(
-        _response(
-            "binary",
-            contextId="a",
-            error={"kind": "invalid_input", "message": "private detail"},
-        )
-    )
-    await socket.incoming.put(
-        _response(
-            "binary",
-            error={"kind": "unavailable", "message": "private detail"},
-        )
-    )
-
-    events = client.events()
-    assert await anext(events) == ContextErrorEvent("a", "invalid_input", None)
-    assert await anext(events) == ConnectionErrorEvent("unavailable", None)
-    assert not client.has_context("a")
-    assert client.has_context("b")
-
-
-@pytest.mark.asyncio
-async def test_unknown_context_and_duplicate_terminal_are_protocol_errors() -> None:
-    client, socket = await _ready_client()
-    await client.send_text("turn", _options(), "Hello.")
-    await socket.incoming.put(
-        _response("binary", contextId="unknown", started={"requestId": "request"})
-    )
-    with pytest.raises(RimeV1ProtocolError, match="unknown context"):
-        await anext(client.events())
-
-    client, socket = await _ready_client()
-    await client.send_text("turn", _options(), "Hello.")
-    await client.end("turn")
-    await socket.incoming.put(
-        _response("binary", contextId="turn", started={"requestId": "request"})
-    )
-    await socket.incoming.put(_response("binary", contextId="turn", done={}))
-    await socket.incoming.put(_response("binary", contextId="turn", done={}))
-    events = client.events()
-    assert isinstance(await anext(events), StartedEvent)
-    assert isinstance(await anext(events), DoneEvent)
-    with pytest.raises(RimeV1ProtocolError, match="after a terminal event"):
-        await anext(events)
-
-
-@pytest.mark.asyncio
-async def test_discard_context_releases_terminal_state() -> None:
-    client, socket = await _ready_client()
-    events = client.events()
-
-    for index in range(10):
-        context_id = f"turn-{index}"
-        await client.send_text(context_id, _options(), "Hello.")
-        await client.end(context_id)
-        await socket.incoming.put(
-            _response(
-                "binary",
-                contextId=context_id,
-                started={"requestId": f"request-{index}"},
-            )
-        )
-        await socket.incoming.put(_response("binary", contextId=context_id, done={}))
-
-        assert isinstance(await anext(events), StartedEvent)
-        assert isinstance(await anext(events), DoneEvent)
-        client.discard_context(context_id)
-
-    assert client._contexts == {}
-    assert client._closed_contexts == set()
-
-
-@pytest.mark.asyncio
-async def test_json_envelope_validation_is_strict_and_forward_compatible() -> None:
-    client, socket = await _ready_client("json")
-    await client.send_text("turn", _options(), "Hello.")
-    await socket.incoming.put(
-        '{"contextId":"turn","started":{"requestId":"request","futureField":1}}'
-    )
-    assert isinstance(await anext(client.events()), StartedEvent)
-
-    await socket.incoming.put('{"contextId":"turn","done":{},"cancelled":{}}')
-    with pytest.raises(RimeV1ProtocolError, match="exactly one payload"):
-        await anext(client.events())
-
-
-@pytest.mark.parametrize(
-    "url",
-    [
-        "wss://rime.ai/coda/ws",
-        "wss://api.rime.ai/coda/ws",
-        "wss://API.RIME.AI./coda/ws",
-        "ws://localhost/coda/ws",
-        "ws://127.0.0.1/coda/ws",
-        "ws://[::1]/coda/ws",
-    ],
-)
-def test_endpoint_validation_accepts_trusted_and_loopback_hosts(url: str) -> None:
-    validate_websocket_url(url)
-
-
-@pytest.mark.parametrize(
-    "url",
-    [
-        "https://api.rime.ai/coda/ws",
-        "wss://rime.ai.example.com/coda/ws",
-        "ws://api.rime.ai/coda/ws",
-        "wss://api.rime.ai/coda/ws/",
-        "wss://user@api.rime.ai/coda/ws",
-    ],
-)
-def test_endpoint_validation_rejects_unsafe_urls(url: str) -> None:
-    with pytest.raises(ValueError):
-        validate_websocket_url(url)
-
-
-def test_custom_endpoint_requires_tls_and_opt_in() -> None:
-    with pytest.raises(ValueError, match="allow_custom_endpoint"):
-        validate_websocket_url("wss://example.com/coda/ws")
-    validate_websocket_url("wss://example.com/coda/ws", allow_custom_endpoint=True)
-    with pytest.raises(ValueError, match="must use wss"):
-        validate_websocket_url("ws://example.com/coda/ws", allow_custom_endpoint=True)
-
-
-def test_model_resolution_handles_route_and_dedicated_endpoint() -> None:
-    assert model_from_websocket_url("wss://api.rime.ai/coda/ws") == "coda"
-    assert model_from_websocket_url("wss://api.rime.ai/mist/ws") == "mistv3"
-    assert model_from_websocket_url("wss://api.rime.ai/ws") is None
-    with pytest.raises(ValueError, match="/mist/ws"):
-        model_from_websocket_url("wss://api.rime.ai/mistv3/ws")
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
 
 
 def test_service_defaults_to_binary_coda() -> None:
@@ -641,33 +134,37 @@ def test_service_defaults_to_binary_coda() -> None:
     assert service._websocket_protocol == "binary"
     assert service._settings.model == "coda"
     assert service._text_aggregation_mode is TextAggregationMode.SENTENCE
-    assert not service._push_text_frames
-    assert service._push_start_frame
-    assert not service._push_stop_frames
 
 
-def test_dedicated_endpoint_uses_explicit_model() -> None:
+@pytest.mark.parametrize(
+    "url, model",
+    [
+        ("wss://api.rime.ai/coda/ws", "coda"),
+        ("wss://api.rime.ai/mist/ws", "mistv3"),
+        ("wss://api.rime.ai/arcana/ws", "arcana"),
+    ],
+)
+def test_model_comes_from_the_endpoint_path(url: str, model: str) -> None:
+    assert RimeV1TTSService(api_key="key", websocket_url=url)._settings.model == model
+
+
+def test_dedicated_endpoint_requires_an_explicit_model() -> None:
     service = RimeV1TTSService(
         api_key="key",
         websocket_url="wss://customer.rime.ai/ws",
-        settings=RimeV1TTSService.Settings(model="mistv3", pause_between_brackets=True),
+        settings=RimeV1TTSService.Settings(model="mistv3"),
     )
+    assert service._settings.model == "mistv3"
 
-    assert service._build_v1_options().model == "mistv3"
-    assert service._build_v1_options().pause_between_brackets is True
-
-
-def test_dedicated_endpoint_requires_explicit_model() -> None:
     with pytest.raises(ValueError, match="requires a model for a dedicated endpoint"):
-        RimeV1TTSService(
-            api_key="key",
-            websocket_url="wss://customer.rime.ai/ws",
-        )
+        RimeV1TTSService(api_key="key", websocket_url="wss://customer.rime.ai/ws")
 
 
 def test_service_rejects_invalid_configuration() -> None:
     with pytest.raises(ValueError, match="binary"):
         RimeV1TTSService(api_key="key", websocket_protocol="xml")
+    with pytest.raises(ValueError, match="must end with /ws"):
+        RimeV1TTSService(api_key="key", websocket_url="wss://api.rime.ai/coda")
     with pytest.raises(ValueError, match="sentence text aggregation"):
         RimeV1TTSService(api_key="key", text_aggregation_mode=TextAggregationMode.TOKEN)
     with pytest.raises(ValueError, match="repetition_penalty"):
@@ -683,482 +180,83 @@ def test_service_rejects_invalid_configuration() -> None:
         )
 
 
-def test_mist_route_maps_model_and_settings() -> None:
-    service = RimeV1TTSService(
-        api_key="key",
-        websocket_url="wss://api.rime.ai/mist/ws",
-        sample_rate=24000,
-        settings=RimeV1TTSService.Settings(pause_between_brackets=True),
-    )
-    service._sample_rate = 24000
-
-    client_options = service._build_v1_options()
-    assert client_options.model == "mistv3"
-    assert client_options.pause_between_brackets is True
-
-
-@pytest.mark.parametrize("lookahead", [0, 4])
-def test_service_maps_v1_settings_to_start_options(lookahead: int) -> None:
-    service = RimeV1TTSService(
-        api_key="key",
-        websocket_url="wss://api.rime.ai/coda/ws",
-        sample_rate=22050,
-        settings=RimeV1TTSService.Settings(
-            voice="astra",
-            language="eng",
-            text_lookahead_tokens=lookahead,
-            time_scale_factor=1.2,
-        ),
-    )
-    service._sample_rate = 22050
-
-    assert service._build_v1_options() == _options(
-        sample_rate=22050,
-        text_lookahead_tokens=lookahead,
-        time_scale_factor=1.2,
-    )
-
-
-@pytest.mark.parametrize("model", ["mist", "arcana", "future-model"])
-@pytest.mark.parametrize("lookahead", [0, 4])
-def test_non_coda_route_rejects_lookahead(model: str, lookahead: int) -> None:
+@pytest.mark.parametrize("model", ["mist", "arcana"])
+def test_non_coda_endpoint_rejects_lookahead(model: str) -> None:
     with pytest.raises(ValueError, match="text_lookahead_tokens requires the Coda model"):
         RimeV1TTSService(
             api_key="key",
             websocket_url=f"wss://api.rime.ai/{model}/ws",
-            settings=RimeV1TTSService.Settings(text_lookahead_tokens=lookahead),
+            settings=RimeV1TTSService.Settings(text_lookahead_tokens=4),
         )
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("model", ["coda", "mist", "arcana", "future-model"])
-@pytest.mark.parametrize("lookahead", [0, 4])
-async def test_runtime_lookahead_requires_coda(model: str, lookahead: int) -> None:
+def test_coda_settings_map_to_the_start_request() -> None:
     service = RimeV1TTSService(
         api_key="key",
-        websocket_url=f"wss://api.rime.ai/{model}/ws",
+        sample_rate=22050,
+        settings=RimeV1TTSService.Settings(
+            voice="astra", language="eng", text_lookahead_tokens=0, time_scale_factor=1.2
+        ),
     )
-    delta = RimeV1TTSService.Settings(text_lookahead_tokens=lookahead)
-    if model == "coda":
-        await service._update_settings(delta)
-        assert service._build_v1_options().text_lookahead_tokens == lookahead
-    else:
-        with pytest.raises(ValueError, match="text_lookahead_tokens requires the Coda model"):
-            await service._update_settings(delta)
-        assert service._build_v1_options().text_lookahead_tokens is None
+    service._sample_rate = 22050
+
+    start = service._build_start_request("turn").start
+    assert start.speaker == "astra"
+    assert start.language == "eng"
+    assert start.audio_parameters.audio_format == "audio/pcm"
+    assert start.audio_parameters.sampling_rate == 22050
+    assert start.audio_parameters.time_scale_factor == pytest.approx(1.2)
+    assert start.coda_parameters.HasField("text_lookahead_tokens")
+    assert start.coda_parameters.text_lookahead_tokens == 0
+    assert not start.HasField("mist_parameters")
 
 
-@pytest.mark.asyncio
-async def test_runtime_settings_apply_to_the_next_context() -> None:
+def test_mist_settings_map_to_the_start_request() -> None:
     service = RimeV1TTSService(
         api_key="key",
-        websocket_url="wss://api.rime.ai/coda/ws",
-        sample_rate=24000,
-        settings=RimeV1TTSService.Settings(voice="old"),
+        websocket_url="wss://api.rime.ai/mist/ws",
+        settings=RimeV1TTSService.Settings(pause_between_brackets=True, save_oovs=False),
     )
     service._sample_rate = 24000
-    service._v1_options_by_context["a"] = service._build_v1_options()
 
-    changed = await service._update_settings(RimeV1TTSService.Settings(voice="new"))
-
-    assert changed == {"voice": "old"}
-    assert service._v1_options_by_context["a"].speaker == "old"
-    assert service._build_v1_options().speaker == "new"
+    start = service._build_start_request("turn").start
+    assert start.mist_parameters.pause_between_brackets is True
+    assert start.mist_parameters.save_oovs is False
+    assert not start.HasField("coda_parameters")
 
 
 @pytest.mark.asyncio
-async def test_dedicated_endpoint_rejects_runtime_model_change() -> None:
-    service = RimeV1TTSService(
-        api_key="key",
-        websocket_url="wss://customer.rime.ai/ws",
-        settings=RimeV1TTSService.Settings(model="coda"),
-    )
+async def test_runtime_settings_are_validated_against_the_endpoint() -> None:
+    service = RimeV1TTSService(api_key="key", settings=RimeV1TTSService.Settings(voice="old"))
+    service._sample_rate = 24000
+
+    changed = await service._update_settings(RimeV1TTSService.Settings(voice="new"))
+    assert changed == {"voice": "old"}
+    assert service._build_start_request("turn").start.speaker == "new"
 
     with pytest.raises(ValueError, match="does not match the v1 endpoint model"):
         await service._update_settings(RimeV1TTSService.Settings(model="mistv3"))
 
-
-@pytest.mark.asyncio
-async def test_finish_v1_context_releases_terminal_tombstones() -> None:
-    service = RimeV1TTSService(
-        api_key="key",
-        websocket_url="wss://api.rime.ai/coda/ws",
-    )
-    client, socket = await _ready_client()
-    service._v1_client = client
-    await client.send_text("turn", _options(), "Hello.")
-    await client.end("turn")
-    await socket.incoming.put(
-        _response("binary", contextId="turn", started={"requestId": "request"})
-    )
-    await socket.incoming.put(_response("binary", contextId="turn", done={}))
-    events = client.events()
-    assert isinstance(await anext(events), StartedEvent)
-    assert isinstance(await anext(events), DoneEvent)
-    service._v1_closed_contexts.add("turn")
-
-    await service._finish_v1_context("turn")
-
-    assert service._v1_closed_contexts == set()
-    assert client._contexts == {}
-    assert client._closed_contexts == set()
+    mist = RimeV1TTSService(api_key="key", websocket_url="wss://api.rime.ai/mist/ws")
+    with pytest.raises(ValueError, match="text_lookahead_tokens requires the Coda model"):
+        await mist._update_settings(RimeV1TTSService.Settings(text_lookahead_tokens=4))
 
 
-@pytest.mark.asyncio
-async def test_interruption_after_provider_completion_releases_local_context_state() -> None:
-    service = RimeV1TTSService(
-        api_key="key",
-        websocket_url="wss://api.rime.ai/coda/ws",
-    )
-    client, _ = await _ready_client()
-    service._v1_client = client
-    service._v1_options_by_context["turn"] = _options()
-
-    await service.on_audio_context_interrupted("turn")
-
-    assert service._v1_closed_contexts == set()
-    assert service._v1_options_by_context == {}
-
-
-@pytest.mark.parametrize(
-    ("request_payload", "response_payload", "task_map_name"),
-    [
-        ("end", "done", "_v1_terminal_watchdogs"),
-        ("cancel", "cancelled", "_v1_cancel_watchdogs"),
-    ],
-)
-@pytest.mark.asyncio
-async def test_terminal_send_race_releases_completed_watchdog(
-    request_payload: str,
-    response_payload: str,
-    task_map_name: str,
-) -> None:
-    service = RimeV1TTSService(
-        api_key="key",
-        websocket_url="wss://api.rime.ai/coda/ws",
-    )
-    socket = _TerminalRaceSocket(request_payload, response_payload)
-    await socket.incoming.put(_response("binary", ready={"protocol": 1}))
-    client = RimeWebSocketV1Client(socket, protocol="binary")
-    await client.wait_ready(0.1)
-    service._websocket = socket
-    service._v1_client = client
-
-    service.create_task = lambda coroutine, name: asyncio.create_task(coroutine)
-
-    async def cancel_task(task: asyncio.Task[None]) -> None:
-        task.cancel()
-        await asyncio.gather(task, return_exceptions=True)
-
-    service.cancel_task = cancel_task
-    await client.send_text("turn", _options(), "Hello.")
-    await socket.incoming.put(
-        _response("binary", contextId="turn", started={"requestId": "request"})
-    )
-    receive_task = asyncio.create_task(service._receive_messages())
-
-    if request_payload == "end":
-        send_task = asyncio.create_task(service.flush_audio("turn"))
-    else:
-        send_task = asyncio.create_task(service.on_audio_context_interrupted("turn"))
-
-    try:
-        for _ in range(10):
-            if not client.has_context("turn"):
-                break
-            await asyncio.sleep(0)
-        assert not client.has_context("turn")
-        socket.allow_send_to_return.set()
-        await send_task
-        await asyncio.sleep(0)
-
-        assert getattr(service, task_map_name) == {}
-    finally:
-        socket.allow_send_to_return.set()
-        if not send_task.done():
-            await send_task
-        receive_task.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await receive_task
-
-
-@pytest.mark.asyncio
-async def test_context_error_is_queued_before_turn_completion_closes_context() -> None:
-    service = RimeV1TTSService(
-        api_key="key",
-        websocket_url="wss://api.rime.ai/coda/ws",
-    )
-    context_id = "turn"
-    service._turn_context_id = context_id
-    await service.create_audio_context(context_id)
-    cancellation_started = asyncio.Event()
-    allow_cancellation_to_finish = asyncio.Event()
-
-    async def block_context_task_cancellation(context_id: str, **kwargs: Any) -> None:
-        cancellation_started.set()
-        await allow_cancellation_to_finish.wait()
-
-    service._cancel_v1_context_tasks = block_context_task_cancellation
-    error = ErrorFrame(error="Rime WebSocket v1 request failed")
-    finish_task = asyncio.create_task(service._finish_v1_context(context_id, error=error))
-    await cancellation_started.wait()
-
-    await service.on_turn_context_completed()
-    allow_cancellation_to_finish.set()
-    await finish_task
-
-    queued_error, queued_stop, end = await _queued_items(service, context_id, 3)
-    assert queued_error is error
-    assert isinstance(queued_stop, TTSStoppedFrame)
-    assert queued_stop.context_id == context_id
-    assert end is None
-
-
-@pytest.mark.asyncio
-async def test_failed_v1_request_releases_service_tombstone() -> None:
-    service = RimeV1TTSService(
-        api_key="key",
-        websocket_url="wss://api.rime.ai/coda/ws",
-    )
-    client, socket = await _ready_client()
-    socket.state = object()
-    service._websocket = socket
-    service._v1_client = client
-
-    frames = [frame async for frame in service.run_tts("Hello.", "")]
-
-    assert [type(frame) for frame in frames] == [ErrorFrame, TTSStoppedFrame]
-    assert service._v1_closed_contexts == set()
-
-
-@pytest.mark.asyncio
-async def test_old_receive_failure_does_not_close_replacement_connection() -> None:
-    service = RimeV1TTSService(
-        api_key="key",
-        websocket_url="wss://api.rime.ai/coda/ws",
-    )
-    old_client, old_socket = await _ready_client()
-    old_socket.state = State.CLOSED
-    service._websocket = old_socket
-    service._v1_client = old_client
-
-    new_socket = _ScriptedSocket("rime.v1.binary")
-    new_socket.state = State.OPEN
-    await new_socket.incoming.put(_response("binary", ready={"protocol": 1, "languages": ["eng"]}))
-
-    async def connect(*args: Any, **kwargs: Any) -> _ScriptedSocket:
-        return new_socket
-
-    service._websocket_connect = connect
-    failure_started = asyncio.Event()
-    allow_failure_cleanup = asyncio.Event()
-
-    async def block_failure_cleanup(message: str, category: Any) -> None:
-        failure_started.set()
-        await allow_failure_cleanup.wait()
-
-    service._fail_all_v1_contexts = block_failure_cleanup
-
-    receive_task = asyncio.create_task(service._receive_messages())
-    await old_socket.incoming.put(ConnectionError("old socket failed"))
-    await failure_started.wait()
-
-    connect_task = asyncio.create_task(service._connect_websocket())
-    _, pending = await asyncio.wait({connect_task}, timeout=0.01)
-    allow_failure_cleanup.set()
-
-    with pytest.raises(RimeV1ConnectionError, match="Failed to read from the Rime v1 WebSocket"):
-        await receive_task
-    await connect_task
-
-    assert service._websocket is new_socket
-    assert service._v1_client is not old_client
-    assert not new_socket.closed
-    assert pending == {connect_task}
-
-
-@pytest.mark.asyncio
-async def test_v1_reconnect_moves_an_active_turn_to_a_new_context() -> None:
-    service = RimeV1TTSService(
-        api_key="key",
-        websocket_url="wss://api.rime.ai/coda/ws",
-    )
-    old_client, old_socket = await _ready_client()
-    old_socket.state = State.CLOSED
-    service._websocket = old_socket
-    service._v1_client = old_client
-    service._v1_receiving_client = old_client
-    service._turn_context_id = "old-turn"
-    await service.create_audio_context("old-turn")
-    service._v1_failed_contexts.add("old-turn")
-
-    new_socket = _ScriptedSocket("rime.v1.binary")
-    new_socket.state = State.OPEN
-    new_socket.ping = AsyncMock()
-    await new_socket.incoming.put(_response("binary", ready={"protocol": 1, "languages": ["eng"]}))
-
-    async def connect(*args: Any, **kwargs: Any) -> _ScriptedSocket:
-        return new_socket
-
-    service._websocket_connect = connect
-
-    assert await service._reconnect_websocket(1)
-
-    assert service._turn_context_id is not None
-    assert service._turn_context_id != "old-turn"
-    assert service.create_context_id() not in service._v1_failed_contexts
-    queued_stop, end = await _queued_items(service, "old-turn", 2)
-    assert isinstance(queued_stop, TTSStoppedFrame)
-    assert end is None
-    assert service._websocket is new_socket
-    assert old_socket.closed
-
-
-@pytest.mark.asyncio
-async def test_old_receive_loop_does_not_reconnect_over_replacement_connection() -> None:
-    service = RimeV1TTSService(
-        api_key="key",
-        websocket_url="wss://api.rime.ai/coda/ws",
-    )
-    old_client, _ = await _ready_client()
-    service._v1_client = old_client
-    receive_task = asyncio.create_task(service._receive_messages())
-    await asyncio.sleep(0)
-
-    new_client, new_socket = await _ready_client()
-    new_socket.state = State.OPEN
-    service._websocket = new_socket
-    service._v1_client = new_client
-    service._turn_context_id = "new-turn"
-
-    async def reject_connect(*args: Any, **kwargs: Any) -> _ScriptedSocket:
-        raise ConnectionError("unexpected reconnect")
-
-    service._websocket_connect = reject_connect
-    try:
-        assert await service._reconnect_websocket(1)
-    finally:
-        receive_task.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await receive_task
-
-    assert service._websocket is new_socket
-    assert service._v1_client is new_client
-    assert service._turn_context_id == "new-turn"
-    assert not new_socket.closed
-
-
-@pytest.mark.asyncio
-async def test_run_tts_does_not_start_tasks_for_a_finished_context() -> None:
-    class FinishedContextClient:
-        async def send_text(
-            self, context_id: str, options: SynthesisOptions, text: str, *, timeout_s: float
-        ) -> None:
-            pass
-
-        def has_context(self, context_id: str) -> bool:
-            return False
-
-    service = RimeV1TTSService(
-        api_key="key",
-        websocket_url="wss://api.rime.ai/coda/ws",
-    )
-    socket = _ScriptedSocket("rime.v1.binary")
-    socket.state = object()
-    service._websocket = socket
-    service._v1_client = FinishedContextClient()
-    started_tasks: list[tuple[str, str]] = []
-    service._start_v1_keepalive = lambda context_id: started_tasks.append(("keepalive", context_id))
-    service._start_v1_start_watchdog = lambda context_id: started_tasks.append(
-        ("watchdog", context_id)
-    )
-
-    frames = [frame async for frame in service.run_tts("Hello.", "turn")]
-
-    assert frames == []
-    assert started_tasks == []
-
-
-def _server_message(protocol: str, response: proto.WebSocketResponse) -> str | bytes:
-    if protocol == "rime.v1.binary":
-        return response.SerializeToString()
-    return json_format.MessageToJson(response, preserving_proto_field_name=False, indent=None)
-
-
-def _server_request(message: str | bytes) -> proto.WebSocketRequest:
-    request = proto.WebSocketRequest()
-    if isinstance(message, bytes):
-        request.ParseFromString(message)
-    else:
-        json_format.Parse(message, request)
-    return request
+# ---------------------------------------------------------------------------
+# Synthesis against a local Rime v1 server
+# ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("protocol", ["binary", "json"])
 @pytest.mark.asyncio
-async def test_service_round_trip_uses_v1_frames_and_pipecat_order(protocol: str) -> None:
-    captured: dict[str, Any] = {"requests": []}
-    audio = b"\x01\x02\x03\x04"
-
-    async def handler(websocket) -> None:
-        captured["authorization"] = websocket.request.headers.get("Authorization")
-        captured["subprotocol"] = websocket.subprotocol
-        await websocket.send(
-            _server_message(
-                websocket.subprotocol,
-                proto.WebSocketResponse(ready=proto.WebSocketReady(protocol=1)),
-            )
-        )
-        try:
-            async for message in websocket:
-                request = _server_request(message)
-                captured["requests"].append(request)
-                context_id = request.context_id
-                payload = request.WhichOneof("payload")
-                if payload == "start":
-                    await websocket.send(
-                        _server_message(
-                            websocket.subprotocol,
-                            proto.WebSocketResponse(
-                                context_id=context_id,
-                                started=proto.WebSocketStarted(request_id="request-1"),
-                            ),
-                        )
-                    )
-                elif payload == "text":
-                    await websocket.send(
-                        _server_message(
-                            websocket.subprotocol,
-                            proto.WebSocketResponse(context_id=context_id, audio=audio),
-                        )
-                    )
-                elif payload == "end":
-                    await websocket.send(
-                        _server_message(
-                            websocket.subprotocol,
-                            proto.WebSocketResponse(
-                                context_id=context_id,
-                                done=proto.WebSocketDone(),
-                            ),
-                        )
-                    )
-        except websockets.ConnectionClosed:
-            pass
-
-    async with serve(
-        handler,
-        "127.0.0.1",
-        0,
-        subprotocols=["rime.v1.binary", "rime.v1.json"],
-    ) as server:
-        host, port = next(iter(server.sockets)).getsockname()[:2]
+async def test_round_trip_streams_one_context_per_turn(protocol: str) -> None:
+    async with _rime_server(_speaking_reply(b"\x01\x02\x03\x04")) as (url, requests):
         service = RimeV1TTSService(
             api_key="test-key",
-            websocket_url=f"ws://{host}:{port}/coda/ws",
+            websocket_url=f"{url}/coda/ws",
             websocket_protocol=protocol,
             sample_rate=24000,
         )
-
         down_frames, up_frames = await run_test(
             service,
             frames_to_send=[
@@ -1169,248 +267,69 @@ async def test_service_round_trip_uses_v1_frames_and_pipecat_order(protocol: str
             start_timeout=3.0,
         )
 
-    assert captured["authorization"] == "Bearer test-key"
-    assert captured["subprotocol"] == f"rime.v1.{protocol}"
-    requests = captured["requests"]
-    assert [request.WhichOneof("payload") for request in requests] == [
-        "start",
-        "text",
-        "text",
-        "end",
-    ]
-    assert requests[0].start.audio_parameters.audio_format == "audio/pcm"
+    assert _payloads(requests) == ["start", "text", "text", "end"]
+    assert len({request.context_id for request in requests}) == 1
     assert requests[0].start.audio_parameters.sampling_rate == 24000
-    assert requests[1].text == "Hello from Pipecat. "
-    assert requests[2].text == "This is a second sentence. "
+    assert [request.text for request in requests[1:3]] == [
+        "Hello from Pipecat. ",
+        "This is a second sentence. ",
+    ]
     assert not any(isinstance(frame, ErrorFrame) for frame in down_frames + up_frames)
+    assert _audio_bytes(down_frames) == b"\x01\x02\x03\x04" * 2
 
     output_types = [type(frame) for frame in down_frames]
     assert output_types.index(TTSStartedFrame) < output_types.index(TTSAudioRawFrame)
-    assert output_types.index(TTSStartedFrame) < output_types.index(TTSTextFrame)
     assert output_types.index(TTSAudioRawFrame) < output_types.index(TTSStoppedFrame)
     assert output_types.index(TTSTextFrame) < output_types.index(TTSStoppedFrame)
-    audio_frames = [frame for frame in down_frames if isinstance(frame, TTSAudioRawFrame)]
-    assert b"".join(frame.audio for frame in audio_frames) == audio * 2
-    assert not service._v1_keepalive_tasks
-    assert not service._v1_start_watchdogs
-    assert not service._v1_terminal_watchdogs
-    assert not service._v1_cancel_watchdogs
 
 
 @pytest.mark.asyncio
-async def test_context_error_without_audio_force_completes_tts_text() -> None:
-    async def handler(websocket) -> None:
-        await websocket.send(
-            proto.WebSocketResponse(ready=proto.WebSocketReady(protocol=1)).SerializeToString()
-        )
-        try:
-            async for message in websocket:
-                request = _server_request(message)
-                if request.WhichOneof("payload") == "start":
-                    await websocket.send(
-                        proto.WebSocketResponse(
-                            context_id=request.context_id,
-                            error=proto.WebSocketError(
-                                kind="invalid_input",
-                                message="rejected",
-                            ),
-                        ).SerializeToString()
-                    )
-        except websockets.ConnectionClosed:
-            pass
+async def test_interruption_cancels_the_context_and_drops_late_audio() -> None:
+    def reply(request: proto.WebSocketRequest) -> list[proto.WebSocketResponse]:
+        payload = request.WhichOneof("payload")
+        if payload == "start":
+            return [_started(request)]
+        if payload == "text":
+            return [_audio(request, b"\x01\x02")]
+        if payload == "cancel":
+            return [
+                _audio(request, b"\x03\x04"),
+                proto.WebSocketResponse(
+                    context_id=request.context_id, cancelled=proto.WebSocketCancelled()
+                ),
+            ]
+        return []
 
-    async with serve(
-        handler,
-        "127.0.0.1",
-        0,
-        subprotocols=["rime.v1.binary"],
-    ) as server:
-        host, port = next(iter(server.sockets)).getsockname()[:2]
-        service = RimeV1TTSService(
-            api_key="test-key",
-            websocket_url=f"ws://{host}:{port}/coda/ws",
-            sample_rate=24000,
-        )
+    async with _rime_server(reply) as (url, requests):
+        service = RimeV1TTSService(api_key="key", websocket_url=f"{url}/coda/ws")
         down_frames, up_frames = await run_test(
             service,
             frames_to_send=[
-                TTSSpeakFrame(text="Rejected text."),
+                TTSSpeakFrame(text="Stop me."),
+                SleepFrame(sleep=0.05),
+                InterruptionFrame(),
                 SleepFrame(sleep=0.1),
             ],
             start_timeout=3.0,
         )
 
-    assert any(isinstance(frame, ErrorFrame) for frame in up_frames)
-    assert not any(isinstance(frame, TTSAudioRawFrame) for frame in down_frames)
-    assert [frame.text for frame in down_frames if isinstance(frame, TTSTextFrame)] == [
-        "Rejected text."
-    ]
-    assert service.is_usable
-
-
-@pytest.mark.asyncio
-async def test_done_without_audio_force_completes_tts_text() -> None:
-    async def handler(websocket) -> None:
-        await websocket.send(
-            proto.WebSocketResponse(ready=proto.WebSocketReady(protocol=1)).SerializeToString()
-        )
-        try:
-            async for message in websocket:
-                request = _server_request(message)
-                payload = request.WhichOneof("payload")
-                if payload == "start":
-                    await websocket.send(
-                        proto.WebSocketResponse(
-                            context_id=request.context_id,
-                            started=proto.WebSocketStarted(request_id="request-1"),
-                        ).SerializeToString()
-                    )
-                elif payload == "end":
-                    await websocket.send(
-                        proto.WebSocketResponse(
-                            context_id=request.context_id,
-                            done=proto.WebSocketDone(),
-                        ).SerializeToString()
-                    )
-        except websockets.ConnectionClosed:
-            pass
-
-    async with serve(
-        handler,
-        "127.0.0.1",
-        0,
-        subprotocols=["rime.v1.binary"],
-    ) as server:
-        host, port = next(iter(server.sockets)).getsockname()[:2]
-        service = RimeV1TTSService(
-            api_key="test-key",
-            websocket_url=f"ws://{host}:{port}/coda/ws",
-            sample_rate=24000,
-        )
-        down_frames, up_frames = await run_test(
-            service,
-            frames_to_send=[
-                TTSSpeakFrame(text="This audio is empty."),
-                SleepFrame(sleep=0.1),
-            ],
-            start_timeout=3.0,
-        )
-
-    assert any(isinstance(frame, ErrorFrame) for frame in up_frames)
-    assert not any(isinstance(frame, TTSAudioRawFrame) for frame in down_frames)
-    assert [frame.text for frame in down_frames if isinstance(frame, TTSTextFrame)] == [
-        "This audio is empty."
-    ]
-
-
-@pytest.mark.asyncio
-async def test_odd_length_audio_is_padded_without_an_error() -> None:
-    async def handler(websocket) -> None:
-        await websocket.send(
-            proto.WebSocketResponse(ready=proto.WebSocketReady(protocol=1)).SerializeToString()
-        )
-        try:
-            async for message in websocket:
-                request = _server_request(message)
-                payload = request.WhichOneof("payload")
-                if payload == "start":
-                    await websocket.send(
-                        proto.WebSocketResponse(
-                            context_id=request.context_id,
-                            started=proto.WebSocketStarted(request_id="request-1"),
-                        ).SerializeToString()
-                    )
-                elif payload == "text":
-                    for chunk in (b"\x01\x02\x03", b"\x04\x05"):
-                        await websocket.send(
-                            proto.WebSocketResponse(
-                                context_id=request.context_id, audio=chunk
-                            ).SerializeToString()
-                        )
-                elif payload == "end":
-                    await websocket.send(
-                        proto.WebSocketResponse(
-                            context_id=request.context_id,
-                            done=proto.WebSocketDone(),
-                        ).SerializeToString()
-                    )
-        except websockets.ConnectionClosed:
-            pass
-
-    async with serve(
-        handler,
-        "127.0.0.1",
-        0,
-        subprotocols=["rime.v1.binary"],
-    ) as server:
-        host, port = next(iter(server.sockets)).getsockname()[:2]
-        service = RimeV1TTSService(
-            api_key="test-key",
-            websocket_url=f"ws://{host}:{port}/coda/ws",
-            sample_rate=24000,
-        )
-        down_frames, up_frames = await run_test(
-            service,
-            frames_to_send=[
-                TTSSpeakFrame(text="Odd audio."),
-                SleepFrame(sleep=0.2),
-                BotStoppedSpeakingFrame(),
-            ],
-            start_timeout=3.0,
-        )
-
+    assert _payloads(requests) == ["start", "text", "end", "cancel"]
     assert not any(isinstance(frame, ErrorFrame) for frame in down_frames + up_frames)
-    audio_frames = [frame for frame in down_frames if isinstance(frame, TTSAudioRawFrame)]
-    assert all(len(frame.audio) % 2 == 0 for frame in audio_frames)
-    assert b"".join(frame.audio for frame in audio_frames) == b"\x01\x02\x03\x04\x05\x00"
+    assert _audio_bytes(down_frames) == b"\x01\x02"
 
 
 @pytest.mark.asyncio
-async def test_context_error_stops_sending_later_sentences_in_the_same_turn() -> None:
-    requests: list[str] = []
+async def test_context_error_reports_and_skips_the_rest_of_the_turn() -> None:
+    def reply(request: proto.WebSocketRequest) -> list[proto.WebSocketResponse]:
+        payload = request.WhichOneof("payload")
+        if payload == "start":
+            return [_started(request)]
+        if payload == "text":
+            return [_error(request, "internal")]
+        return []
 
-    async def handler(websocket) -> None:
-        await websocket.send(
-            proto.WebSocketResponse(ready=proto.WebSocketReady(protocol=1)).SerializeToString()
-        )
-        try:
-            async for message in websocket:
-                request = _server_request(message)
-                payload = request.WhichOneof("payload")
-                assert payload is not None
-                requests.append(payload)
-                if payload == "start":
-                    await websocket.send(
-                        proto.WebSocketResponse(
-                            context_id=request.context_id,
-                            started=proto.WebSocketStarted(request_id="request-1"),
-                        ).SerializeToString()
-                    )
-                elif payload == "text":
-                    await websocket.send(
-                        proto.WebSocketResponse(
-                            context_id=request.context_id,
-                            error=proto.WebSocketError(
-                                kind="internal",
-                                message="synthesis failed",
-                            ),
-                        ).SerializeToString()
-                    )
-        except websockets.ConnectionClosed:
-            pass
-
-    async with serve(
-        handler,
-        "127.0.0.1",
-        0,
-        subprotocols=["rime.v1.binary"],
-    ) as server:
-        host, port = next(iter(server.sockets)).getsockname()[:2]
-        service = RimeV1TTSService(
-            api_key="test-key",
-            websocket_url=f"ws://{host}:{port}/coda/ws",
-            sample_rate=24000,
-        )
+    async with _rime_server(reply) as (url, requests):
+        service = RimeV1TTSService(api_key="key", websocket_url=f"{url}/coda/ws")
         down_frames, up_frames = await run_test(
             service,
             frames_to_send=[
@@ -1424,21 +343,105 @@ async def test_context_error_stops_sending_later_sentences_in_the_same_turn() ->
             start_timeout=3.0,
         )
 
-    assert requests == ["start", "text"]
-    assert any(isinstance(frame, ErrorFrame) for frame in up_frames)
+    assert _payloads(requests) == ["start", "text"]
+    errors = [frame for frame in up_frames if isinstance(frame, ErrorFrame)]
+    assert errors and "internal" in errors[0].error
+    assert errors[0].category is ErrorCategory.SERVER
     assert not any(isinstance(frame, TTSAudioRawFrame) for frame in down_frames)
-    assert [frame.text for frame in down_frames if isinstance(frame, TTSTextFrame)] == [
-        "First sentence.",
-        "Second sentence.",
-    ]
+    assert _texts(down_frames) == ["First sentence.", "Second sentence."]
+    assert service.is_usable
 
 
 @pytest.mark.asyncio
-async def test_service_interruption_sends_cancel_and_drops_late_audio() -> None:
-    captured: list[str] = []
+async def test_permanent_context_error_leaves_the_service_usable() -> None:
+    def reply(request: proto.WebSocketRequest) -> list[proto.WebSocketResponse]:
+        return [_error(request, "invalid_input")] if request.HasField("start") else []
+
+    async with _rime_server(reply) as (url, _):
+        service = RimeV1TTSService(api_key="key", websocket_url=f"{url}/coda/ws")
+        down_frames, up_frames = await run_test(
+            service,
+            frames_to_send=[TTSSpeakFrame(text="Rejected text."), SleepFrame(sleep=0.1)],
+            start_timeout=3.0,
+        )
+
+    errors = [frame for frame in up_frames if isinstance(frame, ErrorFrame)]
+    assert errors and errors[0].category is ErrorCategory.UNKNOWN
+    assert _texts(down_frames) == ["Rejected text."]
+    assert service.is_usable
+
+
+@pytest.mark.asyncio
+async def test_done_without_audio_ends_the_context() -> None:
+    def reply(request: proto.WebSocketRequest) -> list[proto.WebSocketResponse]:
+        payload = request.WhichOneof("payload")
+        if payload == "start":
+            return [_started(request)]
+        if payload == "end":
+            return [_done(request)]
+        return []
+
+    async with _rime_server(reply) as (url, _):
+        service = RimeV1TTSService(api_key="key", websocket_url=f"{url}/coda/ws")
+        down_frames, _ = await run_test(
+            service,
+            frames_to_send=[TTSSpeakFrame(text="This audio is empty."), SleepFrame(sleep=0.1)],
+            start_timeout=3.0,
+        )
+
+    assert not any(isinstance(frame, TTSAudioRawFrame) for frame in down_frames)
+    assert any(isinstance(frame, TTSStoppedFrame) for frame in down_frames)
+    assert _texts(down_frames) == ["This audio is empty."]
+
+
+@pytest.mark.asyncio
+async def test_odd_length_audio_is_padded_without_an_error() -> None:
+    def reply(request: proto.WebSocketRequest) -> list[proto.WebSocketResponse]:
+        payload = request.WhichOneof("payload")
+        if payload == "start":
+            return [_started(request)]
+        if payload == "text":
+            return [_audio(request, b"\x01\x02\x03"), _audio(request, b"\x04\x05")]
+        if payload == "end":
+            return [_done(request)]
+        return []
+
+    async with _rime_server(reply) as (url, _):
+        service = RimeV1TTSService(api_key="key", websocket_url=f"{url}/coda/ws")
+        down_frames, up_frames = await run_test(
+            service,
+            frames_to_send=[
+                TTSSpeakFrame(text="Odd audio."),
+                SleepFrame(sleep=0.2),
+                BotStoppedSpeakingFrame(),
+            ],
+            start_timeout=3.0,
+        )
+
+    assert not any(isinstance(frame, ErrorFrame) for frame in down_frames + up_frames)
+    assert _audio_bytes(down_frames) == b"\x01\x02\x03\x04\x05\x00"
+
+
+@pytest.mark.asyncio
+async def test_ready_error_is_reported_with_its_category() -> None:
+    ready = proto.WebSocketResponse(
+        error=proto.WebSocketError(kind="unauthenticated", message="bad key")
+    )
+    async with _rime_server(_speaking_reply(), ready=ready) as (url, requests):
+        service = RimeV1TTSService(api_key="bad", websocket_url=f"{url}/coda/ws")
+        _, up_frames = await run_test(
+            service, frames_to_send=[SleepFrame(sleep=0.05)], start_timeout=3.0
+        )
+
+    errors = [frame for frame in up_frames if isinstance(frame, ErrorFrame)]
+    assert errors and "unauthenticated" in errors[0].error
+    assert errors[0].category is ErrorCategory.AUTHENTICATION
+    assert not requests
+
+
+@pytest.mark.asyncio
+async def test_next_turn_reconnects_after_rime_closes_the_socket() -> None:
     connections = 0
-    first_audio = b"\x01\x02"
-    stale_audio = b"\x03\x04"
 
     async def handler(websocket) -> None:
         nonlocal connections
@@ -1446,72 +449,31 @@ async def test_service_interruption_sends_cancel_and_drops_late_audio() -> None:
         await websocket.send(
             proto.WebSocketResponse(ready=proto.WebSocketReady(protocol=1)).SerializeToString()
         )
-        try:
-            async for message in websocket:
-                request = _server_request(message)
-                payload = request.WhichOneof("payload")
-                assert payload is not None
-                captured.append(payload)
-                if payload == "start":
-                    await websocket.send(
-                        proto.WebSocketResponse(
-                            context_id=request.context_id,
-                            started=proto.WebSocketStarted(request_id="request-1"),
-                        ).SerializeToString()
-                    )
-                elif payload == "text":
-                    await websocket.send(
-                        proto.WebSocketResponse(
-                            context_id=request.context_id,
-                            audio=first_audio,
-                        ).SerializeToString()
-                    )
-                elif payload == "cancel":
-                    await websocket.send(
-                        proto.WebSocketResponse(
-                            context_id=request.context_id,
-                            audio=stale_audio,
-                        ).SerializeToString()
-                    )
-                    await websocket.send(
-                        proto.WebSocketResponse(
-                            context_id=request.context_id,
-                            cancelled=proto.WebSocketCancelled(),
-                        ).SerializeToString()
-                    )
-        except websockets.ConnectionClosed:
-            pass
+        reply = _speaking_reply()
+        async for message in websocket:
+            request = proto.WebSocketRequest.FromString(message)
+            for response in reply(request):
+                await websocket.send(response.SerializeToString())
+            if request.HasField("end") and connections == 1:
+                await websocket.close()
+                return
 
-    async with serve(
-        handler,
-        "127.0.0.1",
-        0,
-        subprotocols=["rime.v1.binary"],
-    ) as server:
+    async with serve(handler, "127.0.0.1", 0, subprotocols=["rime.v1.binary"]) as server:
         host, port = next(iter(server.sockets)).getsockname()[:2]
-        service = RimeV1TTSService(
-            api_key="test-key",
-            websocket_url=f"ws://{host}:{port}/coda/ws",
-            sample_rate=24000,
-        )
+        service = RimeV1TTSService(api_key="key", websocket_url=f"ws://{host}:{port}/coda/ws")
         down_frames, up_frames = await run_test(
             service,
             frames_to_send=[
-                TTSSpeakFrame(text="Stop me."),
-                SleepFrame(sleep=0.05),
-                InterruptionFrame(),
-                SleepFrame(sleep=0.1),
+                TTSSpeakFrame(text="First turn."),
+                SleepFrame(sleep=0.2),
+                BotStoppedSpeakingFrame(),
+                TTSSpeakFrame(text="Second turn."),
+                SleepFrame(sleep=0.2),
+                BotStoppedSpeakingFrame(),
             ],
             start_timeout=3.0,
         )
 
-    assert captured == ["start", "text", "end", "cancel"]
-    assert connections == 1
-    assert "flush" not in captured
-    assert not any(isinstance(frame, ErrorFrame) for frame in down_frames + up_frames)
-    audio_frames = [frame for frame in down_frames if isinstance(frame, TTSAudioRawFrame)]
-    assert b"".join(frame.audio for frame in audio_frames) == first_audio
-    assert not service._v1_keepalive_tasks
-    assert not service._v1_start_watchdogs
-    assert not service._v1_terminal_watchdogs
-    assert not service._v1_cancel_watchdogs
+    assert connections == 2
+    assert _audio_bytes(down_frames) == b"\x01\x02" * 2
+    assert _texts(down_frames) == ["First turn.", "Second turn."]
