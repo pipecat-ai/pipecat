@@ -49,9 +49,9 @@ To judge with OpenAI's [Decisions API](https://developers.openai.com/api/docs/gu
 instead, set `factory: evals.judges.openai_classifier`. It needs the `openai`
 extra and `OPENAI_API_KEY` exported.
 
-Jev gives verdicts but not reasons. So a local LLM, the **explainer**, writes
-the reason for every `no` and for every verdict Jev is not sure about. Jev's
-verdict always stands.
+These classifiers give verdicts but not reasons. So a local LLM, the
+**explainer**, writes the reason for every `no` and for every verdict the
+classifier is not sure about. The classifier's verdict always stands.
 
 **A local LLM.** The explainer, and the caller in simulations, run `gemma4:12b`
 on [Ollama](https://ollama.com). Install Ollama, start it, and pull the model:
