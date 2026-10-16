@@ -122,7 +122,9 @@ class DailySIPTransferFrame(DataFrame):
     utterance before the transfer occurs.
 
     Parameters:
-        settings: SIP call transfer settings.
+        settings: SIP call transfer settings. When it has no ``sessionId``, the
+            transport uses the active dial-out session, then the active
+            dial-in session.
     """
 
     settings: Mapping[str, Any] = field(default_factory=dict)
@@ -137,7 +139,9 @@ class DailySIPReferFrame(DataFrame):
     before the REFER occurs.
 
     Parameters:
-        settings: SIP REFER settings.
+        settings: SIP REFER settings. When it has no ``sessionId``, the
+            transport uses the active dial-out session, then the active
+            dial-in session.
     """
 
     settings: Mapping[str, Any] = field(default_factory=dict)
@@ -1073,6 +1077,14 @@ class DailyTransportClient(EventHandler):
         Returns:
             An error description, or None on success.
         """
+        session_id = (
+            settings.get("sessionId") or self._dial_out_session_id or self._dial_in_session_id
+        )
+        if not session_id:
+            return "Can't perform SIP REFER if 'sessionId' is not set"
+
+        settings["sessionId"] = session_id
+
         future = self._get_event_loop().create_future()
         self._client.sip_refer(settings, completion=completion_callback(future))
         return await future
