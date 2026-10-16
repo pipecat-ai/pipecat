@@ -682,6 +682,9 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
                             )
                         )
 
+                if event.type == "message_delta":
+                    self._handle_stop_reason(event.delta)
+
                 # Usage counts are cumulative: message_start reports them so far
                 # and message_delta for the whole message, so each replaces the
                 # last. A field a message_delta leaves out keeps its earlier value.
@@ -778,6 +781,22 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
             self._settings.enable_prompt_caching = frame.enable
         else:
             await self.push_frame(frame, direction)
+
+    def _handle_stop_reason(self, delta):
+        """Log why Claude stopped generating, when it stopped for a notable reason.
+
+        Anything other than a normal stop leaves the turn short of what the model
+        would otherwise have said: the request was refused, or the output hit the
+        token limit or the context window. Whatever text did arrive is still
+        passed downstream.
+        """
+        stop_reason = getattr(delta, "stop_reason", None)
+        if stop_reason in (None, "end_turn", "tool_use", "stop_sequence"):
+            return
+
+        category = getattr(getattr(delta, "stop_details", None), "category", None)
+        detail = f" ({category})" if category else ""
+        logger.warning(f"{self}: response incomplete, the model stopped for {stop_reason}{detail}")
 
     def _estimate_tokens(self, text: str) -> int:
         return int(len(re.split(r"[^\w]+", text)) * 1.3)
