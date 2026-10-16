@@ -140,6 +140,8 @@ class BaseOutputTransport(FrameProcessor):
         """
         await super().setup(setup)
         self._sample_rate = self._params.audio_out_sample_rate or setup.audio_out_sample_rate
+        source = "transport params" if self._params.audio_out_sample_rate else "pipeline"
+        logger.debug(f"{self}: output audio sample rate {self._sample_rate} Hz (from {source})")
 
         # We will write 10ms*CHUNKS of audio at a time (where CHUNKS is the
         # `audio_out_10ms_chunks` parameter). If we receive long audio frames we
@@ -472,6 +474,8 @@ class BaseOutputTransport(FrameProcessor):
             # ahead of playback and would otherwise treat the pause between two
             # TTS chunks as the end of the stream.
             self._resampler = create_stream_resampler(clear_after_secs=None)
+            # Source sample rates we have already logged a resampling message for.
+            self._logged_resample_rates: set[int] = set()
 
             # The user can provide a single mixer, to be used by the default
             # destination, or a destination/mixer mapping.
@@ -651,6 +655,16 @@ class BaseOutputTransport(FrameProcessor):
 
             # We might need to resample if incoming audio doesn't match the
             # transport sample rate.
+            if (
+                frame.sample_rate != self._sample_rate
+                and frame.sample_rate not in self._logged_resample_rates
+            ):
+                self._logged_resample_rates.add(frame.sample_rate)
+                destination = f" [{self._destination}]" if self._destination else ""
+                logger.debug(
+                    f"{self._transport}{destination}: resampling output audio from "
+                    f"{frame.sample_rate} Hz to {self._sample_rate} Hz"
+                )
             resampled = await self._resampler.resample(
                 frame.audio, frame.sample_rate, self._sample_rate
             )
