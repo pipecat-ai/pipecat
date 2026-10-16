@@ -16,6 +16,7 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     ManuallySwitchServiceFrame,
+    PipelineFlushFrame,
     ServiceMetadataFrame,
     ServiceSwitcherFrame,
     ServiceSwitcherRequestMetadataFrame,
@@ -395,6 +396,22 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
                 enable_direct_mode=True,
             ),
         ]
+
+    async def _parallel_push_frame(self, frame: Frame, direction: FrameDirection):
+        """Deduplicate flush probes separately for each trip through the active route."""
+        if not isinstance(frame, PipelineFlushFrame):
+            await super()._parallel_push_frame(frame, direction)
+            return
+
+        # A flush goes downstream, upstream, then downstream again with returning=True.
+        key = (frame.id, direction, frame.returning)
+        if key in self._seen_ids:
+            return
+        self._seen_ids.add(key)
+        if self._synchronizing:
+            self._buffered_frames.append((frame, direction))
+        else:
+            await self.push_frame(frame, direction)
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
         """Push a frame out of the service switcher.
