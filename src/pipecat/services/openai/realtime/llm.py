@@ -24,6 +24,7 @@ from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.adapters.services.open_ai_realtime_adapter import (
     OpenAIRealtimeLLMAdapter,
 )
+from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
     CancelFrame,
@@ -362,6 +363,8 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
 
         self._current_assistant_response = None
         self._current_audio_response = None
+
+        self._resampler = create_stream_resampler()
 
         self._user_audio_preroll_buffer = bytearray()
         # When set, pins the pre-roll duration; otherwise auto-sized from the
@@ -1400,8 +1403,14 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
                 frame.vad_params.start_secs + AUTOSIZED_USER_AUDIO_PREROLL_MARGIN_SECS
             )
 
-    async def _send_user_audio(self, frame):
-        payload = base64.b64encode(frame.audio).decode("utf-8")
+    async def _send_user_audio(self, frame: InputAudioRawFrame):
+        # The session's input format is PCM at a fixed 24 kHz.
+        audio = frame.audio
+        if frame.sample_rate != OPENAI_SAMPLE_RATE:
+            audio = await self._resampler.resample(audio, frame.sample_rate, OPENAI_SAMPLE_RATE)
+        if not audio:
+            return
+        payload = base64.b64encode(audio).decode("utf-8")
         await self.send_client_event(events.InputAudioBufferAppendEvent(audio=payload))
 
         # In manual turn-detection mode, keep a rolling pre-roll buffer of the
@@ -1409,9 +1418,9 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
         # after clearing the input buffer. (Server-side turn detection never
         # clears it, so no buffer is needed.)
         if self._is_turn_detection_disabled():
-            self._user_audio_preroll_buffer.extend(frame.audio)
+            self._user_audio_preroll_buffer.extend(audio)
             preroll_len = int(
-                frame.sample_rate * frame.num_channels * 2 * self._user_audio_preroll_secs
+                OPENAI_SAMPLE_RATE * frame.num_channels * 2 * self._user_audio_preroll_secs
             )
             self._user_audio_preroll_buffer = self._user_audio_preroll_buffer[-preroll_len:]
 
