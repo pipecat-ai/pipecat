@@ -93,6 +93,16 @@ async def test_deduplication_is_per_flush_pass_and_unchanged_for_other_frames():
     switcher = ServiceSwitcher(services=[Passthrough(), Passthrough()])
     frame = PipelineFlushFrame(event=asyncio.Event())
     with patch.object(switcher, "push_frame", new_callable=AsyncMock) as push:
+        # A probe arriving while a lifecycle frame is being synchronized is
+        # buffered, then delivered when the buffer flushes.
+        switcher._synchronizing = True
+        await switcher._parallel_push_frame(frame, FrameDirection.DOWNSTREAM)
+        assert push.await_count == 0
+        await switcher._flush_buffered_frames()
+        assert push.await_count == 1
+        switcher._synchronizing = False
+        frame = PipelineFlushFrame(event=asyncio.Event())
+
         for direction, returning in [
             (FrameDirection.DOWNSTREAM, False),
             (FrameDirection.UPSTREAM, False),
@@ -101,10 +111,10 @@ async def test_deduplication_is_per_flush_pass_and_unchanged_for_other_frames():
             frame.returning = returning
             await switcher._parallel_push_frame(frame, direction)
             await switcher._parallel_push_frame(frame, direction)
-        assert push.await_count == 3
+        assert push.await_count == 4
 
         text = TextFrame("ordinary output")
         await switcher._parallel_push_frame(text, FrameDirection.DOWNSTREAM)
         await switcher._parallel_push_frame(text, FrameDirection.DOWNSTREAM)
         await switcher._parallel_push_frame(text, FrameDirection.UPSTREAM)
-        assert push.await_count == 4
+        assert push.await_count == 5
