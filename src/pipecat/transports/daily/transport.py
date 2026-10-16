@@ -2374,6 +2374,10 @@ class DailyTransport(BaseTransport):
       Args: (message: Any, sender: str)
     - on_transcription_message: Called when a transcription message is received.
       Args: (message: dict)
+    - on_transcription_stopped: Called when transcription stops.
+      Args: (stopped_by: str, stopped_by_error: bool)
+    - on_transcription_error: Called when a transcription error occurs.
+      Args: (message: str)
     - on_recording_started: Called when recording starts. Args: (status: str)
     - on_recording_stopped: Called when recording stops. Args: (stream_id: str)
     - on_recording_error: Called when a recording error occurs.
@@ -2494,6 +2498,8 @@ class DailyTransport(BaseTransport):
         self._register_event_handler("on_participant_left")
         self._register_event_handler("on_participant_updated")
         self._register_event_handler("on_transcription_message")
+        self._register_event_handler("on_transcription_stopped")
+        self._register_event_handler("on_transcription_error")
         self._register_event_handler("on_recording_started")
         self._register_event_handler("on_recording_stopped")
         self._register_event_handler("on_recording_error")
