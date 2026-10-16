@@ -49,8 +49,10 @@ To judge with OpenAI's [Decisions API](https://developers.openai.com/api/docs/gu
 instead, set `factory: evals.judges.openai_classifier`. It needs the `openai`
 extra and `OPENAI_API_KEY` exported.
 
-Jev gives verdicts but not reasons. So a local LLM, the **explainer**, writes
-the reason for every `no` and for every verdict Jev is not sure about. Jev's
+These classifiers give verdicts but not reasons. So a local LLM, the
+**explainer**, is told every `no` and every verdict the classifier is not sure
+about, and points to what in the conversation supports it. That is evidence to
+check the verdict against, not how the classifier reached it. The classifier's
 verdict always stands.
 
 **A local LLM.** The explainer, and the caller in simulations, run `gemma4:12b`
