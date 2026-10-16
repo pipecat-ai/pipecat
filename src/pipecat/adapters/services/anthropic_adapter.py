@@ -167,6 +167,38 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
             messages_for_logging.append(msg)
         return messages_for_logging
 
+    def is_thought(self, message: LLMContextMessage) -> bool:
+        """Check whether a context message is a thought sent as a thinking block.
+
+        Args:
+            message: A message from an LLM context.
+
+        Returns:
+            True for an Anthropic thought message.
+        """
+        return (
+            isinstance(message, LLMSpecificMessage)
+            and message.llm == self.id_for_llm_specific_messages
+            and isinstance(message.message, dict)
+            and message.message.get("type") == "thought"
+        )
+
+    def remove_thoughts(self, context: LLMContext) -> bool:
+        """Remove the thoughts sent as thinking blocks from a context.
+
+        Args:
+            context: The LLM context to remove them from.
+
+        Returns:
+            Whether any thought was removed.
+        """
+        messages = context.messages
+        kept = [m for m in messages if not self.is_thought(m)]
+        if len(kept) == len(messages):
+            return False
+        context.set_messages(kept)
+        return True
+
     def supports_file_url(self, url: str, mime_type: str) -> bool:
         """Anthropic fetches image and PDF URLs itself; other files must be inlined."""
         return url.startswith(("http://", "https://")) and (
