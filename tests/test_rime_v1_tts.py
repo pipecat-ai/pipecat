@@ -36,6 +36,7 @@ from pipecat.frames.frames import (
 from pipecat.services.rime.tts_v1 import RimeV1TTSService
 from pipecat.services.tts_service import TextAggregationMode
 from pipecat.tests.utils import SleepFrame, run_test
+from pipecat.transcriptions.language import Language
 from pipecat.utils.errors import ErrorCategory
 
 Reply = Callable[[proto.WebSocketRequest], list[proto.WebSocketResponse]]
@@ -227,20 +228,30 @@ def test_coda_settings_map_to_the_start_request() -> None:
         api_key="key",
         sample_rate=22050,
         settings=RimeV1TTSService.Settings(
-            voice="astra", language="eng", text_lookahead_tokens=0, time_scale_factor=1.2
+            voice="astra", language=Language.EN, text_lookahead_tokens=0, time_scale_factor=1.2
         ),
     )
     service._sample_rate = 22050
 
     start = service._build_start_request("turn").start
     assert start.speaker == "astra"
-    assert start.language == "eng"
+    assert start.language == "en"
     assert start.audio_parameters.audio_format == "audio/pcm"
     assert start.audio_parameters.sampling_rate == 22050
     assert start.audio_parameters.time_scale_factor == pytest.approx(1.2)
     assert start.coda_parameters.HasField("text_lookahead_tokens")
     assert start.coda_parameters.text_lookahead_tokens == 0
     assert not start.HasField("mist_parameters")
+
+
+@pytest.mark.asyncio
+async def test_languages_map_to_bcp47_tags() -> None:
+    service = RimeV1TTSService(api_key="key", settings=RimeV1TTSService.Settings(language="ja-JP"))
+    service._sample_rate = 24000
+    assert service._build_start_request("turn").start.language == "ja"
+
+    await service._update_settings(RimeV1TTSService.Settings(language=Language.DE_DE))
+    assert service._build_start_request("turn").start.language == "de"
 
 
 def test_mist_settings_map_to_the_start_request() -> None:
@@ -292,7 +303,7 @@ _REQUEST_ENVELOPES = [
         {
             "contextId": "ctx",
             "start": {
-                "language": "eng",
+                "language": "en",
                 "speaker": "luna",
                 "text": "Hello.",
                 "audioParameters": {
@@ -304,7 +315,7 @@ _REQUEST_ENVELOPES = [
                 "codaParameters": {"textLookaheadTokens": 0},
             },
         },
-        "0a036374781a2f1203656e671a046c756e61220648656c6c6f2e2a140a09617564696f2f70636d"
+        "0a036374781a2e1202656e1a046c756e61220648656c6c6f2e2a140a09617564696f2f70636d"
         "10c0bb011d0000a03f300242024000",
     ),
     ({"contextId": "ctx", "text": "Hello."}, "0a03637478220648656c6c6f2e"),
@@ -313,8 +324,8 @@ _REQUEST_ENVELOPES = [
 ]
 _RESPONSE_ENVELOPES = [
     (
-        {"ready": {"protocol": 1, "languages": ["eng", "spa"], "defaultLanguage": "eng"}},
-        "121108011203656e6712037370611a03656e67",
+        {"ready": {"protocol": 1, "languages": ["en", "es"], "defaultLanguage": "en"}},
+        "120e08011202656e120265731a02656e",
     ),
     ({"contextId": "ctx", "started": {"requestId": "req"}}, "0a036374781a050a03726571"),
     ({"contextId": "ctx", "audio": "AAH+/w=="}, "0a0363747822040001feff"),

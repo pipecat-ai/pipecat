@@ -18,10 +18,9 @@ from websockets.protocol import State
 
 from pipecat.frames.frames import ErrorFrame, Frame, TTSAudioRawFrame, TTSStoppedFrame
 from pipecat.processors.frame_processor import FrameProcessorSetup
-from pipecat.services.rime.tts import language_to_rime_language
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TextAggregationMode, WebsocketTTSService
-from pipecat.transcriptions.language import Language
+from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -51,6 +50,30 @@ _ERROR_CATEGORIES: dict[str, ErrorCategory] = {
     "unimplemented": ErrorCategory.SERVER,
     "internal": ErrorCategory.SERVER,
 }
+
+
+def language_to_rime_v1_language(language: Language) -> str:
+    """Convert a pipecat Language to the BCP-47 tag Rime WebSocket v1 expects.
+
+    Args:
+        language: The pipecat Language enum value.
+
+    Returns:
+        The base BCP-47 tag (e.g., 'en' for English). A region-qualified
+        language falls back to its base tag.
+    """
+    LANGUAGE_MAP = {
+        Language.AR: "ar",
+        Language.DE: "de",
+        Language.EN: "en",
+        Language.ES: "es",
+        Language.FR: "fr",
+        Language.HI: "hi",
+        Language.IT: "it",
+        Language.JA: "ja",
+        Language.PT: "pt",
+    }
+    return resolve_language(language, LANGUAGE_MAP)
 
 
 def _model_from_websocket_url(websocket_url: str) -> str | None:
@@ -212,15 +235,15 @@ class RimeV1TTSService(WebsocketTTSService):
         return True
 
     def language_to_service_language(self, language: Language) -> str | None:
-        """Convert pipecat language to Rime language code.
+        """Convert pipecat language to the BCP-47 tag Rime WebSocket v1 expects.
 
         Args:
             language: The language to convert.
 
         Returns:
-            The Rime-specific language code, or None if not supported.
+            The BCP-47 language tag.
         """
-        return language_to_rime_language(language)
+        return language_to_rime_v1_language(language)
 
     # A set of Rime-specific helpers for text transformations
     @staticmethod
@@ -260,7 +283,7 @@ class RimeV1TTSService(WebsocketTTSService):
         voice = assert_given(s.voice)
         if voice is not None:
             start.speaker = voice
-        # The stored language is always a Rime code; the field type also allows Language.
+        # The stored language is always a BCP-47 tag; the field type also allows Language.
         language = assert_given(s.language)
         if isinstance(language, str):
             start.language = language
