@@ -352,11 +352,14 @@ _REPORTED_EVENT_TYPES = frozenset(
         "user-stopped-speaking",
         "vad-user-started-speaking",
         "vad-user-stopped-speaking",
-        "user-transcription",
         # The bot reporting *its* output was interrupted. Kept as a message so it
         # doesn't become an InterruptionFrame, which the harness's own user
         # aggregator already broadcasts when our VAD detects the bot speaking.
         "bot-interrupted",
+        # What the bot said, read for its backchannels, and what the user said:
+        # its transcriptions and backchannels.
+        "bot-output",
+        "user-input",
     }
 )
 
@@ -381,7 +384,9 @@ class EvalClientSerializer(RTVIClientSerializer):
     harness (its transcription, VAD, and speaking messages) stay raw messages
     rather than becoming frames, so they cannot be mistaken for what the
     harness computes from the bot's audio. So does ``eval-bot-image``, which
-    has no frame on the harness's side to become.
+    has no frame on the harness's side to become. The deprecated
+    ``user-transcription`` is dropped: ``user-input`` carries the same
+    transcriptions.
     """
 
     def __init__(self, **kwargs):
@@ -423,6 +428,8 @@ class EvalClientSerializer(RTVIClientSerializer):
                     sample_rate=sample_rate,
                     num_channels=1,
                 )
+            if msg_type == "user-transcription":
+                return None
             if msg_type in _REPORTED_EVENT_TYPES or msg_type == EVAL_BOT_IMAGE_TYPE:
                 # Kept as the raw message so the sink maps it to a scenario event;
                 # see the class docstring for why these aren't frames.

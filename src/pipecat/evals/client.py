@@ -200,7 +200,8 @@ class _BotSpeechGate(FrameProcessor):
     notices the user: a tagged transcript whose segment began before the bot
     started speaking again is the bot finishing what it was saying, however
     late it lands, and is dropped here so it cannot pass for the reply or be
-    folded into it.
+    folded into it. A turn that sends nothing drops the same way what the bot
+    says before it starts speaking again.
 
     Both need a segmented STT, which transcribes one segment at a time. With
     any other STT the gate keeps no account of segments and drops nothing, and
@@ -238,10 +239,7 @@ class _BotSpeechGate(FrameProcessor):
         elif isinstance(frame, _BotSegmentTranscriptionFrame):
             talked_over_until = self._stream.talked_over_until
             if talked_over_until is not None and frame.segment_started_at < talked_over_until:
-                self._trace.log(
-                    f"discard: bot speech from before its reply to the interrupting send "
-                    f"{frame.text!r}"
-                )
+                self._trace.log(f"discard: bot speech from before the turn's reply {frame.text!r}")
                 return
         await self.push_frame(frame, direction)
 
@@ -715,6 +713,32 @@ class EvalClient:
         assert self._sink is not None  # pipeline built before any send
         await self._drop_bot_speech_if_talking_over()
         await self._sink.inject(TTSSpeakFrame(text))
+
+    async def say_with_pauses(self, parts: list[str | int]) -> None:
+        """Speak the user's text with real silence between its parts.
+
+        Each text is synthesized by the user TTS (cached), and the turn goes out
+        like a recording: one stretch of audio, paced to the bot and recorded.
+
+        Args:
+            parts: Text to speak, or the milliseconds of silence between texts.
+        """
+        assert self._sink is not None  # pipeline built before any send
+        assert self._user_tts is not None  # pauses need a voice to speak them
+        await self._drop_bot_speech_if_talking_over()
+        sample_rate = self._user_tts.sample_rate
+        pcm = bytearray()
+        for part in parts:
+            if isinstance(part, str):
+                pcm.extend(await self._user_tts.synthesize(part))
+            else:
+                pcm.extend(b"\x00\x00" * (sample_rate * part // 1000))
+        for frame in (
+            TTSStartedFrame(),
+            TTSAudioRawFrame(audio=bytes(pcm), sample_rate=sample_rate, num_channels=1),
+            TTSStoppedFrame(),
+        ):
+            await self._sink.inject(frame)
 
     async def play(self, path: str) -> None:
         """Play a recording to the bot as the user's turn, instead of synthesizing one.

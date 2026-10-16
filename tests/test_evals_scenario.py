@@ -269,6 +269,32 @@ class TestEvalsScenarioParser(unittest.TestCase):
         self.assertTrue(s.user_audio)
         self.assertEqual(s.user_speech, {"service": "cartesia", "voice": "v1"})
 
+    def test_user_turn_with_pauses(self):
+        s = _script(
+            _write(
+                "name: a\n"
+                "user: {modality: audio, speech: {service: kokoro, voice: v1}}\n"
+                "turns:\n"
+                "  - user: ['So last week I went to', {pause_ms: 2000}, 'Spain.']\n"
+            )
+        )
+        turn = s.turns[0]
+        self.assertEqual(turn.user, "So last week I went to Spain.")
+        self.assertEqual(turn.parts, ["So last week I went to", 2000, "Spain."])
+
+    def test_user_turn_pauses_are_validated(self):
+        audio = "user: {modality: audio, speech: {service: kokoro, voice: v1}}\n"
+        cases = {
+            "pauses but no text": audio + "turns: [{user: [{pause_ms: 500}]}]\n",
+            "items must be text": audio + "turns: [{user: ['Hi', {pause_ms: 0}]}]\n",
+            "text modality": "turns: [{user: ['Hi', {pause_ms: 500}, 'there']}]\n",
+        }
+        for message, body in cases.items():
+            with self.subTest(message=message):
+                with self.assertRaises(ValueError) as cm:
+                    _script(_write("name: a\n" + body))
+                self.assertIn(message, str(cm.exception))
+
     def test_user_audio_requires_speech(self):
         with self.assertRaises(ValueError) as cm:
             _script(
