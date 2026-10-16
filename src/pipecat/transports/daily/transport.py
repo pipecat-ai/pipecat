@@ -122,7 +122,9 @@ class DailySIPTransferFrame(DataFrame):
     utterance before the transfer occurs.
 
     Parameters:
-        settings: SIP call transfer settings.
+        settings: SIP call transfer settings. When it has no ``sessionId``, the
+            transport uses the active dial-out session, then the active
+            dial-in session.
     """
 
     settings: Mapping[str, Any] = field(default_factory=dict)
@@ -137,7 +139,9 @@ class DailySIPReferFrame(DataFrame):
     before the REFER occurs.
 
     Parameters:
-        settings: SIP REFER settings.
+        settings: SIP REFER settings. When it has no ``sessionId``, the
+            transport uses the active dial-out session, then the active
+            dial-in session.
     """
 
     settings: Mapping[str, Any] = field(default_factory=dict)
@@ -166,7 +170,8 @@ class DailyOutputDTMFFrame(OutputDTMFFrame):
     Parameters:
         session_id: Target participant session id. When ``None``, the
             transport uses the active dial-out session, then the active
-            dial-in session. If neither exists, nothing is sent.
+            dial-in session. If neither exists, nothing is sent and an
+            error is pushed.
         digit_duration_ms: Duration of each DTMF digit in milliseconds.
             When ``None``, Daily's default duration is used.
         method: DTMF delivery method (e.g. ``"telephone-event"``, ``"sip-info"``
@@ -190,7 +195,8 @@ class DailyOutputDTMFUrgentFrame(OutputDTMFUrgentFrame):
     Parameters:
         session_id: Target participant session id. When ``None``, the
             transport uses the active dial-out session, then the active
-            dial-in session. If neither exists, nothing is sent.
+            dial-in session. If neither exists, nothing is sent and an
+            error is pushed.
         digit_duration_ms: Duration of each DTMF digit in milliseconds.
             When ``None``, Daily's default duration is used.
         method: DTMF delivery method (e.g. ``"telephone-event"``, ``"sip-info"``
@@ -1071,6 +1077,14 @@ class DailyTransportClient(EventHandler):
         Returns:
             An error description, or None on success.
         """
+        session_id = (
+            settings.get("sessionId") or self._dial_out_session_id or self._dial_in_session_id
+        )
+        if not session_id:
+            return "Can't perform SIP REFER if 'sessionId' is not set"
+
+        settings["sessionId"] = session_id
+
         future = self._get_event_loop().create_future()
         self._client.sip_refer(settings, completion=completion_callback(future))
         return await future
@@ -2321,7 +2335,9 @@ class DailyOutputTransport(BaseOutputTransport):
             if frame.method is not None:
                 settings["method"] = frame.method
 
-        await self._client.send_dtmf(settings)
+        error = await self._client.send_dtmf(settings)
+        if error:
+            await self.push_error(f"Unable to send DTMF: {error}")
 
 
 class DailyTransport(BaseTransport):

@@ -11,9 +11,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.frames.frames import BotConnectedFrame, STTMetadataFrame
 from pipecat.services.stt_latency import DEEPGRAM_TTFS_P99
-from pipecat.transports.daily.transport import DailyParams, DailyTransport
+from pipecat.transports.daily.transport import (
+    DailyOutputDTMFFrame,
+    DailyParams,
+    DailyTransport,
+)
 
 
 def _make_transport(**params_kwargs) -> DailyTransport:
@@ -168,7 +173,7 @@ async def test_on_dialin_ready_does_not_report_success_as_error():
     transport._on_error.assert_not_awaited()
 
 
-def _make_dtmf_client(*, dial_out: str = "", dial_in: str = ""):
+def _make_session_client(*, dial_out: str = "", dial_in: str = ""):
     """Return a transport client with session ids set and a fake Daily call client."""
     transport = _make_transport()
     client = transport._client
@@ -177,16 +182,17 @@ def _make_dtmf_client(*, dial_out: str = "", dial_in: str = ""):
     client._task_manager = MagicMock()
     client._task_manager.get_event_loop.return_value = asyncio.get_running_loop()
 
-    def _send_dtmf(settings, completion):
+    def _complete(settings, completion):
         completion(None)
 
-    client._client.send_dtmf = MagicMock(side_effect=_send_dtmf)
+    client._client.send_dtmf = MagicMock(side_effect=_complete)
+    client._client.sip_refer = MagicMock(side_effect=_complete)
     return client
 
 
 @pytest.mark.asyncio
 async def test_send_dtmf_falls_back_to_dial_in_session_id():
-    client = _make_dtmf_client(dial_in="dial-in-session")
+    client = _make_session_client(dial_in="dial-in-session")
 
     error = await client.send_dtmf({"tones": "1"})
 
@@ -197,7 +203,7 @@ async def test_send_dtmf_falls_back_to_dial_in_session_id():
 
 @pytest.mark.asyncio
 async def test_send_dtmf_prefers_dial_out_session_id_over_dial_in():
-    client = _make_dtmf_client(dial_out="dial-out-session", dial_in="dial-in-session")
+    client = _make_session_client(dial_out="dial-out-session", dial_in="dial-in-session")
 
     error = await client.send_dtmf({"tones": "1"})
 
@@ -208,9 +214,70 @@ async def test_send_dtmf_prefers_dial_out_session_id_over_dial_in():
 
 @pytest.mark.asyncio
 async def test_send_dtmf_errors_without_any_session_id():
-    client = _make_dtmf_client()
+    client = _make_session_client()
 
     error = await client.send_dtmf({"tones": "1"})
 
     assert error == "Can't send DTMF if 'sessionId' is not set"
     client._client.send_dtmf.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_sip_refer_falls_back_to_dial_in_session_id():
+    client = _make_session_client(dial_in="dial-in-session")
+
+    error = await client.sip_refer({"toEndPoint": "sip:agent@example.com"})
+
+    assert error is None
+    settings = client._client.sip_refer.call_args.args[0]
+    assert settings["sessionId"] == "dial-in-session"
+
+
+@pytest.mark.asyncio
+async def test_sip_refer_keeps_explicit_session_id():
+    client = _make_session_client(dial_out="dial-out-session")
+
+    error = await client.sip_refer(
+        {"sessionId": "explicit-session", "toEndPoint": "sip:agent@example.com"}
+    )
+
+    assert error is None
+    settings = client._client.sip_refer.call_args.args[0]
+    assert settings["sessionId"] == "explicit-session"
+
+
+@pytest.mark.asyncio
+async def test_sip_refer_errors_without_any_session_id():
+    client = _make_session_client()
+
+    error = await client.sip_refer({"toEndPoint": "sip:agent@example.com"})
+
+    assert error == "Can't perform SIP REFER if 'sessionId' is not set"
+    client._client.sip_refer.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_dtmf_frame_pushes_error_when_send_fails():
+    transport = _make_transport()
+    output = transport.output()
+    output._client.send_dtmf = AsyncMock(return_value="Can't send DTMF if 'sessionId' is not set")
+    output.push_error = AsyncMock()
+
+    await output._write_dtmf_native(DailyOutputDTMFFrame(button=KeypadEntry.ONE))
+
+    output.push_error.assert_awaited_once_with(
+        "Unable to send DTMF: Can't send DTMF if 'sessionId' is not set"
+    )
+
+
+@pytest.mark.asyncio
+async def test_dtmf_frame_pushes_no_error_when_send_succeeds():
+    transport = _make_transport()
+    output = transport.output()
+    output._client.send_dtmf = AsyncMock(return_value=None)
+    output.push_error = AsyncMock()
+
+    await output._write_dtmf_native(DailyOutputDTMFFrame(button=KeypadEntry.ONE))
+
+    output._client.send_dtmf.assert_awaited_once()
+    output.push_error.assert_not_awaited()
