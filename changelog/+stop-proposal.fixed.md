@@ -1,0 +1,1 @@
+- Fixed a user turn that never ended when a transcript opened it and the service proposed the stop right after. `LLMUserAggregator` now keeps the frames queued behind a turn-opening frame instead of discarding them, so that stop proposal and any further transcripts join the turn.
