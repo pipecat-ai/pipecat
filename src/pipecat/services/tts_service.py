@@ -605,6 +605,8 @@ class TTSService(AIService):
         """
         await super().setup(setup)
         self._sample_rate = self._init_sample_rate or setup.audio_out_sample_rate
+        source = "explicit" if self._init_sample_rate else "from pipeline"
+        logger.debug(f"{self}: TTS sample rate {self._sample_rate} Hz ({source})")
         if setup.enable_expressive_conversation:
             self._expression_formatter = ExpressionFormatter(self.get_expression_adapter, self)
             self._aggregated_frame_sequencer.llm_markup = EXPRESSION_TAG_PATTERN
