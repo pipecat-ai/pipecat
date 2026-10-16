@@ -528,6 +528,7 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
 
         # LLM completion
         response = await self._client.beta.messages.create(**params)
+        self._handle_stop_reason(response)
 
         return next((block.text for block in response.content if hasattr(block, "text")), None)
 
@@ -782,19 +783,23 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
         else:
             await self.push_frame(frame, direction)
 
-    def _handle_stop_reason(self, delta):
+    def _handle_stop_reason(self, result):
         """Log why Claude stopped generating, when it stopped for a notable reason.
 
         Anything other than a normal stop leaves the turn short of what the model
         would otherwise have said: the request was refused, or the output hit the
         token limit or the context window. Whatever text did arrive is still
-        passed downstream.
+        passed on.
+
+        Args:
+            result: A streamed ``message_delta``'s delta or a complete message;
+                both carry ``stop_reason`` and ``stop_details``.
         """
-        stop_reason = getattr(delta, "stop_reason", None)
+        stop_reason = getattr(result, "stop_reason", None)
         if stop_reason in (None, "end_turn", "tool_use", "stop_sequence"):
             return
 
-        category = getattr(getattr(delta, "stop_details", None), "category", None)
+        category = getattr(getattr(result, "stop_details", None), "category", None)
         detail = f" ({category})" if category else ""
         logger.warning(f"{self}: response incomplete, the model stopped for {stop_reason}{detail}")
 
