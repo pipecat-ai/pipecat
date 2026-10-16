@@ -413,7 +413,6 @@ class RimeTTSService(WebsocketTTSService):
         self._v1_start_watchdogs: dict[str, asyncio.Task[None]] = {}
         self._v1_terminal_watchdogs: dict[str, asyncio.Task[None]] = {}
         self._v1_cancel_watchdogs: dict[str, asyncio.Task[None]] = {}
-        self._v1_audio_remainders: dict[str, bytes] = {}
         self._v1_failed_contexts: set[str] = set()
         self._v1_closed_contexts: set[str] = set()
         self._v1_invalidating = False
@@ -760,7 +759,6 @@ class RimeTTSService(WebsocketTTSService):
                     )
                     await self.remove_audio_context(context_id)
             self._v1_options_by_context.clear()
-            self._v1_audio_remainders.clear()
             self._v1_closed_contexts.clear()
             await self._call_event_handler("on_disconnected")
 
@@ -890,7 +888,6 @@ class RimeTTSService(WebsocketTTSService):
             await self.stop_all_metrics()
         await self._cancel_v1_context_tasks(context_id)
         self._v1_options_by_context.pop(context_id, None)
-        self._v1_audio_remainders.pop(context_id, None)
 
         defer_audio_context_close = False
         if first_close and self.audio_context_available(context_id):
@@ -1074,7 +1071,6 @@ class RimeTTSService(WebsocketTTSService):
                     )
             else:
                 self._v1_options_by_context.pop(context_id, None)
-                self._v1_audio_remainders.pop(context_id, None)
                 self._v1_closed_contexts.discard(context_id)
                 if client:
                     client.discard_context(context_id)
@@ -1156,14 +1152,6 @@ class RimeTTSService(WebsocketTTSService):
         logger.trace(f"{self}: flushing audio")
         await self._get_websocket().send(json.dumps({"operation": "flush"}))
 
-    def _sample_aligned_v1_audio(self, context_id: str, audio: bytes) -> bytes:
-        """Return whole PCM16 samples without mixing context remainders."""
-        combined = self._v1_audio_remainders.pop(context_id, b"") + audio
-        aligned = len(combined) - (len(combined) % 2)
-        if aligned != len(combined):
-            self._v1_audio_remainders[context_id] = combined[-1:]
-        return combined[:aligned]
-
     async def _receive_messages(self):
         """Process incoming websocket messages."""
         if self._use_websocket_v1:
@@ -1226,12 +1214,11 @@ class RimeTTSService(WebsocketTTSService):
                 if isinstance(event, AudioEvent):
                     if event.context_id in self._v1_closed_contexts:
                         continue
-                    audio = self._sample_aligned_v1_audio(event.context_id, event.audio)
-                    if audio and self.audio_context_available(event.context_id):
+                    if event.audio and self.audio_context_available(event.context_id):
                         await self.append_to_audio_context(
                             event.context_id,
                             TTSAudioRawFrame(
-                                audio=audio,
+                                audio=event.audio,
                                 sample_rate=self.sample_rate,
                                 num_channels=1,
                                 context_id=event.context_id,
@@ -1254,16 +1241,7 @@ class RimeTTSService(WebsocketTTSService):
                     )
                     continue
                 if isinstance(event, DoneEvent):
-                    if self._v1_audio_remainders.get(event.context_id):
-                        await self._finish_v1_context(
-                            event.context_id,
-                            error=ErrorFrame(
-                                error="Rime v1 ended with an incomplete PCM16 sample",
-                                category=ErrorCategory.SERVER,
-                            ),
-                        )
-                    else:
-                        await self._finish_v1_context(event.context_id)
+                    await self._finish_v1_context(event.context_id)
                     continue
                 if isinstance(event, CancelledEvent):
                     await self._finish_v1_context(event.context_id, emit_stop=False)
@@ -1357,7 +1335,6 @@ class RimeTTSService(WebsocketTTSService):
             category = self._v1_exception_category(e)
             self._v1_closed_contexts.add(context_id)
             self._v1_options_by_context.pop(context_id, None)
-            self._v1_audio_remainders.pop(context_id, None)
             yield ErrorFrame(error="Rime WebSocket v1 request failed", category=category)
             yield TTSStoppedFrame(context_id=context_id)
             await self.remove_audio_context(context_id)

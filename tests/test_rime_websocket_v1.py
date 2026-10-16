@@ -765,16 +765,6 @@ async def test_runtime_lookahead_requires_coda(model: str, lookahead: int) -> No
         assert service._build_v1_options().text_lookahead_tokens is None
 
 
-def test_v1_pcm_remainders_are_isolated_by_context() -> None:
-    service = RimeTTSService.__new__(RimeTTSService)
-    service._v1_audio_remainders = {}
-
-    assert service._sample_aligned_v1_audio("a", b"\x01\x02\x03") == b"\x01\x02"
-    assert service._sample_aligned_v1_audio("b", b"\x10\x11") == b"\x10\x11"
-    assert service._sample_aligned_v1_audio("a", b"\x04") == b"\x03\x04"
-    assert service._v1_audio_remainders == {}
-
-
 @pytest.mark.asyncio
 async def test_runtime_settings_apply_to_the_next_context() -> None:
     service = RimeTTSService(
@@ -1328,6 +1318,68 @@ async def test_done_without_audio_force_completes_tts_text() -> None:
     assert [frame.text for frame in down_frames if isinstance(frame, TTSTextFrame)] == [
         "This audio is empty."
     ]
+
+
+@pytest.mark.asyncio
+async def test_odd_length_audio_is_padded_without_an_error() -> None:
+    async def handler(websocket) -> None:
+        await websocket.send(
+            proto.WebSocketResponse(ready=proto.WebSocketReady(protocol=1)).SerializeToString()
+        )
+        try:
+            async for message in websocket:
+                request = _server_request(message)
+                payload = request.WhichOneof("payload")
+                if payload == "start":
+                    await websocket.send(
+                        proto.WebSocketResponse(
+                            context_id=request.context_id,
+                            started=proto.WebSocketStarted(request_id="request-1"),
+                        ).SerializeToString()
+                    )
+                elif payload == "text":
+                    for chunk in (b"\x01\x02\x03", b"\x04\x05"):
+                        await websocket.send(
+                            proto.WebSocketResponse(
+                                context_id=request.context_id, audio=chunk
+                            ).SerializeToString()
+                        )
+                elif payload == "end":
+                    await websocket.send(
+                        proto.WebSocketResponse(
+                            context_id=request.context_id,
+                            done=proto.WebSocketDone(),
+                        ).SerializeToString()
+                    )
+        except websockets.ConnectionClosed:
+            pass
+
+    async with serve(
+        handler,
+        "127.0.0.1",
+        0,
+        subprotocols=["rime.v1.binary"],
+    ) as server:
+        host, port = next(iter(server.sockets)).getsockname()[:2]
+        service = RimeTTSService(
+            api_key="test-key",
+            websocket_url=f"ws://{host}:{port}/coda/ws",
+            sample_rate=24000,
+        )
+        down_frames, up_frames = await run_test(
+            service,
+            frames_to_send=[
+                TTSSpeakFrame(text="Odd audio."),
+                SleepFrame(sleep=0.2),
+                BotStoppedSpeakingFrame(),
+            ],
+            start_timeout=3.0,
+        )
+
+    assert not any(isinstance(frame, ErrorFrame) for frame in down_frames + up_frames)
+    audio_frames = [frame for frame in down_frames if isinstance(frame, TTSAudioRawFrame)]
+    assert all(len(frame.audio) % 2 == 0 for frame in audio_frames)
+    assert b"".join(frame.audio for frame in audio_frames) == b"\x01\x02\x03\x04\x05\x00"
 
 
 @pytest.mark.asyncio
