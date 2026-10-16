@@ -324,6 +324,22 @@ class TestReceiveResponseEventsText:
         service._push_llm_text.assert_any_await(" world")
 
     @pytest.mark.asyncio
+    async def test_refusal_deltas_pushed_as_text(self):
+        service = _make_service()
+        service._push_llm_text = AsyncMock()
+        service.stop_ttfb_metrics = AsyncMock()
+        service.start_llm_usage_metrics = AsyncMock()
+
+        service._websocket = _ws_events(
+            {"type": "response.refusal.delta", "delta": "I can't help with that."},
+            {"type": "response.completed", "response": {"id": "resp_1"}},
+        )
+
+        await service._receive_response_events(MagicMock(spec=LLMContext), [])
+
+        service._push_llm_text.assert_awaited_once_with("I can't help with that.")
+
+    @pytest.mark.asyncio
     async def test_response_completed_stores_state(self):
         service = _make_service()
         service._push_llm_text = AsyncMock()
