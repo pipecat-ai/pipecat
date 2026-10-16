@@ -170,12 +170,15 @@ class SmallestSTTService(WebsocketSTTService):
     a ``finalize`` message to flush the final transcript while keeping the
     session alive for the next utterance.
 
-    Connects to ``wss://api.smallest.ai/waves/v1/stt/live?model=pulse``. Pass
-    ``model=SmallestSTTModel.PULSE_2`` for Pulse 2.0, an English-only
-    streaming model with built-in end-of-turn detection (``endpointing`` has
-    no effect on it) that also adds per-utterance ``emotion`` and ``gender``
-    to every final transcript (see ``emotion_detection``/``gender_detection``,
-    on by default).
+    Connects to ``wss://api.smallest.ai/waves/v1/stt/live?model=pulse``. Set
+    ``model=SmallestSTTModel.PULSE_2`` in the settings for Pulse 2.0, an
+    English-only model that adds per-utterance ``emotion`` and ``gender`` to
+    final transcripts (see ``emotion_detection``/``gender_detection``, on by
+    default). Both appear in the ``TranscriptionFrame`` ``result`` and are
+    omitted for very short utterances. Pulse 2.0 also has built-in end-of-turn detection,
+    but Pipecat's VAD and user turn strategies still decide when the user's
+    turn ends, and the VAD-triggered ``finalize`` flushes the final transcript
+    as with Pulse. ``endpointing`` has no effect on this model.
 
     Example::
 
