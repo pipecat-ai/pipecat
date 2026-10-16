@@ -9,7 +9,7 @@
 import asyncio
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
-from typing import Any, ClassVar, Literal
+from typing import Any, ClassVar, Literal, TypeVar
 from urllib.parse import unquote, urlsplit
 
 from google.protobuf import json_format
@@ -25,7 +25,7 @@ from pipecat.transcriptions.language import Language
 from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
 from pipecat.utils.tracing.service_decorators import traced_tts
-from pipecat.utils.types import NOT_GIVEN, NotGiven
+from pipecat.utils.types import NOT_GIVEN, NotGiven, is_given
 
 try:
     from rime_api import text_to_speech_pb2 as proto
@@ -35,6 +35,7 @@ except ModuleNotFoundError as e:
     raise ImportError(f"Missing module: {e}") from e
 
 WebSocketProtocol = Literal["binary", "json"]
+_T = TypeVar("_T")
 
 _DEFAULT_WEBSOCKET_URL = "wss://api.rime.ai/coda/ws"
 _PROTOCOL_VERSION = 1
@@ -62,6 +63,11 @@ def _model_from_websocket_url(websocket_url: str) -> str | None:
         return None
     model = unquote(segments[-2]).lower()
     return "mistv3" if model == "mist" else model
+
+
+def _given(value: _T | None | NotGiven) -> _T | None:
+    """Return a settings value, or None when it is unset."""
+    return value if is_given(value) else None
 
 
 def _error_message(error: proto.WebSocketError) -> str:
@@ -238,6 +244,8 @@ class RimeV1TTSService(WebsocketTTSService):
             names = ", ".join(sorted(settings.extra))
             raise ValueError(f"Rime WebSocket v1 does not support these settings: {names}")
         model = settings.model
+        if not isinstance(model, str):
+            raise ValueError("Rime WebSocket v1 requires a model")
         mist_fields = (
             settings.pause_between_brackets,
             settings.phonemize_between_brackets,
@@ -262,26 +270,33 @@ class RimeV1TTSService(WebsocketTTSService):
     def _build_start_request(self, context_id: str) -> proto.WebSocketRequest:
         """Build the start envelope that fixes a context's settings."""
         s = self._settings
+        model = self._endpoint_model
         audio_parameters = proto.AudioParameters(
             audio_format="audio/pcm", sampling_rate=self.sample_rate
         )
-        if s.time_scale_factor is not None:
-            audio_parameters.time_scale_factor = s.time_scale_factor
+        time_scale_factor = _given(s.time_scale_factor)
+        if time_scale_factor is not None:
+            audio_parameters.time_scale_factor = time_scale_factor
 
         start = proto.SynthesisRequest(text="", audio_parameters=audio_parameters)
         if isinstance(s.voice, str):
             start.speaker = s.voice
         if isinstance(s.language, str):
             start.language = s.language
-        if s.model == "coda" and s.text_lookahead_tokens is not None:
-            start.coda_parameters.text_lookahead_tokens = s.text_lookahead_tokens
-        elif s.model.startswith("mist"):
-            if s.pause_between_brackets is not None:
-                start.mist_parameters.pause_between_brackets = s.pause_between_brackets
-            if s.phonemize_between_brackets is not None:
-                start.mist_parameters.phonemize_between_brackets = s.phonemize_between_brackets
-            if s.save_oovs is not None:
-                start.mist_parameters.save_oovs = s.save_oovs
+        text_lookahead_tokens = _given(s.text_lookahead_tokens)
+        if model == "coda" and text_lookahead_tokens is not None:
+            start.coda_parameters.text_lookahead_tokens = text_lookahead_tokens
+        elif model.startswith("mist"):
+            mist = start.mist_parameters
+            pause_between_brackets = _given(s.pause_between_brackets)
+            if pause_between_brackets is not None:
+                mist.pause_between_brackets = pause_between_brackets
+            phonemize_between_brackets = _given(s.phonemize_between_brackets)
+            if phonemize_between_brackets is not None:
+                mist.phonemize_between_brackets = phonemize_between_brackets
+            save_oovs = _given(s.save_oovs)
+            if save_oovs is not None:
+                mist.save_oovs = save_oovs
         return proto.WebSocketRequest(context_id=context_id, start=start)
 
     def _encode(self, request: proto.WebSocketRequest) -> str | bytes:
