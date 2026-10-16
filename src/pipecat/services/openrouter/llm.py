@@ -111,6 +111,7 @@ class OpenRouterLLMService(OpenAILLMService):
 
     Settings = OpenRouterLLMSettings
     _settings: Settings
+    _requires_api_key = True
     supports_developer_role = False
 
     ProviderPreferences = OpenRouterProviderPreferences

@@ -35,6 +35,7 @@ class GroqSTTService(BaseWhisperSTTService):
 
     Settings = GroqSTTSettings
     _settings: Settings
+    _requires_api_key = True
 
     def __init__(
         self,
