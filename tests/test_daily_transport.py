@@ -11,9 +11,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.frames.frames import BotConnectedFrame, STTMetadataFrame
 from pipecat.services.stt_latency import DEEPGRAM_TTFS_P99
-from pipecat.transports.daily.transport import DailyParams, DailyTransport
+from pipecat.transports.daily.transport import (
+    DailyOutputDTMFFrame,
+    DailyParams,
+    DailyTransport,
+)
 
 
 def _make_transport(**params_kwargs) -> DailyTransport:
@@ -214,3 +219,30 @@ async def test_send_dtmf_errors_without_any_session_id():
 
     assert error == "Can't send DTMF if 'sessionId' is not set"
     client._client.send_dtmf.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_dtmf_frame_pushes_error_when_send_fails():
+    transport = _make_transport()
+    output = transport.output()
+    output._client.send_dtmf = AsyncMock(return_value="Can't send DTMF if 'sessionId' is not set")
+    output.push_error = AsyncMock()
+
+    await output._write_dtmf_native(DailyOutputDTMFFrame(button=KeypadEntry.ONE))
+
+    output.push_error.assert_awaited_once_with(
+        "Unable to send DTMF: Can't send DTMF if 'sessionId' is not set"
+    )
+
+
+@pytest.mark.asyncio
+async def test_dtmf_frame_pushes_no_error_when_send_succeeds():
+    transport = _make_transport()
+    output = transport.output()
+    output._client.send_dtmf = AsyncMock(return_value=None)
+    output.push_error = AsyncMock()
+
+    await output._write_dtmf_native(DailyOutputDTMFFrame(button=KeypadEntry.ONE))
+
+    output._client.send_dtmf.assert_awaited_once()
+    output.push_error.assert_not_awaited()

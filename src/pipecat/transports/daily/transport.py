@@ -166,7 +166,8 @@ class DailyOutputDTMFFrame(OutputDTMFFrame):
     Parameters:
         session_id: Target participant session id. When ``None``, the
             transport uses the active dial-out session, then the active
-            dial-in session. If neither exists, nothing is sent.
+            dial-in session. If neither exists, nothing is sent and an
+            error is pushed.
         digit_duration_ms: Duration of each DTMF digit in milliseconds.
             When ``None``, Daily's default duration is used.
         method: DTMF delivery method (e.g. ``"telephone-event"``, ``"sip-info"``
@@ -190,7 +191,8 @@ class DailyOutputDTMFUrgentFrame(OutputDTMFUrgentFrame):
     Parameters:
         session_id: Target participant session id. When ``None``, the
             transport uses the active dial-out session, then the active
-            dial-in session. If neither exists, nothing is sent.
+            dial-in session. If neither exists, nothing is sent and an
+            error is pushed.
         digit_duration_ms: Duration of each DTMF digit in milliseconds.
             When ``None``, Daily's default duration is used.
         method: DTMF delivery method (e.g. ``"telephone-event"``, ``"sip-info"``
@@ -2321,7 +2323,9 @@ class DailyOutputTransport(BaseOutputTransport):
             if frame.method is not None:
                 settings["method"] = frame.method
 
-        await self._client.send_dtmf(settings)
+        error = await self._client.send_dtmf(settings)
+        if error:
+            await self.push_error(f"Unable to send DTMF: {error}")
 
 
 class DailyTransport(BaseTransport):
