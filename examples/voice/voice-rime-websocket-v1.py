@@ -25,7 +25,7 @@ from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.services.rime.tts import RimeTTSService
+from pipecat.services.rime.tts_v1 import RimeV1TTSService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -46,14 +46,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
     logger.info("Starting bot")
 
     stt = DeepgramSTTService(api_key=os.environ["DEEPGRAM_API_KEY"])
-    tts = RimeTTSService(
+    tts = RimeV1TTSService(
         api_key=os.environ["RIME_API_KEY"],
         websocket_url=os.getenv("RIME_WEBSOCKET_URL", "wss://api.rime.ai/coda/ws"),
         websocket_protocol="binary",
-        settings=RimeTTSService.Settings(
-            voice="astra",
-            model="coda",
-        ),
+        settings=RimeV1TTSService.Settings(voice="astra"),
     )
     llm = OpenAILLMService(
         api_key=os.environ["OPENAI_API_KEY"],

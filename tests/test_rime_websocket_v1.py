@@ -31,7 +31,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
     TTSTextFrame,
 )
-from pipecat.services.rime import tts as rime_tts
+from pipecat.services.rime import tts_v1 as rime_tts_v1
 from pipecat.services.rime._websocket_v1 import (
     AudioEvent,
     CancelledEvent,
@@ -49,7 +49,7 @@ from pipecat.services.rime._websocket_v1 import (
     subprotocol_for_protocol,
     validate_websocket_url,
 )
-from pipecat.services.rime.tts import RimeTTSService
+from pipecat.services.rime.tts_v1 import RimeV1TTSService
 from pipecat.services.tts_service import TextAggregationMode
 from pipecat.tests.utils import SleepFrame, run_test
 
@@ -143,7 +143,7 @@ async def _ready_client(protocol: str = "binary") -> tuple[RimeWebSocketV1Client
     return client, socket
 
 
-async def _queued_items(service: RimeTTSService, context_id: str, count: int) -> list[Any]:
+async def _queued_items(service: RimeV1TTSService, context_id: str, count: int) -> list[Any]:
     return [await service._audio_context_manager.get(context_id, timeout=0.1) for _ in range(count)]
 
 
@@ -197,10 +197,10 @@ async def test_start_text_and_end_use_one_typed_context(protocol: str) -> None:
 async def test_service_blocked_write_closes_connection_and_allows_reconnect(
     protocol: str, payload: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(rime_tts, "_V1_START_TIMEOUT_S", 0.02)
-    monkeypatch.setattr(rime_tts, "_V1_TERMINAL_TIMEOUT_S", 0.02)
-    monkeypatch.setattr(rime_tts, "_V1_CANCEL_TIMEOUT_S", 0.02)
-    service = RimeTTSService(
+    monkeypatch.setattr(rime_tts_v1, "_V1_START_TIMEOUT_S", 0.02)
+    monkeypatch.setattr(rime_tts_v1, "_V1_TERMINAL_TIMEOUT_S", 0.02)
+    monkeypatch.setattr(rime_tts_v1, "_V1_CANCEL_TIMEOUT_S", 0.02)
+    service = RimeV1TTSService(
         api_key="key",
         websocket_url="wss://api.rime.ai/coda/ws",
         websocket_protocol=protocol,
@@ -236,7 +236,7 @@ async def test_service_blocked_write_closes_connection_and_allows_reconnect(
         elif payload == "cancel":
             await service.on_audio_context_interrupted("turn")
         else:
-            frames = [frame async for frame in service._run_tts_v1("Hello.", "turn")]
+            frames = [frame async for frame in service.run_tts("Hello.", "turn")]
             assert any(isinstance(frame, ErrorFrame) for frame in frames)
 
     await asyncio.wait_for(send(), timeout=0.5)
@@ -634,24 +634,23 @@ def test_model_resolution_handles_route_and_dedicated_endpoint() -> None:
         model_from_websocket_url("wss://api.rime.ai/mistv3/ws")
 
 
-def test_service_selects_binary_v1_without_changing_legacy_default() -> None:
-    legacy = RimeTTSService(api_key="key")
-    v1 = RimeTTSService(api_key="key", websocket_url="wss://api.rime.ai/coda/ws")
+def test_service_defaults_to_binary_coda() -> None:
+    service = RimeV1TTSService(api_key="key")
 
-    assert legacy._url == "wss://users-ws.rime.ai/ws3"
-    assert not legacy._use_websocket_v1
-    assert v1._websocket_protocol == "binary"
-    assert v1._text_aggregation_mode is TextAggregationMode.SENTENCE
-    assert not v1._push_text_frames
-    assert v1._push_start_frame
-    assert not v1._push_stop_frames
+    assert service._websocket_url == "wss://api.rime.ai/coda/ws"
+    assert service._websocket_protocol == "binary"
+    assert service._settings.model == "coda"
+    assert service._text_aggregation_mode is TextAggregationMode.SENTENCE
+    assert not service._push_text_frames
+    assert service._push_start_frame
+    assert not service._push_stop_frames
 
 
 def test_dedicated_endpoint_uses_explicit_model() -> None:
-    service = RimeTTSService(
+    service = RimeV1TTSService(
         api_key="key",
         websocket_url="wss://customer.rime.ai/ws",
-        settings=RimeTTSService.Settings(model="mistv3", pauseBetweenBrackets=True),
+        settings=RimeV1TTSService.Settings(model="mistv3", pause_between_brackets=True),
     )
 
     assert service._build_v1_options().model == "mistv3"
@@ -660,52 +659,36 @@ def test_dedicated_endpoint_uses_explicit_model() -> None:
 
 def test_dedicated_endpoint_requires_explicit_model() -> None:
     with pytest.raises(ValueError, match="requires a model for a dedicated endpoint"):
-        RimeTTSService(
+        RimeV1TTSService(
             api_key="key",
             websocket_url="wss://customer.rime.ai/ws",
         )
 
 
-def test_service_rejects_conflicting_modes_and_unsupported_settings() -> None:
-    with pytest.raises(ValueError, match="cannot be used together"):
-        RimeTTSService(
-            api_key="key",
-            url="wss://legacy.example/ws3",
-            websocket_url="wss://api.rime.ai/coda/ws",
-        )
-    with pytest.raises(ValueError, match="requires websocket_url"):
-        RimeTTSService(api_key="key", websocket_protocol="json")
+def test_service_rejects_invalid_configuration() -> None:
+    with pytest.raises(ValueError, match="binary"):
+        RimeV1TTSService(api_key="key", websocket_protocol="xml")
     with pytest.raises(ValueError, match="sentence text aggregation"):
-        RimeTTSService(
-            api_key="key",
-            websocket_url="wss://api.rime.ai/coda/ws",
-            text_aggregation_mode=TextAggregationMode.TOKEN,
-        )
+        RimeV1TTSService(api_key="key", text_aggregation_mode=TextAggregationMode.TOKEN)
     with pytest.raises(ValueError, match="repetition_penalty"):
-        RimeTTSService(
+        RimeV1TTSService(
             api_key="key",
-            websocket_url="wss://api.rime.ai/coda/ws",
-            settings=RimeTTSService.Settings(repetition_penalty=1.1),
+            settings=RimeV1TTSService.Settings.from_mapping({"repetition_penalty": 1.1}),
         )
     with pytest.raises(ValueError, match="does not match"):
-        RimeTTSService(
-            api_key="key",
-            websocket_url="wss://api.rime.ai/coda/ws",
-            settings=RimeTTSService.Settings(model="mistv3"),
-        )
-    with pytest.raises(ValueError, match="requires Rime WebSocket v1"):
-        RimeTTSService(
-            api_key="key",
-            settings=RimeTTSService.Settings(text_lookahead_tokens=3),
+        RimeV1TTSService(api_key="key", settings=RimeV1TTSService.Settings(model="mistv3"))
+    with pytest.raises(ValueError, match="Mist settings require a Mist model"):
+        RimeV1TTSService(
+            api_key="key", settings=RimeV1TTSService.Settings(pause_between_brackets=True)
         )
 
 
 def test_mist_route_maps_model_and_settings() -> None:
-    service = RimeTTSService(
+    service = RimeV1TTSService(
         api_key="key",
         websocket_url="wss://api.rime.ai/mist/ws",
         sample_rate=24000,
-        settings=RimeTTSService.Settings(pauseBetweenBrackets=True),
+        settings=RimeV1TTSService.Settings(pause_between_brackets=True),
     )
     service._sample_rate = 24000
 
@@ -716,15 +699,15 @@ def test_mist_route_maps_model_and_settings() -> None:
 
 @pytest.mark.parametrize("lookahead", [0, 4])
 def test_service_maps_v1_settings_to_start_options(lookahead: int) -> None:
-    service = RimeTTSService(
+    service = RimeV1TTSService(
         api_key="key",
         websocket_url="wss://api.rime.ai/coda/ws",
         sample_rate=22050,
-        settings=RimeTTSService.Settings(
+        settings=RimeV1TTSService.Settings(
             voice="astra",
             language="eng",
             text_lookahead_tokens=lookahead,
-            timeScaleFactor=1.2,
+            time_scale_factor=1.2,
         ),
     )
     service._sample_rate = 22050
@@ -740,10 +723,10 @@ def test_service_maps_v1_settings_to_start_options(lookahead: int) -> None:
 @pytest.mark.parametrize("lookahead", [0, 4])
 def test_non_coda_route_rejects_lookahead(model: str, lookahead: int) -> None:
     with pytest.raises(ValueError, match="text_lookahead_tokens requires the Coda model"):
-        RimeTTSService(
+        RimeV1TTSService(
             api_key="key",
             websocket_url=f"wss://api.rime.ai/{model}/ws",
-            settings=RimeTTSService.Settings(text_lookahead_tokens=lookahead),
+            settings=RimeV1TTSService.Settings(text_lookahead_tokens=lookahead),
         )
 
 
@@ -751,11 +734,11 @@ def test_non_coda_route_rejects_lookahead(model: str, lookahead: int) -> None:
 @pytest.mark.parametrize("model", ["coda", "mist", "arcana", "future-model"])
 @pytest.mark.parametrize("lookahead", [0, 4])
 async def test_runtime_lookahead_requires_coda(model: str, lookahead: int) -> None:
-    service = RimeTTSService(
+    service = RimeV1TTSService(
         api_key="key",
         websocket_url=f"wss://api.rime.ai/{model}/ws",
     )
-    delta = RimeTTSService.Settings(text_lookahead_tokens=lookahead)
+    delta = RimeV1TTSService.Settings(text_lookahead_tokens=lookahead)
     if model == "coda":
         await service._update_settings(delta)
         assert service._build_v1_options().text_lookahead_tokens == lookahead
@@ -767,16 +750,16 @@ async def test_runtime_lookahead_requires_coda(model: str, lookahead: int) -> No
 
 @pytest.mark.asyncio
 async def test_runtime_settings_apply_to_the_next_context() -> None:
-    service = RimeTTSService(
+    service = RimeV1TTSService(
         api_key="key",
         websocket_url="wss://api.rime.ai/coda/ws",
         sample_rate=24000,
-        settings=RimeTTSService.Settings(voice="old"),
+        settings=RimeV1TTSService.Settings(voice="old"),
     )
     service._sample_rate = 24000
     service._v1_options_by_context["a"] = service._build_v1_options()
 
-    changed = await service._update_settings(RimeTTSService.Settings(voice="new"))
+    changed = await service._update_settings(RimeV1TTSService.Settings(voice="new"))
 
     assert changed == {"voice": "old"}
     assert service._v1_options_by_context["a"].speaker == "old"
@@ -785,19 +768,19 @@ async def test_runtime_settings_apply_to_the_next_context() -> None:
 
 @pytest.mark.asyncio
 async def test_dedicated_endpoint_rejects_runtime_model_change() -> None:
-    service = RimeTTSService(
+    service = RimeV1TTSService(
         api_key="key",
         websocket_url="wss://customer.rime.ai/ws",
-        settings=RimeTTSService.Settings(model="coda"),
+        settings=RimeV1TTSService.Settings(model="coda"),
     )
 
     with pytest.raises(ValueError, match="does not match the v1 endpoint model"):
-        await service._update_settings(RimeTTSService.Settings(model="mistv3"))
+        await service._update_settings(RimeV1TTSService.Settings(model="mistv3"))
 
 
 @pytest.mark.asyncio
 async def test_finish_v1_context_releases_terminal_tombstones() -> None:
-    service = RimeTTSService(
+    service = RimeV1TTSService(
         api_key="key",
         websocket_url="wss://api.rime.ai/coda/ws",
     )
@@ -823,7 +806,7 @@ async def test_finish_v1_context_releases_terminal_tombstones() -> None:
 
 @pytest.mark.asyncio
 async def test_interruption_after_provider_completion_releases_local_context_state() -> None:
-    service = RimeTTSService(
+    service = RimeV1TTSService(
         api_key="key",
         websocket_url="wss://api.rime.ai/coda/ws",
     )
@@ -850,7 +833,7 @@ async def test_terminal_send_race_releases_completed_watchdog(
     response_payload: str,
     task_map_name: str,
 ) -> None:
-    service = RimeTTSService(
+    service = RimeV1TTSService(
         api_key="key",
         websocket_url="wss://api.rime.ai/coda/ws",
     )
@@ -872,7 +855,7 @@ async def test_terminal_send_race_releases_completed_watchdog(
     await socket.incoming.put(
         _response("binary", contextId="turn", started={"requestId": "request"})
     )
-    receive_task = asyncio.create_task(service._receive_v1_messages())
+    receive_task = asyncio.create_task(service._receive_messages())
 
     if request_payload == "end":
         send_task = asyncio.create_task(service.flush_audio("turn"))
@@ -901,7 +884,7 @@ async def test_terminal_send_race_releases_completed_watchdog(
 
 @pytest.mark.asyncio
 async def test_context_error_is_queued_before_turn_completion_closes_context() -> None:
-    service = RimeTTSService(
+    service = RimeV1TTSService(
         api_key="key",
         websocket_url="wss://api.rime.ai/coda/ws",
     )
@@ -933,7 +916,7 @@ async def test_context_error_is_queued_before_turn_completion_closes_context() -
 
 @pytest.mark.asyncio
 async def test_failed_v1_request_releases_service_tombstone() -> None:
-    service = RimeTTSService(
+    service = RimeV1TTSService(
         api_key="key",
         websocket_url="wss://api.rime.ai/coda/ws",
     )
@@ -942,7 +925,7 @@ async def test_failed_v1_request_releases_service_tombstone() -> None:
     service._websocket = socket
     service._v1_client = client
 
-    frames = [frame async for frame in service._run_tts_v1("Hello.", "")]
+    frames = [frame async for frame in service.run_tts("Hello.", "")]
 
     assert [type(frame) for frame in frames] == [ErrorFrame, TTSStoppedFrame]
     assert service._v1_closed_contexts == set()
@@ -950,7 +933,7 @@ async def test_failed_v1_request_releases_service_tombstone() -> None:
 
 @pytest.mark.asyncio
 async def test_old_receive_failure_does_not_close_replacement_connection() -> None:
-    service = RimeTTSService(
+    service = RimeV1TTSService(
         api_key="key",
         websocket_url="wss://api.rime.ai/coda/ws",
     )
@@ -976,11 +959,11 @@ async def test_old_receive_failure_does_not_close_replacement_connection() -> No
 
     service._fail_all_v1_contexts = block_failure_cleanup
 
-    receive_task = asyncio.create_task(service._receive_v1_messages())
+    receive_task = asyncio.create_task(service._receive_messages())
     await old_socket.incoming.put(ConnectionError("old socket failed"))
     await failure_started.wait()
 
-    connect_task = asyncio.create_task(service._connect_websocket_v1())
+    connect_task = asyncio.create_task(service._connect_websocket())
     _, pending = await asyncio.wait({connect_task}, timeout=0.01)
     allow_failure_cleanup.set()
 
@@ -996,7 +979,7 @@ async def test_old_receive_failure_does_not_close_replacement_connection() -> No
 
 @pytest.mark.asyncio
 async def test_v1_reconnect_moves_an_active_turn_to_a_new_context() -> None:
-    service = RimeTTSService(
+    service = RimeV1TTSService(
         api_key="key",
         websocket_url="wss://api.rime.ai/coda/ws",
     )
@@ -1033,13 +1016,13 @@ async def test_v1_reconnect_moves_an_active_turn_to_a_new_context() -> None:
 
 @pytest.mark.asyncio
 async def test_old_receive_loop_does_not_reconnect_over_replacement_connection() -> None:
-    service = RimeTTSService(
+    service = RimeV1TTSService(
         api_key="key",
         websocket_url="wss://api.rime.ai/coda/ws",
     )
     old_client, _ = await _ready_client()
     service._v1_client = old_client
-    receive_task = asyncio.create_task(service._receive_v1_messages())
+    receive_task = asyncio.create_task(service._receive_messages())
     await asyncio.sleep(0)
 
     new_client, new_socket = await _ready_client()
@@ -1076,7 +1059,7 @@ async def test_run_tts_does_not_start_tasks_for_a_finished_context() -> None:
         def has_context(self, context_id: str) -> bool:
             return False
 
-    service = RimeTTSService(
+    service = RimeV1TTSService(
         api_key="key",
         websocket_url="wss://api.rime.ai/coda/ws",
     )
@@ -1090,7 +1073,7 @@ async def test_run_tts_does_not_start_tasks_for_a_finished_context() -> None:
         ("watchdog", context_id)
     )
 
-    frames = [frame async for frame in service._run_tts_v1("Hello.", "turn")]
+    frames = [frame async for frame in service.run_tts("Hello.", "turn")]
 
     assert frames == []
     assert started_tasks == []
@@ -1169,7 +1152,7 @@ async def test_service_round_trip_uses_v1_frames_and_pipecat_order(protocol: str
         subprotocols=["rime.v1.binary", "rime.v1.json"],
     ) as server:
         host, port = next(iter(server.sockets)).getsockname()[:2]
-        service = RimeTTSService(
+        service = RimeV1TTSService(
             api_key="test-key",
             websocket_url=f"ws://{host}:{port}/coda/ws",
             websocket_protocol=protocol,
@@ -1243,7 +1226,7 @@ async def test_context_error_without_audio_force_completes_tts_text() -> None:
         subprotocols=["rime.v1.binary"],
     ) as server:
         host, port = next(iter(server.sockets)).getsockname()[:2]
-        service = RimeTTSService(
+        service = RimeV1TTSService(
             api_key="test-key",
             websocket_url=f"ws://{host}:{port}/coda/ws",
             sample_rate=24000,
@@ -1299,7 +1282,7 @@ async def test_done_without_audio_force_completes_tts_text() -> None:
         subprotocols=["rime.v1.binary"],
     ) as server:
         host, port = next(iter(server.sockets)).getsockname()[:2]
-        service = RimeTTSService(
+        service = RimeV1TTSService(
             api_key="test-key",
             websocket_url=f"ws://{host}:{port}/coda/ws",
             sample_rate=24000,
@@ -1361,7 +1344,7 @@ async def test_odd_length_audio_is_padded_without_an_error() -> None:
         subprotocols=["rime.v1.binary"],
     ) as server:
         host, port = next(iter(server.sockets)).getsockname()[:2]
-        service = RimeTTSService(
+        service = RimeV1TTSService(
             api_key="test-key",
             websocket_url=f"ws://{host}:{port}/coda/ws",
             sample_rate=24000,
@@ -1423,7 +1406,7 @@ async def test_context_error_stops_sending_later_sentences_in_the_same_turn() ->
         subprotocols=["rime.v1.binary"],
     ) as server:
         host, port = next(iter(server.sockets)).getsockname()[:2]
-        service = RimeTTSService(
+        service = RimeV1TTSService(
             api_key="test-key",
             websocket_url=f"ws://{host}:{port}/coda/ws",
             sample_rate=24000,
@@ -1506,7 +1489,7 @@ async def test_service_interruption_sends_cancel_and_drops_late_audio() -> None:
         subprotocols=["rime.v1.binary"],
     ) as server:
         host, port = next(iter(server.sockets)).getsockname()[:2]
-        service = RimeTTSService(
+        service = RimeV1TTSService(
             api_key="test-key",
             websocket_url=f"ws://{host}:{port}/coda/ws",
             sample_rate=24000,

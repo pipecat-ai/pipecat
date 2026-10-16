@@ -29,20 +29,16 @@ async def check():
         RimeHttpTTSService(api_key="test", aiohttp_session=session)
         RimeNonJsonTTSService(api_key="test")
         RimeTTSService(api_key="test")
-        for protocol in ("binary", "json"):
-            try:
-                RimeTTSService(
-                    api_key="test",
-                    websocket_url="wss://api.rime.ai/coda/ws",
-                    websocket_protocol=protocol,
-                )
-            except ImportError as exc:
-                assert 'uv add "pipecat-ai[rime]"' in str(exc)
-            else:
-                raise AssertionError("v1 must require the Rime extra")
     assert "rime_api" not in sys.modules
 
 asyncio.run(check())
+
+try:
+    import pipecat.services.rime.tts_v1
+except ImportError as exc:
+    assert "Missing module" in str(exc)
+else:
+    raise AssertionError("RimeV1TTSService must require the Rime extra")
 """,
         ],
         capture_output=True,
@@ -50,3 +46,4 @@ asyncio.run(check())
         timeout=60,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+    assert 'uv add "pipecat-ai[rime]"' in result.stderr

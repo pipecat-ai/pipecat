@@ -17,15 +17,19 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Literal, Protocol, cast
+from typing import Any, Literal, Protocol, cast
 from urllib.parse import unquote, urlsplit
 
 from google.protobuf import json_format
 from google.protobuf.message import DecodeError
+from loguru import logger
 
-# HTTP and legacy WebSocket services can import this module without the Rime extra.
-if TYPE_CHECKING:
+try:
     from rime_api import text_to_speech_pb2 as proto
+except ModuleNotFoundError as e:
+    logger.error(f"Exception: {e}")
+    logger.error('In order to use RimeV1TTSService, you need to `uv add "pipecat-ai[rime]"`.')
+    raise ImportError(f"Missing module: {e}") from e
 
 WebSocketProtocol = Literal["binary", "json"]
 WebSocketMessage = str | bytes
@@ -274,8 +278,6 @@ class _BinaryEnvelopeCodec:
         return request.SerializeToString()
 
     def decode_response(self, message: WebSocketMessage) -> proto.WebSocketResponse:
-        from rime_api import text_to_speech_pb2 as proto
-
         if not isinstance(message, bytes):
             raise RimeV1ProtocolError("Rime v1 sent an unexpected WebSocket frame type")
         response = proto.WebSocketResponse()
@@ -299,8 +301,6 @@ class _JsonEnvelopeCodec:
         )
 
     def decode_response(self, message: WebSocketMessage) -> proto.WebSocketResponse:
-        from rime_api import text_to_speech_pb2 as proto
-
         if not isinstance(message, str):
             raise RimeV1ProtocolError("Rime v1 sent an unexpected WebSocket frame type")
         try:
@@ -411,8 +411,6 @@ def model_from_websocket_url(
 
 
 def _start_payload(options: SynthesisOptions) -> proto.SynthesisRequest:
-    from rime_api import text_to_speech_pb2 as proto
-
     audio_parameters = proto.AudioParameters(
         audio_format="audio/pcm",
         sampling_rate=options.sample_rate,
@@ -439,8 +437,6 @@ def _start_payload(options: SynthesisOptions) -> proto.SynthesisRequest:
 
 
 def _request(context_id: str, payload: str, value: object = None) -> proto.WebSocketRequest:
-    from rime_api import text_to_speech_pb2 as proto
-
     request = proto.WebSocketRequest(context_id=context_id)
     if payload == "start" and isinstance(value, SynthesisOptions):
         request.start.CopyFrom(_start_payload(value))
