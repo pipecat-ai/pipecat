@@ -1226,10 +1226,6 @@ class TestPipelineWorker(unittest.IsolatedAsyncioTestCase):
         assert timeout_count >= 2
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class StartRecorder(FrameProcessor):
     """Takes ``setup_secs`` to set up, like a service connecting, and records
     when it gets the StartFrame (seconds since ``t0``)."""
@@ -1380,3 +1376,7 @@ class TestPipelineWorkerStartup(unittest.IsolatedAsyncioTestCase):
 
         assert worker.has_finished()
         assert time.monotonic() - t0 < 1.0
+
+
+if __name__ == "__main__":
+    unittest.main()
