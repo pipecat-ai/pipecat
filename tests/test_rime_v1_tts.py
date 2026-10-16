@@ -27,6 +27,7 @@ from pipecat.frames.frames import (
     InterruptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
+    LLMTextFrame,
     TTSAudioRawFrame,
     TTSSpeakFrame,
     TTSStartedFrame,
@@ -177,8 +178,6 @@ def test_service_rejects_invalid_configuration() -> None:
         RimeV1TTSService(api_key="key", websocket_protocol="xml")
     with pytest.raises(ValueError, match="must end with /ws"):
         RimeV1TTSService(api_key="key", websocket_url="wss://api.rime.ai/coda")
-    with pytest.raises(ValueError, match="sentence text aggregation"):
-        RimeV1TTSService(api_key="key", text_aggregation_mode=TextAggregationMode.TOKEN)
     with pytest.raises(ValueError, match="does not match"):
         RimeV1TTSService(api_key="key", settings=RimeV1TTSService.Settings(model="mistv3"))
 
@@ -242,6 +241,17 @@ def test_coda_settings_map_to_the_start_request() -> None:
     assert start.coda_parameters.HasField("text_lookahead_tokens")
     assert start.coda_parameters.text_lookahead_tokens == 0
     assert not start.HasField("mist_parameters")
+
+
+def test_token_mode_asks_rime_to_accumulate_sentences() -> None:
+    sentences = RimeV1TTSService(api_key="key")
+    sentences._sample_rate = 24000
+    assert not sentences._build_start_request("turn").start.HasField("split_strategy")
+
+    tokens = RimeV1TTSService(api_key="key", text_aggregation_mode=TextAggregationMode.TOKEN)
+    tokens._sample_rate = 24000
+    start = tokens._build_start_request("turn").start
+    assert start.split_strategy == proto.SPLIT_STRATEGY_ACCUMULATE_SENTENCE
 
 
 @pytest.mark.asyncio
@@ -400,6 +410,32 @@ async def test_round_trip_streams_one_context_per_turn(protocol: str) -> None:
     assert output_types.index(TTSStartedFrame) < output_types.index(TTSAudioRawFrame)
     assert output_types.index(TTSAudioRawFrame) < output_types.index(TTSStoppedFrame)
     assert output_types.index(TTSTextFrame) < output_types.index(TTSStoppedFrame)
+
+
+@pytest.mark.asyncio
+async def test_token_mode_streams_tokens_and_keeps_spell_tags_whole() -> None:
+    async with _rime_server(_speaking_reply()) as (url, requests):
+        service = RimeV1TTSService(
+            api_key="key",
+            websocket_url=f"{url}/coda/ws",
+            text_aggregation_mode=TextAggregationMode.TOKEN,
+        )
+        down_frames, up_frames = await run_test(
+            service,
+            frames_to_send=[
+                LLMFullResponseStartFrame(),
+                *[LLMTextFrame(token) for token in ["Say ", "spe", "ll(A", "B) ", "now", "."]],
+                LLMFullResponseEndFrame(),
+                SleepFrame(sleep=0.2),
+            ],
+            start_timeout=3.0,
+        )
+
+    assert _payloads(requests) == ["start", "text", "text", "text", "text", "end"]
+    assert requests[0].start.split_strategy == proto.SPLIT_STRATEGY_ACCUMULATE_SENTENCE
+    assert [request.text for request in requests[1:5]] == ["Say ", "spell(AB) ", "now", "."]
+    assert not any(isinstance(frame, ErrorFrame) for frame in down_frames + up_frames)
+    assert sum(isinstance(frame, TTSStoppedFrame) for frame in down_frames) == 1
 
 
 @pytest.mark.asyncio

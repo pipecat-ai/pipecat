@@ -132,11 +132,13 @@ class RimeV1TTSService(WebsocketTTSService):
 
     Sends protobuf envelopes, in binary or proto3 JSON encoding, over one
     connection that carries a synthesis context per Pipecat turn. Interruptions
-    cancel the turn's context without reconnecting. The model is read from the
-    endpoint path (``/coda/ws``, ``/mist/ws``); a dedicated ``/ws`` endpoint
-    requires ``settings.model``. A context leaves out, with a warning, any
-    setting its model does not accept, including a model other than the
-    endpoint's. WebSocket v1 does not report word timestamps.
+    cancel the turn's context without reconnecting. Text is sent as whole
+    sentences by default; with ``TextAggregationMode.TOKEN``, LLM tokens are
+    sent as they arrive and Rime accumulates them into sentences. The model is
+    read from the endpoint path (``/coda/ws``, ``/mist/ws``); a dedicated
+    ``/ws`` endpoint requires ``settings.model``. A context leaves out, with a
+    warning, any setting its model does not accept, including a model other
+    than the endpoint's. WebSocket v1 does not report word timestamps.
 
     Requires the ``rime`` extra: ``uv add "pipecat-ai[rime]"``.
     """
@@ -151,6 +153,7 @@ class RimeV1TTSService(WebsocketTTSService):
         websocket_url: str = _DEFAULT_WEBSOCKET_URL,
         websocket_protocol: WebSocketProtocol = "binary",
         sample_rate: int | None = None,
+        text_aggregation_mode: TextAggregationMode | None = None,
         settings: Settings | None = None,
         **kwargs,
     ):
@@ -161,19 +164,15 @@ class RimeV1TTSService(WebsocketTTSService):
             websocket_url: Rime WebSocket v1 endpoint. Its path selects the model.
             websocket_protocol: Envelope encoding, ``"binary"`` or ``"json"``.
             sample_rate: Audio sample rate in Hz.
+            text_aggregation_mode: How to aggregate text before synthesis.
+                Defaults to ``TextAggregationMode.SENTENCE``.
+                ``TextAggregationMode.TOKEN`` streams LLM tokens and has Rime
+                accumulate them into sentences.
             settings: Runtime-updatable settings.
-            **kwargs: Additional arguments passed to parent class. Text is always
-                aggregated by sentence.
+            **kwargs: Additional arguments passed to parent class.
         """
         if websocket_protocol not in _SUBPROTOCOLS:
             raise ValueError('websocket_protocol must be "binary" or "json"')
-        text_aggregation_mode = kwargs.pop("text_aggregation_mode", None)
-        aggregate_sentences = kwargs.pop("aggregate_sentences", None)
-        if aggregate_sentences is False or text_aggregation_mode not in (
-            None,
-            TextAggregationMode.SENTENCE,
-        ):
-            raise ValueError("Rime WebSocket v1 requires sentence text aggregation")
 
         default_settings = self.Settings(
             model=None,
@@ -199,7 +198,7 @@ class RimeV1TTSService(WebsocketTTSService):
         default_settings.model = endpoint_model
 
         super().__init__(
-            text_aggregation_mode=TextAggregationMode.SENTENCE,
+            text_aggregation_mode=text_aggregation_mode,
             push_text_frames=False,
             push_start_frame=True,
             pause_frame_processing=True,
@@ -209,7 +208,7 @@ class RimeV1TTSService(WebsocketTTSService):
             **kwargs,
         )
 
-        # Keep spelled-out text in one aggregate so a sentence split never breaks a tag.
+        # Keep spelled-out text in one aggregate so a split never breaks a tag.
         self._text_aggregator = SkipTagsAggregator(
             [("spell(", ")")], aggregation_type=self._text_aggregation_mode
         )
@@ -280,6 +279,8 @@ class RimeV1TTSService(WebsocketTTSService):
                 audio_parameters.time_scale_factor = time_scale_factor
 
         start = proto.SynthesisRequest(text="", audio_parameters=audio_parameters)
+        if self._is_streaming_tokens:
+            start.split_strategy = proto.SPLIT_STRATEGY_ACCUMULATE_SENTENCE
         voice = assert_given(s.voice)
         if voice is not None:
             start.speaker = voice
@@ -489,8 +490,14 @@ class RimeV1TTSService(WebsocketTTSService):
                 if ctx_id != self._turn_context_id:
                     await self._close_failed_context(ctx_id)
 
-    async def _split_sentences(self, text: str) -> list[str]:
-        """Split prepared text into the sentence units Rime v1 expects per text message."""
+    async def _text_messages(self, text: str) -> list[str]:
+        """Split prepared text into the text messages Rime v1 expects.
+
+        Rime accumulates streamed tokens itself, so each token is one message.
+        Otherwise each message is one sentence.
+        """
+        if self._is_streaming_tokens:
+            return [text]
         aggregator = SkipTagsAggregator(
             [("spell(", ")")], aggregation_type=TextAggregationMode.SENTENCE
         )
@@ -524,7 +531,7 @@ class RimeV1TTSService(WebsocketTTSService):
                 if context_id not in self._contexts:
                     await self._send(self._build_start_request(context_id))
                     self._contexts.add(context_id)
-                for sentence in await self._split_sentences(text):
+                for sentence in await self._text_messages(text):
                     await self._send(proto.WebSocketRequest(context_id=context_id, text=sentence))
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
