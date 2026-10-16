@@ -124,6 +124,7 @@ class TestEvalJudge(unittest.TestCase):
         [record] = records
         self.assertEqual(record["conversation"], str(self.conversation))
         self.assertEqual(record["scenario"], "book/available")
+        self.assertEqual(record["success"], "the bot booked a table")
         self.assertTrue(record["passed"])
         self.assertEqual(record["reason"], "booked")
         self.assertEqual(record["confidence"], 0.8)
@@ -131,6 +132,7 @@ class TestEvalJudge(unittest.TestCase):
         # The measured metric is left out: a conversation has nothing to measure.
         [politeness] = record["metrics"]
         self.assertEqual(politeness["name"], "politeness")
+        self.assertEqual(politeness["criterion"], "stays polite")
         self.assertEqual(
             politeness["verdicts"],
             [

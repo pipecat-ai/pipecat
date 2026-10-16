@@ -558,6 +558,7 @@ async def _judge_conversation(
             simulation_name=simulation.name,
             succeeded=False,
             error=f"error: {type(e).__name__}: {e}",
+            success=simulation.success,
         )
     goal = judgement.goal
     return EvalSimulationResult(
@@ -577,15 +578,17 @@ async def _judge_conversation(
         ],
         conversation=messages,
         turns=sum(1 for m in messages if m["role"] == "user"),
+        success=simulation.success,
     )
 
 
 def _judgement_record(path: Path, result: EvalSimulationResult) -> dict:
-    """The JSONL line of a judged conversation: the goal's verdict and every metric's, each turn's with its reason and what the bot said."""
+    """The JSONL line of a judged conversation: the goal's verdict and every metric's, each with the wording it was judged on, and each turn's with its reason and what the bot said."""
     bot_turns = [m["content"] for m in result.messages if m["role"] == "assistant"]
     return {
         "conversation": str(path),
         "scenario": result.simulation_name,
+        "success": result.success,
         "passed": result.passed,
         "succeeded": result.succeeded,
         "error": result.error,
@@ -595,6 +598,7 @@ def _judgement_record(path: Path, result: EvalSimulationResult) -> dict:
         "metrics": [
             {
                 "name": m.name,
+                "criterion": m.criterion,
                 "score": m.score,
                 "passed": m.passed,
                 "min_score": m.min_score,

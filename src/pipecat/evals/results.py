@@ -241,6 +241,8 @@ class EvalSimulationMetricScore:
             left turns unanswered, ``out_of_range`` for a measure outside its
             bounds, ``function_calls`` for a call list that did not match;
             ``None`` when it passed.
+        criterion: The criterion each bot turn was judged on, as the
+            simulation worded it; ``None`` for a measured metric.
     """
 
     name: str
@@ -251,6 +253,7 @@ class EvalSimulationMetricScore:
     verdicts: list[EvalSimulationTurnVerdict] = field(default_factory=list)
     value: float | None = None
     failure_kind: str | None = None
+    criterion: str | None = None
 
 
 @dataclass
@@ -282,6 +285,8 @@ class EvalSimulationResult:
             ``None`` when it gave none.
         probabilities: The probability of each answer to the goal question;
             empty when the judge gave none.
+        success: The goal the conversation was judged on, the simulation's
+            ``success`` as it was worded.
     """
 
     simulation_name: str
@@ -299,6 +304,7 @@ class EvalSimulationResult:
     debug_log: list[str] = field(default_factory=list)
     confidence: float | None = None
     probabilities: dict[str, float] = field(default_factory=dict)
+    success: str = ""
 
     @property
     def passed(self) -> bool:

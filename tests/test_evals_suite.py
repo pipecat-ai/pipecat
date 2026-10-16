@@ -835,6 +835,7 @@ class TestSimulationRecords(unittest.TestCase):
                     passed=False,
                     reason="turn 2: curt",
                     min_score=1.0,
+                    criterion="stays polite",
                     verdicts=[
                         EvalSimulationTurnVerdict(1, True, "warm"),
                         EvalSimulationTurnVerdict(
@@ -854,6 +855,7 @@ class TestSimulationRecords(unittest.TestCase):
             duration_ms=1234,
             confidence=0.8,
             probabilities={"yes": 0.8, "no": 0.2},
+            success="the bot booked a table",
         )
         rebuilt = _simulation_result_from_dict(json.loads(json.dumps(dataclasses.asdict(result))))
         self.assertEqual(rebuilt, result)
@@ -877,6 +879,12 @@ class TestSimulationRecords(unittest.TestCase):
                     turns=3,
                     ended_by="bot",
                     events_seen=[{"type": "llm_started"}],
+                    success="the bot booked a table",
+                    metrics=[
+                        EvalSimulationMetricScore(
+                            name="politeness", score=1.0, criterion="stays polite"
+                        )
+                    ],
                 ),
             )
             _append_result(base / "results.jsonl", run, "flows_x.py__book__002", base, None)
@@ -889,6 +897,8 @@ class TestSimulationRecords(unittest.TestCase):
             self.assertFalse(record["succeeded"])
             self.assertEqual(record["ended_by"], "bot")
             self.assertEqual(record["reason"], "no table")
+            self.assertEqual(record["success"], "the bot booked a table")
+            self.assertEqual(record["metrics"][0]["criterion"], "stays polite")
             self.assertEqual(record["events_seen"], [{"type": "llm_started"}])
 
 

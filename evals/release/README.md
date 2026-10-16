@@ -398,11 +398,12 @@ uv run python -m pipecat.evals judge evals/release/scenarios/simulated/book_tabl
 
 Each conversation gets one line in `judged.jsonl` (`-o` to change it):
 whether the goal was met and every metric's score, with a reason for every
-verdict, passes included, and the text of the turn each one is about.
-Measured metrics are left out, since a conversation has nothing to measure. A
-conversation saved from a real call in the same format is judged the same
-way. Run it from the repository root, as above, where a judge `factory:` such
-as `evals.judges` resolves.
+verdict, passes included, and the text of the turn each one is about. The line
+keeps the `success` and every `criterion` as they were worded, so you can tell
+which wording each verdict was judged on. Measured metrics are left out, since
+a conversation has nothing to measure. A conversation saved from a real call in
+the same format is judged the same way. Run it from the repository root, as
+above, where a judge `factory:` such as `evals.judges` resolves.
 
 ## Adding coverage
 
