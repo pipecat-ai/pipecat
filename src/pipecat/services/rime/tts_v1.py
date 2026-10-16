@@ -9,7 +9,7 @@
 import asyncio
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
-from typing import Any, ClassVar, Literal, TypeVar
+from typing import ClassVar, Literal
 from urllib.parse import unquote, urlsplit
 
 from google.protobuf import json_format
@@ -25,7 +25,7 @@ from pipecat.transcriptions.language import Language
 from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
 from pipecat.utils.tracing.service_decorators import traced_tts
-from pipecat.utils.types import NOT_GIVEN, NotGiven, is_given
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
 try:
     from rime_api import text_to_speech_pb2 as proto
@@ -35,7 +35,6 @@ except ModuleNotFoundError as e:
     raise ImportError(f"Missing module: {e}") from e
 
 WebSocketProtocol = Literal["binary", "json"]
-_T = TypeVar("_T")
 
 _DEFAULT_WEBSOCKET_URL = "wss://api.rime.ai/coda/ws"
 _PROTOCOL_VERSION = 1
@@ -63,11 +62,6 @@ def _model_from_websocket_url(websocket_url: str) -> str | None:
         return None
     model = unquote(segments[-2]).lower()
     return "mistv3" if model == "mist" else model
-
-
-def _given(value: _T | None | NotGiven) -> _T | None:
-    """Return a settings value, or None when it is unset."""
-    return value if is_given(value) else None
 
 
 def _error_message(error: proto.WebSocketError) -> str:
@@ -117,7 +111,9 @@ class RimeV1TTSService(WebsocketTTSService):
     connection that carries a synthesis context per Pipecat turn. Interruptions
     cancel the turn's context without reconnecting. The model is read from the
     endpoint path (``/coda/ws``, ``/mist/ws``); a dedicated ``/ws`` endpoint
-    requires ``settings.model``. WebSocket v1 does not report word timestamps.
+    requires ``settings.model``. A context leaves out, with a warning, any
+    setting its model does not accept, including a model other than the
+    endpoint's. WebSocket v1 does not report word timestamps.
 
     Requires the ``rime`` extra: ``uv add "pipecat-ai[rime]"``.
     """
@@ -170,14 +166,14 @@ class RimeV1TTSService(WebsocketTTSService):
             default_settings.apply_update(settings)
 
         endpoint_model = _model_from_websocket_url(websocket_url)
+        explicit_model = assert_given(default_settings.model)
         if endpoint_model is None:
-            if not isinstance(default_settings.model, str):
+            if explicit_model is None:
                 raise ValueError("Rime WebSocket v1 requires a model for a dedicated endpoint")
-            endpoint_model = default_settings.model
-        elif default_settings.model not in (None, endpoint_model):
+            endpoint_model = explicit_model
+        elif explicit_model not in (None, endpoint_model):
             raise ValueError("settings.model does not match the v1 endpoint model")
         default_settings.model = endpoint_model
-        self._validate_settings(default_settings)
 
         super().__init__(
             text_aggregation_mode=TextAggregationMode.SENTENCE,
@@ -237,66 +233,57 @@ class RimeV1TTSService(WebsocketTTSService):
         """Convenience method to create a pause tag."""
         return f"<{seconds * 1000}>"
 
-    @staticmethod
-    def _validate_settings(settings: Settings) -> None:
-        """Reject settings that the endpoint's model does not accept."""
-        if settings.extra:
-            names = ", ".join(sorted(settings.extra))
-            raise ValueError(f"Rime WebSocket v1 does not support these settings: {names}")
-        model = settings.model
-        if not isinstance(model, str):
-            raise ValueError("Rime WebSocket v1 requires a model")
-        mist_fields = (
-            settings.pause_between_brackets,
-            settings.phonemize_between_brackets,
-            settings.save_oovs,
-        )
-        if not model.startswith("mist") and any(value is not None for value in mist_fields):
-            raise ValueError("Rime WebSocket v1 Mist settings require a Mist model")
-        if model != "coda" and settings.text_lookahead_tokens is not None:
-            raise ValueError("text_lookahead_tokens requires the Coda model")
-        if model == "mistv2" and settings.time_scale_factor is not None:
-            raise ValueError("time_scale_factor is not supported by the mistv2 model")
-
-    async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
-        """Apply a settings delta to contexts that start after the update."""
-        candidate = self._settings.copy()
-        candidate.apply_update(self.Settings.from_mapping(delta.given_fields()))
-        if candidate.model != self._endpoint_model:
-            raise ValueError("settings.model does not match the v1 endpoint model")
-        self._validate_settings(candidate)
-        return await super()._update_settings(delta)
+    def _warn_ignored(self, name: str, model: str):
+        logger.warning(f"{self}: {name} is not applied, {model} does not accept it")
 
     def _build_start_request(self, context_id: str) -> proto.WebSocketRequest:
-        """Build the start envelope that fixes a context's settings."""
+        """Build the start envelope that fixes a context's settings.
+
+        Settings the endpoint's model does not accept are left out with a warning.
+        """
         s = self._settings
         model = self._endpoint_model
+        if assert_given(s.model) != model:
+            logger.warning(f"{self}: model {s.model} is not applied, the endpoint serves {model}")
+
         audio_parameters = proto.AudioParameters(
             audio_format="audio/pcm", sampling_rate=self.sample_rate
         )
-        time_scale_factor = _given(s.time_scale_factor)
+        time_scale_factor = assert_given(s.time_scale_factor)
         if time_scale_factor is not None:
-            audio_parameters.time_scale_factor = time_scale_factor
+            if model == "mistv2":
+                self._warn_ignored("time_scale_factor", model)
+            else:
+                audio_parameters.time_scale_factor = time_scale_factor
 
         start = proto.SynthesisRequest(text="", audio_parameters=audio_parameters)
-        if isinstance(s.voice, str):
-            start.speaker = s.voice
-        if isinstance(s.language, str):
-            start.language = s.language
-        text_lookahead_tokens = _given(s.text_lookahead_tokens)
-        if model == "coda" and text_lookahead_tokens is not None:
-            start.coda_parameters.text_lookahead_tokens = text_lookahead_tokens
-        elif model.startswith("mist"):
-            mist = start.mist_parameters
-            pause_between_brackets = _given(s.pause_between_brackets)
-            if pause_between_brackets is not None:
-                mist.pause_between_brackets = pause_between_brackets
-            phonemize_between_brackets = _given(s.phonemize_between_brackets)
-            if phonemize_between_brackets is not None:
-                mist.phonemize_between_brackets = phonemize_between_brackets
-            save_oovs = _given(s.save_oovs)
-            if save_oovs is not None:
-                mist.save_oovs = save_oovs
+        voice = assert_given(s.voice)
+        if voice is not None:
+            start.speaker = voice
+        # The stored language is always a Rime code; the field type also allows Language.
+        language = assert_given(s.language)
+        if isinstance(language, str):
+            start.language = language
+
+        text_lookahead_tokens = assert_given(s.text_lookahead_tokens)
+        if text_lookahead_tokens is not None:
+            if model == "coda":
+                start.coda_parameters.text_lookahead_tokens = text_lookahead_tokens
+            else:
+                self._warn_ignored("text_lookahead_tokens", model)
+
+        mist_settings = {
+            "pause_between_brackets": assert_given(s.pause_between_brackets),
+            "phonemize_between_brackets": assert_given(s.phonemize_between_brackets),
+            "save_oovs": assert_given(s.save_oovs),
+        }
+        for name, value in mist_settings.items():
+            if value is None:
+                continue
+            if model.startswith("mist"):
+                setattr(start.mist_parameters, name, value)
+            else:
+                self._warn_ignored(name, model)
         return proto.WebSocketRequest(context_id=context_id, start=start)
 
     def _encode(self, request: proto.WebSocketRequest) -> str | bytes:

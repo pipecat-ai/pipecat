@@ -8,13 +8,14 @@
 
 import json
 import time
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import asynccontextmanager
 from typing import Any
 
 import pytest
 import websockets
 from google.protobuf import json_format
+from loguru import logger
 from rime_api import text_to_speech_pb2 as proto
 from websockets.asyncio.server import serve
 
@@ -59,6 +60,14 @@ def _error(request: proto.WebSocketRequest, kind: str) -> proto.WebSocketRespons
         context_id=request.context_id,
         error=proto.WebSocketError(kind=kind, message="rejected"),
     )
+
+
+@pytest.fixture
+def warning_log() -> Iterator[list[str]]:
+    messages: list[str] = []
+    handler_id = logger.add(lambda m: messages.append(m.record["message"]), level="WARNING")
+    yield messages
+    logger.remove(handler_id)
 
 
 def _speaking_reply(audio: bytes = b"\x01\x02") -> Reply:
@@ -169,27 +178,48 @@ def test_service_rejects_invalid_configuration() -> None:
         RimeV1TTSService(api_key="key", websocket_url="wss://api.rime.ai/coda")
     with pytest.raises(ValueError, match="sentence text aggregation"):
         RimeV1TTSService(api_key="key", text_aggregation_mode=TextAggregationMode.TOKEN)
-    with pytest.raises(ValueError, match="repetition_penalty"):
-        RimeV1TTSService(
-            api_key="key",
-            settings=RimeV1TTSService.Settings.from_mapping({"repetition_penalty": 1.1}),
-        )
     with pytest.raises(ValueError, match="does not match"):
         RimeV1TTSService(api_key="key", settings=RimeV1TTSService.Settings(model="mistv3"))
-    with pytest.raises(ValueError, match="Mist settings require a Mist model"):
-        RimeV1TTSService(
-            api_key="key", settings=RimeV1TTSService.Settings(pause_between_brackets=True)
-        )
 
 
-@pytest.mark.parametrize("model", ["mist", "arcana"])
-def test_non_coda_endpoint_rejects_lookahead(model: str) -> None:
-    with pytest.raises(ValueError, match="text_lookahead_tokens requires the Coda model"):
-        RimeV1TTSService(
-            api_key="key",
-            websocket_url=f"wss://api.rime.ai/{model}/ws",
-            settings=RimeV1TTSService.Settings(text_lookahead_tokens=4),
-        )
+@pytest.mark.parametrize(
+    "url, settings, ignored",
+    [
+        ("wss://api.rime.ai/mist/ws", {"text_lookahead_tokens": 4}, "text_lookahead_tokens"),
+        ("wss://api.rime.ai/arcana/ws", {"text_lookahead_tokens": 4}, "text_lookahead_tokens"),
+        ("wss://api.rime.ai/coda/ws", {"pause_between_brackets": True}, "pause_between_brackets"),
+        ("wss://api.rime.ai/coda/ws", {"save_oovs": False}, "save_oovs"),
+        (
+            "wss://customer.rime.ai/ws",
+            {"model": "mistv2", "time_scale_factor": 1.2},
+            "time_scale_factor",
+        ),
+    ],
+)
+def test_settings_the_model_does_not_accept_are_left_out_with_a_warning(
+    url: str, settings: dict[str, Any], ignored: str, warning_log: list[str]
+) -> None:
+    service = RimeV1TTSService(
+        api_key="key", websocket_url=url, settings=RimeV1TTSService.Settings(**settings)
+    )
+    service._sample_rate = 24000
+
+    start = service._build_start_request("turn").start
+    assert not start.coda_parameters.HasField("text_lookahead_tokens")
+    assert not start.HasField("mist_parameters")
+    assert not start.audio_parameters.HasField("time_scale_factor")
+    assert getattr(service._settings, ignored) == settings[ignored]
+    assert any(ignored in message for message in warning_log)
+
+
+def test_unknown_settings_are_ignored() -> None:
+    service = RimeV1TTSService(
+        api_key="key",
+        settings=RimeV1TTSService.Settings.from_mapping({"repetition_penalty": 1.1}),
+    )
+    service._sample_rate = 24000
+
+    assert service._build_start_request("turn").start.speaker == ""
 
 
 def test_coda_settings_map_to_the_start_request() -> None:
@@ -228,20 +258,26 @@ def test_mist_settings_map_to_the_start_request() -> None:
 
 
 @pytest.mark.asyncio
-async def test_runtime_settings_are_validated_against_the_endpoint() -> None:
+async def test_runtime_settings_apply_to_the_next_context(warning_log: list[str]) -> None:
     service = RimeV1TTSService(api_key="key", settings=RimeV1TTSService.Settings(voice="old"))
     service._sample_rate = 24000
 
     changed = await service._update_settings(RimeV1TTSService.Settings(voice="new"))
     assert changed == {"voice": "old"}
     assert service._build_start_request("turn").start.speaker == "new"
+    assert not warning_log
 
-    with pytest.raises(ValueError, match="does not match the v1 endpoint model"):
-        await service._update_settings(RimeV1TTSService.Settings(model="mistv3"))
+    # The endpoint serves one model, so a model change is reported, not applied.
+    await service._update_settings(RimeV1TTSService.Settings(model="mistv3"))
+    start = service._build_start_request("turn").start
+    assert not start.HasField("mist_parameters")
+    assert any("mistv3 is not applied" in message for message in warning_log)
 
     mist = RimeV1TTSService(api_key="key", websocket_url="wss://api.rime.ai/mist/ws")
-    with pytest.raises(ValueError, match="text_lookahead_tokens requires the Coda model"):
-        await mist._update_settings(RimeV1TTSService.Settings(text_lookahead_tokens=4))
+    mist._sample_rate = 24000
+    await mist._update_settings(RimeV1TTSService.Settings(text_lookahead_tokens=4))
+    assert not mist._build_start_request("turn").start.HasField("coda_parameters")
+    assert any("text_lookahead_tokens" in message for message in warning_log)
 
 
 # ---------------------------------------------------------------------------
