@@ -13,15 +13,20 @@ import pytest
 import websockets
 
 import pipecat.transports.websocket.client as websocket_client
-from pipecat.frames.frames import Frame, OutputAudioRawFrame
+from pipecat.frames.frames import EndFrame, ErrorFrame, Frame, OutputAudioRawFrame
+from pipecat.pipeline.pipeline import Pipeline
+from pipecat.pipeline.worker import PipelineWorker, WorkerParams
 from pipecat.serializers.base_serializer import FrameSerializer
 from pipecat.transports.websocket.client import (
     WebsocketClientCallbacks,
+    WebsocketClientInputTransport,
+    WebsocketClientOutputTransport,
     WebsocketClientParams,
     WebsocketClientSession,
     WebsocketClientTransport,
 )
 from pipecat.utils.asyncio.task_manager import TaskManager
+from pipecat.utils.errors import ErrorCategory
 
 
 class _FakeWebsocket:
@@ -101,6 +106,40 @@ async def test_the_websocket_outlives_the_first_transport_to_disconnect(monkeypa
     assert opened[0].closed
 
 
+@pytest.mark.asyncio
+async def test_a_connect_timeout_is_reported_by_both_transports(monkeypatch):
+    """A handshake that times out is reported like any other failure to connect.
+
+    The input and output transports share the connection, so each reports that
+    it could not be set up.
+    """
+
+    async def timing_out_connect(**kwargs):
+        raise TimeoutError("timed out during opening handshake")
+
+    monkeypatch.setattr(websocket_client, "websocket_connect", timing_out_connect)
+
+    transport = WebsocketClientTransport(uri="ws://example.com")
+    worker = PipelineWorker(Pipeline([transport.input(), transport.output()]))
+    errors: list[ErrorFrame] = []
+
+    @worker.event_handler("on_pipeline_error")
+    async def on_pipeline_error(worker, frame):
+        errors.append(frame)
+
+    await worker.queue_frame(EndFrame())
+    async with asyncio.timeout(5):
+        await worker.run(WorkerParams(task_manager=TaskManager()))
+
+    assert len(errors) == 2
+    assert {type(error.processor) for error in errors} == {
+        WebsocketClientInputTransport,
+        WebsocketClientOutputTransport,
+    }
+    assert all(error.category == ErrorCategory.CONNECTIVITY for error in errors)
+    assert all(isinstance(error.exception, TimeoutError) for error in errors)
+
+
 class _CoalescingSerializer(FrameSerializer):
     """Emits one coalesced payload every third frame, buffering the two before it."""
 
@@ -145,3 +184,23 @@ async def test_every_frame_is_paced_when_payloads_are_coalesced():
     assert written == [True] * 9
     assert output._write_audio_sleep.await_count == 9
     assert connection.send.await_count == 3
+
+
+@pytest.mark.asyncio
+async def test_frame_is_not_written_when_sending_fails():
+    """A send that fails leaves the frame unwritten, and unpaced."""
+    params = WebsocketClientParams(audio_out_enabled=True)
+    output = WebsocketClientTransport(uri="ws://localhost:1", params=params).output()
+    output._sample_rate = 16000
+    output._write_audio_sleep = AsyncMock()
+
+    connection = AsyncMock()
+    connection.state = websockets.State.OPEN
+    connection.send.side_effect = websockets.exceptions.ConnectionClosedError(None, None)
+    output._session._websocket = connection
+
+    frame = OutputAudioRawFrame(audio=b"\x00" * 320, sample_rate=16000, num_channels=1)
+    written = await output.write_audio_frame(frame)
+
+    assert not written
+    output._write_audio_sleep.assert_not_awaited()
