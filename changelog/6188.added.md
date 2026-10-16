@@ -1,0 +1,1 @@
+- Added an `on_audio_published` event to `MOQTransport`. It fires for each audio frame written to the bot's audio track with the frame, the track name, and the media timestamp of the frame's first sample, so an application can place what the bot said on the published track's timeline.
