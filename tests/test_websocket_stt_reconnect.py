@@ -137,3 +137,98 @@ async def test_a_failed_first_connect_is_retried(service):
     assert provider.handshakes == 2
     assert len(provider.connections) == 1
     assert "c1" in transcripts
+
+
+# Services whose own protocol the fake provider doesn't speak: the test only
+# checks that a rejected first handshake is followed by a second one that
+# carries the audio.
+RETRY_ONLY_SERVICES = [
+    "assemblyai",
+    "aws",
+    "gladia",
+    "meta",
+    "openai",
+    "soniox",
+    "together",
+    "xai",
+]
+
+
+def _make_retry_only_service(name: str, port: int):
+    if name == "assemblyai":
+        from pipecat.services.assemblyai.stt import AssemblyAISTTService
+
+        service = AssemblyAISTTService(api_key="test-key")
+    elif name == "aws":
+        from pipecat.services.aws.stt import AWSTranscribeSTTService
+
+        service = AWSTranscribeSTTService(
+            api_key="test-secret", aws_access_key_id="test-key", region="us-east-1"
+        )
+    elif name == "gladia":
+        from pipecat.services.gladia.stt import GladiaSTTService
+
+        service = GladiaSTTService(api_key="test-key")
+
+        async def setup_gladia(settings):
+            return {"url": f"ws://127.0.0.1:{port}", "id": "test-session"}
+
+        service._setup_gladia = setup_gladia
+    elif name == "meta":
+        from pipecat.services.meta.stt import MetaSTTService
+
+        service = MetaSTTService(api_key="test-key")
+    elif name == "openai":
+        from pipecat.services.openai.stt import OpenAIRealtimeSTTService
+
+        service = OpenAIRealtimeSTTService(api_key="test-key")
+    elif name == "soniox":
+        from pipecat.services.soniox.stt import SonioxSTTService
+
+        service = SonioxSTTService(api_key="test-key")
+    elif name == "together":
+        from pipecat.services.together.stt import TogetherSTTService
+
+        service = TogetherSTTService(api_key="test-key")
+    else:
+        from pipecat.services.xai.stt import XAISTTService
+
+        service = XAISTTService(api_key="test-key")
+
+    websocket_connect = service._websocket_connect
+
+    async def local_websocket_connect(uri, **kwargs):
+        # The fake provider checks no auth, and AWS's handshake headers clash
+        # with the client's own.
+        kwargs.pop("subprotocols", None)
+        kwargs.pop("additional_headers", None)
+        return await websocket_connect(f"ws://127.0.0.1:{port}", **kwargs)
+
+    service._websocket_connect = local_websocket_connect
+    return service
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("service", RETRY_ONLY_SERVICES)
+async def test_a_failed_first_connect_is_retried_in_the_background(service):
+    provider = _FakeProvider(service, reject_first_handshake=True)
+    messages = []
+
+    async def handle(websocket):
+        provider.connections.append(_Connection(id=len(provider.connections) + 1))
+        async for message in websocket:
+            messages.append(message)
+
+    async with serve(handle, "127.0.0.1", 0, process_request=provider.process_request) as server:
+        port = server.sockets[0].getsockname()[1]
+        frames = []
+        for _ in range(int(1.0 / FRAME_SECONDS)):
+            frames.append(
+                InputAudioRawFrame(audio=b"\x00\x00" * 320, sample_rate=16000, num_channels=1)
+            )
+            frames.append(SleepFrame(sleep=FRAME_SECONDS))
+        await run_test(_make_retry_only_service(service, port), frames_to_send=frames)
+
+    assert provider.handshakes == 2
+    assert len(provider.connections) == 1
+    assert messages
