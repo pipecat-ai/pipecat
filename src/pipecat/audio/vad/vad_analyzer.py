@@ -231,19 +231,21 @@ class VADAnalyzer(ABC):
                     case VADState.STOPPING:
                         self._vad_stopping_count += 1
 
-        if (
-            self._vad_state == VADState.STARTING
-            and self._vad_starting_count >= self._vad_start_frames
-        ):
-            self._vad_state = VADState.SPEAKING
-            self._vad_starting_count = 0
+            # Settled per analysis frame, so a buffer holding several of them
+            # behaves like the same audio delivered one frame at a time.
+            if (
+                self._vad_state == VADState.STARTING
+                and self._vad_starting_count >= self._vad_start_frames
+            ):
+                self._vad_state = VADState.SPEAKING
+                self._vad_starting_count = 0
 
-        if (
-            self._vad_state == VADState.STOPPING
-            and self._vad_stopping_count >= self._vad_stop_frames
-        ):
-            self._vad_state = VADState.QUIET
-            self._vad_stopping_count = 0
+            if (
+                self._vad_state == VADState.STOPPING
+                and self._vad_stopping_count >= self._vad_stop_frames
+            ):
+                self._vad_state = VADState.QUIET
+                self._vad_stopping_count = 0
 
         return self._vad_state
 
