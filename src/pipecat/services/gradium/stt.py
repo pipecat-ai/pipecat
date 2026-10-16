@@ -57,6 +57,10 @@ DEFAULT_EOT_HORIZON_S = 3.0
 DEFAULT_EOT_THRESHOLD = 0.5
 DEFAULT_POST_FLUSH_COOLDOWN_FRAMES = 8
 
+# Longest SETTLING waits for a post-flush reading before proposing the stop
+# anyway; matches ExternalUserTurnStopStrategy's default timeout.
+STOP_SETTLE_TIMEOUT_S = 0.5
+
 # Settings read on the client as step messages arrive; a change to any of
 # them takes effect on the next step without a reconnect.
 _TURN_DETECTION_FIELDS = frozenset({"eot_horizon_s", "eot_threshold", "post_flush_cooldown_frames"})
@@ -66,15 +70,18 @@ class _TurnPhase(Enum):
     """Where turn detection is in a turn's lifecycle.
 
     IDLE waits for the signal to read inactive, ARMED opens a turn on the next
-    dip, OPEN is a turn in progress, and ENDING has proposed the stop and
-    flushed the server, and ignores the signal until the turn's transcript is
-    pushed, then hands over to ARMED.
+    dip, OPEN is a turn in progress, and ENDING has flushed the server and
+    ignores the signal until the turn's transcript is pushed. SETTLING then
+    waits for the first reading after the post-flush cooldown: inactive
+    proposes the stop and hands over to ARMED, active means the user kept
+    talking and reopens the turn.
     """
 
     IDLE = auto()
     ARMED = auto()
     OPEN = auto()
     ENDING = auto()
+    SETTLING = auto()
 
 
 # Gradium's language code asking it to detect the language rather than being
@@ -207,7 +214,7 @@ class GradiumSTTService(WebsocketSTTService):
 
         step(inactivity >= threshold) -> step(inactivity < threshold: turn opens)
             -> text* -> step(inactivity >= threshold: turn ends)
-            -> ProposedUserStoppedSpeakingFrame -> flush -> TranscriptionFrame
+            -> flush -> TranscriptionFrame -> ProposedUserStoppedSpeakingFrame
             -> step(inactivity < threshold: next turn opens)
 
     A connection's first turn opens on the signal falling below the
@@ -217,20 +224,23 @@ class GradiumSTTService(WebsocketSTTService):
     transcript is pushed the next step below the threshold opens a turn, and
     speech that continues through the flush starts one.
 
-    A turn start broadcasts a :class:`ProposedUserStartedSpeakingFrame`; a
-    turn end broadcasts a :class:`ProposedUserStoppedSpeakingFrame` and
-    flushes the server, and the final :class:`TranscriptionFrame` follows
-    once the flush is acknowledged. Local VAD frames are ignored, and
+    A turn start broadcasts a :class:`ProposedUserStartedSpeakingFrame`. A
+    turn end flushes the server; once the flush is acknowledged the final
+    :class:`TranscriptionFrame` is pushed and a
+    :class:`ProposedUserStoppedSpeakingFrame` follows it, even for a turn
+    that produced no text. Local VAD frames are ignored, and
     ``service_metadata_frame()`` recommends
     :class:`~pipecat.turns.user_turn_strategies.ExternalUserTurnStrategies`,
-    which resolve the proposals into the user turn frames, own the
-    interruption, and hold the turn open until that transcript arrives.
+    which resolve the proposals into the user turn frames and own the
+    interruption. With the transcript already in hand, they close the turn
+    on the stop proposal itself.
 
     Event handlers available (in addition to ``on_connected`` /
     ``on_disconnected``), fired only with turn detection on:
 
     - on_turn_start(service): the end-pointing signal opened a turn
-    - on_turn_end(service): the end-pointing signal closed the turn
+    - on_turn_end(service): the turn's transcript was pushed and its stop
+      proposed
 
     Example::
 
@@ -386,6 +396,11 @@ class GradiumSTTService(WebsocketSTTService):
         # post-flush cooldown, which outlives the ENDING phase.
         self._turn_phase = _TurnPhase.IDLE
         self._flush_cooldown = 0
+        # Steps received since the last "flushed" ack and the latest one's
+        # inactivity, which SETTLING decides on.
+        self._steps_since_flush = 0
+        self._last_inactive: bool | None = None
+        self._settle_timeout_task: asyncio.Task | None = None
 
         self._register_event_handler("on_turn_start")
         self._register_event_handler("on_turn_end")
@@ -440,6 +455,7 @@ class GradiumSTTService(WebsocketSTTService):
             return changed
 
         if self._websocket:
+            await self._propose_pending_turn_stop()
             await self._disconnect()
             await self._connect()
         return changed
@@ -638,7 +654,8 @@ class GradiumSTTService(WebsocketSTTService):
         The server's decoder state goes with the connection, so the text
         received so far is pushed as the transcript and the new connection
         starts from a clean state. An open turn stays open: the user may still
-        be speaking, and the new connection's end-pointing signal ends it.
+        be speaking, and the new connection's end-pointing signal ends it. A
+        turn that ended but has not proposed its stop yet proposes it.
 
         Args:
             attempt_number: Current retry attempt number for logging.
@@ -650,6 +667,7 @@ class GradiumSTTService(WebsocketSTTService):
             await self.cancel_task(self._transcript_aggregation_task)
             self._transcript_aggregation_task = None
         await self._finalize_accumulated_text()
+        await self._propose_pending_turn_stop()
         turn_open = self._turn_phase is _TurnPhase.OPEN
         await self._reset_connection_state()
         if turn_open:
@@ -661,11 +679,16 @@ class GradiumSTTService(WebsocketSTTService):
         if self._transcript_aggregation_task:
             await self.cancel_task(self._transcript_aggregation_task)
             self._transcript_aggregation_task = None
+        if self._settle_timeout_task:
+            await self.cancel_task(self._settle_timeout_task)
+            self._settle_timeout_task = None
 
         self._accumulated_text.clear()
         self._flush_counter = 0
         self._turn_phase = _TurnPhase.IDLE
         self._flush_cooldown = 0
+        self._steps_since_flush = 0
+        self._last_inactive = None
 
     def _get_websocket(self):
         if self._websocket:
@@ -688,6 +711,8 @@ class GradiumSTTService(WebsocketSTTService):
                 await self._handle_text(msg["text"])
             elif type_ == "flushed":
                 if self._enable_turn_detection:
+                    self._steps_since_flush = 0
+                    self._last_inactive = None
                     self._flush_cooldown = (
                         assert_given(self._settings.post_flush_cooldown_frames) or 0
                     )
@@ -737,7 +762,7 @@ class GradiumSTTService(WebsocketSTTService):
             await self._finalize_accumulated_text()
         finally:
             if self._turn_phase is _TurnPhase.ENDING:
-                self._turn_phase = _TurnPhase.ARMED
+                await self._begin_settling()
 
     async def _finalize_accumulated_text(self):
         """Join accumulated text, push TranscriptionFrame, and clear state."""
@@ -776,9 +801,9 @@ class GradiumSTTService(WebsocketSTTService):
         vad = msg.get("vad") or []
         if not vad:
             return
-        if self._flush_cooldown > 0:
+        cooling_down = self._flush_cooldown > 0
+        if cooling_down:
             self._flush_cooldown -= 1
-            return
 
         horizon = assert_given(self._settings.eot_horizon_s)
         threshold = assert_given(self._settings.eot_threshold)
@@ -791,6 +816,17 @@ class GradiumSTTService(WebsocketSTTService):
         logger.trace(f"Gradium turn detection: inactivity {inactivity:.2f} over {horizon}s")
 
         inactive = inactivity >= threshold
+        self._steps_since_flush += 1
+        self._last_inactive = inactive
+        if (
+            self._turn_phase is _TurnPhase.SETTLING
+            and self._steps_since_flush > self._post_flush_cooldown_frames
+        ):
+            await self._settle(inactive)
+            return
+        if cooling_down:
+            return
+
         match self._turn_phase:
             case _TurnPhase.IDLE if inactive:
                 self._turn_phase = _TurnPhase.ARMED
@@ -798,9 +834,9 @@ class GradiumSTTService(WebsocketSTTService):
                 await self._start_turn()
             case _TurnPhase.OPEN if inactive:
                 await self._end_turn()
-            # ENDING ignores the signal: the previous turn's TranscriptionFrame
-            # and stop proposal must not arrive after the next turn's start
-            # proposal.
+            # ENDING and SETTLING ignore it otherwise: the previous turn's
+            # TranscriptionFrame and stop proposal must not arrive after the
+            # next turn's start proposal.
 
     async def _start_turn(self):
         logger.debug("Gradium turn detection: start of turn")
@@ -811,14 +847,69 @@ class GradiumSTTService(WebsocketSTTService):
     async def _end_turn(self):
         logger.debug("Gradium turn detection: end of turn")
         self._turn_phase = _TurnPhase.ENDING
-        await self.broadcast_frame(ProposedUserStoppedSpeakingFrame)
-        await self._call_event_handler("on_turn_end")
         # The flush pushes the decoder past its lookahead so the turn's tail
-        # tokens arrive and the transcript finalizes on the "flushed" ack.
-        # Without a flush no ack is coming, so the transcript finalizes on
-        # what has arrived.
+        # tokens arrive and the transcript finalizes on the "flushed" ack; the
+        # stop is proposed after it. Without a flush no ack is coming, so the
+        # transcript finalizes on what has arrived.
         self.request_finalize()
         if await self._send_flush():
             return
-        self._turn_phase = _TurnPhase.IDLE
         await self._finalize_accumulated_text()
+        await self._propose_turn_stop()
+        self._turn_phase = _TurnPhase.IDLE
+
+    async def _propose_turn_stop(self):
+        await self.broadcast_frame(ProposedUserStoppedSpeakingFrame)
+        await self._call_event_handler("on_turn_end")
+
+    async def _propose_pending_turn_stop(self):
+        """Propose the stop of a turn that ended before its connection did.
+
+        The stop follows the turn's transcript, so a turn still flushing or
+        settling when its connection is replaced has not proposed it, and the
+        turn strategies would hold the turn open.
+        """
+        if self._turn_phase in (_TurnPhase.ENDING, _TurnPhase.SETTLING):
+            await self._propose_turn_stop()
+
+    @property
+    def _post_flush_cooldown_frames(self) -> int:
+        return assert_given(self._settings.post_flush_cooldown_frames) or 0
+
+    async def _begin_settling(self):
+        """Wait for the signal after the flush to say whether the user stopped.
+
+        A flush cuts the turn at the end-pointer's decision, but the user may
+        be speaking again, or start a moment later. The stop is proposed only
+        once the first reading after the post-flush cooldown says the line is
+        quiet; otherwise the turn reopens, so the continuation lands in the
+        same user turn instead of interrupting the bot. Without a reading in
+        time the stop goes out anyway.
+        """
+        self._turn_phase = _TurnPhase.SETTLING
+        if (
+            self._steps_since_flush > self._post_flush_cooldown_frames
+            and self._last_inactive is not None
+        ):
+            await self._settle(self._last_inactive)
+            return
+        self._settle_timeout_task = self.create_task(
+            self._settle_timeout_handler(), "stop_settle_timeout"
+        )
+
+    async def _settle_timeout_handler(self):
+        await asyncio.sleep(STOP_SETTLE_TIMEOUT_S)
+        self._settle_timeout_task = None
+        if self._turn_phase is _TurnPhase.SETTLING:
+            await self._settle(True)
+
+    async def _settle(self, inactive: bool):
+        if self._settle_timeout_task:
+            await self.cancel_task(self._settle_timeout_task)
+            self._settle_timeout_task = None
+        if inactive:
+            await self._propose_turn_stop()
+            self._turn_phase = _TurnPhase.ARMED
+        else:
+            logger.debug("Gradium turn detection: speech continued through the flush")
+            self._turn_phase = _TurnPhase.OPEN
