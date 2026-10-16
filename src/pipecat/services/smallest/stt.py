@@ -89,30 +89,27 @@ def language_to_smallest_stt_language(language: Language) -> str:
     return resolve_language(language, LANGUAGE_MAP)
 
 
-def _validate_pulse_2_language(
-    model: str | NotGiven | None, language: Language | str | NotGiven | None
-) -> None:
-    """Reject non-English languages on the English-only ``pulse-2`` model.
-
-    The server closes the socket with a ``LANGUAGE_NOT_SUPPORTED_BY_MODEL``
-    error in this case; raise here instead so the failure surfaces at
-    settings-update time with a clear message.
-    """
-    if model != SmallestSTTModel.PULSE_2.value or language is None or not is_given(language):
-        return
-
-    code = (
-        language_to_smallest_stt_language(language) if isinstance(language, Language) else language
-    )
-    if code != "en":
-        raise ValueError(f"model 'pulse-2' is English-only, got language '{code}'")
-
-
 class SmallestSTTModel(StrEnum):
     """Available Smallest AI STT models."""
 
     PULSE = "pulse"
     PULSE_2 = "pulse-2"
+
+
+def _validate_pulse_2_language(
+    model: str | NotGiven | None, language: Language | str | NotGiven | None
+) -> None:
+    """Raise if ``language`` isn't English and ``model`` is the English-only ``pulse-2``.
+
+    The server rejects this combination by closing the socket, so raise up front
+    with a clear message instead.
+    """
+    if (
+        model == SmallestSTTModel.PULSE_2
+        and language
+        and str(language).split("-")[0].lower() != "en"
+    ):
+        raise ValueError(f"model 'pulse-2' is English-only, got language '{language}'")
 
 
 @dataclass

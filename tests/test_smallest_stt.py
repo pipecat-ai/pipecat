@@ -6,6 +6,8 @@
 
 """Tests for SmallestSTTService's Pulse 2.0 model support."""
 
+from unittest.mock import AsyncMock
+
 import pytest
 
 from pipecat.services.smallest.stt import SmallestSTTModel, SmallestSTTService
@@ -22,6 +24,16 @@ def test_pulse_2_defaults_to_english():
     service = SmallestSTTService(
         api_key="test-key",
         settings=SmallestSTTService.Settings(model=SmallestSTTModel.PULSE_2.value),
+    )
+    assert service._settings.language == "en"
+
+
+def test_pulse_2_accepts_regional_english_string():
+    service = SmallestSTTService(
+        api_key="test-key",
+        settings=SmallestSTTService.Settings(
+            model=SmallestSTTModel.PULSE_2.value, language="en-US"
+        ),
     )
     assert service._settings.language == "en"
 
@@ -53,6 +65,18 @@ async def test_switching_to_pulse_2_with_non_english_language_raises():
         await service._update_settings(
             STTSettings(model=SmallestSTTModel.PULSE_2.value, language=Language.HI)
         )
+
+
+@pytest.mark.asyncio
+async def test_switching_to_pulse_2_with_regional_english_string_succeeds():
+    service = SmallestSTTService(api_key="test-key")
+    service._disconnect = AsyncMock()
+    service._connect = AsyncMock()
+
+    await service._update_settings(
+        STTSettings(model=SmallestSTTModel.PULSE_2.value, language="en-US")
+    )
+    assert service._settings.model == SmallestSTTModel.PULSE_2.value
 
 
 def test_emotion_and_gender_detection_default_on():
