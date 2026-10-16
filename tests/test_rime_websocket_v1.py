@@ -32,7 +32,7 @@ from pipecat.frames.frames import (
     TTSTextFrame,
 )
 from pipecat.services.rime import tts_v1 as rime_tts_v1
-from pipecat.services.rime._websocket_v1 import (
+from pipecat.services.rime.tts_v1 import (
     AudioEvent,
     CancelledEvent,
     ConnectionErrorEvent,
@@ -42,6 +42,7 @@ from pipecat.services.rime._websocket_v1 import (
     RimeV1ProtocolError,
     RimeV1ProviderError,
     RimeV1StateError,
+    RimeV1TTSService,
     RimeWebSocketV1Client,
     StartedEvent,
     SynthesisOptions,
@@ -49,7 +50,6 @@ from pipecat.services.rime._websocket_v1 import (
     subprotocol_for_protocol,
     validate_websocket_url,
 )
-from pipecat.services.rime.tts_v1 import RimeV1TTSService
 from pipecat.services.tts_service import TextAggregationMode
 from pipecat.tests.utils import SleepFrame, run_test
 

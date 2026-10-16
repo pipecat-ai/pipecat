@@ -8,7 +8,7 @@ import pytest
 from google.protobuf import json_format
 from rime_api import text_to_speech_pb2 as proto
 
-from pipecat.services.rime._websocket_v1 import _codec_for_protocol
+from pipecat.services.rime.tts_v1 import _codec_for_protocol
 
 _FIXTURES = json.loads((Path(__file__).parent / "fixtures/rime_websocket_v1.json").read_text())
 
