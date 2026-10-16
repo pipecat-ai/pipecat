@@ -28,16 +28,33 @@ from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.rime.tts_v1 import RimeV1TTSService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.livekit.transport import LiveKitParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
 
 transport_params = {
-    "eval": lambda: EvalTransportParams(audio_in_enabled=True, audio_out_enabled=True),
-    "daily": lambda: DailyParams(audio_in_enabled=True, audio_out_enabled=True),
-    "twilio": lambda: FastAPIWebsocketParams(audio_in_enabled=True, audio_out_enabled=True),
-    "webrtc": lambda: TransportParams(audio_in_enabled=True, audio_out_enabled=True),
+    "eval": lambda: EvalTransportParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
+    "daily": lambda: DailyParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
+    "livekit": lambda: LiveKitParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
+    "twilio": lambda: FastAPIWebsocketParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
+    "webrtc": lambda: TransportParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
 }
 
 
@@ -46,12 +63,14 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
     logger.info("Starting bot")
 
     stt = DeepgramSTTService(api_key=os.environ["DEEPGRAM_API_KEY"])
+
     tts = RimeV1TTSService(
         api_key=os.environ["RIME_API_KEY"],
-        websocket_url=os.getenv("RIME_WEBSOCKET_URL", "wss://api.rime.ai/coda/ws"),
-        websocket_protocol="binary",
-        settings=RimeV1TTSService.Settings(voice="astra"),
+        settings=RimeV1TTSService.Settings(
+            voice="astra",
+        ),
     )
+
     llm = OpenAILLMService(
         api_key=os.environ["OPENAI_API_KEY"],
         settings=OpenAILLMService.Settings(
@@ -80,7 +99,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
     )
     worker = PipelineWorker(
         pipeline,
-        params=PipelineParams(enable_metrics=True, enable_usage_metrics=True),
+        params=PipelineParams(
+            enable_metrics=True,
+            enable_usage_metrics=True,
+        ),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
         processor_unusable_policy=ProcessorUnusablePolicy.END,
     )
