@@ -143,6 +143,10 @@ async def _ready_client(protocol: str = "binary") -> tuple[RimeWebSocketV1Client
     return client, socket
 
 
+async def _queued_items(service: RimeTTSService, context_id: str, count: int) -> list[Any]:
+    return [await service._audio_context_manager.get(context_id, timeout=0.1) for _ in range(count)]
+
+
 def _options(**kwargs: Any) -> SynthesisOptions:
     values = {
         "model": "coda",
@@ -208,7 +212,7 @@ async def test_service_blocked_write_closes_connection_and_allows_reconnect(
     service._v1_client = client
     service._v1_receiving_client = client
     service._turn_context_id = "turn"
-    service._audio_contexts["turn"] = asyncio.Queue()
+    await service.create_audio_context("turn")
     if payload in ("end", "cancel"):
         service._v1_options_by_context["turn"] = _options()
         await client.send_text("turn", _options(), "Hello.")
@@ -913,7 +917,7 @@ async def test_context_error_is_queued_before_turn_completion_closes_context() -
     )
     context_id = "turn"
     service._turn_context_id = context_id
-    service._audio_contexts = {context_id: asyncio.Queue()}
+    await service.create_audio_context(context_id)
     cancellation_started = asyncio.Event()
     allow_cancellation_to_finish = asyncio.Event()
 
@@ -930,13 +934,11 @@ async def test_context_error_is_queued_before_turn_completion_closes_context() -
     allow_cancellation_to_finish.set()
     await finish_task
 
-    queue = service._audio_contexts[context_id]
-    queued_error = queue.get_nowait()
-    queued_stop = queue.get_nowait()
+    queued_error, queued_stop, end = await _queued_items(service, context_id, 3)
     assert queued_error is error
     assert isinstance(queued_stop, TTSStoppedFrame)
     assert queued_stop.context_id == context_id
-    assert queue.get_nowait() is None
+    assert end is None
 
 
 @pytest.mark.asyncio
@@ -1014,7 +1016,7 @@ async def test_v1_reconnect_moves_an_active_turn_to_a_new_context() -> None:
     service._v1_client = old_client
     service._v1_receiving_client = old_client
     service._turn_context_id = "old-turn"
-    service._audio_contexts = {"old-turn": asyncio.Queue()}
+    await service.create_audio_context("old-turn")
     service._v1_failed_contexts.add("old-turn")
 
     new_socket = _ScriptedSocket("rime.v1.binary")
@@ -1032,9 +1034,9 @@ async def test_v1_reconnect_moves_an_active_turn_to_a_new_context() -> None:
     assert service._turn_context_id is not None
     assert service._turn_context_id != "old-turn"
     assert service.create_context_id() not in service._v1_failed_contexts
-    queue = service._audio_contexts["old-turn"]
-    assert isinstance(queue.get_nowait(), TTSStoppedFrame)
-    assert queue.get_nowait() is None
+    queued_stop, end = await _queued_items(service, "old-turn", 2)
+    assert isinstance(queued_stop, TTSStoppedFrame)
+    assert end is None
     assert service._websocket is new_socket
     assert old_socket.closed
 
@@ -1223,7 +1225,7 @@ async def test_service_round_trip_uses_v1_frames_and_pipecat_order(protocol: str
 
 
 @pytest.mark.asyncio
-async def test_context_error_without_audio_does_not_publish_tts_text() -> None:
+async def test_context_error_without_audio_force_completes_tts_text() -> None:
     async def handler(websocket) -> None:
         await websocket.send(
             proto.WebSocketResponse(ready=proto.WebSocketReady(protocol=1)).SerializeToString()
@@ -1259,7 +1261,7 @@ async def test_context_error_without_audio_does_not_publish_tts_text() -> None:
         down_frames, up_frames = await run_test(
             service,
             frames_to_send=[
-                TTSSpeakFrame(text="This must not enter history."),
+                TTSSpeakFrame(text="Rejected text."),
                 SleepFrame(sleep=0.1),
             ],
             start_timeout=3.0,
@@ -1267,12 +1269,14 @@ async def test_context_error_without_audio_does_not_publish_tts_text() -> None:
 
     assert any(isinstance(frame, ErrorFrame) for frame in up_frames)
     assert not any(isinstance(frame, TTSAudioRawFrame) for frame in down_frames)
-    assert not any(isinstance(frame, TTSTextFrame) for frame in down_frames)
+    assert [frame.text for frame in down_frames if isinstance(frame, TTSTextFrame)] == [
+        "Rejected text."
+    ]
     assert service.is_usable
 
 
 @pytest.mark.asyncio
-async def test_done_without_audio_does_not_publish_tts_text() -> None:
+async def test_done_without_audio_force_completes_tts_text() -> None:
     async def handler(websocket) -> None:
         await websocket.send(
             proto.WebSocketResponse(ready=proto.WebSocketReady(protocol=1)).SerializeToString()
@@ -1321,11 +1325,13 @@ async def test_done_without_audio_does_not_publish_tts_text() -> None:
 
     assert any(isinstance(frame, ErrorFrame) for frame in up_frames)
     assert not any(isinstance(frame, TTSAudioRawFrame) for frame in down_frames)
-    assert not any(isinstance(frame, TTSTextFrame) for frame in down_frames)
+    assert [frame.text for frame in down_frames if isinstance(frame, TTSTextFrame)] == [
+        "This audio is empty."
+    ]
 
 
 @pytest.mark.asyncio
-async def test_context_error_discards_later_sentences_in_the_same_turn() -> None:
+async def test_context_error_stops_sending_later_sentences_in_the_same_turn() -> None:
     requests: list[str] = []
 
     async def handler(websocket) -> None:
@@ -1386,7 +1392,10 @@ async def test_context_error_discards_later_sentences_in_the_same_turn() -> None
     assert requests == ["start", "text"]
     assert any(isinstance(frame, ErrorFrame) for frame in up_frames)
     assert not any(isinstance(frame, TTSAudioRawFrame) for frame in down_frames)
-    assert not any(isinstance(frame, TTSTextFrame) for frame in down_frames)
+    assert [frame.text for frame in down_frames if isinstance(frame, TTSTextFrame)] == [
+        "First sentence.",
+        "Second sentence.",
+    ]
 
 
 @pytest.mark.asyncio
