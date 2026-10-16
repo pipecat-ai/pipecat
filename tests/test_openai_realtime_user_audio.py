@@ -69,6 +69,7 @@ def _make_service(*, manual_turn_detection: bool, preroll_secs: float | None = N
         settings=settings,
         user_audio_preroll_secs=preroll_secs,
     )
+    service._api_session_ready = True
 
     recorder = _EventRecorder()
     service.send_client_event = recorder  # type: ignore[method-assign]
@@ -202,6 +203,20 @@ async def test_server_mode_appends_without_buffering():
 
     assert recorder.kinds() == ["InputAudioBufferAppendEvent", "InputAudioBufferAppendEvent"]
     assert bytes(service._user_audio_preroll_buffer) == b""
+
+
+@pytest.mark.asyncio
+async def test_user_audio_is_dropped_until_session_ready():
+    """Audio must not reach the server before session.update is acknowledged."""
+    service, recorder = _make_service(manual_turn_detection=False)
+    service._api_session_ready = False
+
+    await service._send_user_audio(_audio_frame(data=b"\xaa\xbb"))
+    assert recorder.kinds() == []
+
+    service._api_session_ready = True
+    await service._send_user_audio(_audio_frame(data=b"\xcc\xdd"))
+    assert recorder.append_payloads() == [base64.b64encode(b"\xcc\xdd").decode()]
 
 
 @pytest.mark.asyncio
