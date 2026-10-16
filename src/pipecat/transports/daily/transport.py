@@ -337,6 +337,10 @@ class DailyParams(TransportParams):
         custom_audio_track_params: Per-destination configuration for custom audio tracks.
         custom_video_track_params: Per-destination configuration for custom video tracks.
         dialin_settings: Optional settings for dial-in functionality.
+        initial_receive_bitrate: Expected download bandwidth in bits per second. The
+            SFU starts its estimate of what it can send the bot from this value, so
+            incoming video reaches full quality sooner. ``None`` keeps Daily's default
+            of 1 Mbps.
         microphone_out_enabled: Whether to enable the main microphone track.
         transcription_enabled: Whether to enable speech transcription.
         transcription_settings: Configuration for transcription service.
@@ -350,6 +354,7 @@ class DailyParams(TransportParams):
     custom_audio_track_params: Mapping[str, DailyCustomAudioTrackParams] | None = None
     custom_video_track_params: Mapping[str, DailyCustomVideoTrackParams] | None = None
     dialin_settings: DailyDialinSettings | None = None
+    initial_receive_bitrate: int | None = None
     microphone_out_enabled: bool = True
     transcription_enabled: bool = False
     transcription_settings: DailyTranscriptionSettings = DailyTranscriptionSettings()
@@ -885,51 +890,57 @@ class DailyTransportClient(EventHandler):
         camera_enabled = self._params.video_out_enabled and self._params.camera_out_enabled
         microphone_enabled = self._params.audio_out_enabled and self._params.microphone_out_enabled
 
+        client_settings: dict[str, Any] = {
+            "inputs": {
+                "camera": {
+                    "isEnabled": camera_enabled,
+                    "settings": {
+                        "customTrack": {
+                            "id": self._camera_track.track.id
+                            if self._camera_track
+                            else "no-camera-track"
+                        }
+                    },
+                },
+                "microphone": {
+                    "isEnabled": microphone_enabled,
+                    "settings": {
+                        "customTrack": {
+                            "id": self._microphone_track.track.id
+                            if self._microphone_track
+                            else "no-microphone-track"
+                        }
+                    },
+                },
+            },
+            "publishing": {
+                "camera": {
+                    "isPublishing": camera_enabled,
+                    "sendSettings": self._params.camera_out_send_settings
+                    if self._params.camera_out_send_settings
+                    else {},
+                },
+                "microphone": {
+                    "isPublishing": microphone_enabled,
+                    "sendSettings": {
+                        "channelConfig": "stereo"
+                        if self._params.audio_out_channels == 2
+                        else "mono",
+                        "bitrate": self._params.audio_out_bitrate,
+                    },
+                },
+            },
+        }
+        if self._params.initial_receive_bitrate is not None:
+            client_settings["connection"] = {
+                "initialReceiveBitrate": self._params.initial_receive_bitrate
+            }
+
         self._client.join(
             self._room_url,
             self._token,
             completion=completion_callback(future),
-            client_settings={
-                "inputs": {
-                    "camera": {
-                        "isEnabled": camera_enabled,
-                        "settings": {
-                            "customTrack": {
-                                "id": self._camera_track.track.id
-                                if self._camera_track
-                                else "no-camera-track"
-                            }
-                        },
-                    },
-                    "microphone": {
-                        "isEnabled": microphone_enabled,
-                        "settings": {
-                            "customTrack": {
-                                "id": self._microphone_track.track.id
-                                if self._microphone_track
-                                else "no-microphone-track"
-                            }
-                        },
-                    },
-                },
-                "publishing": {
-                    "camera": {
-                        "isPublishing": camera_enabled,
-                        "sendSettings": self._params.camera_out_send_settings
-                        if self._params.camera_out_send_settings
-                        else {},
-                    },
-                    "microphone": {
-                        "isPublishing": microphone_enabled,
-                        "sendSettings": {
-                            "channelConfig": "stereo"
-                            if self._params.audio_out_channels == 2
-                            else "mono",
-                            "bitrate": self._params.audio_out_bitrate,
-                        },
-                    },
-                },
-            },
+            client_settings=client_settings,
         )
 
         return await future
