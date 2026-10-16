@@ -13,7 +13,6 @@ with support for streaming audio, word timestamps, and voice customization.
 import base64
 import html
 import json
-import warnings
 from collections.abc import AsyncGenerator, Mapping
 from dataclasses import dataclass, field
 from typing import (
@@ -55,7 +54,7 @@ from pipecat.services.tts_service import (
     TTSService,
 )
 from pipecat.transcriptions.language import Language
-from pipecat.utils.deprecation import deprecated
+from pipecat.utils.deprecation import deprecated, warn_deprecated
 from pipecat.utils.text.phonemes import normalize_ipa
 from pipecat.utils.tracing.service_decorators import traced_tts
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
@@ -454,14 +453,13 @@ class ElevenLabsTTSService(ElevenLabsTTSBase):
         self._enable_ssml_parsing = enable_ssml_parsing
 
         if _pronunciation_dictionary_locators is not None:
-            warnings.warn(
+            warn_deprecated(
                 "`pronunciation_dictionary_locators` is deprecated since 1.6.0 and will be "
                 "removed in 2.0.0. Use `text_transforms` -> `replace_text` instead. "
                 "Pronunciation dictionary substitutions can rewrite the spoken words in "
                 "ways that no longer match the text sent to synthesis, which breaks the "
                 "alignment-based word-completion tracking used to attribute spoken text "
                 "back to the conversation context.",
-                DeprecationWarning,
                 stacklevel=2,
             )
         self._pronunciation_dictionary_locators = _pronunciation_dictionary_locators
@@ -876,14 +874,13 @@ class ElevenLabsHttpTTSService(TTSService):
         self._output_format = ""  # initialized in start()
         self._voice_settings = self._set_voice_settings()
         if _pronunciation_dictionary_locators is not None:
-            warnings.warn(
+            warn_deprecated(
                 "`pronunciation_dictionary_locators` is deprecated since 1.6.0 and will be "
                 "removed in 2.0.0. Use `text_transforms` -> `replace_text` instead. "
                 "Pronunciation dictionary substitutions can rewrite the spoken words in "
                 "ways that no longer match the text sent to synthesis, which breaks the "
                 "alignment-based word-completion tracking used to attribute spoken text "
                 "back to the conversation context.",
-                DeprecationWarning,
                 stacklevel=2,
             )
         self._pronunciation_dictionary_locators = _pronunciation_dictionary_locators

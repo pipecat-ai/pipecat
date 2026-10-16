@@ -25,6 +25,7 @@ import wave
 from pathlib import Path
 
 from pipecat.audio.utils import create_stream_resampler, mix_audio
+from pipecat.evals.serializer import EvalConnectionFlags, eval_connect_message
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
@@ -367,20 +368,36 @@ class EvalClientTransport(RTVIClientTransport):
     """The harness's RTVI client transport, with audio edges that behave like a live transport.
 
     The input fills the gaps in the bot's audio and the output paces the
-    user's; both feed the recorder the raw audio when one is given.
+    user's; both feed the recorder the raw audio when one is given. On connect
+    it sends the connection's flags in an ``eval-connect`` message, ahead of
+    the RTVI handshake.
     """
 
-    def __init__(self, *args, recorder: "EvalClientRecorder | None" = None, **kwargs):
+    def __init__(
+        self,
+        *args,
+        flags: EvalConnectionFlags | None = None,
+        recorder: "EvalClientRecorder | None" = None,
+        **kwargs,
+    ):
         """Initialize the transport, optionally wiring a recorder to both edges.
 
         Args:
+            flags: The connection's flags, sent first on connect; ``None``
+                sends the defaults.
             recorder: Optional :class:`EvalClientRecorder` fed the raw audio on both
                 edges; ``None`` disables recording.
             *args: Forwarded to :class:`~pipecat.transports.websocket.rtvi_client.RTVIClientTransport`.
             **kwargs: Forwarded to the parent transport.
         """
         super().__init__(*args, **kwargs)
+        self._flags = flags or EvalConnectionFlags()
         self._recorder = recorder
+
+    async def _on_connected(self, websocket):
+        """Send ``eval-connect`` first, then fire the user's handler and start the handshake."""
+        await self._session.send(eval_connect_message(self._flags))
+        await super()._on_connected(websocket)
 
     def input(self) -> WebsocketClientInputTransport:
         """Return the gap-filling input transport."""

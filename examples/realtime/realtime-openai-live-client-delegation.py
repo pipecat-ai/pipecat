@@ -36,6 +36,7 @@ from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.live.llm import OpenAILiveLLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.livekit.transport import LiveKitParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 from pipecat.workers.llm import BackendLLMWorker
 from pipecat.workers.runner import WorkerRunner
@@ -68,9 +69,8 @@ transcript. Work out what is being asked from it and answer that. The
 transcript may contain transcription errors; use the most likely intent.
 
 Use the available tools to answer questions about the weather and
-restaurants. Reply with the verified result in concise, conversational plain
-text that the assistant can say to the user — no Markdown, no raw JSON — and
-never claim an action completed without a tool result confirming it."""
+restaurants. Never claim an action completed without a tool result
+confirming it."""
 
 
 async def get_current_weather(params: FunctionCallParams, location: str, format: str):
@@ -80,6 +80,9 @@ async def get_current_weather(params: FunctionCallParams, location: str, format:
         location: The city and state, e.g. "San Francisco, CA".
         format: The temperature unit to use. Must be either "celsius" or "fahrenheit". Infer this from the user's location.
     """
+    # Uncomment to exercise longer-running backend work.
+    # import asyncio
+    # await asyncio.sleep(6)
     temperature = 75 if format == "fahrenheit" else 24
     await params.result_callback(
         {
@@ -108,6 +111,10 @@ transport_params = {
         audio_out_enabled=True,
     ),
     "daily": lambda: DailyParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
+    "livekit": lambda: LiveKitParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
     ),
@@ -199,7 +206,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     @backend.assistant_aggregator.event_handler("on_assistant_turn_stopped")
     async def on_backend_turn_stopped(aggregator, message: AssistantTurnStoppedMessage):
-        logger.info(f"Backend said: {message.content}")
+        logger.info(f"Backend wrote: {message.content}")
 
     @user_aggregator.event_handler("on_user_turn_message_added")
     async def on_user_turn_message_added(aggregator, message: UserTurnMessageAddedMessage):

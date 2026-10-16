@@ -369,7 +369,9 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
             self._warn_init_param_moved_to_settings("prompt", "prompt")
             default_settings.prompt = prompt
         if noise_reduction is not None:
-            self._warn_init_param_moved_to_settings("noise_reduction", "noise_reduction")
+            self._warn_init_param_moved_to_settings(
+                "noise_reduction", "noise_reduction", deprecated_since="0.0.106"
+            )
             default_settings.noise_reduction = noise_reduction
 
         # --- 3. (no params object for this service) ---

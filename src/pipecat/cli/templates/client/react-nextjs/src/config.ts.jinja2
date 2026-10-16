@@ -9,7 +9,7 @@ import type { TransportFactory } from '@/lib/transports';
 
 export const PROJECT_NAME = '{{ project_name }}';
 
-export type TransportType = 'daily' | 'smallwebrtc' | 'websocket';
+export type TransportType = 'daily' | 'livekit' | 'smallwebrtc' | 'websocket';
 
 export const AVAILABLE_TRANSPORTS: TransportType[] = [
 {%- for transport in transports %}
@@ -21,6 +21,7 @@ export const DEFAULT_TRANSPORT: TransportType = '{{ transports[0].value }}';
 
 export const TRANSPORT_LABELS: Record<TransportType, string> = {
   daily: 'Daily',
+  livekit: 'LiveKit',
   smallwebrtc: 'SmallWebRTC',
   websocket: 'WebSocket',
 };
@@ -31,6 +32,13 @@ const dailyConfig: APIRequest = {
     createDailyRoom: true,
     dailyRoomProperties: { start_video_off: true },
     transport: 'daily',
+  },
+};
+
+const liveKitConfig: APIRequest = {
+  endpoint: '/api/start',
+  requestData: {
+    transport: 'livekit',
   },
 };
 
@@ -74,6 +82,11 @@ export const TRANSPORT_FACTORIES: Partial<Record<TransportType, TransportFactory
     const { DailyTransport } = await import('@pipecat-ai/daily-transport');
     return new DailyTransport();
   },
+{%- elif transport.value == 'livekit' %}
+  livekit: async () => {
+    const { LiveKitTransport } = await import('@pipecat-ai/livekit-transport');
+    return new LiveKitTransport();
+  },
 {%- elif transport.value == 'smallwebrtc' %}
   smallwebrtc: async () => {
     const { SmallWebRTCTransport } = await import(
@@ -107,6 +120,7 @@ export interface TransportProps {
 
 export const TRANSPORT_PROPS: Record<TransportType, TransportProps> = {
   daily: { connectParams: dailyConfig },
+  livekit: { connectParams: liveKitConfig },
   smallwebrtc: { connectParams: smallWebRTCConfig },
   websocket: {
     startBotParams: websocketConfig,

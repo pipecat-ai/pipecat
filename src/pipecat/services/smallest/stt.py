@@ -12,7 +12,6 @@ This module provides a STT service using Smallest AI's Waves API:
   continuously and receives interim/final transcripts with low latency.
 """
 
-import asyncio
 import json
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
@@ -90,14 +89,16 @@ def language_to_smallest_stt_language(language: Language) -> str:
     return resolve_language(language, LANGUAGE_MAP)
 
 
-def _validate_pulse_2_language(model: str | None, language: Language | str | None) -> None:
+def _validate_pulse_2_language(
+    model: str | NotGiven | None, language: Language | str | NotGiven | None
+) -> None:
     """Reject non-English languages on the English-only ``pulse-2`` model.
 
     The server closes the socket with a ``LANGUAGE_NOT_SUPPORTED_BY_MODEL``
     error in this case; raise here instead so the failure surfaces at
     settings-update time with a clear message.
     """
-    if model != SmallestSTTModel.PULSE_2.value or language is None:
+    if model != SmallestSTTModel.PULSE_2.value or language is None or not is_given(language):
         return
 
     code = (
@@ -136,6 +137,13 @@ class SmallestSTTSettings(STTSettings):
         gender_detection: ``model="pulse-2"`` only. Adds an acoustic
             per-utterance ``gender`` estimate to every final transcript. No
             effect on ``model="pulse"``.
+        itn_normalize: Run inverse text normalization so spoken numbers come
+            back as digits (e.g. "twenty five" -> "25").
+        no_format_delay: With ``itn_normalize`` on, a number still being
+            dictated at the end of a final is held back and merged into the
+            next final so it normalizes whole. Set to ``True`` to emit every
+            final as soon as it is ready instead. No effect unless
+            ``itn_normalize`` is ``True``; text is never dropped either way.
     """
 
     word_timestamps: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -150,6 +158,8 @@ class SmallestSTTSettings(STTSettings):
     format: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     emotion_detection: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     gender_detection: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    itn_normalize: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    no_format_delay: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class SmallestSTTService(WebsocketSTTService):
@@ -221,6 +231,8 @@ class SmallestSTTService(WebsocketSTTService):
             format=True,
             emotion_detection=True,
             gender_detection=True,
+            itn_normalize=False,
+            no_format_delay=False,
         )
 
         if settings is not None:
@@ -241,8 +253,6 @@ class SmallestSTTService(WebsocketSTTService):
         self._base_url = base_url.rstrip("/")
         self._encoding = encoding
         self._receive_task = None
-        self._connected_event = asyncio.Event()
-        self._connected_event.set()
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics."""
@@ -298,11 +308,8 @@ class SmallestSTTService(WebsocketSTTService):
         Yields:
             None -- transcription results arrive via WebSocket messages.
         """
-        await self._connected_event.wait()
-
-        if not self._websocket or self._websocket.state is State.CLOSED:
-            await self._connect()
-
+        # The receive loop reconnects a dropped socket; audio arriving
+        # meanwhile is dropped.
         if self._websocket and self._websocket.state is State.OPEN:
             try:
                 await self._websocket.send(audio)
@@ -329,17 +336,13 @@ class SmallestSTTService(WebsocketSTTService):
         return changed
 
     async def _connect(self):
-        self._connected_event.clear()
-        try:
-            await self._connect_websocket()
-            await super()._connect()
+        await self._connect_websocket()
+        await super()._connect()
 
-            if self._websocket and not self._receive_task:
-                self._receive_task = self.create_task(
-                    self._receive_task_handler(self._report_error)
-                )
-        finally:
-            self._connected_event.set()
+        # Started even when the connection failed: with no socket the receive
+        # loop goes straight to its reconnect path, which retries the connect.
+        if not self._receive_task:
+            self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
     async def _disconnect(self):
         await super()._disconnect()
@@ -374,6 +377,8 @@ class SmallestSTTService(WebsocketSTTService):
                 "format": str(self._settings.format).lower(),
                 "emotion_detection": str(self._settings.emotion_detection).lower(),
                 "gender_detection": str(self._settings.gender_detection).lower(),
+                "itn_normalize": str(self._settings.itn_normalize).lower(),
+                "no_format_delay": str(self._settings.no_format_delay).lower(),
             }
 
             # An empty `keywords` value would register a single empty keyword,

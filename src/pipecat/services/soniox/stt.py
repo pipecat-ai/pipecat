@@ -10,7 +10,7 @@ import json
 import time
 from collections import Counter
 from collections.abc import AsyncGenerator
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from loguru import logger
@@ -31,6 +31,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.settings import STTSettings
+from pipecat.services.soniox.errors import classify_error_code
 from pipecat.services.stt_latency import SONIOX_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -38,7 +39,7 @@ from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
-from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 
 KEEPALIVE_MESSAGE = '{"type": "keepalive"}'
 
@@ -170,6 +171,7 @@ def language_to_soniox_language(language: Language) -> str:
         Language.ML: "ml",
         Language.MR: "mr",
         Language.MS: "ms",
+        Language.NB: "no",
         Language.NL: "nl",
         Language.NO: "no",
         Language.PA: "pa",
@@ -261,6 +263,24 @@ class SonioxSTTSettings(STTSettings):
         default_factory=lambda: NOT_GIVEN
     )
     client_reference_id: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+
+def _move_language_to_hints(delta: SonioxSTTSettings) -> None:
+    """Replace ``language_hints`` with ``delta.language``, the field Soniox reads on connect.
+
+    Hints given in the same delta win. A string outside :class:`Language` stays in
+    ``language`` for the base class to handle.
+    """
+    if not is_given(delta.language) or delta.language is None:
+        return
+    if is_given(getattr(delta, "language_hints", NOT_GIVEN)):
+        return
+    try:
+        language = Language(delta.language)
+    except ValueError:
+        return
+    delta.language_hints = [language]
+    delta.language = NOT_GIVEN
 
 
 class SonioxSTTService(WebsocketSTTService):
@@ -373,6 +393,8 @@ class SonioxSTTService(WebsocketSTTService):
 
         # --- 4. Settings delta (canonical API, always wins) ---
         if settings is not None:
+            settings = replace(settings)
+            _move_language_to_hints(settings)
             default_settings.apply_update(settings)
 
         super().__init__(
@@ -454,12 +476,16 @@ class SonioxSTTService(WebsocketSTTService):
     async def _update_settings(self, delta: Settings) -> dict[str, Any]:
         """Apply settings delta and reconnect if anything changed.
 
+        A ``language`` replaces ``language_hints``, the field Soniox reads on connect.
+
         Args:
             delta: A settings delta.
 
         Returns:
             Dict mapping changed field names to their previous values.
         """
+        delta = replace(delta)
+        _move_language_to_hints(delta)
         changed = await super()._update_settings(delta)
 
         if changed:
@@ -587,7 +613,10 @@ class SonioxSTTService(WebsocketSTTService):
 
             logger.debug("Connecting to Soniox STT")
 
-            self._websocket = await self._websocket_connect(self._url)
+            self._websocket = await self._websocket_connect(
+                self._url,
+                additional_headers={"Authorization": f"Bearer {self._api_key}"},
+            )
 
             if not self._websocket:
                 await self.push_error(error_msg=f"Unable to connect to Soniox API at {self._url}")
@@ -605,7 +634,6 @@ class SonioxSTTService(WebsocketSTTService):
 
             # Send the initial configuration message.
             config = {
-                "api_key": self._api_key,
                 "model": s.model,
                 "audio_format": self._audio_format,
                 "num_channels": self._num_channels,
@@ -749,7 +777,8 @@ class SonioxSTTService(WebsocketSTTService):
                     # in the buffer) and close any open user turn.
                     await finalize_turn()
                     await self.push_error(
-                        error_msg=f"Error: {error_code} (_receive_messages) - {error_message}"
+                        error_msg=f"Error: {error_code} (_receive_messages) - {error_message}",
+                        category=classify_error_code(error_code),
                     )
 
                 finished = content.get("finished")

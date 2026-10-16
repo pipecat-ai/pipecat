@@ -5,22 +5,26 @@
 #
 
 import asyncio
+import base64
+import io
 import json
 import os
 from collections.abc import Callable
 
 import httpx
 import pytest
+from PIL import Image, ImageDraw
 
 from pipecat.classifiers.base_classifier import (
     ChoiceQuestion,
     ClassifierError,
+    ClassifierImage,
     ScoreQuestion,
     YesNoQuestion,
     YesNoResult,
 )
-from pipecat.classifiers.jev.classifier import JEV_MAX_CHOICE_OPTIONS, JevClassifier
-from pipecat.classifiers.jev.client import JevClient
+from pipecat.classifiers.typesafe.jev.classifier import JEV_MAX_CHOICE_OPTIONS, JevClassifier
+from pipecat.classifiers.typesafe.jev.client import JevClient
 from pipecat.metrics.metrics import LLMUsageMetricsData, ProcessingMetricsData
 from pipecat.utils.asyncio.task_manager import TaskManager
 
@@ -32,6 +36,15 @@ def _client(handler: Callable[[httpx.Request], httpx.Response], **kwargs) -> Jev
     client = JevClient(api_key="key", **kwargs)
     client._http._transport = httpx.MockTransport(handler)
     return client
+
+
+def _circle(color: str) -> ClassifierImage:
+    """A camera-sized JPEG with a circle in the middle."""
+    image = Image.new("RGB", (640, 480), "white")
+    ImageDraw.Draw(image).ellipse((220, 140, 420, 340), fill=color)
+    buffer = io.BytesIO()
+    image.save(buffer, format="JPEG")
+    return ClassifierImage(data=buffer.getvalue(), content_type="image/jpeg")
 
 
 def _reply(answer: dict) -> httpx.Response:
@@ -86,7 +99,7 @@ class TestJevClient:
         async def no_sleep(seconds):
             waits.append(seconds)
 
-        monkeypatch.setattr("pipecat.classifiers.jev.client.asyncio.sleep", no_sleep)
+        monkeypatch.setattr("pipecat.classifiers.typesafe.jev.client.asyncio.sleep", no_sleep)
 
         def handler(request: httpx.Request) -> httpx.Response:
             status = next(statuses, None)
@@ -108,7 +121,7 @@ class TestJevClient:
         async def no_sleep(seconds):
             pass
 
-        monkeypatch.setattr("pipecat.classifiers.jev.client.asyncio.sleep", no_sleep)
+        monkeypatch.setattr("pipecat.classifiers.typesafe.jev.client.asyncio.sleep", no_sleep)
         client = _client(lambda request: httpx.Response(429), max_retries=2)
 
         with pytest.raises(ClassifierError, match="busy"):
@@ -116,10 +129,72 @@ class TestJevClient:
         await client.close()
 
     @pytest.mark.asyncio
+    async def test_sends_assets_with_the_images_header(self):
+        seen = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen["header"] = request.headers.get("TypeSafe-Danger-Zone-Images")
+            seen["body"] = json.loads(request.content)
+            return _reply({"type": "noul", "noul": 0.9})
+
+        client = _client(handler)
+        asset = {"type": "image", "format": "jpg", "data_base64": "anBlZw=="}
+        await client.ask(
+            {"images": ["ref-1"], "state": "a frame"},
+            {"answer": {"type": "noul", "instructions": "a person?"}},
+            {"ref-1": asset},
+        )
+
+        assert seen["header"] == "true"
+        assert seen["body"]["assets"] == {"ref-1": asset}
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_no_images_header_without_assets(self):
+        seen = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen["header"] = request.headers.get("TypeSafe-Danger-Zone-Images")
+            seen["body"] = json.loads(request.content)
+            return _reply({"type": "noul", "noul": 0.9})
+
+        client = _client(handler)
+        await client.ask("a", {"answer": {"type": "noul", "instructions": "?"}}, {})
+
+        assert seen["header"] is None
+        assert "assets" not in seen["body"]
+        await client.close()
+
+    @pytest.mark.asyncio
     async def test_rejected_request_is_an_error(self):
         client = _client(lambda request: httpx.Response(401))
 
         with pytest.raises(ClassifierError, match="401"):
+            await client.ask("a", {"answer": {"type": "noul", "instructions": "?"}})
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_rejected_request_error_carries_jev_reason(self):
+        reply = {"detail": {"error_type": "api_usage_error", "message": "Invalid image request."}}
+        client = _client(lambda request: httpx.Response(400, json=reply))
+
+        with pytest.raises(ClassifierError, match=r"HTTP 400: Invalid image request\.$"):
+            await client.ask("a", {"answer": {"type": "noul", "instructions": "?"}})
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_rejected_request_error_carries_a_plain_reason(self):
+        client = _client(lambda request: httpx.Response(413, json={"detail": "Too large."}))
+
+        with pytest.raises(ClassifierError, match=r"HTTP 413: Too large\.$"):
+            await client.ask("a", {"answer": {"type": "noul", "instructions": "?"}})
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_rejected_request_without_a_reason_reports_the_status(self):
+        client = _client(lambda request: httpx.Response(422, json={"detail": [{"loc": ["x"]}]}))
+
+        with pytest.raises(ClassifierError, match=r"HTTP 422$"):
             await client.ask("a", {"answer": {"type": "noul", "instructions": "?"}})
         await client.close()
 
@@ -367,6 +442,63 @@ class TestJevClassifier:
             (await classifier.yes_no("a", {"answer": YesNoQuestion(instructions="?")}))["answer"]
         await classifier.client.close()
 
+    @pytest.mark.asyncio
+    async def test_images_are_referenced_ahead_of_the_state(self):
+        requests = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            return _reply({"type": "noul", "noul": 0.99})
+
+        classifier = JevClassifier(client=_client(handler))
+        png = ClassifierImage(data=b"png bytes", content_type="image/png")
+        jpeg = ClassifierImage(data=b"jpeg bytes", content_type="image/jpeg")
+        question = {"answer": YesNoQuestion(instructions="is there a red circle?")}
+        assert classifier.supports_images
+
+        await classifier.yes_no("a camera frame", question, images=[png, jpeg])
+        await classifier.yes_no("no frame", question)
+
+        body = json.loads(requests[0].content)
+        references = body["state"]["images"]
+        assert body["state"] == {"images": references, "state": "a camera frame"}
+        assert len(set(references)) == 2
+        assert body["assets"] == {
+            references[0]: {
+                "type": "image",
+                "format": "png",
+                "data_base64": base64.b64encode(b"png bytes").decode(),
+            },
+            references[1]: {
+                "type": "image",
+                "format": "jpg",
+                "data_base64": base64.b64encode(b"jpeg bytes").decode(),
+            },
+        }
+        assert requests[0].headers["TypeSafe-Danger-Zone-Images"] == "true"
+        body = json.loads(requests[1].content)
+        assert body["state"] == "no frame"
+        assert "assets" not in body
+        await classifier.client.close()
+
+    @pytest.mark.asyncio
+    async def test_an_image_jev_cannot_read_is_an_error_before_any_request(self):
+        sent = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            sent.append(request)
+            return _reply({"type": "noul", "noul": 0.5})
+
+        classifier = JevClassifier(client=_client(handler))
+        webp = ClassifierImage(data=b"webp bytes", content_type="image/webp")
+
+        with pytest.raises(ClassifierError, match="PNG or JPEG images, got image/webp"):
+            await classifier.yes_no(
+                "a frame", {"answer": YesNoQuestion(instructions="?")}, images=[webp]
+            )
+        assert sent == []
+        await classifier.client.close()
+
     def test_needs_a_key_or_a_client(self):
         with pytest.raises(ValueError):
             JevClassifier()
@@ -439,6 +571,18 @@ class TestJevLive:
             )["answer"]
             assert 0 <= score.score <= 3
             assert classifier.client.usage.input_tokens > 0
+        finally:
+            await classifier.cleanup()
+
+    @pytest.mark.asyncio
+    async def test_a_question_about_an_image(self):
+        classifier = JevClassifier(api_key=os.environ["TYPESAFE_API_KEY"])
+        question = {"red": YesNoQuestion(instructions="Is there a red circle in the image?")}
+        try:
+            red = await classifier.yes_no("A camera frame.", question, images=[_circle("red")])
+            blue = await classifier.yes_no("A camera frame.", question, images=[_circle("blue")])
+            assert red["red"].is_yes
+            assert not blue["red"].is_yes
         finally:
             await classifier.cleanup()
 

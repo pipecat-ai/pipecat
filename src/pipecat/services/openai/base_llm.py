@@ -19,16 +19,20 @@ from openai import (
     NOT_GIVEN as OPENAI_NOT_GIVEN,
 )
 from openai import (
+    APIStatusError,
     APITimeoutError,
     AsyncOpenAI,
     AsyncStream,
+    BadRequestError,
     DefaultAsyncHttpxClient,
+    UnprocessableEntityError,
 )
 from openai._types import NotGiven as OpenAINotGiven
 from openai.types import CompletionUsage
 from openai.types.chat import ChatCompletionChunk
 from pydantic import BaseModel, Field
 
+from pipecat.adapters.base_llm_adapter import LLMContextConversionError
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter, OpenAILLMInvocationParams
 from pipecat.frames.frames import (
     Frame,
@@ -43,6 +47,7 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.utils.deprecation import deprecated
+from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.http import TIMEOUT_EXCEPTIONS, connection_limits
 from pipecat.utils.tracing.service_decorators import traced_llm
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
@@ -334,11 +339,9 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
             Async stream of chat completion chunks.
         """
         adapter = self.get_llm_adapter()
-        logger.debug(
-            f"{self}: Generating chat from context {adapter.get_messages_for_logging(context)}"
-        )
+        self._log_llm_response(context)
 
-        params_from_context = adapter.get_llm_invocation_params(
+        params_from_context = await adapter.get_llm_invocation_params(
             context,
             system_instruction=assert_given(self._settings.system_instruction),
             convert_developer_to_user=not self.supports_developer_role,
@@ -456,7 +459,7 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
             self._settings.system_instruction
         )
         adapter = self.get_llm_adapter()
-        invocation_params = adapter.get_llm_invocation_params(
+        invocation_params = await adapter.get_llm_invocation_params(
             context,
             system_instruction=effective_instruction,
             convert_developer_to_user=not self.supports_developer_role,
@@ -686,8 +689,37 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
             except TIMEOUT_EXCEPTIONS as e:
                 await self._call_event_handler("on_completion_timeout")
                 await self.push_error(error_msg="LLM completion timeout", exception=e)
+            except LLMContextConversionError as e:
+                await self.push_error(error_msg=str(e), exception=e)
+                # A conversion failure (e.g. an unsupported file MIME type, corrupt
+                # base64 data) can't reach the API at all, but is just as much
+                # evidence of an invalid file as a rejection from OpenAI itself, so
+                # it gets the same best-effort cleanup.
+                frame.context.remove_invalid_file_message()
             except Exception as e:
-                await self.push_error(error_msg=f"Error during completion: {e}", exception=e)
+                # Only the payload-shaped errors (bad request, unprocessable
+                # content, payload too large — the latter has no dedicated
+                # OpenAI exception class, so match its status code) are
+                # grounds to remove a pending file message on a best-effort
+                # basis. The rest of the 4xx range — auth, permissions,
+                # not-found, rate limiting — says nothing about whether our
+                # request (or its file) was bad, and removing the file there
+                # would discard it for no benefit: the file isn't what needs
+                # fixing before the next retry can succeed. When a message is
+                # removed as a result of this error, the fault lay in
+                # application-supplied content and the context is repaired, so
+                # the error is pushed as APPLICATION instead of letting the
+                # rejection classify as permanent and cost the service its
+                # usability.
+                removed = (
+                    isinstance(e, (BadRequestError, UnprocessableEntityError))
+                    or (isinstance(e, APIStatusError) and e.status_code == 413)
+                ) and frame.context.remove_invalid_file_message()
+                await self.push_error(
+                    error_msg=f"Error during completion: {e}",
+                    exception=e,
+                    category=ErrorCategory.APPLICATION if removed else None,
+                )
             finally:
                 await self.stop_processing_metrics()
                 await self.push_frame(LLMFullResponseEndFrame())

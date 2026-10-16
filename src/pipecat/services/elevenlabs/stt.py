@@ -11,7 +11,6 @@ using segmented audio processing. The service uploads audio files and receives
 transcription results directly.
 """
 
-import asyncio
 import base64
 import io
 import json
@@ -615,9 +614,6 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         self._enable_logging = enable_logging
         self._include_language_detection = include_language_detection
 
-        self._connected_event = asyncio.Event()
-        self._connected_event.set()
-
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate processing metrics.
 
@@ -701,13 +697,8 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         Yields:
             None - transcription results are handled via WebSocket responses.
         """
-        # Wait for any in-flight _connect() to finish before checking state
-        await self._connected_event.wait()
-
-        # Reconnect if connection is closed
-        if not self._websocket or self._websocket.state is State.CLOSED:
-            await self._connect()
-
+        # The receive loop reconnects a dropped socket; audio arriving
+        # meanwhile is dropped.
         if self._websocket and self._websocket.state is State.OPEN:
             try:
                 # Encode audio as base64
@@ -728,18 +719,14 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
 
     async def _connect(self):
         """Establish WebSocket connection to ElevenLabs Realtime STT."""
-        self._connected_event.clear()
-        try:
-            await self._connect_websocket()
+        await self._connect_websocket()
 
-            await super()._connect()
+        await super()._connect()
 
-            if self._websocket and not self._receive_task:
-                self._receive_task = self.create_task(
-                    self._receive_task_handler(self._report_error)
-                )
-        finally:
-            self._connected_event.set()
+        # Started even when the connection failed: with no socket the receive
+        # loop goes straight to its reconnect path, which retries the connect.
+        if not self._receive_task:
+            self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
     async def _disconnect(self):
         """Close WebSocket connection and cleanup tasks."""

@@ -36,7 +36,10 @@ These source paths don't follow the standard `services/{provider}/{type}.py` →
 | `services/grok/realtime/**`                 | `api-reference/server/services/s2s/grok.mdx`                                                       |
 | `services/openai/realtime/**`               | `api-reference/server/services/s2s/openai.mdx`                                                     |
 | `services/openai/responses/llm.py`          | `api-reference/server/services/llm/openai-responses.mdx`                                           |
-| `processors/frameworks/rtvi.py`             | `api-reference/server/rtvi/rtvi-processor.mdx` and `api-reference/server/rtvi/rtvi-observer.mdx`   |
+| `processors/frameworks/rtvi/processor.py`   | `api-reference/server/rtvi/rtvi-processor.mdx`                                                     |
+| `processors/frameworks/rtvi/observer.py`    | `api-reference/server/rtvi/rtvi-observer.mdx`                                                      |
+| `processors/frameworks/rtvi/models.py`      | `client/rtvi-standard.mdx` (the wire protocol: messages, fields, `PROTOCOL_VERSION`)               |
+| `processors/frameworks/rtvi/frames.py`      | `api-reference/server/rtvi/rtvi-processor.mdx` and `api-reference/server/frames/system-frames.mdx` |
 | `processors/idle_frame_processor.py`        | `api-reference/server/pipeline/pipeline-idle-detection.mdx`                                        |
 | `pipeline/worker.py`                        | `api-reference/server/pipeline/pipeline-worker.mdx`                                                |
 | `pipeline/runner.py`                        | `api-reference/server/utilities/runner/guide.mdx`                                                  |
@@ -65,6 +68,7 @@ in guides and concept pages rather than on a per-provider reference page.
 | `transports/base_output.py`      | `api-reference/server/services/transport/transport-params.mdx`                                                |
 | `pipeline/pipeline.py`           | `pipecat/learn/pipeline.mdx`                                                                                  |
 | `processors/frame_processor.py`  | `pipecat/fundamentals/custom-frame-processor.mdx` and `api-reference/server/events/frame-processor-events.mdx` |
+| `classifiers/base_classifier.py` | `api-reference/server/classifiers/overview.mdx` and `pipecat/learn/classifiers.mdx`                           |
 
 Several of these carry documented parameters with no reference page of their own.
 Where a change fits none of the pages above, report it as a missing-page gap in
@@ -152,6 +156,7 @@ For files not in the tables above, apply these patterns. Convert underscores to 
 | `processors/filters/**`           | `api-reference/server/utilities/filters/` (match by class name)   |
 | `workers/**`                      | `api-reference/server/workers/` (match by class name)             |
 | `bus/**`                          | `api-reference/server/bus/` (match by class name)                 |
+| `classifiers/**`                  | `api-reference/server/classifiers/` (match by class name)         |
 | `turns/**`                        | `api-reference/server/utilities/turn-management/`                 |
 | `frames/frames.py`                | `api-reference/server/frames/` (match by frame class name)        |
 | `evals/**`                        | `pipecat/evals/` and `api-reference/cli/eval.mdx`                 |
@@ -203,6 +208,20 @@ Prose that cites pipecat API lives in:
 - `pipecat/features/` — feature-specific guides (Gemini Live, OpenAI audio, WhatsApp, etc.)
 - `pipecat/telephony/` — telephony integration guides (Twilio, Plivo, Telnyx, etc.)
 - `pipecat/flows/` — Pipecat Flows guides (nodes-and-messages, functions, context-strategies, state-management, actions); check these when `src/pipecat/flows/**` changed
+
+## Checks
+
+`DOCS_PATH/scripts/check-reference.py` compares the server API reference with
+this repository's source: constructor parameters, `Settings` fields and the
+defaults set in `default_settings`, registered events, and deprecations. Run it
+from the root of this repository, so it reads the source being documented:
+
+```bash
+python3 DOCS_PATH/scripts/check-reference.py --pipecat .
+```
+
+Each line names a page, a kind of mismatch, and what the code says. The docs
+repo's CI runs the same check on the pages a docs PR changes.
 
 ## New pages
 

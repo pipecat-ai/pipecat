@@ -123,7 +123,7 @@ class SimliVideoService(AIService):
 
         # 2. Apply deprecated params overrides
         if params is not None:
-            self._warn_init_param_moved_to_settings("params")
+            self._warn_init_param_moved_to_settings("params", deprecated_since="0.0.106")
             if max_session_length is None and hasattr(params, "max_session_length"):
                 max_session_length = params.max_session_length
             if max_idle_time is None and hasattr(params, "max_idle_time"):

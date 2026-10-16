@@ -24,6 +24,7 @@ from pipecat.evals.judge import (
     JudgeVerdict,
     _Explainer,
 )
+from pipecat.utils.deprecation import _warned_sites
 
 REPLY_OPTIONS = ("yes", "no", "continue")
 TURN_OPTIONS = ("meets", "fails", "not_applicable")
@@ -41,7 +42,7 @@ class _FakeClassifier(BaseClassifier):
         self._answers = answers
         self.asked: list[dict] = []
 
-    async def _ask(self, state, questions):
+    async def _ask(self, state, questions, images=()):
         self.asked.append({"state": state, "questions": dict(questions)})
         answer = (
             self._answers(state, questions) if callable(self._answers) else self._answers.pop(0)
@@ -496,6 +497,9 @@ class TestJudgeEvaluateRun(unittest.IsolatedAsyncioTestCase):
             lambda: judge.evaluate_run(given, {"polite": "is polite"}, "done"),
             lambda: judge.evaluate_run({"polite": "is polite"}, "done", transcript=given),
         ):
+            # Both calls warn from the line awaiting them, so start each from an
+            # empty record of warned sites.
+            _warned_sites.clear()
             with self.assertWarns(DeprecationWarning):
                 verdicts = await call()
             self.assertTrue(verdicts.goal.passed)

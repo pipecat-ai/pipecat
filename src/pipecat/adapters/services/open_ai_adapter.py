@@ -16,7 +16,7 @@ from openai.types.chat import (
     ChatCompletionToolParam,
 )
 
-from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
+from pipecat.adapters.base_llm_adapter import BaseLLMAdapter, LLMContextConversionError
 from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
 from pipecat.processors.aggregators.llm_context import (
     LLMContext,
@@ -142,7 +142,7 @@ class OpenAILLMAdapter(BaseLLMAdapter[OpenAILLMInvocationParams]):
         """Get the identifier used in LLMSpecificMessage instances for OpenAI."""
         return "openai"
 
-    def get_llm_invocation_params(
+    async def get_llm_invocation_params(
         self,
         context: LLMContext,
         *,
@@ -162,6 +162,7 @@ class OpenAILLMAdapter(BaseLLMAdapter[OpenAILLMInvocationParams]):
         Returns:
             Dictionary of parameters for OpenAI's ChatCompletion API.
         """
+        await self.prepare_file_content(context)
         messages = self._from_universal_context_messages(
             self.get_messages(context), convert_developer_to_user=convert_developer_to_user
         )
@@ -237,6 +238,10 @@ class OpenAILLMAdapter(BaseLLMAdapter[OpenAILLMInvocationParams]):
             self.get_messages(context, truncate_large_values=True),
         )
 
+    def supports_file_url(self, url: str, mime_type: str) -> bool:
+        """OpenAI Chat Completions fetches image URLs itself; other files must be inlined."""
+        return mime_type.startswith("image/") and url.startswith(("http://", "https://"))
+
     def _from_universal_context_messages(
         self,
         messages: list[LLMContextMessage],
@@ -246,11 +251,43 @@ class OpenAILLMAdapter(BaseLLMAdapter[OpenAILLMInvocationParams]):
         result: list[ChatCompletionMessageParam] = []
         for message in messages:
             if isinstance(message, LLMSpecificMessage):
-                # Extract the actual message content from LLMSpecificMessage
                 result.append(message.message)
             else:
-                # Standard message, pass through unchanged
-                result.append(openai_from_llm_standard_message(message))
+                msg = dict(openai_from_llm_standard_message(message))
+                content = msg.get("content")
+                if isinstance(content, list):
+                    new_content = []
+                    for item in content:
+                        if item["type"] == "file_base64":
+                            f_data = item["file"]
+                            item = self._inline_file_item(
+                                f_data["file_data"], f_data["filename"], f_data["mime_type"]
+                            )
+                        elif item["type"] == "file_url":
+                            f_data = item["file"]
+                            # inlined_file_content raises a plain ValueError so
+                            # adapters with a message-level wrapper don't double-wrap;
+                            # this adapter has no such wrapper, so wrap here.
+                            try:
+                                resolved = self.inlined_file_content(f_data)
+                            except ValueError as e:
+                                raise LLMContextConversionError(e) from e
+                            if resolved is None:
+                                # Pass-through: only image URLs, per supports_file_url.
+                                item = {
+                                    "type": "image_url",
+                                    "image_url": {"url": f_data["url"]},
+                                }
+                            else:
+                                # Non-raw adapters always cache the data-URL form.
+                                item = self._inline_file_item(
+                                    cast(str, resolved),
+                                    f_data.get("filename", ""),
+                                    f_data["mime_type"],
+                                )
+                        new_content.append(item)
+                    msg["content"] = new_content
+                result.append(cast("ChatCompletionMessageParam", msg))
 
         if convert_developer_to_user:
             # Copy rather than mutate: the message dicts are shared with the
@@ -264,6 +301,16 @@ class OpenAILLMAdapter(BaseLLMAdapter[OpenAILLMInvocationParams]):
             ]
 
         return result
+
+    def _inline_file_item(self, file_data_url: str, filename: str, mime_type: str) -> dict:
+        """Build the ChatCompletion content item for an inline (base64) file."""
+        if mime_type.startswith("image/"):
+            return {"type": "image_url", "image_url": {"url": file_data_url}}
+        if mime_type == "application/pdf":
+            return {"type": "file", "file": {"filename": filename, "file_data": file_data_url}}
+        raise LLMContextConversionError(
+            ValueError(f"Unsupported 'file' MIME type for OpenAI: {mime_type}")
+        )
 
     def _from_standard_tool_choice(
         self, tool_choice: LLMContextToolChoice | NotGiven

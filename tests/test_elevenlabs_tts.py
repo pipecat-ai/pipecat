@@ -318,7 +318,7 @@ async def test_keepalive_does_not_stamp_context_before_init():
     # Simulate the start of an LLM turn: TTSService sets the turn context id on
     # LLMFullResponseStartFrame, before run_tts sends the voice_settings init.
     service._turn_context_id = "ctx-1"
-    service._playing_context_id = None
+    service.reset_active_audio_context()
     assert "ctx-1" not in service._context_init_sent
 
     await service._send_keepalive()
@@ -335,7 +335,7 @@ async def test_keepalive_stamps_context_after_init():
     ws = _FakeWebSocket()
     service._websocket = ws
     service._turn_context_id = "ctx-1"
-    service._playing_context_id = None
+    service.reset_active_audio_context()
     # run_tts records the context once its voice_settings init has gone out.
     service._context_init_sent.add("ctx-1")
 
@@ -351,7 +351,7 @@ async def test_keepalive_without_active_context_sends_empty():
     ws = _FakeWebSocket()
     service._websocket = ws
     service._turn_context_id = None
-    service._playing_context_id = None
+    service.reset_active_audio_context()
 
     await service._send_keepalive()
 
@@ -478,6 +478,7 @@ def test_language_code_is_gated_by_model():
     assert elevenlabs_language_code("eleven_v3", "de") == "de"
     # Cantonese is v4-only.
     assert elevenlabs_language_code("eleven_v4_turbo", "yue") == "yue"
+    assert elevenlabs_language_code("eleven_v4", "yue") == "yue"
     assert elevenlabs_language_code("eleven_v3", "yue") is None
 
 

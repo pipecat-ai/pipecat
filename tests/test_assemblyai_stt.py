@@ -16,6 +16,7 @@ import pytest
 from loguru import logger
 
 from pipecat.frames.frames import ProposedUserStartedSpeakingFrame
+from pipecat.services.assemblyai.models import AssemblyAIConnectionParams
 from pipecat.services.assemblyai.stt import AssemblyAISTTService, is_u3_pro_model
 from pipecat.transcriptions.language import Language
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
@@ -63,6 +64,14 @@ def test_explicit_sample_rate_overrides_setup(monkeypatch):
 def test_default_model_is_universal_3_6_pro():
     # universal-3-6-pro is the default model sent to AssemblyAI.
     service = AssemblyAISTTService(api_key="test-key")
+    assert _query(service)["speech_model"] == ["universal-3-6-pro"]
+
+
+def test_deprecated_connection_params_default_to_universal_3_6_pro():
+    with pytest.warns(DeprecationWarning):
+        service = AssemblyAISTTService(
+            api_key="test-key", connection_params=AssemblyAIConnectionParams()
+        )
     assert _query(service)["speech_model"] == ["universal-3-6-pro"]
 
 

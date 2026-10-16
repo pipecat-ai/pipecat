@@ -16,7 +16,6 @@ server-side endpointing and in-band configuration updates.
 import asyncio
 import base64
 import json
-import warnings
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field, fields
 from typing import Any, Literal, cast
@@ -47,7 +46,7 @@ from pipecat.services.stt_service import STTService, WebsocketSTTService
 from pipecat.services.websocket_service import ReportErrorCallback
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
-from pipecat.utils.deprecation import deprecated
+from pipecat.utils.deprecation import deprecated, warn_deprecated
 from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
@@ -1638,10 +1637,9 @@ def _without_language_code(settings: SarvamRealtimeSTTSettings) -> SarvamRealtim
     """Fold the deprecated ``language_code`` setting into ``language``."""
     if not is_given(settings.language_code) or settings.language_code is None:
         return settings
-    warnings.warn(
+    warn_deprecated(
         "`SarvamRealtimeSTTService.Settings.language_code` is deprecated since 1.13.0 and "
         "will be removed in 2.0.0. Use `language` instead.",
-        DeprecationWarning,
         stacklevel=3,
     )
     folded = settings.copy()

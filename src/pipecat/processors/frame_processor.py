@@ -16,7 +16,6 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import traceback
-import warnings
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from enum import Enum
@@ -46,7 +45,7 @@ from pipecat.observers.base_observer import BaseObserver, FrameProcessed, FrameP
 from pipecat.processors.metrics.frame_processor_metrics import FrameProcessorMetrics
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
 from pipecat.utils.base_object import BaseObject
-from pipecat.utils.deprecation import deprecated, warn_deprecated_read
+from pipecat.utils.deprecation import deprecated, warn_deprecated
 from pipecat.utils.errors import ErrorCategory, classify_http_exception
 from pipecat.utils.frame_queue import FrameQueue
 
@@ -120,9 +119,10 @@ class FrameProcessorSetup:
         if name == "tool_resources":
             value = object.__getattribute__(self, "tool_resources")
             if value is not None:
-                warn_deprecated_read(
-                    "`FrameProcessorSetup.tool_resources` is deprecated since 1.2.0; "
-                    "read `setup.pipeline_worker.app_resources` instead."
+                warn_deprecated(
+                    "`FrameProcessorSetup.tool_resources` is deprecated since 1.2.0 and will "
+                    "be removed in 2.0.0. Use `setup.pipeline_worker.app_resources` instead.",
+                    stacklevel=2,
                 )
             return value
         return object.__getattribute__(self, name)
@@ -925,19 +925,17 @@ class FrameProcessor(BaseObject):
             ```
         """
         if fatal:
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    "`push_error(fatal=True)` is deprecated since 1.8.0 and will be removed "
-                    "in 2.0.0. If the error leaves its originating processor unable to do "
-                    "its job, pass `force_treat_as_permanent=True` instead: that marks the "
-                    "processor unusable, and the PipelineWorker acts on it according to its "
-                    "`processor_unusable_policy` (`ProcessorUnusablePolicy.CANCEL` does what "
-                    "`fatal=True` did). Otherwise, drop `fatal` and push an "
-                    "`EndWorkerFrame` after the error to end the pipeline.",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
+            warn_deprecated(
+                "`push_error(fatal=True)` is deprecated since 1.8.0 and will be removed "
+                "in 2.0.0. Use `force_treat_as_permanent=True` or an `EndWorkerFrame` "
+                "instead. If the error leaves its originating processor unable to do its "
+                "job, `force_treat_as_permanent=True` marks the processor unusable, and the "
+                "PipelineWorker acts on it according to its "
+                "`processor_unusable_policy` (`ProcessorUnusablePolicy.CANCEL` does what "
+                "`fatal=True` did). Otherwise, drop `fatal` and push an "
+                "`EndWorkerFrame` after the error to end the pipeline.",
+                stacklevel=2,
+            )
 
         error_frame = ErrorFrame(
             error=error_msg,
@@ -956,7 +954,11 @@ class FrameProcessor(BaseObject):
         else:
             await self.push_error_frame(error=error_frame)
 
-    async def push_error_frame(self, error: ErrorFrame, force_treat_as_permanent: bool = False):
+    async def push_error_frame(
+        self,
+        error: ErrorFrame,
+        force_treat_as_permanent: bool = False,
+    ):
         """Push an error frame upstream.
 
         Args:

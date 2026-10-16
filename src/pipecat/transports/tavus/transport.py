@@ -40,6 +40,7 @@ from pipecat.frames.frames import (
     StartFrame,
     TTSStoppedFrame,
 )
+from pipecat.pipeline.capabilities import BotCapabilities
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BOT_VAD_STOP_FALLBACK_SECS, BaseOutputTransport
@@ -754,6 +755,18 @@ class TavusOutputTransport(BaseOutputTransport):
         # write_audio_frame/_write_audio_sleep).
         self._send_interval: float = 0
         self._next_send_time: float = 0
+
+    @property
+    def capabilities(self) -> BotCapabilities:
+        """The media this transport sends to the user.
+
+        The Tavus avatar publishes its video to the room itself, so the user
+        receives bot video even though this transport sends none.
+
+        Returns:
+            The ``audio_out`` capability, with ``video_out`` set.
+        """
+        return super().capabilities.override(BotCapabilities(video_out=True))
 
     async def setup(self, setup: FrameProcessorSetup):
         """Setup the output transport.

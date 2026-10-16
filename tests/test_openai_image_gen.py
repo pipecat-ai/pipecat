@@ -24,8 +24,12 @@ def _png_bytes(mode: str, size: tuple[int, int] = (64, 32)) -> bytes:
     return buffer.getvalue()
 
 
-def _service(data: list[dict]) -> OpenAIImageGenService:
-    service = OpenAIImageGenService(api_key="test-key", aiohttp_session=MagicMock())
+def _service(data: list[dict], **settings) -> OpenAIImageGenService:
+    service = OpenAIImageGenService(
+        api_key="test-key",
+        aiohttp_session=MagicMock(),
+        settings=OpenAIImageGenService.Settings(**settings) if settings else None,
+    )
     service._client = MagicMock()
     service._client.images.generate = AsyncMock(
         return_value=ImagesResponse.model_validate({"created": 0, "data": data})
@@ -104,4 +108,16 @@ async def test_default_model_is_sent_without_response_format():
 
     kwargs = service._client.images.generate.call_args.kwargs
     assert kwargs["model"] == "gpt-image-2.5-flare"
+    assert kwargs["quality"] is None
     assert "response_format" not in kwargs
+
+
+@pytest.mark.asyncio
+async def test_quality_setting_is_forwarded():
+    """A configured quality tier reaches the Images API."""
+    b64 = base64.b64encode(_png_bytes("RGB")).decode()
+    service = _service([{"b64_json": b64}], quality="low")
+
+    await _frames(service)
+
+    assert service._client.images.generate.call_args.kwargs["quality"] == "low"

@@ -7,9 +7,9 @@
 """Multi-bot eval suite runner.
 
 An :class:`EvalManifest` lists bots to spawn and the scenarios to run
-against each, scripted and simulated alike. An :class:`EvalSuite` spawns
-each bot with its eval transport on its own port and drives it with the
-harness in a subprocess, several at a time. ``pipecat eval suite`` is the
+against each, scripted and simulated alike. An :class:`EvalSuite` runs
+each bot on its own port with the dev runner and drives it with the harness
+in a subprocess, several at a time. ``pipecat eval suite`` is the
 CLI in front of it; the release evals are a manifest plus that command.
 
 Manifest format (YAML)::
@@ -22,7 +22,7 @@ Manifest format (YAML)::
     scenarios_dir: scenarios      # resolved relative to this manifest file
     # {python}=interpreter (default sys.executable), {bot}=bot path,
     # {port}=assigned per run by the suite runner
-    spawn: "{python} {bot} -t eval --port {port}"
+    spawn: "{python} {bot} --port {port}"
     suite:
       - bot: examples/voice/voice-cartesia.py
         scenarios: [simple_math, greeting]
@@ -102,7 +102,6 @@ import shlex
 import sys
 import time
 import traceback
-import warnings
 from collections import deque
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, replace
@@ -125,21 +124,22 @@ from pipecat.evals.script import EvalScriptScenario
 from pipecat.evals.session import EvalSessionParams, _params_with_deprecated_knobs
 from pipecat.evals.simulation import EvalSimulationScenario
 from pipecat.utils.base_object import BaseObject
+from pipecat.utils.deprecation import warn_deprecated
 
 DEFAULT_BASE_PORT = 7900
 DEFAULT_CONCURRENCY = 4
 # How long to wait for a freshly spawned bot to start listening (the harness
 # retries the connect, so this doubles as readiness waiting).
 BOT_CONNECT_TIMEOUT_S = 60.0
-# How long to wait for a bot subprocess to exit after the harness asks it to
-# stop (via eval-cancel) before escalating to terminate/kill.
+# How long to wait for a bot subprocess to exit after it is asked to terminate
+# before killing it.
 BOT_STOP_TIMEOUT_S = 10.0
 # Safety net for a hung harness worker. The harness's own per-expectation timeouts
 # bound a healthy run far below this; the cap only catches a worker that wedges, so
 # it can't hold a concurrency slot forever.
 WORKER_SAFETY_TIMEOUT_S = 600.0
 # Default spawn template; {python}/{bot}/{port} are substituted per run.
-DEFAULT_SPAWN = "{python} {bot} -t eval --port {port}"
+DEFAULT_SPAWN = "{python} {bot} --port {port}"
 # What a scenario file may be named, wherever one is looked for.
 SCENARIO_SUFFIXES = (".yaml", ".yml")
 
@@ -732,10 +732,9 @@ class EvalManifest:
         if spec is None:
             return _RunnerBody()
         if isinstance(spec, str):
-            warnings.warn(
-                f"{where} a bare 'runner_body: <file>' is deprecated since 1.11.0 and will be "
-                "removed in 2.0.0. Use 'runner_body: {path: <file>}' instead.",
-                DeprecationWarning,
+            warn_deprecated(
+                "`runner_body: <file>` is deprecated since 1.11.0 and will be removed in "
+                f"2.0.0. Use `runner_body: {{path: <file>}}` instead. Found in {where}.",
                 stacklevel=2,
             )
             spec = {"path": spec}
@@ -1130,15 +1129,12 @@ class EvalSuite(BaseObject):
                 "connect_timeout_s": BOT_CONNECT_TIMEOUT_S,
                 "record_path": str(files.record) if files.record else None,
                 "cache_dir": self.manifest.cache_dir,
-                # The suite spawned this bot, so it is cancelled on teardown, which is
-                # faster than the kill fallback.
-                "stop_bot": True,
             }
         )
         config = {
             "scenario_path": str(run.scenario_path),
             "scenario_name": run.scenario,
-            "bot_url": f"ws://localhost:{port}",
+            "bot_url": f"ws://localhost:{port}/ws",
             "params": run_params.model_dump(),
             "debug": debug,
             "logs_dir": str(files.log.parent),
@@ -1230,10 +1226,9 @@ class EvalSuite(BaseObject):
 
     def _add_legacy_update_callback(self, on_update: Callable[[EvalRun], None]):
         """Register a bare ``on_update`` callback as an event handler; returns the handler, to remove after the run."""
-        warnings.warn(
+        warn_deprecated(
             "`on_update` is deprecated since 1.9.0 and will be removed in 2.0.0. "
             "Use the `on_update` event handler instead.",
-            DeprecationWarning,
             stacklevel=3,
         )
 
@@ -1257,16 +1252,18 @@ class EvalSuite(BaseObject):
 
     @staticmethod
     async def _stop_bot(proc: asyncio.subprocess.Process) -> None:
-        """Wait for the bot to exit, then terminate and kill if it lingers."""
+        """Terminate the bot, and kill it if it lingers.
+
+        The bot's session ended with the harness's connection, but the dev
+        runner serving it keeps running until it is told to stop.
+        """
         if proc.returncode is not None:
             return
-        try:
-            await asyncio.wait_for(proc.wait(), timeout=BOT_STOP_TIMEOUT_S)
-            return
-        except TimeoutError:
+        with contextlib.suppress(ProcessLookupError):
             proc.terminate()
         try:
             await asyncio.wait_for(proc.wait(), timeout=BOT_STOP_TIMEOUT_S)
         except TimeoutError:
-            proc.kill()
+            with contextlib.suppress(ProcessLookupError):
+                proc.kill()
             await proc.wait()

@@ -8,7 +8,6 @@
 
 import asyncio
 import time
-import warnings
 from abc import abstractmethod
 from collections.abc import AsyncGenerator
 from typing import Any
@@ -42,7 +41,7 @@ from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import DEFAULT_TTFS_P99
 from pipecat.services.websocket_service import WebsocketService
 from pipecat.transcriptions.language import Language
-from pipecat.utils.deprecation import deprecated
+from pipecat.utils.deprecation import deprecated, warn_deprecated
 from pipecat.utils.types import is_given
 
 # Duration in seconds of silent audio sent for WebSocket keepalive (100ms).
@@ -495,14 +494,12 @@ class STTService(AIService):
                 await self._update_settings(frame.delta)
             elif frame.settings:
                 # Backward-compatible path: convert legacy dict to settings object.
-                with warnings.catch_warnings():
-                    warnings.simplefilter("always")
-                    warnings.warn(
-                        "Passing a dict via STTUpdateSettingsFrame(settings={...}) is deprecated "
-                        "since 0.0.104, use STTUpdateSettingsFrame(delta=STTSettings(...)) instead.",
-                        DeprecationWarning,
-                        stacklevel=2,
-                    )
+                warn_deprecated(
+                    "`STTUpdateSettingsFrame(settings={...})` is deprecated since 0.0.104 and "
+                    "will be removed in 2.0.0. Use "
+                    "`STTUpdateSettingsFrame(delta=STTSettings(...))` instead.",
+                    stacklevel=2,
+                )
                 delta = type(self._settings).from_mapping(frame.settings)
                 await self._update_settings(delta)
         elif isinstance(frame, STTMuteFrame):

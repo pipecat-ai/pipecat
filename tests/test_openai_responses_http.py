@@ -63,7 +63,7 @@ def _make_service(**kwargs):
     # streaming completion handler here.
     adapter = MagicMock()
     adapter.get_messages_for_logging.return_value = []
-    adapter.get_llm_invocation_params.return_value = {}
+    adapter.get_llm_invocation_params = AsyncMock(return_value={})
     service.get_llm_adapter = MagicMock(return_value=adapter)
     service._build_response_params = MagicMock(return_value={})
 
@@ -614,3 +614,30 @@ class TestHttpRetryOnTimeout:
 
         assert await service._create_stream({}) is stream
         assert attempts == 2
+
+
+# ---------------------------------------------------------------------------
+# _build_response_params — default reasoning effort
+# ---------------------------------------------------------------------------
+
+
+class TestHttpReasoningParams:
+    def _params(self, model):
+        # Built without _make_service, which stubs out _build_response_params.
+        with patch.object(OpenAIResponsesHttpLLMService, "_create_client"):
+            service = OpenAIResponsesHttpLLMService(
+                api_key="test-key",
+                settings=OpenAIResponsesHttpLLMService.Settings(model=model),
+            )
+        return service._build_response_params({"input": []})
+
+    def test_listed_models_get_their_effort(self):
+        """Models listed in the reasoning defaults get their lowest effort."""
+        assert self._params("gpt-5-mini")["reasoning"] == {"effort": "minimal"}
+        assert self._params("gpt-5.5")["reasoning"] == {"effort": "none"}
+        assert self._params("o3")["reasoning"] == {"effort": "low"}
+
+    def test_unlisted_models_run_at_openais_default(self):
+        """Every other model is left at the provider default."""
+        for model in ("gpt-6.2", "gpt-4.1"):
+            assert "reasoning" not in self._params(model), model

@@ -6,9 +6,9 @@ evals run each example for us.
 
 ## How it works
 
-Each example is a Pipecat **bot**. We run it with its eval transport
-(`-t eval`). The **eval harness** (`pipecat.evals`) connects to it as an RTVI
-client, plays the user's side of a conversation, listens to what the bot says,
+Each example is a Pipecat **bot**. We run it with the dev runner, as for any
+local run. The **eval harness** (`pipecat.evals`) connects to its eval transport
+as an RTVI client, plays the user's side of a conversation, listens to what the bot says,
 and judges it.
 
 A **scenario** is one check: a conversation to have with the bot and how to
@@ -37,8 +37,17 @@ classifier from TypeSafe. It answers each check in a few hundred milliseconds
 and says how sure it is. The judge is picked in `judge_text.yaml`,
 `judge_audio.yaml` and the audio scenario of `language_switch.yaml` through a
 factory we keep in `evals/judges.py` (`factory: evals.judges.typesafe_classifier`).
-It needs the `jev` extra and `TYPESAFE_API_KEY` exported in the shell that runs
+It needs the `typesafe` extra and `TYPESAFE_API_KEY` exported in the shell that runs
 the suite. The harness doesn't read `.env`; only the bots do.
+
+To judge with Cloudflare's [Clef](https://developers.cloudflare.com/workers-ai/models/clef/)
+instead, set `factory: evals.judges.cloudflare_classifier` (add
+`model: clef-flash` for faster answers). It needs the `cloudflare` extra, and
+`CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_KEY` exported.
+
+To judge with OpenAI's [Decisions API](https://developers.openai.com/api/docs/guides/decisions)
+instead, set `factory: evals.judges.openai_classifier`. It needs the `openai`
+extra and `OPENAI_API_KEY` exported.
 
 Jev gives verdicts but not reasons. So a local LLM, the **explainer**, writes
 the reason for every `no` and for every verdict Jev is not sure about. Jev's
@@ -192,12 +201,12 @@ runs on the CPU by default and takes `device: cuda` if you have room.
 
 ## One scenario against a running bot
 
-If a bot is already running with `-t eval`, run a scenario against it
+If a bot is already running (`python bot.py`), run a scenario against it
 directly. This is handy while working on a scenario or a bot:
 
 ```sh
-pipecat eval run scenarios/scripted/capital_question.yaml --bot-url ws://localhost:7860
-pipecat eval run scenarios/simulated/capital_curious.yaml --bot-url ws://localhost:7860 -v
+pipecat eval run scenarios/scripted/capital_question.yaml --bot-url ws://localhost:7860/ws
+pipecat eval run scenarios/simulated/capital_curious.yaml --bot-url ws://localhost:7860/ws -v
 ```
 
 ## Scripted scenarios
@@ -368,7 +377,7 @@ scripted audio scenario, so `capital_curious/audio` exercises the bot's STT,
 TTS and turn taking against a caller of its own. The file format is in the
 [`pipecat.evals.simulation`](../../src/pipecat/evals/simulation.py) module
 docstring. Run one by hand with `pipecat eval run
-scenarios/simulated/<name>.yaml --bot-url ws://localhost:7860 -v`, which prints
+scenarios/simulated/<name>.yaml --bot-url ws://localhost:7860/ws -v`, which prints
 the conversation as it happens.
 
 ## Adding coverage

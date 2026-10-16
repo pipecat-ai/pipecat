@@ -27,12 +27,17 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
 )
-from pipecat.services.aws.sagemaker.bidi_client import SageMakerBidiClient
+from pipecat.services.aws.sagemaker.bidi_client import (
+    SageMakerBidiClient,
+    SageMakerBidiSessionError,
+    classify_sagemaker_bidi_error,
+)
 from pipecat.services.deepgram.flux.stt_base import (
     DeepgramFluxSTTBase,
     DeepgramFluxSTTSettings,
     FluxConnectionNotConfirmedError,
 )
+from pipecat.utils.errors import ErrorCategory
 
 
 @dataclass
@@ -191,6 +196,10 @@ class DeepgramFluxSageMakerSTTService(DeepgramFluxSTTBase):
             return
         await self._client.send_json(message)
 
+    def _classify_error(self, exception: Exception) -> ErrorCategory | None:
+        """Classify Flux protocol failures, then SageMaker session failures."""
+        return super()._classify_error(exception) or classify_sagemaker_bidi_error(exception)
+
     def _transport_is_active(self) -> bool:
         return self._client is not None and self._client.is_active
 
@@ -236,7 +245,13 @@ class DeepgramFluxSageMakerSTTService(DeepgramFluxSTTBase):
             await self._call_event_handler("on_connected")
 
         except Exception as e:
-            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
+            # Nothing reconnects after a failed session start, so the service
+            # can't do any more work in this session.
+            await self.push_error(
+                error_msg=f"Unknown error occurred: {e}",
+                exception=e,
+                force_treat_as_permanent=isinstance(e, SageMakerBidiSessionError),
+            )
             await self._call_event_handler("on_connection_error", str(e))
 
     async def _start_session_within_timeout(self):

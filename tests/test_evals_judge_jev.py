@@ -14,8 +14,8 @@ from unittest.mock import patch
 
 import httpx
 
-from pipecat.classifiers.jev.classifier import JevClassifier
-from pipecat.classifiers.jev.client import DEFAULT_MODEL, JevClient
+from pipecat.classifiers.typesafe.jev.classifier import JevClassifier
+from pipecat.classifiers.typesafe.jev.client import DEFAULT_MODEL, JevClient
 from pipecat.evals.judge import EvalJudge
 
 
@@ -118,7 +118,7 @@ def typesafe_classifier(config: dict) -> JevClassifier:
 def _config_judge(api: _FakeApi, config: dict) -> EvalJudge:
     """The judge a ``judge.eval:`` block builds, over a mock connection to ``api``."""
     with patch.dict(os.environ, {"TYPESAFE_API_KEY": "k"}):
-        with patch("pipecat.classifiers.jev.classifier.JevClient", api.client):
+        with patch("pipecat.classifiers.typesafe.jev.classifier.JevClient", api.client):
             return EvalJudge.from_config(config)
 
 

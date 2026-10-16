@@ -3,14 +3,10 @@ revision = 3
 requires-python = ">=3.11"
 resolution-markers = [
     "python_full_version >= '3.14'",
-    "python_full_version == '3.13.*' and sys_platform == 'linux'",
     "python_full_version == '3.13.*' and sys_platform != 'linux'",
+    "python_full_version == '3.13.*' and sys_platform == 'linux'",
     "python_full_version == '3.12.*'",
     "python_full_version < '3.12'",
-]
-supported-markers = [
-    "python_full_version == '3.13.*' and sys_platform == 'linux'",
-    "python_full_version != '3.13.*' or sys_platform != 'linux'",
 ]
 
 [[package]]
@@ -1244,8 +1240,8 @@ version = "1.4.0"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
     "python_full_version >= '3.14'",
-    "python_full_version == '3.13.*' and sys_platform == 'linux'",
     "python_full_version == '3.13.*' and sys_platform != 'linux'",
+    "python_full_version == '3.13.*' and sys_platform == 'linux'",
     "python_full_version == '3.12.*'",
 ]
 dependencies = [
@@ -2391,49 +2387,19 @@ wheels = [
 
 [[package]]
 name = "google-genai"
-version = "2.8.0"
-source = { registry = "https://pypi.org/simple" }
-resolution-markers = [
-    "python_full_version == '3.13.*' and sys_platform == 'linux'",
-]
-dependencies = [
-    { name = "anyio", marker = "python_full_version == '3.13.*' and sys_platform == 'linux'" },
-    { name = "distro", marker = "python_full_version == '3.13.*' and sys_platform == 'linux'" },
-    { name = "google-auth", extra = ["requests"], marker = "python_full_version == '3.13.*' and sys_platform == 'linux'" },
-    { name = "httpx", marker = "python_full_version == '3.13.*' and sys_platform == 'linux'" },
-    { name = "pydantic", marker = "python_full_version == '3.13.*' and sys_platform == 'linux'" },
-    { name = "requests", marker = "python_full_version == '3.13.*' and sys_platform == 'linux'" },
-    { name = "sniffio", marker = "python_full_version == '3.13.*' and sys_platform == 'linux'" },
-    { name = "tenacity", marker = "python_full_version == '3.13.*' and sys_platform == 'linux'" },
-    { name = "typing-extensions", marker = "python_full_version == '3.13.*' and sys_platform == 'linux'" },
-    { name = "websockets", marker = "python_full_version == '3.13.*' and sys_platform == 'linux'" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/5b/52/0244e310812f3063d09d60b30ae29ab7df9343bd005744cd5eeaa6ba39b4/google_genai-2.8.0.tar.gz", hash = "sha256:37a9b3cb127d763e7f4ca47452ae3562c87728773bd1b149f7b559c239da2bc1", size = 564955, upload-time = "2026-06-03T22:55:38.397Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/e2/de/747ad1aa49e902da9a4699081c282a1ed8ceed3b4d295fd99a6d286e09e4/google_genai-2.8.0-py3-none-any.whl", hash = "sha256:4da0a223a100f4b37f609a68b835e3326ab0fa313314dc0fd9d34e76ee293844", size = 832497, upload-time = "2026-06-03T22:55:36.598Z" },
-]
-
-[[package]]
-name = "google-genai"
 version = "2.25.0"
 source = { registry = "https://pypi.org/simple" }
-resolution-markers = [
-    "python_full_version >= '3.14'",
-    "python_full_version == '3.13.*' and sys_platform != 'linux'",
-    "python_full_version == '3.12.*'",
-    "python_full_version < '3.12'",
-]
 dependencies = [
-    { name = "anyio", marker = "python_full_version != '3.13.*' or sys_platform != 'linux'" },
-    { name = "distro", marker = "python_full_version != '3.13.*' or sys_platform != 'linux'" },
-    { name = "google-auth", extra = ["requests"], marker = "python_full_version != '3.13.*' or sys_platform != 'linux'" },
-    { name = "httpx", marker = "python_full_version != '3.13.*' or sys_platform != 'linux'" },
-    { name = "pydantic", marker = "python_full_version != '3.13.*' or sys_platform != 'linux'" },
-    { name = "requests", marker = "python_full_version != '3.13.*' or sys_platform != 'linux'" },
-    { name = "sniffio", marker = "python_full_version != '3.13.*' or sys_platform != 'linux'" },
-    { name = "tenacity", marker = "python_full_version != '3.13.*' or sys_platform != 'linux'" },
-    { name = "typing-extensions", marker = "python_full_version != '3.13.*' or sys_platform != 'linux'" },
-    { name = "websockets", marker = "python_full_version != '3.13.*' or sys_platform != 'linux'" },
+    { name = "anyio" },
+    { name = "distro" },
+    { name = "google-auth", extra = ["requests"] },
+    { name = "httpx" },
+    { name = "pydantic" },
+    { name = "requests" },
+    { name = "sniffio" },
+    { name = "tenacity" },
+    { name = "typing-extensions" },
+    { name = "websockets" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/62/0a/a3b7856ca840031d4393dbdd97b67fe811b20061315ed68b67b5c85ca80d/google_genai-2.25.0.tar.gz", hash = "sha256:ab603baa5eee0205926ad0f8d7f93e0400df6d67650e99c33e01ab228ea16ad6", size = 699564, upload-time = "2026-09-22T17:23:01.238Z" }
 wheels = [
@@ -3775,8 +3741,8 @@ version = "1.0.0"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
     "python_full_version >= '3.14'",
-    "python_full_version == '3.13.*' and sys_platform == 'linux'",
     "python_full_version == '3.13.*' and sys_platform != 'linux'",
+    "python_full_version == '3.13.*' and sys_platform == 'linux'",
     "python_full_version == '3.12.*'",
 ]
 dependencies = [
@@ -4903,8 +4869,8 @@ version = "2.5.3"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
     "python_full_version >= '3.14'",
-    "python_full_version == '3.13.*' and sys_platform == 'linux'",
     "python_full_version == '3.13.*' and sys_platform != 'linux'",
+    "python_full_version == '3.13.*' and sys_platform == 'linux'",
     "python_full_version == '3.12.*'",
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/13/01/11703282db468b85f6f7b8c7f22d058de5970d5c7e60a3a8aaa313c3de36/numpy-2.5.3.tar.gz", hash = "sha256:df2d5874ff183595a4ba404edd04f6bd9b5505c1d7708573f6a6c17489a67563", size = 20791231, upload-time = "2026-09-06T16:27:47.073Z" }
@@ -5699,6 +5665,9 @@ cli = [
     { name = "ruff" },
     { name = "typer" },
 ]
+cloudflare = [
+    { name = "httpx", extra = ["http2"] },
+]
 daily = [
     { name = "daily-python" },
 ]
@@ -5725,8 +5694,7 @@ funasr = [
 google = [
     { name = "google-cloud-speech" },
     { name = "google-cloud-texttospeech" },
-    { name = "google-genai", version = "2.8.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.13.*' and sys_platform == 'linux'" },
-    { name = "google-genai", version = "2.25.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version != '3.13.*' or sys_platform != 'linux'" },
+    { name = "google-genai" },
 ]
 groq = [
     { name = "groq" },
@@ -5806,6 +5774,9 @@ nvidia = [
     { name = "nvidia-riva-client" },
     { name = "protobuf" },
 ]
+openai = [
+    { name = "httpx", extra = ["http2"] },
+]
 pgmq = [
     { name = "asyncpg" },
     { name = "pgmq" },
@@ -5854,8 +5825,11 @@ tracing = [
     { name = "opentelemetry-instrumentation" },
     { name = "opentelemetry-sdk" },
 ]
+typesafe = [
+    { name = "httpx", extra = ["http2"] },
+]
 vonage-video-connector = [
-    { name = "vonage-video-connector", marker = "python_full_version == '3.13.*' and sys_platform == 'linux'" },
+    { name = "vonage-video-connector", marker = "sys_platform == 'linux'" },
 ]
 webrtc = [
     { name = "aiortc" },
@@ -5900,7 +5874,7 @@ requires-dist = [
     { name = "aic-sdk", marker = "extra == 'aic'", specifier = "~=3.1.0" },
     { name = "aiobotocore", marker = "extra == 'aws'", specifier = ">=3,<4" },
     { name = "aiofiles", specifier = ">=24.1.0,<27" },
-    { name = "aiohttp", specifier = ">=3.11.12,<4" },
+    { name = "aiohttp", specifier = ">=3.14.0,<4" },
     { name = "aiortc", marker = "extra == 'webrtc'", specifier = ">=1.14.0,<2" },
     { name = "anthropic", marker = "extra == 'anthropic'", specifier = ">=0.49.0,<2" },
     { name = "asyncpg", marker = "extra == 'pgmq'", specifier = ">=0.30.0" },
@@ -5924,7 +5898,9 @@ requires-dist = [
     { name = "google-genai", marker = "(python_full_version != '3.13.*' and extra == 'google') or (sys_platform != 'linux' and extra == 'google')", specifier = ">=2.25.0,<3" },
     { name = "google-genai", marker = "extra == 'google'", specifier = ">=1.68.0,<3" },
     { name = "groq", marker = "extra == 'groq'", specifier = ">=0.23.0,<2" },
-    { name = "httpx", extras = ["http2"], marker = "extra == 'jev'", specifier = ">=0.27,<1" },
+    { name = "httpx", extras = ["http2"], marker = "extra == 'cloudflare'", specifier = ">=0.27,<1" },
+    { name = "httpx", extras = ["http2"], marker = "extra == 'openai'", specifier = ">=0.27,<1" },
+    { name = "httpx", extras = ["http2"], marker = "extra == 'typesafe'", specifier = ">=0.27,<1" },
     { name = "hume", marker = "extra == 'hume'", specifier = ">=0.11.2,<1" },
     { name = "jinja2", marker = "extra == 'cli'", specifier = ">=3.1.0,<4" },
     { name = "kokoro-onnx", marker = "extra == 'kokoro'", specifier = ">=0.5.0,<1" },
@@ -5962,9 +5938,10 @@ requires-dist = [
     { name = "pipecat-ai", extras = ["kokoro"], marker = "extra == 'evals'" },
     { name = "pipecat-ai", extras = ["mcp"], marker = "extra == 'keenable'" },
     { name = "pipecat-ai", extras = ["moonshine"], marker = "extra == 'evals'" },
+    { name = "pipecat-ai", extras = ["typesafe"], marker = "extra == 'jev'" },
     { name = "pipecat-ai", extras = ["webrtc"], marker = "extra == 'webrtc-video'" },
     { name = "pipecat-ai-context-hub", marker = "extra == 'cli'", specifier = ">=0.7.0,<1" },
-    { name = "pipecat-ai-prebuilt", marker = "extra == 'runner'", specifier = ">=1.2.2" },
+    { name = "pipecat-ai-prebuilt", marker = "extra == 'runner'", specifier = ">=1.3.0" },
     { name = "piper-tts", marker = "extra == 'piper'", specifier = ">=1.3.0,<2" },
     { name = "pocket-tts", marker = "extra == 'pocket-tts'", specifier = ">=2.1.0,<3" },
     { name = "protobuf", specifier = ">=5.29.6,<7" },
@@ -5973,7 +5950,7 @@ requires-dist = [
     { name = "pyaudio", marker = "extra == 'local'", specifier = "~=0.2.14" },
     { name = "pydantic", specifier = ">=2.10.6,<3" },
     { name = "pydantic", marker = "python_full_version >= '3.14'", specifier = ">=2.13" },
-    { name = "pygobject", marker = "extra == 'gstreamer'", specifier = "~=3.50.0" },
+    { name = "pygobject", marker = "extra == 'gstreamer'", specifier = ">=3.52.0,<4" },
     { name = "pyjwt", marker = "extra == 'livekit'", specifier = ">=2.12.0,<3" },
     { name = "pyrnnoise", marker = "extra == 'rnnoise'", specifier = "~=0.4.5" },
     { name = "python-dotenv", specifier = ">=1.0.0,<2.0.0" },
@@ -6003,11 +5980,11 @@ requires-dist = [
     { name = "typer", marker = "extra == 'cli'", specifier = ">=0.20.0,<1" },
     { name = "typing-extensions", specifier = ">=4.9" },
     { name = "uvicorn", marker = "extra == 'runner'", specifier = ">=0.32.0,<1.0.0" },
-    { name = "vonage-video-connector", marker = "python_full_version == '3.13.*' and sys_platform == 'linux' and extra == 'vonage-video-connector'", specifier = "~=1.0.2" },
+    { name = "vonage-video-connector", marker = "python_full_version >= '3.11' and sys_platform == 'linux' and extra == 'vonage-video-connector'", specifier = "~=1.0.3" },
     { name = "wait-for2", marker = "python_full_version < '3.12'", specifier = ">=0.4.1,<1" },
     { name = "websockets", specifier = ">=13.1" },
 ]
-provides-extras = ["aic", "anthropic", "assemblyai", "asyncai", "aws", "aws-nova-sonic", "azure", "baseten", "bland", "cartesia", "camb", "cerebras", "crusoe", "daily", "deepgram", "deepseek", "elevenlabs", "evals", "fal", "fireworks", "fish", "funasr", "gladia", "google", "gradium", "grok", "groq", "gstreamer", "heygen", "hume", "inception", "inworld", "jev", "keenable", "koala", "kokoro", "langchain", "lemonslice", "livekit", "local", "local-smart-turn", "mcp", "mem0", "meta", "mistral", "mlx-whisper", "moondream", "moonshine", "moq", "nebius", "neuphonic", "novita", "nvidia", "openai", "rnnoise", "openrouter", "perplexity", "pgmq", "piper", "pocket-tts", "qwen", "redis", "resembleai", "rime", "runner", "sagemaker", "sambanova", "sarvam", "sentry", "silero", "simli", "smallest", "soniox", "soundfile", "speechify", "speechmatics", "strands", "tavus", "together", "tracing", "ultravox", "vonage-video-connector", "webrtc", "webrtc-video", "websocket", "whisper", "xai", "cli"]
+provides-extras = ["aic", "anthropic", "assemblyai", "asyncai", "aws", "aws-nova-sonic", "azure", "baseten", "bland", "cartesia", "camb", "cerebras", "cloudflare", "crusoe", "daily", "deepgram", "deepseek", "elevenlabs", "evals", "fal", "fireworks", "fish", "funasr", "gladia", "google", "gradium", "grok", "groq", "gstreamer", "heygen", "hume", "inception", "inworld", "jev", "keenable", "koala", "kokoro", "langchain", "lemonslice", "livekit", "local", "local-smart-turn", "mcp", "mem0", "meta", "mistral", "mlx-whisper", "moondream", "moonshine", "moq", "nebius", "neuphonic", "novita", "nvidia", "openai", "rnnoise", "openrouter", "perplexity", "pgmq", "piper", "pocket-tts", "qwen", "redis", "resembleai", "rime", "runner", "sagemaker", "sambanova", "sarvam", "sentry", "silero", "simli", "smallest", "soniox", "soundfile", "speechify", "speechmatics", "strands", "tavus", "together", "tracing", "typesafe", "ultravox", "vonage-video-connector", "webrtc", "webrtc-video", "websocket", "whisper", "xai", "cli"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -6058,14 +6035,14 @@ wheels = [
 
 [[package]]
 name = "pipecat-ai-prebuilt"
-version = "1.2.2"
+version = "1.3.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "fastapi", extra = ["all"] },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/06/84/d0f88732469c0ef2a747c0a9da3e054a9815630a913f7dfece2aa9d10ca8/pipecat_ai_prebuilt-1.2.2.tar.gz", hash = "sha256:a0050c198cbe04f2535d9b1eef4ef338812952f3973d92b18856d4d3731aa5dc", size = 804294, upload-time = "2026-09-25T12:09:37.795Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/d4/50/7ad21080c8c8d6210b08c6f2b72f9939da71caa2f8c3f16ac4afd9af25e8/pipecat_ai_prebuilt-1.3.0.tar.gz", hash = "sha256:b7ee2244e6885f2866272d4f4c5053980b1a1fcfc8c8976b6a21e6558676b061", size = 825709, upload-time = "2026-10-02T13:06:10.876Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ac/a2/e3bd030c733b28c53e09d7cfd70763123c2b85615ea440076647a9c1b949/pipecat_ai_prebuilt-1.2.2-py3-none-any.whl", hash = "sha256:1e1991725cc7f20c92cacba8dc65d64e2e714dd81293ea8074669de7f8f85d17", size = 805332, upload-time = "2026-09-25T12:09:36.269Z" },
+    { url = "https://files.pythonhosted.org/packages/e4/6a/df44efb2952089e59a7a2e1798156666257429613d6feac6f1ebb364f420/pipecat_ai_prebuilt-1.3.0-py3-none-any.whl", hash = "sha256:fe06408efea390d0cfe4257b4bf86aff19b44189cdbb504954dd9329513dbf7f", size = 828361, upload-time = "2026-10-02T13:06:09.099Z" },
 ]
 
 [[package]]
@@ -6939,8 +6916,8 @@ version = "14.0.0"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
     "python_full_version >= '3.14'",
-    "python_full_version == '3.13.*' and sys_platform == 'linux'",
     "python_full_version == '3.13.*' and sys_platform != 'linux'",
+    "python_full_version == '3.13.*' and sys_platform == 'linux'",
     "python_full_version == '3.12.*'",
 ]
 dependencies = [
@@ -6962,12 +6939,12 @@ wheels = [
 
 [[package]]
 name = "pygobject"
-version = "3.50.2"
+version = "3.58.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pycairo" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/a7/5d/f2946cc6c1baf56dee6e942af8cfa16472538a8ad9d780d9f484e7554288/pygobject-3.50.2.tar.gz", hash = "sha256:ece6b860aab77cb649fdfc6e88d8a83765e7a62f7ffd39a628d6e2a0d397a7ff", size = 1085854, upload-time = "2025-10-18T13:44:45.634Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/a3/9b/473a5234ec86bce978d3583adc62441c84cc57181c4ea8a8978997c7f0c1/pygobject-3.58.0.tar.gz", hash = "sha256:45068697de3ffe46840ca369705f23118b34db4f7deb63f6eff079a6734ddcca", size = 1408568, upload-time = "2026-08-28T06:50:27.22Z" }
 
 [[package]]
 name = "pyjwt"
@@ -8154,8 +8131,8 @@ version = "1.18.1"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
     "python_full_version >= '3.14'",
-    "python_full_version == '3.13.*' and sys_platform == 'linux'",
     "python_full_version == '3.13.*' and sys_platform != 'linux'",
+    "python_full_version == '3.13.*' and sys_platform == 'linux'",
     "python_full_version == '3.12.*'",
 ]
 dependencies = [
@@ -8631,8 +8608,8 @@ version = "9.1.0"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
     "python_full_version >= '3.14'",
-    "python_full_version == '3.13.*' and sys_platform == 'linux'",
     "python_full_version == '3.13.*' and sys_platform != 'linux'",
+    "python_full_version == '3.13.*' and sys_platform == 'linux'",
     "python_full_version == '3.12.*'",
 ]
 dependencies = [
@@ -9487,7 +9464,7 @@ name = "vonage-video-connector"
 version = "1.0.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "pydantic", marker = "python_full_version == '3.13.*' and sys_platform == 'linux'" },
+    { name = "pydantic", marker = "python_full_version != '3.13.*' or sys_platform == 'linux'" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ba/c3/c2c503b85221358d0e491f2c8f84b67491ddf7dcb0abcc1cb61069fc521a/vonage_video_connector-1.0.3-cp311-abi3-manylinux_2_35_aarch64.whl", hash = "sha256:0345529ed0166eb190c456da12e5bbd83a1195679e45d33b081d442901badd3d", size = 12374514, upload-time = "2026-09-22T14:01:54.663Z" },

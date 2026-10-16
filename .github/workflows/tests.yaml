@@ -40,14 +40,15 @@ jobs:
             --extra aws-nova-sonic \
             --extra azure \
             --extra cli \
+            --extra cloudflare \
             --extra daily \
             --extra deepgram \
             --extra google \
-            --extra jev \
             --extra langchain \
             --extra livekit \
             --extra mcp \
             --extra moq \
+            --extra openai \
             --extra pgmq \
             --extra piper \
             --extra redis \
@@ -56,6 +57,7 @@ jobs:
             --extra sarvam \
             --extra speechmatics \
             --extra tracing \
+            --extra typesafe \
             --extra websocket
 
       - name: Test with pytest

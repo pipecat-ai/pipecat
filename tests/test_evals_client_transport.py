@@ -7,6 +7,7 @@
 """Tests for the eval harness's client output transport."""
 
 import asyncio
+import json
 import types
 import unittest
 from unittest.mock import AsyncMock, patch
@@ -18,8 +19,10 @@ from pipecat.evals.client_transport import (
     EvalClientInputTransport,
     EvalClientOutputTransport,
     EvalClientRecorder,
+    EvalClientTransport,
     _RecorderTrack,
 )
+from pipecat.evals.serializer import EvalConnectionFlags, parse_eval_connect
 from pipecat.frames.frames import (
     InputAudioRawFrame,
     InputTransportMessageFrame,
@@ -194,6 +197,20 @@ class TestEvalHarnessInput(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(inp._bot_pcm), 0)
             self.assertEqual(recorder._bot._chunks, [])  # nothing of it was played
             self.assertIs(push.await_args_list[-1].args[0], interrupted)  # still reported
+
+
+class TestEvalClientTransportConnect(unittest.IsolatedAsyncioTestCase):
+    async def test_sends_eval_connect_before_client_ready(self):
+        flags = EvalConnectionFlags(skip_tts=True)
+        transport = EvalClientTransport("ws://localhost:7860", flags=flags)
+        sent = []
+        transport._session.send = AsyncMock(side_effect=sent.append)
+
+        await transport._on_connected(None)
+
+        messages = [json.loads(m) for m in sent]
+        self.assertEqual(parse_eval_connect(messages[0]), flags)
+        self.assertEqual(messages[1]["type"], "client-ready")
 
 
 if __name__ == "__main__":

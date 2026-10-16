@@ -11,10 +11,10 @@ using the VoiceFormatter bundle, giving fine-grained control over which
 transforms are applied and in what order.
 
 Each transform is an async callable with the signature:
-    async def transform(text: str, aggregation_type: str) -> str
+    async def transform(text: str, text_type: str) -> str
 
 Transforms are registered via text_transforms on the TTS service as a list of
-(aggregation_type, callable) pairs. The aggregation_type string controls which
+(text_type, callable) pairs. The text_type string controls which
 frames the transform applies to ("*" means all frames).
 
 This example shows a billing-assistant scenario where several transforms are
@@ -60,6 +60,7 @@ from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.livekit.transport import LiveKitParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 from pipecat.utils.text.transforms import (
     email_to_speech,
@@ -81,6 +82,10 @@ transport_params = {
         audio_out_enabled=True,
     ),
     "daily": lambda: DailyParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
+    "livekit": lambda: LiveKitParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
     ),

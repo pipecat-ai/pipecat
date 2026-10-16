@@ -1623,7 +1623,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to. Everything the backend produces comes back as a `BackendOutput` saying
   what it is and whether the user may hear it, and `transform_output` decides
   that per output, or rewrites the text on its way out — see
-  `examples/realtime/realtime-openai-live-client-delegation-spoken-updates.py`.
+  `examples/realtime/realtime-openai-live-client-delegation-speaking-policy.py`.
   (PR [#5688](https://github.com/pipecat-ai/pipecat/pull/5688))
 
 - Added `OpenAILiveLLMService`, a speech-to-speech service for the OpenAI Live
@@ -1637,7 +1637,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Pipecat LLM service as the backend through a `BackendLLMWorker`. See
   `examples/realtime/realtime-openai-live-responses-delegation.py` and
   `examples/realtime/realtime-openai-live-client-delegation.py`, plus
-  `examples/realtime/realtime-openai-live-client-delegation-spoken-updates.py`
+  `examples/realtime/realtime-openai-live-client-delegation-speaking-policy.py`
   for a backend that chooses what the user hears.
   (PR [#5688](https://github.com/pipecat-ai/pipecat/pull/5688))
 

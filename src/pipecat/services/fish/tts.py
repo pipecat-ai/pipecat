@@ -57,7 +57,7 @@ class FishAudioTTSSettings(TTSSettings):
         prosody_speed: Speech speed multiplier (0.5-2.0). Defaults to 1.0.
         prosody_volume: Volume adjustment in dB (-20 to 20). Defaults to 0.
         prosody_normalize_loudness: Whether to normalize output loudness for a more
-            consistent perceived volume. Applies to the S2 family.
+            consistent perceived volume. Applies to the S2 family and drama-3.
         chunk_length: Text segment size for processing (100-300).
         min_chunk_length: Minimum characters before splitting into a new chunk (0-100).
         condition_on_previous_chunks: Whether to use previously generated audio as
@@ -98,6 +98,9 @@ class FishAudioTTSService(InterruptibleTTSService):
     Provides real-time text-to-speech synthesis using Fish Audio's WebSocket API.
     Supports various audio formats, customizable prosody controls, and streaming
     audio generation with interruption handling.
+
+    Uses the ``s2.1-pro`` model by default. Set ``Settings(model=...)`` to use
+    another Fish Audio model, such as ``s1``, ``s2-pro``, or ``drama-3``.
     """
 
     Settings = FishAudioTTSSettings
@@ -150,7 +153,7 @@ class FishAudioTTSService(InterruptibleTTSService):
                     Use ``settings=FishAudioTTSService.Settings(voice=...)`` instead.
                     Will be removed in 2.0.0.
 
-            model_id: Specify which Fish Audio TTS model to use (e.g. "s2.1-pro").
+            model_id: Specify which Fish Audio TTS model to use (e.g. "s2.1-pro" or "drama-3").
 
                 .. deprecated:: 0.0.105
                     Use ``settings=FishAudioTTSService.Settings(model=...)`` instead.
