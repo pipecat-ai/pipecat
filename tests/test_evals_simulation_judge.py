@@ -136,6 +136,7 @@ class TestSimulationJudge(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(politeness.failure_kind, "judge_no")
         self.assertEqual(politeness.reason, "turn 2: turn 2 politeness")
+        self.assertEqual(politeness.criterion, "stays polite")
         # Without a min_score, a metric reports and fails nothing.
         self.assertEqual((brevity.score, brevity.passed), (0.5, True))
         self.assertIn(

@@ -497,6 +497,7 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.succeeded)
         self.assertTrue(result.passed)
         self.assertEqual(result.reason, "because the bot said Berlin")
+        self.assertEqual(result.success, "the bot said Berlin")
         self.assertEqual(result.ended_by, "end_call")
         self.assertEqual(result.turns, 2)
         self.assertEqual(result.end_call, {"success": True, "reason": "I got my answer"})
@@ -504,6 +505,7 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
         # brevity scored 0.5 but gates nothing, so the run still passes.
         self.assertEqual([m.passed for m in result.metrics], [True, True])
         self.assertEqual(result.metrics[0].reason, "all 3 turn(s)")
+        self.assertEqual(result.metrics[0].criterion, "stayed polite")
         self.assertEqual(result.metrics[1].reason, "turn 2: because kept it short")
         self.assertEqual([v.turn for v in result.metrics[1].verdicts if not v.passed], [2])
         self.assertIsNone(result.failure)

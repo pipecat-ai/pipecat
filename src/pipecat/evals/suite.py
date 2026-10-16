@@ -284,7 +284,7 @@ def _scenario_record(run: "EvalRun", artifacts: dict) -> dict:
 
 
 def _simulation_record(run: "EvalRun", artifacts: dict) -> dict:
-    """The results.jsonl record of a simulation run: how it ended, what the judge said, each metric's score, the conversation, and for a failed run the bot's events."""
+    """The results.jsonl record of a simulation run: how it ended, what the judge said and on what wording, each metric's score, the conversation, and for a failed run the bot's events."""
     result = run.result if isinstance(run.result, EvalSimulationResult) else None
     record = {
         "bot": run.bot,
@@ -292,6 +292,7 @@ def _simulation_record(run: "EvalRun", artifacts: dict) -> dict:
         "scenario": run.scenario,
         "kind": run.kind,
         "attempt": run.attempt,
+        "success": result.success if result else "",
         "passed": bool(result and result.passed),
         "succeeded": bool(result and result.succeeded),
         "error": run.error or (result.error if result else None),
@@ -302,6 +303,7 @@ def _simulation_record(run: "EvalRun", artifacts: dict) -> dict:
         "metrics": [
             {
                 "name": m.name,
+                "criterion": m.criterion,
                 "score": m.score,
                 "passed": m.passed,
                 "min_score": m.min_score,
@@ -357,6 +359,7 @@ def _simulation_result_from_dict(data: dict) -> EvalSimulationResult:
         duration_ms=data.get("duration_ms", 0),
         events_seen=data.get("events_seen", []),
         debug_log=data.get("debug_log", []),
+        success=data.get("success", ""),
     )
 
 

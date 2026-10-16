@@ -214,6 +214,7 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
             duration_ms=duration_ms,
             events_seen=events_seen,
             debug_log=debug_log,
+            success=self._simulation.success,
         )
 
     def timeline(self) -> list[dict]:

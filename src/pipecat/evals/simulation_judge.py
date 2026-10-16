@@ -189,4 +189,5 @@ class EvalSimulationJudge:
             min_score=metric.min_score,
             verdicts=verdicts,
             failure_kind=failure_kind,
+            criterion=metric.criterion,
         )
