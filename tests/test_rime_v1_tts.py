@@ -7,6 +7,7 @@
 """Tests for RimeV1TTSService."""
 
 import json
+import time
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from typing import Any
@@ -399,27 +400,39 @@ async def test_context_error_reports_and_skips_the_rest_of_the_turn() -> None:
             return [_error(request, "internal")]
         return []
 
+    def failed_turn(first: str, second: str) -> list[Any]:
+        return [
+            LLMFullResponseStartFrame(),
+            AggregatedTextFrame(first, AggregationType.SENTENCE),
+            SleepFrame(sleep=0.1),
+            AggregatedTextFrame(second, AggregationType.SENTENCE),
+            LLMFullResponseEndFrame(),
+            SleepFrame(sleep=0.1),
+        ]
+
     async with _rime_server(reply) as (url, requests):
         service = RimeV1TTSService(api_key="key", websocket_url=f"{url}/coda/ws")
+        started_at = time.monotonic()
         down_frames, up_frames = await run_test(
             service,
-            frames_to_send=[
-                LLMFullResponseStartFrame(),
-                AggregatedTextFrame("First sentence.", AggregationType.SENTENCE),
-                SleepFrame(sleep=0.05),
-                AggregatedTextFrame("Second sentence.", AggregationType.SENTENCE),
-                LLMFullResponseEndFrame(),
-                SleepFrame(sleep=0.1),
-            ],
+            frames_to_send=failed_turn("First one.", "First two.")
+            + failed_turn("Second one.", "Second two."),
             start_timeout=3.0,
         )
+        elapsed = time.monotonic() - started_at
 
-    assert _payloads(requests) == ["start", "text"]
-    errors = [frame for frame in up_frames if isinstance(frame, ErrorFrame)]
-    assert errors and "internal" in errors[0].error
-    assert errors[0].category is ErrorCategory.SERVER
+    # Each turn's later sentence is skipped after Rime fails its context.
+    assert _payloads(requests) == ["start", "text", "start", "text"]
+    rime_errors = [f for f in up_frames if isinstance(f, ErrorFrame) and "internal" in f.error]
+    assert len(rime_errors) == 2
+    assert rime_errors[0].category is ErrorCategory.SERVER
     assert not any(isinstance(frame, TTSAudioRawFrame) for frame in down_frames)
-    assert _texts(down_frames) == ["First sentence.", "Second sentence."]
+    # The failed context stays open for the rest of its turn instead of being
+    # reopened empty, so each turn ends promptly with one started/stopped pair.
+    assert sum(isinstance(frame, TTSStartedFrame) for frame in down_frames) == 2
+    assert sum(isinstance(frame, TTSStoppedFrame) for frame in down_frames) == 2
+    assert elapsed < 2.0
+    assert _texts(down_frames) == ["First one.", "First two.", "Second one.", "Second two."]
     assert service.is_usable
 
 

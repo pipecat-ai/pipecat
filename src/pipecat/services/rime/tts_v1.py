@@ -394,10 +394,17 @@ class RimeV1TTSService(WebsocketTTSService):
         await super().on_audio_context_interrupted(context_id)
 
     async def on_turn_context_completed(self):
-        """Forget a failed context once its turn has no more text."""
-        if self._turn_context_id:
-            self._failed_contexts.discard(self._turn_context_id)
+        """Close a failed context's audio once its turn has no more text."""
+        context_id = self._turn_context_id
         await super().on_turn_context_completed()
+        if context_id in self._failed_contexts:
+            await self._close_failed_context(context_id)
+
+    async def _close_failed_context(self, context_id: str):
+        self._failed_contexts.discard(context_id)
+        if self.audio_context_available(context_id):
+            await self.append_to_audio_context(context_id, TTSStoppedFrame(context_id=context_id))
+            await self.remove_audio_context(context_id)
 
     async def flush_audio(self, context_id: str | None = None):
         """End the context's input so Rime synthesizes the rest of its text.
@@ -451,8 +458,11 @@ class RimeV1TTSService(WebsocketTTSService):
                     error_msg=_error_message(response.error),
                     category=ErrorCategory.UNKNOWN if category.is_permanent else category,
                 )
-                await self.append_to_audio_context(ctx_id, TTSStoppedFrame(context_id=ctx_id))
-                await self.remove_audio_context(ctx_id)
+                # While the turn is still sending text, its later sentences reuse
+                # this audio context; closing it now would make the base reopen an
+                # empty one for them. on_turn_context_completed closes it instead.
+                if ctx_id != self._turn_context_id:
+                    await self._close_failed_context(ctx_id)
 
     async def _split_sentences(self, text: str) -> list[str]:
         """Split prepared text into the sentence units Rime v1 expects per text message."""
