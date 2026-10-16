@@ -379,6 +379,25 @@ class TestGeminiLiveIntermediateResults(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(self._responses(), [])
 
+    async def test_a_live_thinking_model_takes_no_intermediate_results(self):
+        self.service._settings.model = "models/gemini-3.8-live-extended-thinking"
+        self.assertFalse(self.service.accepts_intermediate_function_call_results)
+
+        await self.service.push_frame(_result(is_final=False))
+
+        self.assertEqual(self._responses(), [])
+
+    async def test_a_live_thinking_model_gets_no_scheduling_hint(self):
+        self.service._settings.model = "models/gemini-3.8-live-extended-thinking"
+
+        await self.service.push_frame(_result(is_final=True))
+
+        (response,) = self._responses()
+        # These models close the session on a response that carries scheduling.
+        self.assertIsNone(response.scheduling)
+        self.assertNotIn("scheduling", response.response)
+        self.assertIs(response.will_continue, False)
+
 
 class TestNovaSonicIntermediateResults(unittest.IsolatedAsyncioTestCase):
     """Nova Sonic takes them as text beside the call."""
