@@ -658,28 +658,27 @@ class FrameProcessor(BaseObject):
             await self._metrics.setup(self.task_manager)
 
     def _setup_started(self):
-        """Hold the StartFrame here and in every sub-processor.
+        """Hold the StartFrame until :meth:`_setup_finished` is called.
 
-        Called by the pipeline before setting processors up. Each one is let go
-        by :meth:`_setup_finished`.
+        Called by the pipeline before setting this processor up.
         """
         self.__setup_done.clear()
-        for p in self.processors:
-            p._setup_started()
 
-    def _setup_finished(self, recursive: bool = False):
-        """Let this processor start, once its own setup() has returned.
-
-        Args:
-            recursive: Also let every sub-processor start.
-        """
+    def _setup_finished(self):
+        """Let this processor start, once its own setup() has returned."""
         self.__setup_done.set()
-        if self.__start_pending and self._task_manager:
-            self.__start_pending = False
-            self.__create_input_task()
-        if recursive:
-            for p in self.processors:
-                p._setup_finished(recursive=True)
+        if not self.__start_pending:
+            return
+        self.__start_pending = False
+        if not self._task_manager:
+            # Setting up was cut short before FrameProcessor.setup() ran, so
+            # there is no task manager to start processing frames with.
+            logger.error(
+                f"{self}: can't start, setup ended before FrameProcessor.setup() was "
+                "called (call super().setup() before anything that can block)"
+            )
+            return
+        self.__create_input_task()
 
     async def cleanup(self):
         """Release this processor's resources at teardown.

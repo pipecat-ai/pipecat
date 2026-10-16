@@ -1383,13 +1383,10 @@ class PipelineWorker(BaseWorker):
         self._pipeline._setup_started()
         self._pipeline_setup_task = self.create_task(self._pipeline.setup(setup))
         # The StartFrame is pushed right away and each processor holds it until
-        # its own setup is done (see BasePipeline._setup_processors()). Mark the
-        # whole tree first: the StartFrame can reach a processor before its
-        # setup() has even begun. Whatever happens to setting up (done, failed,
-        # timed out or cancelled), nothing may stay held after it.
-        self._pipeline_setup_task.add_done_callback(
-            lambda _: self._pipeline._setup_finished(recursive=True)
-        )
+        # its own setup is done (see BasePipeline._setup_processors()). Whatever
+        # happens to setting up (done, failed, timed out or cancelled), the
+        # pipeline may not stay held after it.
+        self._pipeline_setup_task.add_done_callback(lambda _: self._pipeline._setup_finished())
 
     async def _cleanup(self, cleanup_pipeline: bool):
         """Clean up the pipeline worker and processors."""
