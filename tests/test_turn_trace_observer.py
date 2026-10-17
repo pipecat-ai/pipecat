@@ -372,6 +372,11 @@ class TestTurnTraceObserver(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(conv_spans[0].attributes["deployment.id"], "abc-123")
         self.assertEqual(conv_spans[0].attributes["customer.tier"], "premium")
 
+        turn_spans = self._get_spans_by_name("turn")
+        self.assertEqual(len(turn_spans), 1)
+        self.assertEqual(turn_spans[0].attributes["deployment.id"], "abc-123")
+        self.assertEqual(turn_spans[0].attributes["customer.tier"], "premium")
+
     async def test_concurrent_pipelines_are_isolated(self):
         """Test that two pipelines with separate TracingContexts don't interfere."""
         tracing_ctx_a = TracingContext()

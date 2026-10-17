@@ -32,6 +32,12 @@ class TestTracingContext(unittest.TestCase):
         self.assertIsNone(ctx.get_conversation_context())
         self.assertIsNone(ctx.get_turn_context())
         self.assertIsNone(ctx.conversation_id)
+        self.assertEqual(ctx.additional_span_attributes, {})
+
+    def test_additional_span_attributes(self):
+        """Test that additional span attributes are kept on the context."""
+        ctx = TracingContext(additional_span_attributes={"session.id": "call-42"})
+        self.assertEqual(ctx.additional_span_attributes, {"session.id": "call-42"})
 
     def test_set_and_get_conversation_context(self):
         """Test setting and retrieving conversation context."""
