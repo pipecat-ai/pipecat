@@ -9,7 +9,7 @@ uv run python -m pipecat.evals suite -d evals/llm-with-backend/manifest.yaml -k 
 
 ## Layout
 
-The conversations live once, in `scenarios/turns/`, and are included by two scenario files each: `scenarios/text/<name>.yaml`, which judges the frontend's text, and `scenarios/audio/<name>.yaml`, which synthesizes the user's voice and judges a transcription of the bot's speech. Text mode drives the cascade bots only, since the speech-to-speech bots take audio, and is the fast loop while working on prompts or code; audio mode runs against every bot and is the judgment. The manifest lists which bots run which.
+The conversations live once, in `scenarios/turns/`, and are included by two scenario files each: `scenarios/text/<name>.yaml`, which judges the frontend's text, and `scenarios/audio/<name>.yaml`, which synthesizes the user's voice and judges a transcription of the bot's speech. Text mode drives the cascade bots only, since the speech-to-speech bots take audio, and is the fast loop while working on prompts or code; audio mode runs against every bot and is the judgment. The manifest lists which bots run which. `bots/no-progress-frontend.py` is a cascade bot of the suite's own, run with each cascade frontend in turn (the manifest's `runner_body` picks it): its connector records none of the backend's progress in the frontend's context, for the scenario that needs that.
 
 ## Scenarios
 
@@ -27,6 +27,7 @@ The backend is an engineering assistant's: a code change that loops through sear
 | `implicit_cancel`        | A change of mind while the integration tests run, with no "stop" said: the backend cancels `run_integration_tests`, the bot acknowledges once, and nothing arrives later. |
 | `partial_cancel`         | Integration tests and a runbook lookup in flight, then "forget the tests": `run_integration_tests` is cancelled, the runbook answer still arrives, no test result does.    |
 | `progress_inquiry`       | "How's it going?" mid-fix: answered from the backend's silent progress messages, without delegating again.                                   |
+| `progress_inquiry_no_progress` | The same, on the bot whose context holds none of the backend's progress: the bot says it has no update yet, without describing work it cannot see, and still reports the fix. |
 | `aside_while_waiting`    | Small talk while the fix is in progress: the chat is answered, and the fix is still reported when it lands.                                  |
 | `result_during_interruption` | A lookup bundled with a request for a long story, so its result lands while the story is being spoken, which the user then cuts off: the result is reported all the same. Audio only. |
 | `accepted_offer`         | "Yes, go ahead and check CI, and tell me a joke while we wait": the check is delegated, not merely promised, and "is it done?" is answered from the backend's report.       |
@@ -34,3 +35,21 @@ The backend is an engineering assistant's: a code change that loops through sear
 ## Reading a verdict
 
 The judge sees each reply as the harness attributes it to a turn, so a result that arrives inside the previous turn's reply can fail the turn that expected it, and audio the user talks over is discarded. When a verdict looks wrong, read the run's logs and recording under `test-runs/<timestamp>/` before changing anything: the bot log says what the backend sent and when, and whether the frontend spoke it. Budgets in the scenarios are generous on purpose, since the eval clock lags the bot by seconds and a `response` needs the bot to stop speaking and its speech to be transcribed.
+
+## Frontend replay
+
+`frontend_replay/` is the fast loop for the pairing instruction. `turns.jsonl` holds 75 user turns recorded from the text scenarios on the three cascade bots: the frontend's context when the turn ended, and whether the turn should be delegated. `replay.py` runs a frontend model on each of them several times, with the prompts as they are in the code, and reports the turns where its decision differs: a stop it answered itself, or small talk it delegated. It needs the frontend's key and takes a few minutes; run it on each frontend before and after changing a prompt.
+
+```bash
+uv run python evals/llm-with-backend/frontend_replay/replay.py --frontend openai --samples 10
+```
+
+## Predictive delegation's classifier
+
+`predictive_delegation/` checks the classifier that `PredictiveDelegation` asks whether a user's turn needs the backend. `turns.jsonl` holds 107 turns recorded from the three text example bots in a ten-turn conversation that mixes requests for the backend with ones the frontend answers itself: each is the frontend's context when the user's turn ended, and whether the turn needs the backend. `replay.py` builds the classifier's input from each turn as a running bot would, with the prompts as they are in the code, and reports the turns it gets wrong at the threshold for delegating early. A false "yes" delegates a turn the frontend would have answered itself; a missed "yes" leaves a turn to the frontend that could have been delegated early.
+
+```bash
+uv run python evals/llm-with-backend/predictive_delegation/replay.py --out after.json
+```
+
+It needs `TYPESAFE_API_KEY` and takes about a minute. Run it, with the evals, before and after any change to the prompts (see "Prompts" in `pipecat.pipeline.llm_with_backend`), and record the results in [`RESULTS.md`](RESULTS.md), where `results_table.py` turns a suite run into its table.
