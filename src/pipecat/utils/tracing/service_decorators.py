@@ -559,8 +559,10 @@ def traced_stt(func: Callable | None = None, *, name: str | None = None) -> Call
 
     The span is scoped to one STT segment, from
     ``VADUserStartedSpeakingFrame`` (or the first ``TranscriptionFrame``
-    when VAD did not fire, e.g. whispered speech) until a finalized
-    ``TranscriptionFrame``. Multiple finalized transcripts in a single
+    when VAD did not fire, e.g. whispered speech) until a complete
+    ``TranscriptionFrame``: one pushed with ``finalized=True``, or one
+    pushed ``UPSTREAM`` (speech-to-speech services push only complete
+    transcripts upstream). Multiple complete transcripts in a single
     user turn produce multiple sequential spans, each anchored at the
     point speech for that segment began. ``metrics.ttfb`` is read after
     the base ``push_frame`` runs ``stop_ttfb_metrics`` for the
@@ -680,7 +682,7 @@ def traced_stt(func: Callable | None = None, *, name: str | None = None) -> Call
                 elif isinstance(frame, TranscriptionFrame) and state["span"] is None:
                     open_span(service, state)
 
-            async def handle_post_push(service, frame, state):
+            async def handle_post_push(service, frame, state, direction):
                 """Attach per-frame attrs; close on finalized; record TTFB from MetricsFrame.
 
                 ``metrics.ttfb`` is read off the ``TTFBMetricsData``
@@ -709,6 +711,15 @@ def traced_stt(func: Callable | None = None, *, name: str | None = None) -> Call
                 span. The ``stt.incomplete=true`` flag is only set if
                 neither a finalized transcript nor a TTFB measurement
                 ever finalized for the span.
+
+                An ``UPSTREAM`` ``TranscriptionFrame`` is treated as
+                complete regardless of ``finalized``: speech-to-speech
+                services (Gemini Live, OpenAI Realtime) push only
+                complete transcripts upstream, and the transcript
+                arrives after the turn's ``UserStoppedSpeakingFrame``,
+                so closing here is what keeps the span inside its
+                parent ``turn`` span and gets the last turn's span
+                exported before shutdown.
                 """
                 if isinstance(frame, UserStoppedSpeakingFrame):
                     prev_span = state["span"]
@@ -747,12 +758,13 @@ def traced_stt(func: Callable | None = None, *, name: str | None = None) -> Call
                     if frame.text:
                         update_transcript(state, frame.text)
                         span.set_attribute("transcript", " ".join(state["segments"]).strip())
-                    span.set_attribute("is_final", bool(frame.finalized))
+                    is_complete = bool(frame.finalized) or direction == FrameDirection.UPSTREAM
+                    span.set_attribute("is_final", is_complete)
                     if frame.language:
                         span.set_attribute("language", str(frame.language))
                     if frame.user_id:
                         span.set_attribute("user_id", frame.user_id)
-                    if frame.finalized:
+                    if is_complete:
                         attach_pending_usage(state)
                         span.end()
                         state["span"] = None
@@ -781,7 +793,7 @@ def traced_stt(func: Callable | None = None, *, name: str | None = None) -> Call
 
                 if getattr(self, "_tracing_enabled", False):
                     try:
-                        await handle_post_push(self, frame, state)
+                        await handle_post_push(self, frame, state, direction)
                     except Exception as e:
                         logging.warning(f"Error in STT post-push tracing: {e}")
 
