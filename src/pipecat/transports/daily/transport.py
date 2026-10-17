@@ -2261,7 +2261,7 @@ class DailyOutputTransport(BaseOutputTransport):
         self._transport = transport
         self._client = client
         # Set once a failed send is reported, until a send succeeds.
-        self._send_failure_reported = False
+        self._send_message_failure_reported = False
 
     async def setup(self, setup: FrameProcessorSetup):
         """Setup the output transport with shared client setup.
@@ -2333,12 +2333,12 @@ class DailyOutputTransport(BaseOutputTransport):
         """
         error = await self._client.send_message(frame)
         if not error:
-            self._send_failure_reported = False
+            self._send_message_failure_reported = False
         # Sends can fail before the client learns signalling is down. Reporting
         # each failure would let a processor that relays errors as app messages
         # (e.g. RTVIProcessor) feed on its own failures.
-        elif not self._send_failure_reported:
-            self._send_failure_reported = True
+        elif not self._send_message_failure_reported:
+            self._send_message_failure_reported = True
             await self.push_error(f"Unable to send message: {error}")
 
     async def register_video_destination(self, destination: str):
