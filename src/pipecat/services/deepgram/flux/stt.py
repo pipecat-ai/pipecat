@@ -299,7 +299,9 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
         Establishes the WebSocket connection to the Deepgram Flux API and starts
         the background task for receiving transcription results.
         """
-        await super()._connect()
+        # `DeepgramFluxSTTBase._connect` is abstract and doesn't chain on, so
+        # call the websocket side directly.
+        await WebsocketService._connect(self)
         self._websocket_url = f"{self._url}?{self._build_query_string()}"
         await self._connect_websocket()
 
@@ -309,7 +311,9 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
         Gracefully disconnects from the Deepgram Flux API, cancels background tasks,
         and cleans up resources to prevent memory leaks.
         """
-        await super()._disconnect()
+        # Marks the disconnect as intentional, so the receive loop doesn't
+        # reconnect as it winds down.
+        await WebsocketService._disconnect(self)
 
         try:
             await self._disconnect_websocket()
