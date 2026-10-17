@@ -1,0 +1,1 @@
+- Fixed pipeline flushing through parallel pipelines and service switchers, including nested branches and inactive services.
