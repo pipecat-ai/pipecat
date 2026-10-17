@@ -1110,7 +1110,7 @@ class SmallWebRTCTransport(BaseTransport):
         """
         if not self._output:
             self._output = SmallWebRTCOutputTransport(
-                self._client, self._params, name=self._input_name
+                self._client, self._params, name=self._output_name
             )
         return self._output
 
