@@ -278,7 +278,7 @@ class FrameProcessor(BaseObject):
         # setup is done, while the ones ahead of it in the pipeline can.
         self.__setup_done = asyncio.Event()
         self.__setup_done.set()
-        self.__start_pending = False
+        self.__start_received = False
 
         # The process task processes non-system frames.  Non-system frames will
         # be processed as soon as they are received by the processing task
@@ -667,18 +667,7 @@ class FrameProcessor(BaseObject):
     def _setup_finished(self):
         """Let this processor start, once its own setup() has returned."""
         self.__setup_done.set()
-        if not self.__start_pending:
-            return
-        self.__start_pending = False
-        if not self._task_manager:
-            # Setting up was cut short before FrameProcessor.setup() ran, so
-            # there is no task manager to start processing frames with.
-            logger.error(
-                f"{self}: can't start, setup ended before FrameProcessor.setup() was "
-                "called (call super().setup() before anything that can block)"
-            )
-            return
-        self.__create_input_task()
+        self.__maybe_create_input_task()
 
     async def cleanup(self):
         """Release this processor's resources at teardown.
@@ -755,10 +744,8 @@ class FrameProcessor(BaseObject):
         # has been started. Frames pushed before that simply wait, and the
         # StartFrame is dequeued ahead of them.
         if isinstance(frame, StartFrame):
-            if self.__setup_done.is_set():
-                self.__create_input_task()
-            else:
-                self.__start_pending = True
+            self.__start_received = True
+            self.__maybe_create_input_task()
 
     async def pause_processing_frames(self):
         """Pause processing of queued frames."""
@@ -1234,6 +1221,20 @@ class FrameProcessor(BaseObject):
                 exception=e,
                 category=ErrorCategory.UNKNOWN,
             )
+
+    def __maybe_create_input_task(self):
+        """Create the input task once the StartFrame is here and setup is done."""
+        if not self.__start_received or not self.__setup_done.is_set():
+            return
+        if not self._task_manager:
+            # Setting up was cut short before FrameProcessor.setup() ran, so
+            # there is no task manager to start processing frames with.
+            logger.error(
+                f"{self}: can't start, setup ended before FrameProcessor.setup() was "
+                "called (call super().setup() before anything that can block)"
+            )
+            return
+        self.__create_input_task()
 
     def __create_input_task(self):
         """Create the frame input processing task."""
