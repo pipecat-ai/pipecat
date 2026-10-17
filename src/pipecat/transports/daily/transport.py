@@ -605,6 +605,10 @@ class DailyTransportClient(EventHandler):
         """Generate a unique virtual speaker name for this client instance."""
         return f"speaker-{self}"
 
+    def _in_call(self) -> bool:
+        """Whether the client is in a call, even if signalling is reconnecting."""
+        return self._call_state in (_CallState.JOINED, _CallState.INTERRUPTED)
+
     @property
     def room_url(self) -> str:
         """Get the Daily room URL.
@@ -1222,8 +1226,7 @@ class DailyTransportClient(EventHandler):
             return
 
         self._transcription_ids.append(participant_id)
-        in_call = self._call_state in (_CallState.JOINED, _CallState.INTERRUPTED)
-        if in_call and self._transcription_status:
+        if self._in_call() and self._transcription_status:
             await self.update_transcription(self._transcription_ids)
 
     async def capture_participant_audio(
@@ -1866,7 +1869,7 @@ class DailyTransportClient(EventHandler):
         """Track whether app messages can still be sent, then report the state."""
         # leave() moves to LEFT before leaving, so reaching "left" while still
         # in the call means the call ended underneath us.
-        if state == "left" and self._call_state in (_CallState.JOINED, _CallState.INTERRUPTED):
+        if state == "left" and self._in_call():
             self._call_state = _CallState.LEFT
             await self._callbacks.on_error(
                 f"Disconnected from {self._room_url}; app messages will not be sent"
