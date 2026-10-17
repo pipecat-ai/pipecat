@@ -287,14 +287,22 @@ from pipecat.evals.client import (  # noqa: E402
     BOT_ENDED_EVENT,
     HARNESS_ERROR_EVENT,
     PERSONA_TURN_EVENT,
+    _PersonaTurnRelay,
 )
 from pipecat.evals.events import EvalEventStream  # noqa: E402
 from pipecat.evals.judge import JudgeVerdict, RunVerdicts  # noqa: E402
 from pipecat.evals.results import EvalAssertionFailure, EvalTrace  # noqa: E402
 from pipecat.evals.scenario import EvalSimulationMetric  # noqa: E402
 from pipecat.evals.simulation_driver import END_CALL_EVENT, EvalSimulationDriver  # noqa: E402
-from pipecat.frames.frames import LLMTextFrame  # noqa: E402
+from pipecat.frames.frames import (  # noqa: E402
+    LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
+    LLMTextFrame,
+    TextType,
+    TTSTextFrame,
+)
 from pipecat.processors.aggregators.llm_context import LLMContext  # noqa: E402
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor  # noqa: E402
 from pipecat.services.llm_service import FunctionCallParams  # noqa: E402
 
 
@@ -354,16 +362,27 @@ class _FakePersonaLLM:
         self.handlers[name] = handler
 
 
+class _Discard(FrameProcessor):
+    """Takes what the processor before it pushes, without a running pipeline."""
+
+    async def queue_frame(self, frame, direction=FrameDirection.DOWNSTREAM, callback=None):
+        pass
+
+
 class _FakeClient:
-    def __init__(self):
+    def __init__(self, stream: EvalEventStream):
         self.instruction: str | None = None
         self.hung_up = False
+        self._stream = stream
 
     async def configure_persona(self, instruction: str):
         self.instruction = instruction
 
     async def hang_up(self):
         self.hung_up = True
+
+    async def report_end_call(self, event: dict):
+        await self._stream.append(event)
 
 
 def _simulation(**overrides) -> EvalSimulationScenario:
@@ -388,7 +407,7 @@ def _driver(
     trace = EvalTrace()
     stream = EvalEventStream(bot_audio=simulation.bot_audio, trace=trace)
     llm = _FakePersonaLLM()
-    client = _FakeClient()
+    client = _FakeClient(stream)
 
     async def progress(record):
         if progress_records is not None:
@@ -842,6 +861,37 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
 class TestClosingTurn(unittest.IsolatedAsyncioTestCase):
     """A persona that hangs up on its own last line leaves the bot its reply to it."""
 
+    async def _hang_up_while_speaking(self, simulation: EvalSimulationScenario):
+        """Run a conversation whose last persona line ends with end_call, made while the line is spoken."""
+        # In audio mode the persona calls end_call before the user TTS has
+        # spoken the line the call came with.
+        judge = _FakeConversationJudge(["yes"])
+        driver, stream, llm, client = _driver(simulation, judge)
+        relay = _PersonaTurnRelay(lambda text: {}, EvalTrace(), stream)
+        relay.link(_Discard())
+        client.report_end_call = relay.end_call
+
+        async def conversation():
+            await stream.append({"type": "response", "text": "Anything else?"})
+            await relay.process_frame(LLMFullResponseStartFrame(), FrameDirection.DOWNSTREAM)
+            await _end_call(llm, success=True, reason="done")
+            self.assertTrue(client.hung_up)
+            # Speaking the line takes a while.
+            await asyncio.sleep(0.1)
+            for frame in (
+                TTSTextFrame(text="No, goodbye!", text_type=TextType.SENTENCE),
+                LLMFullResponseEndFrame(),
+            ):
+                await relay.process_frame(frame, FrameDirection.DOWNSTREAM)
+            await asyncio.sleep(0.1)
+            await stream.append({"type": "response", "text": "Goodbye!"})
+
+        task = asyncio.create_task(conversation())
+        await driver.run()
+        await task
+        result = driver.result(failures=[], duration_ms=0, events_seen=[], debug_log=[])
+        return result, judge
+
     async def test_the_bots_reply_to_the_last_line_closes_the_run(self):
         driver, stream, llm, client = _driver(_simulation(), _FakeConversationJudge(["yes"]))
 
@@ -862,6 +912,23 @@ class TestClosingTurn(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             result.messages[-1], {"role": "assistant", "content": "Great, you're all set."}
         )
+
+    async def test_a_hang_up_while_the_last_line_is_spoken_waits_for_the_bots_reply(self):
+        result, judge = await self._hang_up_while_speaking(_simulation(bot_audio=True))
+        self.assertEqual(result.ended_by, "end_call")
+        # The judge read the persona's last line and the bot's reply to it.
+        self.assertEqual(
+            judge.transcript[-2:],
+            [
+                {"role": "user", "content": "No, goodbye!"},
+                {"role": "assistant", "content": "Goodbye!"},
+            ],
+        )
+
+    async def test_a_hang_up_on_the_last_allowed_turn_waits_for_the_bots_reply(self):
+        result, _ = await self._hang_up_while_speaking(_simulation(bot_audio=True, max_turns=1))
+        self.assertEqual(result.ended_by, "end_call")
+        self.assertEqual(result.messages[-1], {"role": "assistant", "content": "Goodbye!"})
 
     async def test_a_hang_up_with_no_reply_coming_still_ends_as_end_call(self):
         driver, stream, llm, _ = _driver(

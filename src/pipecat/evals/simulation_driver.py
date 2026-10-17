@@ -35,7 +35,8 @@ from pipecat.frames.frames import FunctionCallResultProperties
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.utils.deprecation import deprecated
 
-# The event the driver appends when the persona calls end_call.
+# The event that reports the persona's end_call, once the reply that made the
+# call has gone out to the bot.
 END_CALL_EVENT = "end_call"
 # How long the run waits, after the persona hangs up on its own last line, for
 # the bot's reply to it. A flow makes its final tool calls in that turn, and a
@@ -153,9 +154,8 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
                 break
             self._observe_new_events()
             if event["type"] == END_CALL_EVENT:
-                # The persona says nothing more from here. The bot still gets
-                # its turn if the persona hung up on its own last line.
-                await self._client.hang_up()
+                # The bot still gets its turn if the persona hung up on its own
+                # last line.
                 if self._pending or not self._lines or self._lines[-1]["role"] != "user":
                     self._ended_by = "end_call"
                 else:
@@ -169,7 +169,9 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
             elif event["type"] == PERSONA_TURN_EVENT:
                 self._turns += 1
                 await self._report("user", event.get("text", ""))
-                if self._turns >= simulation.max_turns:
+                # A persona that hung up on this turn has its end_call event
+                # next, which leaves the bot its closing turn.
+                if self._turns >= simulation.max_turns and self._end_call is None:
                     self._ended_by = "max_turns"
             elif event["type"] == self._bot_said and event.get("text"):
                 await self._report("bot", event["text"])
@@ -282,7 +284,10 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
         await params.result_callback(
             {"status": "call ended"}, properties=FunctionCallResultProperties(run_llm=False)
         )
-        await self._stream.append(
+        # The persona answers nothing more. The run hears of the call once the
+        # reply that made it has gone out, so that reply's turn comes first.
+        await self._client.hang_up()
+        await self._client.report_end_call(
             {"type": END_CALL_EVENT, "text": self._end_call["reason"], **self._end_call}
         )
 
