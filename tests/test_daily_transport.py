@@ -333,7 +333,14 @@ async def _make_joined_client():
     client = transport._client
     client._task_manager = MagicMock()
     client._task_manager.get_event_loop.return_value = asyncio.get_running_loop()
-    for name in ("on_joined", "on_left", "on_before_leave", "on_error", "on_call_state_updated"):
+    for name in (
+        "on_joined",
+        "on_left",
+        "on_before_leave",
+        "on_error",
+        "on_call_state_updated",
+        "on_network_connection_status_updated",
+    ):
         setattr(client._callbacks, name, AsyncMock())
 
     def _complete(*args, completion, **kwargs):
@@ -451,3 +458,119 @@ async def test_transcription_started_scopes_to_captured_participants():
     client.on_transcription_started({})
 
     client._call_event_callback.assert_called_once_with(client.update_transcription, ["user-1"])
+
+
+def _signalling(event: str) -> dict:
+    return {"connection": "signalling", "event": event}
+
+
+@pytest.mark.asyncio
+async def test_signalling_interruption_warns_once_and_drops_messages():
+    client = await _make_joined_client()
+
+    with patch("pipecat.transports.daily.transport.logger") as log:
+        await client._handle_network_connection_status_updated(_signalling("interrupted"))
+        await client._handle_network_connection_status_updated(_signalling("interrupted"))
+    for n in range(3):
+        error = await client.send_message(OutputTransportMessageUrgentFrame(message={"n": n}))
+        assert error is None
+
+    log.warning.assert_called_once()
+    client._callbacks.on_error.assert_not_awaited()
+    assert client._callbacks.on_network_connection_status_updated.await_count == 2
+    client._client.send_app_message.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_signalling_reconnect_resumes_messages():
+    client = await _make_joined_client()
+
+    await client._handle_network_connection_status_updated(_signalling("interrupted"))
+    await client._handle_network_connection_status_updated(_signalling("connected"))
+    error = await client.send_message(OutputTransportMessageUrgentFrame(message={"n": 1}))
+
+    assert error is None
+    client._client.send_app_message.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_signalling_flaps_follow_the_latest_event():
+    client = await _make_joined_client()
+
+    for event in ("interrupted", "connected", "interrupted"):
+        await client._handle_network_connection_status_updated(_signalling(event))
+    dropped = await client.send_message(OutputTransportMessageUrgentFrame(message={"n": 1}))
+    await client._handle_network_connection_status_updated(_signalling("connected"))
+    sent = await client.send_message(OutputTransportMessageUrgentFrame(message={"n": 2}))
+
+    assert dropped is None and sent is None
+    client._callbacks.on_error.assert_not_awaited()
+    assert client._callbacks.on_network_connection_status_updated.await_count == 4
+    client._client.send_app_message.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_call_ending_during_signalling_interruption_is_an_error():
+    client = await _make_joined_client()
+
+    await client._handle_network_connection_status_updated(_signalling("interrupted"))
+    await client._handle_call_state_updated("left")
+    error = await client.send_message(OutputTransportMessageUrgentFrame(message={"n": 1}))
+
+    assert error is None
+    client._callbacks.on_error.assert_awaited_once()
+    client._client.send_app_message.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_signalling_connected_while_connected_is_not_reported():
+    client = await _make_joined_client()
+
+    await client._handle_network_connection_status_updated(_signalling("connected"))
+
+    client._callbacks.on_error.assert_not_awaited()
+    client._callbacks.on_network_connection_status_updated.assert_awaited_once_with(
+        _signalling("connected")
+    )
+
+
+@pytest.mark.asyncio
+async def test_media_transport_interruption_keeps_messages_flowing():
+    client = await _make_joined_client()
+
+    await client._handle_network_connection_status_updated(
+        {"connection": "sendTransport", "event": "interrupted"}
+    )
+    error = await client.send_message(OutputTransportMessageUrgentFrame(message={"n": 1}))
+
+    assert error is None
+    client._callbacks.on_error.assert_not_awaited()
+    client._client.send_app_message.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_output_reports_failed_sends_once_until_one_succeeds():
+    transport = _make_transport()
+    output = transport.output()
+    output.push_error = AsyncMock()
+    transport._client.send_message = AsyncMock(
+        side_effect=["Disconnected", "Disconnected", None, "Disconnected"]
+    )
+
+    for n in range(4):
+        await output.send_message(OutputTransportMessageUrgentFrame(message={"n": n}))
+
+    assert output.push_error.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_transcription_capture_continues_during_signalling_interruption():
+    client = await _make_joined_client()
+    client._params.transcription_enabled = True
+    client._transcription_status = {"transcriptId": "t"}
+    client.update_transcription = AsyncMock()
+
+    await client._handle_network_connection_status_updated(_signalling("interrupted"))
+    await client.capture_participant_transcription("participant")
+
+    client.update_transcription.assert_awaited_once_with(["participant"])

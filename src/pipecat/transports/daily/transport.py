@@ -399,6 +399,8 @@ class DailyCallbacks(BaseModel):
         on_dialout_error: Called when dial-out encounters an error.
         on_dialout_warning: Called when dial-out has a warning.
         on_dtmf_event: Called when a DTMF tone happens.
+        on_network_connection_status_updated: Called when a network connection
+            needed for the call is interrupted or connects.
         on_participant_joined: Called when a participant joins.
         on_participant_left: Called when a participant leaves.
         on_participant_updated: Called when participant info is updated.
@@ -430,6 +432,7 @@ class DailyCallbacks(BaseModel):
     on_dialout_error: Callable[[Any], Awaitable[None]]
     on_dialout_warning: Callable[[Any], Awaitable[None]]
     on_dtmf_event: Callable[[Any], Awaitable[None]]
+    on_network_connection_status_updated: Callable[[Mapping[str, Any]], Awaitable[None]]
     on_participant_joined: Callable[[Mapping[str, Any]], Awaitable[None]]
     on_participant_left: Callable[[Mapping[str, Any], str], Awaitable[None]]
     on_participant_updated: Callable[[Mapping[str, Any]], Awaitable[None]]
@@ -500,13 +503,16 @@ CallClientError = str
 class _CallState(Enum):
     """Where the client is in a call.
 
+    ``INTERRUPTED`` is still in the call, which Daily reports as joined, while
+    daily-core reconnects the signalling connection that carries app messages.
     ``LEFT`` covers both ``leave()`` and a call that ends without it (the bot
-    is ejected, or the room or meeting ends). daily-core fails every app
-    message sent after that.
+    is ejected, or the room or meeting ends). App messages can't be delivered
+    in either state.
     """
 
     NOT_JOINED = "not_joined"
     JOINED = "joined"
+    INTERRUPTED = "interrupted"
     LEFT = "left"
 
 
@@ -650,10 +656,11 @@ class DailyTransportClient(EventHandler):
             self._join_message_queue.append(frame)
             return None
 
-        # The disconnect was already reported once; reporting every dropped
-        # message would let a processor that relays errors as app messages
-        # (e.g. RTVIProcessor) feed on its own failures.
-        if self._call_state == _CallState.LEFT:
+        # The call ended or signalling is reconnecting, either of which is
+        # reported when it happens. Reporting every dropped message would let a
+        # processor that relays errors as app messages (e.g. RTVIProcessor) feed
+        # on its own failures.
+        if self._call_state != _CallState.JOINED:
             return None
 
         participant_id = None
@@ -1215,7 +1222,8 @@ class DailyTransportClient(EventHandler):
             return
 
         self._transcription_ids.append(participant_id)
-        if self._call_state == _CallState.JOINED and self._transcription_status:
+        in_call = self._call_state in (_CallState.JOINED, _CallState.INTERRUPTED)
+        if in_call and self._transcription_status:
             await self.update_transcription(self._transcription_ids)
 
     async def capture_participant_audio(
@@ -1691,6 +1699,15 @@ class DailyTransportClient(EventHandler):
         """
         self._call_event_callback(self._callbacks.on_dtmf_event, data)
 
+    def on_network_connection_status_updated(self, status: Mapping[str, Any]):
+        """Handle network connection status events.
+
+        Args:
+            status: The connection ("signalling", "sendTransport" or
+                "recvTransport") and its event ("connected" or "interrupted").
+        """
+        self._call_event_callback(self._handle_network_connection_status_updated, status)
+
     def on_participant_joined(self, participant):
         """Handle participant joined events.
 
@@ -1848,13 +1865,30 @@ class DailyTransportClient(EventHandler):
     async def _handle_call_state_updated(self, state: str):
         """Track whether app messages can still be sent, then report the state."""
         # leave() moves to LEFT before leaving, so reaching "left" while still
-        # joined means the call ended underneath us.
-        if state == "left" and self._call_state == _CallState.JOINED:
+        # in the call means the call ended underneath us.
+        if state == "left" and self._call_state in (_CallState.JOINED, _CallState.INTERRUPTED):
             self._call_state = _CallState.LEFT
             await self._callbacks.on_error(
                 f"Disconnected from {self._room_url}; app messages will not be sent"
             )
         await self._callbacks.on_call_state_updated(state)
+
+    async def _handle_network_connection_status_updated(self, status: Mapping[str, Any]):
+        """Track whether signalling can carry app messages, then report the status."""
+        # An interruption is a warning, not an error: daily-core reconnects on
+        # its own, and the event lets the application react if it wants to.
+        if status.get("connection") == "signalling":
+            event = status.get("event")
+            if event == "interrupted" and self._call_state == _CallState.JOINED:
+                self._call_state = _CallState.INTERRUPTED
+                logger.warning(
+                    f"Signalling to {self._room_url} interrupted; "
+                    "app messages will not be sent until it reconnects"
+                )
+            elif event == "connected" and self._call_state == _CallState.INTERRUPTED:
+                self._call_state = _CallState.JOINED
+                logger.info(f"Signalling to {self._room_url} reconnected")
+        await self._callbacks.on_network_connection_status_updated(status)
 
     def _get_event_loop(self) -> asyncio.AbstractEventLoop:
         """Get the event loop from the task manager."""
@@ -2223,6 +2257,8 @@ class DailyOutputTransport(BaseOutputTransport):
 
         self._transport = transport
         self._client = client
+        # Set once a failed send is reported, until a send succeeds.
+        self._send_failure_reported = False
 
     async def setup(self, setup: FrameProcessorSetup):
         """Setup the output transport with shared client setup.
@@ -2293,7 +2329,13 @@ class DailyOutputTransport(BaseOutputTransport):
             frame: The transport message frame to send.
         """
         error = await self._client.send_message(frame)
-        if error:
+        if not error:
+            self._send_failure_reported = False
+        # Sends can fail before the client learns signalling is down. Reporting
+        # each failure would let a processor that relays errors as app messages
+        # (e.g. RTVIProcessor) feed on its own failures.
+        elif not self._send_failure_reported:
+            self._send_failure_reported = True
             await self.push_error(f"Unable to send message: {error}")
 
     async def register_video_destination(self, destination: str):
@@ -2407,6 +2449,10 @@ class DailyTransport(BaseTransport):
     - on_before_leave: [sync] Called just before the bot leaves the room.
     - on_error: Called when a transport error occurs. Args: (error: str)
     - on_call_state_updated: Called when the call state changes. Args: (state: str)
+    - on_network_connection_status_updated: Called when a network connection
+      needed for the call is interrupted or connects. Args: (status: dict, with
+      "connection": "signalling" | "sendTransport" | "recvTransport" and
+      "event": "connected" | "interrupted")
     - on_first_participant_joined: Called when the first participant joins.
       Args: (participant: dict)
     - on_participant_joined: Called when any participant joins.
@@ -2502,6 +2548,7 @@ class DailyTransport(BaseTransport):
             on_dialout_error=self._on_dialout_error,
             on_dialout_warning=self._on_dialout_warning,
             on_dtmf_event=self._on_dtmf_event,
+            on_network_connection_status_updated=self._on_network_connection_status_updated,
             on_participant_joined=self._on_participant_joined,
             on_participant_left=self._on_participant_left,
             on_participant_updated=self._on_participant_updated,
@@ -2544,6 +2591,7 @@ class DailyTransport(BaseTransport):
         self._register_event_handler("on_dialout_error")
         self._register_event_handler("on_dialout_warning")
         self._register_event_handler("on_dtmf_event")
+        self._register_event_handler("on_network_connection_status_updated")
         self._register_event_handler("on_first_participant_joined")
         self._register_event_handler("on_participant_joined")
         self._register_event_handler("on_participant_left")
@@ -3008,6 +3056,10 @@ class DailyTransport(BaseTransport):
         if state == "left" and self._input:
             await self._input.remove_all_video()
         await self._call_event_handler("on_call_state_updated", state)
+
+    async def _on_network_connection_status_updated(self, status: Mapping[str, Any]):
+        """Handle network connection status events."""
+        await self._call_event_handler("on_network_connection_status_updated", status)
 
     async def _on_client_connected(self, participant: Any):
         """Handle client connected events."""
