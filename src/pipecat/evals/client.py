@@ -335,9 +335,9 @@ class _PersonaTurnRelay(FrameProcessor):
 
     In text mode a whole reply goes to the bot as one ``send-text``; in audio
     mode the user TTS has already spoken it and this only logs the text. A
-    reply with words in it is one ``persona_turn`` event; a reply that only
-    calls ``end_call``, or that the bot's speech cut off before a word went
-    out, is not a turn.
+    reply with words in it is one ``persona_turn`` event, up to where the
+    bot's speech cut it off if it did; a reply that only calls ``end_call``,
+    or that the bot's speech cut off before a word went out, is not a turn.
 
     The persona's ``end_call`` event follows the turn of the reply that made
     the call: in audio mode the reply is still being spoken when the persona
@@ -381,12 +381,15 @@ class _PersonaTurnRelay(FrameProcessor):
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
         self._stream.touch()
-        if isinstance(frame, (LLMFullResponseStartFrame, InterruptionFrame)):
+        if isinstance(frame, LLMFullResponseStartFrame):
             self._text = []
             self._spoken = []
-            self._replying = isinstance(frame, LLMFullResponseStartFrame)
-            if not self._replying:
-                await self._append_end_call()
+            self._replying = True
+        elif isinstance(frame, InterruptionFrame):
+            # The bot heard what the user TTS spoke before the cut; a text-mode
+            # reply is sent only once it is complete.
+            self._text = []
+            await self._end_reply()
         elif isinstance(frame, LLMTextFrame) and frame.skip_tts:
             self._text.append(frame.text)
         elif isinstance(frame, LLMFullResponseEndFrame):
@@ -398,20 +401,18 @@ class _PersonaTurnRelay(FrameProcessor):
                     OutputTransportMessageUrgentFrame(message=self._text_turn_message(text))
                 )
                 self._spoken.append(text)
-            if self._spoken:
-                await self._stream.append(
-                    {"type": PERSONA_TURN_EVENT, "text": " ".join(self._spoken)}
-                )
-            self._spoken = []
-            self._replying = False
-            await self._append_end_call()
+            await self._end_reply()
         elif isinstance(frame, TTSTextFrame):
             self._trace.log(f"send: {frame.text!r} (persona, audio)")
             self._spoken.append(frame.text)
         await self.push_frame(frame, direction)
 
-    async def _append_end_call(self) -> None:
-        """Append the end_call event held for the response that just ended, if any."""
+    async def _end_reply(self) -> None:
+        """Append what went out of the reply as a turn, then the end_call event held for it."""
+        if self._spoken:
+            await self._stream.append({"type": PERSONA_TURN_EVENT, "text": " ".join(self._spoken)})
+        self._spoken = []
+        self._replying = False
         if self._end_call is not None:
             await self._stream.append(self._end_call)
             self._end_call = None
