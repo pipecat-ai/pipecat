@@ -6,6 +6,7 @@
 
 import asyncio
 import unittest
+from unittest.mock import patch
 
 from pipecat.frames.frames import (
     InterruptionFrame,
@@ -19,6 +20,11 @@ from pipecat.processors.aggregators.llm_context_summarizer import (
     LLMContextSummarizer,
     SummaryAppliedEvent,
 )
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMAssistantAggregator,
+    LLMAssistantAggregatorParams,
+)
+from pipecat.tests.utils import run_test
 from pipecat.utils.asyncio.task_manager import TaskManager
 from pipecat.utils.context.llm_context_summarization import (
     LLMAutoContextSummarizationConfig,
@@ -131,6 +137,149 @@ class TestLLMContextSummarizer(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(request_frame)
 
         await summarizer.cleanup()
+
+    async def test_callback_triggers_summarization_without_threshold_evaluation(self):
+        """A callback can trigger automatic summarization below configured thresholds."""
+        config = LLMAutoContextSummarizationConfig(
+            max_context_tokens=100000,
+            max_unsummarized_messages=100,
+        )
+        callback_contexts = []
+        summarizer = LLMContextSummarizer(
+            context=self.context,
+            config=config,
+            should_summarize_callback=lambda context: callback_contexts.append(context) or True,
+        )
+        await summarizer.setup(frame_processor_setup(self.task_manager))
+
+        request_frame = None
+
+        @summarizer.event_handler("on_request_summarization")
+        async def on_request_summarization(summarizer, frame):
+            nonlocal request_frame
+            request_frame = frame
+
+        with patch(
+            "pipecat.processors.aggregators.llm_context_summarizer."
+            "LLMContextSummarizationUtil.estimate_context_tokens",
+            side_effect=AssertionError("callback mode must not estimate tokens"),
+        ):
+            await summarizer.process_frame(LLMFullResponseStartFrame())
+
+        self.assertEqual(callback_contexts, [self.context])
+        self.assertIsNotNone(request_frame)
+        await summarizer.cleanup()
+
+    async def test_callback_can_suppress_exceeded_thresholds_without_token_estimation(self):
+        """A callback can suppress automatic summarization after thresholds are exceeded."""
+        config = LLMAutoContextSummarizationConfig(
+            max_context_tokens=1,
+            max_unsummarized_messages=1,
+        )
+        callback_contexts = []
+        summarizer = LLMContextSummarizer(
+            context=self.context,
+            config=config,
+            should_summarize_callback=lambda context: callback_contexts.append(context) or False,
+        )
+        await summarizer.setup(frame_processor_setup(self.task_manager))
+
+        request_frame = None
+
+        @summarizer.event_handler("on_request_summarization")
+        async def on_request_summarization(summarizer, frame):
+            nonlocal request_frame
+            request_frame = frame
+
+        with patch(
+            "pipecat.processors.aggregators.llm_context_summarizer."
+            "LLMContextSummarizationUtil.estimate_context_tokens",
+            side_effect=AssertionError("callback mode must not estimate tokens"),
+        ):
+            await summarizer.process_frame(LLMFullResponseStartFrame())
+
+        self.assertEqual(callback_contexts, [self.context])
+        self.assertIsNone(request_frame)
+        await summarizer.cleanup()
+
+    async def test_callback_respects_auto_trigger_and_in_progress_guards(self):
+        """Automatic summary guards run before the callback."""
+        callback_calls = 0
+
+        def callback(context):
+            nonlocal callback_calls
+            callback_calls += 1
+            return True
+
+        summarizer = LLMContextSummarizer(
+            context=self.context,
+            auto_trigger=False,
+            should_summarize_callback=callback,
+        )
+        await summarizer.setup(frame_processor_setup(self.task_manager))
+        await summarizer.process_frame(LLMFullResponseStartFrame())
+        self.assertEqual(callback_calls, 0)
+        await summarizer.cleanup()
+
+        summarizer = LLMContextSummarizer(
+            context=self.context,
+            should_summarize_callback=callback,
+        )
+        await summarizer.setup(frame_processor_setup(self.task_manager))
+        summarizer._summarization_in_progress = True
+        await summarizer.process_frame(LLMFullResponseStartFrame())
+        self.assertEqual(callback_calls, 0)
+        await summarizer.cleanup()
+
+    async def test_manual_summarization_does_not_consult_callback(self):
+        """Manual summary requests bypass automatic trigger policy."""
+        callback_calls = 0
+
+        def callback(context):
+            nonlocal callback_calls
+            callback_calls += 1
+            return False
+
+        summarizer = LLMContextSummarizer(
+            context=self.context,
+            auto_trigger=False,
+            should_summarize_callback=callback,
+        )
+        await summarizer.setup(frame_processor_setup(self.task_manager))
+
+        request_frame = None
+
+        @summarizer.event_handler("on_request_summarization")
+        async def on_request_summarization(summarizer, frame):
+            nonlocal request_frame
+            request_frame = frame
+
+        await summarizer.process_frame(LLMSummarizeContextFrame())
+
+        self.assertEqual(callback_calls, 0)
+        self.assertIsNotNone(request_frame)
+        await summarizer.cleanup()
+
+    async def test_assistant_aggregator_uses_should_summarize_callback(self):
+        """Assistant aggregator parameters control automatic summarization."""
+        callback_contexts = []
+        aggregator = LLMAssistantAggregator(
+            context=self.context,
+            params=LLMAssistantAggregatorParams(
+                enable_auto_context_summarization=True,
+                should_summarize_callback=lambda context: callback_contexts.append(context) or True,
+            ),
+        )
+
+        _, upstream_frames = await run_test(
+            aggregator,
+            frames_to_send=[LLMFullResponseStartFrame()],
+            expected_down_frames=[],
+            expected_up_frames=[LLMContextSummaryRequestFrame],
+        )
+
+        self.assertEqual(callback_contexts, [self.context])
+        self.assertEqual(upstream_frames[0].context, self.context)
 
     async def test_summarization_in_progress_prevents_duplicate(self):
         """Test that a summarization in progress prevents triggering another."""
