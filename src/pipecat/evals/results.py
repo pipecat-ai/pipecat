@@ -199,15 +199,22 @@ class EvalSimulationTurnVerdict:
             something; it indexes the ``assistant`` messages of the run's
             conversation.
         passed: Whether the turn satisfied the criterion.
-        reason: The judge's one-sentence justification.
+        reason: The explainer's one-sentence reason for the verdict, or the
+            classifier's probabilities when nothing explained it.
         verdict: The judge's answer: ``yes``, ``no``, or ``none`` when it gave
             no verdict on the turn, which counts as a no.
+        confidence: How sure the judge is of the verdict, from 0 to 1; ``None``
+            when it gave none.
+        probabilities: The probability of each outcome the classifier was
+            offered; empty when it gave no verdict.
     """
 
     turn: int
     passed: bool
     reason: str
     verdict: str = "no"
+    confidence: float | None = None
+    probabilities: dict[str, float] = field(default_factory=dict)
 
 
 @dataclass
@@ -234,6 +241,8 @@ class EvalSimulationMetricScore:
             left turns unanswered, ``out_of_range`` for a measure outside its
             bounds, ``function_calls`` for a call list that did not match;
             ``None`` when it passed.
+        criterion: The criterion each bot turn was judged on, as the
+            simulation worded it; ``None`` for a measured metric.
     """
 
     name: str
@@ -244,6 +253,7 @@ class EvalSimulationMetricScore:
     verdicts: list[EvalSimulationTurnVerdict] = field(default_factory=list)
     value: float | None = None
     failure_kind: str | None = None
+    criterion: str | None = None
 
 
 @dataclass
@@ -261,6 +271,9 @@ class EvalSimulationResult:
         messages: The conversation, with the persona's turns as ``user`` messages
             and the bot's as ``assistant`` (the convention scenarios' judges use);
             the ``assistant`` messages are the bot turns the metrics scored.
+        conversation: The conversation as a conversation file holds it, the
+            ``messages`` with the bot's function calls in place (see
+            :mod:`pipecat.evals.conversation`).
         turns: How many turns the persona took.
         ended_by: How the run ended, one of ``SIMULATION_ENDINGS``.
         end_call: The persona's own ``end_call`` claim (``success``, ``reason``)
@@ -268,6 +281,12 @@ class EvalSimulationResult:
         duration_ms: Wall-clock time the run took, in milliseconds.
         events_seen: Every friendly event observed, for diagnostics.
         debug_log: Timestamped trace of the harness's own decisions.
+        confidence: How sure the judge is of its goal verdict, from 0 to 1;
+            ``None`` when it gave none.
+        probabilities: The probability of each answer to the goal question;
+            empty when the judge gave none.
+        success: The goal the conversation was judged on, the simulation's
+            ``success`` as it was worded.
     """
 
     simulation_name: str
@@ -276,12 +295,16 @@ class EvalSimulationResult:
     error: str | None = None
     metrics: list[EvalSimulationMetricScore] = field(default_factory=list)
     messages: list[dict] = field(default_factory=list)
+    conversation: list[dict] = field(default_factory=list)
     turns: int = 0
     ended_by: str = "error"
     end_call: dict | None = None
     duration_ms: int = 0
     events_seen: list[dict] = field(default_factory=list)
     debug_log: list[str] = field(default_factory=list)
+    confidence: float | None = None
+    probabilities: dict[str, float] = field(default_factory=dict)
+    success: str = ""
 
     @property
     def passed(self) -> bool:

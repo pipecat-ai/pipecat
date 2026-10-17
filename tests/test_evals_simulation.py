@@ -478,6 +478,7 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.succeeded)
         self.assertTrue(result.passed)
         self.assertEqual(result.reason, "because the bot said Berlin")
+        self.assertEqual(result.success, "the bot said Berlin")
         self.assertEqual(result.ended_by, "end_call")
         self.assertEqual(result.turns, 2)
         self.assertEqual(result.end_call, {"success": True, "reason": "I got my answer"})
@@ -485,6 +486,7 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
         # brevity scored 0.5 but gates nothing, so the run still passes.
         self.assertEqual([m.passed for m in result.metrics], [True, True])
         self.assertEqual(result.metrics[0].reason, "all 3 turn(s)")
+        self.assertEqual(result.metrics[0].criterion, "stayed polite")
         self.assertEqual(result.metrics[1].reason, "turn 2: because kept it short")
         self.assertEqual([v.turn for v in result.metrics[1].verdicts if not v.passed], [2])
         self.assertIsNone(result.failure)
@@ -705,6 +707,21 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
                 {"role": "assistant", "content": "Let me check. Six is free, booked."},
             ],
         )
+        # The conversation file has the call in place too.
+        self.assertEqual(
+            result.conversation,
+            [
+                {"role": "assistant", "content": "Hello!"},
+                {"role": "user", "content": "A table at six, please."},
+                {
+                    "role": "tool_call",
+                    "name": "check_availability",
+                    "arguments": {"time": "6"},
+                    "cancelled": False,
+                },
+                {"role": "assistant", "content": "Let me check. Six is free, booked."},
+            ],
+        )
 
     async def test_the_conversation_is_reported_as_it_happens(self):
         records: list = []
@@ -800,6 +817,11 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
         with self.assertWarns(DeprecationWarning):
             transcript = driver.transcript()
         self.assertEqual([e["content"] for e in transcript if e["role"] == "tool"], calls)
+        result = driver.result(failures=[], duration_ms=0, events_seen=[], debug_log=[])
+        self.assertEqual(
+            [(m["name"], m["cancelled"]) for m in result.conversation],
+            [("check_availability", False), ("end_conversation", True)],
+        )
 
     async def test_wall_clock_cap_ends_the_run(self):
         driver, _, _, _ = _driver(_simulation(max_duration_s=0.05), _FakeConversationJudge(["no"]))
