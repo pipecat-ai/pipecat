@@ -27,6 +27,7 @@ FAILURE_KINDS = (
     "no_content",  # the matched event carried no text to judge
     "text_mismatch",  # `text_contains` not present in the event's text
     "text_present",  # `text_excludes` found in the event's text
+    "text_unmatched",  # a `text_matches` pattern did not match the event's text
     "missing_function_call",  # an expected function call never arrived
     "function_args_mismatch",  # the call arrived with unexpected arguments
     "unexpected_event",  # an `absent:` expectation saw the event it forbade
