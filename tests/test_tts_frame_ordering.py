@@ -2969,6 +2969,20 @@ async def test_llm_response_end_follows_the_last_word(reuse_context_id_within_tu
 
 
 @pytest.mark.asyncio
+async def test_llm_response_end_of_a_reply_without_text_is_pushed():
+    """With word timestamps, a reply with nothing to speak still pushes its end frame."""
+    end_frame = LLMFullResponseEndFrame()
+    down, _ = await asyncio.wait_for(
+        run_test(
+            _MockWordTimestampWSTTSService(),
+            frames_to_send=[LLMFullResponseStartFrame(), end_frame, SleepFrame(sleep=0.2)],
+        ),
+        timeout=5,
+    )
+    assert end_frame in down
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("reuse_context_id_within_turn", [True, False])
 async def test_speak_frame_settings_reach_its_spoken_context(reuse_context_id_within_turn):
     """A TTSSpeakFrame's append_to_context, and its aggregation push, apply to its speech."""
