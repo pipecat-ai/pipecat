@@ -41,6 +41,15 @@ class TestInworldRealtimeContext(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(session_keys), 2)
         self.assertNotEqual(session_keys[0], session_keys[1])
 
+    async def test_runtime_temperature_is_sent_in_a_session_update(self):
+        service = InworldRealtimeLLMService(api_key="test")
+        service._send_session_update = AsyncMock()
+
+        await service._update_settings(InworldRealtimeLLMService.Settings(temperature=0.3))
+
+        service._send_session_update.assert_awaited_once()
+        self.assertEqual(service._settings.session_properties.temperature, 0.3)
+
     async def test_tool_update_does_not_consume_server_vad_user_turn(self):
         context = LLMContext([{"role": "developer", "content": "Be helpful."}])
         service = InworldRealtimeLLMService(api_key="test")
