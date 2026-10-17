@@ -835,17 +835,27 @@ class TestSimulationRecords(unittest.TestCase):
                     passed=False,
                     reason="turn 2: curt",
                     min_score=1.0,
+                    criterion="stays polite",
                     verdicts=[
                         EvalSimulationTurnVerdict(1, True, "warm"),
-                        EvalSimulationTurnVerdict(2, False, "curt"),
+                        EvalSimulationTurnVerdict(
+                            2, False, "curt", "no", 0.9, {"meets": 0.1, "fails": 0.9}
+                        ),
                     ],
                 )
             ],
             messages=[{"role": "user", "content": "hi"}],
+            conversation=[
+                {"role": "user", "content": "hi"},
+                {"role": "tool_call", "name": "book", "arguments": {}, "cancelled": False},
+            ],
             turns=2,
             ended_by="end_call",
             end_call={"success": True, "reason": "done"},
             duration_ms=1234,
+            confidence=0.8,
+            probabilities={"yes": 0.8, "no": 0.2},
+            success="the bot booked a table",
         )
         rebuilt = _simulation_result_from_dict(json.loads(json.dumps(dataclasses.asdict(result))))
         self.assertEqual(rebuilt, result)
@@ -869,6 +879,12 @@ class TestSimulationRecords(unittest.TestCase):
                     turns=3,
                     ended_by="bot",
                     events_seen=[{"type": "llm_started"}],
+                    success="the bot booked a table",
+                    metrics=[
+                        EvalSimulationMetricScore(
+                            name="politeness", score=1.0, criterion="stays polite"
+                        )
+                    ],
                 ),
             )
             _append_result(base / "results.jsonl", run, "flows_x.py__book__002", base, None)
@@ -881,7 +897,49 @@ class TestSimulationRecords(unittest.TestCase):
             self.assertFalse(record["succeeded"])
             self.assertEqual(record["ended_by"], "bot")
             self.assertEqual(record["reason"], "no table")
+            self.assertEqual(record["success"], "the bot booked a table")
+            self.assertEqual(record["metrics"][0]["criterion"], "stays polite")
             self.assertEqual(record["events_seen"], [{"type": "llm_started"}])
+
+
+class TestSimulationConversationFile(unittest.IsolatedAsyncioTestCase):
+    async def test_a_finished_simulation_writes_its_conversation_and_the_record_points_to_it(self):
+        from pipecat.evals.suite import _RunFiles
+
+        conversation = [
+            {"role": "user", "content": "A table at six."},
+            {"role": "tool_call", "name": "book", "arguments": {"time": "6"}, "cancelled": False},
+            {"role": "assistant", "content": "Booked."},
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            run = EvalRun(
+                bot="flows/x.py",
+                scenario="book",
+                scenario_path=base / "book.yaml",
+                kind=EvalKind.SIMULATION,
+                result=EvalSimulationResult(
+                    simulation_name="book", succeeded=True, conversation=conversation
+                ),
+            )
+            suite = EvalSuite(
+                EvalManifest(
+                    runs=[run],
+                    spawn=DEFAULT_SPAWN,
+                    python=sys.executable,
+                    concurrency=1,
+                    repeat=1,
+                    base_port=7900,
+                    runs_dir=None,
+                    record=False,
+                    cache_dir=None,
+                )
+            )
+            files = _RunFiles.for_run(run, base, None)
+            await suite._finish(run, files, None, None, base / "results.jsonl", base, None)
+            self.assertEqual(json.loads(files.conversation.read_text()), conversation)
+            record = json.loads((base / "results.jsonl").read_text())
+            self.assertEqual(record["artifacts"]["conversation"], str(files.conversation))
 
 
 class TestEntryQueues(unittest.TestCase):

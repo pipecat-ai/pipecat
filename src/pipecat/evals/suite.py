@@ -216,7 +216,11 @@ def _append_result(
     runs that did not pass, since that is what a failure is diagnosed from.
     """
     artifacts = {"log": str(logs_dir / f"{stem}.log")}
-    for suffix, key in ((".eval.log", "eval_log"), (".debug.log", "debug_log")):
+    for suffix, key in (
+        (".eval.log", "eval_log"),
+        (".debug.log", "debug_log"),
+        (".conversation.json", "conversation"),
+    ):
         path = logs_dir / f"{stem}{suffix}"
         if path.exists():
             artifacts[key] = str(path)
@@ -280,7 +284,7 @@ def _scenario_record(run: "EvalRun", artifacts: dict) -> dict:
 
 
 def _simulation_record(run: "EvalRun", artifacts: dict) -> dict:
-    """The results.jsonl record of a simulation run: how it ended, what the judge said, each metric's score, the conversation, and for a failed run the bot's events."""
+    """The results.jsonl record of a simulation run: how it ended, what the judge said and on what wording, each metric's score, the conversation, and for a failed run the bot's events."""
     result = run.result if isinstance(run.result, EvalSimulationResult) else None
     record = {
         "bot": run.bot,
@@ -288,14 +292,18 @@ def _simulation_record(run: "EvalRun", artifacts: dict) -> dict:
         "scenario": run.scenario,
         "kind": run.kind,
         "attempt": run.attempt,
+        "success": result.success if result else "",
         "passed": bool(result and result.passed),
         "succeeded": bool(result and result.succeeded),
         "error": run.error or (result.error if result else None),
+        "confidence": result.confidence if result else None,
+        "probabilities": result.probabilities if result else {},
         "ended_by": result.ended_by if result else "error",
         "turns": result.turns if result else 0,
         "metrics": [
             {
                 "name": m.name,
+                "criterion": m.criterion,
                 "score": m.score,
                 "passed": m.passed,
                 "min_score": m.min_score,
@@ -303,7 +311,14 @@ def _simulation_record(run: "EvalRun", artifacts: dict) -> dict:
                 "reason": m.reason,
                 "failure_kind": m.failure_kind,
                 "verdicts": [
-                    {"turn": v.turn, "passed": v.passed, "verdict": v.verdict, "reason": v.reason}
+                    {
+                        "turn": v.turn,
+                        "passed": v.passed,
+                        "verdict": v.verdict,
+                        "confidence": v.confidence,
+                        "probabilities": v.probabilities,
+                        "reason": v.reason,
+                    }
                     for v in m.verdicts
                 ],
             }
@@ -326,6 +341,8 @@ def _simulation_result_from_dict(data: dict) -> EvalSimulationResult:
         simulation_name=data["simulation_name"],
         succeeded=data["succeeded"],
         reason=data.get("reason", ""),
+        confidence=data.get("confidence"),
+        probabilities=data.get("probabilities", {}),
         error=data.get("error"),
         metrics=[
             EvalSimulationMetricScore(
@@ -335,12 +352,14 @@ def _simulation_result_from_dict(data: dict) -> EvalSimulationResult:
             for m in data.get("metrics", [])
         ],
         messages=data.get("messages", []),
+        conversation=data.get("conversation", []),
         turns=data.get("turns", 0),
         ended_by=data.get("ended_by", "error"),
         end_call=data.get("end_call"),
         duration_ms=data.get("duration_ms", 0),
         events_seen=data.get("events_seen", []),
         debug_log=data.get("debug_log", []),
+        success=data.get("success", ""),
     )
 
 
@@ -823,6 +842,7 @@ class _RunFiles:
         log: The bot's output.
         harness_log: The harness worker's output, kept only when it crashed.
         trace: The harness's decision trace, ``<prefix>.eval.log``.
+        conversation: A simulation's conversation, ``<prefix>.conversation.json``.
         config: The worker's config, the handoff in.
         result: The worker's result, the handoff out.
         body: The bot's runner-args body, written when the manifest gives it inline.
@@ -833,6 +853,7 @@ class _RunFiles:
     log: Path
     harness_log: Path
     trace: Path
+    conversation: Path
     config: Path
     result: Path
     body: Path
@@ -859,6 +880,7 @@ class _RunFiles:
             log=logs_dir / f"{prefix}.log",
             harness_log=logs_dir / f"{prefix}.harness.log",
             trace=logs_dir / f"{prefix}.eval.log",
+            conversation=logs_dir / f"{prefix}.conversation.json",
             config=logs_dir / f"{prefix}.config.json",
             result=logs_dir / f"{prefix}.result.json",
             body=logs_dir / f"{prefix}.body.json",
@@ -1208,6 +1230,8 @@ class EvalSuite(BaseObject):
                 handoff.unlink()
         if run.result is not None and run.result.debug_log:
             files.trace.write_text("\n".join(run.result.debug_log) + "\n")
+        if isinstance(run.result, EvalSimulationResult):
+            files.conversation.write_text(json.dumps(run.result.conversation, indent=2) + "\n")
         if results_path is not None:
             _append_result(results_path, run, files.prefix, logs_dir, record_dir)
 
