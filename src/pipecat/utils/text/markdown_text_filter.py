@@ -77,12 +77,20 @@ class MarkdownTextFilter(BaseTextFilter):
             The filtered text with Markdown formatting removed or converted.
         """
         if self._settings.enable_text_filter:
+            filtered_text = text
+
+            # Remove code blocks while their ``` fences are still in the text:
+            # md.convert turns a fence into inline code and the HTML tag strip
+            # then removes it.
+            if self._settings.filter_code:
+                filtered_text = self._remove_code_blocks(filtered_text)
+
             # Strip markdown headers to plain text before the newline collapse
             # below. md.convert can't recognize a header once the collapse
             # injects a leading space, so we normalize headers ourselves.
             # First, drop blank lines before a header (keeping the marker) so
             # the collapse doesn't turn them into a leading space.
-            filtered_text = re.sub(r"\n\s*\n(#{1,6}[ \t])", r"\n\1", text)
+            filtered_text = re.sub(r"\n\s*\n(#{1,6}[ \t])", r"\n\1", filtered_text)
             # Then strip the leading marker and any "closed" trailing marker
             # (e.g. ## Title ##), leaving just the header text. The trailing
             # marker's surrounding spaces are absorbed only when the marker is
@@ -147,10 +155,6 @@ class MarkdownTextFilter(BaseTextFilter):
             filtered_text = re.sub(r"\|", "", filtered_text)
             filtered_text = re.sub(r"^\s*[-:]+\s*$", "", filtered_text, flags=re.MULTILINE)
 
-            # Remove code blocks
-            if self._settings.filter_code:
-                filtered_text = self._remove_code_blocks(filtered_text)
-
             # Restore numbered list items
             filtered_text = filtered_text.replace("§NUM§", "")
 
@@ -188,64 +192,27 @@ class MarkdownTextFilter(BaseTextFilter):
     def _remove_code_blocks(self, text: str) -> str:
         """Remove code blocks from the input text.
 
-        Handles interruptions and delegates to specific methods based on the
-        current state.
+        A code block can open and close within one text chunk or span several,
+        so whether the text starts inside a block carries over between calls.
         """
         if self._interrupted:
             self._in_code_block = False
             return text
 
-        # Pattern to match three consecutive backticks (code block delimiter)
-        code_block_pattern = r"```"
-        match = re.search(code_block_pattern, text)
+        if "```" not in text:
+            return "" if self._in_code_block else text
 
-        if self._in_code_block:
-            return self._handle_in_code_block(match, text)
+        # Split on the fences; the parts alternate between outside and inside
+        # a code block, starting from where the previous chunk left off.
+        kept = []
+        for part in text.split("```"):
+            if not self._in_code_block and part.strip():
+                kept.append(part.strip())
+            self._in_code_block = not self._in_code_block
+        # The last part isn't followed by a fence, so undo its toggle.
+        self._in_code_block = not self._in_code_block
 
-        return self._handle_not_in_code_block(match, text, code_block_pattern)
-
-    def _handle_in_code_block(self, match, text):
-        """Handle text when not currently inside a code block.
-
-        If we find the end of the block, return text after it. Otherwise, skip
-        the content.
-        """
-        if match:
-            self._in_code_block = False
-            end_index = match.end()
-            return text[end_index:].strip()
-        return ""  # Skip content inside code block
-
-    def _handle_not_in_code_block(self, match, text, code_block_pattern):
-        """Handle text when not currently inside a code block."""
-        if not match:
-            return text  # No code block found, return original text
-
-        start_index = match.start()
-        if start_index == 0 or text[:start_index].isspace():
-            return self._handle_start_of_code_block(text, start_index)
-        return self._handle_code_block_within_text(text, code_block_pattern)
-
-    def _handle_start_of_code_block(self, text, start_index):
-        """Handle the case where a code block starts.
-
-        Return any text before the code block and set the state to inside a
-        code block.
-        """
-        self._in_code_block = True
-        return text[:start_index].strip()
-
-    def _handle_code_block_within_text(self, text, code_block_pattern):
-        """Handle code blocks found within text content.
-
-        If it's a complete code block, remove it and return surrounding text.
-        If it's the start of a code block, return text before it and set state.
-        """
-        parts = re.split(code_block_pattern, text)
-        if len(parts) > 2:
-            return (parts[0] + " " + parts[-1]).strip()
-        self._in_code_block = True
-        return parts[0].strip()
+        return " ".join(kept)
 
     #
     # Filter tables

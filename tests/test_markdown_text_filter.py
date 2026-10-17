@@ -223,6 +223,35 @@ class TestMarkdownTextFilter(unittest.IsolatedAsyncioTestCase):
             f"Simple table removal failed.\nExpected:\n{expected}\nGot:\n{result}",
         )
 
+    async def test_code_block_removal(self):
+        """Test removal of a code block that opens and closes in one chunk."""
+        test_cases = {
+            "```python\nprint(1)\n```": "",
+            "Here:\n```python\nprint(1)\n```\nDone.": "Here: Done.",
+            "Sure! ```python\nprint(1)\n``` That prints 1.": "Sure! That prints 1.",
+            "\n\n```python\nprint(1)\n```\n\nThat prints 1.": "That prints 1.",
+        }
+
+        for input_text, expected in test_cases.items():
+            filter = MarkdownTextFilter(params=MarkdownTextFilter.InputParams(filter_code=True))
+            result = await filter.filter(input_text)
+            self.assertEqual(result, expected, f"Code block removal failed for: {input_text!r}")
+
+    async def test_code_block_removal_across_chunks(self):
+        """Test removal of a code block that spans several chunks."""
+        filter = MarkdownTextFilter(params=MarkdownTextFilter.InputParams(filter_code=True))
+        chunks = {
+            "Here is code:": "Here is code:",
+            "```python": "",
+            "print(1)": "",
+            "x = 1\n``` That sets x.": "That sets x.",
+            "Anything else?": "Anything else?",
+        }
+
+        for input_text, expected in chunks.items():
+            result = await filter.filter(input_text)
+            self.assertEqual(result, expected, f"Code block removal failed for: {input_text!r}")
+
     async def test_feature_toggles(self):
         """Test enabling/disabling specific filter features."""
         # Create a filter with all features disabled
