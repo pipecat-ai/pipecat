@@ -223,6 +223,20 @@ class TestMarkdownTextFilter(unittest.IsolatedAsyncioTestCase):
             f"Simple table removal failed.\nExpected:\n{expected}\nGot:\n{result}",
         )
 
+    async def test_table_removal_keeps_surrounding_text(self):
+        """Test that removing a table keeps the text before and after it."""
+        table = "| Item | Price |\n|------|-------|\n| Tea | 2 |\n| Coffee | 3 |"
+        test_cases = {
+            f"Here are the prices.\n\n{table}": "Here are the prices.",
+            f"\n\n{table}\n\nLet me know what you want.": "Let me know what you want.",
+            f"Before.\n{table}\nAfter.": "Before.\nAfter.",
+        }
+
+        for input_text, expected in test_cases.items():
+            filter = MarkdownTextFilter(params=MarkdownTextFilter.InputParams(filter_tables=True))
+            result = await filter.filter(input_text)
+            self.assertEqual(result.strip(), expected, f"Table removal failed for: {input_text!r}")
+
     async def test_code_block_removal(self):
         """Test removal of a code block that opens and closes in one chunk."""
         test_cases = {

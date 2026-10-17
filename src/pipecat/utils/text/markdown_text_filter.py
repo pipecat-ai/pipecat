@@ -19,6 +19,15 @@ from pydantic import BaseModel
 
 from pipecat.utils.text.base_text_filter import BaseTextFilter
 
+# A Markdown table: a header row, a delimiter row (| --- | :-: |) and any body
+# rows, each line starting with a pipe.
+_MARKDOWN_TABLE = re.compile(
+    r"^[ \t]*\|.*\n"
+    r"[ \t]*\|[ \t]*:?-+:?[ \t]*(?:\|[ \t]*:?-+:?[ \t]*)*\|?[ \t]*(?:\n|$)"
+    r"(?:[ \t]*\|.*(?:\n|$))*",
+    re.MULTILINE,
+)
+
 
 class MarkdownTextFilter(BaseTextFilter):
     """Text filter that removes Markdown formatting from text content.
@@ -84,6 +93,11 @@ class MarkdownTextFilter(BaseTextFilter):
             # then removes it.
             if self._settings.filter_code:
                 filtered_text = self._remove_code_blocks(filtered_text)
+
+            # Remove complete tables before the newline collapse below, which
+            # would join a table to the text around it.
+            if self._settings.filter_tables:
+                filtered_text = _MARKDOWN_TABLE.sub("", filtered_text)
 
             # Strip markdown headers to plain text before the newline collapse
             # below. md.convert can't recognize a header once the collapse
