@@ -99,6 +99,7 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
         self._end_call: dict | None = None
         self._succeeded = False
         self._reason = ""
+        self._confidence: float | None = None
         self._metrics: list[EvalSimulationMetricScore] = []
         # The conversation as the events tell it, built as they arrive (see
         # :meth:`timeline`): the lines so far, the bot's words since the last
@@ -212,6 +213,8 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
             duration_ms=duration_ms,
             events_seen=events_seen,
             debug_log=debug_log,
+            # An errored run has no verdict on the goal, so no confidence in one.
+            confidence=None if error else self._confidence,
         )
 
     def timeline(self) -> list[dict]:
@@ -362,6 +365,7 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
                     passed=verdict.verdict == "yes",
                     reason=verdict.reason,
                     verdict=verdict.verdict,
+                    confidence=verdict.confidence,
                 )
                 for index, verdict in enumerate(judged.turns.get(metric.name, []), 1)
             ]
@@ -372,6 +376,7 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
             self._metrics.append(self._score(metric, verdicts))
         self._succeeded = judged.goal.verdict == "yes"
         self._reason = judged.goal.reason
+        self._confidence = judged.goal.confidence
         if judged.goal.verdict == "none":
             self._trace.log(f"judge: no verdict on the goal: {self._reason}")
             return [
