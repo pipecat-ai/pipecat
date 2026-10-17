@@ -696,22 +696,6 @@ class OpenAIResponsesLLMService(
 
     # -- WebsocketLLMService interface ----------------------------------------
 
-    async def _report_event_usage(self, usage: dict | None):
-        """Report the token usage of a response received over the WebSocket."""
-        if not usage:
-            return
-        input_details = usage.get("input_tokens_details") or {}
-        output_details = usage.get("output_tokens_details") or {}
-        tokens = LLMTokenUsage(
-            prompt_tokens=usage.get("input_tokens", 0),
-            completion_tokens=usage.get("output_tokens", 0),
-            total_tokens=usage.get("total_tokens", 0),
-            cache_read_input_tokens=input_details.get("cached_tokens", 0),
-            cache_creation_input_tokens=input_details.get("cache_write_tokens", 0),
-            reasoning_tokens=output_details.get("reasoning_tokens", 0),
-        )
-        await self.start_llm_usage_metrics(tokens)
-
     async def _connect_websocket(self):
         """Establish the WebSocket connection."""
         try:
@@ -1138,6 +1122,22 @@ class OpenAIResponsesLLMService(
             await cleanup()
             raise
 
+    async def _report_event_usage(self, usage: dict | None):
+        """Report the token usage of a response received over the WebSocket."""
+        if not usage:
+            return
+        input_details = usage.get("input_tokens_details") or {}
+        output_details = usage.get("output_tokens_details") or {}
+        tokens = LLMTokenUsage(
+            prompt_tokens=usage.get("input_tokens", 0),
+            completion_tokens=usage.get("output_tokens", 0),
+            total_tokens=usage.get("total_tokens", 0),
+            cache_read_input_tokens=input_details.get("cached_tokens", 0),
+            cache_creation_input_tokens=input_details.get("cache_write_tokens", 0),
+            reasoning_tokens=output_details.get("reasoning_tokens", 0),
+        )
+        await self.start_llm_usage_metrics(tokens)
+
     async def _receive_response_events(
         self, context: LLMContext, full_input: list, output_timeout_secs: float | None = None
     ):
@@ -1265,15 +1265,11 @@ class OpenAIResponsesLLMService(
 
             elif event_type in ("response.failed", "response.incomplete"):
                 response = event.get("response", {})
-                # A response cut short or failed is billed for the tokens it used too.
+                # A response cut short or failed is still billed for its tokens.
                 await self._report_event_usage(response.get("usage"))
-                # The Responses API reports why in `error` (failed) or
-                # `incomplete_details` (incomplete).
-                status_details = response.get("status_details") or {}
                 error_msg = (
                     (response.get("error") or {}).get("message")
                     or (response.get("incomplete_details") or {}).get("reason")
-                    or (status_details.get("error") or {}).get("message")
                     or f"Response {event_type.split('.')[-1]}"
                 )
                 await self.push_error(error_msg=f"LLM response error: {error_msg}")
@@ -1354,11 +1350,7 @@ class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
             await self.push_frame(frame, direction)
 
     async def _report_usage(self, usage: ResponseUsage | None):
-        """Report a response's token usage, if it carries any.
-
-        A response cut short (``response.incomplete``) or failed
-        (``response.failed``) is billed for the tokens it used too.
-        """
+        """Report a response's token usage, if it carries any."""
         if not usage:
             return
         # Third-party Responses API servers may omit fields the

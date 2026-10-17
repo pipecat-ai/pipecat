@@ -509,34 +509,7 @@ class TestReceiveResponseEventsFunctionCalls:
 
 class TestReceiveResponseEventsErrors:
     @pytest.mark.asyncio
-    async def test_response_failed_pushes_error(self):
-        service = _make_service()
-        service.stop_ttfb_metrics = AsyncMock()
-        service.start_llm_usage_metrics = AsyncMock()
-        service.push_error = AsyncMock()
-
-        ws = _ws_events(
-            {
-                "type": "response.failed",
-                "response": {
-                    "id": "resp_1",
-                    "status_details": {
-                        "error": {"message": "Content filter triggered"},
-                    },
-                },
-            },
-        )
-        service._websocket = ws
-
-        context = MagicMock(spec=LLMContext)
-        await service._receive_response_events(context, [])
-
-        service.push_error.assert_called_once()
-        assert "Content filter triggered" in service.push_error.call_args.kwargs["error_msg"]
-
-    @pytest.mark.asyncio
     async def test_response_incomplete_reports_reason_and_usage(self):
-        """The Responses API reports why a response stopped in incomplete_details."""
         service = _make_service()
         service.stop_ttfb_metrics = AsyncMock()
         service.start_llm_usage_metrics = AsyncMock()
@@ -570,8 +543,7 @@ class TestReceiveResponseEventsErrors:
         assert tokens.completion_tokens == 50
 
     @pytest.mark.asyncio
-    async def test_response_failed_reports_the_error_message(self):
-        """The Responses API puts a failed response's error in response.error."""
+    async def test_response_failed_pushes_error(self):
         service = _make_service()
         service.stop_ttfb_metrics = AsyncMock()
         service.start_llm_usage_metrics = AsyncMock()
@@ -604,7 +576,7 @@ class TestReceiveResponseEventsErrors:
         ws = _ws_events(
             {
                 "type": "response.incomplete",
-                "response": {"id": "resp_1", "status_details": None},
+                "response": {"id": "resp_1", "incomplete_details": None},
             },
         )
         service._websocket = ws
