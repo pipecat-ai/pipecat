@@ -68,6 +68,10 @@ class TestMarkdownTextFilter(unittest.IsolatedAsyncioTestCase):
             "Text^^^^^test": "Texttest",  # 5 carets removed
             "Dots....here": "Dots....here",  # 4 dots preserved
             "Dots.....here": "Dotshere",  # 5 dots removed
+            "Fill in _____ here": "Fill in  here",  # 5 underscores removed
+            "The prize is 1000000 dollars.": "The prize is 1000000 dollars.",  # digits kept
+            "Extension 22222": "Extension 22222",  # repeated digits kept
+            "Sooooo good": "Sooooo good",  # repeated letters kept
         }
 
         for input_text, expected in test_cases.items():
