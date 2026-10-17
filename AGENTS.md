@@ -107,6 +107,12 @@ Runnable examples live in `examples/multi-worker/` (local handoff, distributed h
 
 - **Uninterruptible Frames**: These are frames that will not be removed from internal queues even if there's an interruption. Every frame carries an `interruptible` flag, True by default; a frame class such as `EndFrame` or `StopFrame` declares `interruptible: bool = field(default=False, init=False)` to be uninterruptible by default, and setting the flag on a frame before pushing it decides for that frame alone.
 
+- **Frames are the public interface**: A non-system frame pushed into the pipeline keeps its place in order with the frames around it: a `DailySIPTransferFrame` pushed after a `TTSSpeakFrame` acts once that speech has played. System frames act as soon as they arrive. A method call skips the processors in front of its class, so it can act ahead of frames pushed before it.
+  - When a frame does the job, use the frame in examples and docs, and don't add a public method that duplicates it. A method that does exist alongside a frame says in its docstring that it acts ahead of queued frames, and points to the frame. A method that returns a result, converts a value, or validates differently from the frame isn't a duplicate.
+  - Public methods are for work with no place in the frame stream: session and connection control called from event handlers (dial-out, recording), lookups, and calls that return a result.
+  - A name without a leading underscore is public API. Give a helper that only its own class calls a `_` name.
+  - When a frame must act after the bot speaks, such as a transfer, set `interruptible = False` on both the `TTSSpeakFrame` and that frame, so the user talking over the bot can't drop either one.
+
 - **Events**: Most classes in Pipecat have `BaseObject` as the very base class. `BaseObject` has support for events. Events can run in the background in an async task (default) or synchronously (`sync=True`) if we want immediate action. Synchronous event handlers need to execute fast.
 
 - **Async Task Management**: Always use `self.create_task(coroutine, name)` instead of raw `asyncio.create_task()`. The `TaskManager` automatically tracks tasks and cleans them up on processor shutdown. Use `await self.cancel_task(task, timeout)` for cancellation.
