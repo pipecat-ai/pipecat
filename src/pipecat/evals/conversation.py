@@ -17,8 +17,10 @@ A conversation file is a JSON list of messages, in the order they happened:
   a function the bot called, placed before the bot turn it was made in.
 
 The file holds what each side said and the calls the bot made, which is what
-the judge reads. It has no system prompt, no tool results, and no timing.
-Example::
+the judge reads. It has no system prompt, no tool results, and no timing. The
+harness saves one for every simulation run, and
+:class:`~pipecat.evals.conversation_observer.EvalConversationObserver` records
+one from a bot's own pipeline. Example::
 
     [
       {"role": "assistant", "content": "Hi, how can I help?"},
