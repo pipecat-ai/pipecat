@@ -944,6 +944,62 @@ class TestPipelineWorker(unittest.IsolatedAsyncioTestCase):
         assert len(timed_out) == 1
         assert isinstance(timed_out[0], CancelFrame)
 
+    async def _cancel_while_ending(self, end_frame: Frame):
+        class EndBlocker(FrameProcessor):
+            def __init__(self, *, end_received: asyncio.Event, release: asyncio.Event, **kwargs):
+                super().__init__(**kwargs)
+                self._end_received = end_received
+                self._release = release
+
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                await super().process_frame(frame, direction)
+
+                if isinstance(frame, (EndFrame, StopFrame)):
+                    self._end_received.set()
+                    await self._release.wait()
+
+                await self.push_frame(frame, direction)
+
+        end_received = asyncio.Event()
+        release = asyncio.Event()
+        pipeline = Pipeline([EndBlocker(end_received=end_received, release=release)])
+        worker = PipelineWorker(pipeline, cancel_timeout_secs=1.0)
+
+        finished = []
+        timed_out = []
+
+        @worker.event_handler("on_pipeline_finished")
+        async def on_pipeline_finished(_worker, frame):
+            finished.append(frame)
+
+        @worker.event_handler("on_pipeline_timeout")
+        async def on_pipeline_timeout(_worker, frame):
+            timed_out.append(frame)
+
+        run_task = asyncio.create_task(worker.run(WorkerParams(task_manager=TaskManager())))
+        await worker.queue_frame(end_frame)
+        await end_received.wait()
+        await worker.cancel()
+        done, _ = await asyncio.wait({run_task}, timeout=1.0)
+        if not done:
+            # Let the stuck frame through so the worker can still finish.
+            release.set()
+            await run_task
+            self.fail(f"cancel() could not finish a worker stuck on {end_frame}")
+
+        assert worker.has_finished()
+
+        # The CancelFrame overtakes the stuck frame and drains the pipeline.
+        assert timed_out == []
+        assert len(finished) == 1
+        assert isinstance(finished[0], CancelFrame)
+
+    async def test_task_cancel_while_end_frame_is_stuck(self):
+        await self._cancel_while_ending(EndFrame())
+
+    async def test_task_cancel_while_stop_frame_is_stuck(self):
+        await self._cancel_while_ending(StopFrame())
+
     async def test_task_start_frame_never_reaches_sink(self):
         class StartBlocker(FrameProcessor):
             def __init__(self, **kwargs):
