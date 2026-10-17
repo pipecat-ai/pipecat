@@ -535,6 +535,66 @@ class TestReceiveResponseEventsErrors:
         assert "Content filter triggered" in service.push_error.call_args.kwargs["error_msg"]
 
     @pytest.mark.asyncio
+    async def test_response_incomplete_reports_reason_and_usage(self):
+        """The Responses API reports why a response stopped in incomplete_details."""
+        service = _make_service()
+        service.stop_ttfb_metrics = AsyncMock()
+        service.start_llm_usage_metrics = AsyncMock()
+        service.push_error = AsyncMock()
+
+        ws = _ws_events(
+            {
+                "type": "response.incomplete",
+                "response": {
+                    "id": "resp_1",
+                    "status": "incomplete",
+                    "incomplete_details": {"reason": "max_output_tokens"},
+                    "usage": {
+                        "input_tokens": 12,
+                        "output_tokens": 50,
+                        "total_tokens": 62,
+                        "input_tokens_details": {"cached_tokens": 0},
+                        "output_tokens_details": {"reasoning_tokens": 0},
+                    },
+                },
+            },
+        )
+        service._websocket = ws
+
+        context = MagicMock(spec=LLMContext)
+        await service._receive_response_events(context, [])
+
+        assert "max_output_tokens" in service.push_error.call_args.kwargs["error_msg"]
+        tokens = service.start_llm_usage_metrics.call_args[0][0]
+        assert tokens.prompt_tokens == 12
+        assert tokens.completion_tokens == 50
+
+    @pytest.mark.asyncio
+    async def test_response_failed_reports_the_error_message(self):
+        """The Responses API puts a failed response's error in response.error."""
+        service = _make_service()
+        service.stop_ttfb_metrics = AsyncMock()
+        service.start_llm_usage_metrics = AsyncMock()
+        service.push_error = AsyncMock()
+
+        ws = _ws_events(
+            {
+                "type": "response.failed",
+                "response": {
+                    "id": "resp_1",
+                    "status": "failed",
+                    "error": {"code": "server_error", "message": "The model failed to respond"},
+                },
+            },
+        )
+        service._websocket = ws
+
+        context = MagicMock(spec=LLMContext)
+        await service._receive_response_events(context, [])
+
+        assert "The model failed to respond" in service.push_error.call_args.kwargs["error_msg"]
+
+    @pytest.mark.asyncio
     async def test_response_incomplete_pushes_error(self):
         service = _make_service()
         service.stop_ttfb_metrics = AsyncMock()
