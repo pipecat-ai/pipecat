@@ -556,6 +556,9 @@ class WhisperSTTServiceMLX(WhisperSTTService):
 
         # MLX Whisper loads the model on demand, so only the name is checked here.
         require_given(self._settings.model, "Whisper model")
+        # No model is held, so there are no supported languages to check
+        # against when the language changes.
+        self._model = None
 
     @override
     def _load(self):
