@@ -20,7 +20,11 @@ from http import HTTPStatus
 import pytest
 from websockets.asyncio.server import serve
 
-from pipecat.frames.frames import InputAudioRawFrame
+from pipecat.frames.frames import (
+    InputAudioRawFrame,
+    ProposedUserStoppedSpeakingFrame,
+    TranscriptionFrame,
+)
 from pipecat.services.deepgram.flux.stt import DeepgramFluxSTTService
 from pipecat.tests.utils import SleepFrame, run_test
 
@@ -32,6 +36,10 @@ class _FakeFlux:
     rejected_handshakes: int = 0
     reject_after: int | None = None
     drop_first_after: int | None = None
+    # Open a turn on the first connection just before dropping it.
+    drop_mid_turn: bool = False
+    # Continue that turn on the second connection: the rest of what the user says.
+    resume_turn: bool = False
     confirm: bool = True
     handshakes: int = 0
     audio_per_connection: list[int] = field(default_factory=list)
@@ -54,7 +62,16 @@ class _FakeFlux:
             if not isinstance(message, bytes):
                 continue
             self.audio_per_connection[index] += 1
+            if index == 1 and self.resume_turn and self.audio_per_connection[1] == 3:
+                for event in ("StartOfTurn", "EndOfTurn"):
+                    turn_info = {"type": "TurnInfo", "event": event, "transcript": "how are you"}
+                    await websocket.send(json.dumps(turn_info))
             if index == 0 and self.audio_per_connection[0] == self.drop_first_after:
+                if self.drop_mid_turn:
+                    for event, transcript in (("StartOfTurn", "hello"), ("Update", "hello there")):
+                        turn_info = {"type": "TurnInfo", "event": event, "transcript": transcript}
+                        await websocket.send(json.dumps(turn_info))
+                    await asyncio.sleep(0.05)
                 websocket.transport.abort()
                 return
 
@@ -101,6 +118,54 @@ async def test_a_dropped_connection_is_replaced_by_one_new_connection():
 
     assert len(server.audio_per_connection) == 2
     assert server.audio_per_connection[1] > 0
+
+
+def _turn_ends(down) -> tuple[list[tuple[str, bool]], list[int]]:
+    """The transcriptions pushed and the positions of proposed turn stops."""
+    transcripts = [(f.text, f.finalized) for f in down if isinstance(f, TranscriptionFrame)]
+    stops = [i for i, f in enumerate(down) if isinstance(f, ProposedUserStoppedSpeakingFrame)]
+    return transcripts, stops
+
+
+@pytest.mark.asyncio
+async def test_a_turn_cut_short_by_a_drop_ends_with_its_transcript_so_far():
+    server = _FakeFlux(drop_first_after=10, drop_mid_turn=True)
+
+    _, down = await _run(server, seconds=1.0)
+
+    transcripts, stops = _turn_ends(down)
+    assert transcripts == [("hello there", False)]
+    assert len(stops) == 1
+    first_transcript = next(i for i, f in enumerate(down) if isinstance(f, TranscriptionFrame))
+    assert first_transcript < stops[0]
+    assert len(server.audio_per_connection) == 2
+
+
+@pytest.mark.asyncio
+async def test_speech_continuing_after_a_drop_becomes_a_new_turn():
+    server = _FakeFlux(drop_first_after=10, drop_mid_turn=True, resume_turn=True)
+
+    _, down = await _run(server, seconds=1.0)
+
+    transcripts, stops = _turn_ends(down)
+    assert transcripts == [("hello there", False), ("how are you", True)]
+    assert len(stops) == 2
+
+
+@pytest.mark.asyncio
+async def test_a_turn_ends_when_reconnecting_gives_up():
+    def fast_backoff(service):
+        service._reconnect_backoff_min_wait = 0.01
+        service._reconnect_backoff_max_wait = 0.01
+
+    server = _FakeFlux(drop_first_after=10, drop_mid_turn=True, reject_after=1)
+
+    service, down = await _run(server, seconds=1.0, configure=fast_backoff)
+
+    transcripts, stops = _turn_ends(down)
+    assert transcripts == [("hello there", False)]
+    assert len(stops) == 1
+    assert not service.is_usable
 
 
 @pytest.mark.asyncio

@@ -456,8 +456,14 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
         if not self._watchdog_task or self._watchdog_task.done():
             self._watchdog_task = self.create_task(self._watchdog_task_handler())
 
-        async for message in messages:
-            await self._process_message(message)
+        try:
+            async for message in messages:
+                await self._process_message(message)
+        finally:
+            # A turn lives in one connection, so it ends when the connection
+            # does, unless the service is stopping.
+            if not self._disconnecting:
+                await self._end_turn_cut_short()
 
     async def _process_message(self, message: str | bytes):
         """Decode and handle one message from the WebSocket."""

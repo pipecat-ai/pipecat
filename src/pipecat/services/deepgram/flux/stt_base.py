@@ -289,6 +289,10 @@ class DeepgramFluxSTTBase(EagerEndOfTurnSTTServiceMixin, STTService):
         self._watchdog_task: asyncio.Task | None = None
         self._user_is_speaking = False
         self._last_audio_chunk_duration: float = 0.0
+        # The turn so far, from its latest Update, for a turn whose connection
+        # closes before EndOfTurn (see _end_turn_cut_short).
+        self._turn_transcript = ""
+        self._turn_language: Language | None = None
 
         # Flux event handlers
         self._register_event_handler("on_start_of_turn")
@@ -815,6 +819,8 @@ class DeepgramFluxSTTBase(EagerEndOfTurnSTTServiceMixin, STTService):
         """
         logger.debug("User started speaking")
         self._user_is_speaking = True
+        self._turn_transcript = transcript
+        self._turn_language = None
         await self.broadcast_frame(ProposedUserStartedSpeakingFrame)
         await self._call_event_handler("on_start_of_turn", transcript)
         if transcript:
@@ -885,6 +891,7 @@ class DeepgramFluxSTTBase(EagerEndOfTurnSTTServiceMixin, STTService):
         """
         logger.debug("User stopped speaking")
         self._user_is_speaking = False
+        self._turn_transcript = ""
         # The turn is committed, so any eager prediction it followed is resolved.
         self._clear_eager_end_of_turn()
 
@@ -946,6 +953,29 @@ class DeepgramFluxSTTBase(EagerEndOfTurnSTTServiceMixin, STTService):
         )
         await self._call_event_handler("on_eager_end_of_turn", transcript)
 
+    async def _end_turn_cut_short(self):
+        """End a turn whose connection closed before Flux sent EndOfTurn.
+
+        A Flux turn lives in one connection, so a new connection never ends the
+        old one's turn. The transcript received so far is pushed as the turn's
+        transcription, unfinalized since Flux never committed it, and the turn
+        stop is proposed. If the user is still speaking, the new connection
+        transcribes the rest as a new turn.
+        """
+        if not self._user_is_speaking:
+            return
+        logger.debug(f"{self}: connection closed mid-turn, ending the turn")
+        self._user_is_speaking = False
+        self._clear_eager_end_of_turn()
+        transcript, self._turn_transcript = self._turn_transcript, ""
+        if transcript:
+            await self.push_frame(
+                TranscriptionFrame(
+                    transcript, self._user_id, time_now_iso8601(), self._turn_language
+                )
+            )
+        await self.broadcast_frame(ProposedUserStoppedSpeakingFrame)
+
     async def _handle_update(self, transcript: str, data: dict[str, Any]):
         """Handle Update events from Deepgram Flux.
 
@@ -959,6 +989,8 @@ class DeepgramFluxSTTBase(EagerEndOfTurnSTTServiceMixin, STTService):
         """
         if transcript:
             logger.trace(f"Update event: {transcript}")
+            self._turn_transcript = transcript
+            self._turn_language = self._primary_detected_language(data)
             # TTFB (Time To First Byte) metrics are currently disabled for Deepgram Flux.
             # Ideally, TTFB should measure the time from when a user starts speaking
             # until we receive the first transcript. However, Deepgram Flux delivers
