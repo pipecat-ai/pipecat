@@ -3562,6 +3562,48 @@ class TestOpenAIResponsesGetLLMInvocationParams(unittest.IsolatedAsyncioTestCase
 
         self.assertNotIn("instructions", params)
 
+    async def test_tool_choice_in_responses_shape(self):
+        """A context's tool choice reaches the params in the Responses API's shape."""
+        cases = [
+            ("required", "required"),
+            (
+                {"type": "function", "function": {"name": "get_weather"}},
+                {"type": "function", "name": "get_weather"},
+            ),
+            (
+                {"type": "custom", "custom": {"name": "run_query"}},
+                {"type": "custom", "name": "run_query"},
+            ),
+            (
+                {
+                    "type": "allowed_tools",
+                    "allowed_tools": {
+                        "mode": "required",
+                        "tools": [
+                            {"type": "function", "function": {"name": "get_weather"}},
+                            {"type": "image_generation"},
+                        ],
+                    },
+                },
+                {
+                    "type": "allowed_tools",
+                    "mode": "required",
+                    "tools": [
+                        {"type": "function", "name": "get_weather"},
+                        {"type": "image_generation"},
+                    ],
+                },
+            ),
+        ]
+        for tool_choice, expected in cases:
+            with self.subTest(tool_choice=tool_choice):
+                context = LLMContext(
+                    messages=[{"role": "user", "content": "Hi"}], tool_choice=tool_choice
+                )
+                params = await self.adapter.get_llm_invocation_params(context)
+
+                self.assertEqual(params["tool_choice"], expected)
+
 
 class TestOpenAIRealtimeGetLLMInvocationParams(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:

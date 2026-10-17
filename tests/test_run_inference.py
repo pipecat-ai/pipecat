@@ -790,6 +790,28 @@ async def test_openai_responses_run_inference_with_llm_context():
 
 
 @pytest.mark.asyncio
+async def test_openai_responses_run_inference_forwards_tool_choice():
+    """Test that the context's tool choice reaches the request in the Responses API's shape."""
+    with patch.object(OpenAIResponsesLLMService, "_create_client"):
+        service = OpenAIResponsesLLMService()
+        service._client = AsyncMock()
+
+        context = LLMContext(
+            messages=[{"role": "user", "content": "Hello"}],
+            tool_choice={"type": "function", "function": {"name": "get_weather"}},
+        )
+
+        mock_response = MagicMock()
+        mock_response.output_text = "Hi"
+        service._client.responses.create = AsyncMock(return_value=mock_response)
+
+        await service.run_inference(context)
+
+        call_kwargs = service._client.responses.create.call_args.kwargs
+        assert call_kwargs["tool_choice"] == {"type": "function", "name": "get_weather"}
+
+
+@pytest.mark.asyncio
 async def test_openai_responses_run_inference_client_exception():
     """Test that exceptions from the client are propagated."""
     with patch.object(OpenAIResponsesLLMService, "_create_client"):
