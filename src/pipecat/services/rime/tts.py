@@ -385,7 +385,7 @@ class RimeTTSService(WebsocketTTSService):
         https://docs.rime.ai/api-reference/custom-pronunciation
         """
         self._extra_msg_fields["phonemizeBetweenBrackets"] = True
-        return text.replace(word, f"{phoneme}")
+        return text.replace(word, f"{{{phoneme}}}")
 
     def INLINE_SPEED(self, text: str, speed: float) -> str:
         """Convenience method to support inline speeds."""
