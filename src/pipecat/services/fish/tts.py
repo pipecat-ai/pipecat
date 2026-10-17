@@ -313,7 +313,11 @@ class FishAudioTTSService(InterruptibleTTSService):
             model = assert_given(self._settings.model)
             if model is not None:
                 headers["model"] = model
-            websocket = await self._websocket_connect(self._base_url, additional_headers=headers)
+            # With latency="normal", Fish sends a long sentence's audio in a few
+            # large messages, which can exceed the websockets default of 1 MiB.
+            websocket = await self._websocket_connect(
+                self._base_url, additional_headers=headers, max_size=16 * 1024 * 1024
+            )
             self._websocket = websocket
 
             prosody: dict[str, Any] = {
