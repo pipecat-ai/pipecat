@@ -442,8 +442,7 @@ class CartesiaTurnsSTTService(EagerEndOfTurnSTTServiceMixin, WebsocketSTTService
             Frame: ``None`` (transcription results are pushed by the receive
                 task), or :class:`ErrorFrame` on send failure.
         """
-        if not self._websocket:
-            return
+        # With no socket (the first connect failed), send_with_retry reconnects.
         try:
             self._last_stt_time = time.monotonic()
             self._last_audio_chunk_duration = len(audio) / (self.sample_rate * 2)

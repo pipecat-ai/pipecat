@@ -416,15 +416,10 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
 
         Yields:
             Frame: None (transcription results are delivered via WebSocket callbacks
-                rather than as return values from this method).
-
-        Raises:
-            Exception: If the WebSocket connection is not established or if there
-                are issues sending the audio data.
+                rather than as return values from this method), or
+                :class:`ErrorFrame` on send failure.
         """
-        if not self._websocket:
-            return
-
+        # With no socket (the first connect failed), send_with_retry reconnects.
         try:
             self._last_stt_time = time.monotonic()
             self._last_audio_chunk_duration = len(audio) / (self.sample_rate * 2)
