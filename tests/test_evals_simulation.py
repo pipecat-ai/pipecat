@@ -861,32 +861,12 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
 class TestClosingTurn(unittest.IsolatedAsyncioTestCase):
     """A persona that hangs up on its own last line leaves the bot its reply to it."""
 
-    async def test_the_bots_reply_to_the_last_line_closes_the_run(self):
-        driver, stream, llm, client = _driver(_simulation(), _FakeConversationJudge(["yes"]))
-
-        async def conversation():
-            await stream.append({"type": "llm_response", "text": "Is that all correct?"})
-            await stream.append({"type": PERSONA_TURN_EVENT, "text": "Yes, all correct."})
-            await _end_call(llm, success=True, reason="done")
-            await asyncio.sleep(0.1)
-            # The persona is silent by now, and the bot's reply still counts.
-            self.assertTrue(client.hung_up)
-            await stream.append({"type": "llm_response", "text": "Great, you're all set."})
-
-        task = asyncio.create_task(conversation())
-        await driver.run()
-        await task
-        result = driver.result(failures=[], duration_ms=0, events_seen=[], debug_log=[])
-        self.assertEqual(result.ended_by, "end_call")
-        self.assertEqual(
-            result.messages[-1], {"role": "assistant", "content": "Great, you're all set."}
-        )
-
-    async def test_a_hang_up_while_the_last_line_is_spoken_waits_for_the_bots_reply(self):
+    async def _hang_up_while_speaking(self, simulation: EvalSimulationScenario):
+        """Run a conversation whose last persona line ends with end_call, made while the line is spoken."""
         # In audio mode the persona calls end_call before the user TTS has
         # spoken the line the call came with.
         judge = _FakeConversationJudge(["yes"])
-        driver, stream, llm, client = _driver(_simulation(bot_audio=True), judge)
+        driver, stream, llm, client = _driver(simulation, judge)
         relay = _PersonaTurnRelay(lambda text: {}, EvalTrace(), stream)
         relay.link(_Discard())
         client.report_end_call = relay.end_call
@@ -910,6 +890,31 @@ class TestClosingTurn(unittest.IsolatedAsyncioTestCase):
         await driver.run()
         await task
         result = driver.result(failures=[], duration_ms=0, events_seen=[], debug_log=[])
+        return result, judge
+
+    async def test_the_bots_reply_to_the_last_line_closes_the_run(self):
+        driver, stream, llm, client = _driver(_simulation(), _FakeConversationJudge(["yes"]))
+
+        async def conversation():
+            await stream.append({"type": "llm_response", "text": "Is that all correct?"})
+            await stream.append({"type": PERSONA_TURN_EVENT, "text": "Yes, all correct."})
+            await _end_call(llm, success=True, reason="done")
+            await asyncio.sleep(0.1)
+            # The persona is silent by now, and the bot's reply still counts.
+            self.assertTrue(client.hung_up)
+            await stream.append({"type": "llm_response", "text": "Great, you're all set."})
+
+        task = asyncio.create_task(conversation())
+        await driver.run()
+        await task
+        result = driver.result(failures=[], duration_ms=0, events_seen=[], debug_log=[])
+        self.assertEqual(result.ended_by, "end_call")
+        self.assertEqual(
+            result.messages[-1], {"role": "assistant", "content": "Great, you're all set."}
+        )
+
+    async def test_a_hang_up_while_the_last_line_is_spoken_waits_for_the_bots_reply(self):
+        result, judge = await self._hang_up_while_speaking(_simulation(bot_audio=True))
         self.assertEqual(result.ended_by, "end_call")
         # The judge read the persona's last line and the bot's reply to it.
         self.assertEqual(
@@ -919,6 +924,11 @@ class TestClosingTurn(unittest.IsolatedAsyncioTestCase):
                 {"role": "assistant", "content": "Goodbye!"},
             ],
         )
+
+    async def test_a_hang_up_on_the_last_allowed_turn_waits_for_the_bots_reply(self):
+        result, _ = await self._hang_up_while_speaking(_simulation(bot_audio=True, max_turns=1))
+        self.assertEqual(result.ended_by, "end_call")
+        self.assertEqual(result.messages[-1], {"role": "assistant", "content": "Goodbye!"})
 
     async def test_a_hang_up_with_no_reply_coming_still_ends_as_end_call(self):
         driver, stream, llm, _ = _driver(

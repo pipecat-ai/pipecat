@@ -169,7 +169,9 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
             elif event["type"] == PERSONA_TURN_EVENT:
                 self._turns += 1
                 await self._report("user", event.get("text", ""))
-                if self._turns >= simulation.max_turns:
+                # A persona that hung up on this turn has its end_call event
+                # next, which leaves the bot its closing turn.
+                if self._turns >= simulation.max_turns and self._end_call is None:
                     self._ended_by = "max_turns"
             elif event["type"] == self._bot_said and event.get("text"):
                 await self._report("bot", event["text"])
