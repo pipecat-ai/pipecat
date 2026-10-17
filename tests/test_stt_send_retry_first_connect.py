@@ -42,7 +42,7 @@ def _make_service(name: str, port: int):
     return service
 
 
-async def _run(name: str, rejected_handshakes: int, seconds: float):
+async def _run(name: str, rejected_handshakes: int, seconds: float, confirm: bool = True):
     handshakes = 0
     audio_messages = 0
 
@@ -55,11 +55,12 @@ async def _run(name: str, rejected_handshakes: int, seconds: float):
 
     async def handle(websocket):
         nonlocal audio_messages
-        if name == "flux":
-            connected = {"type": "Connected"}
-        else:
-            connected = {"type": "connected", "request_id": "test-request"}
-        await websocket.send(json.dumps(connected))
+        if confirm:
+            if name == "flux":
+                connected = {"type": "Connected"}
+            else:
+                connected = {"type": "connected", "request_id": "test-request"}
+            await websocket.send(json.dumps(connected))
         async for message in websocket:
             if isinstance(message, bytes):
                 audio_messages += 1
@@ -95,6 +96,21 @@ async def test_a_provider_that_never_accepts_leaves_the_service_unusable(service
 
     # The setup connect, then one round of retries; once the service is
     # unusable it takes no more audio, so it never tries again.
+    assert handshakes == 1 + MAX_RETRIES
+    assert audio_messages == 0
+    assert not stt.is_usable
+
+
+@pytest.mark.asyncio
+async def test_cartesia_turns_gives_up_on_a_connection_that_is_never_confirmed(monkeypatch):
+    # The handshake succeeds but the server never sends ``connected``, so each
+    # attempt times out instead of holding the audio path forever.
+    monkeypatch.setattr(CartesiaTurnsSTTService, "_CONNECTION_TIMEOUT", 0.1)
+
+    stt, handshakes, audio_messages = await asyncio.wait_for(
+        _run("turns", rejected_handshakes=0, seconds=0.5, confirm=False), timeout=10
+    )
+
     assert handshakes == 1 + MAX_RETRIES
     assert audio_messages == 0
     assert not stt.is_usable

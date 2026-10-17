@@ -125,6 +125,11 @@ class CartesiaTurnsSTTService(EagerEndOfTurnSTTServiceMixin, WebsocketSTTService
     Settings = CartesiaTurnsSTTSettings
     _settings: Settings
 
+    # How long to wait for the server's ``connected`` frame after the
+    # handshake. Reconnects run while sending audio, so an unbounded wait
+    # would stall the audio path.
+    _CONNECTION_TIMEOUT = 10.0
+
     def __init__(
         self,
         *,
@@ -368,7 +373,14 @@ class CartesiaTurnsSTTService(EagerEndOfTurnSTTServiceMixin, WebsocketSTTService
                 self._watchdog_task = self.create_task(self._watchdog_task_handler())
 
             logger.debug("WebSocket connected, waiting for server confirmation...")
-            await self._connection_established_event.wait()
+            try:
+                await asyncio.wait_for(
+                    self._connection_established_event.wait(), timeout=self._CONNECTION_TIMEOUT
+                )
+            except TimeoutError:
+                raise TimeoutError(
+                    f"Cartesia did not confirm the connection within {self._CONNECTION_TIMEOUT}s"
+                ) from None
             logger.debug(f"Connected to Cartesia Ink-2 ASR (request_id={self._request_id})")
             await self._call_event_handler("on_connected")
         except Exception as e:
