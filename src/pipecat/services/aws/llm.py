@@ -237,7 +237,8 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
 
         self._aws_session = aiobotocore.session.get_session()
 
-        # Resolve credentials using the shared chain (explicit → env → botocore).
+        # Explicit or environment keys. Without them, each client takes its
+        # credentials from the session's default chain, which renews them.
         resolved = resolve_credentials(
             aws_access_key_id=aws_access_key,
             aws_secret_access_key=aws_secret_key,
