@@ -138,6 +138,18 @@ class TestMarkdownTextFilter(unittest.IsolatedAsyncioTestCase):
             result = await self.filter.filter(input_text)
             self.assertEqual(result, expected, f"Asterisk removal failed for: '{input_text}'")
 
+    async def test_standalone_asterisk_preserved(self):
+        """Test that an asterisk not attached to a word is kept."""
+        test_cases = {
+            "Press * then #": "Press * then #",
+            "5 * 3 = 15": "5 * 3 = 15",
+            "Use the * key": "Use the * key",
+        }
+
+        for input_text, expected in test_cases.items():
+            result = await self.filter.filter(input_text)
+            self.assertEqual(result, expected, f"Standalone asterisk lost in: '{input_text}'")
+
     async def test_newline_handling(self):
         """Test handling of empty and whitespace-only lines."""
         test_cases = {

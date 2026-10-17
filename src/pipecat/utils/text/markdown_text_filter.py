@@ -139,8 +139,9 @@ class MarkdownTextFilter(BaseTextFilter):
             # Remove double asterisks (consecutive without any exceptions)
             filtered_text = re.sub(r"\*\*", "", filtered_text)
 
-            # Remove single asterisks at the start or end of words
-            filtered_text = re.sub(r"(^|\s)\*|\*($|\s)", r"\1\2", filtered_text)
+            # Remove single asterisks at the start or end of words. A standalone
+            # asterisk ("Press * then #", "5 * 3") is content and stays.
+            filtered_text = re.sub(r"(^|\s)\*(?=\S)|(?<=\S)\*($|\s)", r"\1\2", filtered_text)
 
             # Remove Markdown table formatting
             filtered_text = re.sub(r"\|", "", filtered_text)
