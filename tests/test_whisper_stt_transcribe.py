@@ -63,3 +63,21 @@ async def test_segments_are_decoded_off_the_event_loop():
     assert threading.get_ident() not in model.decoding_threads
     transcriptions = [frame for frame in frames if isinstance(frame, TranscriptionFrame)]
     assert [frame.text.split() for frame in transcriptions] == [["Hello", "world."]]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("sample_rate", [8000, 16000, 24000])
+async def test_audio_reaches_whisper_at_16khz(sample_rate):
+    """Whisper reads 16 kHz audio whatever rate the pipeline's input audio uses."""
+    model = _LazyModel()
+    received = []
+    transcribe = model.transcribe
+    model.transcribe = lambda audio, **kwargs: (received.append(audio), transcribe(audio))[1]
+    service = _build(model)
+    service._sample_rate = sample_rate
+    one_second = b"\x00\x00" * sample_rate
+
+    [frame async for frame in service.run_stt(one_second)]
+
+    assert len(received) == 1
+    assert abs(len(received[0]) - 16000) <= 16
