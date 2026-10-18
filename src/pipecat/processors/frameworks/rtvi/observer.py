@@ -852,11 +852,13 @@ class RTVIObserver(BaseObserver):
 
     async def _handle_aggregated_llm_text(self, frame: AggregatedTextFrame):
         """Handle aggregated LLM text output frames."""
-        if self._bot_is_speaking:
-            # Bot has already started speaking, send directly
+        # Text to be spoken waits for the bot to start speaking. Text that won't
+        # be spoken has nothing to wait for, except text queued before it.
+        if self._bot_is_speaking or (
+            not frame.will_be_spoken and not self._queued_aggregated_text_frames
+        ):
             await self._send_aggregated_llm_text(frame)
         else:
-            # Bot hasn't started speaking yet, queue the frame
             self._queued_aggregated_text_frames.append(frame)
 
     async def _handle_aggregated_progress(self, frame: AggregatedTextProgressFrame):

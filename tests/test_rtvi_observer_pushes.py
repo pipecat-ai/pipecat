@@ -89,6 +89,7 @@ class TestRTVIObserverPushes(unittest.IsolatedAsyncioTestCase):
 
     async def test_aggregated_text_is_handled_once_it_has_gone_through_the_transport(self):
         frame = AggregatedTextFrame(text="hello", text_type="sentence")
+        frame.will_be_spoken = True
         transport = BaseOutputTransport(TransportParams())
 
         await self._push(frame)
@@ -97,8 +98,31 @@ class TestRTVIObserverPushes(unittest.IsolatedAsyncioTestCase):
         await self._push(frame, first_push=False, source=transport)
         self.assertEqual(self.observer._queued_aggregated_text_frames, [frame])
 
+    async def test_text_that_wont_be_spoken_is_sent_without_waiting_for_the_bot_to_speak(self):
+        transport = BaseOutputTransport(TransportParams())
+
+        await self._push(AggregatedTextFrame("Hello there.", "sentence"), source=transport)
+
+        self.assertEqual(self._sent_outputs(), ["Hello there."])
+
+    async def test_text_that_wont_be_spoken_waits_behind_text_queued_before_it(self):
+        transport = BaseOutputTransport(TransportParams())
+        spoken = AggregatedTextFrame("Here it is.", "sentence")
+        spoken.will_be_spoken = True
+        code = AggregatedTextFrame("print(1)", "code")
+
+        await self._push(spoken, source=transport)
+        await self._push(code, source=transport)
+        self.assertEqual(self._sent_outputs(), [])
+
+        await self._push(BotStartedSpeakingFrame())
+        self.assertEqual(self._sent_outputs(), ["Here it is.", "print(1)"])
+
     def _sent_messages(self):
         return [call.args[0] for call in self.observer.send_rtvi_message.await_args_list]
+
+    def _sent_outputs(self):
+        return [m.data.text for m in self._sent_messages() if isinstance(m, RTVI.BotOutputMessage)]
 
     async def test_a_user_backchannel_is_sent_as_user_input(self):
         await self._push(UserBackchannelFrame(text="mhm", user_id="user", timestamp="now"))
