@@ -202,3 +202,52 @@ async def test_reasoning_cut_short_is_closed_without_a_signature():
 
     (end,) = [f for f in frames if isinstance(f, LLMThoughtEndFrame)]
     assert end.signature is None
+
+
+@pytest.mark.asyncio
+async def test_each_text_block_can_open_with_a_thought():
+    def text_block(index: int, deltas: list[str]) -> list[dict]:
+        return [
+            {"contentBlockDelta": {"delta": {"text": d}, "contentBlockIndex": index}}
+            for d in deltas
+        ] + [{"contentBlockStop": {"contentBlockIndex": index}}]
+
+    def tool_block(index: int, city: str) -> list[dict]:
+        return [
+            {
+                "contentBlockStart": {
+                    "start": {"toolUse": {"toolUseId": f"tooluse_{index}", "name": "get_weather"}},
+                    "contentBlockIndex": index,
+                }
+            },
+            {
+                "contentBlockDelta": {
+                    "delta": {"toolUse": {"input": f'{{"city":"{city}"}}'}},
+                    "contentBlockIndex": index,
+                }
+            },
+            {"contentBlockStop": {"contentBlockIndex": index}},
+        ]
+
+    events = [
+        {"messageStart": {"role": "assistant"}},
+        *text_block(0, ["<thinking>", "Paris first.", "</thinking>"]),
+        *tool_block(1, "Paris"),
+        *text_block(2, ["<thinking>", "Now Tokyo.", "</thinking>\n"]),
+        *tool_block(3, "Tokyo"),
+        {"messageStop": {"stopReason": "tool_use"}},
+    ]
+    service, frames = await _run(events)
+
+    thoughts = []
+    for f in frames:
+        if isinstance(f, LLMThoughtStartFrame):
+            thoughts.append("")
+        elif isinstance(f, LLMThoughtTextFrame):
+            thoughts[-1] += f.text
+    assert thoughts == ["Paris first.", "Now Tokyo."]
+    assert sum(isinstance(f, LLMThoughtEndFrame) for f in frames) == 2
+    assert not any(isinstance(f, LLMTextFrame) for f in frames)
+
+    (calls,) = service.run_function_calls.call_args.args
+    assert [c.arguments["city"] for c in calls] == ["Paris", "Tokyo"]
