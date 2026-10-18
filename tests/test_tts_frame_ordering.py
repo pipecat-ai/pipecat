@@ -1024,6 +1024,7 @@ async def test_skipped_frame_before_spoken_emits_immediately():
 
     assert len(skipped) == 1
     assert skipped[0].append_to_context is True
+    assert skipped[0].skip_tts is True
     assert len(word_frames) >= 1
 
     skipped_idx = down.index(skipped[0])

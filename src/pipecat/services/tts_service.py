@@ -1452,6 +1452,8 @@ class TTSService(AIService):
 
     async def _push_skipped_text(self, frame: AggregatedTextFrame, context_id: str):
         """Push text that isn't spoken, in order with the spoken text around it."""
+        # Marked so whatever is downstream knows the TTS left it out.
+        frame.skip_tts = True
         # The sequencer returns the frame at once if no spoken slot precedes it,
         # or holds it until it can flush it in order.
         await self._push_sequencer_frames(

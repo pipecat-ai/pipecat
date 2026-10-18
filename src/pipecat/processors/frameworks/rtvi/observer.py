@@ -860,11 +860,10 @@ class RTVIObserver(BaseObserver):
 
     async def _handle_aggregated_llm_text(self, frame: AggregatedTextFrame):
         """Handle aggregated LLM text output frames."""
-        # Text to be spoken waits for the bot to start speaking. Text that won't
-        # be spoken has nothing to wait for, except text queued before it.
-        if self._bot_is_speaking or (
-            not frame.will_be_spoken and not self._queued_aggregated_text_frames
-        ):
+        # Text waits for the bot to start speaking, including text spoken without
+        # a TTS service (a speech-to-speech service's transcript). Text the TTS
+        # left out (skip_tts) has nothing to wait for, except text queued before it.
+        if self._bot_is_speaking or (frame.skip_tts and not self._queued_aggregated_text_frames):
             await self._send_aggregated_llm_text(frame)
         else:
             self._queued_aggregated_text_frames.append(frame)

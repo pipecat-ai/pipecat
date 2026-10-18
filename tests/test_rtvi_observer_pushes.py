@@ -98,25 +98,44 @@ class TestRTVIObserverPushes(unittest.IsolatedAsyncioTestCase):
         await self._push(frame, first_push=False, source=transport)
         self.assertEqual(self.observer._queued_aggregated_text_frames, [frame])
 
-    async def test_text_that_wont_be_spoken_is_sent_without_waiting_for_the_bot_to_speak(self):
+    @staticmethod
+    def _left_out(text, text_type="sentence"):
+        """Text the TTS left out of speech, marked as it marks it."""
+        frame = AggregatedTextFrame(text, text_type)
+        frame.skip_tts = True
+        return frame
+
+    async def test_text_the_tts_left_out_is_sent_without_waiting_for_the_bot_to_speak(self):
         transport = BaseOutputTransport(TransportParams())
 
-        await self._push(AggregatedTextFrame("Hello there.", "sentence"), source=transport)
+        await self._push(self._left_out("Hello there."), source=transport)
 
         self.assertEqual(self._sent_outputs(), ["Hello there."])
 
-    async def test_text_that_wont_be_spoken_waits_behind_text_queued_before_it(self):
+    async def test_text_the_tts_left_out_waits_behind_text_queued_before_it(self):
         transport = BaseOutputTransport(TransportParams())
         spoken = AggregatedTextFrame("Here it is.", "sentence")
         spoken.will_be_spoken = True
-        code = AggregatedTextFrame("print(1)", "code")
 
         await self._push(spoken, source=transport)
-        await self._push(code, source=transport)
+        await self._push(self._left_out("print(1)", "code"), source=transport)
         self.assertEqual(self._sent_outputs(), [])
 
         await self._push(BotStartedSpeakingFrame())
         self.assertEqual(self._sent_outputs(), ["Here it is.", "print(1)"])
+
+    async def test_a_transcript_spoken_without_a_tts_service_waits_for_the_bot_to_speak(self):
+        transport = BaseOutputTransport(TransportParams())
+        cut_off = TTSTextFrame("Let me check.", TextType.SENTENCE)
+        transcript = TTSTextFrame("Here it is.", TextType.SENTENCE)
+
+        await self._push(cut_off, source=transport)
+        await self._push(InterruptionFrame())
+        await self._push(transcript, source=transport)
+        self.assertEqual(self._sent_outputs(), [])
+
+        await self._push(BotStartedSpeakingFrame())
+        self.assertEqual(self._sent_outputs(), ["Here it is."])
 
     async def test_an_interruption_drops_queued_text_whose_speech_it_cut_off(self):
         transport = BaseOutputTransport(TransportParams())
@@ -125,7 +144,7 @@ class TestRTVIObserverPushes(unittest.IsolatedAsyncioTestCase):
 
         await self._push(spoken, source=transport)
         await self._push(InterruptionFrame())
-        await self._push(AggregatedTextFrame("Here it is.", "sentence"), source=transport)
+        await self._push(self._left_out("Here it is."), source=transport)
         await self._push(BotStartedSpeakingFrame())
 
         self.assertEqual(self._sent_outputs(), ["Here it is."])
