@@ -1119,6 +1119,41 @@ async def test_skip_tts_response_reaches_the_context_once():
     assert context.messages == [{"role": "assistant", "content": "Hello there. How are you?"}]
 
 
+def _index(frames: Sequence[Frame], predicate) -> int:
+    return next(i for i, f in enumerate(frames) if predicate(f))
+
+
+@pytest.mark.asyncio
+async def test_skip_tts_response_comes_out_after_the_audio_still_playing():
+    """A reply that isn't spoken waits for earlier speech, then its frames come out in order."""
+    down, _ = await run_test(
+        MockWebSocketTTSService(),
+        frames_to_send=[TTSSpeakFrame("One moment."), *_skip_tts_response("Hello there.")],
+    )
+
+    audio = _index(down, lambda f: isinstance(f, TTSAudioRawFrame))
+    start = _index(down, lambda f: isinstance(f, LLMFullResponseStartFrame))
+    sentence = _index(down, lambda f: isinstance(f, AggregatedTextFrame) and f.skip_tts)
+    end = _index(down, lambda f: isinstance(f, LLMFullResponseEndFrame))
+    assert audio < start < sentence < end
+
+
+@pytest.mark.asyncio
+async def test_skip_tts_response_after_speech_reaches_the_context_once():
+    """The context gets a reply that isn't spoken once, even while earlier speech plays."""
+    context = LLMContext()
+    pipeline = Pipeline([MockWebSocketTTSService(), LLMAssistantAggregator(context)])
+    await run_test(
+        pipeline,
+        frames_to_send=[
+            TTSSpeakFrame("One moment.", append_to_context=False),
+            *_skip_tts_response("Hello there. How", " are you?"),
+        ],
+    )
+
+    assert context.messages == [{"role": "assistant", "content": "Hello there. How are you?"}]
+
+
 # ---------------------------------------------------------------------------
 # Tests: raw_text propagation through WordCompletionTracker
 # ---------------------------------------------------------------------------

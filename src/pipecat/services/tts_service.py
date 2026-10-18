@@ -1056,11 +1056,15 @@ class TTSService(AIService):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, LLMTextFrame) and frame.skip_tts:
+        # A reply that isn't spoken is queued behind the audio still playing, so
+        # it comes out after that audio, its start, sentences and end in order.
+        if isinstance(frame, LLMFullResponseStartFrame) and frame.skip_tts:
+            await self._audio_context_manager.put_frame(frame)
+        elif isinstance(frame, LLMTextFrame) and frame.skip_tts:
             await self._handle_skipped_llm_text(frame)
         elif isinstance(frame, LLMFullResponseEndFrame) and frame.skip_tts:
-            await self._handle_skipped_llm_response_end(frame, direction)
-        elif isinstance(frame, (TextFrame, LLMFullResponseStartFrame)) and frame.skip_tts:
+            await self._handle_skipped_llm_response_end(frame)
+        elif isinstance(frame, TextFrame) and frame.skip_tts:
             await self.push_frame(frame, direction)
         elif isinstance(frame, AggregatedTextFrame):
             await self._handle_aggregated_text(frame)
@@ -1211,26 +1215,25 @@ class TTSService(AIService):
         await self.on_turn_context_completed()
 
     async def _handle_skipped_llm_text(self, frame: LLMTextFrame):
-        """Push each sentence of LLM text that isn't spoken as skipped text."""
+        """Queue each sentence of LLM text that isn't spoken."""
         async for aggregate in self._skipped_text_aggregator.aggregate(frame.text):
-            await self._push_skipped_llm_text(aggregate)
+            await self._queue_skipped_llm_text(aggregate)
 
-    async def _handle_skipped_llm_response_end(
-        self, frame: LLMFullResponseEndFrame, direction: FrameDirection
-    ):
-        """Push the rest of a response that isn't spoken, then the end of the response."""
+    async def _handle_skipped_llm_response_end(self, frame: LLMFullResponseEndFrame):
+        """Queue the rest of a reply that isn't spoken, then the end of the reply."""
         remaining = await self._skipped_text_aggregator.flush()
         if remaining:
-            await self._push_skipped_llm_text(remaining)
-        await self.push_frame(frame, direction)
+            await self._queue_skipped_llm_text(remaining)
+        await self._audio_context_manager.put_frame(frame)
 
-    async def _push_skipped_llm_text(self, aggregation: Aggregation):
-        """Push a sentence of LLM text that isn't spoken, as the bot's output."""
+    async def _queue_skipped_llm_text(self, aggregation: Aggregation):
+        """Queue a sentence of LLM text that isn't spoken, as the bot's output."""
         if not aggregation.text.strip():
             return
         frame = self._aggregated_text_frame(aggregation)
         frame.skip_tts = True
-        await self._push_skipped_text(frame, self.create_context_id())
+        frame.transport_destination = self._transport_destination
+        await self._audio_context_manager.put_frame(frame)
 
     async def _handle_tts_speak(self, frame: TTSSpeakFrame):
         """Speak a TTSSpeakFrame as a turn of its own, even in the middle of an LLM turn."""
