@@ -34,6 +34,7 @@ from pipecat.frames.frames import (
     LLMAssistantPushAggregationFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
+    LLMTextFrame,
     StartFrame,
     SystemFrame,
     TextFrame,
@@ -318,6 +319,15 @@ class TTSService(AIService):
         self._sample_rate = 0
         self._text_aggregator = SimpleTextAggregator(
             aggregation_type=self._text_aggregation_mode,
+            language=aggregation_language,
+        )
+        # Cuts LLM text marked skip_tts into sentences, so a reply that isn't
+        # spoken still reaches clients as bot output. It's separate from the
+        # aggregator above because that one yields single tokens in token mode,
+        # and only spoken tokens are regrouped into sentences afterwards (by the
+        # sequencer).
+        self._skipped_text_aggregator = SimpleTextAggregator(
+            aggregation_type=TextAggregationMode.SENTENCE,
             language=aggregation_language,
         )
 
@@ -1046,10 +1056,11 @@ class TTSService(AIService):
         """
         await super().process_frame(frame, direction)
 
-        if (
-            isinstance(frame, (TextFrame, LLMFullResponseStartFrame, LLMFullResponseEndFrame))
-            and frame.skip_tts
-        ):
+        if isinstance(frame, LLMTextFrame) and frame.skip_tts:
+            await self._handle_skipped_llm_text(frame)
+        elif isinstance(frame, LLMFullResponseEndFrame) and frame.skip_tts:
+            await self._handle_skipped_llm_response_end(frame, direction)
+        elif isinstance(frame, (TextFrame, LLMFullResponseStartFrame)) and frame.skip_tts:
             await self.push_frame(frame, direction)
         elif isinstance(frame, AggregatedTextFrame):
             await self._handle_aggregated_text(frame)
@@ -1124,6 +1135,7 @@ class TTSService(AIService):
 
         if is_given(language):
             self._text_aggregator.set_language(language)
+            self._skipped_text_aggregator.set_language(language)
 
         return changed
 
@@ -1198,6 +1210,28 @@ class TTSService(AIService):
 
         await self.on_turn_context_completed()
 
+    async def _handle_skipped_llm_text(self, frame: LLMTextFrame):
+        """Push each sentence of LLM text that isn't spoken as skipped text."""
+        async for aggregate in self._skipped_text_aggregator.aggregate(frame.text):
+            await self._push_skipped_llm_text(aggregate)
+
+    async def _handle_skipped_llm_response_end(
+        self, frame: LLMFullResponseEndFrame, direction: FrameDirection
+    ):
+        """Push the rest of a response that isn't spoken, then the end of the response."""
+        remaining = await self._skipped_text_aggregator.flush()
+        if remaining:
+            await self._push_skipped_llm_text(remaining)
+        await self.push_frame(frame, direction)
+
+    async def _push_skipped_llm_text(self, aggregation: Aggregation):
+        """Push a sentence of LLM text that isn't spoken, as the bot's output."""
+        if not aggregation.text.strip():
+            return
+        frame = self._aggregated_text_frame(aggregation)
+        frame.skip_tts = True
+        await self._push_skipped_text(frame, self.create_context_id())
+
     async def _handle_tts_speak(self, frame: TTSSpeakFrame):
         """Speak a TTSSpeakFrame as a turn of its own, even in the middle of an LLM turn."""
         saved_sent_non_whitespace = self._sent_non_whitespace_in_context
@@ -1263,6 +1297,7 @@ class TTSService(AIService):
         self._text_aggregation_metrics_started = False
 
         await self._text_aggregator.handle_interruption()
+        await self._skipped_text_aggregator.handle_interruption()
         for filter in self._text_filters:
             await filter.handle_interruption()
 
