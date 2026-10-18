@@ -6,6 +6,7 @@
 
 
 import os
+import re
 from dataclasses import dataclass
 
 from dotenv import load_dotenv
@@ -48,6 +49,10 @@ load_dotenv(override=True)
 
 
 marker = "|----|"
+# The LLM sometimes writes the separator without its closing "|", so any run
+# of three or more dashes counts, once something other than the separator
+# follows it (a separator still streaming in, like "|--", doesn't match yet).
+marker_pattern = re.compile(r"\|-{3,}\|?(?=[^-|])")
 system_message = f"""
 You are a helpful LLM in a voice call. Your goals are to be helpful and brief in your responses.
 
@@ -133,19 +138,23 @@ class TranscriptExtractor(FrameProcessor):
             self._accumulating_transcript = True
         elif isinstance(frame, TextFrame) and self._processing_llm_response:
             if self._accumulating_transcript:
-                text = frame.text
-                split_index = text.find(marker)
-                if split_index < 0:
-                    self._accumulator += frame.text
+                # The separator can be split across text frames, so look for it
+                # in everything received so far.
+                self._accumulator += frame.text
+                match = marker_pattern.search(self._accumulator)
+                if not match:
                     # do not push this frame
                     return
-                else:
-                    self._accumulating_transcript = False
-                    self._accumulator += text[:split_index]
-                    frame.text = text[split_index + len(marker) :]
+                self._accumulating_transcript = False
+                frame.text = self._accumulator[match.end() :]
+                self._accumulator = self._accumulator[: match.start()]
             await self.push_frame(frame)
             return
         elif isinstance(frame, LLMFullResponseEndFrame):
+            if self._accumulating_transcript:
+                # No separator: speak the whole response rather than nothing.
+                await self.push_frame(TextFrame(text=self._accumulator))
+                self._accumulator = ""
             await self.push_frame(MagicDemoTranscriptionFrame(text=self._accumulator.strip()))
             self.reset()
 
