@@ -19,6 +19,7 @@ from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
+    UserTurnMessageAddedMessage,
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
@@ -62,14 +63,13 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info("Starting bot")
 
-    # Omni listens to the user's speech itself, so there is no STT service.
-    # emit_transcriptions reports what the user said, which the user aggregator
-    # writes to the context as the conversation history.
+    # Omni listens to the user's speech itself, so there is no STT service. It
+    # reports what the user said, which the user aggregator writes to the
+    # context as the conversation history.
     llm = NvidiaOmniLLMService(
         api_key=os.environ["NVIDIA_API_KEY"],
         settings=NvidiaOmniLLMService.Settings(
             system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
-            emit_transcriptions=True,
         ),
     )
 
@@ -109,6 +109,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
 
     await runner.add_workers(worker)
+
+    @user_aggregator.event_handler("on_user_turn_message_added")
+    async def on_user_turn_message_added(aggregator, message: UserTurnMessageAddedMessage):
+        logger.info(f"User said: {message.content}")
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):

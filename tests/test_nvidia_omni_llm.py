@@ -10,6 +10,9 @@
 import asyncio
 import base64
 import contextlib
+import io
+import wave
+from collections.abc import Awaitable, Callable
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
@@ -50,23 +53,30 @@ from pipecat.tests.utils import SleepFrame, run_test
 from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.http import TIMEOUT_EXCEPTIONS
 
-TOOL_CALL_MESSAGES = [
-    {"role": "user", "content": "weather?"},
-    {
-        "role": "assistant",
-        "tool_calls": [
-            {"id": "call_1", "type": "function", "function": {"name": "w", "arguments": "{}"}}
-        ],
-    },
-    {"role": "tool", "tool_call_id": "call_1", "content": "sunny"},
-]
 
-
-def _service(**settings) -> NvidiaOmniLLMService:
+def _service(*, audio_input: bool = True, **settings) -> NvidiaOmniLLMService:
     return NvidiaOmniLLMService(
         base_url="http://localhost:8000/v1",
+        audio_input=audio_input,
         settings=NvidiaOmniLLMService.Settings(**settings) if settings else None,
     )
+
+
+def _tool_messages(content="sunny", tool_call_id="call_1"):
+    return [
+        {"role": "user", "content": "weather?"},
+        {
+            "role": "assistant",
+            "tool_calls": [
+                {
+                    "id": tool_call_id,
+                    "type": "function",
+                    "function": {"name": "w", "arguments": "{}"},
+                }
+            ],
+        },
+        {"role": "tool", "tool_call_id": tool_call_id, "content": content},
+    ]
 
 
 def _chunk(content=None, *, tool_calls=None, reasoning_content=None):
@@ -88,6 +98,7 @@ class _Turns:
         self.started: list[dict] = []
         self.cancelled: list[int] = []
         self.completed: list[int] = []
+        self.on_start: Callable[[], Awaitable[None]] | None = None
         self._releases: list[asyncio.Event] = []
 
         async def run_turn(context, **kwargs):
@@ -95,6 +106,8 @@ class _Turns:
             release = asyncio.Event()
             self.started.append({"context": context, **kwargs})
             self._releases.append(release)
+            if self.on_start:
+                await self.on_start()
             try:
                 await release.wait()
                 self.completed.append(index)
@@ -134,14 +147,13 @@ async def omni():
     yield service, turns
     for index in range(len(turns.started)):
         turns.release(index)
-    await service._cancel_turn()
+    await service._cancel_turns()
 
 
 @pytest.mark.asyncio
 async def test_speech_between_user_turn_frames_starts_an_audio_turn(omni):
     service, turns = omni
     service.push_frame = AsyncMock()
-    service._settings.emit_transcriptions = True
     audio = b"\x00" * service._bytes_per_second()
 
     await service.process_frame(UserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
@@ -156,8 +168,18 @@ async def test_speech_between_user_turn_frames_starts_an_audio_turn(omni):
     assert turns.started[0]["turn_parts"][0]["type"] == "input_audio"
 
 
+async def _assert_queued_behind_the_first_turn(turns: _Turns):
+    await asyncio.sleep(0.01)
+    assert len(turns.started) == 1
+    assert turns.cancelled == []
+
+    turns.release(0)
+    await turns.wait_for(2)
+    assert turns.completed == [0]
+
+
 @pytest.mark.asyncio
-async def test_audio_turn_preempts_the_turn_in_progress(omni):
+async def test_audio_turn_waits_for_the_turn_in_progress(omni):
     service, turns = omni
     _fill_audio(service)
     await service._start_audio_turn()
@@ -165,37 +187,60 @@ async def test_audio_turn_preempts_the_turn_in_progress(omni):
 
     _fill_audio(service)
     await service._start_audio_turn()
-    await turns.wait_for(2)
 
-    assert turns.cancelled == [0]
-    service.stop_all_metrics.assert_awaited()
+    await _assert_queued_behind_the_first_turn(turns)
 
 
 @pytest.mark.asyncio
-async def test_text_turn_preempts_the_text_turn_in_progress(omni):
+async def test_text_turn_waits_for_the_turn_in_progress(omni):
     service, turns = omni
     context = LLMContext([{"role": "user", "content": "hi"}])
     await service._start_text_turn(context, force=True)
     await turns.wait_for(1)
 
     await service._start_text_turn(context, force=True)
-    await turns.wait_for(2)
 
-    assert turns.cancelled == [0]
+    await _assert_queued_behind_the_first_turn(turns)
 
 
 @pytest.mark.asyncio
-async def test_context_frame_yields_to_the_audio_turn_in_progress(omni):
+async def test_context_frame_during_an_audio_turn_is_answered_after_it(omni):
     service, turns = omni
     _fill_audio(service)
     await service._start_audio_turn()
     await turns.wait_for(1)
 
+    await service._start_text_turn(
+        LLMContext([{"role": "developer", "content": "Mention the opening hours."}])
+    )
+
+    await _assert_queued_behind_the_first_turn(turns)
+
+
+@pytest.mark.asyncio
+async def test_interruption_cancels_every_queued_turn(omni):
+    service, turns = omni
+    service.push_frame = AsyncMock()
     await service._start_text_turn(LLMContext([{"role": "user", "content": "hi"}]), force=True)
+    await turns.wait_for(1)
+    await service._start_text_turn(LLMContext(_tool_messages()))
+
+    await service.process_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
     await asyncio.sleep(0.01)
 
+    assert turns.cancelled == [0]
     assert len(turns.started) == 1
-    assert turns.cancelled == []
+
+
+@pytest.mark.asyncio
+async def test_failed_turn_does_not_block_the_queue(omni):
+    service, turns = omni
+    failing = asyncio.get_running_loop().create_future()
+    failing.set_exception(RuntimeError("boom"))
+    service._turn_tasks = [failing]
+
+    await service._start_text_turn(LLMContext([{"role": "user", "content": "hi"}]), force=True)
+    await turns.wait_for(1)
 
 
 @pytest.mark.asyncio
@@ -224,28 +269,45 @@ async def test_utterance_before_any_context_is_answered_without_history(omni):
 
 
 @pytest.mark.asyncio
-async def test_text_turn_is_skipped_when_text_input_is_disabled(omni):
+async def test_typed_user_turn_is_completed_with_audio_input(omni):
     service, turns = omni
-    service._settings.input_modalities = ("audio",)
-    await service._start_text_turn(LLMContext([{"role": "user", "content": "hi"}]), force=True)
-    assert service._turn_task is None
-
-
-@pytest.mark.asyncio
-async def test_tool_result_is_completed_with_audio_input_only(omni):
-    service, turns = omni
-    service._settings.input_modalities = ("audio",)
-    await service._start_text_turn(LLMContext(TOOL_CALL_MESSAGES))
+    await service._start_text_turn(LLMContext([{"role": "user", "content": "hi"}]))
     await turns.wait_for(1)
 
 
 @pytest.mark.asyncio
-async def test_text_only_service_completes_every_user_turn(omni):
+async def test_tool_result_is_completed_once_across_context_frames(omni):
     service, turns = omni
-    service._settings.input_modalities = ("text",)
-    service._last_transcript = "where is the tower?"
-    await service._start_text_turn(LLMContext([{"role": "user", "content": "where is the tower?"}]))
+    context = LLMContext(_tool_messages())
+    await service._start_text_turn(context)
     await turns.wait_for(1)
+    turns.release(0)
+
+    await service._start_text_turn(context)
+    await asyncio.sleep(0.01)
+
+    assert len(turns.started) == 1
+
+
+@pytest.mark.asyncio
+async def test_follow_up_waits_for_a_running_tool(omni):
+    service, turns = omni
+    await service._start_text_turn(LLMContext(_tool_messages(content="IN_PROGRESS")))
+    assert not service._turn_tasks
+
+    await service._start_text_turn(LLMContext(_tool_messages()))
+    await turns.wait_for(1)
+
+
+@pytest.mark.asyncio
+async def test_async_tool_result_replacing_its_started_message_is_completed(omni):
+    service, turns = omni
+    await service._start_text_turn(LLMContext(_tool_messages(content="started")))
+    await turns.wait_for(1)
+    turns.release(0)
+
+    await service._start_text_turn(LLMContext(_tool_messages(content="sunny")))
+    await turns.wait_for(2)
 
 
 @pytest.mark.asyncio
@@ -263,22 +325,67 @@ async def test_answered_context_is_not_completed(omni):
         [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "hello"}]
     )
     await service._start_text_turn(context)
-    assert service._turn_task is None
+    assert not service._turn_tasks
+
+
+async def _report_transcript(service: NvidiaOmniLLMService, transcript: str):
+    service.push_frame = AsyncMock()
+    await service._emit_user_transcript(transcript)
 
 
 @pytest.mark.asyncio
-async def test_transcript_echo_is_not_answered_twice(omni):
+async def test_context_frame_recording_a_spoken_turn_is_not_answered_again(omni):
     service, _ = omni
-    service._last_transcript = "where is the tower?"
+    await _report_transcript(service, "where is the tower?")
     await service._start_text_turn(LLMContext([{"role": "user", "content": "where is the tower?"}]))
-    assert service._turn_task is None
+    assert not service._turn_tasks
+
+
+@pytest.mark.asyncio
+async def test_later_frame_repeating_the_spoken_turn_is_answered(omni):
+    service, turns = omni
+    await _report_transcript(service, "where is the tower?")
+    context = LLMContext([{"role": "user", "content": "where is the tower?"}])
+    await service._start_text_turn(context)
+
+    await service._start_text_turn(context)
+    await turns.wait_for(1)
+
+
+@pytest.mark.asyncio
+async def test_developer_message_after_a_spoken_turn_is_answered(omni):
+    service, turns = omni
+    await _report_transcript(service, "where is the tower?")
+    context = LLMContext(
+        [
+            {"role": "user", "content": "where is the tower?"},
+            {"role": "developer", "content": "Mention the opening hours."},
+        ]
+    )
+    await service._start_text_turn(context)
+    await turns.wait_for(1)
+
+
+@pytest.mark.asyncio
+async def test_late_spoken_turn_frame_and_tool_result_frame_complete_the_result_once(omni):
+    service, turns = omni
+    await _report_transcript(service, "weather?")
+    context = LLMContext(_tool_messages())
+    await service._start_text_turn(context)
+    await turns.wait_for(1)
+    turns.release(0)
+
+    await service._start_text_turn(context)
+    await asyncio.sleep(0.01)
+
+    assert len(turns.started) == 1
 
 
 @pytest.mark.asyncio
 async def test_tool_follow_up_carries_a_spoken_turn_missing_from_the_context(omni):
     service, turns = omni
     service._last_transcript = "what is the weather?"
-    await service._start_text_turn(LLMContext(TOOL_CALL_MESSAGES[1:]))
+    await service._start_text_turn(LLMContext(_tool_messages()[1:]))
     await turns.wait_for(1)
 
     assert turns.started[0]["turn_parts"] == [{"type": "text", "text": "what is the weather?"}]
@@ -290,7 +397,7 @@ async def test_tool_follow_up_waits_for_the_turn_that_requested_it(omni):
     await service._start_text_turn(LLMContext([{"role": "user", "content": "hi"}]), force=True)
     await turns.wait_for(1)
 
-    await service._start_text_turn(LLMContext(TOOL_CALL_MESSAGES))
+    await service._start_text_turn(LLMContext(_tool_messages()))
     await asyncio.sleep(0.01)
     assert len(turns.started) == 1
     assert turns.cancelled == []
@@ -312,38 +419,119 @@ async def test_interruption_cancels_the_turn_and_drops_buffered_audio(omni):
     await service.process_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
 
     assert turns.cancelled == [0]
-    assert service._turn_task is None
+    assert not service._turn_tasks
     assert service._pre_speech_buffer == []
     service.stop_all_metrics.assert_awaited()
 
 
+async def _speak(service: NvidiaOmniLLMService, *, start_turn: bool = True, seconds: float = 1.0):
+    frames = [VADUserStartedSpeakingFrame()]
+    if start_turn:
+        frames.append(UserStartedSpeakingFrame())
+    audio = b"\x00" * int(service._bytes_per_second() * seconds)
+    frames += [
+        InputAudioRawFrame(audio=audio, sample_rate=16000, num_channels=1),
+        VADUserStoppedSpeakingFrame(),
+    ]
+    if start_turn:
+        frames.append(UserStoppedSpeakingFrame())
+    for frame in frames:
+        await service.process_frame(frame, FrameDirection.DOWNSTREAM)
+
+
+async def _speak_over_the_bot(service: NvidiaOmniLLMService, audio: bytes):
+    for frame in [
+        VADUserStartedSpeakingFrame(),
+        UserStartedSpeakingFrame(),
+        InterruptionFrame(),
+        InputAudioRawFrame(audio=audio, sample_rate=16000, num_channels=1),
+        VADUserStoppedSpeakingFrame(),
+        UserStoppedSpeakingFrame(),
+    ]:
+        await service.process_frame(frame, FrameDirection.DOWNSTREAM)
+
+
+def _sent_audio(turn: dict) -> bytes:
+    wav = base64.b64decode(turn["turn_parts"][0]["input_audio"]["data"])
+    with wave.open(io.BytesIO(wav)) as reader:
+        return reader.readframes(reader.getnframes())
+
+
 @pytest.mark.asyncio
-async def test_user_speech_cancels_the_reply_the_bot_is_speaking(omni):
+async def test_speech_interrupted_before_its_transcript_is_answered_with_the_next_utterance(omni):
     service, turns = omni
     service.push_frame = AsyncMock()
-    _fill_audio(service)
+    first = b"\x01" * service._bytes_per_second()
+    second = b"\x02" * service._bytes_per_second()
+    service._audio_buffer = [first]
     await service._start_audio_turn()
     await turns.wait_for(1)
 
-    await service.process_frame(BotStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
-    await service.process_frame(UserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+    await _speak_over_the_bot(service, second)
+    await turns.wait_for(2)
 
     assert turns.cancelled == [0]
-    assert service._bot_speaking is False
+    assert _sent_audio(turns.started[1]) == first + second
 
 
 @pytest.mark.asyncio
-async def test_audio_turn_waits_until_the_bot_stops_speaking(omni):
+async def test_transcribed_speech_is_not_answered_again_after_an_interruption(omni):
     service, turns = omni
-    service.push_frame = AsyncMock()
-    await service.process_frame(BotStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+    turns.on_start = lambda: _report_transcript(service, "What's the weather?")
+    second = b"\x02" * service._bytes_per_second()
     _fill_audio(service)
     await service._start_audio_turn()
-    assert service._turn_task is None
+    await turns.wait_for(1)
 
-    await service.process_frame(BotStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+    await _speak_over_the_bot(service, second)
+    await turns.wait_for(2)
+
+    assert _sent_audio(turns.started[1]) == second
+
+
+@pytest.mark.asyncio
+async def test_speech_of_a_finished_turn_is_not_answered_again(omni):
+    service, turns = omni
+    service.push_frame = AsyncMock()
+    second = b"\x02" * service._bytes_per_second()
+    _fill_audio(service)
     await service._start_audio_turn()
     await turns.wait_for(1)
+    turns.release(0)
+    await asyncio.sleep(0.01)
+
+    await _speak_over_the_bot(service, second)
+    await turns.wait_for(2)
+
+    assert _sent_audio(turns.started[1]) == second
+
+
+@pytest.mark.asyncio
+async def test_speech_without_an_interruption_lets_the_reply_finish(omni):
+    service, turns = omni
+    service.push_frame = AsyncMock()
+    _fill_audio(service)
+    await service._start_audio_turn()
+    await turns.wait_for(1)
+
+    await _speak(service)
+
+    await _assert_queued_behind_the_first_turn(turns)
+
+
+@pytest.mark.asyncio
+async def test_speech_that_starts_no_user_turn_is_dropped(omni):
+    service, turns = omni
+    service.push_frame = AsyncMock()
+    await _speak(service, start_turn=False, seconds=2.0)
+    await service.process_frame(UserStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+    assert not service._turn_tasks
+
+    await _speak(service)
+    await turns.wait_for(1)
+
+    sent_audio = base64.b64decode(turns.started[0]["turn_parts"][0]["input_audio"]["data"])
+    assert len(sent_audio) < 2 * service._bytes_per_second()
 
 
 @pytest.mark.asyncio
@@ -374,7 +562,7 @@ async def test_run_frame_completes_an_answered_context(omni):
 async def test_completion_before_any_context_is_ignored(omni):
     service, _ = omni
     await service._start_text_turn(None, force=True)
-    assert service._turn_task is None
+    assert not service._turn_tasks
 
 
 @pytest.mark.asyncio
@@ -382,7 +570,7 @@ async def test_context_without_a_user_turn_is_not_completed(omni):
     service, _ = omni
     context = LLMContext([LLMSpecificMessage(llm="other", message={"role": "user"})])
     await service._start_text_turn(context)
-    assert service._turn_task is None
+    assert not service._turn_tasks
 
 
 @pytest.mark.asyncio
@@ -453,6 +641,14 @@ class TestTurnErrors:
         context.remove_invalid_file_message.assert_called_once()
         assert service.push_error.await_args.kwargs["category"] == ErrorCategory.APPLICATION
         assert service._active_turn_parts is None
+
+    @pytest.mark.asyncio
+    async def test_audio_turn_forgets_the_previous_transcript(self):
+        service, context = self._service(_bad_request())
+        service._last_transcript = "an earlier question"
+        await service._run_turn(context, expect_transcript=True)
+
+        assert service._last_transcript == ""
 
 
 class TestStreamHandling:
@@ -546,6 +742,14 @@ class TestStreamHandling:
         assert self._spoken(frames) == "Hello."
 
     @pytest.mark.asyncio
+    async def test_transcript_cut_off_by_an_interruption_is_not_reported(self):
+        service, frames = self._service(expect_transcript=True)
+        await service._push_llm_text("<transcript>Where is the")
+        await service._finalize_reasoning_state(flush_buffered_text=False)
+
+        assert self._transcripts(frames) == []
+
+    @pytest.mark.asyncio
     async def test_plain_text_is_not_rewritten(self):
         service, frames = self._service(expect_transcript=False)
         out = await self._drain(service, _chunk("Hello"), _chunk(" there."))
@@ -567,7 +771,7 @@ class _FakeStream:
 
 @pytest.mark.asyncio
 async def test_spoken_turn_is_transcribed_and_answered_in_a_pipeline():
-    service = _service(input_modalities=("audio",), emit_transcriptions=True)
+    service = _service()
     create = AsyncMock(
         return_value=_FakeStream(
             [
@@ -629,29 +833,49 @@ async def test_transcript_is_pushed_upstream_and_not_written_to_the_context():
 
 def test_audio_input_announces_a_realtime_service():
     assert _service().service_metadata_frame().is_realtime_service
-    assert not _service(input_modalities=("text",)).service_metadata_frame().is_realtime_service
-
-
-def test_unsupported_input_modality_is_rejected():
-    with pytest.raises(ValueError):
-        _service(input_modalities=("video",))
-    with pytest.raises(ValueError):
-        _service(input_modalities=())
+    assert not _service(audio_input=False).service_metadata_frame().is_realtime_service
 
 
 @pytest.mark.asyncio
-async def test_unsupported_input_modality_update_is_rejected():
-    service = _service()
-    with pytest.raises(ValueError):
-        await service._update_settings(NvidiaOmniLLMService.Settings(input_modalities=("video",)))
-    assert service._settings.input_modalities == ("text", "audio")
+async def test_text_llm_ignores_user_audio():
+    service = _service(audio_input=False)
+    service.push_frame = AsyncMock()
+    await _speak(service)
+
+    assert service._pre_speech_buffer == []
+    assert not service._turn_tasks
+
+
+class _SlowStream:
+    def __aiter__(self):
+        async def chunks():
+            await asyncio.sleep(0.2)
+            yield _chunk("Goodbye!")
+
+        return chunks()
+
+    async def close(self):
+        pass
 
 
 @pytest.mark.asyncio
-async def test_supported_input_modality_update_is_applied():
-    service = _service()
-    await service._update_settings(NvidiaOmniLLMService.Settings(input_modalities=("text",)))
-    assert service._settings.input_modalities == ("text",)
+@pytest.mark.parametrize("audio_input", [True, False])
+async def test_reply_requested_before_the_end_frame_is_completed(audio_input):
+    service = _service(audio_input=audio_input)
+    service._client = SimpleNamespace(
+        chat=SimpleNamespace(
+            completions=SimpleNamespace(create=AsyncMock(return_value=_SlowStream()))
+        )
+    )
+
+    down_frames, _ = await run_test(
+        service,
+        frames_to_send=[
+            LLMContextFrame(LLMContext([{"role": "developer", "content": "Say goodbye."}]))
+        ],
+    )
+
+    assert "".join(f.text for f in down_frames if isinstance(f, LLMTextFrame)) == "Goodbye!"
 
 
 @pytest.mark.asyncio
@@ -707,6 +931,18 @@ async def test_run_inference_sends_one_token_limit_and_no_audio_turn():
     assert "max_completion_tokens" not in sent
     assert sent["messages"] == [{"role": "user", "content": "hi"}]
     assert service._active_turn_parts == [{"type": "text", "text": "listen"}]
+
+
+@pytest.mark.asyncio
+async def test_developer_messages_are_sent_as_user_messages():
+    service = _service()
+    sent = _capture_requests(service)
+
+    await service.run_inference(
+        LLMContext([{"role": "developer", "content": "Introduce yourself."}])
+    )
+
+    assert sent["messages"] == [{"role": "user", "content": "Introduce yourself."}]
 
 
 @pytest.mark.asyncio
@@ -821,7 +1057,7 @@ async def test_streamed_multimodal_inference_reports_deltas():
 
 @pytest.mark.asyncio
 async def test_text_only_service_works_as_a_plain_llm_in_a_pipeline():
-    service = _service(input_modalities=("text",))
+    service = _service(audio_input=False)
     create = AsyncMock(return_value=_FakeStream([_chunk("Hello there.")]))
     service._client = SimpleNamespace(
         chat=SimpleNamespace(completions=SimpleNamespace(create=create))
