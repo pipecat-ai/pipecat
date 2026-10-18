@@ -130,7 +130,8 @@ class RTVIObserverParams:
             the ``bot-tts-text`` message is deprecated in favor of ``tts-raw-text``
             (``tts_raw_text_enabled``) and will be removed in 2.0.0. This flag stays, for
             ``bot-tts-started`` and ``bot-tts-stopped``.
-        bot_speaking_enabled: Indicates if the bot's started/stopped speaking messages should be sent.
+        bot_speaking_enabled: Indicates if the bot's started/stopped speaking and
+            interrupted messages should be sent.
         bot_audio_level_enabled: Indicates if bot's audio level messages should be sent.
         user_llm_enabled: Indicates if the user's LLM input messages should be sent.
         user_speaking_enabled: Indicates if the user's started/stopped speaking messages should be sent.
@@ -680,16 +681,10 @@ class RTVIObserver(BaseObserver):
             and self._params.user_mute_enabled
         ):
             await self._handle_user_mute(frame)
-        elif (
-            isinstance(frame, (BotStartedSpeakingFrame, BotStoppedSpeakingFrame))
-            and self._params.bot_speaking_enabled
-        ):
+        elif isinstance(frame, (BotStartedSpeakingFrame, BotStoppedSpeakingFrame)):
             await self._handle_bot_speaking(frame)
-        elif isinstance(frame, InterruptionFrame) and self._params.bot_speaking_enabled:
-            # The bot's in-flight output was cut off (VAD barge-in or a programmatic
-            # run_immediately interrupt). Let clients drop what it was mid-saying.
-            await self.send_rtvi_message(RTVI.BotInterruptedMessage())
-            self._skipped_segments_interrupted = True
+        elif isinstance(frame, InterruptionFrame):
+            await self._handle_bot_interrupted()
         elif isinstance(frame, (TranscriptionFrame, InterimTranscriptionFrame)):
             await self._handle_user_transcriptions(frame)
         elif isinstance(frame, UserBackchannelFrame) and self._params.user_input_enabled:
@@ -834,10 +829,10 @@ class RTVIObserver(BaseObserver):
             await self.send_rtvi_message(message)
 
     async def _handle_bot_speaking(self, frame: Frame):
-        """Handle bot speaking event frames."""
+        """Track whether the bot is speaking, and tell clients if they want to know."""
         if isinstance(frame, BotStartedSpeakingFrame):
-            message = RTVI.BotStartedSpeakingMessage()
-            await self.send_rtvi_message(message)
+            if self._params.bot_speaking_enabled:
+                await self.send_rtvi_message(RTVI.BotStartedSpeakingMessage())
             self._forget_interrupted_segments()
             # Flush any queued aggregated text frames
             for queued_frame in self._queued_aggregated_text_frames:
@@ -845,18 +840,32 @@ class RTVIObserver(BaseObserver):
             self._queued_aggregated_text_frames.clear()
             self._bot_is_speaking = True
         elif isinstance(frame, BotStoppedSpeakingFrame):
-            message = RTVI.BotStoppedSpeakingMessage()
-            await self.send_rtvi_message(message)
+            if self._params.bot_speaking_enabled:
+                await self.send_rtvi_message(RTVI.BotStoppedSpeakingMessage())
             self._forget_interrupted_segments()
             self._bot_is_speaking = False
 
+    async def _handle_bot_interrupted(self):
+        """Tell clients the bot's output was cut off, and drop what it won't say."""
+        # The bot's in-flight output was cut off (VAD barge-in or a programmatic
+        # run_immediately interrupt). Let clients drop what it was mid-saying.
+        if self._params.bot_speaking_enabled:
+            await self.send_rtvi_message(RTVI.BotInterruptedMessage())
+        self._skipped_segments_interrupted = True
+        # Queued text whose speech was cut off would otherwise go out with the
+        # next speech, and hold back text that won't be spoken.
+        self._queued_aggregated_text_frames = [
+            f for f in self._queued_aggregated_text_frames if not f.interruptible
+        ]
+
     async def _handle_aggregated_llm_text(self, frame: AggregatedTextFrame):
         """Handle aggregated LLM text output frames."""
-        if self._bot_is_speaking:
-            # Bot has already started speaking, send directly
+        # Text waits for the bot to start speaking, including text spoken without
+        # a TTS service (a speech-to-speech service's transcript). Text the TTS
+        # left out (skip_tts) has nothing to wait for, except text queued before it.
+        if self._bot_is_speaking or (frame.skip_tts and not self._queued_aggregated_text_frames):
             await self._send_aggregated_llm_text(frame)
         else:
-            # Bot hasn't started speaking yet, queue the frame
             self._queued_aggregated_text_frames.append(frame)
 
     async def _handle_aggregated_progress(self, frame: AggregatedTextProgressFrame):
@@ -989,7 +998,9 @@ class RTVIObserver(BaseObserver):
                     spoken_status = "new"
                     progress = RTVI.SpokenProgressData(accumulated_text="", remaining_text=text)
             else:
-                spoken_status = None
+                # Text that isn't spoken gets this one message, which starts its
+                # segment as spoken text's first message does.
+                spoken_status = "new"
                 progress = None
 
             data = RTVI.BotOutputMessageData(
