@@ -70,17 +70,18 @@ paths belongs in a file for that reason.
     Will be removed in 2.0.0.
 
 An entry's ``name:`` is its label: what the display, the ``-p`` filter, the
-results records and the artifact file names use, and what an entry's own
-``concurrency:`` is keyed on. It defaults to the ``bot:`` path, so it is only
-needed when several entries share a bot, as when sweeping a model with
-``runner_body:``; two entries may not run the same scenario under the same
-label.
+results records and the artifact file names use. It defaults to the ``bot:``
+path, so it is only needed when several entries share a bot, as when sweeping
+a model with ``runner_body:``; two entries may not run the same scenario under
+the same label.
 
 ``concurrency`` is how many runs execute at once. The suite keeps that many
 going, taking the next run from the first entry in manifest order that still
 has one, so an entry's scenarios finish together and no slot waits while any
 entry still has runs. An entry whose provider rate-limits sets its own
-``concurrency:``, and never has more than that many runs in flight.
+``concurrency:``, and never has more than that many runs in flight. Two
+entries for the same bot stay separate: each keeps its place in the manifest
+order and its own cap.
 
 Manifest-relative paths (``bot``/``bots_dir``, ``scenarios_dir``,
 ``runs_dir``) resolve relative to the manifest file, so a manifest is portable;
@@ -422,9 +423,12 @@ class EvalRun:
         runner_body: The bot's runner-args body given inline, written to a
             file for the bot when it is spawned; ``None`` when there is none or
             it comes from ``runner_body_path``.
-        concurrency: How many runs of this bot's entry may be in flight at
+        concurrency: How many runs of this run's entry may be in flight at
             once, when its manifest entry says; ``None`` is as many as the
             suite runs.
+        entry: The position of the run's entry in the manifest's ``suite:``
+            list. The suite takes runs in entry order and applies each
+            entry's ``concurrency`` to that entry's runs only.
         attempt: 1-based attempt number when the suite repeats (see
             :attr:`EvalManifest.repeat`); always 1 for a single pass.
         status: ``pending``, ``running``, or ``done``.
@@ -448,6 +452,7 @@ class EvalRun:
     runner_body_path: Path | None = None
     runner_body: dict | None = None
     concurrency: int | None = None
+    entry: int = 0
     kind: EvalKind = EvalKind.SCRIPT
     attempts: int = 1
     sweep: bool = False
@@ -684,7 +689,7 @@ class EvalManifest:
         slow ones.
         """
         runs: list[EvalRun] = []
-        for item in data.get("suite", []):
+        for entry, item in enumerate(data.get("suite", [])):
             bot = str(item["bot"])
             bot_path = (settings.bots_dir / bot).resolve()
             name = item.get("name")
@@ -722,6 +727,7 @@ class EvalManifest:
                             runner_body_path=body.path,
                             runner_body=body.data,
                             concurrency=concurrency,
+                            entry=entry,
                             kind=kind,
                             attempts=attempts,
                             sweep=settings.repeat_given,
@@ -775,16 +781,16 @@ class _RunQueue:
     for a run to finish.
     """
 
-    def __init__(self, queues: list[tuple[str, int | None, deque[EvalRun]]]):
+    def __init__(self, queues: list[tuple[int, int | None, deque[EvalRun]]]):
         """Initialize the queue.
 
         Args:
-            queues: Each entry's runs per attempt, with the entry's label and
-                its cap on runs in flight, ``None`` for no cap.
+            queues: Each entry's runs per attempt, with the entry's position
+                and its cap on runs in flight, ``None`` for no cap.
         """
         self._queues = queues
-        self._caps = {label: cap for label, cap, _ in queues}
-        self._in_flight = {label: 0 for label, _, _ in queues}
+        self._caps = {entry: cap for entry, cap, _ in queues}
+        self._in_flight = {entry: 0 for entry, _, _ in queues}
         self._changed = asyncio.Condition()
 
     async def take(self) -> EvalRun | None:
@@ -800,14 +806,14 @@ class _RunQueue:
     async def done(self, run: EvalRun) -> None:
         """Count the run as finished, so its entry may take another."""
         async with self._changed:
-            self._in_flight[run.label] -= 1
+            self._in_flight[run.entry] -= 1
             self._changed.notify_all()
 
     def _pick(self) -> EvalRun | None:
         """The first queued run whose entry is under its cap."""
-        for label, cap, queue in self._queues:
-            if queue and (cap is None or self._in_flight[label] < cap):
-                self._in_flight[label] += 1
+        for entry, cap, queue in self._queues:
+            if queue and (cap is None or self._in_flight[entry] < cap):
+                self._in_flight[entry] += 1
                 return queue.popleft()
         return None
 
@@ -1081,22 +1087,21 @@ class EvalSuite(BaseObject):
             )
 
     @staticmethod
-    def _entry_queues(runs: list[EvalRun]) -> list[tuple[str, int | None, deque[EvalRun]]]:
-        """One queue per entry label and attempt, attempt-major then in manifest order, with the label and the entry's cap.
+    def _entry_queues(runs: list[EvalRun]) -> list[tuple[int, int | None, deque[EvalRun]]]:
+        """One queue per entry and attempt, attempt-major then in manifest order, with the entry and its cap.
 
-        A queue keeps its runs in manifest order. An entry's cap is the lowest
-        ``concurrency:`` among its runs, ``None`` when none sets it, and it
-        covers all of its attempts.
+        A queue keeps its runs in manifest order. An entry's cap is its
+        ``concurrency:``, ``None`` when it sets none, and it covers all of its
+        attempts.
         """
-        queues: dict[tuple[int, str], deque[EvalRun]] = {}
-        caps: dict[str, int] = {}
+        queues: dict[tuple[int, int], deque[EvalRun]] = {}
+        caps: dict[int, int | None] = {}
         for run in runs:
-            queues.setdefault((run.attempt, run.label), deque()).append(run)
-            if run.concurrency is not None:
-                caps[run.label] = min(caps.get(run.label, run.concurrency), run.concurrency)
+            queues.setdefault((run.attempt, run.entry), deque()).append(run)
+            caps[run.entry] = run.concurrency
         return [
-            (label, caps.get(label), queue)
-            for (_, label), queue in sorted(queues.items(), key=lambda item: item[0][0])
+            (entry, caps[entry], queue)
+            for (_, entry), queue in sorted(queues.items(), key=lambda item: item[0][0])
         ]
 
     def _missing_file(self, run: EvalRun) -> str | None:
