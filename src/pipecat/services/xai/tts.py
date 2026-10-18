@@ -30,10 +30,10 @@ from websockets.protocol import State
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
-    StartFrame,
     TTSAudioRawFrame,
     TTSStoppedFrame,
 )
+from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TTSService, WebsocketTTSService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -418,9 +418,13 @@ class XAITTSService(WebsocketTTSService):
         """Convert a Language enum to xAI language format."""
         return language_to_xai_language(language)
 
-    async def start(self, frame: StartFrame):
-        """Start the xAI WebSocket TTS service."""
-        await super().start(frame)
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
+
+        Args:
+            setup: Configuration object containing setup parameters.
+        """
+        await super().setup(setup)
         await self._connect()
 
     async def _connect(self):

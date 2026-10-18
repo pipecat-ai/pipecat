@@ -5,7 +5,11 @@
 
 import type { APIRequest, TransportConnectionParams } from '@pipecat-ai/client-js';
 
-export type TransportType = 'daily' | 'smallwebrtc' | 'websocket';
+import type { TransportFactory } from '@/lib/transports';
+
+export const PROJECT_NAME = '{{ project_name }}';
+
+export type TransportType = 'daily' | 'livekit' | 'smallwebrtc' | 'websocket';
 
 export const AVAILABLE_TRANSPORTS: TransportType[] = [
 {%- for transport in transports %}
@@ -17,6 +21,7 @@ export const DEFAULT_TRANSPORT: TransportType = '{{ transports[0].value }}';
 
 export const TRANSPORT_LABELS: Record<TransportType, string> = {
   daily: 'Daily',
+  livekit: 'LiveKit',
   smallwebrtc: 'SmallWebRTC',
   websocket: 'WebSocket',
 };
@@ -27,6 +32,13 @@ const dailyConfig: APIRequest = {
     createDailyRoom: true,
     dailyRoomProperties: { start_video_off: true },
     transport: 'daily',
+  },
+};
+
+const liveKitConfig: APIRequest = {
+  endpoint: '/api/start',
+  requestData: {
+    transport: 'livekit',
   },
 };
 
@@ -60,9 +72,43 @@ const websocketResponseTransformer = (
 };
 
 /**
- * Props passed to `PipecatAppBase` for each transport. WebRTC transports
- * connect in one step via `connectParams`; WebSocket starts the bot first and
- * transforms the response into the WebSocket connection params.
+ * Creates the transport for each selected type. Packages are imported lazily so
+ * only the transports this project uses are bundled.
+ */
+export const TRANSPORT_FACTORIES: Partial<Record<TransportType, TransportFactory>> = {
+{%- for transport in transports %}
+{%- if transport.value == 'daily' %}
+  daily: async () => {
+    const { DailyTransport } = await import('@pipecat-ai/daily-transport');
+    return new DailyTransport();
+  },
+{%- elif transport.value == 'livekit' %}
+  livekit: async () => {
+    const { LiveKitTransport } = await import('@pipecat-ai/livekit-transport');
+    return new LiveKitTransport();
+  },
+{%- elif transport.value == 'smallwebrtc' %}
+  smallwebrtc: async () => {
+    const { SmallWebRTCTransport } = await import(
+      '@pipecat-ai/small-webrtc-transport'
+    );
+    return new SmallWebRTCTransport();
+  },
+{%- elif transport.value == 'websocket' %}
+  websocket: async () => {
+    const { WebSocketTransport } = await import(
+      '@pipecat-ai/websocket-transport'
+    );
+    return new WebSocketTransport();
+  },
+{%- endif %}
+{%- endfor %}
+};
+
+/**
+ * Connection options passed to `usePipecatApp` for each transport. WebRTC
+ * transports connect in one step via `connectParams`; WebSocket starts the bot
+ * first and transforms the response into the WebSocket connection params.
  */
 export interface TransportProps {
   connectParams?: APIRequest | TransportConnectionParams;
@@ -74,6 +120,7 @@ export interface TransportProps {
 
 export const TRANSPORT_PROPS: Record<TransportType, TransportProps> = {
   daily: { connectParams: dailyConfig },
+  livekit: { connectParams: liveKitConfig },
   smallwebrtc: { connectParams: smallWebRTCConfig },
   websocket: {
     startBotParams: websocketConfig,

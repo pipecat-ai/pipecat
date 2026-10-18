@@ -192,6 +192,7 @@ from pipecat.transports.vonage.utils import (
     process_audio_channels,
 )
 from pipecat.transports.vonage.video_connector import (
+    AudioInFrameSource,
     SubscribeSettings,
     VonageException,
     VonageVideoConnectorInputTransport,
@@ -244,18 +245,21 @@ class TestVonageVideoConnectorTransport:
         self._connect_callbacks: ConnectCallbacks | None = None
         self._subscriber_callbacks: dict[str, SubscriberCallbacks] = {}
 
-    def _get_frame_processor_setup(self) -> FrameProcessorSetup:
-        if self._frame_processor_setup is not None:
+    def _get_frame_processor_setup(self, **kwargs: Any) -> FrameProcessorSetup:
+        if not kwargs and self._frame_processor_setup is not None:
             return self._frame_processor_setup
 
         clock: SystemClock = SystemClock()  # type: ignore[no-untyped-call]
         task_manager = TaskManager()
-        self._frame_processor_setup = FrameProcessorSetup(
+        setup = FrameProcessorSetup(
             clock=clock,
             task_manager=task_manager,
             pipeline_worker=SimpleNamespace(app_resources=None),  # type: ignore[arg-type]
+            **kwargs,
         )
-        return self._frame_processor_setup
+        if not kwargs:
+            self._frame_processor_setup = setup
+        return setup
 
     async def _wait_for_condition(
         self,
@@ -448,7 +452,9 @@ class TestVonageVideoConnectorTransport:
         await drain_event.wait()
 
     async def _create_output_transport(
-        self, params: VonageVideoConnectorTransportParams
+        self,
+        params: VonageVideoConnectorTransportParams,
+        **setup_kwargs: Any,
     ) -> VonageVideoConnectorOutputTransport:
         client = self.VonageClient(
             self.application_id,
@@ -457,12 +463,16 @@ class TestVonageVideoConnectorTransport:
             params,
         )
         transport = self.VonageVideoConnectorOutputTransport(client, params)
-        await transport.setup(self._get_frame_processor_setup())
+        # Transports connect during setup(), so keep the SDK out of it.
+        with patch.object(client, "_sdk_connect", AsyncMock()):
+            await transport.setup(self._get_frame_processor_setup(**setup_kwargs))
 
         return transport
 
     async def _create_input_transport(
-        self, params: VonageVideoConnectorTransportParams
+        self,
+        params: VonageVideoConnectorTransportParams,
+        **setup_kwargs: Any,
     ) -> VonageVideoConnectorInputTransport:
         client = self.VonageClient(
             self.application_id,
@@ -471,7 +481,9 @@ class TestVonageVideoConnectorTransport:
             params,
         )
         transport = self.VonageVideoConnectorInputTransport(client, params)
-        await transport.setup(self._get_frame_processor_setup())
+        # Transports connect during setup(), so keep the SDK out of it.
+        with patch.object(client, "_sdk_connect", AsyncMock()):
+            await transport.setup(self._get_frame_processor_setup(**setup_kwargs))
 
         return transport
 
@@ -484,10 +496,31 @@ class TestVonageVideoConnectorTransport:
             self.token,
             params,
         )
-        await transport.input().setup(self._get_frame_processor_setup())
-        await transport.output().setup(self._get_frame_processor_setup())
+        # Transports connect during setup(), so keep the SDK out of it.
+        with patch.object(transport.input()._client, "_sdk_connect", AsyncMock()):
+            await transport.input().setup(self._get_frame_processor_setup())
+            await transport.output().setup(self._get_frame_processor_setup())
 
         return transport
+
+    @pytest.mark.asyncio
+    async def test_vonage_client_thread_outlives_the_first_holder(self) -> None:
+        """The input and output transports both set this client up and both clean
+        it up, and the last of them is the one that actually disconnects, on this
+        thread. Releasing it with the first would leave the SDK connection live."""
+        params = self.VonageVideoConnectorTransportParams()
+        client = self.VonageClient(self.application_id, self.session_id, self.token, params)
+
+        setup = self._get_frame_processor_setup()
+        await client.setup(setup)
+        await client.setup(setup)
+
+        await client.cleanup()
+        client._executor.submit(lambda: None).result(timeout=5)
+
+        await client.cleanup()
+        with pytest.raises(RuntimeError):
+            client._executor.submit(lambda: None)
 
     @pytest.mark.asyncio
     async def test_vonage_client_setup_n_cleanup(self) -> None:
@@ -617,7 +650,12 @@ class TestVonageVideoConnectorTransport:
             logging=MockLoggingSettings(level=params.video_connector_log_level),
         )
         assert self._connect_callbacks is not None
-        assert call_args[1]["on_audio_data_cb"] == client._on_session_audio_data_cb
+        # the session mixed audio callback is only registered when mixed audio is wanted
+        # (audio enabled and, by default, mixed mode); otherwise it's left out
+        if has_audio:
+            assert call_args[1]["on_audio_data_cb"] == client._on_session_audio_data_cb
+        else:
+            assert "on_audio_data_cb" not in call_args[1]
         assert call_args[1]["on_error_cb"] == self._connect_callbacks.on_error_cb
         assert call_args[1]["on_connected_cb"] == client._on_session_connected_cb
         assert call_args[1]["on_disconnected_cb"] == self._connect_callbacks.on_disconnected_cb
@@ -1768,7 +1806,7 @@ class TestVonageVideoConnectorTransport:
             on_connected_cb=callbacks.on_connected_cb,
             on_disconnected_cb=callbacks.on_disconnected_cb,
             on_render_frame_cb=client._on_subscriber_video_data_cb,
-            on_audio_data_cb=client._on_subscriber_audio_data_cb,
+            # default mode is mixed, so the per-subscriber audio callback is not registered
             on_caption_text_cb=client._on_subscriber_caption_text_cb,
         )
         listener.on_stream_received.reset_mock()
@@ -1970,7 +2008,6 @@ class TestVonageVideoConnectorTransport:
         transport = self.VonageVideoConnectorInputTransport(client, transport_params)
 
         assert transport._client == client
-        assert transport._initialized is False
 
     @pytest.mark.asyncio
     async def test_vonage_input_transport_start(self) -> None:
@@ -1984,12 +2021,16 @@ class TestVonageVideoConnectorTransport:
             patch.object(client, "connect", AsyncMock(return_value=1)) as client_connect_mock,
             patch.object(transport, "set_transport_ready", AsyncMock()) as set_transport_ready_mock,
         ):
+            # The transport connects during setup(), before any StartFrame.
+            await transport.setup(self._get_frame_processor_setup())
+
+            assert transport._connected is True
+            client_connect_mock.assert_called_once()
+            set_transport_ready_mock.assert_not_called()
+
             start_frame = StartFrame()
             await transport.start(start_frame)
 
-            assert transport._initialized is True
-            assert transport._connected is True
-            client_connect_mock.assert_called_once()
             set_transport_ready_mock.assert_called_once_with(start_frame)
 
     @pytest.mark.asyncio
@@ -2035,6 +2076,85 @@ class TestVonageVideoConnectorTransport:
             assert not transport._connected
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("audio_in_frame_source", "expect_mixed_cb"),
+        [
+            (None, True),  # default mode is mixed
+            (AudioInFrameSource.MIXED, True),
+            (AudioInFrameSource.BOTH, True),
+            (AudioInFrameSource.INDIVIDUAL, False),
+        ],
+    )
+    async def test_vonage_client_registers_mixed_audio_cb_by_mode(
+        self,
+        audio_in_frame_source: AudioInFrameSource | None,
+        expect_mixed_cb: bool,
+    ) -> None:
+        """Test that the session mixed audio callback is registered only when the mode wants it."""
+        params_kwargs: dict[str, Any] = {"audio_in_enabled": True}
+        if audio_in_frame_source is not None:
+            params_kwargs["audio_in_frame_source"] = audio_in_frame_source
+        params = self.VonageVideoConnectorTransportParams(**params_kwargs)
+        client = await self._create_client(params)
+
+        await client.connect()
+
+        connect_kwargs = self.mock_client_instance.connect.call_args.kwargs
+        if expect_mixed_cb:
+            assert connect_kwargs["on_audio_data_cb"] == client._on_session_audio_data_cb
+        else:
+            assert "on_audio_data_cb" not in connect_kwargs
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("audio_in_frame_source", "expect_individual_cb"),
+        [
+            (None, False),  # default mode is mixed
+            (AudioInFrameSource.MIXED, False),
+            (AudioInFrameSource.INDIVIDUAL, True),
+            (AudioInFrameSource.BOTH, True),
+        ],
+    )
+    async def test_vonage_client_registers_per_subscriber_audio_cb_by_mode(
+        self,
+        audio_in_frame_source: AudioInFrameSource | None,
+        expect_individual_cb: bool,
+    ) -> None:
+        """Test that the per-subscriber audio callback is registered only when the mode wants it.
+
+        The stream is still audio-subscribed regardless of mode so the mixer keeps being fed.
+        """
+        params_kwargs: dict[str, Any] = {"audio_in_enabled": True}
+        if audio_in_frame_source is not None:
+            params_kwargs["audio_in_frame_source"] = audio_in_frame_source
+        params = self.VonageVideoConnectorTransportParams(**params_kwargs)
+        client = await self._create_client(params)
+
+        await client.connect()
+
+        stream_id = "audio-stream"
+        await self._subscribe_n_handle_callbacks(
+            client,
+            stream_id,
+            SubscribeSettings(subscribe_to_audio=True),
+            lambda callbacks: callbacks.on_connected_cb(
+                vonage_video_mock.models.Subscriber(
+                    stream=vonage_video_mock.models.Stream(
+                        id=stream_id, connection=DUMMY_CONNECTION
+                    )
+                )
+            ),
+        )
+
+        subscribe_kwargs = self.mock_client_instance.subscribe.call_args.kwargs
+        if expect_individual_cb:
+            assert subscribe_kwargs["on_audio_data_cb"] == client._on_subscriber_audio_data_cb
+        else:
+            assert "on_audio_data_cb" not in subscribe_kwargs
+        # audio subscription itself is independent of the frame mode
+        assert subscribe_kwargs["settings"].subscribe_to_audio is True
+
+    @pytest.mark.asyncio
     async def test_vonage_output_transport_initialization(self) -> None:
         """Test VonageVideoConnectorOutputTransport initialization."""
         params = self.VonageVideoConnectorTransportParams()
@@ -2044,7 +2164,6 @@ class TestVonageVideoConnectorTransport:
         transport = self.VonageVideoConnectorOutputTransport(client, transport_params)
 
         assert transport._client == client
-        assert transport._initialized is False
 
     @pytest.mark.asyncio
     async def test_vonage_output_transport_start(self) -> None:
@@ -2059,11 +2178,15 @@ class TestVonageVideoConnectorTransport:
             patch.object(client, "connect", AsyncMock(return_value=1)) as client_connect_mock,
             patch.object(transport, "set_transport_ready", AsyncMock()) as set_transport_ready_mock,
         ):
+            # The transport connects during setup(), before any StartFrame.
+            await transport.setup(self._get_frame_processor_setup())
+
+            client_connect_mock.assert_called_once()
+            set_transport_ready_mock.assert_not_called()
+
             start_frame = StartFrame()
             await transport.start(start_frame)
 
-            assert transport._initialized is True
-            client_connect_mock.assert_called_once()
             set_transport_ready_mock.assert_called_once_with(start_frame)
 
     @pytest.mark.asyncio
@@ -2297,10 +2420,10 @@ class TestVonageVideoConnectorTransport:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("transport_type", ["input", "output"])
-    async def test_vonage_transport_sets_audio_sample_rates_from_start_frame(
+    async def test_vonage_transport_sets_audio_sample_rates_from_setup(
         self, transport_type: str
     ) -> None:
-        """Test transport sets audio sample rates from StartFrame when params are None."""
+        """Test transport sets audio sample rates from the setup when params are None."""
         # Create params with None sample rates
         params = self.VonageVideoConnectorTransportParams(
             audio_in_enabled=(transport_type == "input"),
@@ -2309,21 +2432,18 @@ class TestVonageVideoConnectorTransport:
             audio_out_sample_rate=None,
         )
         transport: VonageVideoConnectorInputTransport | VonageVideoConnectorOutputTransport
-        if transport_type == "input":
-            transport = await self._create_input_transport(params=params)
-        else:
-            transport = await self._create_output_transport(params=params)
-        client = transport._client
+        create = (
+            self._create_input_transport
+            if transport_type == "input"
+            else self._create_output_transport
+        )
+        transport = await create(
+            params=params, audio_in_sample_rate=22050, audio_out_sample_rate=44100
+        )
 
-        # Create a StartFrame with specific sample rates
-        start_frame = StartFrame(audio_in_sample_rate=22050, audio_out_sample_rate=44100)
-
-        with patch.object(client, "_sdk_connect", AsyncMock()):
-            await transport.start(start_frame)
-
-            # Verify both sample rates were set from the StartFrame
-            assert client._audio_in_sample_rate == 22050
-            assert client._audio_out_sample_rate == 44100
+        # Verify both sample rates were set from the setup
+        assert transport._client._audio_in_sample_rate == 22050
+        assert transport._client._audio_out_sample_rate == 44100
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("transport_type", ["input", "output"])
@@ -2339,21 +2459,19 @@ class TestVonageVideoConnectorTransport:
             audio_out_sample_rate=16000,
         )
         transport: VonageVideoConnectorInputTransport | VonageVideoConnectorOutputTransport
-        if transport_type == "input":
-            transport = await self._create_input_transport(params=params)
-        else:
-            transport = await self._create_output_transport(params=params)
-        client = transport._client
+        create = (
+            self._create_input_transport
+            if transport_type == "input"
+            else self._create_output_transport
+        )
+        # Set the transport up with sample rates that differ from the params.
+        transport = await create(
+            params=params, audio_in_sample_rate=22050, audio_out_sample_rate=44100
+        )
 
-        # Create a StartFrame with different sample rates
-        start_frame = StartFrame(audio_in_sample_rate=22050, audio_out_sample_rate=44100)
-
-        with patch.object(client, "_sdk_connect", AsyncMock()):
-            await transport.start(start_frame)
-
-            # Verify sample rates remain as originally set in params
-            assert client._audio_in_sample_rate == 48000
-            assert client._audio_out_sample_rate == 16000
+        # Verify sample rates remain as originally set in params
+        assert transport._client._audio_in_sample_rate == 48000
+        assert transport._client._audio_out_sample_rate == 16000
 
     @pytest.mark.asyncio
     async def test_vonage_transport_initialization(self) -> None:

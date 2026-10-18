@@ -26,7 +26,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
@@ -39,6 +39,7 @@ from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.google.llm import GoogleLLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.livekit.transport import LiveKitParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 from pipecat.workers.runner import WorkerRunner
 
@@ -181,7 +182,7 @@ class InputTranscriptionContextFilter(FrameProcessor):
             )
             new_message_content.append(last_part)
             msg = {"role": "developer", "content": new_message_content}
-            ctx = LLMContext([{"role": "system", "content": transcriber_system_message}, msg])
+            ctx = LLMContext([msg])
 
             await self.push_frame(LLMContextFrame(context=ctx))
         except Exception as e:
@@ -279,6 +280,10 @@ transport_params = {
         audio_in_enabled=True,
         audio_out_enabled=True,
     ),
+    "livekit": lambda: LiveKitParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
     "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
@@ -296,14 +301,14 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     tts = CartesiaTTSService(
         api_key=os.environ["CARTESIA_API_KEY"],
         settings=CartesiaTTSService.Settings(
-            voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+            voice="86e30c1d-714b-4074-a1f2-1cb6b552fb49",
         ),
     )
 
     conversation_llm = GoogleLLMService(
         name="Conversation",
         settings=GoogleLLMService.Settings(
-            model="gemini-2.5-flash",
+            model="gemini-3.6-flash",
             system_instruction=conversation_system_message,
         ),
         api_key=os.environ["GOOGLE_API_KEY"],
@@ -315,7 +320,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     input_transcription_llm = GoogleLLMService(
         name="Transcription",
         settings=GoogleLLMService.Settings(
-            model="gemini-2.5-flash",
+            model="gemini-3.6-flash",
             system_instruction=transcriber_system_message,
         ),
         api_key=os.environ["GOOGLE_API_KEY"],
@@ -367,6 +372,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             enable_usage_metrics=True,
         ),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
+        processor_unusable_policy=ProcessorUnusablePolicy.END,
     )
 
     runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)

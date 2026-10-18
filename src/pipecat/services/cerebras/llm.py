@@ -10,7 +10,6 @@ from dataclasses import dataclass
 
 from loguru import logger
 
-from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
 from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.openai.llm import OpenAILLMService
 
@@ -29,12 +28,9 @@ class CerebrasLLMService(OpenAILLMService):
     maintaining full compatibility with OpenAI's interface and functionality.
     """
 
-    # Cerebras doesn't support the "developer" message role.
-    # This value is used by BaseOpenAILLMService when calling the adapter.
-    supports_developer_role = False
-
     Settings = CerebrasLLMSettings
     _settings: Settings
+    _requires_api_key = True
 
     def __init__(
         self,
@@ -89,33 +85,3 @@ class CerebrasLLMService(OpenAILLMService):
         """
         logger.debug(f"Creating Cerebras client with api {base_url}")
         return super().create_client(api_key, base_url, **kwargs)
-
-    def build_chat_completion_params(self, params_from_context: OpenAILLMInvocationParams) -> dict:
-        """Build parameters for Cerebras chat completion request.
-
-        Cerebras supports a subset of OpenAI parameters, focusing on core
-        completion settings without advanced features like frequency/presence penalties.
-
-        Args:
-            params_from_context: Parameters, derived from the LLM context, to
-                use for the chat completion. Contains messages, tools, and tool
-                choice.
-
-        Returns:
-            Dictionary of parameters for the chat completion request.
-        """
-        params = {
-            "model": self._settings.model,
-            "stream": True,
-            "seed": self._settings.seed,
-            "temperature": self._settings.temperature,
-            "top_p": self._settings.top_p,
-            "max_completion_tokens": self._settings.max_completion_tokens,
-        }
-
-        # Messages, tools, tool_choice
-        params.update(params_from_context)
-
-        params.update(self._settings.extra)
-
-        return params

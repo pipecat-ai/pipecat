@@ -1,0 +1,1 @@
+- `NeuphonicTTSService.Settings` and `NeuphonicHttpTTSService.Settings` gained `ipa_key`, selecting the regional variant (`es-castilian` or `pt-br`) whose sounds Neuphonic reads `<phoneme:...>` tags with.

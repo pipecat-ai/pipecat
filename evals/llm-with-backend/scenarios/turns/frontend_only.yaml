@@ -1,0 +1,12 @@
+# A question the frontend answers itself: nothing here needs the backend.
+- expect:
+    - event: response
+      eval: "the bot opens the conversation in some way (a greeting, an introduction, an offer to help, or a question to get the user started)"
+
+- user: "What is a race condition in programming?"
+  expect:
+    - event: response
+      eval: "explains what a race condition is (two or more things touching shared state at the same time, with the outcome depending on timing)"
+    - event: function_call
+      absent: true
+      within_ms: 5000

@@ -8,26 +8,31 @@
 
 import asyncio
 import json
+import re
 from collections.abc import Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import Any
 
-import httpx
 from loguru import logger
 from openai import (
     NOT_GIVEN as OPENAI_NOT_GIVEN,
 )
 from openai import (
+    APIStatusError,
     APITimeoutError,
     AsyncOpenAI,
     AsyncStream,
+    BadRequestError,
     DefaultAsyncHttpxClient,
+    UnprocessableEntityError,
 )
 from openai._types import NotGiven as OpenAINotGiven
+from openai.types import CompletionUsage
 from openai.types.chat import ChatCompletionChunk
 from pydantic import BaseModel, Field
 
+from pipecat.adapters.base_llm_adapter import LLMContextConversionError
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter, OpenAILLMInvocationParams
 from pipecat.frames.frames import (
     Frame,
@@ -42,8 +47,10 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.utils.deprecation import deprecated
+from pipecat.utils.errors import ErrorCategory
+from pipecat.utils.http import TIMEOUT_EXCEPTIONS, connection_limits
 from pipecat.utils.tracing.service_decorators import traced_llm
-from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 
 
 @dataclass
@@ -72,6 +79,13 @@ class OpenAILLMSettings(LLMSettings):
     )
 
 
+# OpenAI models that predate strict JSON schema replies: gpt-3.5, gpt-4 and
+# gpt-4-turbo, the first gpt-4o snapshot, chatgpt-4o and the o1 previews.
+OPENAI_MODEL_WITHOUT_RESPONSE_SCHEMA = re.compile(
+    r"^(gpt-3\.5|gpt-4($|-)|gpt-4o-2024-05-13|chatgpt-4o|o1-mini|o1-preview)"
+)
+
+
 class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
     """Base class for all services that use the AsyncOpenAI client.
 
@@ -84,6 +98,10 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
     Settings = OpenAILLMSettings
     _settings: Settings
 
+    # Set by services for providers other than OpenAI. Without a key the OpenAI
+    # client falls back to OPENAI_API_KEY and would send it to that provider.
+    _requires_api_key = False
+
     supports_developer_role: bool = True
     """Whether this service's API supports the "developer" message role.
 
@@ -92,6 +110,10 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
     this to ``False``, which causes the adapter to convert "developer"
     messages to "user" messages before sending them to the API.
     """
+
+    supports_response_schema: bool = True
+    """Whether the API can enforce a response schema. OpenAI-compatible
+    services whose API cannot should set this to ``False``."""
 
     @deprecated(
         "`BaseOpenAILLMService.InputParams` is deprecated since 0.0.105 and will be removed in "
@@ -186,10 +208,21 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
-            retry_timeout_secs: Request timeout in seconds. Defaults to 5.0 seconds.
-            retry_on_timeout: Whether to retry the request once if it times out.
+            retry_timeout_secs: How long an inference may go without producing
+                output before it is abandoned and re-issued, when
+                ``retry_on_timeout`` is set. Defaults to 5.0 seconds.
+            retry_on_timeout: Whether to re-issue the request once if the first
+                attempt produces no output within ``retry_timeout_secs``. The
+                retry is unbounded.
             **kwargs: Additional arguments passed to the parent LLMService.
+
+        Raises:
+            ValueError: If the service is for a provider other than OpenAI and
+                ``api_key`` is empty.
         """
+        if self._requires_api_key and not api_key:
+            raise ValueError(f"{type(self).__name__} requires an api_key.")
+
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
             model="gpt-4.1",
@@ -275,7 +308,7 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
             organization=organization,
             project=project,
             http_client=DefaultAsyncHttpxClient(
-                limits=httpx.Limits(
+                limits=connection_limits(
                     max_keepalive_connections=100, max_connections=1000, keepalive_expiry=None
                 )
             ),
@@ -317,11 +350,9 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
             Async stream of chat completion chunks.
         """
         adapter = self.get_llm_adapter()
-        logger.debug(
-            f"{self}: Generating chat from context {adapter.get_messages_for_logging(context)}"
-        )
+        self._log_llm_response(context)
 
-        params_from_context = adapter.get_llm_invocation_params(
+        params_from_context = await adapter.get_llm_invocation_params(
             context,
             system_instruction=assert_given(self._settings.system_instruction),
             convert_developer_to_user=not self.supports_developer_role,
@@ -380,11 +411,45 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
 
         return params
 
+    @staticmethod
+    def _merge_extra_body(params: dict[str, Any], fields: Mapping[str, Any]):
+        """Add provider-specific fields to a request's ``extra_body``.
+
+        The OpenAI client rejects keyword arguments it doesn't know, so fields
+        specific to an OpenAI-compatible provider travel in ``extra_body``,
+        which the client merges into the request JSON as-is.
+
+        Args:
+            params: Request parameters, updated in place. An ``extra_body``
+                already there, supplied through ``Settings.extra``, wins key by
+                key, matching how ``extra`` overrides every other request
+                parameter. It is copied rather than modified.
+            fields: Fields to add. Unset and ``None`` values are omitted.
+        """
+        extra_body = {
+            name: value for name, value in fields.items() if is_given(value) and value is not None
+        }
+        extra_body.update(params.get("extra_body") or {})
+        if extra_body:
+            params["extra_body"] = extra_body
+
+    @staticmethod
+    def model_supports_response_schema(model: str) -> bool:
+        """Whether a model can enforce a response schema.
+
+        OpenAI models before gpt-4o-mini and gpt-4o-2024-08-06 cannot.
+
+        Args:
+            model: The model name.
+        """
+        return not OPENAI_MODEL_WITHOUT_RESPONSE_SCHEMA.match(model)
+
     async def run_inference(
         self,
         context: LLMContext,
         max_tokens: int | None = None,
         system_instruction: str | None = None,
+        response_schema: dict[str, Any] | None = None,
     ) -> str | None:
         """Run a one-shot, out-of-band (i.e. out-of-pipeline) inference with the given LLM context.
 
@@ -394,6 +459,9 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
                 overrides the service's default max_tokens/max_completion_tokens setting.
             system_instruction: Optional system instruction to use for this inference.
                 If provided, overrides any system instruction in the context.
+            response_schema: Optional JSON schema the reply must follow. The
+                service asks the provider to enforce it, so the reply is JSON
+                text matching the schema.
 
         Returns:
             The LLM's response as a string, or None if no response is generated.
@@ -402,7 +470,7 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
             self._settings.system_instruction
         )
         adapter = self.get_llm_adapter()
-        invocation_params = adapter.get_llm_invocation_params(
+        invocation_params = await adapter.get_llm_invocation_params(
             context,
             system_instruction=effective_instruction,
             convert_developer_to_user=not self.supports_developer_role,
@@ -423,10 +491,56 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
             else:
                 params["max_tokens"] = max_tokens
 
+        response_schema = self._check_response_schema(response_schema)
+        if response_schema is not None:
+            params["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {"name": "response", "schema": response_schema, "strict": True},
+            }
+
         # LLM completion
         response = await self._client.chat.completions.create(**params)
 
         return response.choices[0].message.content
+
+    def _token_usage(self, usage: CompletionUsage) -> LLMTokenUsage:
+        """Convert a chat completion's usage into Pipecat's token usage.
+
+        Follows OpenAI's convention, where ``completion_tokens`` includes the
+        reasoning tokens reported in ``completion_tokens_details``. Providers
+        that report reasoning elsewhere, or apart from ``completion_tokens``,
+        override this.
+
+        Args:
+            usage: The usage reported with the completion.
+
+        Returns:
+            The token usage to report.
+        """
+        cached_tokens = (
+            usage.prompt_tokens_details.cached_tokens if usage.prompt_tokens_details else None
+        )
+        # Tokens written into the prompt cache, billed above the input rate.
+        # Providers without prompt caching omit the field, which reads as "not
+        # reported" rather than zero.
+        cache_write_tokens = (
+            getattr(usage.prompt_tokens_details, "cache_write_tokens", None)
+            if usage.prompt_tokens_details
+            else None
+        )
+        reasoning_tokens = (
+            usage.completion_tokens_details.reasoning_tokens
+            if usage.completion_tokens_details
+            else None
+        )
+        return LLMTokenUsage(
+            prompt_tokens=usage.prompt_tokens,
+            completion_tokens=usage.completion_tokens,
+            total_tokens=usage.total_tokens,
+            cache_read_input_tokens=cached_tokens,
+            cache_creation_input_tokens=cache_write_tokens,
+            reasoning_tokens=reasoning_tokens,
+        )
 
     @traced_llm
     async def _process_context(self, context: LLMContext):
@@ -473,23 +587,7 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
             async with _closing(chunk_stream) as chunk_iter:
                 async for chunk in chunk_iter:
                     if chunk.usage:
-                        cached_tokens = (
-                            chunk.usage.prompt_tokens_details.cached_tokens
-                            if chunk.usage.prompt_tokens_details
-                            else None
-                        )
-                        reasoning_tokens = (
-                            chunk.usage.completion_tokens_details.reasoning_tokens
-                            if chunk.usage.completion_tokens_details
-                            else None
-                        )
-                        token_usage = LLMTokenUsage(
-                            prompt_tokens=chunk.usage.prompt_tokens,
-                            completion_tokens=chunk.usage.completion_tokens,
-                            total_tokens=chunk.usage.total_tokens,
-                            cache_read_input_tokens=cached_tokens,
-                            reasoning_tokens=reasoning_tokens,
-                        )
+                        token_usage = self._token_usage(chunk.usage)
 
                     if chunk.model and self.get_full_model_name() != chunk.model:
                         self.set_full_model_name(chunk.model)
@@ -503,6 +601,11 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
                         continue
 
                     if chunk.choices[0].delta.tool_calls:
+                        # A turn that only calls tools produces no answer text, so
+                        # the call itself is what the caller gets and TTFAT ends
+                        # here rather than going unmeasured.
+                        await self.stop_ttfat_metrics()
+
                         # We're streaming the LLM response to enable the fastest response times.
                         # For text, we just yield each chunk as we receive it and count on consumers
                         # to do whatever coalescing they need (eg. to pass full sentences to TTS)
@@ -594,11 +697,40 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
                 await self.push_frame(LLMFullResponseStartFrame())
                 await self.start_processing_metrics()
                 await self._process_context(frame.context)
-            except httpx.TimeoutException as e:
+            except TIMEOUT_EXCEPTIONS as e:
                 await self._call_event_handler("on_completion_timeout")
                 await self.push_error(error_msg="LLM completion timeout", exception=e)
+            except LLMContextConversionError as e:
+                await self.push_error(error_msg=str(e), exception=e)
+                # A conversion failure (e.g. an unsupported file MIME type, corrupt
+                # base64 data) can't reach the API at all, but is just as much
+                # evidence of an invalid file as a rejection from OpenAI itself, so
+                # it gets the same best-effort cleanup.
+                frame.context.remove_invalid_file_message()
             except Exception as e:
-                await self.push_error(error_msg=f"Error during completion: {e}", exception=e)
+                # Only the payload-shaped errors (bad request, unprocessable
+                # content, payload too large — the latter has no dedicated
+                # OpenAI exception class, so match its status code) are
+                # grounds to remove a pending file message on a best-effort
+                # basis. The rest of the 4xx range — auth, permissions,
+                # not-found, rate limiting — says nothing about whether our
+                # request (or its file) was bad, and removing the file there
+                # would discard it for no benefit: the file isn't what needs
+                # fixing before the next retry can succeed. When a message is
+                # removed as a result of this error, the fault lay in
+                # application-supplied content and the context is repaired, so
+                # the error is pushed as APPLICATION instead of letting the
+                # rejection classify as permanent and cost the service its
+                # usability.
+                removed = (
+                    isinstance(e, (BadRequestError, UnprocessableEntityError))
+                    or (isinstance(e, APIStatusError) and e.status_code == 413)
+                ) and frame.context.remove_invalid_file_message()
+                await self.push_error(
+                    error_msg=f"Error during completion: {e}",
+                    exception=e,
+                    category=ErrorCategory.APPLICATION if removed else None,
+                )
             finally:
                 await self.stop_processing_metrics()
                 await self.push_frame(LLMFullResponseEndFrame())

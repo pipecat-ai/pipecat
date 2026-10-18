@@ -26,8 +26,8 @@ The flow manager coordinates all aspects of a conversation, including:
 
 import asyncio
 import inspect
-import warnings
-from collections.abc import Callable
+import re
+from collections.abc import Callable, Mapping
 from typing import Any, cast
 
 from loguru import logger
@@ -45,6 +45,7 @@ from pipecat.flows.exceptions import (
 )
 from pipecat.flows.types import (
     NO_RESPONSE,
+    TRANSITION_IN_YAML,
     ActionConfig,
     ConsolidatedFunctionResult,
     ContextStrategy,
@@ -74,11 +75,18 @@ from pipecat.processors.aggregators.llm_context import NOT_GIVEN, LLMContext, No
 from pipecat.services.llm_service import FunctionCallParams, LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.transports.base_transport import BaseTransport
-from pipecat.utils.deprecation import deprecated
+from pipecat.utils.deprecation import deprecated, warn_deprecated
+
+# A ``{{ key }}`` or ``{{ key.sub.key }}`` placeholder in a node's prompt text.
+# Only identifiers and dots are accepted, so prose braces are left alone. A
+# leading backslash escapes it: ``\{{ key }}`` renders as ``{{ key }}``.
+_PLACEHOLDER = re.compile(
+    r"(\\?)\{\{\s*([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)\s*\}\}"
+)
 
 
 class FlowManager:
-    """Manages conversation flows.
+    r"""Manages conversation flows.
 
     The FlowManager orchestrates conversation flows by managing state transitions,
     function registration, and message handling across different LLM providers,
@@ -86,6 +94,14 @@ class FlowManager:
 
     The manager coordinates all aspects of a conversation including LLM context
     management, function registration, state transitions, and action execution.
+
+    A node's prompts may refer to ``state`` with ``{{ key }}`` placeholders, in
+    ``role_message``, ``task_messages`` content, and ``tts_say`` text. They are
+    filled in each time the node is entered, so a value a handler stored
+    earlier in the conversation can appear in a later prompt, including after
+    a context reset. ``{{ order.size }}`` walks into a stored mapping, a
+    key that is missing raises :class:`~pipecat.flows.FlowError` on entry,
+    and ``\{{ key }}`` is left as the literal ``{{ key }}``.
     """
 
     def __init__(
@@ -121,10 +137,9 @@ class FlowManager:
         if worker is not None and task is not None:
             raise ValueError("Pass either 'worker' or 'task' (deprecated), not both.")
         if task is not None:
-            warnings.warn(
-                "The 'task' parameter is deprecated since 1.5.0 and will be removed "
-                "in 2.0.0. Use 'worker' instead.",
-                DeprecationWarning,
+            warn_deprecated(
+                "`FlowManager(task=...)` is deprecated since 1.5.0 and will be removed "
+                "in 2.0.0. Use `worker` instead.",
                 stacklevel=2,
             )
             worker = task
@@ -256,8 +271,8 @@ class FlowManager:
         the pipeline, enabling advanced flow control and custom frame injection.
 
         Returns:
-            PipelineWorker: The pipeline worker instance used for frame processing
-                and queueing operations.
+            The pipeline worker instance used for frame processing and queueing
+            operations.
 
         Examples:
             Queueing frames in handlers::
@@ -284,8 +299,8 @@ class FlowManager:
             Use :attr:`worker` instead. Will be removed in 2.0.0.
 
         Returns:
-            PipelineWorker: The pipeline worker instance used for frame processing
-                and queueing operations.
+            The pipeline worker instance used for frame processing and queueing
+            operations.
         """
         return self._worker
 
@@ -297,7 +312,7 @@ class FlowManager:
                 the flow will start at this node immediately.
 
         Raises:
-            FlowInitializationError: If initialization fails.
+            ~pipecat.flows.FlowInitializationError: If initialization fails.
 
         Examples:
             Initialize with an initial node::
@@ -341,7 +356,7 @@ class FlowManager:
             user messages, and assistant responses.
 
         Raises:
-            FlowError: If context aggregator is not available.
+            ~pipecat.flows.FlowError: If context aggregator is not available.
         """
         if not self._context_aggregator:
             raise FlowError("No context aggregator available")
@@ -374,7 +389,7 @@ class FlowManager:
             action: Action configuration dictionary containing type and optional handler.
 
         Raises:
-            ActionError: If action type is not registered and no valid handler provided.
+            ~pipecat.flows.ActionError: If action type is not registered and no valid handler provided.
         """
         action_type = action.get("type")
         handler = action.get("handler")
@@ -418,22 +433,20 @@ class FlowManager:
         if effective_param_count == 0:
             if not self._showed_deprecation_warning_for_zero_arg_handler:
                 self._showed_deprecation_warning_for_zero_arg_handler = True
-                warnings.warn(
-                    "Zero-argument function handlers are deprecated and will be "
-                    "removed in 2.0.0. Update handlers to accept "
-                    "(args: FlowArgs, flow_manager: FlowManager) instead.",
-                    DeprecationWarning,
+                warn_deprecated(
+                    "`async def handler()` is deprecated since 1.5.0 and will be "
+                    "removed in 2.0.0. Use `async def handler(args: FlowArgs, "
+                    "flow_manager: FlowManager)` instead.",
                     stacklevel=2,
                 )
             return await cast(ZeroArgFunctionHandler, handler)()
         elif effective_param_count == 1:
             if not self._showed_deprecation_warning_for_legacy_handler:
                 self._showed_deprecation_warning_for_legacy_handler = True
-                warnings.warn(
-                    "Single-argument (legacy) function handlers are deprecated "
-                    "and will be removed in 2.0.0. Update handlers to accept "
-                    "(args: FlowArgs, flow_manager: FlowManager) instead.",
-                    DeprecationWarning,
+                warn_deprecated(
+                    "`async def handler(args)` is deprecated since 1.5.0 and will be "
+                    "removed in 2.0.0. Use `async def handler(args: FlowArgs, "
+                    "flow_manager: FlowManager)` instead.",
                     stacklevel=2,
                 )
             return await cast(LegacyFunctionHandler, handler)(args)
@@ -492,6 +505,13 @@ class FlowManager:
                 logger.debug(
                     f"{'Transition-only function called for' if is_transition_only_function else 'Function handler completed for'} {name}"
                 )
+
+                if next_node is TRANSITION_IN_YAML:
+                    raise InvalidFunctionError(
+                        f"Function {name} returned TRANSITION_IN_YAML, but this node was not "
+                        "built from a flow config, so nothing can decide the transition; "
+                        "return a NodeConfig or None"
+                    )
 
                 is_no_response = next_node is NO_RESPONSE
                 if is_no_response or not next_node:
@@ -594,10 +614,61 @@ class FlowManager:
             node_config: Configuration for the new node.
 
         Raises:
-            FlowTransitionError: If manager not initialized.
-            FlowError: If node setup fails.
+            ~pipecat.flows.FlowTransitionError: If manager not initialized.
+            ~pipecat.flows.FlowError: If node setup fails.
         """
         await self._set_node(get_or_generate_node_name(node_config), node_config)
+
+    def _render_node(self, node_id: str, node_config: NodeConfig) -> NodeConfig:
+        r"""Fill ``{{ key }}`` placeholders in the node's prompts from ``self.state``.
+
+        Placeholders are rendered in ``role_message``, each ``task_messages``
+        content, and ``tts_say`` action text. ``{{ order.size }}`` walks into
+        a stored mapping, and ``\{{ key }}`` is left as the literal
+        ``{{ key }}``. Rendering happens on every entry, so a prompt sees
+        whatever handlers have stored by then.
+
+        Raises:
+            ~pipecat.flows.FlowError: If a placeholder names a key that is
+                not in state.
+        """
+
+        def value(path: str) -> str:
+            current: Any = self.state
+            for part in path.split("."):
+                if not isinstance(current, Mapping) or part not in current:
+                    raise FlowError(
+                        f"node '{node_id}' uses '{{{{ {path} }}}}', which is not in state"
+                    )
+                current = current[part]
+            return str(current)
+
+        def render(text: str) -> str:
+            def substitute(match: re.Match) -> str:
+                if match.group(1):
+                    return match.group(0)[1:]
+                return value(match.group(2))
+
+            return _PLACEHOLDER.sub(substitute, text)
+
+        rendered = dict(node_config)
+        if role_message := node_config.get("role_message"):
+            rendered["role_message"] = render(role_message)
+        rendered["task_messages"] = [
+            {**message, "content": render(message["content"])}
+            if isinstance(message.get("content"), str)
+            else message
+            for message in node_config["task_messages"]
+        ]
+        for key in ("pre_actions", "post_actions"):
+            if actions := node_config.get(key):
+                rendered[key] = [
+                    {**action, "text": render(action["text"])}
+                    if action.get("type") == "tts_say" and isinstance(action.get("text"), str)
+                    else action
+                    for action in actions
+                ]
+        return cast(NodeConfig, rendered)
 
     async def _set_node(self, node_id: str, node_config: NodeConfig) -> None:
         """Set up a new conversation node and transition to it.
@@ -616,8 +687,8 @@ class FlowManager:
             node_config: Complete configuration for the node.
 
         Raises:
-            FlowTransitionError: If manager not initialized.
-            FlowError: If node setup fails.
+            ~pipecat.flows.FlowTransitionError: If manager not initialized.
+            ~pipecat.flows.FlowError: If node setup fails.
         """
         if not self._initialized:
             raise FlowTransitionError(f"{self.__class__.__name__} must be initialized first")
@@ -630,6 +701,7 @@ class FlowManager:
             self._pending_transition = None
 
             self._validate_node_config(node_id, node_config)
+            node_config = self._render_node(node_id, node_config)
             logger.debug(f"Setting node: {node_id}")
 
             # Clear any deferred post-actions from previous node
@@ -682,10 +754,9 @@ class FlowManager:
             if role_messages and not role_message:
                 if not self._showed_deprecation_warning_for_role_messages:
                     self._showed_deprecation_warning_for_role_messages = True
-                    warnings.warn(
-                        "'role_messages' is deprecated and will be removed in 2.0.0. "
-                        "Use 'role_message' (singular, str) instead.",
-                        DeprecationWarning,
+                    warn_deprecated(
+                        "`role_messages` is deprecated since 1.5.0 and will be removed in "
+                        "2.0.0. Use `role_message` (singular, str) instead.",
                         stacklevel=2,
                     )
 
@@ -757,7 +828,7 @@ class FlowManager:
             strategy: Optional context update configuration.
 
         Raises:
-            FlowError: If context update fails.
+            ~pipecat.flows.FlowError: If context update fails.
         """
         try:
             frames = []
@@ -779,13 +850,12 @@ class FlowManager:
             if update_config.strategy == ContextStrategy.RESET_WITH_SUMMARY:
                 if not self._showed_deprecation_warning_for_reset_with_summary:
                     self._showed_deprecation_warning_for_reset_with_summary = True
-                    warnings.warn(
-                        "RESET_WITH_SUMMARY is deprecated and will be removed in 2.0.0. "
-                        "Use Pipecat's native context summarization instead. To trigger "
+                    warn_deprecated(
+                        "`RESET_WITH_SUMMARY` is deprecated since 1.5.0 and will be removed "
+                        "in 2.0.0. Use Pipecat's native context summarization instead. To trigger "
                         "on-demand summarization during a node transition, push an "
                         "LLMSummarizeContextFrame in a pre-action. See "
                         "https://docs.pipecat.ai/guides/fundamentals/context-summarization",
-                        DeprecationWarning,
                         stacklevel=2,
                     )
 
@@ -835,8 +905,13 @@ class FlowManager:
                 else LLMMessagesAppendFrame
             )
 
-            frames.append(frame_type(messages=messages))
-            frames.append(LLMSetToolsFrame(tools=functions))
+            # A node's context and tools must land even if the user interrupts
+            # while they are queued, or the LLM runs with the previous node's.
+            context_frame = frame_type(messages=messages)
+            context_frame.interruptible = False
+            tools_frame = LLMSetToolsFrame(tools=functions)
+            tools_frame.interruptible = False
+            frames += [context_frame, tools_frame]
 
             await self._worker.queue_frames(frames)
 
@@ -877,8 +952,8 @@ class FlowManager:
             config: Complete node configuration to validate.
 
         Raises:
-            FlowError: If required fields are missing.
-            InvalidFunctionError: If function format is invalid.
+            ~pipecat.flows.FlowError: If required fields are missing.
+            ~pipecat.flows.InvalidFunctionError: If function format is invalid.
         """
         # Check required fields
         if "task_messages" not in config:

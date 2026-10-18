@@ -18,6 +18,8 @@ from pipecat.processors.metrics.frame_processor_metrics import FrameProcessorMet
 from pipecat.services.settings import STTSettings
 from pipecat.services.stt_service import STTService, WebsocketSTTService
 from pipecat.tests.utils import run_test
+from pipecat.utils.asyncio.task_manager import TaskManager
+from tests.frame_processor_helpers import frame_processor_setup
 
 SAMPLE_RATE = 16000
 
@@ -66,7 +68,7 @@ def _make_service(cls=FakeSTTService, *, usage_enabled=True):
     """Create a service ready for direct-call tests (no StartFrame)."""
     service = cls(sample_rate=SAMPLE_RATE)
     service._sample_rate = SAMPLE_RATE
-    service._enable_usage_metrics = usage_enabled
+    service._setup = frame_processor_setup(TaskManager(), enable_usage_metrics=usage_enabled)
     return service
 
 

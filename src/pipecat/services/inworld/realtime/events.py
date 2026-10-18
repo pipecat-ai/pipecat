@@ -186,7 +186,7 @@ class SessionProperties(BaseModel):
 
     Parameters:
         type: Session type, always "realtime".
-        model: The LLM model to use (e.g. "openai/gpt-4.1-nano").
+        model: The LLM model to use (e.g. "openai/gpt-4.1-mini").
         instructions: System instructions for the assistant.
         output_modalities: Output modalities (e.g. ["audio", "text"]).
         audio: Audio configuration including input (transcription, turn detection)
@@ -195,7 +195,7 @@ class SessionProperties(BaseModel):
     """
 
     # Needed to support ToolSchema in tools field.
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = ConfigDict(arbitrary_types_allowed=True, populate_by_name=True)
 
     type: str | None = "realtime"
     model: str | None = None
@@ -207,7 +207,7 @@ class SessionProperties(BaseModel):
     # tools (the validator below normalizes that to a ToolsSchema); a list of
     # provider-native InworldTool objects passes through.
     tools: ToolsSchema | list[FunctionSchema | DirectFunction] | list[InworldTool] | None = None
-    provider_data: dict[str, Any] | None = None
+    provider_data: dict[str, Any] | None = Field(default=None, alias="providerData")
 
     @field_validator("tools", mode="before")
     @classmethod

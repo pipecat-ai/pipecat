@@ -4,32 +4,47 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Tests for :class:`pipecat.evals.serializer.RTVIEvalSerializer`."""
+"""Tests for :class:`pipecat.evals.serializer.EvalSerializer`."""
 
 import base64
+import io
 import json
 import unittest
 
+from PIL import Image
+
 import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.evals.serializer import (
+    EVAL_BOT_AUDIO_TYPE,
+    EVAL_BOT_IMAGE_TYPE,
     EVAL_CONFIGURE_MESSAGE_TYPE,
     EVAL_CONTEXT_MESSAGE_TYPE,
     EVAL_IMAGE_MESSAGE_TYPE,
-    RTVIEvalSerializer,
+    EvalClientSerializer,
+    EvalConnectionFlags,
+    EvalSerializer,
+    eval_connect_message,
+    parse_eval_connect,
 )
 from pipecat.frames.frames import (
+    InputAudioRawFrame,
     InputTransportMessageFrame,
+    LLMFullResponseStartFrame,
     LLMMessagesUpdateFrame,
     OutputAudioRawFrame,
+    OutputImageRawFrame,
     OutputTransportMessageUrgentFrame,
+    TranscriptionFrame,
+    UserImageRawFrame,
+    UserImageRequestFrame,
 )
 from pipecat.processors.frameworks.rtvi.frames import RTVIConfigureObserverFrame
 from pipecat.processors.frameworks.rtvi.observer import RTVIFunctionCallReportLevel
 
 
-class TestRTVIEvalSerializerDeserialize(unittest.IsolatedAsyncioTestCase):
+class TestEvalSerializerDeserialize(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
-        self.serializer = RTVIEvalSerializer()
+        self.serializer = EvalSerializer()
 
     async def test_send_text_wraps_as_transport_message(self):
         msg = {
@@ -104,6 +119,22 @@ class TestRTVIEvalSerializerDeserialize(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(frame.vad_user_speaking_enabled)
         # Unset report level stays None, so it isn't disturbed.
         self.assertIsNone(frame.function_call_report_level)
+        self.assertIsNone(frame.bot_llm_marker_enabled)
+
+    async def test_eval_configure_enables_llm_markers(self):
+        msg = {
+            "label": RTVI.MESSAGE_LABEL,
+            "type": "client-message",
+            "id": "9",
+            "data": {
+                "t": EVAL_CONFIGURE_MESSAGE_TYPE,
+                "d": {"llm_markers": True},
+            },
+        }
+        frame = await self.serializer.deserialize(json.dumps(msg))
+        self.assertIsInstance(frame, RTVIConfigureObserverFrame)
+        self.assertTrue(frame.bot_llm_marker_enabled)
+        self.assertIsNone(frame.vad_user_speaking_enabled)
 
     async def test_eval_image_stored_and_not_forwarded(self):
         img = b"\x89PNG-fake-bytes"
@@ -119,6 +150,40 @@ class TestRTVIEvalSerializerDeserialize(unittest.IsolatedAsyncioTestCase):
         # eval-image is consumed (not forwarded) and kept for a later image request.
         self.assertIsNone(await self.serializer.deserialize(json.dumps(msg)))
         self.assertEqual(self.serializer.get_user_image(), (img, "image/png"))
+
+    async def test_eval_connect_consumed_and_not_forwarded(self):
+        message = eval_connect_message(EvalConnectionFlags(skip_tts=True))
+        self.assertIsNone(await self.serializer.deserialize(message))
+
+    async def test_user_image_frame_decodes_the_registered_image(self):
+        buffer = io.BytesIO()
+        Image.new("RGB", (4, 3), (255, 0, 0)).save(buffer, format="PNG")
+        msg = {
+            "label": RTVI.MESSAGE_LABEL,
+            "type": "client-message",
+            "id": "7",
+            "data": {
+                "t": EVAL_IMAGE_MESSAGE_TYPE,
+                "d": {
+                    "image": base64.b64encode(buffer.getvalue()).decode("ascii"),
+                    "format": "image/png",
+                },
+            },
+        }
+        await self.serializer.deserialize(json.dumps(msg))
+        request = UserImageRequestFrame(user_id="user", text="what is this?")
+
+        frame = await self.serializer.user_image_frame(request)
+
+        self.assertIsInstance(frame, UserImageRawFrame)
+        self.assertEqual(frame.size, (4, 3))
+        self.assertEqual(frame.format, "RGB")
+        self.assertEqual(frame.image[:3], bytes([255, 0, 0]))
+        self.assertIs(frame.request, request)
+
+    async def test_user_image_frame_without_an_image_is_none(self):
+        request = UserImageRequestFrame(user_id="user")
+        self.assertIsNone(await self.serializer.user_image_frame(request))
 
     async def test_dtmf_message_forwarded_to_processor(self):
         # DTMF is now a first-class RTVI message handled by the RTVIProcessor, so
@@ -151,9 +216,9 @@ class TestRTVIEvalSerializerDeserialize(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(await self.serializer.deserialize("not json"))
 
 
-class TestRTVIEvalSerializerSerialize(unittest.IsolatedAsyncioTestCase):
+class TestEvalSerializerSerialize(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
-        self.serializer = RTVIEvalSerializer()
+        self.serializer = EvalSerializer()
 
     async def test_rtvi_server_message_serialized_to_json(self):
         message = RTVI.BotLLMStartedMessage().model_dump()
@@ -170,5 +235,142 @@ class TestRTVIEvalSerializerSerialize(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(await self.serializer.serialize(frame))
 
 
+class TestEvalClientSerializer(unittest.IsolatedAsyncioTestCase):
+    """The client-side serializer the harness pipeline uses to talk to the bot."""
+
+    def setUp(self):
+        self.serializer = EvalClientSerializer()
+
+    def _server(self, msg_type: str, data: dict | None = None) -> str:
+        return json.dumps({"label": RTVI.MESSAGE_LABEL, "type": msg_type, "data": data})
+
+    async def test_eval_bot_audio_becomes_input_audio(self):
+        # Already at the harness STT rate (16 kHz): passes through unchanged.
+        pcm = b"\x01\x02\x03\x04"
+        frame = await self.serializer.deserialize(
+            self._server(
+                EVAL_BOT_AUDIO_TYPE,
+                {"audio": base64.b64encode(pcm).decode("ascii"), "sampleRate": 16000},
+            )
+        )
+        self.assertIsInstance(frame, InputAudioRawFrame)
+        self.assertEqual(frame.audio, pcm)
+        self.assertEqual(frame.sample_rate, 16000)
+        self.assertEqual(frame.num_channels, 1)
+
+    async def test_eval_bot_audio_resampled_to_harness_rate(self):
+        # A different rate is resampled to the harness STT rate for the pipeline VAD/STT.
+        pcm = b"\x00\x00" * 480  # 20ms @ 24kHz
+        frame = await self.serializer.deserialize(
+            self._server(
+                EVAL_BOT_AUDIO_TYPE,
+                {"audio": base64.b64encode(pcm).decode("ascii"), "sampleRate": 24000},
+            )
+        )
+        self.assertIsInstance(frame, InputAudioRawFrame)
+        self.assertEqual(frame.sample_rate, 16000)
+
+    async def test_user_transcription_is_dropped(self):
+        # user-input carries the same transcriptions; the base serializer would
+        # make this a TranscriptionFrame, the STT's transcription of the bot's audio.
+        data = {"text": "hello", "user_id": "u", "final": True}
+        self.assertIsNone(
+            await self.serializer.deserialize(self._server("user-transcription", data))
+        )
+
+    async def test_bot_output_and_user_input_stay_raw_messages(self):
+        # Kept as raw messages (not a TranscriptionFrame) so the sink can tell the
+        # user's transcriptions apart from the STT's transcription of the bot's
+        # audio, and find the backchannels.
+        for msg_type in ("bot-output", "user-input"):
+            frame = await self.serializer.deserialize(self._server(msg_type, {"text": "mhm"}))
+            self.assertIsInstance(frame, InputTransportMessageFrame)
+            self.assertEqual(frame.message["type"], msg_type)
+
+    async def test_generic_messages_delegate_to_base(self):
+        # Non-eval RTVI messages keep the base RTVIClientSerializer mapping.
+        self.assertIsInstance(
+            await self.serializer.deserialize(self._server("bot-llm-started")),
+            LLMFullResponseStartFrame,
+        )
+        self.assertIsNone(await self.serializer.deserialize(self._server("bot-ready")))
+        self.assertIsNone(await self.serializer.deserialize("not json"))
+
+    async def test_base_no_longer_maps_user_transcription_to_transcription(self):
+        # Sanity: only the eval subclass diverts user-transcription; the generic
+        # base still produces a TranscriptionFrame (unchanged for other clients).
+        from pipecat.serializers.rtvi_client import RTVIClientSerializer
+
+        frame = await RTVIClientSerializer().deserialize(
+            self._server("user-transcription", {"text": "hi", "final": True})
+        )
+        self.assertIsInstance(frame, TranscriptionFrame)
+
+
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestEvalSerializerBotImages(unittest.IsolatedAsyncioTestCase):
+    """The bot reports its output images by size and format, only when asked."""
+
+    def _image(self) -> OutputImageRawFrame:
+        return OutputImageRawFrame(image=b"\x00" * 12, size=(2, 2), format="RGB")
+
+    async def test_image_dropped_by_default(self):
+        self.assertIsNone(await EvalSerializer().serialize(self._image()))
+
+    async def test_image_reported_when_captured(self):
+        serializer = EvalSerializer()
+        serializer.set_capture_images(True)
+        message = json.loads(await serializer.serialize(self._image()))
+        self.assertEqual(message["type"], EVAL_BOT_IMAGE_TYPE)
+        self.assertEqual(message["data"], {"width": 2, "height": 2, "format": "RGB"})
+
+
+class TestEvalClientSerializerBotImages(unittest.IsolatedAsyncioTestCase):
+    """The bot's image reports reach the harness as raw messages."""
+
+    async def test_bot_image_stays_a_raw_message(self):
+        frame = await EvalClientSerializer().deserialize(
+            json.dumps(
+                {
+                    "label": RTVI.MESSAGE_LABEL,
+                    "type": EVAL_BOT_IMAGE_TYPE,
+                    "data": {"width": 2, "height": 2},
+                }
+            )
+        )
+        self.assertIsInstance(frame, InputTransportMessageFrame)
+        self.assertEqual(frame.message["type"], EVAL_BOT_IMAGE_TYPE)
+
+
+class TestEvalConnectMessage(unittest.TestCase):
+    def test_round_trips_its_flags(self):
+        flags = EvalConnectionFlags(skip_tts=True, capture_bot_images=True)
+        parsed = parse_eval_connect(json.loads(eval_connect_message(flags)))
+        self.assertEqual(parsed, flags)
+
+    def test_is_an_rtvi_client_message(self):
+        message = json.loads(eval_connect_message(EvalConnectionFlags()))
+        self.assertEqual(message["label"], RTVI.MESSAGE_LABEL)
+        self.assertEqual(message["type"], "client-message")
+
+    def test_missing_flags_default_off(self):
+        message = json.loads(eval_connect_message(EvalConnectionFlags()))
+        del message["data"]["d"]
+        self.assertEqual(parse_eval_connect(message), EvalConnectionFlags())
+
+    def test_other_messages_are_not_eval_connect(self):
+        self.assertIsNone(parse_eval_connect({"label": RTVI.MESSAGE_LABEL, "type": "client-ready"}))
+        self.assertIsNone(
+            parse_eval_connect(
+                {
+                    "label": RTVI.MESSAGE_LABEL,
+                    "type": "client-message",
+                    "data": {"t": EVAL_CONTEXT_MESSAGE_TYPE, "d": {}},
+                }
+            )
+        )
+        self.assertIsNone(parse_eval_connect({"event": "start"}))
+        self.assertIsNone(parse_eval_connect("not a dict"))

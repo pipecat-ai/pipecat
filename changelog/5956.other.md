@@ -1,0 +1,1 @@
+- Added `examples/image-generation/` bots for fal, Google, and OpenAI, and a `generate_image` release-eval scenario that checks each one produces an image.

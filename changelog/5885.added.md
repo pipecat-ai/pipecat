@@ -1,0 +1,1 @@
+- Added Gemini 3.8 TTS model support in `GeminiTTSService`: `gemini-3.8-flash-tts` and `gemini-3.8-flash-lite-tts`.

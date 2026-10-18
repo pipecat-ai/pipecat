@@ -40,13 +40,11 @@ BotType = Literal["web", "telephony"]
 class ServiceDefinition:
     """Service metadata definition.
 
-    Required fields:
-        value: Service identifier (e.g., "openai_llm")
-        label: Human-readable name (e.g., "OpenAI")
-        package: Python package requirement (e.g., "pipecat-ai[openai]")
-
-    Optional fields:
-        class_name: List of class names to import for this service
+    Parameters:
+        value: Service identifier (e.g., "openai_llm").
+        label: Human-readable name (e.g., "OpenAI").
+        package: Python package requirement (e.g., "pipecat-ai[openai]").
+        class_name: List of class names to import for this service.
         env_prefix: Prefix for environment variables (e.g., "OPENAI" -> "OPENAI_API_KEY")
         include_params: Constructor params that have defaults but should still appear in the
             generated config (e.g., "api_key" has a default but we want users to set it via
@@ -62,6 +60,10 @@ class ServiceDefinition:
             produces os.getenv("ENV_VAR", "default") instead of os.getenv("ENV_VAR").
             Use this for params where the quickstart should work without the user
             setting the env var (e.g., model or voice defaults).
+        client_package: npm package a generated web client installs to connect over
+            this transport (e.g., "@pipecat-ai/daily-transport"), with its version
+            range in ``client_package_version``. Only web transports have one.
+        client_package_version: Version range for ``client_package`` (e.g., "^1.6.9").
     """
 
     value: str
@@ -75,6 +77,8 @@ class ServiceDefinition:
     recommended: bool = False
     additional_imports: list[str] | None = None
     param_defaults: dict[str, str] | None = None
+    client_package: str | None = None
+    client_package_version: str | None = None
 
     def __post_init__(self):
         """Validate service definition after initialization."""
@@ -84,6 +88,8 @@ class ServiceDefinition:
             raise ValueError("Service must have a label")
         if not self.package:
             raise ValueError("Service must have a package")
+        if bool(self.client_package) != bool(self.client_package_version):
+            raise ValueError("client_package and client_package_version go together")
 
 
 # Feature definitions with metadata for auto-generation
@@ -112,9 +118,12 @@ FEATURE_DEFINITIONS: dict[str, list[str]] = {
     # Imported on the standard (non-PSTN/SIP) transport path: the collapsed bot()
     # calls create_transport. Dial-out and SIP construct their transports by hand.
     "create_transport": ["create_transport"],
-    # The "eval" transport entry (pc create --eval) needs EvalTransportParams so the
-    # generated bot is runnable with `-t eval` for behavioral evals.
+    # The "eval" transport entry (pc create --eval) needs EvalTransportParams so
+    # `pipecat eval` can drive the generated bot for behavioral evals.
     "eval": ["EvalTransportParams"],
+    # Video input on a Daily or SmallWebRTC transport captures its sources from
+    # video_in_sources.
+    "video_in_sources": ["VideoInSourceParams"],
 }
 
 
@@ -150,18 +159,32 @@ class ServiceRegistry:
             package="pipecat-ai[daily]",
             # Bots build transports via create_transport(); only the params are needed.
             class_name=["DailyParams"],
+            client_package="@pipecat-ai/daily-transport",
+            client_package_version="^1.6.9",
+        ),
+        ServiceDefinition(
+            value="livekit",
+            label="LiveKit (WebRTC)",
+            package="pipecat-ai[livekit]",
+            class_name=["LiveKitParams"],
+            client_package="@pipecat-ai/livekit-transport",
+            client_package_version="^1.0.0",
         ),
         ServiceDefinition(
             value="smallwebrtc",
             label="SmallWebRTC",
             package="pipecat-ai[webrtc]",
             class_name=["TransportParams"],
+            client_package="@pipecat-ai/small-webrtc-transport",
+            client_package_version="^1.10.8",
         ),
         ServiceDefinition(
             value="websocket",
             label="WebSocket",
             package="pipecat-ai[websocket]",
             class_name=["FastAPIWebsocketParams", "ProtobufFrameSerializer"],
+            client_package="@pipecat-ai/websocket-transport",
+            client_package_version="^1.7.2",
         ),
     ]
 
@@ -336,6 +359,14 @@ class ServiceRegistry:
             include_params=["api_key"],
         ),
         ServiceDefinition(
+            value="gemini_stt",
+            label="Gemini Transcribe Live",
+            package="pipecat-ai[google]",
+            class_name=["GeminiSTTService"],
+            env_prefix="GOOGLE",
+            include_params=["api_key"],
+        ),
+        ServiceDefinition(
             value="gladia_stt",
             label="Gladia",
             package="pipecat-ai[gladia]",
@@ -349,7 +380,7 @@ class ServiceRegistry:
             package="pipecat-ai[google]",
             class_name=["GoogleSTTService"],
             env_prefix="GOOGLE",
-            include_params=["credentials", "location"],
+            include_params=["credentials"],
         ),
         ServiceDefinition(
             value="gradium_stt",
@@ -365,6 +396,14 @@ class ServiceRegistry:
             package="pipecat-ai[groq]",
             class_name=["GroqSTTService"],
             env_prefix="GROQ",
+            include_params=["api_key"],
+        ),
+        ServiceDefinition(
+            value="meta_stt",
+            label="Meta",
+            package="pipecat-ai[meta]",
+            class_name=["MetaSTTService"],
+            env_prefix="META",
             include_params=["api_key"],
         ),
         ServiceDefinition(
@@ -414,7 +453,6 @@ class ServiceRegistry:
             class_name=["SarvamSTTService"],
             env_prefix="SARVAM",
             include_params=["api_key"],
-            settings_params=["model"],
         ),
         ServiceDefinition(
             value="soniox_stt",
@@ -437,15 +475,18 @@ class ServiceRegistry:
             label="Moonshine",
             package="pipecat-ai[moonshine]",
             class_name=["MoonshineSTTService"],
+            env_prefix="MOONSHINE",
             settings_params=["model"],
+            param_defaults={"model": "small-streaming"},
         ),
         ServiceDefinition(
             value="whisper_stt",
             label="Whisper (Local)",
             package="pipecat-ai[whisper]",
             class_name=["WhisperSTTService"],
-            env_prefix="OPENAI",
+            env_prefix="WHISPER",
             settings_params=["model"],
+            param_defaults={"model": "Systran/faster-distil-whisper-medium.en"},
         ),
         ServiceDefinition(
             value="xai_stt",
@@ -727,6 +768,16 @@ class ServiceRegistry:
             settings_params=["voice"],
         ),
         ServiceDefinition(
+            value="bland_tts",
+            label="Bland",
+            package="pipecat-ai[bland]",
+            class_name=["BlandTTSService"],
+            env_prefix="BLAND",
+            include_params=["api_key"],
+            settings_params=["voice"],
+            param_defaults={"voice": "29158307-9893-4149-8a75-bc9ce313d64e"},
+        ),
+        ServiceDefinition(
             value="cartesia_tts",
             label="Cartesia",
             package="pipecat-ai[cartesia]",
@@ -734,7 +785,7 @@ class ServiceRegistry:
             env_prefix="CARTESIA",
             include_params=["api_key"],
             settings_params=["voice"],
-            param_defaults={"voice": "71a7ad14-091c-4e8e-a314-022ece01c121"},
+            param_defaults={"voice": "86e30c1d-714b-4074-a1f2-1cb6b552fb49"},
         ),
         ServiceDefinition(
             value="deepgram_tts",
@@ -755,6 +806,15 @@ class ServiceRegistry:
             settings_params=["voice"],
         ),
         ServiceDefinition(
+            value="deepgram_flux_sagemaker_tts",
+            label="Deepgram Flux SageMaker",
+            package="pipecat-ai[deepgram,sagemaker]",
+            class_name=["DeepgramFluxSageMakerTTSService"],
+            env_prefix="DEEPGRAM_FLUX_SAGEMAKER_TTS",
+            include_params=["endpoint_name", "region"],
+            settings_params=["voice"],
+        ),
+        ServiceDefinition(
             value="deepgram_sagemaker_tts",
             label="Deepgram SageMaker",
             package="pipecat-ai[deepgram,sagemaker]",
@@ -768,6 +828,15 @@ class ServiceRegistry:
             label="ElevenLabs",
             package="pipecat-ai[elevenlabs]",
             class_name=["ElevenLabsTTSService"],
+            env_prefix="ELEVENLABS",
+            include_params=["api_key"],
+            settings_params=["voice"],
+        ),
+        ServiceDefinition(
+            value="elevenlabs_dialogue_tts",
+            label="ElevenLabs Dialogue (v3)",
+            package="pipecat-ai[elevenlabs]",
+            class_name=["ElevenLabsDialogueTTSService"],
             env_prefix="ELEVENLABS",
             include_params=["api_key"],
             settings_params=["voice"],
@@ -841,15 +910,6 @@ class ServiceRegistry:
             package="pipecat-ai[kokoro]",
             class_name=["KokoroTTSService"],
             env_prefix="KOKORO",
-            settings_params=["voice"],
-        ),
-        ServiceDefinition(
-            value="lmnt_tts",
-            label="LMNT",
-            package="pipecat-ai[lmnt]",
-            class_name=["LmntTTSService"],
-            env_prefix="LMNT",
-            include_params=["api_key"],
             settings_params=["voice"],
         ),
         ServiceDefinition(
@@ -948,7 +1008,7 @@ class ServiceRegistry:
             class_name=["SarvamTTSService"],
             env_prefix="SARVAM",
             include_params=["api_key"],
-            settings_params=["model", "voice"],
+            settings_params=["voice"],
         ),
         ServiceDefinition(
             value="smallest_tts",
@@ -1018,6 +1078,18 @@ class ServiceRegistry:
             manual_config=True,
             additional_imports=[
                 "from pipecat.services.openai.realtime.events import SessionProperties, InputAudioTranscription"
+            ],
+        ),
+        ServiceDefinition(
+            value="azure_voice_live",
+            label="Azure Voice Live",
+            package="pipecat-ai[azure]",
+            class_name=["AzureVoiceLiveLLMService"],
+            env_prefix="AZURE",
+            include_params=[],
+            manual_config=True,
+            additional_imports=[
+                "from pipecat.services.azure.voice_live.events import AzureStandardVoice, InputAudioTranscription, SessionProperties, TurnDetection"
             ],
         ),
         ServiceDefinition(
@@ -1149,6 +1221,23 @@ MANUAL_SERVICE_CONFIGS = {
         '    api_key=os.getenv("AZURE_REALTIME_API_KEY"),\n'
         '    base_url=os.getenv("AZURE_REALTIME_BASE_URL"),\n'
         "    settings=AzureRealtimeLLMService.Settings(\n"
+        "        session_properties=session_properties,\n"
+        f'        system_instruction="{DEFAULT_SYSTEM_INSTRUCTION}",\n'
+        "    ),\n"
+        ")"
+    ),
+    "azure_voice_live": (
+        "session_properties = SessionProperties(\n"
+        '    voice=AzureStandardVoice(name="en-US-Ava:DragonHDLatestNeural"),\n'
+        '    turn_detection=TurnDetection(type="azure_semantic_vad"),\n'
+        '    input_audio_transcription=InputAudioTranscription(model="azure-speech"),\n'
+        ")\n"
+        "\n"
+        "llm = AzureVoiceLiveLLMService(\n"
+        '    api_key=os.getenv("AZURE_VOICE_LIVE_API_KEY"),\n'
+        '    endpoint=os.getenv("AZURE_VOICE_LIVE_ENDPOINT"),\n'
+        "    settings=AzureVoiceLiveLLMService.Settings(\n"
+        '        model="gpt-4o-mini",\n'
         "        session_properties=session_properties,\n"
         f'        system_instruction="{DEFAULT_SYSTEM_INSTRUCTION}",\n'
         "    ),\n"

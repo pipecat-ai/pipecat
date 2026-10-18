@@ -30,6 +30,7 @@ from pipecat.frames.frames import (
     StartFrame,
     TranscriptionFrame,
 )
+from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import NVIDIA_TTFS_P99
 from pipecat.services.stt_service import SegmentedSTTService, STTService
@@ -433,7 +434,7 @@ class NvidiaSTTService(STTService):
         return True
 
     async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
-        """Apply a settings delta and sync internal state.
+        """Apply a settings delta, then reconnect so the stream picks it up.
 
         Args:
             delta: A :class:`STTSettings` (or ``NvidiaSTTService.Settings``) delta.
@@ -443,8 +444,17 @@ class NvidiaSTTService(STTService):
         """
         changed = await super()._update_settings(delta)
 
-        if changed and self._config is not None:
+        if not changed:
+            return changed
+
+        if self._config is not None:
             self._config = self._create_recognition_config()
+
+        # streaming_response_generator() receives streaming_config once, when the
+        # gRPC stream is opened, so rebuilding the config alone leaves the running
+        # stream transcribing with the previous settings. _request_reconnect()
+        # defers until the user stops speaking, so this cannot cut into a turn.
+        await self._request_reconnect()
 
         return changed
 
@@ -471,6 +481,19 @@ class NvidiaSTTService(STTService):
             model: Model name to set.
         """
 
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service.
+
+        Args:
+            setup: Configuration object containing setup parameters.
+        """
+        await super().setup(setup)
+        self._initialize_client()
+        self._config = self._create_recognition_config()
+        self._audio_iterator = AudioChunkIterator(self.get_event_loop())
+        self._create_keepalive_task()
+        logger.debug(f"Initialized NvidiaSTTService with model: {self._settings.model}")
+
     async def start(self, frame: StartFrame):
         """Start the NVIDIA Nemotron Speech STT service and initialize streaming configuration.
 
@@ -478,16 +501,9 @@ class NvidiaSTTService(STTService):
             frame: StartFrame indicating pipeline start.
         """
         await super().start(frame)
-        self._initialize_client()
-        self._config = self._create_recognition_config()
-        self._audio_iterator = AudioChunkIterator(self.get_event_loop())
 
         if not self._thread_task:
             self._thread_task = self.create_task(self._thread_task_handler())
-
-        self._create_keepalive_task()
-
-        logger.debug(f"Initialized NvidiaSTTService with model: {self._settings.model}")
 
     async def stop(self, frame: EndFrame):
         """Stop the NVIDIA Nemotron Speech STT service and clean up resources.

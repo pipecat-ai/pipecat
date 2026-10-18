@@ -23,7 +23,7 @@ from itertools import chain
 
 from loguru import logger
 
-from pipecat.frames.frames import ControlFrame, EndFrame, Frame, SystemFrame
+from pipecat.frames.frames import ControlFrame, EndFrame, Frame, StartFrame, SystemFrame
 from pipecat.pipeline.base_pipeline import BasePipeline
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
@@ -242,12 +242,15 @@ class SyncParallelPipeline(BasePipeline):
             setup: Configuration for frame processor setup.
         """
         await super().setup(setup)
-        await asyncio.gather(*[p.setup(setup) for p in self._pipelines])
+        # This pipeline is set up, so let the StartFrame in: each branch holds
+        # it until its own setup is done.
+        self._setup_finished()
+        await self._setup_processors(self._pipelines, setup)
 
     async def cleanup(self):
         """Clean up the parallel pipeline and all contained processors."""
         await super().cleanup()
-        await asyncio.gather(*[p.cleanup() for p in self._pipelines])
+        await self._cleanup_processors(self._pipelines)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Send a frame through all parallel pipelines and release output once all finish.
@@ -261,6 +264,10 @@ class SyncParallelPipeline(BasePipeline):
             direction: The direction of frame flow.
         """
         await super().process_frame(frame, direction)
+
+        if isinstance(frame, StartFrame) and direction == FrameDirection.DOWNSTREAM:
+            await self._start_pipelines(frame)
+            return
 
         # SystemFrames are simply passed through all internal pipelines without
         # draining queued output. This avoids the race condition where a
@@ -361,3 +368,20 @@ class SyncParallelPipeline(BasePipeline):
                     await self.push_frame(frame, FrameDirection.DOWNSTREAM)
                     seen_ids.add(frame.id)
                 self._down_queue.task_done()
+
+    async def _start_pipelines(self, frame: StartFrame):
+        """Start every pipeline, then pass the StartFrame on once it is through all of them."""
+        await asyncio.gather(
+            *[
+                self._start_pipeline(pipeline, source["queue"], frame)
+                for pipeline, source in zip(self._pipelines, self._sources)
+            ]
+        )
+        await self.push_frame(frame)
+
+    async def _start_pipeline(self, pipeline: Pipeline, queue: asyncio.Queue, frame: StartFrame):
+        """Push the StartFrame into a pipeline and wait for it to come out of the pipeline's sink."""
+        # Into the pipeline rather than straight to its source, so the pipeline
+        # and each of its processors hold it until they are set up.
+        await pipeline.queue_frame(frame)
+        await queue.get()

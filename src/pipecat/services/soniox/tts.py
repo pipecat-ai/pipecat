@@ -21,7 +21,6 @@ from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from typing import Any
 
-import websockets
 from loguru import logger
 from websockets.protocol import State
 
@@ -30,11 +29,12 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
-    StartFrame,
     TTSAudioRawFrame,
     TTSStoppedFrame,
 )
+from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.settings import TTSSettings
+from pipecat.services.soniox.errors import classify_error_code
 from pipecat.services.tts_service import TextAggregationMode, WebsocketTTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -93,6 +93,7 @@ def language_to_soniox_tts_language(language: Language) -> str | None:
         Language.ML: "ml",
         Language.MR: "mr",
         Language.MS: "ms",
+        Language.NB: "no",
         Language.NL: "nl",
         Language.NO: "no",
         Language.PA: "pa",
@@ -125,19 +126,29 @@ def language_to_soniox_tts_language(language: Language) -> str | None:
 class SonioxTTSSettings(TTSSettings):
     """Settings for SonioxTTSService.
 
-    ``voice``, ``model``, ``language``, and ``speed`` travel in the per-stream
-    config message, so changing any of them does not require reconnecting the
-    WebSocket. The current context is flushed so the next stream opens with the
-    new values.
+    ``voice``, ``model``, ``language``, ``speed``, ``reduce_silence`` and
+    ``client_reference_id`` travel in the per-stream config message, so changing
+    any of them does not require reconnecting the WebSocket. The current context
+    is flushed so the next stream opens with the new values.
 
     Parameters:
         voice: Voice name (e.g. ``"Adrian"``) or the UUID of a cloned voice in
             the project owning the API key.
         speed: Speech rate multiplier in the range 0.7-1.3. ``None`` leaves it
             unset and uses the Soniox server default (1.0).
+        reduce_silence: Shorten the pauses between words so the speech flows
+            more tightly, without changing how fast the words themselves are
+            spoken. Only models whose catalogue entry reports
+            ``supports_silence_reduction`` accept it. ``None`` leaves it unset
+            and uses the Soniox server default (false).
+        client_reference_id: Client-defined identifier recorded with each
+            request in the Soniox usage logs, for attributing usage to a
+            customer or session. Ignored for temporary API keys.
     """
 
     speed: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    reduce_silence: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    client_reference_id: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class SonioxTTSService(WebsocketTTSService):
@@ -190,6 +201,8 @@ class SonioxTTSService(WebsocketTTSService):
             voice="Bryce",
             language=Language.EN,
             speed=None,
+            reduce_silence=None,
+            client_reference_id=None,
         )
 
         # Settings delta (canonical API, always wins)
@@ -226,7 +239,6 @@ class SonioxTTSService(WebsocketTTSService):
         self._partials: dict[str, tuple[str, float]] = {}
 
         self._receive_task: asyncio.Task | None = None
-        self._keepalive_task: asyncio.Task | None = None
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -247,13 +259,13 @@ class SonioxTTSService(WebsocketTTSService):
         """
         return language_to_soniox_tts_language(language)
 
-    async def start(self, frame: StartFrame):
-        """Start the Soniox TTS service.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
 
         Args:
-            frame: The start frame containing initialization parameters.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         if self._audio_format.startswith("pcm_") and self.sample_rate not in VALID_SAMPLE_RATES:
             logger.warning(
                 f"{self}: sample_rate={self.sample_rate} is not in Soniox supported rates "
@@ -362,7 +374,14 @@ class SonioxTTSService(WebsocketTTSService):
         if not changed:
             return changed
 
-        if changed.keys() & {"voice", "model", "language", "speed"}:
+        if changed.keys() & {
+            "voice",
+            "model",
+            "language",
+            "speed",
+            "reduce_silence",
+            "client_reference_id",
+        }:
             if self._turn_context_id:
                 # Finalize the old context's still-pending sentence so its
                 # already-heard prefix still emits progress frames (mirrors the
@@ -391,8 +410,8 @@ class SonioxTTSService(WebsocketTTSService):
         if self._websocket and not self._receive_task:
             self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
-        if self._websocket and not self._keepalive_task:
-            self._keepalive_task = self.create_task(self._keepalive_task_handler())
+        if self._websocket:
+            self._create_keepalive_task(interval=KEEPALIVE_INTERVAL_SECONDS)
 
     async def _disconnect(self):
         await super()._disconnect()
@@ -401,9 +420,7 @@ class SonioxTTSService(WebsocketTTSService):
             await self.cancel_task(self._receive_task)
             self._receive_task = None
 
-        if self._keepalive_task:
-            await self.cancel_task(self._keepalive_task)
-            self._keepalive_task = None
+        await self._cancel_keepalive_task()
 
         await self._disconnect_websocket()
 
@@ -412,9 +429,10 @@ class SonioxTTSService(WebsocketTTSService):
             if self._websocket and self._websocket.state is State.OPEN:
                 return
             logger.debug("Connecting to Soniox TTS")
-            # Soniox expects the api_key in the per-stream config message, not
-            # as a header or query param, so the connect call is bare.
-            self._websocket = await self._websocket_connect(self._url)
+            self._websocket = await self._websocket_connect(
+                self._url,
+                additional_headers={"Authorization": f"Bearer {self._api_key}"},
+            )
             await self._call_event_handler("on_connected")
         except Exception as e:
             self._websocket = None
@@ -430,7 +448,6 @@ class SonioxTTSService(WebsocketTTSService):
         except Exception as e:
             await self.push_error(error_msg=f"Error closing Soniox websocket: {e}", exception=e)
         finally:
-            await self.remove_active_audio_context()
             self._configured_contexts.clear()
             self._partials.clear()
             self._websocket = None
@@ -445,7 +462,6 @@ class SonioxTTSService(WebsocketTTSService):
         """Build the per-stream configuration message for a new stream_id."""
         s = self._settings
         config: dict[str, Any] = {
-            "api_key": self._api_key,
             "stream_id": context_id,
             "model": s.model,
             "voice": s.voice,
@@ -455,6 +471,10 @@ class SonioxTTSService(WebsocketTTSService):
             config["language"] = s.language
         if s.speed is not None:
             config["speed"] = s.speed
+        if s.reduce_silence is not None:
+            config["reduce_silence"] = s.reduce_silence
+        if s.client_reference_id is not None:
+            config["client_reference_id"] = s.client_reference_id
         # Character-level timestamps drive the word-aligned TTSTextFrames.
         config["return_timestamps"] = True
         if self._audio_format.startswith("pcm_"):
@@ -475,24 +495,10 @@ class SonioxTTSService(WebsocketTTSService):
         self._configured_contexts.add(context_id)
         logger.trace(f"{self}: opened Soniox stream {context_id}")
 
-    async def _keepalive_task_handler(self):
-        """Send periodic keepalive messages to prevent Soniox's idle timeout.
-
-        Soniox closes idle connections after 20-30s; sending ``{"keep_alive": true}``
-        resets the timer without triggering synthesis.
-        """
-        while True:
-            await asyncio.sleep(KEEPALIVE_INTERVAL_SECONDS)
-            try:
-                if self._websocket and self._websocket.state is State.OPEN:
-                    await self._websocket.send(json.dumps({"keep_alive": True}))
-                    logger.trace(f"{self}: sent Soniox keepalive")
-            except websockets.ConnectionClosed as e:
-                logger.warning(f"{self} keepalive error: {e}")
-                break
-            except Exception as e:
-                logger.warning(f"{self}: unexpected keepalive error: {e}")
-                break
+    async def _send_keepalive(self):
+        """Reset Soniox's idle timeout without triggering synthesis."""
+        await self._get_websocket().send(json.dumps({"keep_alive": True}))
+        logger.trace(f"{self}: sent Soniox keepalive")
 
     def _is_chinese_or_japanese_language(self) -> bool:
         """Whether the current language is written without spaces between words.
@@ -565,7 +571,8 @@ class SonioxTTSService(WebsocketTTSService):
                     error_msg=(
                         f"Soniox TTS error {error_code} {error_type} "
                         f"(stream {stream_id}): {error_message}"
-                    )
+                    ),
+                    category=classify_error_code(error_code),
                 )
                 if stream_id and self.audio_context_available(stream_id):
                     await self.append_to_audio_context(
@@ -634,15 +641,16 @@ class SonioxTTSService(WebsocketTTSService):
                 await self._connect()
 
             try:
+                await self._send_config(context_id)
                 text_msg = {"text": text, "text_end": False, "stream_id": context_id}
                 await self._get_websocket().send(json.dumps(text_msg))
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
-                yield ErrorFrame(error=f"Unknown error occurred: {e}")
+                yield ErrorFrame(error=f"Unknown error occurred: {e}", exception=e)
                 yield TTSStoppedFrame(context_id=context_id)
                 await self._disconnect()
                 await self._connect()
                 return
             yield None
         except Exception as e:
-            yield ErrorFrame(error=f"Unknown error occurred: {e}")
+            yield ErrorFrame(error=f"Unknown error occurred: {e}", exception=e)

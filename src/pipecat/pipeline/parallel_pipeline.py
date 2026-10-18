@@ -123,14 +123,15 @@ class ParallelPipeline(BasePipeline):
             TypeError: If any processor list argument is not actually a list.
         """
         await super().setup(setup)
-        for p in self._pipelines:
-            await p.setup(setup)
+        # This pipeline is set up, so let the StartFrame in: each branch holds
+        # it until its own setup is done.
+        self._setup_finished()
+        await self._setup_processors(self._pipelines, setup)
 
     async def cleanup(self):
         """Clean up the parallel pipeline and all its branches."""
         await super().cleanup()
-        for p in self._pipelines:
-            await p.cleanup()
+        await self._cleanup_processors(self._pipelines)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames through all parallel branches with lifecycle coordination.

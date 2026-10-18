@@ -1,0 +1,11 @@
+name: generate_image
+
+# The bot generates an image from a fixed prompt when the harness connects. The
+# turn sends nothing and waits for the image.
+
+scenarios:
+  - name: generate_image
+    turns:
+      - expect:
+          - event: image
+            within_ms: 30000

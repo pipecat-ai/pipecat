@@ -13,6 +13,11 @@ repos:
         entry: uv run ruff format
         language: system
         types: [python]
+      - id: pyright
+        name: pyright
+        entry: uv run pyright
+        language: system
+        types: [python]
       # Keep the CLI's service registry in sync with the source. The imports hook
       # regenerates _imports.py (AST-based, no service SDKs needed) when a service
       # module or the metadata changes; if the result differs, the commit aborts so

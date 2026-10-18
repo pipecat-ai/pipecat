@@ -165,7 +165,6 @@ Validated against `examples/07-interruptible.py`:
 
 ```python
 class ExampleTTSService(TTSService):
-
     def __init__(self, *, api_key: Optional[str] = None, **kwargs):
         super().__init__(**kwargs)
         self._api_key = api_key or os.getenv("SERVICE_API_KEY")
@@ -196,6 +195,7 @@ transport_params = {
     "webrtc": lambda: TransportParams(...),
 }
 
+
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     stt = DeepgramSTTService(...)
     tts = SomeTTSService(...)
@@ -220,6 +220,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         await runner.cancel()
 
     await runner.run()
+
 
 async def bot(runner_args: RunnerArguments):
     """Main bot entry point compatible with Pipecat Cloud."""
@@ -267,6 +268,7 @@ class AudioInfo:
 
     sample_rate: int
     num_channels: int
+
 
 def get_audio_info(self) -> AudioInfo:
     return AudioInfo(sample_rate=48000, num_channels=1)

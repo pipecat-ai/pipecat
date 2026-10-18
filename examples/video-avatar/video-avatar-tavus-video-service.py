@@ -15,7 +15,7 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
@@ -29,6 +29,7 @@ from pipecat.services.google.llm import GoogleLLMService
 from pipecat.services.tavus.video import TavusVideoService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.livekit.transport import LiveKitParams
 from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
@@ -41,6 +42,31 @@ transport_params = {
         audio_out_enabled=True,
     ),
     "daily": lambda: DailyParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+        video_out_enabled=True,
+        video_out_is_live=True,
+        video_out_width=1280,
+        video_out_height=720,
+        audio_out_auto_silence=False,
+        # Send the avatar as a single full-resolution 2 Mbps layer, starting at
+        # 2 Mbps, instead of three simulcast layers: the picture is sharper at the
+        # same bitrate. For the avatar to reach full quality sooner on the user's
+        # side, the client should also set `initialReceiveBitrate` (e.g. 2.5 Mbps)
+        # when it joins.
+        camera_out_send_settings={
+            "maxQuality": "low",
+            "startBitrate": 2_000_000,
+            "encodings": {
+                "low": {
+                    "maxBitrate": 2_000_000,
+                    "maxFramerate": 30,
+                    "scaleResolutionDownBy": 1,
+                }
+            },
+        },
+    ),
+    "livekit": lambda: LiveKitParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
         video_out_enabled=True,
@@ -84,6 +110,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             api_key=os.environ["TAVUS_API_KEY"],
             replica_id=os.environ["TAVUS_REPLICA_ID"],
             session=session,
+            # Start the SFU's estimate at 2.5 Mbps instead of 1 Mbps, so the
+            # replica's video reaches full quality sooner.
+            initial_receive_bitrate=2_500_000,
         )
 
         context = LLMContext()
@@ -114,6 +143,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
                 enable_usage_metrics=True,
             ),
             idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
+            processor_unusable_policy=ProcessorUnusablePolicy.END,
         )
 
         runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)

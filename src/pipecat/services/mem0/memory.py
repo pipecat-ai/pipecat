@@ -12,7 +12,6 @@ historical information.
 """
 
 import asyncio
-import warnings
 from typing import Any
 
 from loguru import logger
@@ -25,6 +24,7 @@ from pipecat.processors.aggregators.llm_context import (
     LLMStandardMessage,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.utils.deprecation import warn_deprecated
 
 try:
     from mem0 import Memory, MemoryClient  # noqa: F401
@@ -58,7 +58,9 @@ class Mem0MemoryService(FrameProcessor):
                     removed in 2.0.0.
 
             system_prompt: Prefix text for memory context messages.
-            add_as_system_message: Whether to add memories as system messages.
+            add_as_system_message: Whether to add memories as instruction
+                messages ("developer" role) rather than user messages.
+                Providers without a "developer" role receive them as "user".
             position: Position to insert memory messages in context.
         """
 
@@ -114,10 +116,10 @@ class Mem0MemoryService(FrameProcessor):
         self.search_limit = params.search_limit
         self.search_threshold = params.search_threshold
         if params.api_version is not None:
-            warnings.warn(
-                "Mem0MemoryService.InputParams.api_version is deprecated and no longer used; "
-                "Mem0 2.0.0 removed the api_version/output_format parameters.",
-                DeprecationWarning,
+            warn_deprecated(
+                "`Mem0MemoryService.InputParams.api_version` is deprecated since 1.4.0 and "
+                "will be removed in 2.0.0. No replacement. It has no effect: Mem0 2.0.0 "
+                "removed the api_version/output_format parameters.",
                 stacklevel=2,
             )
         self.system_prompt = params.system_prompt
@@ -279,9 +281,9 @@ class Mem0MemoryService(FrameProcessor):
         for i, memory in enumerate(memories, 1):
             memory_text += f"{i}. {memory.get('memory', '')}\n\n"
 
-        # Add memories as a system message or user message based on configuration
+        # Add memories as a developer message or user message based on configuration
         memory_message: LLMStandardMessage = (
-            {"role": "system", "content": memory_text}
+            {"role": "developer", "content": memory_text}
             if self.add_as_system_message
             else {"role": "user", "content": memory_text}
         )

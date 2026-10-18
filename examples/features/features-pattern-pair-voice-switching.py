@@ -48,7 +48,7 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame, TTSUpdateSettingsFrame
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
@@ -62,6 +62,7 @@ from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.livekit.transport import LiveKitParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 from pipecat.utils.text.pattern_pair_aggregator import (
     MatchAction,
@@ -76,7 +77,7 @@ load_dotenv(override=True)
 # Define voice IDs
 VOICE_IDS = {
     "narrator": "c45bc5ec-dc68-4feb-8829-6e6b2748095d",  # Narrator voice
-    "female": "71a7ad14-091c-4e8e-a314-022ece01c121",  # Female character voice
+    "female": "f6ff7c0c-e396-40a9-a70b-f7607edb6937",  # Female character voice
     "male": "7cf0e2b1-8daf-4fe4-89ad-f6039398f359",  # Male character voice
 }
 
@@ -88,6 +89,10 @@ transport_params = {
         audio_out_enabled=True,
     ),
     "daily": lambda: DailyParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
+    "livekit": lambda: LiveKitParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
     ),
@@ -142,7 +147,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         settings=CartesiaTTSService.Settings(
             voice=VOICE_IDS["narrator"],
         ),
-        skip_aggregator_types=["voice"],  # Skip voice tags in TTS speech
+        skip_text_types=["voice"],  # Skip voice tags in TTS speech
     )
 
     # System prompt for storytelling with voice switching
@@ -228,6 +233,7 @@ Remember: Use narrator voice for EVERYTHING except the actual quoted dialogue.""
             enable_usage_metrics=True,
         ),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
+        processor_unusable_policy=ProcessorUnusablePolicy.END,
     )
 
     runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)

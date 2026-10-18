@@ -19,6 +19,7 @@ jobs:
   test:
     name: "Unit Tests"
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -31,11 +32,6 @@ jobs:
       - name: Set up Python
         run: uv python install 3.12
 
-      - name: Install system packages
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y portaudio19-dev
-
       - name: Install dependencies
         run: |
           uv sync --group dev \
@@ -44,18 +40,25 @@ jobs:
             --extra aws-nova-sonic \
             --extra azure \
             --extra cli \
+            --extra cloudflare \
             --extra daily \
             --extra deepgram \
             --extra google \
             --extra langchain \
             --extra livekit \
+            --extra mcp \
+            --extra moq \
+            --extra openai \
             --extra pgmq \
             --extra piper \
             --extra redis \
+            --extra rime \
             --extra runner \
             --extra sagemaker \
             --extra sarvam \
+            --extra speechmatics \
             --extra tracing \
+            --extra typesafe \
             --extra websocket
 
       - name: Test with pytest

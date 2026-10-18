@@ -9,17 +9,33 @@
 This module defines the abstract base class for text aggregators that accumulate
 and process text tokens, typically used by TTS services to determine when
 aggregated text should be sent for speech synthesis.
+
+Attributes:
+    AggregationType: Deprecated alias for :class:`TextType`.
+
+        .. deprecated:: 1.13.0
+            Use :class:`TextType` instead.
+            Will be removed in 2.0.0.
 """
 
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import TYPE_CHECKING
+
+from pipecat.utils.deprecation import warn_deprecated
+from pipecat.utils.string import resolve_sentence_tokenizer_language
 
 
-class AggregationType(StrEnum):
-    """Built-in aggregation strings."""
+class TextType(StrEnum):
+    """Built-in text types.
 
+    ``BACKCHANNEL`` is a short acknowledgment the bot says while the user talks,
+    such as "Mm-hmm.". Text can also have a type of its own, such as ``"code"``.
+    """
+
+    BACKCHANNEL = "backchannel"
     SENTENCE = "sentence"
     TOKEN = "token"
     WORD = "word"
@@ -33,13 +49,13 @@ class Aggregation:
     """Data class representing aggregated text and its type.
 
     An Aggregation object is created whenever a stream of text is aggregated by
-    a text aggregator. It contains the aggregated text and a type indicating
-    the nature of the aggregation.
+    a text aggregator. It contains the aggregated text and a type saying what
+    the text represents.
 
     Parameters:
         text: The aggregated text content.
-        type: The type of aggregation the text represents (e.g., 'sentence', 'word', 'token',
-              'my_custom_aggregation').
+        type: What the text represents: a :class:`TextType` such as a sentence or
+            a word, or a custom type such as ``"code"``.
     """
 
     text: str
@@ -67,18 +83,39 @@ class BaseTextAggregator(ABC):
     logic, text manipulation behavior, and state management for interruptions.
     """
 
-    def __init__(self, *, aggregation_type: AggregationType = AggregationType.SENTENCE):
+    def __init__(
+        self,
+        *,
+        aggregation_type: TextType = TextType.SENTENCE,
+        language: str | None = None,
+    ):
         """Initialize the base text aggregator.
 
         Args:
             aggregation_type: The aggregation strategy to use. SENTENCE buffers
                 text until sentence boundaries are detected, TOKEN passes text
                 through immediately, and WORD buffers until word boundaries.
+            language: Language code for sentence detection.
         """
-        self._aggregation_type = AggregationType(aggregation_type)
+        self._aggregation_type = TextType(aggregation_type)
+        self._language = resolve_sentence_tokenizer_language(language)
 
     @property
-    def aggregation_type(self) -> AggregationType:
+    def language(self) -> str:
+        """The normalized language code used for sentence detection."""
+        return self._language
+
+    def set_language(self, language: str | None) -> None:
+        """Select a sentence tokenizer without discarding buffered text.
+
+        Args:
+            language: Language code. Call between generations
+                to keep one language for all text within a generation.
+        """
+        self._language = resolve_sentence_tokenizer_language(language)
+
+    @property
+    def aggregation_type(self) -> TextType:
         """Get the aggregation type for this aggregator.
 
         Returns:
@@ -120,8 +157,8 @@ class BaseTextAggregator(ABC):
         Yields:
             Aggregation objects as they complete. Each Aggregation consists of
             the aggregated text (stripped of leading/trailing whitespace) and
-            a string indicating the type of aggregation (e.g., 'sentence', 'word',
-            'token', 'my_custom_aggregation').
+            a type saying what it represents: a :class:`TextType` such as a
+            sentence or a word, or a custom type such as ``"code"``.
         """
         pass
         # Make this a generator to satisfy type checker
@@ -162,3 +199,19 @@ class BaseTextAggregator(ABC):
         resetting any internal tracking variables.
         """
         pass
+
+
+if TYPE_CHECKING:
+    AggregationType = TextType
+else:
+
+    def __getattr__(name: str):
+        """Resolve the deprecated ``AggregationType`` alias."""
+        if name == "AggregationType":
+            warn_deprecated(
+                "`AggregationType` is deprecated since 1.13.0 and will be removed in 2.0.0. "
+                "Use `TextType` instead.",
+                stacklevel=2,
+            )
+            return TextType
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

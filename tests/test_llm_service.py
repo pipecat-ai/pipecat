@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 import httpx
+from loguru import logger
 
 from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
 from pipecat.adapters.schemas.function_schema import FunctionSchema
@@ -27,7 +28,6 @@ from pipecat.frames.frames import (
     LLMContextFrame,
     LLMSetToolsFrame,
     LLMUpdateSettingsFrame,
-    StartFrame,
 )
 from pipecat.processors.aggregators.llm_context import NOT_GIVEN, LLMContext
 from pipecat.processors.frame_processor import FrameDirection
@@ -39,9 +39,10 @@ from pipecat.services.llm_service import (
 from pipecat.services.settings import LLMSettings
 from pipecat.turns.user_mute.function_call_user_mute_strategy import FunctionCallUserMuteStrategy
 from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionConfig
-from pipecat.utils.async_tool_cancellation import CANCEL_ASYNC_TOOL_NAME
+from pipecat.utils.async_tool_cancellation import cancel_tool_name
 from pipecat.utils.asyncio.task_manager import TaskManager
 from pipecat.utils.errors import ErrorCategory
+from tests.frame_processor_helpers import frame_processor_setup
 
 
 def _expected_missing_tool_message(name: str) -> str:
@@ -66,8 +67,10 @@ class MockLLMService(LLMService):
             user_turn_completion_config=kwargs.pop("user_turn_completion_config", None),
         )
         super().__init__(settings=settings, **kwargs)
-        # Stub the pipeline task so FunctionCallParams can be constructed.
-        self._pipeline_worker = SimpleNamespace(app_resources=None)
+        # Stub the pipeline worker so FunctionCallParams can be constructed.
+        self._setup = frame_processor_setup(
+            pipeline_worker=SimpleNamespace(app_resources=None, worker_runner=None)
+        )
 
 
 class TestUnparameterizedSubclass(unittest.TestCase):
@@ -142,6 +145,76 @@ class TestLLMService(unittest.IsolatedAsyncioTestCase):
         warnings = [c.args[0] for c in mock_logger.warning.call_args_list]
         self.assertTrue(any("not in the currently advertised tool set" in w for w in warnings))
         self.assertFalse(any("just unregistered" in w for w in warnings))
+
+    async def test_handler_that_raises_settles_the_call_with_the_failure(self):
+        """The LLM reads a stand-in message; the frame says what went wrong."""
+        service = MockLLMService()
+        service._call_event_handler = AsyncMock()
+        await self._run_function_calls_inline(service)
+
+        async def explode(params):
+            raise RuntimeError("the API is down")
+
+        service.register_function("weather", explode)
+
+        recorded_frames = []
+
+        async def mock_broadcast_frame(frame_cls, **kwargs):
+            recorded_frames.append(frame_cls(**kwargs))
+
+        service.broadcast_frame = mock_broadcast_frame
+        service.push_error = AsyncMock()
+
+        await service.run_function_calls(
+            [
+                FunctionCallFromLLM(
+                    function_name="weather",
+                    tool_call_id="call_1",
+                    arguments={},
+                    context=LLMContext(),
+                )
+            ]
+        )
+
+        result = recorded_frames[-1]
+        self.assertIsInstance(result, FunctionCallResultFrame)
+        self.assertEqual(result.error, "RuntimeError: the API is down")
+        self.assertEqual(
+            result.result,
+            LLMService.FUNCTION_CALL_ERROR_MESSAGE_TEMPLATE.format(function_name="weather"),
+        )
+
+    async def test_a_call_that_returns_carries_no_error(self):
+        service = MockLLMService()
+        service._call_event_handler = AsyncMock()
+        await self._run_function_calls_inline(service)
+
+        async def handler(params):
+            await params.result_callback({"temperature": 12})
+
+        service.register_function("weather", handler)
+
+        recorded_frames = []
+
+        async def mock_broadcast_frame(frame_cls, **kwargs):
+            recorded_frames.append(frame_cls(**kwargs))
+
+        service.broadcast_frame = mock_broadcast_frame
+
+        await service.run_function_calls(
+            [
+                FunctionCallFromLLM(
+                    function_name="weather",
+                    tool_call_id="call_1",
+                    arguments={},
+                    context=LLMContext(),
+                )
+            ]
+        )
+
+        result = recorded_frames[-1]
+        self.assertEqual(result.result, {"temperature": 12})
+        self.assertIsNone(result.error)
 
     async def test_function_unregistered_between_queue_and_execute(self):
         """Function unregistered between queuing and execution still terminates."""
@@ -350,7 +423,10 @@ class TestLLMService(unittest.IsolatedAsyncioTestCase):
         async def async_tool(params: FunctionCallParams):
             await params.result_callback("done")
 
-        service.register_function("async_tool", async_tool, cancel_on_interruption=False)
+        service.register_function(
+            "async_tool", async_tool, cancel_on_interruption=False, cancellable_by_llm=True
+        )
+        service._sync_registered_tool_handlers(NOT_GIVEN)
 
         recorded_frames = []
 
@@ -362,7 +438,7 @@ class TestLLMService(unittest.IsolatedAsyncioTestCase):
         await service.run_function_calls(
             [
                 FunctionCallFromLLM(
-                    function_name=CANCEL_ASYNC_TOOL_NAME,
+                    function_name=cancel_tool_name("async_tool"),
                     tool_call_id="cancel_1",
                     arguments={"tool_call_id": "call_1"},
                     context=LLMContext(),
@@ -393,7 +469,10 @@ class TestLLMService(unittest.IsolatedAsyncioTestCase):
             )
             await params.result_callback("done")
 
-        service.register_function("async_tool", async_tool, cancel_on_interruption=False)
+        service.register_function(
+            "async_tool", async_tool, cancel_on_interruption=False, cancellable_by_llm=True
+        )
+        service._sync_registered_tool_handlers(NOT_GIVEN)
 
         recorded_frames = []
 
@@ -760,6 +839,80 @@ class TestFunctionCallTimeout(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(frames[-1], FunctionCallResultFrame)
         self.assertEqual(frames[-1].result, {"ok": True})
 
+    async def test_intermediate_result_does_not_disarm_the_deadline(self):
+        """An update isn't a result, so it can't buy the handler more time."""
+        service, frames = self._service()
+        side_effects = []
+        rolled_back = []
+
+        async def progress_then_hang(params: FunctionCallParams):
+            try:
+                await params.result_callback(
+                    "working", properties=FunctionCallResultProperties(is_final=False)
+                )
+                await asyncio.sleep(self.HANDLER_DURATION)
+                side_effects.append(params.tool_call_id)
+                await params.result_callback({"ok": True})
+            except asyncio.CancelledError:
+                rolled_back.append(params.tool_call_id)
+                raise
+
+        service.register_function(
+            "progress",
+            progress_then_hang,
+            cancel_on_interruption=False,
+            timeout_secs=self.TIMEOUT,
+        )
+        await self._run_call(service, "progress")
+        await asyncio.sleep(self.SETTLE)
+
+        self.assertEqual(side_effects, [])
+        self.assertEqual(rolled_back, ["call_1"])
+        self.assertEqual(
+            [type(frame) for frame in frames],
+            [
+                FunctionCallsStartedFrame,
+                FunctionCallInProgressFrame,
+                FunctionCallResultFrame,
+                FunctionCallCancelFrame,
+            ],
+        )
+        self.assertFalse(frames[2].properties.is_final)
+        self.assertTrue(frames[-1].run_llm)
+
+    async def test_a_hanging_async_tool_times_out_without_any_update(self):
+        """Control for the test above, differing only in the missing update."""
+        service, frames = self._service()
+        rolled_back = []
+
+        async def hang(params: FunctionCallParams):
+            try:
+                await asyncio.sleep(self.HANDLER_DURATION)
+                await params.result_callback({"ok": True})
+            except asyncio.CancelledError:
+                rolled_back.append(params.tool_call_id)
+                raise
+
+        service.register_function(
+            "hang",
+            hang,
+            cancel_on_interruption=False,
+            timeout_secs=self.TIMEOUT,
+        )
+        await self._run_call(service, "hang")
+        await asyncio.sleep(self.SETTLE)
+
+        self.assertEqual(rolled_back, ["call_1"])
+        self.assertEqual(
+            [type(frame) for frame in frames],
+            [
+                FunctionCallsStartedFrame,
+                FunctionCallInProgressFrame,
+                FunctionCallCancelFrame,
+            ],
+        )
+        self.assertTrue(frames[-1].run_llm)
+
 
 class TestFunctionCallError(unittest.IsolatedAsyncioTestCase):
     """A handler that raises settles its call instead of holding it open."""
@@ -825,7 +978,6 @@ class TestFunctionCallError(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(errors), 1)
         self.assertIn("kaboom", errors[0]["error_msg"])
         self.assertIsInstance(errors[0]["exception"], RuntimeError)
-        self.assertFalse(errors[0]["fatal"])
 
     async def test_the_exception_is_kept_out_of_the_llm_context(self):
         """Exception text reaches the user through the LLM; the ErrorFrame carries it instead."""
@@ -916,6 +1068,25 @@ class TestAppendSystemInstruction(unittest.IsolatedAsyncioTestCase):
         service.append_system_instruction("G2")
         self.assertEqual(service._settings.system_instruction, "APP\n\nG1\n\nG2")
 
+    def test_composition_is_logged_only_when_it_changes(self):
+        service = self._service("APP")
+        logged: list[str] = []
+        handler_id = logger.add(
+            lambda message: logged.append(str(message)), level="DEBUG", format="{message}"
+        )
+        try:
+            service.append_system_instruction("GUIDE")
+            # Every tool sync recomposes; an unchanged instruction stays quiet.
+            service._compose_system_instruction()
+            service._compose_system_instruction()
+            service.append_system_instruction("MORE")
+        finally:
+            logger.remove(handler_id)
+        composed = [line for line in logged if "System instruction composed" in line]
+        self.assertEqual(len(composed), 2)
+        self.assertIn("APP\n\nGUIDE\n", composed[0])
+        self.assertIn("MORE", composed[1])
+
     async def test_appended_guide_survives_turn_completion_toggle(self):
         service = self._service("APP")
         service.append_system_instruction("GUIDE")
@@ -950,56 +1121,228 @@ class TestAppendSystemInstruction(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(service._settings.system_instruction, "APP\n\nGUIDE")
 
     async def test_appended_guide_survives_async_tool_cancellation(self):
+        async def handler(params):
+            pass
+
         service = self._service("APP")
         service.append_system_instruction("GUIDE")
 
-        # Enabling async tool cancellation composes after the appended guide,
+        # A cancellable tool composes its instructions after the appended guide,
         # without duplicating it.
-        service._setup_async_tool_cancellation()
+        service.register_function(
+            "write_report", handler, cancel_on_interruption=False, cancellable_by_llm=True
+        )
+        service._sync_registered_tool_handlers(NOT_GIVEN)
         composed = service._settings.system_instruction
         self.assertTrue(composed.startswith("APP\n\nGUIDE\n\n"))
         self.assertEqual(composed.count("GUIDE"), 1)
-        self.assertNotEqual(composed, "APP\n\nGUIDE")  # async instructions appended
+        self.assertNotEqual(composed, "APP\n\nGUIDE")
 
 
-class TestAsyncToolCancellationSetup(unittest.IsolatedAsyncioTestCase):
-    """``enable_async_tool_cancellation`` is the whole condition.
-
-    Handlers advertised through an ``LLMContext`` register on the first context
-    frame, after ``start()``, so setup cannot depend on the registry being
-    populated.
-    """
+class TestCancellationToolBehaviour(unittest.IsolatedAsyncioTestCase):
+    """What the built-in tools report and refuse."""
 
     @staticmethod
-    def _start_frame() -> StartFrame:
-        return StartFrame(audio_in_sample_rate=16000, audio_out_sample_rate=24000)
+    async def _handler(params):
+        pass
 
-    async def test_enabled_with_no_handlers_registered(self):
-        service = MockLLMService(enable_async_tool_cancellation=True)
-
-        await service.start(self._start_frame())
-
-        self.assertIn(CANCEL_ASYNC_TOOL_NAME, service._functions)
-        self.assertIn(CANCEL_ASYNC_TOOL_NAME, service.get_llm_adapter().builtin_tools)
-        self.assertIn("cancel_async_tool_call", service._settings.system_instruction)
-
-    async def test_disabled_by_default(self):
+    def _service_with_running_calls(self) -> MockLLMService:
+        """A service holding two in-flight calls, one cancellable and one not."""
         service = MockLLMService()
+        service.register_function(
+            "write_report", self._handler, cancel_on_interruption=False, cancellable_by_llm=True
+        )
+        service.register_function(
+            "get_current_weather", self._handler, cancel_on_interruption=False
+        )
+        service._sync_registered_tool_handlers(NOT_GIVEN)
+        # A None task stands for a call with no live asyncio task behind it, which
+        # is what lets these run without a task manager.
+        for task, (name, call_id) in zip(
+            (None, object()),
+            (("write_report", "call-1"), ("get_current_weather", "call-2")),
+        ):
+            service._function_call_tasks[task] = FunctionCallRunnerItem(  # type: ignore[index]
+                registry_item=service._functions[name],
+                function_name=name,
+                tool_call_id=call_id,
+                arguments={},
+                context=None,
+            )
+        return service
 
-        await service.start(self._start_frame())
+    async def _invoke(self, service, name: str, arguments: dict):
+        results = []
 
-        self.assertNotIn(CANCEL_ASYNC_TOOL_NAME, service._functions)
-        self.assertNotIn(CANCEL_ASYNC_TOOL_NAME, service.get_llm_adapter().builtin_tools)
-        self.assertIsNone(service._settings.system_instruction)
+        async def result_callback(result, *, properties=None):
+            results.append(result)
 
-    async def test_survives_unregistering_the_last_async_tool(self):
-        service = MockLLMService(enable_async_tool_cancellation=True)
-        service.register_function("weather", lambda params: None, cancel_on_interruption=False)
+        await service._functions[name].handler(
+            FunctionCallParams(
+                function_name=name,
+                tool_call_id="builtin-call",
+                arguments=arguments,
+                llm=service,
+                pipeline_worker=service.pipeline_worker,
+                context=None,
+                result_callback=result_callback,
+                app_resources=None,
+            )
+        )
+        return results[0]
 
-        await service.start(self._start_frame())
-        service.unregister_function("weather")
+    async def test_cancelling_falls_back_to_the_only_running_call(self):
+        # Omitting tool_call_id with one call running means that call, which is
+        # why the schema doesn't ask for it.
+        service = self._service_with_running_calls()
+        result = await self._invoke(service, cancel_tool_name("write_report"), {})
+        self.assertEqual(result["cancelled"], "call-1")
 
-        self.assertIn(CANCEL_ASYNC_TOOL_NAME, service._functions)
+    async def test_cancelling_by_tool_call_id(self):
+        service = self._service_with_running_calls()
+        result = await self._invoke(
+            service, cancel_tool_name("write_report"), {"tool_call_id": "call-1"}
+        )
+        self.assertEqual(result["cancelled"], "call-1")
+
+    async def test_refused_when_no_such_call_is_running(self):
+        service = self._service_with_running_calls()
+        service._function_call_tasks.clear()
+        result = await self._invoke(service, cancel_tool_name("write_report"), {})
+        self.assertIsNone(result["cancelled"])
+
+    async def test_ambiguous_call_asks_for_a_tool_call_id(self):
+        service = self._service_with_running_calls()
+        # A second call of the same tool: the tool name no longer picks one out.
+        service._function_call_tasks[object()] = FunctionCallRunnerItem(  # type: ignore[index]
+            registry_item=service._functions["write_report"],
+            function_name="write_report",
+            tool_call_id="call-3",
+            arguments={},
+            context=None,
+        )
+        result = await self._invoke(service, cancel_tool_name("write_report"), {})
+        self.assertIsNone(result["cancelled"])
+        self.assertEqual({r["tool_call_id"] for r in result["running"]}, {"call-1", "call-3"})
+
+    async def test_a_call_covered_only_by_the_deprecated_flag_is_cancelled(self):
+        # The flag advertises a cancel tool for every async tool, so the same
+        # calls it advertises against have to be the ones it can stop.
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            service = MockLLMService(enable_async_tool_cancellation=True)
+        service.register_function("write_report", self._handler, cancel_on_interruption=False)
+        service._sync_registered_tool_handlers(NOT_GIVEN)
+        service._function_call_tasks[None] = FunctionCallRunnerItem(  # type: ignore[index]
+            registry_item=service._functions["write_report"],
+            function_name="write_report",
+            tool_call_id="call-1",
+            arguments={},
+            context=None,
+        )
+
+        result = await self._invoke(service, cancel_tool_name("write_report"), {})
+
+        self.assertEqual(result["cancelled"], "call-1")
+
+
+class TestAsyncToolCancellationExposure(unittest.IsolatedAsyncioTestCase):
+    """A cancellable tool brings its own cancel tool, named for it."""
+
+    @staticmethod
+    async def _handler(params):
+        pass
+
+    def _sync(self, service):
+        service._sync_registered_tool_handlers(NOT_GIVEN)
+
+    def _advertised(self, service) -> set:
+        return set(service.get_llm_adapter().builtin_tools)
+
+    def test_a_cancellable_tool_gets_its_own_cancel_tool(self):
+        service = MockLLMService()
+        service.register_function(
+            "write_report", self._handler, cancel_on_interruption=False, cancellable_by_llm=True
+        )
+        self._sync(service)
+        self.assertEqual(self._advertised(service), {cancel_tool_name("write_report")})
+        self.assertIn(cancel_tool_name("write_report"), service._functions)
+
+    def test_built_in_tools_are_sent_alone_when_there_are_no_others(self):
+        service = MockLLMService()
+        service.register_function(
+            "write_report", self._handler, cancel_on_interruption=False, cancellable_by_llm=True
+        )
+        self._sync(service)
+        converted = service.get_llm_adapter().from_standard_tools(NOT_GIVEN)
+        self.assertEqual(
+            [t["function"]["name"] for t in converted], [cancel_tool_name("write_report")]
+        )
+
+    def test_the_cancel_tool_does_not_ask_for_a_tool_call_id(self):
+        # Requiring it would make every cancellation go looking for an id first,
+        # including the common case of one call running.
+        service = MockLLMService()
+        service.register_function(
+            "write_report", self._handler, cancel_on_interruption=False, cancellable_by_llm=True
+        )
+        self._sync(service)
+        schema = service._adapter.builtin_tools[cancel_tool_name("write_report")]
+        self.assertEqual(schema.required, [])
+        self.assertIn("tool_call_id", schema.properties)
+
+    def test_a_tool_that_did_not_opt_in_gets_none(self):
+        service = MockLLMService()
+        service.register_function(
+            "write_report", self._handler, cancel_on_interruption=False, cancellable_by_llm=True
+        )
+        service.register_function(
+            "get_current_weather", self._handler, cancel_on_interruption=False
+        )
+        self._sync(service)
+        # The weather tool has no cancel tool, so there is nothing to call against it.
+        self.assertNotIn(cancel_tool_name("get_current_weather"), self._advertised(service))
+
+    def test_nothing_advertised_without_a_cancellable_tool(self):
+        service = MockLLMService()
+        service.register_function(
+            "get_current_weather", self._handler, cancel_on_interruption=False
+        )
+        self._sync(service)
+        self.assertEqual(self._advertised(service), set())
+
+    def test_withdrawn_when_the_cancellable_tool_goes(self):
+        service = MockLLMService()
+        service.register_function(
+            "write_report", self._handler, cancel_on_interruption=False, cancellable_by_llm=True
+        )
+        self._sync(service)
+        service.unregister_function("write_report")
+        self._sync(service)
+        self.assertEqual(self._advertised(service), set())
+
+    def test_cancellable_by_llm_ignored_on_a_synchronous_tool(self):
+        # There is no moment at which the LLM could cancel a call it is waiting on.
+        service = MockLLMService()
+        service.register_function("lookup", self._handler, cancellable_by_llm=True)
+        self._sync(service)
+        self.assertFalse(service._functions["lookup"].cancellable_by_llm)
+        self.assertEqual(self._advertised(service), set())
+
+    def test_deprecated_flag_covers_every_async_tool(self):
+        with self.assertWarns(DeprecationWarning):
+            service = MockLLMService(enable_async_tool_cancellation=True)
+        service.register_function(
+            "get_current_weather", self._handler, cancel_on_interruption=False
+        )
+        self._sync(service)
+        self.assertIn(cancel_tool_name("get_current_weather"), self._advertised(service))
+
+    def test_deprecated_flag_needs_an_async_tool(self):
+        with self.assertWarns(DeprecationWarning):
+            service = MockLLMService(enable_async_tool_cancellation=True)
+        self._sync(service)
+        self.assertEqual(self._advertised(service), set())
 
 
 class TestAsyncToolInstructions(unittest.IsolatedAsyncioTestCase):
@@ -1033,11 +1376,15 @@ class TestAsyncToolInstructions(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("ASYNC TOOLS:", self._composed(service))
         self.assertEqual(self._composed(service), "BASE")
 
-    def test_absent_for_the_cancellation_tool_alone(self):
-        # The built-in registers as synchronous, so it never brings the guidance
-        # in on its own.
-        service = MockLLMService(system_instruction="BASE", enable_async_tool_cancellation=True)
-        service._setup_async_tool_cancellation()
+    def test_absent_for_a_cancel_tool_alone(self):
+        # A cancel tool registers as synchronous, so it never brings the async
+        # guidance in on its own.
+        service = MockLLMService(system_instruction="BASE")
+        service.register_function(
+            "write_report", self._handler, cancel_on_interruption=False, cancellable_by_llm=True
+        )
+        service._sync_registered_tool_handlers(NOT_GIVEN)
+        service.unregister_function("write_report")
         service._sync_registered_tool_handlers(NOT_GIVEN)
         self.assertNotIn("ASYNC TOOLS:", self._composed(service))
 

@@ -22,11 +22,13 @@ from pipecat.metrics.metrics import (
     SmartTurnMetricsData,
     STTUsageMetricsData,
     TTFAMetricsData,
+    TTFATMetricsData,
     TTFBMetricsData,
     TTSUsageMetricsData,
     TurnMetricsData,
 )
 from pipecat.observers.base_observer import BaseObserver, FramePushed
+from pipecat.utils.deprecation import warn_deprecated
 
 
 class MetricsLogObserver(BaseObserver):
@@ -36,6 +38,7 @@ class MetricsLogObserver(BaseObserver):
 
     - TTFBMetricsData (Time To First Byte)
     - TTFAMetricsData (Time To First Audio)
+    - TTFATMetricsData (Time To First Answer Token)
     - ProcessingMetricsData (General processing time)
     - LLMUsageMetricsData (Token usage statistics)
     - STTUsageMetricsData (Speech-to-Text audio seconds)
@@ -72,20 +75,16 @@ class MetricsLogObserver(BaseObserver):
                 metrics types will be logged. If None, all metrics are logged.
             **kwargs: Additional arguments passed to parent class.
         """
-        super().__init__(**kwargs)
+        super().__init__(observe_every_push=False, **kwargs)
         # Normalize deprecated types in include_metrics
         if include_metrics and SmartTurnMetricsData in include_metrics:
-            import warnings
-
-            warnings.warn(
-                "SmartTurnMetricsData is deprecated in include_metrics, "
-                "use TurnMetricsData instead.",
-                DeprecationWarning,
+            warn_deprecated(
+                "`include_metrics=[SmartTurnMetricsData]` is deprecated since 0.0.104 and "
+                "will be removed in 2.0.0. Use `TurnMetricsData` instead.",
                 stacklevel=2,
             )
             include_metrics = (include_metrics - {SmartTurnMetricsData}) | {TurnMetricsData}
         self._include_metrics = include_metrics
-        self._frames_seen = set()
 
     async def on_push_frame(self, data: FramePushed):
         """Handle frame push events and log metrics frames.
@@ -101,12 +100,6 @@ class MetricsLogObserver(BaseObserver):
 
         if not isinstance(frame, MetricsFrame):
             return
-
-        # Skip frames we've already seen to avoid duplicate logging
-        if frame.id in self._frames_seen:
-            return
-
-        self._frames_seen.add(frame.id)
 
         time_sec = timestamp / 1_000_000_000
 
@@ -152,6 +145,11 @@ class MetricsLogObserver(BaseObserver):
             logger.debug(
                 f"📊 {processor_info} TTFA{model_info}: {metrics_data.ttfa}s "
                 f"({metrics_data.leading_silence}s leading silence) at {time_sec:.3f}s"
+            )
+        elif isinstance(metrics_data, TTFATMetricsData):
+            logger.debug(
+                f"📊 {processor_info} TTFAT{model_info}: {metrics_data.ttfat}s "
+                f"({metrics_data.thinking_time}s thinking) at {time_sec:.3f}s"
             )
         elif isinstance(metrics_data, ProcessingMetricsData):
             logger.debug(

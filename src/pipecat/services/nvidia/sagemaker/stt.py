@@ -32,16 +32,20 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     InterimTranscriptionFrame,
-    StartFrame,
     TranscriptionFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.aws.sagemaker.bidi_client import SageMakerBidiClient
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
+from pipecat.services.aws.sagemaker.bidi_client import (
+    SageMakerBidiClient,
+    SageMakerBidiSessionError,
+    classify_sagemaker_bidi_error,
+)
 from pipecat.services.settings import STTSettings
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
+from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 from pipecat.utils.types import assert_given
@@ -117,6 +121,11 @@ class NvidiaSageMakerSTTService(STTService):
         self._region = region
         self._client: SageMakerBidiClient | None = None
         self._response_task: asyncio.Task | None = None
+        self._warned_no_session = False
+
+    def _classify_error(self, exception: Exception) -> ErrorCategory | None:
+        """Classify SageMaker session failures, which carry no HTTP status attribute."""
+        return classify_sagemaker_bidi_error(exception)
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -128,13 +137,13 @@ class NvidiaSageMakerSTTService(STTService):
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
-    async def start(self, frame: StartFrame):
-        """Start the STT service and connect to the SageMaker endpoint.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
 
         Args:
-            frame: The start frame containing initialization parameters.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         await self._connect()
 
     async def stop(self, frame: EndFrame):
@@ -179,6 +188,9 @@ class NvidiaSageMakerSTTService(STTService):
                 await self._client.send_json({"type": "input_audio_buffer.commit"})
             except Exception as e:
                 yield ErrorFrame(error=f"Unknown error occurred: {e}")
+        elif not self._warned_no_session:
+            self._warned_no_session = True
+            logger.warning(f"{self}: no active SageMaker session, audio is being dropped")
         yield None
 
     # ── VAD integration ───────────────────────────────────────────────────────
@@ -226,10 +238,18 @@ class NvidiaSageMakerSTTService(STTService):
             await self._open_client_session()
             self._response_task = self.create_task(self._process_responses())
             logger.debug(f"{self}: connected")
+            self._warned_no_session = False
             await self._call_event_handler("on_connected")
         except Exception as e:
-            logger.error(f"{self}: connection error: {e}")
             self._client = None
+            # Only an error from NIM triggers a reconnect, and none can arrive
+            # without a session, so the service can't transcribe any more of
+            # this call.
+            await self.push_error(
+                error_msg=f"Unknown error occurred: {e}",
+                exception=e,
+                force_treat_as_permanent=isinstance(e, SageMakerBidiSessionError),
+            )
             await self._call_event_handler("on_connection_error", f"{e}")
 
     async def _disconnect(self):
@@ -246,8 +266,10 @@ class NvidiaSageMakerSTTService(STTService):
     async def _send_session_config(self):
         """Send transcription_session.update to configure audio format and params.
 
-        Specifies ``"model": "nemotron-asr-streaming"`` in ``input_audio_transcription`` so
-        NIM selects the correct Nemotron ASR Streaming model.
+        ``input_audio_transcription.model`` carries ``Settings.model``, which NIM matches
+        against its served model names — what ``--list-models`` returns, not the container
+        name. The default, ``cache-aware-parakeet-rnnt-en-US-asr-streaming-sortformer``, is
+        the served name of the ``nemotron-asr-streaming`` container.
         """
         logger.debug(
             f"{self}: sending session config,"

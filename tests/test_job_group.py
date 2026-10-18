@@ -16,14 +16,18 @@ from pipecat.bus import (
 from pipecat.pipeline.job_context import (
     JobError,
     JobEvent,
+    JobGroup,
     JobGroupError,
     JobGroupEvent,
+    JobGroupParams,
+    JobParams,
     JobStatus,
 )
 from pipecat.registry import WorkerRegistry
 from pipecat.registry.types import WorkerReadyData
 from pipecat.utils.asyncio.task_manager import TaskManager
 from pipecat.workers.base_worker import BaseWorker
+from pipecat.workers.runner import WorkerRunner
 
 
 class StubTask(BaseWorker):
@@ -118,7 +122,9 @@ async def create_test_env():
 
 async def setup_task(bus, registry, task):
     """Subscribe a task to the bus and register it as ready."""
-    await task.attach(registry=registry, bus=bus)
+    await task.attach(
+        registry=registry, bus=bus, worker_runner=WorkerRunner(bus=bus, handle_sigint=False)
+    )
     await task.setup(bus.task_manager)
     await bus.subscribe(task)
     await registry.register(WorkerReadyData(worker_name=task.name, runner="test-runner"))
@@ -153,7 +159,9 @@ class TestJobGroupContext(unittest.IsolatedAsyncioTestCase):
         await setup_task(self.bus, self.registry, w1)
         await setup_task(self.bus, self.registry, w2)
 
-        async with parent.job_group("w1", "w2", payload={"work": True}) as tg:
+        async with parent.job_group(
+            "w1", "w2", params=JobGroupParams(payload={"work": True})
+        ) as tg:
             pass
 
         self.assertEqual(tg.responses, {"w1": {"a": 1}, "w2": {"b": 2}})
@@ -168,7 +176,7 @@ class TestJobGroupContext(unittest.IsolatedAsyncioTestCase):
         w1 = JobWorkerTask("w1", response={"ok": True})
         await setup_task(self.bus, self.registry, w1)
 
-        async with parent.job_group("w1", payload={"data": 1}):
+        async with parent.job_group("w1", params=JobGroupParams(payload={"data": 1})):
             pass
 
         request_msgs = [m for m in sent if isinstance(m, BusJobRequestMessage)]
@@ -202,7 +210,7 @@ class TestJobGroupContext(unittest.IsolatedAsyncioTestCase):
         await setup_task(self.bus, self.registry, worker)
 
         with self.assertRaises(JobGroupError) as ctx:
-            async with parent.job_group("worker", timeout=0.05):
+            async with parent.job_group("worker", params=JobGroupParams(timeout=0.05)):
                 pass
 
         self.assertIn("timeout", str(ctx.exception))
@@ -214,7 +222,7 @@ class TestJobGroupContext(unittest.IsolatedAsyncioTestCase):
 
         # "ghost" is never registered, so the ready-wait times out
         with self.assertRaises(JobGroupError) as ctx:
-            async with parent.job_group("ghost", timeout=0.05):
+            async with parent.job_group("ghost", params=JobGroupParams(timeout=0.05)):
                 pass
 
         self.assertIn("not ready", str(ctx.exception))
@@ -344,7 +352,7 @@ class TestJobGroupContext(unittest.IsolatedAsyncioTestCase):
         await setup_task(self.bus, self.registry, worker)
 
         events = []
-        async with parent.job_group("worker", payload={"work": True}) as tg:
+        async with parent.job_group("worker", params=JobGroupParams(payload={"work": True})) as tg:
             async for event in tg:
                 events.append(event)
 
@@ -492,6 +500,44 @@ class TestJobGroupContext(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(received[0], BusJobResponseUrgentMessage)
 
 
+class TestRequestCancelJobGroup(unittest.IsolatedAsyncioTestCase):
+    """External cancellation requests, which ``cancellable`` governs."""
+
+    async def _worker(self):
+        bus, tm, registry = await create_test_env()
+        parent = BaseWorker("parent")
+        await setup_task(bus, registry, parent)
+        return parent
+
+    async def test_cancels_a_cancellable_group(self):
+        parent = await self._worker()
+        parent._job_groups["j1"] = JobGroup(job_id="j1", worker_names=["w1"], cancellable=True)
+
+        self.assertTrue(await parent.request_cancel_job_group("j1", reason="user"))
+        self.assertNotIn("j1", parent._job_groups)
+
+    async def test_refuses_a_non_cancellable_group(self):
+        parent = await self._worker()
+        parent._job_groups["j1"] = JobGroup(job_id="j1", worker_names=["w1"], cancellable=False)
+
+        self.assertFalse(await parent.request_cancel_job_group("j1"))
+        self.assertIn("j1", parent._job_groups)
+
+    async def test_refuses_an_unknown_group(self):
+        parent = await self._worker()
+
+        self.assertFalse(await parent.request_cancel_job_group("nope"))
+
+    async def test_worker_initiated_cancel_ignores_cancellable(self):
+        """Shutdown, timeout and cancel_on_error go straight to cancel_job_group."""
+        parent = await self._worker()
+        parent._job_groups["j1"] = JobGroup(job_id="j1", worker_names=["w1"], cancellable=False)
+
+        await parent.cancel_job_group("j1", reason="timeout")
+
+        self.assertNotIn("j1", parent._job_groups)
+
+
 class TestJobContext(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.bus, self.tm, self.registry = await create_test_env()
@@ -507,7 +553,7 @@ class TestJobContext(unittest.IsolatedAsyncioTestCase):
         worker = JobWorkerTask("worker", response={"result": 42})
         await setup_task(self.bus, self.registry, worker)
 
-        async with parent.job("worker", payload={"x": 1}) as t:
+        async with parent.job("worker", params=JobParams(payload={"x": 1})) as t:
             pass
 
         self.assertEqual(t.response, {"result": 42})
@@ -683,8 +729,8 @@ class TestJobContext(unittest.IsolatedAsyncioTestCase):
         # track job IDs and cancel only the ones started here
         try:
             job_ids = []
-            job_ids.append(await parent.request_job("w1", payload={"job": 1}))
-            job_ids.append(await parent.request_job("w2", payload={"job": 2}))
+            job_ids.append(await parent.request_job("w1", params=JobParams(payload={"job": 1})))
+            job_ids.append(await parent.request_job("w2", params=JobParams(payload={"job": 2})))
             self.assertEqual(len(parent.job_groups), 2)
             raise asyncio.CancelledError()
         except asyncio.CancelledError:
@@ -709,7 +755,7 @@ class TestJobContext(unittest.IsolatedAsyncioTestCase):
         worker = SlowWorkerTask("worker")
         await setup_task(self.bus, self.registry, worker)
 
-        job_id = await parent.request_job("worker", payload={"job": 1})
+        job_id = await parent.request_job("worker", params=JobParams(payload={"job": 1}))
 
         # Wait for the worker to start executing
         await asyncio.wait_for(worker.started.wait(), timeout=2.0)

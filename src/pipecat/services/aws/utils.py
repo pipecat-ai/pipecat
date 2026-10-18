@@ -21,8 +21,6 @@ import struct
 import urllib.parse
 from dataclasses import dataclass
 
-from loguru import logger
-
 
 @dataclass
 class AWSCredentials:
@@ -50,18 +48,19 @@ def resolve_credentials(
     aws_session_token: str | None = None,
     region: str | None = None,
 ) -> AWSCredentials:
-    """Resolve AWS credentials using the standard fallback chain.
+    """Resolve AWS credentials from explicit parameters and the environment.
 
     Resolution order:
+
     1. Explicit parameters
     2. Environment variables (``AWS_ACCESS_KEY_ID``, ``AWS_SECRET_ACCESS_KEY``,
        ``AWS_SESSION_TOKEN``, ``AWS_REGION``)
-    3. Default botocore credential chain (instance profiles, IRSA,
-       ECS task roles, SSO, credential files, etc.)
 
-    The botocore fallback (step 3) is only attempted when *both* access key and
-    secret key are still unresolved after steps 1-2.  This avoids replacing
-    explicitly provided credentials with ambient ones.
+    When neither supplies keys, ``access_key`` and ``secret_key`` are ``None``
+    and the caller leaves credentials to an AWS session's default provider
+    chain (instance profiles, IRSA, ECS task roles, SSO, credential files,
+    etc.). A session renews the temporary credentials that chain hands out, so
+    they aren't resolved here once and kept: they would expire.
 
     Args:
         aws_access_key_id: Explicit access key ID.
@@ -70,37 +69,14 @@ def resolve_credentials(
         region: Explicit AWS region.
 
     Returns:
-        An :class:`AWSCredentials` instance.  ``access_key`` and
-        ``secret_key`` may still be ``None`` if no credentials could be
-        resolved (the caller should raise an appropriate error).
+        An :class:`AWSCredentials` instance. ``access_key`` and ``secret_key``
+        are ``None`` when neither the parameters nor the environment supply
+        them.
     """
     access_key = aws_access_key_id or os.getenv("AWS_ACCESS_KEY_ID")
     secret_key = aws_secret_access_key or os.getenv("AWS_SECRET_ACCESS_KEY")
     session_token = aws_session_token or os.getenv("AWS_SESSION_TOKEN")
     resolved_region = region or os.getenv("AWS_REGION", "us-east-1")
-
-    # Fall back to the botocore credential provider chain (pod roles, IRSA,
-    # instance profiles, SSO, credential files, etc.) when explicit
-    # credentials were not supplied.
-    if not access_key and not secret_key:
-        try:
-            import botocore.session
-
-            session = botocore.session.Session()
-            session.set_config_variable("region", resolved_region)
-            creds = session.get_credentials()
-            if creds:
-                frozen = creds.get_frozen_credentials()
-                access_key = access_key or frozen.access_key
-                secret_key = secret_key or frozen.secret_key
-                session_token = session_token or frozen.token
-        except ImportError:
-            logger.debug(
-                "botocore not available for credential chain fallback; "
-                "install pipecat-ai[aws] for full credential support."
-            )
-        except Exception as e:
-            logger.warning(f"Failed to resolve AWS credentials via botocore chain: {e}")
 
     return AWSCredentials(
         access_key=access_key,

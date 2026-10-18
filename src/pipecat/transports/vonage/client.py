@@ -26,7 +26,6 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     OutputAudioRawFrame,
     OutputImageRawFrame,
-    StartFrame,
     TranscriptionFrame,
     UserAudioRawFrame,
     UserImageRawFrame,
@@ -41,6 +40,7 @@ from pipecat.transports.vonage.utils import (
     process_audio,
 )
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
+from pipecat.utils.shared import acquires, releases
 from pipecat.utils.time import time_now_iso8601
 
 try:
@@ -82,6 +82,19 @@ except ModuleNotFoundError as e:
     raise ImportError(f"Missing module: {e}") from e
 
 
+class AudioInFrameSource(StrEnum):
+    """Select which incoming audio source frames the transport emits.
+
+    - ``INDIVIDUAL`` emits a ``UserAudioRawFrame`` for each subscribed participant.
+    - ``MIXED`` emits the session-wide mixed ``InputAudioRawFrame``.
+    - ``BOTH`` emits individual and mixed audio frames.
+    """
+
+    INDIVIDUAL = "individual"
+    MIXED = "mixed"
+    BOTH = "both"
+
+
 class VonageVideoConnectorTransportParams(TransportParams):
     """Parameters for the Vonage Video Connector transport.
 
@@ -90,6 +103,8 @@ class VonageVideoConnectorTransportParams(TransportParams):
         publisher_enable_opus_dtx: Whether to enable OPUS DTX for publisher audio.
         session_enable_migration: Whether to enable session migration.
         audio_in_auto_subscribe: Whether to automatically subscribe to audio streams.
+        audio_in_frame_source: Audio source frames to emit: individual, mixed, or both.
+            Defaults to mixed.
         video_in_auto_subscribe: Whether to automatically subscribe to video streams.
         captions_in_auto_subscribe: Whether to automatically subscribe to captions streams.
         video_in_preferred_width: Preferred width for video input capture.
@@ -103,6 +118,7 @@ class VonageVideoConnectorTransportParams(TransportParams):
     publisher_enable_opus_dtx: bool = False
     session_enable_migration: bool = False
     audio_in_auto_subscribe: bool = True
+    audio_in_frame_source: AudioInFrameSource = AudioInFrameSource.MIXED
     video_in_auto_subscribe: bool = False
     video_connector_log_level: str = "INFO"
     video_in_preferred_resolution: tuple[int, int] | None = None
@@ -323,16 +339,35 @@ class VonageClient:
             self._video_out_color_format_vonage
         ]
 
+    @property
+    def _wants_mixed_audio(self) -> bool:
+        """Whether the session mixed audio callback should be registered."""
+        return self._params.audio_in_enabled and self._params.audio_in_frame_source in (
+            AudioInFrameSource.MIXED,
+            AudioInFrameSource.BOTH,
+        )
+
+    @property
+    def _wants_individual_audio(self) -> bool:
+        """Whether the per-subscriber audio callback should be registered."""
+        return self._params.audio_in_enabled and self._params.audio_in_frame_source in (
+            AudioInFrameSource.INDIVIDUAL,
+            AudioInFrameSource.BOTH,
+        )
+
+    @acquires("client")
     async def setup(self, setup: FrameProcessorSetup) -> None:
         """Setup the client with task manager and event queues.
 
         Args:
             setup: The frame processor setup configuration.
         """
-        if self._task_manager:
-            return
-
         self._task_manager = setup.task_manager
+
+        if self._params.audio_in_sample_rate is None:
+            self._audio_in_sample_rate = setup.audio_in_sample_rate
+        if self._params.audio_out_sample_rate is None:
+            self._audio_out_sample_rate = setup.audio_out_sample_rate
 
         # tasks from the generic event queue should allow concurrent processing as they
         # may await on new events posted to the same queue
@@ -355,18 +390,33 @@ class VonageClient:
 
     async def cleanup(self) -> None:
         """Cleanup the client, disconnecting if necessary."""
-        if self._connected:
-            await self.disconnect()
+        try:
+            if self._connected:
+                await self.disconnect()
 
-        if self._event_task and self._task_manager:
-            await self._task_manager.cancel_task(self._event_task)
-            self._event_task = None
-        if self._audio_task and self._task_manager:
-            await self._task_manager.cancel_task(self._audio_task)
-            self._audio_task = None
-        if self._video_task and self._task_manager:
-            await self._task_manager.cancel_task(self._video_task)
-            self._video_task = None
+            if self._event_task and self._task_manager:
+                await self._task_manager.cancel_task(self._event_task)
+                self._event_task = None
+            if self._audio_task and self._task_manager:
+                await self._task_manager.cancel_task(self._audio_task)
+                self._audio_task = None
+            if self._video_task and self._task_manager:
+                await self._task_manager.cancel_task(self._video_task)
+                self._video_task = None
+        finally:
+            # Released even when disconnecting raised, which is the case where
+            # the thread is most likely still blocked in the SDK.
+            await self._release_executor()
+
+    @releases("client")
+    async def _release_executor(self) -> None:
+        """Release the thread the SDK's blocking calls run on.
+
+        An input and an output transport share this client and both clean it up,
+        and the last of them is the one that actually disconnects, so the thread
+        it disconnects on has to outlive the others.
+        """
+        self._executor.shutdown(wait=False)
 
     def add_listener(self, listener: VonageClientListener) -> int:
         """Add a listener to the Vonage client.
@@ -389,12 +439,8 @@ class VonageClient:
         """
         self._listeners.pop(listener_id, None)
 
-    async def connect(self, frame: StartFrame | None = None) -> None:
-        """Connect to the Vonage session.
-
-        Args:
-            frame: Optional StartFrame to configure audio sample rates if not already set.
-        """
+    async def connect(self) -> None:
+        """Connect to the Vonage session."""
         logger.info(f"Connecting with session string {self._session_id}")
 
         if self._disconnecting_future is not None:
@@ -415,13 +461,6 @@ class VonageClient:
             await self._connecting_future
             self._connection_counter += 1
             return
-
-        # Set audio sample rates from StartFrame if params are not set
-        if frame:
-            if self._params.audio_in_sample_rate is None:
-                self._audio_in_sample_rate = frame.audio_in_sample_rate
-            if self._params.audio_out_sample_rate is None:
-                self._audio_out_sample_rate = frame.audio_out_sample_rate
 
         # this future will allow concurrent calls to connect to wait until the first connect call is done
         self._connecting_future = self._get_event_loop().create_future()
@@ -671,6 +710,12 @@ class VonageClient:
             self._sdk_event_cb_to_loop(async_cb())
 
         def connect_proc() -> None:
+            # the connector rejects None, so the callback is left out entirely when unused
+            session_audio_kwargs: dict[str, Any] = (
+                {"on_audio_data_cb": self._on_session_audio_data_cb}
+                if self._wants_mixed_audio
+                else {}
+            )
             if not self._client.connect(
                 application_id=self._application_id,
                 session_id=self._session_id,
@@ -702,8 +747,8 @@ class VonageClient:
                 on_disconnected_cb=on_session_disconnected_cb,
                 on_stream_received_cb=self._on_stream_received_cb,
                 on_stream_dropped_cb=self._on_stream_dropped_cb,
-                on_audio_data_cb=self._on_session_audio_data_cb,
                 on_ready_for_audio_cb=audio_ready_cb,
+                **session_audio_kwargs,
             ):
                 logger.error(f"Could not connect to {self._session_id}")
                 raise VonageException("Could not connect to session")
@@ -790,6 +835,11 @@ class VonageClient:
             self._sdk_event_cb_to_loop(async_cb())
 
         async def process() -> None:
+            subscriber_audio_kwargs: dict[str, Any] = (
+                {"on_audio_data_cb": self._on_subscriber_audio_data_cb}
+                if self._wants_individual_audio
+                else {}
+            )
             logger.info(
                 f"Subscribing to stream {stream.id} audio={params.subscribe_to_audio} "
                 f"video={params.subscribe_to_video} captions={params.subscribe_to_captions} "
@@ -816,8 +866,8 @@ class VonageClient:
                 on_connected_cb=on_connected_cb,
                 on_disconnected_cb=on_subscriber_disconnected_cb,
                 on_render_frame_cb=self._on_subscriber_video_data_cb,
-                on_audio_data_cb=self._on_subscriber_audio_data_cb,
                 on_caption_text_cb=self._on_subscriber_caption_text_cb,
+                **subscriber_audio_kwargs,
             ):
                 subscribed_future.cancel()
                 raise VonageException(f"Could not subscribe to stream {stream.id}")

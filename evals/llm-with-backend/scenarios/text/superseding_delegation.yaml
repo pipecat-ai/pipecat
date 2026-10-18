@@ -1,0 +1,5 @@
+name: superseding_delegation
+judge: !include ../../../release/scenarios/judge_text.yaml
+scenarios:
+  - name: text
+    turns: !include ../turns/superseding_delegation.yaml

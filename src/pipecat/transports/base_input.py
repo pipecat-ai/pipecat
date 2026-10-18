@@ -17,7 +17,7 @@ from loguru import logger
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
-    FilterUpdateSettingsFrame,
+    FilterControlFrame,
     Frame,
     InputAudioRawFrame,
     InputImageRawFrame,
@@ -25,8 +25,10 @@ from pipecat.frames.frames import (
     StartFrame,
     StopFrame,
     SystemFrame,
+    UserImageRequestFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.pipeline.capabilities import BotCapabilities
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 from pipecat.transports.base_transport import TransportParams
 from pipecat.utils.deprecation import deprecated
 
@@ -52,7 +54,7 @@ class BaseInputTransport(FrameProcessor):
 
         self._params = params
 
-        # Input sample rate. It will be initialized on StartFrame.
+        # Input sample rate. It will be initialized during setup.
         self._sample_rate = 0
 
         # Track bot speaking state for interruption logic
@@ -74,6 +76,12 @@ class BaseInputTransport(FrameProcessor):
         # receiving frames from the transport but we really don't want to push
         # them downstream until we get another `StartFrame`.
         self._paused = False
+
+        unsupported = [s for s in params.video_in_sources if not self._supports_video_in_source(s)]
+        if unsupported:
+            logger.warning(
+                f"{self}: video_in_sources {unsupported} aren't supported and will be ignored."
+            )
 
     def enable_audio_in_stream_on_start(self, enabled: bool) -> None:
         """Enable or disable audio streaming on transport start.
@@ -116,6 +124,80 @@ class BaseInputTransport(FrameProcessor):
         """
         return self._sample_rate
 
+    async def _answer_image_requests(self, requests: list[UserImageRequestFrame], error: str):
+        """Complete image requests that no frame will answer, with an error.
+
+        The function call that made each request would otherwise never finish.
+
+        Args:
+            requests: The image requests to complete.
+            error: Why no frame will answer them.
+        """
+        if not requests:
+            return
+        logger.warning(f"{self}: {error}")
+        for request in requests:
+            if request.result_callback:
+                await request.result_callback({"error": error})
+
+    def _supports_video_in_source(self, video_source: str) -> bool:
+        """Whether this transport captures a video source listed in ``video_in_sources``.
+
+        Transports that support ``video_in_sources`` override this. A listed
+        source this returns ``False`` for is ignored, with a warning.
+
+        Args:
+            video_source: The video source, e.g. ``"camera"`` or ``"screenVideo"``.
+
+        Returns:
+            Whether the source is captured as its user connects.
+        """
+        return False
+
+    @property
+    def capabilities(self) -> BotCapabilities:
+        """The media this transport receives from the user.
+
+        Returns:
+            The ``audio_in``, ``video_in`` and ``screen_in`` capabilities.
+            ``screen_in`` is unknown when video input is enabled without
+            ``video_in_sources``, since the application then decides which
+            sources to capture, and when the transport doesn't capture screen
+            shares through ``video_in_sources``.
+        """
+        if not self._params.video_in_enabled:
+            screen_in = False
+        elif self._supports_video_in_source("screenVideo") and self._params.video_in_sources:
+            screen_in = "screenVideo" in self._params.video_in_sources
+        else:
+            screen_in = None
+        return BotCapabilities(
+            audio_in=self._params.audio_in_enabled,
+            video_in=self._params.video_in_enabled,
+            screen_in=screen_in,
+        )
+
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the transport.
+
+        Args:
+            setup: Configuration object containing setup parameters.
+        """
+        await super().setup(setup)
+        self._sample_rate = self._params.audio_in_sample_rate or setup.audio_in_sample_rate
+
+        # Start audio filter. Paired with the stop in cleanup(), which is the
+        # only other call guaranteed to happen exactly once.
+        if self._params.audio_in_filter:
+            await self._params.audio_in_filter.start(self._sample_rate)
+
+    async def cleanup(self):
+        """Release input transport resources at teardown."""
+        await super().cleanup()
+        await self._cancel_audio_task()
+        if self._params.audio_in_filter:
+            await self._params.audio_in_filter.stop()
+
     async def start(self, frame: StartFrame):
         """Start the input transport and initialize components.
 
@@ -125,12 +207,6 @@ class BaseInputTransport(FrameProcessor):
         self._paused = False
         self._user_speaking = False
 
-        self._sample_rate = self._params.audio_in_sample_rate or frame.audio_in_sample_rate
-
-        # Start audio filter.
-        if self._params.audio_in_filter:
-            await self._params.audio_in_filter.start(self._sample_rate)
-
     async def stop(self, frame: EndFrame):
         """Stop the input transport and cleanup resources.
 
@@ -139,9 +215,6 @@ class BaseInputTransport(FrameProcessor):
         """
         # Cancel and wait for the audio input task to finish.
         await self._cancel_audio_task()
-        # Stop audio filter.
-        if self._params.audio_in_filter:
-            await self._params.audio_in_filter.stop()
 
     async def pause(self, frame: StopFrame):
         """Pause the input transport temporarily.
@@ -163,16 +236,6 @@ class BaseInputTransport(FrameProcessor):
         """
         # Cancel and wait for the audio input task to finish.
         await self._cancel_audio_task()
-        # Stop audio filter.
-        if self._params.audio_in_filter:
-            await self._params.audio_in_filter.stop()
-
-    async def cleanup(self):
-        """Release input transport resources at teardown."""
-        await super().cleanup()
-        await self._cancel_audio_task()
-        if self._params.audio_in_filter:
-            await self._params.audio_in_filter.stop()
 
     async def set_transport_ready(self, frame: StartFrame):
         """Called when the transport is ready to stream.
@@ -242,7 +305,7 @@ class BaseInputTransport(FrameProcessor):
         elif isinstance(frame, StopFrame):
             await self.push_frame(frame, direction)
             await self.pause(frame)
-        elif isinstance(frame, FilterUpdateSettingsFrame) and self._params.audio_in_filter:
+        elif isinstance(frame, FilterControlFrame) and self._params.audio_in_filter:
             await self._params.audio_in_filter.process_frame(frame)
         # Other frames
         else:

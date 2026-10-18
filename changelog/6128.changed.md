@@ -1,0 +1,1 @@
+- `TranslationConfig.model` for `GladiaSTTService` now documents all three values Gladia's live API accepts — `base`, `batch` and `enhanced` — and that Gladia uses `batch` when the field is unset.

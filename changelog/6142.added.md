@@ -1,0 +1,1 @@
+- `SmallestTTSService` now accepts a `content_filter` setting, passing Smallest's opt-in profanity filter through to the synthesis request.

@@ -41,8 +41,8 @@ from pipecat.frames.frames import (
     InterruptionFrame,
     OutputTransportMessageFrame,
     OutputTransportMessageUrgentFrame,
-    StartFrame,
 )
+from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.serializers.base_serializer import FrameSerializer
 
 
@@ -262,13 +262,13 @@ class GenesysAudioHookSerializer(FrameSerializer):
         self._output_variables = variables
         logger.debug(f"Output variables set: {variables}")
 
-    async def setup(self, frame: StartFrame):
+    async def setup(self, setup: FrameProcessorSetup):
         """Sets up the serializer with pipeline configuration.
 
         Args:
-            frame: The StartFrame containing pipeline configuration.
+            setup: Configuration object containing setup parameters.
         """
-        self._sample_rate = self._params.sample_rate or frame.audio_in_sample_rate
+        self._sample_rate = self._params.sample_rate or setup.audio_in_sample_rate
         logger.debug(f"GenesysAudioHookSerializer setup with sample_rate={self._sample_rate}")
 
     def _format_position(self, position: timedelta) -> str:

@@ -38,6 +38,7 @@ from pipecat.frames.frames import (
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
+from pipecat.pipeline.capabilities import BotCapabilities
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 from pipecat.services.heygen.api_interactive_avatar import NewSessionRequest
 from pipecat.services.heygen.api_liveavatar import LiveAvatarNewSessionRequest
@@ -75,8 +76,6 @@ class HeyGenInputTransport(BaseInputTransport):
         super().__init__(params, **kwargs)
         self._client = client
         self._params = params
-        # Whether we have seen a StartFrame already.
-        self._initialized = False
 
     async def setup(self, setup: FrameProcessorSetup):
         """Setup the input transport.
@@ -99,11 +98,6 @@ class HeyGenInputTransport(BaseInputTransport):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-
-        if self._initialized:
-            return
-
-        self._initialized = True
 
         await self.set_transport_ready(frame)
 
@@ -172,9 +166,19 @@ class HeyGenOutputTransport(BaseOutputTransport):
         self._params = params
         self._resampler = create_stream_resampler()
 
-        # Whether we have seen a StartFrame already.
-        self._initialized = False
         self._event_id = None
+
+    @property
+    def capabilities(self) -> BotCapabilities:
+        """The media this transport sends to the user.
+
+        The HeyGen avatar publishes its video to the room itself, so the user
+        receives bot video even though this transport sends none.
+
+        Returns:
+            The ``audio_out`` capability, with ``video_out`` set.
+        """
+        return super().capabilities.override(BotCapabilities(video_out=True))
 
     async def setup(self, setup: FrameProcessorSetup):
         """Setup the output transport.
@@ -183,6 +187,7 @@ class HeyGenOutputTransport(BaseOutputTransport):
             setup: The frame processor setup configuration.
         """
         await super().setup(setup)
+
         await self._client.setup(setup)
 
     async def cleanup(self):
@@ -197,12 +202,6 @@ class HeyGenOutputTransport(BaseOutputTransport):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-
-        if self._initialized:
-            return
-
-        self._initialized = True
-        await self._client.start(frame)
         await self.set_transport_ready(frame)
         self._client.transport_ready()
 

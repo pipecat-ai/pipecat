@@ -15,7 +15,7 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
@@ -29,6 +29,7 @@ from pipecat.services.google.llm import GoogleLLMService
 from pipecat.services.mcp_service import MCPClient
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.livekit.transport import LiveKitParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 from pipecat.workers.runner import WorkerRunner
 
@@ -42,6 +43,10 @@ transport_params = {
         audio_out_enabled=True,
     ),
     "daily": lambda: DailyParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
+    "livekit": lambda: LiveKitParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
     ),
@@ -64,7 +69,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     tts = CartesiaTTSService(
         api_key=os.environ["CARTESIA_API_KEY"],
         settings=CartesiaTTSService.Settings(
-            voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+            voice="86e30c1d-714b-4074-a1f2-1cb6b552fb49",
         ),
     )
 
@@ -88,60 +93,60 @@ Just respond with short sentences when you are carrying out tool calls.
     # Enable Github Copilot on your GitHub account. Free tier is ok. (https://github.com/settings/copilot)
     # Generate a personal access token. It must be a Fine-grained token, classic tokens are not supported. (https://github.com/settings/personal-access-tokens)
     # Set permissions you want to use (eg. "all repositories", "profile: read/write", etc)
-    async with MCPClient(
+    mcp = MCPClient(
         server_params=StreamableHttpParameters(
             url="https://api.githubcopilot.com/mcp/",
             headers={"Authorization": f"Bearer {os.getenv('GITHUB_PERSONAL_ACCESS_TOKEN')}"},
         )
-    ) as mcp:
-        tools = await mcp.register_tools(llm)
+    )
 
-        context = LLMContext(
-            messages=[{"role": "user", "content": "Please introduce yourself."}],
-            tools=tools,
-        )
-        user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
-            context,
-            user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
-        )
+    context = LLMContext(
+        messages=[{"role": "user", "content": "Please introduce yourself."}],
+        tools=await mcp.tools(),
+    )
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+        context,
+        user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
+    )
 
-        pipeline = Pipeline(
-            [
-                transport.input(),  # Transport user input
-                stt,
-                user_aggregator,  # User spoken responses
-                llm,  # LLM
-                tts,  # TTS
-                transport.output(),  # Transport bot output
-                assistant_aggregator,  # Assistant spoken responses and tool context
-            ]
-        )
+    pipeline = Pipeline(
+        [
+            transport.input(),  # Transport user input
+            stt,
+            user_aggregator,  # User spoken responses
+            llm,  # LLM
+            tts,  # TTS
+            transport.output(),  # Transport bot output
+            assistant_aggregator,  # Assistant spoken responses and tool context
+        ]
+    )
 
-        worker = PipelineWorker(
-            pipeline,
-            params=PipelineParams(
-                enable_metrics=True,
-                enable_usage_metrics=True,
-            ),
-            idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
-        )
+    worker = PipelineWorker(
+        pipeline,
+        params=PipelineParams(
+            enable_metrics=True,
+            enable_usage_metrics=True,
+        ),
+        idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
+        processor_unusable_policy=ProcessorUnusablePolicy.END,
+    )
 
-        runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
+    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
 
-        await runner.add_workers(worker)
+    await runner.add_workers(worker)
 
-        @transport.event_handler("on_client_connected")
-        async def on_client_connected(transport, client):
-            logger.info(f"Client connected: {client}")
-            # Kick off the conversation.
-            await worker.queue_frames([LLMRunFrame()])
+    @transport.event_handler("on_client_connected")
+    async def on_client_connected(transport, client):
+        logger.info(f"Client connected: {client}")
+        # Kick off the conversation.
+        await worker.queue_frames([LLMRunFrame()])
 
-        @transport.event_handler("on_client_disconnected")
-        async def on_client_disconnected(transport, client):
-            logger.info("Client disconnected")
-            await runner.cancel()
+    @transport.event_handler("on_client_disconnected")
+    async def on_client_disconnected(transport, client):
+        logger.info("Client disconnected")
+        await runner.cancel()
 
-        await runner.run()
+    await runner.run()
 
 
 async def bot(runner_args: RunnerArguments):

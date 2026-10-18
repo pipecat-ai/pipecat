@@ -13,8 +13,10 @@ from loguru import logger
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
 from pipecat.frames.frames import (
+    AggregatedTextFrame,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
+    Frame,
     FunctionCallCancelFrame,
     FunctionCallFromLLM,
     FunctionCallInProgressFrame,
@@ -27,6 +29,7 @@ from pipecat.frames.frames import (
     LLMContextAssistantTimestampFrame,
     LLMContextAssistantTurnFrame,
     LLMContextFrame,
+    LLMContextUserTurnFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesAppendFrame,
@@ -49,6 +52,9 @@ from pipecat.frames.frames import (
     TranslationFrame,
     TTSStartedFrame,
     TTSTextFrame,
+    UserBackchannelFrame,
+    UserFileRawFrame,
+    UserImageRawFrame,
     UserMuteStartedFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
@@ -59,6 +65,7 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.aggregators import async_tool_messages
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
+    AssistantBackchannelMessage,
     AssistantThoughtMessage,
     AssistantTurnStoppedMessage,
     LLMAssistantAggregator,
@@ -66,10 +73,11 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregator,
     LLMUserAggregatorParams,
+    UserBackchannelMessage,
     UserTurnMessageAddedMessage,
     UserTurnStoppedMessage,
 )
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.tests.utils import SleepFrame, run_test
 from pipecat.turns.user_mute import (
     FirstSpeechUserMuteStrategy,
@@ -90,7 +98,7 @@ from pipecat.turns.user_turn_strategies import (
     FilterIncompleteUserTurnStrategies,
     UserTurnStrategies,
 )
-from pipecat.utils.text.base_text_aggregator import AggregationType
+from pipecat.utils.text.base_text_aggregator import TextType
 
 USER_TURN_STOP_TIMEOUT = 0.2
 TRANSCRIPTION_TIMEOUT = 0.1
@@ -318,13 +326,21 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
             UserStartedSpeakingFrame,
             InterruptionFrame,
             VADUserStoppedSpeakingFrame,
+            LLMContextUserTurnFrame,
             LLMContextFrame,
+            UserStoppedSpeakingFrame,
+        ]
+        expected_up_frames = [
+            UserStartedSpeakingFrame,
+            InterruptionFrame,
+            LLMContextUserTurnFrame,
             UserStoppedSpeakingFrame,
         ]
         await run_test(
             pipeline,
             frames_to_send=frames_to_send,
             expected_down_frames=expected_down_frames,
+            expected_up_frames=expected_up_frames,
         )
         self.assertTrue(should_start)
         self.assertTrue(should_stop)
@@ -385,11 +401,107 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
         expected_down_frames = [
             UserStartedSpeakingFrame,
             InterruptionFrame,
+            LLMContextUserTurnFrame,
             LLMContextFrame,
             UserStoppedSpeakingFrame,
         ]
         await run_test(
             Pipeline([user_aggregator]),
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+        )
+
+    async def test_a_start_proposed_while_the_stop_awaits_its_transcript_extends_the_turn(self):
+        """A service that proposes the stop before its transcript can see the user resume.
+
+        The stop strategy holds the turn while it waits on the transcript. A
+        start proposed in that window keeps the turn open, so both halves land
+        in one user message and the bot is interrupted only once.
+
+        The hold is set far longer than the test runs, so the turn can only
+        close on the stop proposed after the final transcript.
+        """
+        context = LLMContext()
+        user_aggregator = LLMUserAggregator(
+            context,
+            params=LLMUserAggregatorParams(
+                user_turn_strategies=UserTurnStrategies(
+                    start=[ExternalUserTurnStartStrategy()],
+                    stop=[ExternalUserTurnStopStrategy(timeout=60.0)],
+                )
+            ),
+        )
+
+        frames_to_send = [
+            ProposedUserStartedSpeakingFrame(),
+            InterimTranscriptionFrame(text="I'd like to book a", user_id="", timestamp="now"),
+            ProposedUserStoppedSpeakingFrame(),
+            TranscriptionFrame(text="I'd like to book a", user_id="", timestamp="now"),
+            ProposedUserStartedSpeakingFrame(),
+            InterimTranscriptionFrame(text="table for", user_id="", timestamp="now"),
+            TranscriptionFrame(text="table for two", user_id="", timestamp="now"),
+            ProposedUserStoppedSpeakingFrame(),
+            SleepFrame(sleep=0.3),
+        ]
+        received_down, _ = await run_test(
+            Pipeline([user_aggregator]),
+            frames_to_send=frames_to_send,
+            expected_down_frames=None,
+        )
+        names = [type(f).__name__ for f in received_down]
+        self.assertEqual(names.count("UserStartedSpeakingFrame"), 1)
+        self.assertEqual(names.count("InterruptionFrame"), 1)
+        self.assertEqual(names.count("UserStoppedSpeakingFrame"), 1)
+        self.assertEqual(
+            [m["content"] for m in context.get_messages() if m["role"] == "user"],
+            ["I'd like to book a table for two"],
+        )
+
+    async def test_turn_closes_on_the_stop_signal_when_the_transcript_precedes_it(self):
+        """A service that pushes the transcript before proposing the stop closes at once.
+
+        The aggregation timer is set far longer than the test runs, so the turn
+        can only close from the stop signal itself. That path needs the final
+        transcript to have arrived first, which holds only while
+        ``ProposedUserStoppedSpeakingFrame`` stays ordered against it.
+        """
+
+        class TurnDetectingSTT(FrameProcessor):
+            """Stands in for an STT whose provider reports turn boundaries."""
+
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                await super().process_frame(frame, direction)
+                await self.push_frame(frame, direction)
+                if isinstance(frame, InterimTranscriptionFrame):
+                    await self.push_frame(
+                        TranscriptionFrame(text="Hello!", user_id="", timestamp="now")
+                    )
+                    await self.broadcast_frame(ProposedUserStoppedSpeakingFrame)
+
+        context = LLMContext()
+        user_aggregator = LLMUserAggregator(
+            context,
+            params=LLMUserAggregatorParams(
+                user_turn_strategies=ExternalUserTurnStrategies(
+                    stop=[ExternalUserTurnStopStrategy(timeout=30.0)]
+                )
+            ),
+        )
+
+        frames_to_send = [
+            ProposedUserStartedSpeakingFrame(),
+            InterimTranscriptionFrame(text="Hel", user_id="", timestamp="now"),
+            SleepFrame(sleep=0.3),
+        ]
+        expected_down_frames = [
+            UserStartedSpeakingFrame,
+            InterruptionFrame,
+            LLMContextUserTurnFrame,
+            LLMContextFrame,
+            UserStoppedSpeakingFrame,
+        ]
+        await run_test(
+            Pipeline([TurnDetectingSTT(), user_aggregator]),
             frames_to_send=frames_to_send,
             expected_down_frames=expected_down_frames,
         )
@@ -460,6 +572,7 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
         expected_down_frames = [
             UserStartedSpeakingFrame,
             UserStoppedSpeakingFrame,
+            LLMContextUserTurnFrame,
             LLMContextFrame,
         ]
         await run_test(
@@ -943,7 +1056,7 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
     async def test_multiple_inferences_in_one_turn_preserve_aggregation(self):
         """Two inference triggers before finalization should preserve the full user transcript.
 
-        When the LLM marks the first inference incomplete (○ / ◐) and the
+        When the LLM marks the first inference incomplete (◐ / ○) and the
         user keeps speaking, the deferred upstream strategy fires a
         second inference. Both the public ``on_user_turn_stopped`` event
         and the conversation context should reflect the full user
@@ -985,14 +1098,14 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
             SleepFrame(),
             VADUserStoppedSpeakingFrame(),
             SleepFrame(sleep=TRANSCRIPTION_TIMEOUT + 0.1),
-            # First inference fired here. Imagine the LLM returned ○;
+            # First inference fired here. Imagine the LLM returned ◐;
             # the turn is not yet finalized, so the user keeps talking.
             VADUserStartedSpeakingFrame(),
             TranscriptionFrame(text="about pizza", user_id="", timestamp="now"),
             SleepFrame(),
             VADUserStoppedSpeakingFrame(),
             SleepFrame(sleep=TRANSCRIPTION_TIMEOUT + 0.1),
-            # Second inference fired here. Now the LLM returns ✓ and the
+            # Second inference fired here. Now the LLM returns ● and the
             # turn finalizes via UserTurnInferenceCompletedFrame.
             UserTurnInferenceCompletedFrame(),
             SleepFrame(),
@@ -1008,6 +1121,51 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
 
         user_messages = [m for m in context.get_messages() if m.get("role") == "user"]
         self.assertEqual([m["content"] for m in user_messages], ["I'm thinking", "about pizza"])
+
+    async def test_user_backchannel(self):
+        context = LLMContext()
+        aggregator = LLMUserAggregator(context)
+        messages = []
+
+        @aggregator.event_handler("on_user_backchannel")
+        async def on_user_backchannel(aggregator, message: UserBackchannelMessage):
+            messages.append(message)
+
+        await run_test(
+            aggregator,
+            frames_to_send=[UserBackchannelFrame(text="mhm", user_id="user", timestamp="now")],
+            expected_down_frames=[SpeechControlParamsFrame, UserBackchannelFrame],
+        )
+
+        self.assertEqual(
+            messages, [UserBackchannelMessage(content="mhm", timestamp="now", user_id="user")]
+        )
+        self.assertEqual(context.messages, [])
+
+    async def test_user_backchannel_is_suppressed_while_the_user_is_muted(self):
+        user_aggregator = LLMUserAggregator(
+            LLMContext(),
+            params=LLMUserAggregatorParams(user_mute_strategies=[FirstSpeechUserMuteStrategy()]),
+        )
+        messages = []
+
+        @user_aggregator.event_handler("on_user_backchannel")
+        async def on_user_backchannel(aggregator, message: UserBackchannelMessage):
+            messages.append(message)
+
+        received_down, _ = await run_test(
+            user_aggregator,
+            frames_to_send=[
+                # Bot is speaking, so the user is muted.
+                BotStartedSpeakingFrame(),
+                SleepFrame(),
+                UserBackchannelFrame(text="mhm", user_id="user", timestamp="now"),
+            ],
+            expected_down_frames=None,
+        )
+
+        self.assertFalse(any(isinstance(f, UserBackchannelFrame) for f in received_down))
+        self.assertEqual(messages, [])
 
 
 class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
@@ -1394,6 +1552,272 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
         assert context.messages[-1]["content"] == "CANCELLED"
         assert not aggregator.has_function_calls_in_progress
 
+    async def test_fast_async_function_call_settles_in_place(self):
+        """An async call whose result lands before anything else settles like a sync one."""
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        frames_to_send = [
+            FunctionCallInProgressFrame(
+                function_name="book_table",
+                tool_call_id="1",
+                arguments={"size": 2},
+                cancel_on_interruption=False,
+            ),
+            SleepFrame(),
+            FunctionCallResultFrame(
+                function_name="book_table",
+                tool_call_id="1",
+                arguments={"size": 2},
+                result={"status": "booked"},
+                run_llm=False,
+            ),
+        ]
+        await run_test(aggregator, frames_to_send=frames_to_send, expected_down_frames=[])
+        tool_messages = [m for m in context.messages if m.get("role") == "tool"]
+        assert len(tool_messages) == 1
+        assert tool_messages[0]["tool_call_id"] == "1"
+        assert tool_messages[0]["content"] == '{"status": "booked"}'
+        assert all(async_tool_messages.parse_message(m) is None for m in context.messages)
+        assert not aggregator.has_function_calls_in_progress
+
+    async def test_parallel_fast_async_function_calls_settle_in_place(self):
+        """Sibling placeholders and results are protocol bookkeeping, not the conversation moving on."""
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+
+        def start(tool_call_id):
+            return FunctionCallInProgressFrame(
+                function_name="lookup",
+                tool_call_id=tool_call_id,
+                arguments={},
+                cancel_on_interruption=False,
+                group_id="batch",
+            )
+
+        def result(tool_call_id):
+            return FunctionCallResultFrame(
+                function_name="lookup",
+                tool_call_id=tool_call_id,
+                arguments={},
+                result={"answer": tool_call_id},
+                run_llm=False,
+            )
+
+        frames_to_send = [
+            start("1"),
+            start("2"),
+            SleepFrame(),
+            result("1"),
+            SleepFrame(),
+            result("2"),
+        ]
+        await run_test(aggregator, frames_to_send=frames_to_send, expected_down_frames=[])
+        tool_messages = [m for m in context.messages if m.get("role") == "tool"]
+        assert [m["content"] for m in tool_messages] == ['{"answer": "1"}', '{"answer": "2"}']
+        assert all(async_tool_messages.parse_message(m) is None for m in context.messages)
+
+    async def test_result_during_model_response_settles_in_place(self):
+        """A response in flight has left nothing in the context yet, so the context cannot see it."""
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        frames_to_send = [
+            FunctionCallInProgressFrame(
+                function_name="lookup",
+                tool_call_id="1",
+                arguments={},
+                cancel_on_interruption=False,
+            ),
+            SleepFrame(),
+            LLMFullResponseStartFrame(),
+            SleepFrame(),
+            FunctionCallResultFrame(
+                function_name="lookup",
+                tool_call_id="1",
+                arguments={},
+                result={"answer": 42},
+                run_llm=False,
+            ),
+            SleepFrame(),
+            LLMFullResponseEndFrame(),
+        ]
+        await run_test(aggregator, frames_to_send=frames_to_send)
+        tool_messages = [m for m in context.messages if m.get("role") == "tool"]
+        assert tool_messages[0]["content"] == '{"answer": 42}'
+        assert all(async_tool_messages.parse_message(m) is None for m in context.messages)
+
+    async def test_async_function_call_after_spoken_filler_settles_in_place(self):
+        """Filler spoken with a TTSSpeakFrame while the call runs does not defer it."""
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        frames_to_send = [
+            FunctionCallInProgressFrame(
+                function_name="lookup",
+                tool_call_id="1",
+                arguments={},
+                cancel_on_interruption=False,
+            ),
+            SleepFrame(),
+            TTSStartedFrame(append_to_context=True),
+            TTSTextFrame("Let me check on that.", text_type=TextType.SENTENCE),
+            LLMAssistantPushAggregationFrame(),
+            SleepFrame(),
+            FunctionCallResultFrame(
+                function_name="lookup",
+                tool_call_id="1",
+                arguments={},
+                result={"answer": 42},
+                run_llm=False,
+            ),
+        ]
+        await run_test(aggregator, frames_to_send=frames_to_send)
+        tool_messages = [m for m in context.messages if m.get("role") == "tool"]
+        assert tool_messages[0]["content"] == '{"answer": 42}'
+        assert all(async_tool_messages.parse_message(m) is None for m in context.messages)
+        assert context.messages[-1] == {"role": "assistant", "content": "Let me check on that."}
+
+    async def test_async_function_call_after_user_message_is_deferred(self):
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        frames_to_send = [
+            FunctionCallInProgressFrame(
+                function_name="lookup",
+                tool_call_id="1",
+                arguments={},
+                cancel_on_interruption=False,
+            ),
+            SleepFrame(),
+            LLMMessagesAppendFrame(messages=[{"role": "user", "content": "Any news?"}]),
+            SleepFrame(),
+            FunctionCallResultFrame(
+                function_name="lookup",
+                tool_call_id="1",
+                arguments={},
+                result={"answer": 42},
+                run_llm=False,
+            ),
+        ]
+        await run_test(aggregator, frames_to_send=frames_to_send, expected_down_frames=[])
+        payload = async_tool_messages.parse_message(context.messages[-1])
+        assert payload is not None and payload.kind == "final"
+        assert payload.tool_call_id == "1"
+
+    async def test_async_function_call_after_model_response_settles_in_place(self):
+        """Assistant text with no user turn since the placeholder does not defer the call."""
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        frames_to_send = [
+            FunctionCallInProgressFrame(
+                function_name="lookup",
+                tool_call_id="1",
+                arguments={},
+                cancel_on_interruption=False,
+            ),
+            SleepFrame(),
+            LLMFullResponseStartFrame(),
+            LLMTextFrame("Still looking."),
+            LLMFullResponseEndFrame(),
+            SleepFrame(),
+            FunctionCallResultFrame(
+                function_name="lookup",
+                tool_call_id="1",
+                arguments={},
+                result={"answer": 42},
+                run_llm=False,
+            ),
+        ]
+        await run_test(aggregator, frames_to_send=frames_to_send)
+        tool_messages = [m for m in context.messages if m.get("role") == "tool"]
+        assert tool_messages[0]["content"] == '{"answer": 42}'
+        assert all(async_tool_messages.parse_message(m) is None for m in context.messages)
+
+    async def test_async_function_call_after_developer_message_is_deferred(self):
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        frames_to_send = [
+            FunctionCallInProgressFrame(
+                function_name="lookup",
+                tool_call_id="1",
+                arguments={},
+                cancel_on_interruption=False,
+            ),
+            SleepFrame(),
+            LLMMessagesAppendFrame(
+                messages=[{"role": "developer", "content": "Now help with billing."}]
+            ),
+            SleepFrame(),
+            FunctionCallResultFrame(
+                function_name="lookup",
+                tool_call_id="1",
+                arguments={},
+                result={"answer": 42},
+                run_llm=False,
+            ),
+        ]
+        await run_test(aggregator, frames_to_send=frames_to_send, expected_down_frames=[])
+        payload = async_tool_messages.parse_message(context.messages[-1])
+        assert payload is not None and payload.kind == "final"
+
+    async def test_async_function_call_after_context_rebuild_is_deferred(self):
+        """A placeholder the context no longer holds cannot take the result in place."""
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        frames_to_send = [
+            FunctionCallInProgressFrame(
+                function_name="lookup",
+                tool_call_id="1",
+                arguments={},
+                cancel_on_interruption=False,
+            ),
+            SleepFrame(),
+            LLMMessagesUpdateFrame(messages=[{"role": "developer", "content": "Fresh start."}]),
+            SleepFrame(),
+            FunctionCallResultFrame(
+                function_name="lookup",
+                tool_call_id="1",
+                arguments={},
+                result={"answer": 42},
+                run_llm=False,
+            ),
+        ]
+        await run_test(aggregator, frames_to_send=frames_to_send, expected_down_frames=[])
+        payload = async_tool_messages.parse_message(context.messages[-1])
+        assert payload is not None and payload.kind == "final"
+        assert payload.tool_call_id == "1"
+
+    async def test_intermediate_update_keeps_the_call_deferred(self):
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        frames_to_send = [
+            FunctionCallInProgressFrame(
+                function_name="lookup",
+                tool_call_id="1",
+                arguments={},
+                cancel_on_interruption=False,
+            ),
+            SleepFrame(),
+            FunctionCallResultFrame(
+                function_name="lookup",
+                tool_call_id="1",
+                arguments={},
+                result={"progress": "halfway"},
+                run_llm=False,
+                properties=FunctionCallResultProperties(is_final=False),
+            ),
+            SleepFrame(),
+            FunctionCallResultFrame(
+                function_name="lookup",
+                tool_call_id="1",
+                arguments={},
+                result={"answer": 42},
+                run_llm=False,
+            ),
+        ]
+        await run_test(aggregator, frames_to_send=frames_to_send, expected_down_frames=[])
+        kinds = [
+            p.kind for p in (async_tool_messages.parse_message(m) for m in context.messages) if p
+        ]
+        assert kinds == ["started", "intermediate", "final"]
+
     async def test_async_function_call_cancel(self):
         """A cancelled async call settles on the same channel its results use."""
         context = LLMContext()
@@ -1419,6 +1843,145 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
         assert payload.tool_call_id == "1"
         assert payload.result.startswith("CANCELLED")
         assert not aggregator.has_function_calls_in_progress
+
+    async def test_run_survives_a_later_result_that_does_not_ask_to_run(self):
+        """A burst runs inference once, even when its last result doesn't ask for it."""
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        frames_to_send = [
+            FunctionCallInProgressFrame(
+                function_name="lookup",
+                tool_call_id="1",
+                arguments={},
+                cancel_on_interruption=False,
+            ),
+            SleepFrame(),
+            # Queued together, so the first result's push is held for the second.
+            FunctionCallResultFrame(
+                function_name="lookup",
+                tool_call_id="1",
+                arguments={},
+                result={"progress": "on it"},
+                properties=FunctionCallResultProperties(is_final=False, run_llm=True),
+            ),
+            FunctionCallResultFrame(
+                function_name="lookup",
+                tool_call_id="1",
+                arguments={},
+                result={"progress": "still on it"},
+                properties=FunctionCallResultProperties(is_final=False, run_llm=False),
+            ),
+        ]
+        await run_test(
+            aggregator,
+            frames_to_send=frames_to_send,
+            expected_down_frames=[],
+            expected_up_frames=[LLMContextFrame],
+        )
+
+    async def test_an_append_asking_to_run_waits_for_the_bot_to_stop_speaking(self):
+        """Run mid-sentence, the model would answer a context that lacks its answer in progress."""
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        message = {"role": "developer", "content": "Backend: It's 62 and raining."}
+        await run_test(
+            aggregator,
+            frames_to_send=[
+                BotStartedSpeakingFrame(),
+                LLMMessagesAppendFrame(messages=[message], run_llm=True),
+                SleepFrame(),
+            ],
+            expected_down_frames=[BotStartedSpeakingFrame],
+            expected_up_frames=[],
+        )
+        assert context.get_messages() == [message]
+
+        aggregator = LLMAssistantAggregator(LLMContext())
+        await run_test(
+            aggregator,
+            frames_to_send=[
+                BotStartedSpeakingFrame(),
+                LLMMessagesAppendFrame(messages=[message], run_llm=True),
+                SleepFrame(),
+                BotStoppedSpeakingFrame(),
+            ],
+            expected_down_frames=[BotStartedSpeakingFrame, BotStoppedSpeakingFrame],
+            expected_up_frames=[LLMContextFrame],
+        )
+
+    async def test_an_append_asking_to_run_while_the_user_speaks_is_settled_by_the_turns_run(self):
+        """The run the user's turn brings sees the context as it stands, so nothing is owed after it."""
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        await run_test(
+            aggregator,
+            frames_to_send=[
+                UserStartedSpeakingFrame(),
+                LLMMessagesAppendFrame(
+                    messages=[{"role": "developer", "content": "Backend: Done."}], run_llm=True
+                ),
+                SleepFrame(),
+                UserStoppedSpeakingFrame(),
+                LLMFullResponseStartFrame(),
+                LLMFullResponseEndFrame(),
+                LLMMessagesAppendFrame(
+                    messages=[{"role": "developer", "content": "Backend (thinking): ..."}],
+                    run_llm=False,
+                ),
+                SleepFrame(),
+            ],
+            # An empty response is not passed on; what matters is that no
+            # context frame goes upstream after the run has started.
+            expected_down_frames=[UserStartedSpeakingFrame, UserStoppedSpeakingFrame],
+            expected_up_frames=[],
+        )
+        assert len(context.get_messages()) == 2
+
+    async def test_an_append_owed_through_an_empty_user_turn_is_pushed_on_the_next_arrival(self):
+        """A turn with nothing in it brings no run, so the push is still owed."""
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        await run_test(
+            aggregator,
+            frames_to_send=[
+                UserStartedSpeakingFrame(),
+                LLMMessagesAppendFrame(
+                    messages=[{"role": "developer", "content": "Backend: Done."}], run_llm=True
+                ),
+                SleepFrame(),
+                UserStoppedSpeakingFrame(),
+                LLMMessagesAppendFrame(
+                    messages=[{"role": "developer", "content": "Backend (thinking): ..."}],
+                    run_llm=False,
+                ),
+                SleepFrame(),
+            ],
+            expected_down_frames=[UserStartedSpeakingFrame, UserStoppedSpeakingFrame],
+            expected_up_frames=[LLMContextFrame],
+        )
+        assert len(context.get_messages()) == 2
+
+    async def test_appends_queued_together_run_inference_once(self):
+        """A burst of messages is one run, whatever the last one asks."""
+        aggregator = LLMAssistantAggregator(LLMContext())
+        await run_test(
+            aggregator,
+            frames_to_send=[
+                SleepFrame(),
+                LLMMessagesAppendFrame(
+                    messages=[{"role": "developer", "content": "Backend: One."}], run_llm=True
+                ),
+                LLMMessagesAppendFrame(
+                    messages=[{"role": "developer", "content": "Backend: Two."}], run_llm=True
+                ),
+                LLMMessagesAppendFrame(
+                    messages=[{"role": "developer", "content": "Backend (thinking): Three."}],
+                    run_llm=False,
+                ),
+            ],
+            expected_down_frames=[],
+            expected_up_frames=[LLMContextFrame],
+        )
 
     async def test_function_call_cancel_run_llm(self):
         """A cancellation asking for inference pushes the context upstream."""
@@ -1559,6 +2122,30 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
         await run_test(aggregator, frames_to_send=frames_to_send)
         self.assertEqual(thought_message.content, "I'm thinking!")
 
+    async def test_backchannel(self):
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        messages = []
+
+        @aggregator.event_handler("on_assistant_backchannel")
+        async def on_assistant_backchannel(aggregator, message: AssistantBackchannelMessage):
+            messages.append(message)
+
+        # The frames a TTS service pushes for a BotBackchannelFrame, and then
+        # for a sentence of a reply.
+        backchannel = AggregatedTextFrame("Mm-hmm.", TextType.BACKCHANNEL)
+        backchannel.will_be_spoken = True
+        backchannel.append_to_context = False
+        spoken = TTSTextFrame("Mm-hmm.", TextType.BACKCHANNEL, segment_id=backchannel.id)
+        spoken.append_to_context = False
+        sentence = AggregatedTextFrame("Sounds fun.", TextType.SENTENCE)
+        sentence.will_be_spoken = True
+        sentence.append_to_context = False
+        await run_test(aggregator, frames_to_send=[backchannel, spoken, sentence])
+
+        self.assertEqual([m.content for m in messages], ["Mm-hmm."])
+        self.assertEqual(context.messages, [])
+
     async def test_pending_text_emitted_on_end_frame(self):
         """Pending assistant text should be emitted when EndFrame arrives."""
         context = LLMContext()
@@ -1609,9 +2196,9 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
 
         frames_to_send = [
             TTSStartedFrame(append_to_context=True),
-            TTSTextFrame("Hello,", aggregated_by=AggregationType.WORD),
-            TTSTextFrame("how", aggregated_by=AggregationType.WORD),
-            TTSTextFrame("can I help?", aggregated_by=AggregationType.WORD),
+            TTSTextFrame("Hello,", text_type=TextType.WORD),
+            TTSTextFrame("how", text_type=TextType.WORD),
+            TTSTextFrame("can I help?", text_type=TextType.WORD),
             LLMAssistantPushAggregationFrame(),
         ]
         expected_down_frames = [
@@ -1660,8 +2247,8 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
 
         frames_to_send = [
             TTSStartedFrame(append_to_context=True),
-            TTSTextFrame("Let me", aggregated_by=AggregationType.WORD),
-            TTSTextFrame("check on", aggregated_by=AggregationType.WORD),
+            TTSTextFrame("Let me", text_type=TextType.WORD),
+            TTSTextFrame("check on", text_type=TextType.WORD),
             SleepFrame(),
             InterruptionFrame(),
         ]
@@ -1711,7 +2298,7 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
 
         frames_to_send = [
             TTSStartedFrame(append_to_context=False),
-            TTSTextFrame("off the record", aggregated_by=AggregationType.WORD),
+            TTSTextFrame("off the record", text_type=TextType.WORD),
             SleepFrame(),
             InterruptionFrame(),
         ]
@@ -1750,7 +2337,7 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
         frames_to_send = [
             LLMFullResponseStartFrame(),
             TTSStartedFrame(append_to_context=True),
-            TTSTextFrame("Hello!", aggregated_by=AggregationType.WORD),
+            TTSTextFrame("Hello!", text_type=TextType.WORD),
             LLMFullResponseEndFrame(),
         ]
         await run_test(aggregator, frames_to_send=frames_to_send)
@@ -1895,6 +2482,153 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
             expected_up_frames=expected_up_frames,
         )
         assert context.messages[0]["content"] == "Hi there!"
+
+    async def test_user_file_frame_run_llm_false_does_not_run(self):
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+
+        await run_test(
+            aggregator,
+            frames_to_send=[
+                UserFileRawFrame(
+                    file="data:application/pdf;base64,abc123",
+                    type="bytes",
+                    filename="doc.pdf",
+                    format="application/pdf",
+                    append_to_context=True,
+                    run_llm=False,
+                )
+            ],
+            frames_to_send_direction=FrameDirection.UPSTREAM,
+            expected_up_frames=[],  # no LLMContextFrame expected, run_llm=False
+        )
+        assert len(context.messages) == 1
+
+    async def test_user_file_frame_run_llm_default_runs(self):
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+
+        expected_up_frames = [LLMContextFrame]
+        await run_test(
+            aggregator,
+            frames_to_send=[
+                UserFileRawFrame(
+                    file="data:application/pdf;base64,abc123",
+                    type="bytes",
+                    filename="doc.pdf",
+                    format="application/pdf",
+                    append_to_context=True,
+                )
+            ],
+            frames_to_send_direction=FrameDirection.UPSTREAM,
+            expected_up_frames=expected_up_frames,
+        )
+        assert len(context.messages) == 1
+
+    async def test_user_file_frame_lands_after_in_progress_assistant_text(self):
+        """A file arriving mid-reply commits the partial assistant text first.
+
+        The order matters beyond chronology: remove_invalid_file_message()
+        only considers messages after the last assistant message, so a file
+        written before a later-committed assistant message could never be
+        cleaned up if the provider rejects it.
+        """
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+
+        await run_test(
+            aggregator,
+            frames_to_send=[
+                LLMFullResponseStartFrame(),
+                LLMTextFrame("I was saying..."),
+                # The file frame is a SystemFrame and would jump the priority
+                # queue; the sleep lets the text land first, as it would have
+                # in a real mid-reply arrival.
+                SleepFrame(),
+                UserFileRawFrame(
+                    file="data:application/pdf;base64,abc123",
+                    type="bytes",
+                    filename="doc.pdf",
+                    format="application/pdf",
+                    append_to_context=True,
+                    run_llm=False,
+                ),
+            ],
+        )
+
+        roles = [m["role"] for m in context.messages]
+        assert roles == ["assistant", "user"]
+        assert context.messages[0]["content"] == "I was saying..."
+        assert context.messages[1]["content"][0]["type"] == "file_base64"
+
+    async def test_mid_turn_flush_pushes_no_frames(self):
+        """Committing held text ahead of a file message is context-only: the
+        turn's context and timestamp frames belong to its real end, not to
+        the flush."""
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+
+        received_down, _ = await run_test(
+            aggregator,
+            frames_to_send=[
+                LLMFullResponseStartFrame(),
+                LLMTextFrame("I was saying..."),
+                SleepFrame(),
+                UserFileRawFrame(
+                    file="data:application/pdf;base64,abc123",
+                    type="bytes",
+                    filename="doc.pdf",
+                    format="application/pdf",
+                    append_to_context=True,
+                    run_llm=False,
+                ),
+            ],
+        )
+
+        assert not any(
+            isinstance(f, (LLMContextFrame, LLMContextAssistantTimestampFrame))
+            for f in received_down
+        )
+
+    async def test_user_image_frame_run_llm_false_does_not_run(self):
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+
+        await run_test(
+            aggregator,
+            frames_to_send=[
+                UserImageRawFrame(
+                    image=b"\x00" * 3,
+                    size=(1, 1),
+                    format="RGB",
+                    append_to_context=True,
+                    run_llm=False,
+                )
+            ],
+            frames_to_send_direction=FrameDirection.UPSTREAM,
+            expected_up_frames=[],  # no LLMContextFrame expected, run_llm=False
+        )
+        assert len(context.messages) == 1
+
+    async def test_user_image_frame_run_llm_default_runs(self):
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+
+        expected_up_frames = [LLMContextFrame]
+        await run_test(
+            aggregator,
+            frames_to_send=[
+                UserImageRawFrame(
+                    image=b"\x00" * 3,
+                    size=(1, 1),
+                    format="RGB",
+                    append_to_context=True,
+                )
+            ],
+            frames_to_send_direction=FrameDirection.UPSTREAM,
+            expected_up_frames=expected_up_frames,
+        )
+        assert len(context.messages) == 1
 
     async def test_llm_messages_update(self):
         context = LLMContext()

@@ -81,6 +81,10 @@ Speech-to-text examples with various STT providers.
 
 Image description and vision capabilities with different multimodal LLMs.
 
+### [`image-generation/`](./image-generation/)
+
+Generating an image from a text prompt with different image generation services (fal, Google, OpenAI).
+
 ### [`realtime/`](./realtime/)
 
 Realtime and multimodal live APIs (OpenAI Realtime, Gemini Live, AWS Nova Sonic, Ultravox, Grok).
@@ -105,9 +109,13 @@ Changing service settings at runtime, organized by service type:
 
 Turn detection, interruption handling, and user input management.
 
-### [`thinking-and-mcp/`](./thinking-and-mcp/)
+### [`thinking/`](./thinking/)
 
-LLM thinking/reasoning modes and MCP (Model Context Protocol) tool server integration.
+LLM thinking/reasoning modes.
+
+### [`mcp/`](./mcp/)
+
+MCP (Model Context Protocol) tool server integration.
 
 ### [`transports/`](./transports/)
 

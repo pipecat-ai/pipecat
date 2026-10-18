@@ -39,7 +39,8 @@ _SAMPLE_RATE = 16000
 
 # Outlast the audio-context stop-frame timeout (default 3.0s) so the context
 # drains and force-complete runs, as it does on a live dropped socket.
-_DRAIN_SLEEP = 5.0
+_STOP_FRAME_TIMEOUT_S = 0.05
+_DRAIN_SLEEP = 0.2
 
 
 class _SilentWebsocketTTS(TTSService):
@@ -58,6 +59,7 @@ class _SilentWebsocketTTS(TTSService):
             push_start_frame=True,
             pause_frame_processing=False,
             sample_rate=_SAMPLE_RATE,
+            stop_frame_timeout_s=_STOP_FRAME_TIMEOUT_S,
             **kwargs,
         )
 

@@ -72,8 +72,10 @@ def language_to_aws_language(language: Language) -> str:
         Language.EN: "en-US",  # Default to US English
         Language.EN_AU: "en-AU",
         Language.EN_GB: "en-GB",
+        Language.EN_IE: "en-IE",
         Language.EN_IN: "en-IN",
         Language.EN_NZ: "en-NZ",
+        Language.EN_SG: "en-SG",
         Language.EN_US: "en-US",
         Language.EN_ZA: "en-ZA",
         # Finnish
@@ -263,7 +265,8 @@ class AWSPollyTTSService(TTSService):
             **kwargs,
         )
 
-        # Resolve credentials using the shared chain (explicit → env → botocore).
+        # Explicit or environment keys. Without them, each client takes its
+        # credentials from the session's default chain, which renews them.
         self._aws_params = resolve_credentials(
             aws_access_key_id=aws_access_key_id,
             aws_secret_access_key=api_key,

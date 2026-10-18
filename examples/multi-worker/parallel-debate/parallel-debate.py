@@ -36,8 +36,9 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.bus import BusJobRequestMessage
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMMessagesAppendFrame, LLMRunFrame
+from pipecat.pipeline.job_context import JobGroupParams
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     AssistantTurnStoppedMessage,
@@ -52,6 +53,7 @@ from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.livekit.transport import LiveKitParams
 from pipecat.workers.llm import LLMContextWorker
 from pipecat.workers.runner import WorkerRunner
 
@@ -79,6 +81,10 @@ transport_params = {
         audio_out_enabled=True,
     ),
     "daily": lambda: DailyParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
+    "livekit": lambda: LiveKitParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
     ),
@@ -128,7 +134,9 @@ class DebateWorker(LLMContextWorker):
         self._current_job_id = message.job_id
         await self.queue_frame(
             LLMMessagesAppendFrame(
-                messages=[{"role": "developer", "content": f"Topic: {message.payload['topic']}"}],
+                messages=[
+                    {"role": "developer", "content": f"Topic: {(message.payload or {})['topic']}"}
+                ],
                 run_llm=True,
             )
         )
@@ -143,7 +151,7 @@ async def debate(params: FunctionCallParams, topic: str):
     """
     logger.info(f"Starting debate on '{topic}'")
     async with params.pipeline_worker.job_group(
-        *ROLE_PROMPTS, payload={"topic": topic}, timeout=30
+        *ROLE_PROMPTS, params=JobGroupParams(payload={"topic": topic}, timeout=30)
     ) as tg:
         pass
     result = "\n\n".join(f"{r['role'].upper()}: {r['text']}" for r in tg.responses.values())
@@ -200,6 +208,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             enable_usage_metrics=True,
         ),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
+        processor_unusable_policy=ProcessorUnusablePolicy.END,
     )
 
     runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)

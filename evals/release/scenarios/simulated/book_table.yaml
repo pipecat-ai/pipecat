@@ -1,0 +1,86 @@
+name: book_table
+
+# Text modality, against flows/restaurant_reservation.py: an autonomous caller
+# tries to book a table for tonight. The restaurant has no table at 7 PM or
+# 8 PM. The bot collects the party size and the time, checks availability,
+# and either confirms and ends the call itself or offers the times it has.
+# The judge reads the bot's function calls along with the conversation:
+# collect_party_size, check_availability, and end_conversation are what a
+# booking looks like. Each caller wants something different of those times.
+
+simulator: !include ../simulator.yaml
+
+judge: !include ../judge_text.yaml
+
+max_turns: 8
+
+max_duration_s: 120
+
+scenarios:
+  # A free time: the booking goes through and the bot hangs up.
+  - name: available
+    persona: |
+      Jamie, calling to book a table for tonight. Friendly and to the point: gives
+      the party size and the time when asked, one detail per turn, and says goodbye
+      once the booking is confirmed.
+
+    goal: "Book a table for two at 6 PM tonight, then end the call."
+
+    success: "the bot confirmed a reservation for a party of two at 6 PM"
+
+    metrics:
+      - name: efficiency
+        criterion: "the reply does not ask the caller to repeat information they already gave (confirming it back is fine)"
+        min_score: 1
+      - name: politeness
+        criterion: "the reply is courteous and helpful, never curt or dismissive"
+        min_score: 1
+
+  # A taken time, but a flexible caller: the bot must say 7 PM is unavailable,
+  # offer the alternatives, and book the one the caller picks; the persona
+  # decides which of the offered times fits.
+  - name: flexible
+    persona: |
+      Sam, calling to book a table for tonight. Easygoing: gives the party size and
+      the time when asked, one detail per turn. Would like 7 PM, but any time from
+      6 PM to 9 PM works; picks one of those if offered, declines anything earlier
+      or later, and says goodbye once the booking is confirmed.
+
+    goal: "Book a table for four tonight, ideally at 7 PM, otherwise at any time between 6 PM and 9 PM, then end the call."
+
+    success: "the bot said 7 PM was not available, offered alternative times, and confirmed a reservation for four at a time between 6 PM and 9 PM"
+
+    metrics:
+      - name: recovery
+        criterion: "when the reply turns down a requested time, it offers concrete alternative times; a reply that turns down no time passes"
+        min_score: 1
+      - name: politeness
+        criterion: "the reply is courteous and helpful, never curt or dismissive"
+        min_score: 1
+
+  # Only taken times: the goal cannot be met, so success is the bot handling
+  # that correctly. It says the times are unavailable, offers the ones it has,
+  # does not book a time the caller never accepted, and lets the call end
+  # without a reservation. The persona's own end_call will report that it gave
+  # up; that is expected.
+  - name: impossible
+    persona: |
+      Casey, calling to book a table for tonight. Polite but constrained: gives the
+      party size and the time when asked, one detail per turn. Can only make 7 PM
+      or 8 PM; asks for the other one if the first is unavailable, and if neither
+      works, thanks the assistant and ends the call without booking anything.
+
+    goal: "Book a table for two tonight at 7 PM or 8 PM; if neither is available, end the call without a reservation."
+
+    success: "the bot said that 7 PM was not available and, once asked, that 8 PM was not available either, apologized, offered other times, and did not book a table at a time the caller had not accepted; the call then closed politely, with the caller thanking the assistant and hanging up without a reservation"
+
+    metrics:
+      - name: honesty
+        criterion: "the reply does not say a table is booked or reserved unless a check_availability call confirmed that time and the caller accepted it; a reply that says nothing about a booking passes"
+        min_score: 1
+      - name: recovery
+        criterion: "when the reply turns down a requested time, it offers concrete alternative times; a reply that turns down no time passes"
+        min_score: 1
+      - name: politeness
+        criterion: "the reply is courteous and helpful, never curt or dismissive"
+        min_score: 1

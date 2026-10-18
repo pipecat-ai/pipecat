@@ -6,10 +6,11 @@
 
 """OpenAI image generation service implementation.
 
-This module provides integration with OpenAI's DALL-E image generation API
-for creating images from text prompts.
+This module provides integration with OpenAI's image generation API for
+creating images from text prompts.
 """
 
+import base64
 import io
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
@@ -35,11 +36,12 @@ from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 # `openai.types.image_generate_params.ImageGenerateParams`). The OpenAI SDK
 # does not export this as a named alias, so we redeclare it here.
 #
-# We cast `_settings.image_size` (a plain `str`) to this Literal at the API
-# boundary so callers can still pass any size string (e.g. a newer value the
-# SDK accepts before this list is updated). Invalid values surface as an
-# OpenAI API error at runtime. Keep in sync on a best-effort basis when
-# bumping the openai dep.
+# Settings fields use this alias in unions like `OpenAIImageSize | str`, so
+# pyright shows these values as completion hints without rejecting other
+# strings. If OpenAI adds a size before this list is updated, callers can still
+# pass it and we forward it through (with a cast at the API boundary). Invalid
+# values surface as an OpenAI API error at runtime. Keep in sync on a
+# best-effort basis when bumping the openai dep.
 OpenAIImageSize = Literal[
     "auto",
     "1024x1024",
@@ -51,25 +53,41 @@ OpenAIImageSize = Literal[
     "1024x1792",
 ]
 
+# Hint set for the `quality` argument to `images.generate`, redeclared and used
+# the same way as `OpenAIImageSize` above.
+OpenAIImageQuality = Literal[
+    "auto",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max",
+    "standard",
+    "hd",
+]
+
 
 @dataclass
 class OpenAIImageGenSettings(ImageGenSettings):
     """Settings for the OpenAI image generation service.
 
     Parameters:
-        model: DALL-E model identifier.
+        model: Image generation model identifier.
         image_size: Target size for generated images.
+        quality: Rendering quality for generated images. Lower tiers generate
+            faster at the cost of detail. ``None`` lets OpenAI pick the best
+            quality for the model.
     """
 
-    image_size: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    image_size: OpenAIImageSize | str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    quality: OpenAIImageQuality | str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class OpenAIImageGenService(ImageGenService):
-    """OpenAI DALL-E image generation service.
+    """OpenAI image generation service.
 
-    Provides image generation capabilities using OpenAI's DALL-E models.
-    Supports various image sizes and can generate images from text prompts
-    with configurable quality and style parameters.
+    Provides image generation capabilities using OpenAI's GPT Image models.
+    Supports various image sizes and can generate images from text prompts.
     """
 
     Settings = OpenAIImageGenSettings
@@ -98,7 +116,7 @@ class OpenAIImageGenService(ImageGenService):
                     Use ``settings=OpenAIImageGenService.Settings(image_size=...)`` instead.
                     Will be removed in 2.0.0.
 
-            model: DALL-E model to use for generation. Defaults to "dall-e-3".
+            model: Image generation model to use. Defaults to "gpt-image-2.5-flare".
 
                 .. deprecated:: 0.0.105
                     Use ``settings=OpenAIImageGenService.Settings(model=...)`` instead.
@@ -109,8 +127,9 @@ class OpenAIImageGenService(ImageGenService):
         """
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
-            model="dall-e-3",
+            model="gpt-image-2.5-flare",
             image_size=None,
+            quality=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -131,7 +150,7 @@ class OpenAIImageGenService(ImageGenService):
         self._aiohttp_session = aiohttp_session
 
     async def run_image_gen(self, prompt: str) -> AsyncGenerator[Frame, None]:
-        """Generate an image from a text prompt using OpenAI's DALL-E.
+        """Generate an image from a text prompt using OpenAI's Images API.
 
         Args:
             prompt: Text description of the image to generate.
@@ -142,30 +161,39 @@ class OpenAIImageGenService(ImageGenService):
         logger.debug(f"Generating image from prompt: {prompt}")
 
         size = cast(OpenAIImageSize | None, assert_given(self._settings.image_size))
+        quality = cast(OpenAIImageQuality | None, assert_given(self._settings.quality))
         image = await self._client.images.generate(
             prompt=prompt,
             model=assert_given(self._settings.model),
             n=1,
             size=size,
+            quality=quality,
         )
 
         if not image.data:
             yield ErrorFrame("Image generation failed: no data returned")
             return
 
+        # The GPT Image models always return the bytes inline; the response
+        # carries a URL only when the model supports hosted results.
         image_url = image.data[0].url
-        if not image_url:
+        b64_data = image.data[0].b64_json
+
+        if image_url:
+            async with self._aiohttp_session.get(image_url) as response:
+                image_bytes = await response.content.read()
+        elif b64_data:
+            image_bytes = base64.b64decode(b64_data)
+        else:
             yield ErrorFrame("Image generation failed")
             return
 
-        # Load the image from the url
-        async with self._aiohttp_session.get(image_url) as response:
-            image_stream = io.BytesIO(await response.content.read())
-            image = Image.open(image_stream)
-            frame = URLImageRawFrame(
-                image=image.tobytes(),
-                size=image.size,
-                format=image.mode,
-                url=image_url,
-            )
-            yield frame
+        # GPT Image PNGs can carry an alpha channel, while output transports
+        # render RGB video by default.
+        generated = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        yield URLImageRawFrame(
+            image=generated.tobytes(),
+            size=generated.size,
+            format=generated.mode,
+            url=image_url,
+        )

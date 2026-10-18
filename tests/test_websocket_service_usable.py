@@ -60,9 +60,9 @@ class FakeWebsocketService(AIService, WebsocketService):
     async def _receive_messages(self):
         pass
 
-    async def report_error(self, error: ErrorFrame, treat_as_permanent: bool = False):
+    async def report_error(self, error: ErrorFrame, force_treat_as_permanent: bool = False):
         self.reported.append(error)
-        await self.push_error_frame(error, treat_as_permanent=treat_as_permanent)
+        await self.push_error_frame(error, force_treat_as_permanent=force_treat_as_permanent)
 
 
 class BareWebsocketService(WebsocketService):
@@ -165,9 +165,9 @@ class TestReconnection(unittest.IsolatedAsyncioTestCase):
         service = FakeWebsocketService(connect_error=websocket_rejection(503))
         flags = []
 
-        async def report_error(error, treat_as_permanent=False):
-            flags.append(treat_as_permanent)
-            await service.push_error_frame(error, treat_as_permanent=treat_as_permanent)
+        async def report_error(error, force_treat_as_permanent=False):
+            flags.append(force_treat_as_permanent)
+            await service.push_error_frame(error, force_treat_as_permanent=force_treat_as_permanent)
 
         await service._try_reconnect(max_retries=2, report_error=report_error)
 

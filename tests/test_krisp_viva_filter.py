@@ -127,6 +127,14 @@ class TestKrispVivaFilter(unittest.IsolatedAsyncioTestCase):
             self.mock_sdk_manager.acquire.assert_not_called()
             self.assertEqual(filter_instance._model_path, self.model_path)
 
+    async def test_initialization_with_deprecated_env_variable(self):
+        """Test that the KRISP_VIVA_MODEL_PATH fallback works and warns."""
+        with patch.dict(os.environ, {"KRISP_VIVA_MODEL_PATH": self.model_path}, clear=True):
+            with self.assertWarnsRegex(DeprecationWarning, "KRISP_VIVA_MODEL_PATH"):
+                filter_instance = KrispVivaFilter()
+
+            self.assertEqual(filter_instance._model_path, self.model_path)
+
     async def test_initialization_without_model_path(self):
         """Test filter initialization fails without model path."""
         with patch.dict(os.environ, {}, clear=True):
@@ -134,10 +142,10 @@ class TestKrispVivaFilter(unittest.IsolatedAsyncioTestCase):
                 KrispVivaFilter()
 
             self.assertIn("Model path", str(context.exception))
-            # SDK acquire not called during initialization (happens in start())
-            # But release() is called in exception handler even though acquire() wasn't called
+            # The SDK is acquired in start(), so a failed constructor neither
+            # acquires nor releases a reference.
             self.mock_sdk_manager.acquire.assert_not_called()
-            self.mock_sdk_manager.release.assert_called_once()
+            self.mock_sdk_manager.release.assert_not_called()
 
     async def test_initialization_with_invalid_extension(self):
         """Test filter initialization fails with non-.kef file."""
@@ -150,10 +158,10 @@ class TestKrispVivaFilter(unittest.IsolatedAsyncioTestCase):
                 KrispVivaFilter(model_path=tmp_path)
 
             self.assertIn(".kef extension", str(context.exception))
-            # SDK acquire not called during initialization (happens in start())
-            # But release() is called in exception handler even though acquire() wasn't called
+            # The SDK is acquired in start(), so a failed constructor neither
+            # acquires nor releases a reference.
             self.mock_sdk_manager.acquire.assert_not_called()
-            self.mock_sdk_manager.release.assert_called_once()
+            self.mock_sdk_manager.release.assert_not_called()
         finally:
             os.unlink(tmp_path)
 
@@ -162,10 +170,10 @@ class TestKrispVivaFilter(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(FileNotFoundError):
             KrispVivaFilter(model_path="/nonexistent/path/model.kef")
 
-        # SDK acquire not called during initialization (happens in start())
-        # But release() is called in exception handler even though acquire() wasn't called
+        # The SDK is acquired in start(), so a failed constructor neither
+        # acquires nor releases a reference.
         self.mock_sdk_manager.acquire.assert_not_called()
-        self.mock_sdk_manager.release.assert_called_once()
+        self.mock_sdk_manager.release.assert_not_called()
 
     async def test_initialization_with_custom_noise_level(self):
         """Test filter initialization with custom noise suppression level."""
@@ -768,6 +776,9 @@ class TestKrispVivaFilter(unittest.IsolatedAsyncioTestCase):
 
         # Verify session is None
         self.assertIsNone(filter_instance._session)
+
+        # The SDK is acquired in start(), so there is nothing to release
+        self.mock_sdk_manager.release.assert_not_called()
 
         # Should be able to start after stop without start
         await filter_instance.start(16000)

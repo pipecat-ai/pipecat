@@ -7,22 +7,34 @@
 """Tests for interruption handling in :class:`BaseOutputTransport`."""
 
 import asyncio
+import hashlib
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import numpy as np
+
+from pipecat.audio.filters.base_audio_filter import BaseAudioFilter
 from pipecat.audio.mixers.base_audio_mixer import BaseAudioMixer
 from pipecat.clocks.system_clock import SystemClock
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     CancelFrame,
+    EndFrame,
+    FilterControlFrame,
+    FilterEnableFrame,
+    FilterUpdateSettingsFrame,
+    FunctionCallInProgressFrame,
     InterruptionFrame,
     MixerControlFrame,
     OutputAudioRawFrame,
     StartFrame,
     TTSAudioRawFrame,
     TTSStoppedFrame,
+    TTSTextFrame,
+    VolumeFrame,
+    VolumeGainFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.transports.base_output import BaseOutputTransport
@@ -46,8 +58,56 @@ class _PassthroughMixer(BaseAudioMixer):
         return audio
 
 
-async def _make_transport(mixer: BaseAudioMixer | None = None) -> BaseOutputTransport:
-    params = TransportParams(audio_out_enabled=True, audio_out_mixer=mixer)
+class _InvertingFilter(BaseAudioFilter):
+    """Filter that inverts every byte and records its calls in order."""
+
+    def __init__(self):
+        self.sample_rate = 0
+        self.stops = 0
+        self.calls: list[str | FilterControlFrame] = []
+
+    async def start(self, sample_rate: int):
+        self.sample_rate = sample_rate
+
+    async def stop(self):
+        self.stops += 1
+
+    async def process_frame(self, frame: FilterControlFrame):
+        self.calls.append(frame)
+
+    async def filter(self, audio: bytes) -> bytes:
+        self.calls.append(_fingerprint(audio))
+        return _inverted(audio)
+
+
+def _inverted(audio: bytes) -> bytes:
+    return bytes(b ^ 0xFF for b in audio)
+
+
+def _fingerprint(audio: bytes) -> str:
+    """Name a chunk by its length and hash, so a failed comparison prints short."""
+    return f"{len(audio)}:{hashlib.sha256(audio).hexdigest()[:12]}"
+
+
+async def _clock_idle(sender):
+    """Wait until the clock task has pushed every timed frame it holds."""
+    while sender._clock_frame or not sender._clock_queue.empty():
+        await asyncio.sleep(0.01)
+
+
+async def _make_transport(
+    mixer: BaseAudioMixer | None = None,
+    audio_out_sample_rate: int | None = None,
+    audio_filter: BaseAudioFilter | None = None,
+    audio_out_volume: float = 1.0,
+) -> BaseOutputTransport:
+    params = TransportParams(
+        audio_out_enabled=True,
+        audio_out_mixer=mixer,
+        audio_out_filter=audio_filter,
+        audio_out_sample_rate=audio_out_sample_rate,
+        audio_out_volume=audio_out_volume,
+    )
     transport = BaseOutputTransport(params)
     transport.push_frame = AsyncMock()
     transport.write_audio_frame = AsyncMock(return_value=True)
@@ -69,6 +129,137 @@ async def _make_transport(mixer: BaseAudioMixer | None = None) -> BaseOutputTran
 class TestBaseOutputTransportInterruptions(unittest.IsolatedAsyncioTestCase):
     async def _make_transport(self, mixer: BaseAudioMixer | None = None) -> BaseOutputTransport:
         return await _make_transport(mixer)
+
+    async def test_uninterruptible_audio_write_finishes_after_interruption(self):
+        transport = await self._make_transport()
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        finished = asyncio.Event()
+
+        async def write(frame):
+            entered.set()
+            await release.wait()
+            finished.set()
+            return True
+
+        transport.write_audio_frame.side_effect = write
+        try:
+            sender = transport._media_senders[None]
+            frame = TTSAudioRawFrame(b"\x01" * sender.audio_chunk_size, sender.sample_rate, 1)
+            frame.interruptible = False
+            await transport.process_frame(frame, FrameDirection.DOWNSTREAM)
+            await asyncio.wait_for(entered.wait(), timeout=1)
+            await transport.process_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
+            release.set()
+            await asyncio.wait_for(finished.wait(), timeout=1)
+        finally:
+            release.set()
+            await transport.cancel(CancelFrame())
+
+    async def test_interruption_preserves_waiting_and_queued_uninterruptible_text(self):
+        for interruptible in (True, False):
+            with self.subTest(interruptible=interruptible):
+                transport = await self._make_transport()
+                try:
+                    sender = transport._media_senders[None]
+                    now = transport.get_clock().get_time()
+                    first = TTSTextFrame("first", "sentence")
+                    first.interruptible = interruptible
+                    first.pts = now + 100_000_000
+                    kept = TTSTextFrame("kept", "sentence")
+                    kept.interruptible = False
+                    kept.pts = now + 120_000_000
+                    dropped = TTSTextFrame("dropped", "sentence")
+                    dropped.pts = now + 130_000_000
+                    for frame in (first, kept, dropped):
+                        await transport.process_frame(frame, FrameDirection.DOWNSTREAM)
+                    await asyncio.sleep(0.01)
+                    self.assertIs(sender._clock_frame, first)
+                    await transport.process_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
+                    await asyncio.wait_for(_clock_idle(sender), timeout=1)
+                    delivered = [
+                        call.args[0].text
+                        for call in transport.push_frame.call_args_list
+                        if isinstance(call.args[0], TTSTextFrame)
+                    ]
+                    self.assertEqual(delivered, ["kept"] if interruptible else ["first", "kept"])
+                finally:
+                    await transport.cancel(CancelFrame())
+
+    async def test_interruption_keeps_uninterruptible_leftover_audio_and_bot_speaking(self):
+        transport = await self._make_transport()
+        try:
+            sender = transport._media_senders[None]
+            chunk_size = sender.audio_chunk_size
+
+            # A chunk and a half of uninterruptible audio, then a bit of normal audio:
+            # one chunk plays and the rest waits in the buffer.
+            uninterruptible = TTSAudioRawFrame(
+                b"\x01" * (chunk_size * 3 // 2), sender.sample_rate, 1
+            )
+            uninterruptible.interruptible = False
+            normal = TTSAudioRawFrame(b"\x02" * (chunk_size // 4), sender.sample_rate, 1)
+            await transport.process_frame(uninterruptible, FrameDirection.DOWNSTREAM)
+            await transport.process_frame(normal, FrameDirection.DOWNSTREAM)
+            await asyncio.sleep(0.05)
+            self.assertTrue(sender._bot_speaking)
+
+            await transport.process_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
+
+            # The normal audio is dropped, the uninterruptible audio is kept, and the
+            # bot is still speaking.
+            self.assertEqual(sender._buffered_audio_bytes, chunk_size // 2)
+            self.assertTrue(sender._bot_speaking)
+            pushed = [type(call.args[0]) for call in transport.push_frame.call_args_list]
+            self.assertNotIn(BotStoppedSpeakingFrame, pushed)
+
+            # The uninterruptible speech ends: its leftover audio plays and the bot
+            # stops speaking.
+            await transport.process_frame(TTSStoppedFrame(), FrameDirection.DOWNSTREAM)
+            await asyncio.sleep(0.05)
+
+            written = b"".join(
+                call.args[0].audio for call in transport.write_audio_frame.call_args_list
+            )
+            self.assertEqual(written, uninterruptible.audio + b"\x00" * (chunk_size // 2))
+            pushed = [type(call.args[0]) for call in transport.push_frame.call_args_list]
+            self.assertIn(BotStoppedSpeakingFrame, pushed)
+        finally:
+            await transport.cancel(CancelFrame())
+
+    async def test_interruption_stops_bot_speaking_with_only_uninterruptible_control_frames(self):
+        transport = await self._make_transport()
+        release = asyncio.Event()
+
+        async def write(frame):
+            await release.wait()
+            return True
+
+        transport.write_audio_frame.side_effect = write
+        try:
+            sender = transport._media_senders[None]
+
+            # The bot is speaking, with more audio and a function call (an
+            # uninterruptible control frame) queued behind it.
+            audio = TTSAudioRawFrame(b"\x01" * (sender.audio_chunk_size * 2), sender.sample_rate, 1)
+            await transport.process_frame(audio, FrameDirection.DOWNSTREAM)
+            function_call = FunctionCallInProgressFrame(
+                function_name="get_weather", tool_call_id="1", arguments={}
+            )
+            await transport.process_frame(function_call, FrameDirection.DOWNSTREAM)
+            await asyncio.sleep(0.01)
+            self.assertTrue(sender._bot_speaking)
+
+            await transport.process_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
+
+            # The function call is kept, but there's no audio left to play.
+            self.assertTrue(sender._audio_queue.has_frame(FunctionCallInProgressFrame))
+            self.assertFalse(sender._bot_speaking)
+            pushed = [type(call.args[0]) for call in transport.push_frame.call_args_list]
+            self.assertIn(BotStoppedSpeakingFrame, pushed)
+        finally:
+            release.set()
+            await transport.cancel(CancelFrame())
 
     async def test_interruption_with_mixer_keeps_audio_task_and_mixer_output(self):
         transport = await self._make_transport(mixer=_PassthroughMixer())
@@ -94,7 +285,7 @@ class TestBaseOutputTransportInterruptions(unittest.IsolatedAsyncioTestCase):
         finally:
             await transport.cancel(CancelFrame())
 
-    async def test_interruption_without_mixer_recreates_audio_task(self):
+    async def test_interruption_without_mixer_keeps_audio_task(self):
         transport = await self._make_transport(mixer=None)
         try:
             sender = transport._media_senders[None]
@@ -103,8 +294,7 @@ class TestBaseOutputTransportInterruptions(unittest.IsolatedAsyncioTestCase):
 
             await transport.process_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
 
-            self.assertIsNot(sender._audio_task, task_before)
-            self.assertIsNotNone(sender._audio_task)
+            self.assertIs(sender._audio_task, task_before)
         finally:
             await transport.cancel(CancelFrame())
 
@@ -145,10 +335,44 @@ class TestBaseOutputTransportInterruptions(unittest.IsolatedAsyncioTestCase):
             await transport.cancel(CancelFrame())
 
 
+class TestBaseOutputTransportChunkInterruptibility(unittest.IsolatedAsyncioTestCase):
+    """A chunk cut from the audio buffer keeps the ``interruptible`` flag of the audio it holds."""
+
+    async def test_chunks_carry_the_flag_of_their_audio(self):
+        transport = await _make_transport(mixer=None)
+        try:
+            sender = transport._media_senders[None]
+            chunk_size = sender.audio_chunk_size
+            half = chunk_size // 2
+
+            def frame(audio: bytes, *, interruptible: bool) -> TTSAudioRawFrame:
+                f = TTSAudioRawFrame(
+                    audio=audio, sample_rate=sender.sample_rate, num_channels=1, context_id="ctx"
+                )
+                f.interruptible = interruptible
+                return f
+
+            # One uninterruptible chunk, then a chunk that spans an uninterruptible
+            # frame and a plain one, then a plain chunk.
+            for f in (
+                frame(b"\x01" * chunk_size, interruptible=False),
+                frame(b"\x02" * half, interruptible=False),
+                frame(b"\x03" * half, interruptible=True),
+                frame(b"\x04" * chunk_size, interruptible=True),
+            ):
+                await transport.process_frame(f, FrameDirection.DOWNSTREAM)
+            await asyncio.sleep(0.1)
+
+            written = [call.args[0] for call in transport.write_audio_frame.call_args_list]
+            self.assertEqual([w.interruptible for w in written], [False, False, True])
+        finally:
+            await transport.cancel(CancelFrame())
+
+
 class TestBaseOutputTransportAudioBuffering(unittest.IsolatedAsyncioTestCase):
     """Test for the trailing-partial-chunk audio buffer.
 
-    ``MediaSender._audio_buffer`` only enqueues complete ``audio_chunk_size``
+    ``MediaSender`` only enqueues complete ``audio_chunk_size``
     chunks (see ``handle_audio_frame``); whatever hasn't reached a full chunk
     stays buffered. When ``TTSStoppedFrame`` arrives, that leftover audio is
     padded with silence to a full chunk and queued for playback (see
@@ -192,7 +416,7 @@ class TestBaseOutputTransportAudioBuffering(unittest.IsolatedAsyncioTestCase):
             await transport.process_frame(partial_chunk, FrameDirection.DOWNSTREAM)
 
             # It's sitting in the buffer, not yet queued for playback.
-            self.assertEqual(len(sender._audio_buffer), partial_len)
+            self.assertEqual(sender._buffered_audio_bytes, partial_len)
 
             # TTSStoppedFrame marks the end of the turn: the leftover audio
             # should be padded with silence and flushed, not discarded.
@@ -211,7 +435,7 @@ class TestBaseOutputTransportAudioBuffering(unittest.IsolatedAsyncioTestCase):
             expected = full_audio + partial_audio + silence_padding
             self.assertEqual(written, expected)
             # The buffer should be drained by the flush, not just cleared.
-            self.assertEqual(sender._audio_buffer, bytearray())
+            self.assertEqual(sender._buffered_audio_bytes, 0)
         finally:
             await transport.cancel(CancelFrame())
 
@@ -228,7 +452,7 @@ class TestBaseOutputTransportAudioBuffering(unittest.IsolatedAsyncioTestCase):
             chunk_size = sender.audio_chunk_size
 
             # Audio shorter than a single chunk: never queued by
-            # `handle_audio_frame`, only ever sitting in `_audio_buffer`.
+            # `handle_audio_frame`, only ever sitting in the buffer.
             partial_audio = b"\x03\x04" * (chunk_size // 4)
             partial_chunk = TTSAudioRawFrame(
                 audio=partial_audio,
@@ -237,7 +461,7 @@ class TestBaseOutputTransportAudioBuffering(unittest.IsolatedAsyncioTestCase):
                 context_id="ctx1",
             )
             await transport.process_frame(partial_chunk, FrameDirection.DOWNSTREAM)
-            self.assertEqual(len(sender._audio_buffer), len(partial_audio))
+            self.assertEqual(sender._buffered_audio_bytes, len(partial_audio))
             self.assertFalse(sender._bot_speaking)
 
             await transport.process_frame(
@@ -258,5 +482,393 @@ class TestBaseOutputTransportAudioBuffering(unittest.IsolatedAsyncioTestCase):
             pushed_types = [call.args[0].__class__ for call in transport.push_frame.call_args_list]
             self.assertIn(BotStartedSpeakingFrame, pushed_types)
             self.assertIn(BotStoppedSpeakingFrame, pushed_types)
+        finally:
+            await transport.cancel(CancelFrame())
+
+
+async def _make_wedging_transport(
+    write_audio_frame: AsyncMock, *, timeout: float
+) -> BaseOutputTransport:
+    params = TransportParams(
+        audio_out_enabled=True,
+        audio_out_end_silence_secs=0,
+        audio_out_write_timeout_secs=timeout,
+    )
+    transport = BaseOutputTransport(params)
+    transport.push_frame = AsyncMock()
+    transport.write_audio_frame = write_audio_frame
+
+    await transport.setup(
+        FrameProcessorSetup(
+            clock=SystemClock(),
+            task_manager=TaskManager(),
+            pipeline_worker=SimpleNamespace(app_resources=None),  # type: ignore[arg-type]
+        )
+    )
+    start_frame = StartFrame(audio_out_sample_rate=16000)
+    await transport.process_frame(start_frame, FrameDirection.DOWNSTREAM)
+    await transport.set_transport_ready(start_frame)
+    return transport
+
+
+def _one_second_of_audio() -> OutputAudioRawFrame:
+    # 16kHz, 16-bit mono, which the sender splits into 40ms chunks.
+    return OutputAudioRawFrame(audio=b"\x00" * 16000 * 2, sample_rate=16000, num_channels=1)
+
+
+class TestBaseOutputTransportWriteTimeout(unittest.IsolatedAsyncioTestCase):
+    """A peer that stops reading blocks the write on buffers that never drain."""
+
+    async def test_end_frame_still_reaches_downstream(self):
+        """`process_frame` pushes the EndFrame only after `stop()` returns."""
+        never_returns = asyncio.Event()
+
+        async def wedged(_frame):
+            await never_returns.wait()
+            return True
+
+        transport = await _make_wedging_transport(AsyncMock(side_effect=wedged), timeout=0.5)
+        await transport.process_frame(_one_second_of_audio(), FrameDirection.DOWNSTREAM)
+        await asyncio.sleep(0.1)
+
+        end_frame = EndFrame()
+        await asyncio.wait_for(
+            transport.process_frame(end_frame, FrameDirection.DOWNSTREAM), timeout=10.0
+        )
+
+        pushed = [call.args[0] for call in transport.push_frame.call_args_list]
+        self.assertIn(end_frame, pushed)
+
+    async def test_peer_is_written_off_once(self):
+        """Paying the timeout per queued frame would hang shutdown by a slower route."""
+        never_returns = asyncio.Event()
+
+        async def wedged(_frame):
+            await never_returns.wait()
+            return True
+
+        write = AsyncMock(side_effect=wedged)
+        transport = await _make_wedging_transport(write, timeout=0.3)
+
+        # A second of audio is 25 chunks, so a per-frame timeout would show up here.
+        await transport.process_frame(_one_second_of_audio(), FrameDirection.DOWNSTREAM)
+        await asyncio.sleep(1.0)
+
+        self.assertEqual(write.call_count, 1)
+        self.assertFalse(transport.is_usable)
+
+    async def test_slow_write_within_the_bound_is_not_cut_short(self):
+        """Long playout is legitimately slow; only a stalled write is written off."""
+
+        async def slow(_frame):
+            await asyncio.sleep(0.05)
+            return True
+
+        write = AsyncMock(side_effect=slow)
+        transport = await _make_wedging_transport(write, timeout=1.0)
+
+        await transport.process_frame(_one_second_of_audio(), FrameDirection.DOWNSTREAM)
+        await asyncio.wait_for(
+            transport.process_frame(EndFrame(), FrameDirection.DOWNSTREAM), timeout=30.0
+        )
+
+        # A second of audio is ~25 chunks; a written-off peer would show one
+        # write, so the exact count (resampling shifts it) doesn't matter.
+        self.assertGreater(write.call_count, 20)
+        self.assertTrue(transport.is_usable)
+
+
+class TestBaseOutputTransportResampling(unittest.IsolatedAsyncioTestCase):
+    """Tests for audio that has to be resampled to the transport's output rate.
+
+    ``MediaSender`` resamples on arrival, ahead of the paced ``_audio_queue``,
+    so it sits idle whenever TTS delivers audio in bursts. Its resampler must
+    therefore keep the audio held in its filter across those pauses, and give
+    it up only when the speech run actually ends.
+    """
+
+    TTS_RATE = 16000
+    OUT_RATE = 8000
+
+    def _tts_frames(self, sample_count: int, chunk_samples: int = 640):
+        """Split a ramp of TTS-rate audio into frames, as a TTS service would."""
+        audio = bytes(
+            b for i in range(sample_count) for b in (i % 251).to_bytes(2, "little", signed=False)
+        )
+        chunk = chunk_samples * 2
+        return [
+            TTSAudioRawFrame(
+                audio=audio[offset : offset + chunk],
+                sample_rate=self.TTS_RATE,
+                num_channels=1,
+                context_id="ctx1",
+            )
+            for offset in range(0, len(audio), chunk)
+        ]
+
+    def _constant_frames(self, value: int, sample_count: int, chunk_samples: int = 640):
+        """TTS frames holding a constant level, so leftovers are easy to spot."""
+        audio = int(value).to_bytes(2, "little", signed=True) * sample_count
+        chunk = chunk_samples * 2
+        return [
+            TTSAudioRawFrame(
+                audio=audio[offset : offset + chunk],
+                sample_rate=self.TTS_RATE,
+                num_channels=1,
+                context_id="ctx1",
+            )
+            for offset in range(0, len(audio), chunk)
+        ]
+
+    def _written(self, transport) -> bytes:
+        return b"".join(call.args[0].audio for call in transport.write_audio_frame.call_args_list)
+
+    async def test_delivery_pause_does_not_drop_audio(self):
+        """A pause between TTS chunks must not cost any audio.
+
+        The resampler runs ahead of playback, so a gap between two chunks says
+        nothing about the stream: the audio either side of it is one utterance,
+        and all of it has to reach the transport.
+        """
+        transport = await _make_transport(audio_out_sample_rate=self.OUT_RATE)
+        try:
+            sender = transport._media_senders[None]
+            in_samples = 16000
+
+            for index, frame in enumerate(self._tts_frames(sample_count=in_samples)):
+                if index == 12:
+                    # A delivery pause longer than the resampler's inactivity
+                    # timeout, e.g. a TTS round trip between two sentences.
+                    await asyncio.sleep(0.3)
+                await transport.process_frame(frame, FrameDirection.DOWNSTREAM)
+
+            await transport.process_frame(
+                TTSStoppedFrame(context_id="ctx1"), FrameDirection.DOWNSTREAM
+            )
+            await asyncio.sleep(0.2)
+
+            # Every input sample reaches the transport, give or take the
+            # silence the last partial chunk is padded with.
+            expected = in_samples * self.OUT_RATE // self.TTS_RATE
+            written = len(self._written(transport)) // 2
+            self.assertGreaterEqual(written, expected)
+            self.assertLess(written, expected + sender.audio_chunk_size // 2)
+        finally:
+            await transport.cancel(CancelFrame())
+
+    async def test_interruption_does_not_replay_aborted_audio(self):
+        """Audio cut short is dropped, not carried into what the bot says next."""
+        transport = await _make_transport(audio_out_sample_rate=self.OUT_RATE)
+        try:
+            sender = transport._media_senders[None]
+
+            for frame in self._constant_frames(8000, 8000):
+                await transport.process_frame(frame, FrameDirection.DOWNSTREAM)
+            await asyncio.sleep(0.1)
+            self.assertTrue(sender._bot_speaking)
+
+            await transport.process_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
+            await asyncio.sleep(0.1)
+            already_written = len(transport.write_audio_frame.call_args_list)
+
+            # The next turn is entirely negative, so anything positive in it is
+            # left over from the turn that was cut short.
+            for frame in self._constant_frames(-8000, 8000):
+                await transport.process_frame(frame, FrameDirection.DOWNSTREAM)
+            await transport.process_frame(
+                TTSStoppedFrame(context_id="ctx1"), FrameDirection.DOWNSTREAM
+            )
+            await asyncio.sleep(0.2)
+
+            after = b"".join(
+                call.args[0].audio
+                for call in transport.write_audio_frame.call_args_list[already_written:]
+            )
+            samples = np.frombuffer(after, dtype=np.int16)
+            self.assertGreater(len(samples), 0)
+            self.assertLessEqual(int(samples.max()), 0)
+        finally:
+            await transport.cancel(CancelFrame())
+
+
+class TestBaseOutputTransportAudioFilter(unittest.IsolatedAsyncioTestCase):
+    """The output filter runs on the audio the pipeline sends, before it is written."""
+
+    def _audio(self, transport: BaseOutputTransport, fill: int = 1) -> OutputAudioRawFrame:
+        """One chunk of audio, every byte set to ``fill``."""
+        sender = transport._media_senders[None]
+        return OutputAudioRawFrame(
+            audio=bytes([fill]) * sender.audio_chunk_size,
+            sample_rate=sender.sample_rate,
+            num_channels=1,
+        )
+
+    def _written(self, transport: BaseOutputTransport) -> list[str]:
+        calls = transport.write_audio_frame.call_args_list
+        return [_fingerprint(call.args[0].audio) for call in calls]
+
+    async def test_transport_writes_the_filtered_audio(self):
+        audio_filter = _InvertingFilter()
+        transport = await _make_transport(audio_filter=audio_filter)
+        try:
+            self.assertEqual(audio_filter.sample_rate, transport.sample_rate)
+
+            frame = self._audio(transport)
+            audio = frame.audio
+            await transport.process_frame(frame, FrameDirection.DOWNSTREAM)
+            await asyncio.sleep(0.1)
+            self.assertEqual(self._written(transport), [_fingerprint(_inverted(audio))])
+        finally:
+            await transport.cleanup()
+        self.assertEqual(audio_filter.stops, 1)
+
+    async def test_transport_skips_a_chunk_the_filter_empties(self):
+        audio_filter = _InvertingFilter()
+        audio_filter.filter = AsyncMock(return_value=b"")
+        transport = await _make_transport(audio_filter=audio_filter)
+        try:
+            await transport.process_frame(self._audio(transport), FrameDirection.DOWNSTREAM)
+            await asyncio.sleep(0.1)
+
+            self.assertEqual(audio_filter.filter.call_count, 1)
+            self.assertEqual(self._written(transport), [])
+        finally:
+            await transport.cancel(CancelFrame())
+
+    async def test_filter_runs_before_the_mixer_and_skips_mixer_audio(self):
+        audio_filter = _InvertingFilter()
+        mixer = _PassthroughMixer()
+        mixer.mix = AsyncMock(side_effect=lambda audio: audio)
+        transport = await _make_transport(mixer=mixer, audio_filter=audio_filter)
+        try:
+            frame = self._audio(transport)
+            audio = frame.audio
+            await transport.process_frame(frame, FrameDirection.DOWNSTREAM)
+            await asyncio.sleep(0.1)
+
+            # The mixer mixes a silent chunk on each pass with an empty queue,
+            # and the filter gets none of them.
+            self.assertEqual(audio_filter.calls, [_fingerprint(audio)])
+            mixed = [_fingerprint(call.args[0]) for call in mixer.mix.call_args_list]
+            self.assertIn(_fingerprint(_inverted(audio)), mixed)
+        finally:
+            await transport.cancel(CancelFrame())
+
+    async def test_control_frames_reach_the_filter_in_order_with_the_audio(self):
+        audio_filter = _InvertingFilter()
+        transport = await _make_transport(audio_filter=audio_filter)
+        try:
+            release_write = asyncio.Event()
+
+            async def held_write(frame):
+                await release_write.wait()
+                return True
+
+            transport.write_audio_frame = AsyncMock(side_effect=held_write)
+            first, second, third = (self._audio(transport, fill) for fill in (1, 2, 3))
+            audio = [_fingerprint(frame.audio) for frame in (first, second, third)]
+            controls = [FilterEnableFrame(enable=False), FilterUpdateSettingsFrame(settings={})]
+
+            # The first chunk holds the write, so the second chunk is still
+            # queued when the control frames arrive.
+            await transport.process_frame(first, FrameDirection.DOWNSTREAM)
+            await asyncio.sleep(0.1)
+            for frame in (second, *controls, third):
+                await transport.process_frame(frame, FrameDirection.DOWNSTREAM)
+            release_write.set()
+            await asyncio.sleep(0.1)
+
+            self.assertEqual(audio_filter.calls, [audio[0], audio[1], *controls, audio[2]])
+        finally:
+            await transport.cancel(CancelFrame())
+
+
+class TestBaseOutputTransportVolume(unittest.IsolatedAsyncioTestCase):
+    """The output volume, and the gain on it, scale the audio that follows them."""
+
+    def _audio(self, transport: BaseOutputTransport, sample: int = 1000) -> OutputAudioRawFrame:
+        """One chunk of audio, every sample set to ``sample``."""
+        sender = transport._media_senders[None]
+        return OutputAudioRawFrame(
+            audio=np.full(sender.audio_chunk_size // 2, sample, dtype=np.int16).tobytes(),
+            sample_rate=sender.sample_rate,
+            num_channels=1,
+        )
+
+    def _written(self, transport: BaseOutputTransport) -> list[int]:
+        """The first sample of each chunk written, in order."""
+        calls = transport.write_audio_frame.call_args_list
+        return [int(np.frombuffer(call.args[0].audio, dtype=np.int16)[0]) for call in calls]
+
+    async def test_transport_writes_audio_at_its_volume(self):
+        transport = await _make_transport(audio_out_volume=0.5)
+        try:
+            await transport.process_frame(self._audio(transport), FrameDirection.DOWNSTREAM)
+            await asyncio.sleep(0.1)
+
+            self.assertEqual(self._written(transport), [500])
+        finally:
+            await transport.cancel(CancelFrame())
+
+    async def test_volume_and_gain_scale_the_audio_after_them(self):
+        transport = await _make_transport()
+        try:
+            frames = [
+                self._audio(transport),
+                VolumeFrame(volume=0.5),
+                self._audio(transport),
+                VolumeGainFrame(gain=0.5),
+                self._audio(transport),
+                VolumeGainFrame(gain=1.0),
+                self._audio(transport),
+            ]
+            for frame in frames:
+                await transport.process_frame(frame, FrameDirection.DOWNSTREAM)
+            await asyncio.sleep(0.1)
+
+            self.assertEqual(self._written(transport), [1000, 500, 250, 500])
+        finally:
+            await transport.cancel(CancelFrame())
+
+    async def test_an_interruption_keeps_the_gain_frames(self):
+        transport = await _make_transport()
+        try:
+            release_write = asyncio.Event()
+
+            async def held_write(frame):
+                await release_write.wait()
+                return True
+
+            transport.write_audio_frame = AsyncMock(side_effect=held_write)
+
+            # The first chunk holds the write, so the gain frames and the quiet
+            # chunk between them are still queued when the user interrupts.
+            await transport.process_frame(self._audio(transport), FrameDirection.DOWNSTREAM)
+            await asyncio.sleep(0.1)
+            for frame in (
+                VolumeGainFrame(gain=0.5),
+                self._audio(transport),
+                VolumeGainFrame(gain=1.0),
+            ):
+                await transport.process_frame(frame, FrameDirection.DOWNSTREAM)
+            await transport.process_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
+            release_write.set()
+            await transport.process_frame(self._audio(transport), FrameDirection.DOWNSTREAM)
+            await asyncio.sleep(0.1)
+
+            # The quiet chunk is dropped, and the audio after it plays at full
+            # volume again.
+            self.assertEqual(self._written(transport), [1000, 1000])
+        finally:
+            await transport.cancel(CancelFrame())
+
+    async def test_a_loud_gain_clips_to_the_sample_range(self):
+        transport = await _make_transport()
+        try:
+            for frame in (VolumeGainFrame(gain=2.0), self._audio(transport, sample=30000)):
+                await transport.process_frame(frame, FrameDirection.DOWNSTREAM)
+            await asyncio.sleep(0.1)
+
+            self.assertEqual(self._written(transport), [32767])
         finally:
             await transport.cancel(CancelFrame())

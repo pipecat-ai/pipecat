@@ -9,11 +9,13 @@
 import copy
 import json
 from dataclasses import dataclass
-from typing import Any, TypedDict, TypeGuard, TypeVar, cast
+from typing import Any, Literal, TypedDict, TypeGuard, TypeVar, cast
 
 from anthropic import NOT_GIVEN as ANTHROPIC_NOT_GIVEN
 from anthropic import NotGiven as AnthropicNotGiven
+from anthropic.types.cache_control_ephemeral_param import CacheControlEphemeralParam
 from anthropic.types.message_param import MessageParam
+from anthropic.types.text_block_param import TextBlockParam
 from anthropic.types.tool_union_param import ToolUnionParam
 from loguru import logger
 
@@ -28,6 +30,9 @@ from pipecat.processors.aggregators.llm_context import (
 )
 
 _T = TypeVar("_T")
+
+AnthropicCacheTTL = Literal["5m", "1h"]
+"""Lifetime of an Anthropic prompt cache entry after it was last written or read."""
 
 
 def anthropic_is_given(value: _T | AnthropicNotGiven) -> TypeGuard[_T]:
@@ -54,7 +59,7 @@ def anthropic_is_given(value: _T | AnthropicNotGiven) -> TypeGuard[_T]:
 class AnthropicLLMInvocationParams(TypedDict):
     """Context-based parameters for invoking Anthropic's LLM API."""
 
-    system: str | AnthropicNotGiven
+    system: str | list[TextBlockParam] | AnthropicNotGiven
     messages: list[MessageParam]
     tools: list[ToolUnionParam]
 
@@ -71,12 +76,13 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
         """Get the identifier used in LLMSpecificMessage instances for Anthropic."""
         return "anthropic"
 
-    def get_llm_invocation_params(
+    async def get_llm_invocation_params(
         self,
         context: LLMContext,
         enable_prompt_caching: bool,
         system_instruction: str | None = None,
         ensure_last_message_is_user: bool = False,
+        system_prompt_cache_ttl: AnthropicCacheTTL | None = None,
     ) -> AnthropicLLMInvocationParams:
         """Get Anthropic-specific LLM invocation parameters from a universal LLM context.
 
@@ -89,10 +95,14 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
                 when the converted message list ends with an assistant message.
                 Required by models without assistant-prefill support, which
                 reject requests ending with an assistant message.
+            system_prompt_cache_ttl: Lifetime of the system prompt's cache
+                entry when prompt caching is enabled. ``None`` uses Anthropic's
+                default of 5 minutes.
 
         Returns:
             Dictionary of parameters for invoking Anthropic's LLM API.
         """
+        await self.prepare_file_content(context)
         converted = self._from_universal_context_messages(
             self.get_messages(context), system_instruction=system_instruction
         )
@@ -103,8 +113,15 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
             system_instruction,
             discard_context_system=True,
         )
+        system_param: str | list[TextBlockParam] | AnthropicNotGiven = ANTHROPIC_NOT_GIVEN
+        if system is not None:
+            system_param = (
+                self._system_with_cache_control(system, system_prompt_cache_ttl)
+                if enable_prompt_caching
+                else system
+            )
         return {
-            "system": system if system is not None else ANTHROPIC_NOT_GIVEN,
+            "system": system_param,
             "messages": (
                 self._with_cache_control_markers(converted.messages)
                 if enable_prompt_caching
@@ -143,8 +160,18 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
                             source["data"] = "..."
                     if item.get("type") == "thinking" and item.get("signature"):
                         item["signature"] = "..."
+                    if item.get("type") == "document":
+                        source = item.get("source")
+                        if isinstance(source, dict) and "data" in source:
+                            source["data"] = "..."
             messages_for_logging.append(msg)
         return messages_for_logging
+
+    def supports_file_url(self, url: str, mime_type: str) -> bool:
+        """Anthropic fetches image and PDF URLs itself; other files must be inlined."""
+        return url.startswith(("http://", "https://")) and (
+            mime_type.startswith("image/") or mime_type == "application/pdf"
+        )
 
     @dataclass
     class ConvertedMessages:
@@ -367,6 +394,7 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
             if content == "":
                 content = "(empty)"
         elif isinstance(content, list):
+            new_content = []
             for item in content:
                 # fix empty text
                 if item["type"] == "text" and item["text"] == "":
@@ -392,22 +420,73 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
                         }
                         del item["image_url"]
                     else:
-                        url = item["image_url"]["url"]
-                        logger.warning(f"Unsupported 'image_url': {url}")
+                        logger.warning(f"Unsupported 'image_url': {item['image_url']['url']}")
+                        continue
+                if item["type"] == "file_url":
+                    f_data = item["file"]
+                    # Raises for a URL the provider can't consume with nothing
+                    # resolved (wrapped as LLMContextConversionError by the
+                    # caller in _from_universal_context_messages).
+                    resolved = self.inlined_file_content(f_data)
+                    if resolved is None:
+                        # Pass-through: supports_file_url admits only images
+                        # and PDFs.
+                        item["type"] = (
+                            "image" if f_data["mime_type"].startswith("image/") else "document"
+                        )
+                        item["source"] = {
+                            "type": "url",
+                            "url": f_data["url"],
+                        }
+                        del item["file"]
+                    else:
+                        # Resolved content converts through the inline branch
+                        # below. Non-raw adapters always cache the data-URL form.
+                        item = {
+                            "type": "file_base64",
+                            "file": {**f_data, "file_data": cast(str, resolved)},
+                        }
+                if item["type"] == "file_base64":
+                    f_data = item["file"]
+                    if f_data["mime_type"].startswith("image/"):
+                        item["type"] = "image"
+                        item["source"] = {
+                            "type": "base64",
+                            "media_type": f_data["mime_type"],
+                            "data": f_data["file_data"].split(",")[1],
+                        }
+                        del item["file"]
+                    elif f_data["mime_type"] == "application/pdf":
+                        item["type"] = "document"
+                        item["source"] = {
+                            "type": "base64",
+                            "media_type": f_data["mime_type"],
+                            "data": f_data["file_data"].split(",")[1],
+                        }
+                        del item["file"]
+                    else:
+                        # Wrapped as LLMContextConversionError by the caller in
+                        # _from_universal_context_messages.
+                        raise ValueError(f"Unsupported 'file' MIME type: {f_data['mime_type']}")
+                new_content.append(item)
+            content = new_content
+            msg["content"] = content
 
-            # In the case where there's a single image in the list (like what
-            # would result from a UserImageRawFrame), ensure that the image
-            # comes before text, as recommended by Anthropic docs
+            # In the case where there's a single image or document in the list (like
+            # what would result from a UserImageRawFrame or UserFileRawFrame), ensure
+            # it comes before text, as recommended by Anthropic docs
             # (https://docs.anthropic.com/en/docs/build-with-claude/vision#example-one-image)
-            image_indices = [i for i, item in enumerate(content) if item["type"] == "image"]
+            media_indices = [
+                i for i, item in enumerate(content) if item["type"] in ("image", "document")
+            ]
             text_indices = [i for i, item in enumerate(content) if item["type"] == "text"]
-            if len(image_indices) == 1 and text_indices:
-                img_idx = image_indices[0]
+            if len(media_indices) == 1 and text_indices:
+                media_idx = media_indices[0]
                 first_txt_idx = text_indices[0]
-                if img_idx > first_txt_idx:
-                    # Move image before the first text
-                    image_item = content.pop(img_idx)
-                    content.insert(first_txt_idx, image_item)
+                if media_idx > first_txt_idx:
+                    # Move the image/document before the first text
+                    media_item = content.pop(media_idx)
+                    content.insert(first_txt_idx, media_item)
 
         return cast(MessageParam, msg)
 
@@ -466,6 +545,33 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
         except Exception as e:
             logger.error(f"Error adding cache control marker: {e}")
             return messages_with_markers
+
+    @staticmethod
+    def _system_with_cache_control(
+        system: str, ttl: AnthropicCacheTTL | None = None
+    ) -> list[TextBlockParam]:
+        """Add a cache breakpoint to the end of a system prompt.
+
+        Anthropic accepts system prompts as either a string or a list of content
+        blocks. Converting a string to one text block lets the shared system
+        prompt be cached independently of the conversation messages.
+
+        A TTL longer than the message breakpoints' keeps the shared prefix
+        cached across gaps between conversations. Anthropic requires longer-TTL
+        breakpoints to come before shorter ones, which the system prompt always
+        does.
+
+        Args:
+            system: The system prompt to mark for caching.
+            ttl: Lifetime of the cache entry. ``None`` uses Anthropic's default.
+
+        Returns:
+            The system prompt as one cacheable text block.
+        """
+        cache_control: CacheControlEphemeralParam = {"type": "ephemeral"}
+        if ttl is not None:
+            cache_control["ttl"] = ttl
+        return [{"type": "text", "text": system, "cache_control": cache_control}]
 
     @staticmethod
     def _to_anthropic_function_format(function: FunctionSchema) -> dict[str, Any]:

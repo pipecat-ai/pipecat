@@ -33,6 +33,7 @@ from pipecat.frames.frames import (
     OutputTransportMessageUrgentFrame,
     StartFrame,
 )
+from pipecat.pipeline.capabilities import BotCapabilities
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
@@ -43,6 +44,7 @@ from pipecat.transports.daily.transport import (
     DailyTransportClient,
 )
 from pipecat.transports.lemonslice.api import LemonSliceApi
+from pipecat.utils.shared import acquires, releases
 
 
 class LemonSliceNewSessionRequest(BaseModel):
@@ -185,15 +187,13 @@ class LemonSliceTransportClient:
         self._control_url = response["control_url"]
         return response["room_url"]
 
+    @acquires("client")
     async def setup(self, setup: FrameProcessorSetup):
         """Setup the client and initialize the conversation.
 
         Args:
             setup: The frame processor setup configuration.
         """
-        if self._session_id is not None:
-            logger.debug(f"Session ID already defined: {self._session_id}")
-            return
         try:
             room_url = await self._initialize()
             daily_callbacks = DailyCallbacks(
@@ -219,6 +219,9 @@ class LemonSliceTransportClient:
                 on_dialout_error=partial(self._on_handle_callback, "on_dialout_error"),
                 on_dialout_warning=partial(self._on_handle_callback, "on_dialout_warning"),
                 on_dtmf_event=partial(self._on_handle_callback, "on_dtmf_event"),
+                on_network_connection_status_updated=partial(
+                    self._on_handle_callback, "on_network_connection_status_updated"
+                ),
                 on_participant_joined=self._callbacks.on_participant_joined,
                 on_participant_left=self._callbacks.on_participant_left,
                 on_participant_updated=partial(self._on_handle_callback, "on_participant_updated"),
@@ -242,6 +245,7 @@ class LemonSliceTransportClient:
             await self._end_session()
             raise
 
+    @releases("client")
     async def cleanup(self):
         """Cleanup client resources."""
         try:
@@ -290,7 +294,6 @@ class LemonSliceTransportClient:
         if not self._daily_transport_client:
             return
 
-        await self._daily_transport_client.start(frame)
         await self._daily_transport_client.join()
 
     async def stop(self):
@@ -484,8 +487,6 @@ class LemonSliceInputTransport(BaseInputTransport):
         super().__init__(params, **kwargs)
         self._client = client
         self._params = params
-        # Whether we have seen a StartFrame already.
-        self._initialized = False
 
     async def setup(self, setup: FrameProcessorSetup):
         """Setup the input transport.
@@ -508,11 +509,6 @@ class LemonSliceInputTransport(BaseInputTransport):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-
-        if self._initialized:
-            return
-
-        self._initialized = True
 
         await self._client.start(frame)
         await self.set_transport_ready(frame)
@@ -594,10 +590,20 @@ class LemonSliceOutputTransport(BaseOutputTransport):
         self._client = client
         self._params = params
 
-        # Whether we have seen a StartFrame already.
-        self._initialized = False
         # This is the custom track destination expected by LemonSlice
         self._transport_destination: str | None = "stream"
+
+    @property
+    def capabilities(self) -> BotCapabilities:
+        """The media this transport sends to the user.
+
+        The LemonSlice avatar publishes its video to the room itself, so the user
+        receives bot video even though this transport sends none.
+
+        Returns:
+            The ``audio_out`` capability, with ``video_out`` set.
+        """
+        return super().capabilities.override(BotCapabilities(video_out=True))
 
     async def setup(self, setup: FrameProcessorSetup):
         """Setup the output transport.
@@ -620,11 +626,6 @@ class LemonSliceOutputTransport(BaseOutputTransport):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-
-        if self._initialized:
-            return
-
-        self._initialized = True
 
         await self._client.start(frame)
 

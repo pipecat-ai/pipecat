@@ -25,6 +25,7 @@ from pipecat.services.llm_service import (
 )
 from pipecat.services.settings import LLMSettings
 from pipecat.utils.asyncio.task_manager import TaskManager
+from tests.frame_processor_helpers import frame_processor_setup
 
 
 @dataclass
@@ -100,12 +101,50 @@ class TestFunctionCallParamsAppResources(unittest.TestCase):
         self.assertIs(value, resources)
 
 
+class TestLLMServiceFunctionCallReadsWorkerRunner(unittest.IsolatedAsyncioTestCase):
+    async def test_function_call_params_receives_worker_runner(self):
+        """A tool handler reaches the runner without the app wiring it through."""
+        service = _MockLLMService()
+        runner = SimpleNamespace(name="stub-runner")
+        service._setup = frame_processor_setup(
+            TaskManager(),
+            pipeline_worker=SimpleNamespace(app_resources=None, worker_runner=runner),
+        )
+
+        captured: dict[str, Any] = {}
+
+        async def handler(params: FunctionCallParams):
+            captured["worker_runner"] = params.worker_runner
+            await params.result_callback({"ok": True})
+
+        service._functions["lookup"] = FunctionCallRegistryItem(
+            function_name="lookup",
+            handler=handler,
+            cancel_on_interruption=True,
+        )
+        service.broadcast_frame = AsyncMock()  # type: ignore[method-assign]
+
+        runner_item = FunctionCallRunnerItem(
+            registry_item=service._functions["lookup"],
+            function_name="lookup",
+            tool_call_id="call-1",
+            arguments={},
+            context=LLMContext(),
+        )
+        await service._run_function_call(runner_item)
+
+        self.assertIs(captured["worker_runner"], runner)
+
+
 class TestLLMServiceFunctionCallReadsAppResources(unittest.IsolatedAsyncioTestCase):
     async def test_function_call_params_receives_app_resources(self):
         service = _MockLLMService()
         resources = _Resources(user_name="John")
         # Stub the pipeline worker with just the bit LLMService reads.
-        service._pipeline_worker = SimpleNamespace(app_resources=resources)  # type: ignore[assignment]
+        service._setup = frame_processor_setup(
+            TaskManager(),
+            pipeline_worker=SimpleNamespace(app_resources=resources, worker_runner=None),
+        )
 
         captured: dict[str, Any] = {}
 
@@ -136,7 +175,10 @@ class TestLLMServiceFunctionCallReadsAppResources(unittest.IsolatedAsyncioTestCa
     async def test_direct_function_params_receives_app_resources(self):
         service = _MockLLMService()
         resources = _Resources(user_name="John")
-        service._pipeline_worker = SimpleNamespace(app_resources=resources)  # type: ignore[assignment]
+        service._setup = frame_processor_setup(
+            TaskManager(),
+            pipeline_worker=SimpleNamespace(app_resources=resources, worker_runner=None),
+        )
         captured: dict[str, Any] = {}
 
         async def lookup(params: FunctionCallParams):
@@ -294,7 +336,7 @@ class TestFrameProcessorPipelineTaskAccess(unittest.IsolatedAsyncioTestCase):
 
     def test_pipeline_task_raises_when_not_set_up(self):
         recorder = _RecordingProcessor()
-        with self.assertRaisesRegex(Exception, "pipeline worker is still not set"):
+        with self.assertRaisesRegex(Exception, "is still not set up"):
             _ = recorder.pipeline_worker
 
 

@@ -18,7 +18,7 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
@@ -32,6 +32,7 @@ from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.mcp_service import MCPClient
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.livekit.transport import LiveKitParams
 from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
@@ -45,6 +46,10 @@ transport_params = {
         audio_out_enabled=True,
     ),
     "daily": lambda: DailyParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
+    "livekit": lambda: LiveKitParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
     ),
@@ -63,7 +68,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     tts = CartesiaTTSService(
         api_key=os.environ["CARTESIA_API_KEY"],
         settings=CartesiaTTSService.Settings(
-            voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+            voice="86e30c1d-714b-4074-a1f2-1cb6b552fb49",
         ),
     )
 
@@ -88,78 +93,78 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ),
     )
 
-    async with (
-        # https://github.com/modelcontextprotocol/servers/tree/main/src/memory
-        MCPClient(
-            server_params=StdioServerParameters(
-                command=shutil.which("npx"),
-                args=["-y", "@modelcontextprotocol/server-memory"],
-                # env={"MEMORY_FILE_PATH": "/tmp/pipecat_memory.jsonl"}, # Optional: specify MEMORY_FILE_PATH
-            ),
-        ) as memory_mcp,
-        # Github MCP docs: https://github.com/github/github-mcp-server
-        # Enable Github Copilot on your GitHub account. Free tier is ok. (https://github.com/settings/copilot)
-        # Generate a personal access token. It must be a Fine-grained token, classic tokens are not supported. (https://github.com/settings/personal-access-tokens)
-        # Set permissions you want to use (eg. "all repositories", "profile: read/write", etc)
-        MCPClient(
-            server_params=StreamableHttpParameters(
-                url="https://api.githubcopilot.com/mcp/",
-                headers={"Authorization": f"Bearer {os.getenv('GITHUB_PERSONAL_ACCESS_TOKEN')}"},
-            ),
-        ) as github_mcp,
-    ):
-        memory_tools = await memory_mcp.register_tools(llm)
-        github_tools = await github_mcp.register_tools(llm)
+    # https://github.com/modelcontextprotocol/servers/tree/main/src/memory
+    memory_mcp = MCPClient(
+        server_params=StdioServerParameters(
+            command=shutil.which("npx"),
+            args=["-y", "@modelcontextprotocol/server-memory"],
+            # env={"MEMORY_FILE_PATH": "/tmp/pipecat_memory.jsonl"}, # Optional: specify MEMORY_FILE_PATH
+        ),
+    )
+    # Github MCP docs: https://github.com/github/github-mcp-server
+    # Enable Github Copilot on your GitHub account. Free tier is ok. (https://github.com/settings/copilot)
+    # Generate a personal access token. It must be a Fine-grained token, classic tokens are not supported. (https://github.com/settings/personal-access-tokens)
+    # Set permissions you want to use (eg. "all repositories", "profile: read/write", etc)
+    github_mcp = MCPClient(
+        server_params=StreamableHttpParameters(
+            url="https://api.githubcopilot.com/mcp/",
+            headers={"Authorization": f"Bearer {os.getenv('GITHUB_PERSONAL_ACCESS_TOKEN')}"},
+        ),
+    )
 
-        all_standard_tools = memory_tools.standard_tools + github_tools.standard_tools
-        all_tools = ToolsSchema(standard_tools=all_standard_tools)
+    memory_tools = await memory_mcp.tools()
+    github_tools = await github_mcp.tools()
 
-        context = LLMContext(
-            messages=[{"role": "user", "content": "Please introduce yourself."}],
-            tools=all_tools,
-        )
-        user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
-            context,
-            user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
-        )
+    all_standard_tools = memory_tools.standard_tools + github_tools.standard_tools
+    all_tools = ToolsSchema(standard_tools=all_standard_tools)
 
-        pipeline = Pipeline(
-            [
-                transport.input(),  # Transport user input
-                stt,
-                user_aggregator,  # User spoken responses
-                llm,  # LLM
-                tts,  # TTS
-                transport.output(),  # Transport bot output
-                assistant_aggregator,  # Assistant spoken responses and tool context
-            ]
-        )
+    context = LLMContext(
+        messages=[{"role": "user", "content": "Please introduce yourself."}],
+        tools=all_tools,
+    )
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+        context,
+        user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
+    )
 
-        worker = PipelineWorker(
-            pipeline,
-            params=PipelineParams(
-                enable_metrics=True,
-                enable_usage_metrics=True,
-            ),
-            idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
-        )
+    pipeline = Pipeline(
+        [
+            transport.input(),  # Transport user input
+            stt,
+            user_aggregator,  # User spoken responses
+            llm,  # LLM
+            tts,  # TTS
+            transport.output(),  # Transport bot output
+            assistant_aggregator,  # Assistant spoken responses and tool context
+        ]
+    )
 
-        runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
+    worker = PipelineWorker(
+        pipeline,
+        params=PipelineParams(
+            enable_metrics=True,
+            enable_usage_metrics=True,
+        ),
+        idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
+        processor_unusable_policy=ProcessorUnusablePolicy.END,
+    )
 
-        await runner.add_workers(worker)
+    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
 
-        @transport.event_handler("on_client_connected")
-        async def on_client_connected(transport, client):
-            logger.info(f"Client connected: {client}")
-            # Kick off the conversation.
-            await worker.queue_frames([LLMRunFrame()])
+    await runner.add_workers(worker)
 
-        @transport.event_handler("on_client_disconnected")
-        async def on_client_disconnected(transport, client):
-            logger.info("Client disconnected")
-            await runner.cancel()
+    @transport.event_handler("on_client_connected")
+    async def on_client_connected(transport, client):
+        logger.info(f"Client connected: {client}")
+        # Kick off the conversation.
+        await worker.queue_frames([LLMRunFrame()])
 
-        await runner.run()
+    @transport.event_handler("on_client_disconnected")
+    async def on_client_disconnected(transport, client):
+        logger.info("Client disconnected")
+        await runner.cancel()
+
+    await runner.run()
 
 
 async def bot(runner_args: RunnerArguments):

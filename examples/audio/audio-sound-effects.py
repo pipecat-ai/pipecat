@@ -20,7 +20,7 @@ from pipecat.frames.frames import (
     TTSSpeakFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.worker import PipelineWorker
+from pipecat.pipeline.worker import PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
@@ -35,6 +35,7 @@ from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.livekit.transport import LiveKitParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 from pipecat.workers.runner import WorkerRunner
 
@@ -48,7 +49,7 @@ script_dir = os.path.dirname(__file__)
 
 for file in sound_files:
     # Build the full path to the image file
-    full_path = os.path.join(script_dir, "assets", file)
+    full_path = os.path.join(script_dir, "..", "assets", file)
     # Get the filename without the extension to use as the dictionary key
     filename = os.path.splitext(os.path.basename(full_path))[0]
     # Open the image and convert it to bytes
@@ -93,6 +94,10 @@ transport_params = {
         audio_in_enabled=True,
         audio_out_enabled=True,
     ),
+    "livekit": lambda: LiveKitParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
     "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
@@ -119,7 +124,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     tts = CartesiaTTSService(
         api_key=os.environ["CARTESIA_API_KEY"],
         settings=CartesiaTTSService.Settings(
-            voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+            voice="86e30c1d-714b-4074-a1f2-1cb6b552fb49",
         ),
     )
 
@@ -152,6 +157,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     worker = PipelineWorker(
         pipeline,
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
+        processor_unusable_policy=ProcessorUnusablePolicy.END,
     )
 
     runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
@@ -161,9 +167,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info("Client connected")
-        # Kick off the conversation.
-        await worker.queue_frame(TTSSpeakFrame("Hi, I'm listening!"))
-        await transport.send_audio(sounds["ding1.wav"])
+        # Kick off the conversation. The ding follows the greeting through the
+        # pipeline, so it plays once the greeting finishes.
+        await worker.queue_frames([TTSSpeakFrame("Hi, I'm listening!"), sounds["ding1.wav"]])
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):

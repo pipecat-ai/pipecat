@@ -28,9 +28,9 @@ from pydantic import BaseModel, Field
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
-    StartFrame,
     TTSAudioRawFrame,
 )
+from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -322,13 +322,13 @@ class CambTTSService(TTSService):
         """
         return language_to_camb_language(language)
 
-    async def start(self, frame: StartFrame):
-        """Start the Camb.ai TTS service.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service.
 
         Args:
-            frame: The start frame containing initialization parameters.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
 
         self._client = AsyncCambAI(api_key=self._api_key, timeout=self._timeout)
 

@@ -49,7 +49,7 @@ class PerplexityLLMAdapter(OpenAILLMAdapter):
     ``system_instruction`` prepend).
     """
 
-    def get_llm_invocation_params(
+    async def get_llm_invocation_params(
         self,
         context: LLMContext,
         *,
@@ -69,7 +69,7 @@ class PerplexityLLMAdapter(OpenAILLMAdapter):
             Dictionary of parameters for Perplexity's ChatCompletion API, with
             messages transformed to satisfy Perplexity's constraints.
         """
-        params = super().get_llm_invocation_params(
+        params = await super().get_llm_invocation_params(
             context,
             system_instruction=system_instruction,
             convert_developer_to_user=convert_developer_to_user,

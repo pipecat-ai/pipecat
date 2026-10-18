@@ -6,10 +6,14 @@
 
 import argparse
 import io
+import os
 import sys
+import tempfile
 import types
 import unittest
 from contextlib import redirect_stdout
+from dataclasses import dataclass
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi import FastAPI
@@ -20,8 +24,12 @@ from starlette.testclient import WebSocketDisconnect
 from pipecat.runner.run import (
     _extract_ws_token,
     _generate_ws_token,
+    _parse_ice_servers,
     _print_startup_message,
+    _resolve_file_storage,
+    _run_telephony_bot,
     _setup_daily_routes,
+    _setup_file_uploads_routes,
     _setup_telephony_routes,
     _setup_unified_start_route,
     _setup_webrtc_routes,
@@ -30,6 +38,72 @@ from pipecat.runner.run import (
     _transport_routes_enabled,
     _verify_and_consume_ws_token,
 )
+
+try:
+    import jwt as _jwt  # noqa: F401
+    from livekit import api as _livekit_api  # noqa: F401
+
+    LIVEKIT_AVAILABLE = True
+except ImportError:
+    LIVEKIT_AVAILABLE = False
+
+
+def _fake_smallwebrtc_modules(handler_kwargs: list | None = None) -> dict:
+    """Build stand-in smallwebrtc modules so WebRTC routes can be set up without aiortc.
+
+    Args:
+        handler_kwargs: Optional list that collects the keyword arguments each
+            ``SmallWebRTCRequestHandler`` is constructed with.
+
+    Returns:
+        Module map suitable for ``patch.dict(sys.modules, ...)``.
+    """
+    connection_module = types.ModuleType("pipecat.transports.smallwebrtc.connection")
+    connection_module.SmallWebRTCConnection = MagicMock()
+
+    @dataclass
+    class IceServer:
+        urls: str | list[str]
+        username: str | None = None
+        credential: str | None = None
+
+    connection_module.IceServer = IceServer
+
+    request_handler_module = types.ModuleType("pipecat.transports.smallwebrtc.request_handler")
+
+    class IceCandidate(BaseModel):
+        candidate: str
+        sdp_mid: str
+        sdp_mline_index: int
+
+    class SmallWebRTCPatchRequest(BaseModel):
+        pc_id: str
+        candidates: list[IceCandidate] = []
+
+    class SmallWebRTCRequest(BaseModel):
+        sdp: str
+        type: str
+        pc_id: str | None = None
+        restart_pc: bool | None = None
+        request_data: dict | None = None
+
+    class SmallWebRTCRequestHandler:
+        def __init__(self, *args, **kwargs):
+            if handler_kwargs is not None:
+                handler_kwargs.append(kwargs)
+
+        async def close(self):
+            pass
+
+    request_handler_module.IceCandidate = IceCandidate
+    request_handler_module.SmallWebRTCPatchRequest = SmallWebRTCPatchRequest
+    request_handler_module.SmallWebRTCRequest = SmallWebRTCRequest
+    request_handler_module.SmallWebRTCRequestHandler = SmallWebRTCRequestHandler
+
+    return {
+        "pipecat.transports.smallwebrtc.connection": connection_module,
+        "pipecat.transports.smallwebrtc.request_handler": request_handler_module,
+    }
 
 
 class TestRunnerRun(unittest.TestCase):
@@ -49,6 +123,7 @@ class TestRunnerRun(unittest.TestCase):
         self.assertEqual(_transport_route_dependencies("plivo"), ("fastapi", "websockets"))
         self.assertEqual(_transport_route_dependencies("exotel"), ("fastapi", "websockets"))
         self.assertEqual(_transport_route_dependencies("vonage"), ())
+        self.assertEqual(_transport_route_dependencies("livekit"), ("livekit.api",))
 
     def test_transport_routes_enabled_maps_transports_to_dependency_checks(self):
         def module_available(module: str) -> bool:
@@ -65,7 +140,9 @@ class TestRunnerRun(unittest.TestCase):
     def test_setup_webrtc_routes_skips_when_aiortc_is_missing(self):
         """WebRTC routes should be optional when the webrtc extra is not installed."""
         app = FastAPI()
-        args = argparse.Namespace(folder=None, esp32=False, host="localhost")
+        args = argparse.Namespace(
+            downloads_folder=None, esp32=False, host="localhost", ice_servers=[]
+        )
 
         with (
             patch("pipecat.runner.run._transport_routes_enabled", return_value=False),
@@ -80,57 +157,112 @@ class TestRunnerRun(unittest.TestCase):
     def test_setup_webrtc_routes_registers_routes_when_webrtc_is_available(self):
         """WebRTC routes should be registered when dependencies are available."""
         app = FastAPI()
-        args = argparse.Namespace(folder=None, esp32=False, host="localhost")
-
-        connection_module = types.ModuleType("pipecat.transports.smallwebrtc.connection")
-        connection_module.SmallWebRTCConnection = MagicMock()
-
-        request_handler_module = types.ModuleType("pipecat.transports.smallwebrtc.request_handler")
-
-        class IceCandidate(BaseModel):
-            candidate: str
-            sdp_mid: str
-            sdp_mline_index: int
-
-        class SmallWebRTCPatchRequest(BaseModel):
-            pc_id: str
-            candidates: list[IceCandidate] = []
-
-        class SmallWebRTCRequest(BaseModel):
-            sdp: str
-            type: str
-            pc_id: str | None = None
-            restart_pc: bool | None = None
-            request_data: dict | None = None
-
-        request_handler_module.IceCandidate = IceCandidate
-        request_handler_module.SmallWebRTCPatchRequest = SmallWebRTCPatchRequest
-        request_handler_module.SmallWebRTCRequest = SmallWebRTCRequest
-
-        class MockSmallWebRTCRequestHandler:
-            def __init__(self, *args, **kwargs):
-                pass
-
-            async def close(self):
-                pass
-
-        request_handler_module.SmallWebRTCRequestHandler = MockSmallWebRTCRequestHandler
+        args = argparse.Namespace(
+            downloads_folder=None, esp32=False, host="localhost", ice_servers=[]
+        )
 
         with (
             patch("pipecat.runner.run._transport_routes_enabled", return_value=True),
-            patch.dict(
-                sys.modules,
-                {
-                    "pipecat.transports.smallwebrtc.connection": connection_module,
-                    "pipecat.transports.smallwebrtc.request_handler": request_handler_module,
-                },
-            ),
+            patch.dict(sys.modules, _fake_smallwebrtc_modules()),
         ):
             _setup_webrtc_routes(app, args, {})
 
         paths = {route.path for route in app.routes}
         self.assertIn("/api/offer", paths)
         self.assertIn("/files/{filename:path}", paths)
+
+    def test_download_file_404s_when_downloads_folder_unconfigured(self):
+        """GET /files/<name> 404s cleanly, rather than 500ing on a stale attribute name."""
+        app = FastAPI()
+        args = argparse.Namespace(
+            downloads_folder=None, esp32=False, host="localhost", ice_servers=[]
+        )
+
+        with (
+            patch("pipecat.runner.run._transport_routes_enabled", return_value=True),
+            patch.dict(sys.modules, _fake_smallwebrtc_modules()),
+        ):
+            _setup_webrtc_routes(app, args, {})
+
+        client = TestClient(app)
+        response = client.get("/files/report.txt")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_download_file_serves_file_from_downloads_folder(self):
+        """GET /files/<name> serves the file when a downloads folder is configured."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            (Path(tmpdir) / "report.txt").write_text("hello")
+
+            app = FastAPI()
+            args = argparse.Namespace(
+                downloads_folder=tmpdir, esp32=False, host="localhost", ice_servers=[]
+            )
+
+            with (
+                patch("pipecat.runner.run._transport_routes_enabled", return_value=True),
+                patch.dict(sys.modules, _fake_smallwebrtc_modules()),
+            ):
+                _setup_webrtc_routes(app, args, {})
+
+            client = TestClient(app)
+            response = client.get("/files/report.txt")
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.text, "hello")
+
+    def test_setup_webrtc_routes_gives_handler_no_ice_servers_when_unconfigured(self):
+        """The bot peer keeps its previous behaviour when nothing is configured."""
+        app = FastAPI()
+        args = argparse.Namespace(
+            downloads_folder=None, esp32=False, host="localhost", ice_servers=[]
+        )
+        handler_kwargs = []
+
+        with (
+            patch("pipecat.runner.run._transport_routes_enabled", return_value=True),
+            patch.dict(sys.modules, _fake_smallwebrtc_modules(handler_kwargs)),
+        ):
+            _setup_webrtc_routes(app, args, {})
+
+        self.assertIsNone(handler_kwargs[0]["ice_servers"])
+
+    def test_setup_webrtc_routes_passes_configured_ice_servers_to_handler(self):
+        """Configured STUN and TURN servers must reach the bot's peer connection."""
+        app = FastAPI()
+        args = argparse.Namespace(
+            downloads_folder=None,
+            esp32=False,
+            host="localhost",
+            ice_servers=[
+                {"urls": "stun:stun.l.google.com:19302"},
+                {
+                    "urls": "turn:turn.example.com:3478",
+                    "username": "user",
+                    "credential": "secret",
+                },
+            ],
+        )
+        handler_kwargs = []
+
+        fake_modules = _fake_smallwebrtc_modules(handler_kwargs)
+        ice_server_cls = fake_modules["pipecat.transports.smallwebrtc.connection"].IceServer
+
+        with (
+            patch("pipecat.runner.run._transport_routes_enabled", return_value=True),
+            patch.dict(sys.modules, fake_modules),
+        ):
+            _setup_webrtc_routes(app, args, {})
+
+        self.assertEqual(
+            handler_kwargs[0]["ice_servers"],
+            [
+                ice_server_cls(urls="stun:stun.l.google.com:19302"),
+                ice_server_cls(
+                    urls="turn:turn.example.com:3478", username="user", credential="secret"
+                ),
+            ],
+        )
 
     def test_setup_websocket_routes_skips_when_websocket_is_missing(self):
         """Plain WebSocket routes should be optional."""
@@ -237,7 +369,7 @@ class TestRunnerRun(unittest.TestCase):
 
     def test_start_rejects_disabled_transport_before_running_bot(self):
         app = FastAPI()
-        args = argparse.Namespace(transport=None)
+        args = argparse.Namespace(transport=None, ice_servers=[])
         _setup_unified_start_route(app, args, {})
 
         with patch("pipecat.runner.run._transport_routes_enabled", return_value=False):
@@ -271,6 +403,7 @@ class TestRunnerRun(unittest.TestCase):
                 "   → Open: http://localhost:7860\n"
                 "   → Enabled transports: telephony, websocket\n"
                 "   → Disabled transports: daily (install pipecat-ai[daily]), "
+                "livekit (install pipecat-ai[livekit]), "
                 "webrtc (install pipecat-ai[webrtc]), "
                 "moq (install pipecat-ai[moq])\n"
                 "   → Allowed origins: all (no restriction)\n"
@@ -292,7 +425,7 @@ class TestRunnerRun(unittest.TestCase):
                 "\n"
                 "🚀 Bot ready!\n"
                 "   → Open: http://localhost:7860\n"
-                "   → Enabled transports: daily, webrtc, telephony, websocket, moq\n"
+                "   → Enabled transports: daily, livekit, webrtc, telephony, websocket, moq\n"
                 "   → Allowed origins: all (no restriction)\n"
                 "\n"
             ),
@@ -334,6 +467,310 @@ class TestRunnerRun(unittest.TestCase):
         self.assertIn("   → Open: http://localhost:7860\n", output)
         self.assertIn("   → XML webhook: http://localhost:7860/\n", output)
         self.assertIn("   → WebSocket:   ws://localhost:7860/ws\n", output)
+
+
+class TestFileUploadsRoute(unittest.TestCase):
+    """POST /files must always be registered so an unconfigured uploads folder
+    fails with a clear 503 from the handler itself, rather than 404ing on the
+    exact path and falling through to Starlette's redirect_slashes, which
+    (because GET /files/{filename:path} also matches the slash-appended
+    path) turns into a confusing 307 followed by a 405.
+    """
+
+    def test_registers_the_route_even_without_storage_configured(self):
+        app = FastAPI()
+        with patch("pipecat.runner.run.RUNNER_FILE_STORAGE", None):
+            _setup_file_uploads_routes(app, {})
+
+        paths = {route.path for route in app.routes}
+        self.assertIn("/files", paths)
+
+    def test_returns_503_directly_when_storage_not_configured(self):
+        app = FastAPI()
+        with patch("pipecat.runner.run.RUNNER_FILE_STORAGE", None):
+            _setup_file_uploads_routes(app, {})
+            client = TestClient(app, follow_redirects=False)
+
+            response = client.post("/files", files={"file": ("a.txt", b"hi")})
+
+        self.assertEqual(response.status_code, 503)
+
+    def test_saves_file_when_storage_is_configured(self):
+        app = FastAPI()
+        fake_storage = MagicMock()
+        fake_storage.save = AsyncMock(return_value="pipecat:abc123")
+
+        with patch("pipecat.runner.run.RUNNER_FILE_STORAGE", fake_storage):
+            _setup_file_uploads_routes(app, {})
+            client = TestClient(app)
+
+            response = client.post("/files", files={"file": ("a.txt", b"hello")})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["source"], {"type": "url", "url": "pipecat:abc123"})
+
+    def test_storage_save_failure_returns_clean_500(self):
+        """A backend-specific save error (not just OSError) becomes a clean 500."""
+        app = FastAPI()
+        fake_storage = MagicMock()
+        fake_storage.save = AsyncMock(side_effect=RuntimeError("AccessDenied: no PutObject"))
+
+        with patch("pipecat.runner.run.RUNNER_FILE_STORAGE", fake_storage):
+            _setup_file_uploads_routes(app, {})
+            client = TestClient(app)
+
+            response = client.post("/files", files={"file": ("a.txt", b"hello")})
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.json()["detail"], "Failed to save file")
+
+
+class TestResolveFileStorage(unittest.TestCase):
+    """The uploads backend comes from the bot module's ``create_file_storage()``
+    when it defines one, falling back to ``-u/--uploads-folder`` local storage."""
+
+    @staticmethod
+    def _args(uploads_folder=None):
+        return argparse.Namespace(uploads_folder=uploads_folder, uploads_folder_max_files=10)
+
+    def test_bot_module_factory_wins_over_the_uploads_folder_flag(self):
+        fake_storage = MagicMock()
+        bot_module = types.SimpleNamespace(create_file_storage=lambda: fake_storage)
+
+        with patch("pipecat.runner.run._get_bot_module", return_value=bot_module):
+            resolved = _resolve_file_storage(self._args(uploads_folder="/tmp/uploads"))
+
+        self.assertIs(resolved, fake_storage)
+
+    def test_factory_returning_none_disables_uploads_despite_the_flag(self):
+        bot_module = types.SimpleNamespace(create_file_storage=lambda: None)
+
+        with patch("pipecat.runner.run._get_bot_module", return_value=bot_module):
+            resolved = _resolve_file_storage(self._args(uploads_folder="/tmp/uploads"))
+
+        self.assertIsNone(resolved)
+
+    def test_uploads_folder_flag_backs_uploads_with_local_storage(self):
+        from pipecat.utils.file_storage import LocalFileStorage
+
+        bot_module = types.SimpleNamespace()
+        with (
+            patch("pipecat.runner.run._get_bot_module", return_value=bot_module),
+            tempfile.TemporaryDirectory() as uploads_folder,
+        ):
+            resolved = _resolve_file_storage(self._args(uploads_folder=uploads_folder))
+
+        self.assertIsInstance(resolved, LocalFileStorage)
+
+    def test_no_factory_and_no_flag_disables_uploads(self):
+        with patch("pipecat.runner.run._get_bot_module", side_effect=ImportError("no bot")):
+            self.assertIsNone(_resolve_file_storage(self._args()))
+
+    def test_async_factory_is_rejected_loudly(self):
+        async def create_file_storage():
+            return MagicMock()
+
+        bot_module = types.SimpleNamespace(create_file_storage=create_file_storage)
+        with patch("pipecat.runner.run._get_bot_module", return_value=bot_module):
+            with self.assertRaises(TypeError):
+                _resolve_file_storage(self._args())
+
+
+class TestSessionScopedUploads(unittest.TestCase):
+    """POST /sessions/{session_id}/files mirrors Pipecat Cloud's session-scoped
+    routes; a session's uploads are tracked and deleted when the session ends.
+    """
+
+    def _app(self, active_sessions):
+        app = FastAPI()
+        _setup_file_uploads_routes(app, active_sessions)
+        return app
+
+    def test_unknown_session_404s(self):
+        fake_storage = MagicMock()
+        with patch("pipecat.runner.run.RUNNER_FILE_STORAGE", fake_storage):
+            client = TestClient(self._app({}))
+            response = client.post("/sessions/nope/files", files={"file": ("a.txt", b"hi")})
+
+        self.assertEqual(response.status_code, 404)
+        fake_storage.save.assert_not_called()
+
+    def test_active_session_upload_is_saved_and_tracked(self):
+        fake_storage = MagicMock()
+        fake_storage.save = AsyncMock(return_value="pipecat:abc123")
+
+        with (
+            patch("pipecat.runner.run.RUNNER_FILE_STORAGE", fake_storage),
+            patch.dict("pipecat.runner.run._SESSION_UPLOAD_URLS", {}, clear=True),
+        ):
+            client = TestClient(self._app({"sess-1": {}}))
+            response = client.post("/sessions/sess-1/files", files={"file": ("a.txt", b"hi")})
+
+            from pipecat.runner.run import _SESSION_UPLOAD_URLS
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["source"], {"type": "url", "url": "pipecat:abc123"})
+            self.assertEqual(_SESSION_UPLOAD_URLS, {"sess-1": ["pipecat:abc123"]})
+
+    def test_sessionless_upload_is_not_tracked(self):
+        fake_storage = MagicMock()
+        fake_storage.save = AsyncMock(return_value="pipecat:abc123")
+
+        with (
+            patch("pipecat.runner.run.RUNNER_FILE_STORAGE", fake_storage),
+            patch.dict("pipecat.runner.run._SESSION_UPLOAD_URLS", {}, clear=True),
+        ):
+            client = TestClient(self._app({}))
+            response = client.post("/files", files={"file": ("a.txt", b"hi")})
+
+            from pipecat.runner.run import _SESSION_UPLOAD_URLS
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(_SESSION_UPLOAD_URLS, {})
+
+    def test_session_files_route_wins_over_webrtc_session_proxy(self):
+        """Registration order in _configure_server_app: the upload route must be
+        added before the catch-all /sessions/{session_id}/{path:path} proxy, or
+        uploads would get swallowed by the proxy's 200 stub."""
+        app = FastAPI()
+        active_sessions = {"sess-1": {}}
+        _setup_file_uploads_routes(app, active_sessions)
+        args = argparse.Namespace(
+            downloads_folder=None, esp32=False, host="localhost", ice_servers=[]
+        )
+        with (
+            patch("pipecat.runner.run._transport_routes_enabled", return_value=True),
+            patch.dict(sys.modules, _fake_smallwebrtc_modules()),
+        ):
+            _setup_webrtc_routes(app, args, active_sessions)
+
+        with patch("pipecat.runner.run.RUNNER_FILE_STORAGE", None):
+            client = TestClient(app)
+            response = client.post("/sessions/sess-1/files", files={"file": ("a.txt", b"hi")})
+
+        # The upload handler answers (503: storage unconfigured), not the proxy (200).
+        self.assertEqual(response.status_code, 503)
+
+
+class TestRunBotSessionCleanup(unittest.IsolatedAsyncioTestCase):
+    async def test_session_end_deletes_uploads_and_releases_session(self):
+        from pipecat.runner.run import _run_bot_session
+
+        fake_storage = MagicMock()
+        fake_storage.delete = AsyncMock()
+        active_sessions = {"sess-1": {}}
+
+        async def bot():
+            pass
+
+        with (
+            patch("pipecat.runner.run.RUNNER_FILE_STORAGE", fake_storage),
+            patch.dict(
+                "pipecat.runner.run._SESSION_UPLOAD_URLS",
+                {"sess-1": ["pipecat:aaa", "pipecat:bbb"]},
+                clear=True,
+            ),
+        ):
+            await _run_bot_session(bot(), "sess-1", active_sessions)
+
+            from pipecat.runner.run import _SESSION_UPLOAD_URLS
+
+            self.assertEqual(active_sessions, {})
+            self.assertEqual(_SESSION_UPLOAD_URLS, {})
+        fake_storage.delete.assert_any_await("pipecat:aaa")
+        fake_storage.delete.assert_any_await("pipecat:bbb")
+
+    async def test_cleanup_runs_even_when_the_bot_raises(self):
+        from pipecat.runner.run import _run_bot_session
+
+        fake_storage = MagicMock()
+        fake_storage.delete = AsyncMock()
+        active_sessions = {"sess-1": {}}
+
+        async def bot():
+            raise RuntimeError("boom")
+
+        with (
+            patch("pipecat.runner.run.RUNNER_FILE_STORAGE", fake_storage),
+            patch.dict(
+                "pipecat.runner.run._SESSION_UPLOAD_URLS", {"sess-1": ["pipecat:aaa"]}, clear=True
+            ),
+        ):
+            with self.assertRaises(RuntimeError):
+                await _run_bot_session(bot(), "sess-1", active_sessions)
+
+        self.assertEqual(active_sessions, {})
+        fake_storage.delete.assert_awaited_once_with("pipecat:aaa")
+
+    async def test_delete_failure_is_swallowed(self):
+        """A backend delete error must not propagate out of session teardown."""
+        from pipecat.runner.run import _run_bot_session
+
+        fake_storage = MagicMock()
+        fake_storage.delete = AsyncMock(side_effect=RuntimeError("AccessDenied"))
+
+        async def bot():
+            pass
+
+        with (
+            patch("pipecat.runner.run.RUNNER_FILE_STORAGE", fake_storage),
+            patch.dict(
+                "pipecat.runner.run._SESSION_UPLOAD_URLS", {"sess-1": ["pipecat:aaa"]}, clear=True
+            ),
+        ):
+            await _run_bot_session(bot(), "sess-1", {"sess-1": {}})
+
+
+@unittest.skipUnless(LIVEKIT_AVAILABLE, "livekit package not installed")
+class TestLiveKitRunnerRoutes(unittest.TestCase):
+    def test_livekit_credentials_raises_when_unconfigured(self):
+        from pipecat.runner.livekit import livekit_credentials
+
+        with patch.dict("os.environ", {}, clear=True):
+            with self.assertRaisesRegex(Exception, "LIVEKIT_URL"):
+                livekit_credentials()
+
+    def test_livekit_credentials_returns_configured_values(self):
+        from pipecat.runner.livekit import livekit_credentials
+
+        env = {
+            "LIVEKIT_URL": "wss://test.livekit.cloud",
+            "LIVEKIT_API_KEY": "key",
+            "LIVEKIT_API_SECRET": "secret",
+        }
+        with patch.dict("os.environ", env, clear=True):
+            url, api_key, api_secret = livekit_credentials()
+        self.assertEqual((url, api_key, api_secret), (env["LIVEKIT_URL"], "key", "secret"))
+
+    def test_generate_session_tokens_suffixes_identity_with_session_id(self):
+        """Regression: fixed identities collide across concurrent sessions sharing
+        a room (e.g. a fixed LIVEKIT_ROOM_NAME), evicting the earlier participant.
+        """
+        import uuid
+
+        import jwt
+
+        from pipecat.runner.livekit import generate_session_tokens
+
+        agent_token_1, user_token_1 = generate_session_tokens(
+            "shared-room", str(uuid.uuid4()), "key", "secret"
+        )
+        agent_token_2, user_token_2 = generate_session_tokens(
+            "shared-room", str(uuid.uuid4()), "key", "secret"
+        )
+
+        def identity(token: str) -> str:
+            return jwt.decode(token, options={"verify_signature": False})["sub"]
+
+        identities = {
+            identity(agent_token_1),
+            identity(user_token_1),
+            identity(agent_token_2),
+            identity(user_token_2),
+        }
+        self.assertEqual(
+            len(identities), 4, "every session/role pair should have a unique identity"
+        )
 
 
 class TestWsAuthTokens(unittest.TestCase):
@@ -466,6 +903,7 @@ class TestWsAuthStartEndpoint(unittest.TestCase):
             ws_auth=ws_auth,
             host="localhost",
             port=7860,
+            ice_servers=[],
         )
         _setup_unified_start_route(app, args, {})
         return app
@@ -591,6 +1029,52 @@ class TestWsAuthConnectionBehavior(unittest.TestCase):
                 pass
 
 
+class TestRunnerBody(unittest.IsolatedAsyncioTestCase):
+    """``--runner-body`` reaches WebSocket sessions, which have no /start body."""
+
+    async def test_telephony_bot_gets_the_runner_body(self):
+        import tempfile
+
+        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+            f.write("image_path: cat.jpg\n")
+        self.addCleanup(os.unlink, f.name)
+        bot_module = types.SimpleNamespace(bot=AsyncMock())
+        args = argparse.Namespace(runner_body=f.name)
+
+        with patch("pipecat.runner.run._get_bot_module", return_value=bot_module):
+            await _run_telephony_bot(MagicMock(), args)
+
+        runner_args = bot_module.bot.await_args.args[0]
+        self.assertEqual(runner_args.body, {"image_path": "cat.jpg"})
+
+    async def test_telephony_bot_without_a_runner_body(self):
+        bot_module = types.SimpleNamespace(bot=AsyncMock())
+        args = argparse.Namespace(runner_body=None)
+
+        with patch("pipecat.runner.run._get_bot_module", return_value=bot_module):
+            await _run_telephony_bot(MagicMock(), args)
+
+        self.assertIsNone(bot_module.bot.await_args.args[0].body)
+
+
+class TestDeprecatedEvalTransportOption(unittest.TestCase):
+    """``-t eval`` runs the dev runner's server like a run without ``-t``."""
+
+    def test_eval_transport_runs_the_server(self):
+        from pipecat.runner import run
+
+        with (
+            patch.object(sys, "argv", ["bot.py", "-t", "eval"]),
+            patch.object(run, "_configure_server_app") as configure,
+            patch.object(run.uvicorn, "run") as uvicorn_run,
+            redirect_stdout(io.StringIO()),
+        ):
+            run.main()
+
+        uvicorn_run.assert_called_once()
+        self.assertIsNone(configure.call_args.args[0].transport)
+
+
 class TestAllowedOriginsUtil(unittest.TestCase):
     """Unit tests for the is_origin_allowed utility."""
 
@@ -691,6 +1175,149 @@ class TestWsOriginConnectionBehavior(unittest.TestCase):
                 "/ws", headers={"Origin": "https://allowed.com"}
             ):
                 pass
+
+
+class TestIceServerParsing(unittest.TestCase):
+    """Unit tests for the --ice-servers and PIPECAT_ICE_SERVERS parser."""
+
+    def test_empty_input_yields_no_servers(self):
+        self.assertEqual(_parse_ice_servers(None), [])
+        self.assertEqual(_parse_ice_servers(""), [])
+        self.assertEqual(_parse_ice_servers([]), [])
+
+    def test_cli_tokens_of_bare_urls(self):
+        self.assertEqual(
+            _parse_ice_servers(["stun:stun.l.google.com:19302", "turn:turn.example.com:3478"]),
+            [{"urls": "stun:stun.l.google.com:19302"}, {"urls": "turn:turn.example.com:3478"}],
+        )
+
+    def test_cli_token_of_json_object_keeps_credentials(self):
+        self.assertEqual(
+            _parse_ice_servers(
+                ['{"urls": "turn:turn.example.com:3478", "username": "u", "credential": "p"}']
+            ),
+            [{"urls": "turn:turn.example.com:3478", "username": "u", "credential": "p"}],
+        )
+
+    def test_env_value_is_split_on_commas(self):
+        self.assertEqual(
+            _parse_ice_servers("stun:stun.l.google.com:19302, turn:turn.example.com:3478"),
+            [{"urls": "stun:stun.l.google.com:19302"}, {"urls": "turn:turn.example.com:3478"}],
+        )
+
+    def test_env_value_may_be_a_json_array(self):
+        self.assertEqual(
+            _parse_ice_servers(
+                '[{"urls": ["turn:turn.example.com:3478"], "username": "u", "credential": "p"},'
+                ' "stun:stun.l.google.com:19302"]'
+            ),
+            [
+                {"urls": ["turn:turn.example.com:3478"], "username": "u", "credential": "p"},
+                {"urls": "stun:stun.l.google.com:19302"},
+            ],
+        )
+
+    def test_null_credentials_are_dropped(self):
+        self.assertEqual(
+            _parse_ice_servers('{"urls": "stun:stun.example.com:3478", "username": null}'),
+            [{"urls": "stun:stun.example.com:3478"}],
+        )
+
+    def test_entry_without_urls_is_rejected(self):
+        with self.assertRaises(ValueError):
+            _parse_ice_servers('{"username": "u", "credential": "p"}')
+
+    def test_unsupported_key_is_rejected(self):
+        with self.assertRaises(ValueError) as cm:
+            _parse_ice_servers('{"urls": "turn:turn.example.com:3478", "user": "u"}')
+        self.assertIn("user", str(cm.exception))
+
+    def test_malformed_json_is_rejected(self):
+        with self.assertRaises(ValueError):
+            _parse_ice_servers('{"urls": ')
+        with self.assertRaises(ValueError):
+            _parse_ice_servers('[{"urls": "turn:turn.example.com:3478"')
+
+    def test_json_scalar_is_rejected(self):
+        with self.assertRaises(ValueError):
+            _parse_ice_servers("[7]")
+
+
+class TestStartIceConfig(unittest.TestCase):
+    """Tests for the iceConfig the WebRTC /start response hands to clients."""
+
+    def _post_start(self, ice_servers: list, body: dict) -> dict:
+        app = FastAPI()
+        args = argparse.Namespace(transport=None, ice_servers=ice_servers)
+        _setup_unified_start_route(app, args, {})
+        with patch("pipecat.runner.run._transport_routes_enabled", return_value=True):
+            response = TestClient(app).post("/start", json={"transport": "webrtc", **body})
+        self.assertEqual(response.status_code, 200)
+        return response.json()
+
+    def test_no_ice_config_without_configuration_or_request_flag(self):
+        self.assertIsNone(self._post_start([], {}).get("iceConfig"))
+
+    def test_request_flag_still_returns_the_public_stun_fallback(self):
+        result = self._post_start([], {"enableDefaultIceServers": True})
+        self.assertEqual(
+            result["iceConfig"],
+            {"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]},
+        )
+
+    def test_configured_servers_are_returned_to_the_client(self):
+        configured = [
+            {"urls": "turn:turn.example.com:3478", "username": "u", "credential": "p"},
+        ]
+        result = self._post_start(configured, {})
+        self.assertEqual(result["iceConfig"], {"iceServers": configured})
+
+    def test_configured_servers_take_precedence_over_the_fallback(self):
+        configured = [{"urls": "stun:stun.example.com:3478"}]
+        result = self._post_start(configured, {"enableDefaultIceServers": True})
+        self.assertEqual(result["iceConfig"], {"iceServers": configured})
+
+
+class TestStartFileUploadUrl(unittest.TestCase):
+    """Tests for the fileUploadUrl the /start response advertises so clients
+    never have to reconstruct the uploads route themselves.
+    """
+
+    def _post_start(self, body: dict, storage) -> dict:
+        app = FastAPI()
+        args = argparse.Namespace(
+            transport=None,
+            ice_servers=[],
+            ws_auth="none",
+            host="localhost",
+            port=7860,
+        )
+        _setup_unified_start_route(app, args, {})
+        with (
+            patch("pipecat.runner.run._transport_routes_enabled", return_value=True),
+            patch("pipecat.runner.run.RUNNER_FILE_STORAGE", storage),
+        ):
+            response = TestClient(app).post("/start", json=body)
+        self.assertEqual(response.status_code, 200)
+        return response.json()
+
+    def test_webrtc_advertises_the_session_scoped_route(self):
+        result = self._post_start({"transport": "webrtc"}, MagicMock())
+        self.assertEqual(result["fileUploadUrl"], f"/sessions/{result['sessionId']}/files")
+
+    def test_webrtc_omits_the_url_when_uploads_are_disabled(self):
+        result = self._post_start({"transport": "webrtc"}, None)
+        self.assertNotIn("fileUploadUrl", result)
+
+    def test_websocket_advertises_the_flat_route(self):
+        # The websocket /start sessionId is never registered (the bot mints
+        # its own at connect time), so the session-scoped route would 404.
+        result = self._post_start({"transport": "websocket"}, MagicMock())
+        self.assertEqual(result["fileUploadUrl"], "/files")
+
+    def test_telephony_advertises_nothing(self):
+        result = self._post_start({"transport": "twilio"}, MagicMock())
+        self.assertNotIn("fileUploadUrl", result)
 
 
 if __name__ == "__main__":

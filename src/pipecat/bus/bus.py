@@ -170,6 +170,8 @@ class WorkerBus(BaseObject):
         """Route system messages inline, data messages to the data queue."""
         while True:
             message = await sub.queue.get()
+            if not sub.subscriber.accepts_bus_message(cast(BusMessage, message)):
+                continue
             if isinstance(message, BusSystemMessage):
                 # A subscriber exception must not tear down the dispatch task,
                 # or the subscriber would silently stop receiving all future
@@ -188,6 +190,8 @@ class WorkerBus(BaseObject):
         """Process data messages sequentially from the data queue."""
         while True:
             message = await sub.data_queue.get()
+            if not sub.subscriber.accepts_bus_message(message):
+                continue
             # A subscriber exception must not tear down the dispatch task,
             # or the subscriber would silently stop receiving all future
             # messages (including cancel/cleanup). Log and keep going.

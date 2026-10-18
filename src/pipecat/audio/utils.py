@@ -12,6 +12,8 @@ various audio formats used in Pipecat pipelines.
 """
 
 import audioop
+import io
+import wave
 
 import loudness
 import numpy as np
@@ -80,6 +82,23 @@ def mix_audio(audio1: bytes, audio2: bytes) -> bytes:
     return mixed_audio.astype(np.int16).tobytes()
 
 
+def scale_audio(audio: bytes, factor: float) -> bytes:
+    """Scale the volume of an audio stream by multiplying its samples.
+
+    The audio is assumed to be 16-bit signed integer PCM data.
+
+    Args:
+        audio: Audio as raw bytes (16-bit signed integers).
+        factor: The multiplier for every sample: 1.0 leaves the audio
+            unchanged, 0.5 halves it.
+
+    Returns:
+        Scaled audio data as raw bytes with samples clipped to 16-bit range.
+    """
+    data = np.frombuffer(audio, dtype=np.int16).astype(np.float32) * factor
+    return np.clip(data, -32768, 32767).astype(np.int16).tobytes()
+
+
 def interleave_stereo_audio(left_audio: bytes, right_audio: bytes) -> bytes:
     """Interleave left and right mono audio channels into stereo audio.
 
@@ -106,6 +125,43 @@ def interleave_stereo_audio(left_audio: bytes, right_audio: bytes) -> bytes:
     return stereo.astype(np.int16).tobytes()
 
 
+def pcm_to_wav(
+    pcm: bytes | bytearray | memoryview, sample_rate: int, num_channels: int = 1
+) -> bytes:
+    """Wrap raw PCM audio in a WAV container.
+
+    The PCM data is expected to be signed 16-bit little-endian samples, which
+    is what Pipecat pipelines carry (e.g. what ``AudioBufferProcessor`` emits
+    from its audio event handlers).
+
+    Trailing bytes that don't complete a frame are dropped. Without this the
+    WAV header would report a frame count that excludes them while the data
+    chunk still carries them, so readers would disagree about the length and a
+    stereo stream truncated mid-frame would swap channels.
+
+    Args:
+        pcm: Raw PCM audio data (16-bit signed integers).
+        sample_rate: Sample rate of the audio in Hz.
+        num_channels: Number of interleaved channels in the PCM data.
+
+    Returns:
+        A complete in-memory WAV file as bytes.
+    """
+    pcm = memoryview(pcm).cast("B")
+    block_align = 2 * num_channels
+    remainder = len(pcm) % block_align
+    if remainder:
+        pcm = pcm[: len(pcm) - remainder]
+
+    with io.BytesIO() as buffer:
+        with wave.open(buffer, "wb") as wav_file:
+            wav_file.setnchannels(num_channels)
+            wav_file.setsampwidth(2)
+            wav_file.setframerate(sample_rate)
+            wav_file.writeframes(pcm)
+        return buffer.getvalue()
+
+
 def normalize_value(value, min_value, max_value):
     """Normalize a value to the range [0, 1] and clamp it to bounds.
 
@@ -122,7 +178,7 @@ def normalize_value(value, min_value, max_value):
     return normalized_clamped
 
 
-def calculate_audio_volume(audio: bytes, sample_rate: int) -> float:
+def calculate_audio_volume(audio: bytes | bytearray | memoryview, sample_rate: int) -> float:
     """Calculate the loudness level of audio data using ITU-R BS.1770.
 
     Args:
@@ -279,7 +335,7 @@ def is_silence(pcm_bytes: bytes) -> bool:
     audio_data = np.frombuffer(pcm_bytes, dtype=np.int16)
 
     # Check the maximum absolute amplitude in the frame
-    max_value = np.abs(audio_data).max()
+    max_value = np.abs(audio_data.astype(np.int32)).max()
 
     # If max value is lower than SPEAKING_THRESHOLD, consider it as silence
     return max_value <= SPEAKING_THRESHOLD
@@ -329,7 +385,8 @@ def detect_speech_onset(
     if sample_rate <= 0:
         return None
 
-    samples = np.frombuffer(pcm_bytes, dtype=np.int16)
+    # A trailing partial sample can't be read as int16; ignore it.
+    samples = np.frombuffer(pcm_bytes[: len(pcm_bytes) & ~1], dtype=np.int16)
     if samples.size == 0:
         return None
 

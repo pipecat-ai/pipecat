@@ -1,0 +1,1 @@
+- `SpeechmaticsSTTService` now maps `Language.TL` and `Language.FIL` onto Speechmatics' `tl` language pack. `Language.FIL` previously resolved to `fil`, which Speechmatics rejects.

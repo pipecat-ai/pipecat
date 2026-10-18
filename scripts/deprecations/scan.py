@@ -65,6 +65,8 @@ _SECTION_RE = re.compile(
 )
 # A parameter/field entry within an Args/Parameters section ("voice: The voice ...").
 _PARAM_ENTRY_RE = re.compile(r"^([A-Za-z_]\w*):\s")
+# An event entry in a class docstring's event list ("- on_connected: Called when ...").
+_EVENT_ENTRY_RE = re.compile(r"^- (on_\w+):\s")
 
 
 @dataclass
@@ -91,9 +93,10 @@ class Directive:
 
     relpath: str
     owner: str  # qualname of the symbol the docstring belongs to, or "<module>"
-    param: str | None  # parameter/field name when the directive is nested under one
+    param: str | None  # parameter/field/event name when the directive is nested under one
     version: str | None
     body: str
+    param_kind: str = "parameter"  # what ``param`` names: "parameter" or "event"
 
     @property
     def location(self) -> str:
@@ -107,6 +110,13 @@ class WarnSite:
 
     relpath: str
     enclosing: str  # qualname of the symbol the warn lives in ("" if module level)
+    lineno: int = 0
+    message: str | None = None  # see warn_message(); None if not a literal
+    uses_helper: bool = True  # raised through warn_deprecated(), not warnings.warn
+
+    @property
+    def location(self) -> str:
+        return f"{self.relpath}:{self.lineno}"
 
     @property
     def key(self) -> str:
@@ -126,11 +136,13 @@ class Scan:
 
 
 def iter_directives(docstring: str):
-    """Yield ``(version, body, param)`` for each ``.. deprecated::`` block.
+    """Yield ``(version, body, param, param_kind)`` for each ``.. deprecated::`` block.
 
-    ``param`` is the name of the ``Args:``/``Parameters:`` entry the directive
-    is nested under (a parameter/field deprecation), or ``None`` when the
-    directive sits at the docstring's top level (the symbol itself is deprecated).
+    ``param`` is the name of the entry the directive is nested under, or ``None``
+    when the directive sits at the docstring's top level (the symbol itself is
+    deprecated). ``param_kind`` says what that entry is: ``"parameter"`` for an
+    ``Args:``/``Parameters:`` entry (a parameter/field deprecation), ``"event"``
+    for an entry of the docstring's event list.
     """
     if not docstring:
         return
@@ -143,7 +155,7 @@ def iter_directives(docstring: str):
             continue
         base_indent = len(match.group(1))
         version = match.group(2).strip() or None
-        param = _enclosing_param(lines, i, base_indent)
+        param, param_kind = _enclosing_param(lines, i, base_indent)
         body: list[str] = []
         j = i + 1
         while j < len(lines):
@@ -160,12 +172,17 @@ def iter_directives(docstring: str):
                 break
             body.append(lines[j].strip())
             j += 1
-        yield version, " ".join(body).strip(), param
+        yield version, " ".join(body).strip(), param, param_kind
         i = j
 
 
-def _enclosing_param(lines: list[str], directive_index: int, directive_indent: int) -> str | None:
-    """The parameter entry a directive is nested under, scanning upward, or None."""
+def _enclosing_param(
+    lines: list[str], directive_index: int, directive_indent: int
+) -> tuple[str | None, str]:
+    """The entry a directive is nested under and its kind, scanning upward.
+
+    Returns ``(None, "parameter")`` when the directive is top-level.
+    """
     for k in range(directive_index - 1, -1, -1):
         stripped = lines[k].strip()
         if not stripped:
@@ -176,10 +193,12 @@ def _enclosing_param(lines: list[str], directive_index: int, directive_indent: i
         # A less-indented line: either the param entry that owns the directive,
         # or a section header / prose that means the directive is top-level.
         if _SECTION_RE.match(stripped):
-            return None
+            return None, "parameter"
+        if entry := _EVENT_ENTRY_RE.match(stripped):
+            return entry.group(1), "event"
         entry = _PARAM_ENTRY_RE.match(stripped)
-        return entry.group(1) if entry else None
-    return None
+        return (entry.group(1) if entry else None), "parameter"
+    return None, "parameter"
 
 
 def directive_parses(version: str | None, body: str) -> bool:
@@ -259,10 +278,40 @@ def deprecated_message(node) -> tuple[bool, str | None]:
     return False, None
 
 
-def is_deprecation_warn(call) -> bool:
-    """Whether a Call is ``warnings.warn(..., DeprecationWarning)``."""
+# Stands in for an f-string's interpolated values when a warning message is
+# checked against the template. It fits every field the template has (subject,
+# version, replacement), so only the message's literal text is checked.
+_PLACEHOLDER = "0.0.0"
+
+
+def warn_message(call) -> str | None:
+    """A warn call's message with f-string values replaced, or None if it isn't a literal."""
+    message = call.args[0] if call.args else None
+    for kw in call.keywords:
+        if kw.arg == "message":
+            message = kw.value
+    if isinstance(message, ast.Constant) and isinstance(message.value, str):
+        return message.value
+    if isinstance(message, ast.JoinedStr):
+        return "".join(
+            part.value
+            if isinstance(part, ast.Constant) and isinstance(part.value, str)
+            else _PLACEHOLDER
+            for part in message.values
+        )
+    return None
+
+
+def call_name(call) -> str | None:
     func = call.func
-    name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", None)
+    return func.id if isinstance(func, ast.Name) else getattr(func, "attr", None)
+
+
+def is_deprecation_warn(call) -> bool:
+    """Whether a Call is ``warn_deprecated(...)`` or ``warnings.warn(..., DeprecationWarning)``."""
+    name = call_name(call)
+    if name == "warn_deprecated":
+        return True
     if name != "warn":
         return False
     category = call.args[1] if len(call.args) >= 2 else None
@@ -300,10 +349,14 @@ def scan_source(src_root: Path, *, exclude: frozenset[str] = DEFAULT_EXCLUDE) ->
         relpath = str(py_file.relative_to(src_root.parent))
         if relpath in exclude:
             continue
+        # An editor may leave a lock symlink such as ``.#module.py`` pointing
+        # at nothing readable. It matches the glob but is not source.
+        if not py_file.is_file():
+            continue
         tree = ast.parse(py_file.read_text(encoding="utf-8"), filename=str(py_file))
 
-        for version, body, param in iter_directives(ast.get_docstring(tree) or ""):
-            scan.directives.append(Directive(relpath, "<module>", param, version, body))
+        for version, body, param, param_kind in iter_directives(ast.get_docstring(tree) or ""):
+            scan.directives.append(Directive(relpath, "<module>", param, version, body, param_kind))
 
         def visit(node, prefix: str, parent_is_class: bool, relpath: str = relpath) -> None:
             for child in ast.iter_child_nodes(node):
@@ -314,7 +367,15 @@ def scan_source(src_root: Path, *, exclude: frozenset[str] = DEFAULT_EXCLUDE) ->
                 elif isinstance(child, ast.AnnAssign) and isinstance(child.target, ast.Name):
                     scan.definitions.add(child.target.id)
                 if isinstance(child, ast.Call) and is_deprecation_warn(child):
-                    scan.warn_sites.append(WarnSite(relpath, prefix))
+                    scan.warn_sites.append(
+                        WarnSite(
+                            relpath,
+                            prefix,
+                            child.lineno,
+                            warn_message(child),
+                            call_name(child) == "warn_deprecated",
+                        )
+                    )
                 if isinstance(child, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
                     qualname = f"{prefix}.{child.name}" if prefix else child.name
                     scan.definitions.add(child.name)
@@ -332,8 +393,10 @@ def scan_source(src_root: Path, *, exclude: frozenset[str] = DEFAULT_EXCLUDE) ->
                             decorator_message=message,
                         )
                     )
-                    for version, body, param in iter_directives(docstring):
-                        scan.directives.append(Directive(relpath, qualname, param, version, body))
+                    for version, body, param, param_kind in iter_directives(docstring):
+                        scan.directives.append(
+                            Directive(relpath, qualname, param, version, body, param_kind)
+                        )
                     visit(child, qualname, isinstance(child, ast.ClassDef))
                 else:
                     visit(child, prefix, parent_is_class)
@@ -406,10 +469,14 @@ def build_records(scan: Scan) -> list[dict]:
         if directive.owner == "<module>" and directive.param is None:
             subject = module_path(directive.relpath)
             kind = "module"
+        elif directive.owner == "<module>":
+            # An entry of the module docstring's Attributes section, such as an alias.
+            subject = directive.param
+            kind = "attribute"
         elif directive.param is not None:
             owner = directive.owner.removesuffix(".__init__")
             subject = f"{owner}.{directive.param}" if owner else directive.param
-            kind = "parameter"
+            kind = directive.param_kind
         else:
             # A directive on a non-decorated symbol (a method/function deprecated
             # via directive + manual warn rather than @deprecated).
@@ -542,6 +609,29 @@ def check_decorator_replacements_exist(scan: Scan) -> list[str]:
     return violations
 
 
+def check_warn_messages(scan: Scan) -> list[str]:
+    """Every hand-written deprecation warning's message is a literal matching the template."""
+    violations = []
+    for site in scan.warn_sites:
+        if site.message is None:
+            violations.append(f"{site.location}: message is not a string or f-string literal")
+        elif not DEPRECATION_MESSAGE_RE.match(site.message):
+            violations.append(f"{site.location}: message off-template: {site.message!r}")
+    return violations
+
+
+def check_warn_helper(scan: Scan) -> list[str]:
+    """Every hand-written deprecation warning is raised through ``warn_deprecated()``.
+
+    The helper shows the warning wherever Pipecat raises it, once per call site.
+    """
+    return [
+        f"{site.location}: call warn_deprecated() instead of warnings.warn()"
+        for site in scan.warn_sites
+        if not site.uses_helper
+    ]
+
+
 def all_violations(scan: Scan) -> list[str]:
     """Every validation failure, for the generator to refuse on."""
     out = []
@@ -552,6 +642,8 @@ def all_violations(scan: Scan) -> list[str]:
         check_decorator_subjects,
         check_decorator_versions,
         check_decorator_replacements_exist,
+        check_warn_messages,
+        check_warn_helper,
     ):
         out.extend(f"{check.__name__}: {v}" for v in check(scan))
     return out

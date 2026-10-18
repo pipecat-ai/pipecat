@@ -87,6 +87,10 @@ class Language(StrEnum):
     # Breton
     BR = "br"
 
+    # Bodo
+    BRX = "brx"
+    BRX_IN = "brx-IN"
+
     # Bosnian
     BS = "bs"
     BS_BA = "bs-BA"
@@ -98,6 +102,11 @@ class Language(StrEnum):
     # Cebuano
     CEB = "ceb"
     CEB_PH = "ceb-PH"
+
+    # Central Kurdish
+    CKB = "ckb"
+    CKB_IQ = "ckb-IQ"
+    CKB_IR = "ckb-IR"
 
     # Mandarin Chinese
     CMN = "cmn"
@@ -122,12 +131,17 @@ class Language(StrEnum):
     DE_CH = "de-CH"
     DE_DE = "de-DE"
 
+    # Dogri
+    DOI = "doi"
+    DOI_IN = "doi-IN"
+
     # Greek
     EL = "el"
     EL_GR = "el-GR"
 
     # English
     EN = "en"
+    EN_AB = "en-AB"
     EN_AU = "en-AU"
     EN_CA = "en-CA"
     EN_GB = "en-GB"
@@ -142,6 +156,7 @@ class Language(StrEnum):
     EN_SG = "en-SG"
     EN_TZ = "en-TZ"
     EN_US = "en-US"
+    EN_WL = "en-WL"
     EN_ZA = "en-ZA"
 
     # Esperanto
@@ -183,6 +198,7 @@ class Language(StrEnum):
 
     # Persian
     FA = "fa"
+    FA_AF = "fa-AF"
     FA_IR = "fa-IR"
 
     # Fulah
@@ -290,6 +306,10 @@ class Language(StrEnum):
     # Kabuverdianu
     KEA = "kea"
 
+    # Kabyle
+    KAB = "kab"
+    KAB_DZ = "kab-DZ"
+
     # Kazakh
     KK = "kk"
     KK_KZ = "kk-KZ"
@@ -309,6 +329,10 @@ class Language(StrEnum):
     # Korean
     KO = "ko"
     KO_KR = "ko-KR"
+
+    # Kashmiri
+    KS = "ks"
+    KS_IN = "ks-IN"
 
     # Kurdish
     KU = "ku"
@@ -369,6 +393,10 @@ class Language(StrEnum):
     MN = "mn"
     MN_MN = "mn-MN"
 
+    # Manipuri
+    MNI = "mni"
+    MNI_IN = "mni-IN"
+
     # Marathi
     MR = "mr"
     MR_IN = "mr-IN"
@@ -395,6 +423,7 @@ class Language(StrEnum):
 
     # Nepali
     NE = "ne"
+    NE_IN = "ne-IN"
     NE_NP = "ne-NP"
 
     # Dutch
@@ -442,6 +471,11 @@ class Language(StrEnum):
 
     # Sanskrit
     SA = "sa"
+    SA_IN = "sa-IN"
+
+    # Santali
+    SAT = "sat"
+    SAT_IN = "sat-IN"
 
     # Sindhi
     SD = "sd"
@@ -486,8 +520,11 @@ class Language(StrEnum):
 
     # Swahili
     SW = "sw"
+    SW_BI = "sw-BI"
     SW_KE = "sw-KE"
+    SW_RW = "sw-RW"
     SW_TZ = "sw-TZ"
+    SW_UG = "sw-UG"
 
     # Tamil
     TA = "ta"
@@ -591,8 +628,11 @@ def resolve_language(
     Args:
         language: The Language enum value to convert.
         language_map: Dictionary mapping Language enums to service language codes.
-        use_base_code: If True, extracts base code (e.g., 'en' from 'en-US').
-                      If False, uses full language code as-is.
+        use_base_code: If True, a regional variant resolves through its base
+                      language: the map's code for the base language (e.g.
+                      'eng' for 'en-US' when the map has ``Language.EN: "eng"``),
+                      or the base code itself (e.g. 'en') when the map has no
+                      entry for it. If False, uses full language code as-is.
 
     Returns:
         The resolved language code for the service.
@@ -604,6 +644,12 @@ def resolve_language(
         >>> resolve_language(Language.EN_US, LANGUAGE_MAP, use_base_code=True)
         # Logs: "Language en-US not verified. Using base code 'en'."
         "en"
+
+        # Service with its own code per base language (e.g., ElevenLabs STT)
+        >>> LANGUAGE_MAP = {Language.EN: "eng", Language.ES: "spa"}
+        >>> resolve_language(Language.EN_US, LANGUAGE_MAP, use_base_code=True)
+        # Logs: "Language en-US not verified. Using base code 'eng'."
+        "eng"
 
         # Service expecting full codes (e.g., AWS)
         >>> LANGUAGE_MAP = {Language.EN_US: "en-US", Language.ES_ES: "es-ES"}
@@ -621,8 +667,13 @@ def resolve_language(
     lang_str = str(language)
 
     if use_base_code:
-        # Extract base code (e.g., "en" from "en-US")
+        # Extract base code (e.g., "en" from "en-US"), then prefer the map's code
+        # for that base language when the service names it differently.
         base_code = lang_str.split("-")[0].lower()
+        try:
+            base_code = language_map.get(Language(base_code), base_code)
+        except ValueError:
+            pass
         logger.warning(f"Language {language} not verified. Using base code '{base_code}'.")
         return base_code
     else:

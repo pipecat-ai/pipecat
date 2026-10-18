@@ -22,8 +22,26 @@ class BusSubscriber:
         """Unique name identifying this subscriber on the bus."""
         raise NotImplementedError
 
+    def accepts_bus_message(self, message: BusMessage) -> bool:
+        """Whether this subscriber should be handed this message.
+
+        Checked by the bus before every delivery. Returning False drops
+        the message for this subscriber alone; others still receive it.
+        Subscribers that take everything, which is the default, need not
+        override this.
+
+        Args:
+            message: The bus message about to be delivered.
+
+        Returns:
+            Whether to deliver the message.
+        """
+        return True
+
     async def on_bus_message(self, message: BusMessage) -> None:
         """Handle an incoming bus message.
+
+        Only called for messages :meth:`accepts_bus_message` allowed.
 
         Args:
             message: The bus message to handle.

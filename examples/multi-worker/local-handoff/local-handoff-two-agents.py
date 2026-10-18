@@ -31,7 +31,7 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.bus import BusBridgeProcessor
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
@@ -45,6 +45,7 @@ from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.livekit.transport import LiveKitParams
 from pipecat.workers.llm import LLMWorker, LLMWorkerActivationArgs, tool
 from pipecat.workers.runner import WorkerRunner
 
@@ -62,6 +63,10 @@ transport_params = {
         audio_in_enabled=True,
         audio_out_enabled=True,
     ),
+    "livekit": lambda: LiveKitParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
@@ -69,7 +74,7 @@ transport_params = {
 }
 
 
-class AcmeLLMTask(LLMWorker):
+class AcmeLLMWorker(LLMWorker):
     """LLM-only child worker with transfer/end tools.
 
     Receives user context from the main worker via the bus, runs its LLM,
@@ -89,14 +94,18 @@ class AcmeLLMTask(LLMWorker):
             agent (str): The agent to transfer to (e.g. 'greeter', 'support').
             reason (str): Why the user is being transferred.
         """
-        logger.info(f"Task '{self.name}': transferring to '{agent}' ({reason})")
+        logger.info(f"Worker '{self.name}': transferring to '{agent}' ({reason})")
+        await params.result_callback(None)
+        message = (
+            f"The {self.name} agent transferred the user to you. Take over the "
+            f"conversation and help them. Reason for the transfer: {reason}"
+        )
         await self.activate_worker(
             agent,
             args=LLMWorkerActivationArgs(
-                messages=[{"role": "developer", "content": reason}],
+                messages=[{"role": "developer", "content": message}],
             ),
             deactivate_self=True,
-            result_callback=params.result_callback,
         )
 
     @tool
@@ -106,15 +115,12 @@ class AcmeLLMTask(LLMWorker):
         Args:
             reason (str): Why the conversation is ending.
         """
-        logger.info(f"Task '{self.name}': ending conversation ({reason})")
-        await self.end(
-            reason=reason,
-            messages=[{"role": "developer", "content": reason}],
-            result_callback=params.result_callback,
-        )
+        logger.info(f"Worker '{self.name}': ending conversation ({reason})")
+        await params.result_callback(reason)
+        await self.end(reason=reason)
 
 
-def build_greeter() -> AcmeLLMTask:
+def build_greeter() -> AcmeLLMWorker:
     """Greeter: routes the user to support when they pick a product."""
     llm = OpenAILLMService(
         api_key=os.environ["OPENAI_API_KEY"],
@@ -131,10 +137,10 @@ def build_greeter() -> AcmeLLMTask:
             ),
         ),
     )
-    return AcmeLLMTask("greeter", llm=llm, bridged=())
+    return AcmeLLMWorker("greeter", llm=llm, bridged=())
 
 
-def build_support() -> AcmeLLMTask:
+def build_support() -> AcmeLLMWorker:
     """Support: answers product questions, can hand back to the greeter."""
     llm = OpenAILLMService(
         api_key=os.environ["OPENAI_API_KEY"],
@@ -153,7 +159,7 @@ def build_support() -> AcmeLLMTask:
             ),
         ),
     )
-    return AcmeLLMTask("support", llm=llm, bridged=())
+    return AcmeLLMWorker("support", llm=llm, bridged=())
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
@@ -204,6 +210,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             enable_usage_metrics=True,
         ),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
+        processor_unusable_policy=ProcessorUnusablePolicy.END,
     )
 
     await runner.add_workers(build_greeter(), build_support(), worker)

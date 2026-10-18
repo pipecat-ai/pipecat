@@ -10,7 +10,7 @@ import json
 import time
 from collections import Counter
 from collections.abc import AsyncGenerator
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from loguru import logger
@@ -24,14 +24,14 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
-    StartFrame,
     STTMetadataFrame,
     TranscriptionFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.settings import STTSettings
+from pipecat.services.soniox.errors import classify_error_code
 from pipecat.services.stt_latency import SONIOX_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -39,7 +39,7 @@ from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
-from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 
 KEEPALIVE_MESSAGE = '{"type": "keepalive"}'
 
@@ -65,7 +65,10 @@ class SonioxContextTranslationTerm(BaseModel):
 
 
 class SonioxContextObject(BaseModel):
-    """Context object for models with context_version 2, for Soniox stt-rt-v3-preview and higher.
+    """Structured context that steers transcription and translation.
+
+    Every section is optional; supply only the ones that are relevant. Soniox
+    caps the whole object at 8k tokens.
 
     Learn more about context in the documentation:
     https://soniox.com/docs/stt/concepts/context
@@ -168,6 +171,7 @@ def language_to_soniox_language(language: Language) -> str:
         Language.ML: "ml",
         Language.MR: "mr",
         Language.MS: "ms",
+        Language.NB: "no",
         Language.NL: "nl",
         Language.NO: "no",
         Language.PA: "pa",
@@ -230,9 +234,8 @@ class SonioxSTTSettings(STTSettings):
     Parameters:
         language_hints: List of language hints to use for transcription.
         language_hints_strict: If true, strictly enforce language hints.
-        context: Customization for transcription. String for models with
-            context_version 1 and SonioxContextObject for models with
-            context_version 2.
+        context: Customization for transcription. Either a
+            :class:`SonioxContextObject` or a plain string of background text.
         enable_speaker_diarization: Whether to enable speaker diarization.
         enable_language_identification: Whether to enable language identification.
         max_endpoint_delay_ms: Max ms before endpoint detection finalizes the turn (500-3000).
@@ -260,6 +263,24 @@ class SonioxSTTSettings(STTSettings):
         default_factory=lambda: NOT_GIVEN
     )
     client_reference_id: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+
+def _move_language_to_hints(delta: SonioxSTTSettings) -> None:
+    """Replace ``language_hints`` with ``delta.language``, the field Soniox reads on connect.
+
+    Hints given in the same delta win. A string outside :class:`Language` stays in
+    ``language`` for the base class to handle.
+    """
+    if not is_given(delta.language) or delta.language is None:
+        return
+    if is_given(getattr(delta, "language_hints", NOT_GIVEN)):
+        return
+    try:
+        language = Language(delta.language)
+    except ValueError:
+        return
+    delta.language_hints = [language]
+    delta.language = NOT_GIVEN
 
 
 class SonioxSTTService(WebsocketSTTService):
@@ -372,6 +393,8 @@ class SonioxSTTService(WebsocketSTTService):
 
         # --- 4. Settings delta (canonical API, always wins) ---
         if settings is not None:
+            settings = replace(settings)
+            _move_language_to_hints(settings)
             default_settings.apply_update(settings)
 
         super().__init__(
@@ -450,17 +473,10 @@ class SonioxSTTService(WebsocketSTTService):
         self._user_turn_open = False
         await self.broadcast_frame(ProposedUserStoppedSpeakingFrame)
 
-    async def start(self, frame: StartFrame):
-        """Start the Soniox STT websocket connection.
-
-        Args:
-            frame: The start frame containing initialization parameters.
-        """
-        await super().start(frame)
-        await self._connect()
-
     async def _update_settings(self, delta: Settings) -> dict[str, Any]:
         """Apply settings delta and reconnect if anything changed.
+
+        A ``language`` replaces ``language_hints``, the field Soniox reads on connect.
 
         Args:
             delta: A settings delta.
@@ -468,6 +484,8 @@ class SonioxSTTService(WebsocketSTTService):
         Returns:
             Dict mapping changed field names to their previous values.
         """
+        delta = replace(delta)
+        _move_language_to_hints(delta)
         changed = await super()._update_settings(delta)
 
         if changed:
@@ -475,25 +493,32 @@ class SonioxSTTService(WebsocketSTTService):
 
         return changed
 
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
+
+        Args:
+            setup: Configuration object containing setup parameters.
+        """
+        await super().setup(setup)
+        await self._connect()
+
     async def stop(self, frame: EndFrame):
         """Stop the Soniox STT websocket connection.
-
-        Stopping waits for the server to close the connection as we might receive
-        additional final tokens after sending the stop recording message.
 
         Args:
             frame: The end frame.
         """
-        await super().stop(frame)
+        # The end-of-audio frame has to reach the socket before teardown closes
+        # it. Trailing final tokens are not waited for: that would hold shutdown
+        # open for a transcript that generates no further turn.
         await self._send_stop_recording()
-        await self._disconnect()
+        await super().stop(frame)
 
     async def cancel(self, frame: CancelFrame):
         """Cancel the Soniox STT websocket connection.
 
-        Compared to stop, this method closes the connection immediately without waiting
-        for the server to close it. This is useful when we want to stop the connection
-        immediately without waiting for the server to send any final tokens.
+        Compared to stop, this closes the connection without sending the
+        end-of-audio frame.
 
         Args:
             frame: The cancel frame.
@@ -548,10 +573,12 @@ class SonioxSTTService(WebsocketSTTService):
                 logger.debug(f"Triggered finalize event on: {frame.name=}, {direction=}")
 
     async def _send_stop_recording(self):
-        """Send stop recording message to Soniox."""
+        """Send the end-of-audio frame, an empty message that ends the session."""
         if self._websocket and self._websocket.state is State.OPEN:
-            # Send stop recording message
-            await self._websocket.send("")
+            try:
+                await self._websocket.send("")
+            except Exception as e:
+                logger.warning(f"{self}: end-of-audio send failed: {e}")
 
     async def _connect(self):
         """Connect to the Soniox service.
@@ -562,7 +589,9 @@ class SonioxSTTService(WebsocketSTTService):
 
         await super()._connect()
 
-        if self._websocket and not self._receive_task:
+        # Started even when the connection failed: with no socket the receive
+        # loop goes straight to its reconnect path, which retries the connect.
+        if not self._receive_task:
             self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
     async def _disconnect(self):
@@ -586,7 +615,10 @@ class SonioxSTTService(WebsocketSTTService):
 
             logger.debug("Connecting to Soniox STT")
 
-            self._websocket = await self._websocket_connect(self._url)
+            self._websocket = await self._websocket_connect(
+                self._url,
+                additional_headers={"Authorization": f"Bearer {self._api_key}"},
+            )
 
             if not self._websocket:
                 await self.push_error(error_msg=f"Unable to connect to Soniox API at {self._url}")
@@ -604,7 +636,6 @@ class SonioxSTTService(WebsocketSTTService):
 
             # Send the initial configuration message.
             config = {
-                "api_key": self._api_key,
                 "model": s.model,
                 "audio_format": self._audio_format,
                 "num_channels": self._num_channels,
@@ -748,7 +779,8 @@ class SonioxSTTService(WebsocketSTTService):
                     # in the buffer) and close any open user turn.
                     await finalize_turn()
                     await self.push_error(
-                        error_msg=f"Error: {error_code} (_receive_messages) - {error_message}"
+                        error_msg=f"Error: {error_code} (_receive_messages) - {error_message}",
+                        category=classify_error_code(error_code),
                     )
 
                 finished = content.get("finished")

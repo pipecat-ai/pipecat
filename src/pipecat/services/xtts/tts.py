@@ -34,7 +34,7 @@ from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.tracing.service_decorators import traced_tts
-from pipecat.utils.types import assert_given
+from pipecat.utils.types import assert_given, require_given
 
 # The server below can connect to XTTS through a local running docker
 #
@@ -151,7 +151,9 @@ class XTTSService(TTSService):
             self._warn_init_param_moved_to_settings("voice_id", "voice")
             default_settings.voice = voice_id
         if language is not None:
-            self._warn_init_param_moved_to_settings("language", "language")
+            self._warn_init_param_moved_to_settings(
+                "language", "language", deprecated_since="0.0.106"
+            )
             default_settings.language = language
 
         # 3. (No step 3, as there's no params object to apply)
@@ -167,6 +169,8 @@ class XTTSService(TTSService):
             settings=default_settings,
             **kwargs,
         )
+
+        require_given(self._settings.voice, "XTTS voice")
 
         # Init-only fields (not runtime-updatable)
         self._base_url = base_url
@@ -231,8 +235,8 @@ class XTTSService(TTSService):
             return
 
         voice = assert_given(self._settings.voice)
-        if voice is None:
-            yield ErrorFrame(error="XTTS voice must be specified")
+        if not voice or voice not in self._studio_speakers:
+            yield ErrorFrame(error=f"XTTS voice '{voice}' is not one of the studio speakers")
             return
         embeddings = self._studio_speakers[voice]
 

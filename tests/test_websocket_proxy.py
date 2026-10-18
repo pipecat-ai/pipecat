@@ -17,6 +17,7 @@ from pipecat.bus.serializers import JSONMessageSerializer
 from pipecat.registry import WorkerRegistry
 from pipecat.utils.asyncio.task_manager import TaskManager
 from pipecat.workers.base_worker import BaseWorker
+from pipecat.workers.runner import WorkerRunner
 
 
 async def create_test_bus():
@@ -85,6 +86,7 @@ class TestWebSocketProxyClient(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.bus, self.tm = await create_test_bus()
         self.registry = WorkerRegistry(runner_name="test-runner")
+        self.runner = WorkerRunner(bus=self.bus, handle_sigint=False)
         self.serializer = JSONMessageSerializer()
 
     async def _create_client(self, fake_ws):
@@ -97,7 +99,7 @@ class TestWebSocketProxyClient(unittest.IsolatedAsyncioTestCase):
             local_worker_name="voice",
             serializer=self.serializer,
         )
-        await worker.attach(registry=self.registry, bus=self.bus)
+        await worker.attach(registry=self.registry, bus=self.bus, worker_runner=self.runner)
         await worker.setup(self.tm)
         worker._ws = fake_ws
         return worker
@@ -208,6 +210,7 @@ class TestWebSocketProxyServer(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.bus, self.tm = await create_test_bus()
         self.registry = WorkerRegistry(runner_name="test-runner")
+        self.runner = WorkerRunner(bus=self.bus, handle_sigint=False)
         self.serializer = JSONMessageSerializer()
 
     async def _create_server(self, fake_ws):
@@ -220,7 +223,7 @@ class TestWebSocketProxyServer(unittest.IsolatedAsyncioTestCase):
             remote_worker_name="voice",
             serializer=self.serializer,
         )
-        await worker.attach(registry=self.registry, bus=self.bus)
+        await worker.attach(registry=self.registry, bus=self.bus, worker_runner=self.runner)
         await worker.setup(self.tm)
         return worker
 

@@ -382,7 +382,7 @@ class TestReceiveResponseEventsText:
                         "input_tokens": 100,
                         "output_tokens": 50,
                         "total_tokens": 150,
-                        "input_tokens_details": {"cached_tokens": 20},
+                        "input_tokens_details": {"cached_tokens": 20, "cache_write_tokens": 30},
                         "output_tokens_details": {"reasoning_tokens": 10},
                     },
                 },
@@ -398,7 +398,41 @@ class TestReceiveResponseEventsText:
         assert tokens.completion_tokens == 50
         assert tokens.total_tokens == 150
         assert tokens.cache_read_input_tokens == 20
+        # Both cache buckets sit inside input_tokens, so the totals stay as sent.
+        assert tokens.cache_creation_input_tokens == 30
         assert tokens.reasoning_tokens == 10
+
+    @pytest.mark.asyncio
+    async def test_token_usage_metrics_without_a_cache_write_count(self):
+        """A server without prompt caching omits the field entirely."""
+        service = _make_service()
+        service._push_llm_text = AsyncMock()
+        service.stop_ttfb_metrics = AsyncMock()
+        service.start_llm_usage_metrics = AsyncMock()
+
+        ws = _ws_events(
+            {
+                "type": "response.completed",
+                "response": {
+                    "id": "resp_1",
+                    "model": "gpt-4.1",
+                    "usage": {
+                        "input_tokens": 100,
+                        "output_tokens": 50,
+                        "total_tokens": 150,
+                        "input_tokens_details": {"cached_tokens": 0},
+                        "output_tokens_details": {"reasoning_tokens": 0},
+                    },
+                },
+            },
+        )
+        service._websocket = ws
+
+        context = MagicMock(spec=LLMContext)
+        await service._receive_response_events(context, [])
+
+        tokens = service.start_llm_usage_metrics.call_args[0][0]
+        assert tokens.cache_creation_input_tokens == 0
 
 
 # ---------------------------------------------------------------------------
@@ -475,6 +509,40 @@ class TestReceiveResponseEventsFunctionCalls:
 
 class TestReceiveResponseEventsErrors:
     @pytest.mark.asyncio
+    async def test_response_incomplete_reports_reason_and_usage(self):
+        service = _make_service()
+        service.stop_ttfb_metrics = AsyncMock()
+        service.start_llm_usage_metrics = AsyncMock()
+        service.push_error = AsyncMock()
+
+        ws = _ws_events(
+            {
+                "type": "response.incomplete",
+                "response": {
+                    "id": "resp_1",
+                    "status": "incomplete",
+                    "incomplete_details": {"reason": "max_output_tokens"},
+                    "usage": {
+                        "input_tokens": 12,
+                        "output_tokens": 50,
+                        "total_tokens": 62,
+                        "input_tokens_details": {"cached_tokens": 0},
+                        "output_tokens_details": {"reasoning_tokens": 0},
+                    },
+                },
+            },
+        )
+        service._websocket = ws
+
+        context = MagicMock(spec=LLMContext)
+        await service._receive_response_events(context, [])
+
+        assert "max_output_tokens" in service.push_error.call_args.kwargs["error_msg"]
+        tokens = service.start_llm_usage_metrics.call_args[0][0]
+        assert tokens.prompt_tokens == 12
+        assert tokens.completion_tokens == 50
+
+    @pytest.mark.asyncio
     async def test_response_failed_pushes_error(self):
         service = _make_service()
         service.stop_ttfb_metrics = AsyncMock()
@@ -486,9 +554,8 @@ class TestReceiveResponseEventsErrors:
                 "type": "response.failed",
                 "response": {
                     "id": "resp_1",
-                    "status_details": {
-                        "error": {"message": "Content filter triggered"},
-                    },
+                    "status": "failed",
+                    "error": {"code": "server_error", "message": "The model failed to respond"},
                 },
             },
         )
@@ -497,8 +564,7 @@ class TestReceiveResponseEventsErrors:
         context = MagicMock(spec=LLMContext)
         await service._receive_response_events(context, [])
 
-        service.push_error.assert_called_once()
-        assert "Content filter triggered" in service.push_error.call_args.kwargs["error_msg"]
+        assert "The model failed to respond" in service.push_error.call_args.kwargs["error_msg"]
 
     @pytest.mark.asyncio
     async def test_response_incomplete_pushes_error(self):
@@ -510,7 +576,7 @@ class TestReceiveResponseEventsErrors:
         ws = _ws_events(
             {
                 "type": "response.incomplete",
-                "response": {"id": "resp_1", "status_details": None},
+                "response": {"id": "resp_1", "incomplete_details": None},
             },
         )
         service._websocket = ws
@@ -762,20 +828,143 @@ class TestReasoningParams:
         assert "reasoning" not in params
         assert "include" not in params
 
-    def test_gpt5_series_disabled_by_default(self):
-        """Mainline gpt models from gpt-5 onward default to effort="none"."""
-        # gpt-6.x stands in for a future mainline series we assume will reason.
-        for model in ("gpt-5.4", "gpt-5.5", "gpt-6", "gpt-6.2"):
+    def test_original_gpt_5_gets_minimal(self):
+        """The original gpt-5 models reason before most replies and reject "none"."""
+        for model in ("gpt-5", "gpt-5-mini", "gpt-5-nano", "gpt-5-2025-08-07"):
+            service = _make_service(settings=OpenAIResponsesLLMService.Settings(model=model))
+            params = self._params(service)
+            assert params["reasoning"] == {"effort": "minimal"}, model
+            assert "include" not in params
+
+    def test_later_models_get_none(self):
+        """From gpt-5.1 on, most models can skip reasoning entirely."""
+        for model in ("gpt-5.1", "gpt-5.4-mini", "gpt-5.5", "gpt-5.6-sol", "gpt-6-luna"):
             service = _make_service(settings=OpenAIResponsesLLMService.Settings(model=model))
             params = self._params(service)
             assert params["reasoning"] == {"effort": "none"}, model
             assert "include" not in params
 
-    def test_o_series_left_untouched(self):
-        """The o-series reasons but rejects effort="none", so leave it at the default."""
-        service = _make_service(settings=OpenAIResponsesLLMService.Settings(model="o3"))
+    def test_models_that_must_reason_get_their_lowest_effort(self):
+        """Models that reject "none" get the lowest effort they accept."""
+        for model, effort in (
+            ("gpt-6-astra", "low"),
+            ("gpt-6.1-sol", "low"),
+            ("o3", "low"),
+            ("gpt-5.5-pro", "medium"),
+            ("gpt-5-pro", "high"),
+        ):
+            service = _make_service(settings=OpenAIResponsesLLMService.Settings(model=model))
+            params = self._params(service)
+            assert params["reasoning"] == {"effort": effort}, model
+
+    def test_unlisted_models_run_at_openais_default(self):
+        """Only listed models get an effort, so a model is never sent one it rejects."""
+        for model in ("gpt-6.2", "gpt-5-codex", "gpt-4.1", "gpt-5-chat-latest"):
+            service = _make_service(settings=OpenAIResponsesLLMService.Settings(model=model))
+            params = self._params(service)
+            assert "reasoning" not in params, model
+
+    def test_reasoning_in_extra_replaces_the_default(self):
+        """Reasoning passed through extra wins over the lowest-effort default."""
+        service = _make_service(
+            settings=OpenAIResponsesLLMService.Settings(
+                model="gpt-5-mini", extra={"reasoning": {"effort": "low"}}
+            )
+        )
         params = self._params(service)
+        assert params["reasoning"] == {"effort": "low"}
+
+    def test_the_applied_default_is_logged_once_per_model(self):
+        """The developer learns what Pipecat sent, and when to change it, once per model."""
+        service = _make_service(settings=OpenAIResponsesLLMService.Settings(model="gpt-5-mini"))
+        with patch("pipecat.services.llm_service.logger") as mock_logger:
+            self._params(service)
+            self._params(service)
+            service._settings.model = "gpt-5-nano"
+            self._params(service)
+        messages = [call.args[0] for call in mock_logger.info.call_args_list]
+        assert len(messages) == 2
+        assert "to gpt-5-mini," in messages[0]
+        assert "multistep reasoning" in messages[0]
+        assert "set `reasoning` in OpenAIResponsesLLMService.Settings" in messages[0]
+        assert "to gpt-5-nano," in messages[1]
+        mock_logger.warning.assert_not_called()
+
+    def test_an_unlisted_reasoning_model_is_warned_about_once(self):
+        """A reasoning model without a default may reason before replying, so the developer hears."""
+        service = _make_service(settings=OpenAIResponsesLLMService.Settings(model="gpt-6.2"))
+        with patch("pipecat.services.llm_service.logger") as mock_logger:
+            self._params(service)
+            self._params(service)
+        mock_logger.info.assert_not_called()
+        mock_logger.warning.assert_called_once()
+        assert "no thinking default for gpt-6.2" in mock_logger.warning.call_args.args[0]
+
+    def test_nothing_is_logged_for_a_model_that_doesnt_reason(self):
+        """Models without reasoning have no latency to recover."""
+        for model in ("gpt-4.1", "gpt-5-chat-latest", "my-azure-deployment"):
+            service = _make_service(settings=OpenAIResponsesLLMService.Settings(model=model))
+            with patch("pipecat.services.llm_service.logger") as mock_logger:
+                self._params(service)
+            mock_logger.info.assert_not_called()
+            mock_logger.warning.assert_not_called()
+
+    def test_nothing_is_logged_when_reasoning_is_configured(self):
+        """An explicit setting is the developer's choice, and needs no comment."""
+        service = _make_service(
+            settings=OpenAIResponsesLLMService.Settings(
+                model="gpt-6.2",
+                reasoning=OpenAIResponsesLLMService.ReasoningConfig(effort="low"),
+            )
+        )
+        with patch("pipecat.services.llm_service.logger") as mock_logger:
+            self._params(service)
+        mock_logger.info.assert_not_called()
+        mock_logger.warning.assert_not_called()
+
+    def test_use_provider_thinking_default_runs_at_openais_default(self):
+        """The setting sends no default and logs the reason at DEBUG."""
+        service = _make_service(
+            settings=OpenAIResponsesLLMService.Settings(
+                model="gpt-5.5", use_provider_thinking_default=True
+            )
+        )
+        with patch("pipecat.services.llm_service.logger") as mock_logger:
+            params = self._params(service)
+            self._params(service)
         assert "reasoning" not in params
+        mock_logger.debug.assert_called_once()
+        assert (
+            "use_provider_thinking_default is set, so gpt-5.5 runs"
+            in mock_logger.debug.call_args.args[0]
+        )
+        mock_logger.info.assert_not_called()
+        mock_logger.warning.assert_not_called()
+
+    def test_use_provider_thinking_default_on_a_model_that_doesnt_reason_logs_nothing(self):
+        """A model without reasoning has no default to skip."""
+        service = _make_service(
+            settings=OpenAIResponsesLLMService.Settings(
+                model="gpt-4.1", use_provider_thinking_default=True
+            )
+        )
+        with patch("pipecat.services.llm_service.logger") as mock_logger:
+            self._params(service)
+        mock_logger.debug.assert_not_called()
+        mock_logger.info.assert_not_called()
+        mock_logger.warning.assert_not_called()
+
+    def test_gpt_6_1_sol_explicit_effort_honored(self):
+        """An explicit effort on gpt-6.1-sol reaches the request unchanged."""
+        service = _make_service(
+            settings=OpenAIResponsesLLMService.Settings(
+                model="gpt-6.1-sol",
+                reasoning=OpenAIResponsesLLMService.ReasoningConfig(effort="low"),
+            )
+        )
+        params = self._params(service)
+        assert params["reasoning"] == {"effort": "low"}
+        assert params["include"] == ["reasoning.encrypted_content"]
 
     def test_gpt5_chat_variant_left_untouched(self):
         """The non-reasoning gpt-5-chat variant is excluded from the default-off logic."""
@@ -797,16 +986,27 @@ class TestReasoningParams:
         assert params["reasoning"] == {"effort": "high", "summary": "auto"}
         assert params["include"] == ["reasoning.encrypted_content"]
 
-    def test_empty_reasoning_config_falls_back_to_default(self):
-        """An all-unset config is treated as unconfigured (none default on gpt-5.x)."""
+    def test_reasoning_mode_is_passed_through(self):
+        """`mode` reaches the request alongside `effort`."""
         service = _make_service(
             settings=OpenAIResponsesLLMService.Settings(
-                model="gpt-5.5",
+                model="gpt-5.6-sol",
+                reasoning=OpenAIResponsesLLMService.ReasoningConfig(effort="low", mode="pro"),
+            )
+        )
+        params = self._params(service)
+        assert params["reasoning"] == {"effort": "low", "mode": "pro"}
+
+    def test_empty_reasoning_config_falls_back_to_default(self):
+        """An all-unset config is treated as unconfigured."""
+        service = _make_service(
+            settings=OpenAIResponsesLLMService.Settings(
+                model="gpt-5-mini",
                 reasoning=OpenAIResponsesLLMService.ReasoningConfig(),
             )
         )
         params = self._params(service)
-        assert params["reasoning"] == {"effort": "none"}
+        assert params["reasoning"] == {"effort": "minimal"}
         assert "include" not in params
 
 
@@ -966,3 +1166,128 @@ class TestStartsWithResponseOutputReasoning:
         response_output = [{"type": "reasoning", "id": "rs_1"}]
         items = [{"type": "reasoning", "id": "rs_2"}]
         assert not OpenAIResponsesLLMService._starts_with_response_output(items, response_output)
+
+
+# ---------------------------------------------------------------------------
+# retry_on_timeout
+# ---------------------------------------------------------------------------
+
+
+def _ws_script(*items):
+    """Build a mock WebSocket from a script of events and float stalls.
+
+    A dict item is delivered by recv(); a number stalls recv() for that many
+    seconds. recv() blocks indefinitely once the script is exhausted.
+    """
+    ws = AsyncMock()
+    pending = list(items)
+
+    async def recv():
+        while pending:
+            item = pending.pop(0)
+            if isinstance(item, (int, float)):
+                await asyncio.sleep(item)
+                continue
+            return json.dumps(item)
+        await asyncio.sleep(3600)
+
+    ws.recv = AsyncMock(side_effect=recv)
+    ws.send = AsyncMock()
+    ws.close = AsyncMock()
+    ws.close_code = None
+    return ws
+
+
+class TestRetryOnTimeout:
+    def test_disabled_by_default(self):
+        service = _make_service()
+        assert service._retry_on_timeout is False
+        assert service._retry_timeout_secs == 5.0
+
+    @pytest.mark.asyncio
+    async def test_silent_response_times_out(self):
+        from pipecat.services.openai.responses.llm import _ResponseTimeoutError
+
+        service = _make_service()
+        service._websocket = _ws_script()
+
+        with pytest.raises(_ResponseTimeoutError):
+            await service._receive_response_events(MagicMock(spec=LLMContext), [], 0.05)
+
+    @pytest.mark.asyncio
+    async def test_response_created_alone_does_not_close_the_window(self):
+        """An acknowledged-but-silent response is exactly what retrying is for."""
+        from pipecat.services.openai.responses.llm import _ResponseTimeoutError
+
+        service = _make_service()
+        service._websocket = _ws_script({"type": "response.created", "response": {"id": "resp_1"}})
+
+        with pytest.raises(_ResponseTimeoutError):
+            await service._receive_response_events(MagicMock(spec=LLMContext), [], 0.05)
+
+    @pytest.mark.asyncio
+    async def test_no_timeout_when_not_requested(self):
+        service = _make_service()
+        service._push_llm_text = AsyncMock()
+        service.stop_ttfb_metrics = AsyncMock()
+        service.start_llm_usage_metrics = AsyncMock()
+        service._websocket = _ws_script(
+            0.1,
+            {"type": "response.output_text.delta", "delta": "hi"},
+            {"type": "response.completed", "response": {"id": "resp_1", "model": "gpt-4.1"}},
+        )
+
+        await service._receive_response_events(MagicMock(spec=LLMContext), [])
+
+        service._push_llm_text.assert_awaited_once_with("hi")
+
+    @pytest.mark.asyncio
+    async def test_first_output_makes_the_wait_unbounded(self):
+        """Once content is downstream, a stall must not abandon the response."""
+        service = _make_service()
+        service._push_llm_text = AsyncMock()
+        service.stop_ttfb_metrics = AsyncMock()
+        service.start_llm_usage_metrics = AsyncMock()
+        service._websocket = _ws_script(
+            {"type": "response.output_text.delta", "delta": "hi"},
+            0.15,  # longer than the timeout below
+            {"type": "response.completed", "response": {"id": "resp_1", "model": "gpt-4.1"}},
+        )
+
+        await service._receive_response_events(MagicMock(spec=LLMContext), [], 0.05)
+
+        service._push_llm_text.assert_awaited_once_with("hi")
+
+    @pytest.mark.asyncio
+    async def test_timeout_reconnects_and_retries_with_full_context(self):
+        from pipecat.services.openai.responses.llm import _ResponseTimeoutError
+
+        service = _make_service(retry_on_timeout=True, retry_timeout_secs=0.05)
+        service._websocket = _ws_script()
+        service._ensure_connected = AsyncMock()
+        service._ws_send = AsyncMock()
+        service.start_ttfb_metrics = AsyncMock()
+        service.stop_ttfb_metrics = AsyncMock()
+        service._try_reconnect = AsyncMock(return_value=True)
+
+        # Stale state from an earlier turn; the retry must not reuse it.
+        service._previous_response_id = "resp_stale"
+
+        timeouts = []
+
+        async def receive(context, full_input, output_timeout_secs=None):
+            timeouts.append(output_timeout_secs)
+            if len(timeouts) == 1:
+                raise _ResponseTimeoutError("no output")
+
+        service._receive_response_events = receive
+
+        await service._process_context(LLMContext(messages=[{"role": "user", "content": "hi"}]))
+
+        # First attempt bounded, retry unbounded.
+        assert timeouts == [0.05, None]
+        service._try_reconnect.assert_awaited_once()
+        assert service._previous_response_id is None
+        sent = [call.args[0] for call in service._ws_send.await_args_list]
+        assert len(sent) == 2
+        assert "previous_response_id" not in sent[1]

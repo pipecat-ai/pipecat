@@ -24,8 +24,8 @@ from pipecat.frames.frames import (
     InterruptionFrame,
     OutputTransportMessageFrame,
     OutputTransportMessageUrgentFrame,
-    StartFrame,
 )
+from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.serializers.base_serializer import FrameSerializer
 
 
@@ -155,13 +155,13 @@ class TwilioFrameSerializer(FrameSerializer):
         )
         self._hangup_attempted = False
 
-    async def setup(self, frame: StartFrame):
+    async def setup(self, setup: FrameProcessorSetup):
         """Sets up the serializer with pipeline configuration.
 
         Args:
-            frame: The StartFrame containing pipeline configuration.
+            setup: Configuration object containing setup parameters.
         """
-        self._sample_rate = self._params.sample_rate or frame.audio_in_sample_rate
+        self._sample_rate = self._params.sample_rate or setup.audio_in_sample_rate
 
     async def serialize(self, frame: Frame) -> str | bytes | None:
         """Serializes a Pipecat frame to Twilio WebSocket format.
@@ -284,10 +284,16 @@ class TwilioFrameSerializer(FrameSerializer):
         Returns:
             A Pipecat frame corresponding to the Twilio event, or None if unhandled.
         """
-        message = json.loads(data)
+        try:
+            message = json.loads(data)
+        except json.JSONDecodeError:
+            logger.warning(f"Failed to parse JSON message: {data}")
+            return None
 
-        if message["event"] == "media":
-            payload_base64 = message["media"]["payload"]
+        if message.get("event") == "media":
+            payload_base64 = message.get("media", {}).get("payload")
+            if not payload_base64:
+                return None
             payload = base64.b64decode(payload_base64)
 
             # Input: Convert Twilio's 8kHz μ-law to PCM at pipeline input rate
@@ -302,7 +308,7 @@ class TwilioFrameSerializer(FrameSerializer):
                 audio=deserialized_data, num_channels=1, sample_rate=self._sample_rate
             )
             return audio_frame
-        elif message["event"] == "dtmf":
+        elif message.get("event") == "dtmf":
             digit = message.get("dtmf", {}).get("digit")
 
             try:

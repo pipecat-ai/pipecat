@@ -17,9 +17,12 @@ assertions over its validators, plus runtime checks that the converted shims
 still emit ``DeprecationWarning`` without warning at import time.
 """
 
+import inspect
 import json
 import subprocess
 import sys
+import warnings
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -36,6 +39,7 @@ from pipecat.frames.frames import (  # noqa: E402
     CancelTaskFrame,
     EndTaskFrame,
     InterruptionTaskFrame,
+    StartFrame,
     StopTaskFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline  # noqa: E402
@@ -43,6 +47,7 @@ from pipecat.pipeline.runner import PipelineRunner  # noqa: E402
 from pipecat.pipeline.worker import PipelineTask, PipelineTaskParams  # noqa: E402
 from pipecat.processors.filters.identity_filter import IdentityFilter  # noqa: E402
 from pipecat.utils.asyncio.task_manager import TaskManager  # noqa: E402
+from pipecat.utils.deprecation import renamed_init_field, warn_deprecated_read  # noqa: E402
 
 SRC_ROOT = Path(__file__).parent.parent / "src" / "pipecat"
 _SCAN = dscan.scan_source(SRC_ROOT)
@@ -101,6 +106,45 @@ def test_no_replacement_directive_extracts_no_replacement():
     assert dscan.relation_for(use, "Foo") == "use_existing"
 
 
+def test_directives_are_attributed_to_the_entry_they_sit_under():
+    """A directive under an event bullet or an Args entry deprecates that entry alone."""
+    docstring = """A processor.
+
+    Events:
+
+    - on_ready: Triggered when ready.
+    - on_old_event: Triggered by the old thing.
+
+      .. deprecated:: 1.8.0
+          Use ``on_ready`` instead. Will be removed in 2.0.0.
+
+    Args:
+        old_param: An old parameter.
+
+            .. deprecated:: 1.8.0
+                Use ``new_param`` instead. Will be removed in 2.0.0.
+    """
+    entries = [(param, kind) for _, _, param, kind in dscan.iter_directives(docstring)]
+
+    assert entries == [("on_old_event", "event"), ("old_param", "parameter")]
+
+
+def test_top_level_directive_deprecates_the_symbol():
+    """A directive outside any entry deprecates the symbol the docstring belongs to."""
+    docstring = """A processor.
+
+    .. deprecated:: 1.8.0
+        Use ``NewProcessor`` instead. Will be removed in 2.0.0.
+
+    Events:
+
+    - on_ready: Triggered when ready.
+    """
+    entries = [(param, kind) for _, _, param, kind in dscan.iter_directives(docstring)]
+
+    assert entries == [(None, "parameter")]
+
+
 # --- @deprecated decorator message consistency -------------------------------
 
 
@@ -111,6 +155,25 @@ def test_deprecated_messages_follow_template():
     assert not bad, (
         "These @deprecated messages don't follow the canonical template from "
         "pipecat.utils.deprecation:\n" + "\n".join(f"  {b}" for b in bad)
+    )
+
+
+def test_warn_messages_follow_template():
+    """Every hand-written deprecation warning uses a literal message matching the template."""
+    assert _SCAN.warn_sites, "expected warnings.warn(..., DeprecationWarning) call sites"
+    bad = dscan.check_warn_messages(_SCAN)
+    assert not bad, (
+        "These deprecation warnings don't follow the canonical template from "
+        "pipecat.utils.deprecation:\n" + "\n".join(f"  {b}" for b in bad)
+    )
+
+
+def test_deprecation_warnings_use_the_helper():
+    """Every hand-written deprecation warning is raised through ``warn_deprecated()``."""
+    bad = dscan.check_warn_helper(_SCAN)
+    assert not bad, (
+        "These deprecation warnings call warnings.warn() directly; use "
+        "pipecat.utils.deprecation.warn_deprecated():\n" + "\n".join(f"  {b}" for b in bad)
     )
 
 
@@ -211,6 +274,122 @@ def test_no_deprecation_warnings_at_import_time():
     )
     result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
+
+
+# --- Intercepted field reads (warn_deprecated) --------------------------------
+#
+# A field whose reads are intercepted by ``__getattribute__`` warns once per call
+# site. The shim passes ``stacklevel=2`` to name the reading line, and the helper
+# keys its record of warned sites on that same line, so the tests below pin both
+# the count and the reported location: a call layer added between the shim and
+# the helper would otherwise silently collapse every reader into one entry.
+
+
+def _read_enable_metrics(frame):
+    return frame.enable_metrics
+
+
+def test_intercepted_read_warns_once_per_call_site():
+    frame = StartFrame()
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        for _ in range(10):
+            _read_enable_metrics(frame)
+    assert len(caught) == 1
+
+
+def test_intercepted_read_warns_for_every_call_site():
+    frame = StartFrame()
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        _ = frame.enable_metrics
+        _ = frame.enable_metrics  # Same field, second call site.
+    assert len(caught) == 2
+
+
+def test_intercepted_read_reports_the_reading_line():
+    frame = StartFrame()
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        _ = frame.enable_metrics
+        lineno = inspect.currentframe().f_lineno - 1
+    assert caught[0].filename == __file__
+    assert caught[0].lineno == lineno
+
+
+class _LegacyShim:
+    old = 1
+
+    def __getattribute__(self, name):
+        if name == "old":
+            warn_deprecated_read(
+                "`_LegacyShim.old` is deprecated since 1.0.0 and will be removed in 2.0.0. "
+                "No replacement."
+            )
+        return object.__getattribute__(self, name)
+
+
+def test_deprecated_warn_deprecated_read_still_names_the_reading_line():
+    """``warn_deprecated_read()`` warns that it is deprecated, and still reports the read."""
+    shim = _LegacyShim()
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        _ = shim.old
+        lineno = inspect.currentframe().f_lineno - 1
+    messages = {str(w.message).split(" is deprecated")[0]: w for w in caught}
+    assert set(messages) == {"`warn_deprecated_read`", "`_LegacyShim.old`"}
+    assert messages["`_LegacyShim.old`"].filename == __file__
+    assert messages["`_LegacyShim.old`"].lineno == lineno
+
+
+def test_intercepted_read_warns_through_an_ignore_filter():
+    """The warning reaches a reader who has filtered ``DeprecationWarning`` out.
+
+    Many deprecations are detected inside Pipecat, where Python's default
+    filters would hide them, so ``warn_deprecated()`` raises them under its own
+    ``always`` filter. Run in a subprocess to get an interpreter whose filters
+    ignore the category.
+    """
+    script = "from pipecat.frames.frames import StartFrame\n_ = StartFrame().enable_metrics\n"
+    result = subprocess.run(
+        [sys.executable, "-W", "ignore::DeprecationWarning", "-c", script],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "`StartFrame.enable_metrics` is deprecated" in result.stderr
+
+
+# --- Renamed dataclass fields (renamed_init_field) ----------------------------
+#
+# A class's constructor is wrapped the first time the class is built, so each
+# test builds a hierarchy of its own that no other test has built before.
+
+
+@renamed_init_field(
+    "old",
+    "new",
+    "`_RenamedBase.old` is deprecated since 1.0.0 and will be removed in 2.0.0. Use `new` instead.",
+)
+@dataclass
+class _RenamedBase:
+    new: int
+
+
+@dataclass
+class _RenamedChild(_RenamedBase):
+    extra: int = 0
+
+
+class _PassesOldNameToSuper(_RenamedChild):
+    def __init__(self):
+        super().__init__(old=1)
+
+
+def test_renamed_field_reaches_a_constructor_that_passes_it_to_super():
+    with pytest.warns(DeprecationWarning, match="`_RenamedBase.old`"):
+        frame = _PassesOldNameToSuper()
+    assert frame.new == 1
 
 
 # --- Removal history (removals.json) ------------------------------------------

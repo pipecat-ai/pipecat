@@ -8,12 +8,13 @@
 
 import inspect
 import time
-import warnings
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import (
     TYPE_CHECKING,
+    Any,
+    Literal,
     Optional,
     cast,
 )
@@ -26,9 +27,13 @@ from pipecat.audio.volume import AudioVolumeTracker
 from pipecat.frames.frames import (
     AggregatedTextFrame,
     AggregatedTextProgressFrame,
-    AggregationType,
+    AudioRawFrame,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
+    ExternalFunctionCallCancelFrame,
+    ExternalFunctionCallInProgressFrame,
+    ExternalFunctionCallResultFrame,
+    ExternalFunctionCallsStartedFrame,
     Frame,
     FunctionCallCancelFrame,
     FunctionCallInProgressFrame,
@@ -40,13 +45,16 @@ from pipecat.frames.frames import (
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
+    LLMMarkerResponseFrame,
     LLMTextFrame,
     MetricsFrame,
+    TextType,
     TranscriptionFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
     TTSTextFrame,
+    UserBackchannelFrame,
     UserMuteStartedFrame,
     UserMuteStoppedFrame,
     UserStartedSpeakingFrame,
@@ -59,6 +67,7 @@ from pipecat.metrics.metrics import (
     ProcessingMetricsData,
     STTUsageMetricsData,
     TTFAMetricsData,
+    TTFATMetricsData,
     TTFBMetricsData,
     TTSUsageMetricsData,
 )
@@ -66,6 +75,7 @@ from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.frameworks.rtvi.frames import (
     RTVIConfigureObserverFrame,
+    RTVISendTextFrame,
     RTVIServerMessageFrame,
     RTVIServerResponseFrame,
     RTVIUICommandFrame,
@@ -73,7 +83,9 @@ from pipecat.processors.frameworks.rtvi.frames import (
 )
 from pipecat.processors.frameworks.rtvi.models import BotOutputTransformResult
 from pipecat.transports.base_output import BaseOutputTransport
+from pipecat.utils.deprecation import warn_deprecated
 from pipecat.utils.string import match_endofsentence
+from pipecat.utils.time import time_now_iso8601
 
 if TYPE_CHECKING:
     from pipecat.processors.frameworks.rtvi.processor import RTVIProcessor
@@ -88,12 +100,14 @@ class RTVIFunctionCallReportLevel(StrEnum):
         DISABLED: No events emitted for this function call.
         NONE: Events only with tool_call_id, no function name or metadata (most secure).
         NAME: Events with function name, no arguments or results.
+        ARGUMENTS: Events with function name and arguments, no results.
         FULL: Events with function name, arguments, and results.
     """
 
     DISABLED = "disabled"
     NONE = "none"
     NAME = "name"
+    ARGUMENTS = "arguments"
     FULL = "full"
 
 
@@ -103,8 +117,19 @@ class RTVIObserverParams:
 
     Parameters:
         bot_output_enabled: Indicates if bot output messages should be sent.
-        bot_llm_enabled: Indicates if the bot's LLM messages should be sent.
-        bot_tts_enabled: Indicates if the bot's TTS messages should be sent.
+        bot_llm_enabled: Indicates if the bot's LLM messages should be sent. Of these,
+            the ``bot-llm-text`` message is deprecated in favor of ``llm-raw-text``
+            (``llm_raw_text_enabled``) and will be removed in 2.0.0. This flag stays, for
+            ``bot-llm-started`` and ``bot-llm-stopped``.
+        bot_llm_marker_enabled: Indicates if the bot's LLM marker reports
+            (``LLMMarkerResponseFrame``, e.g. from ``filter_incomplete_user_turns``)
+            should be sent. A report carries the marker the LLM emitted and the raw
+            text of the whole response, which is meant for evaluation, not for
+            clients, so this is off by default. Defaults to False.
+        bot_tts_enabled: Indicates if the bot's TTS messages should be sent. Of these,
+            the ``bot-tts-text`` message is deprecated in favor of ``tts-raw-text``
+            (``tts_raw_text_enabled``) and will be removed in 2.0.0. This flag stays, for
+            ``bot-tts-started`` and ``bot-tts-stopped``.
         bot_speaking_enabled: Indicates if the bot's started/stopped speaking messages should be sent.
         bot_audio_level_enabled: Indicates if bot's audio level messages should be sent.
         user_llm_enabled: Indicates if the user's LLM input messages should be sent.
@@ -114,23 +139,45 @@ class RTVIObserverParams:
             finalization (unlike ``user_speaking_enabled``, which a turn strategy may gate or
             defer). Off by default. Defaults to False.
         user_transcription_enabled: Indicates if user's transcription messages should be sent.
+
+            .. deprecated:: 1.13.0
+                No replacement. It only turns off ``user-transcription``, which is
+                deprecated in favor of ``user-input`` and ``stt-raw-text``. Will be
+                removed in 2.0.0.
+
+        user_input_enabled: Indicates if the user's input messages should be sent. They
+            report what the user said or typed: transcriptions, including interim ones,
+            backchannels, and the text the client sent.
         user_audio_level_enabled: Indicates if user's audio level messages should be sent.
         metrics_enabled: Indicates if metrics messages should be sent.
         system_logs_enabled: Indicates if system logs should be sent.
+        stt_raw_text_enabled: Indicates if the STT's raw text messages should be sent. They
+            report each transcription, interim ones included, as the STT produced it. Only
+            sent to clients of protocol 2.2.0 or later. Defaults to False.
+        llm_raw_text_enabled: Indicates if the LLM's raw text messages should be sent. They
+            report each chunk of text the LLM streams. Only sent to clients of protocol
+            2.2.0 or later. Defaults to False.
+        tts_raw_text_enabled: Indicates if the TTS's raw text messages should be sent. They
+            report the text the TTS speaks, as it is spoken, and leave out the same text
+            types as bot output messages. Only sent to clients of protocol 2.2.0 or later.
+            Defaults to False.
         ignored_sources: List of frame processors whose frames should be silently ignored
             by this observer. Useful for suppressing RTVI messages from secondary pipeline
             branches (e.g. a silent evaluation LLM) that should not be visible to clients.
             Sources can also be added and removed dynamically via ``add_ignored_source()``
             and ``remove_ignored_source()``.
-        skip_aggregator_types: List of aggregation types to skip sending as tts/output messages.
+        skip_text_types: List of text types to skip sending as tts/output messages.
+            Text of type ``backchannel`` is only sent to clients of protocol 2.2.0 or
+            later; add ``"backchannel"`` here to keep it from every client.
             Note: if using this to avoid sending secure information, be sure to also disable
-            bot_llm_enabled to avoid leaking through LLM messages.
+            bot_llm_enabled, and leave llm_raw_text_enabled off, to avoid leaking through
+            LLM messages.
         bot_output_transforms: A list of callables to transform text before sending it to the
             client. Each callable should use the 4-parameter signature::
 
                 async def my_transform(
                     text: str,
-                    agg_type: AggregationType | str,
+                    text_type: TextType | str,
                     accumulated_text: str | None = None,
                     remaining_text: str | None = None,
                 ) -> BotOutputTransformResult: ...
@@ -140,10 +187,10 @@ class RTVIObserverParams:
             transform is being called for a progress event and must return a
             ``BotOutputTransformResult`` with ``accumulated_text`` and ``remaining_text`` set.
 
-            The 2-parameter signature ``(text, agg_type) -> str`` is deprecated. Transforms using
+            The 2-parameter signature ``(text, text_type) -> str`` is deprecated. Transforms using
             it will still work but will emit a ``DeprecationWarning`` at registration time.
 
-            To register, provide a list of tuples of (aggregation_type | '*', transform_function).
+            To register, provide a list of tuples of (text_type | '*', transform_function).
         audio_level_period_secs: How often audio levels should be sent if enabled.
         function_call_report_level: Controls what information is exposed in function call
             events for security. A dict mapping function names to levels, where ``"*"``
@@ -158,13 +205,20 @@ class RTVIObserverParams:
                 - DISABLED: No events emitted for this function.
                 - NONE: Events with tool_call_id only (most secure when events needed).
                 - NAME: Adds function name to events.
+                - ARGUMENTS: Adds function name and arguments, no results.
                 - FULL: Adds function name, arguments, and results.
 
             Defaults to ``{"*": RTVIFunctionCallReportLevel.NONE}``.
+        skip_aggregator_types: List of text types to skip sending as tts/output messages.
+
+            .. deprecated:: 1.13.0
+                Use ``skip_text_types`` instead.
+                Will be removed in 2.0.0.
     """
 
     bot_output_enabled: bool = True
     bot_llm_enabled: bool = True
+    bot_llm_marker_enabled: bool = False
     bot_tts_enabled: bool = True
     bot_speaking_enabled: bool = True
     bot_audio_level_enabled: bool = False
@@ -173,15 +227,19 @@ class RTVIObserverParams:
     vad_user_speaking_enabled: bool = False
     user_mute_enabled: bool = True
     user_transcription_enabled: bool = True
+    user_input_enabled: bool = True
     user_audio_level_enabled: bool = False
     metrics_enabled: bool = True
     system_logs_enabled: bool = False
+    stt_raw_text_enabled: bool = False
+    llm_raw_text_enabled: bool = False
+    tts_raw_text_enabled: bool = False
     ignored_sources: list[FrameProcessor] = field(default_factory=list)
-    skip_aggregator_types: list[AggregationType | str] | None = None
+    skip_text_types: list[TextType | str] | None = None
     bot_output_transforms: (
         list[
             tuple[
-                AggregationType | str,
+                TextType | str,
                 Callable[..., Awaitable[BotOutputTransformResult | str]],
             ]
         ]
@@ -191,6 +249,26 @@ class RTVIObserverParams:
     function_call_report_level: dict[str, RTVIFunctionCallReportLevel] = field(
         default_factory=lambda: {"*": RTVIFunctionCallReportLevel.NONE}
     )
+    skip_aggregator_types: list[TextType | str] | None = field(default=None, kw_only=True)
+
+    def __post_init__(self):
+        """Warn about deprecated fields, carrying any with a replacement over to it."""
+        # False is the only value that differs from the default.
+        if not self.user_transcription_enabled:
+            warn_deprecated(
+                "`RTVIObserverParams.user_transcription_enabled` is deprecated since 1.13.0 and "
+                "will be removed in 2.0.0. No replacement.",
+                # The caller of the generated __init__ that calls __post_init__.
+                stacklevel=3,
+            )
+        if self.skip_aggregator_types is not None:
+            warn_deprecated(
+                "`RTVIObserverParams.skip_aggregator_types` is deprecated since 1.13.0 and will "
+                "be removed in 2.0.0. Use `RTVIObserverParams.skip_text_types` instead.",
+                stacklevel=2,
+            )
+            if self.skip_text_types is None:
+                self.skip_text_types = self.skip_aggregator_types
 
 
 class RTVIObserver(BaseObserver):
@@ -224,7 +302,6 @@ class RTVIObserver(BaseObserver):
         self._params = params or RTVIObserverParams()
 
         self._ignored_sources: set[FrameProcessor] = set(self._params.ignored_sources)
-        self._frames_seen = set()
 
         self._bot_transcription = ""
         self._last_user_audio_level = 0
@@ -235,19 +312,24 @@ class RTVIObserver(BaseObserver):
         # Track bot speaking state for queuing aggregated text frames
         self._bot_is_speaking = False
         self._queued_aggregated_text_frames: list[AggregatedTextFrame] = []
+        # Skipped segments whose spoken text may still come (see _is_skipped)
+        self._skipped_segment_ids: set[int] = set()
+        # Whether an interruption cut off the skipped segments still remembered
+        self._skipped_segments_interrupted = False
 
+        self._system_logger_id: int | None = None
         if self._params.system_logs_enabled:
             self._system_logger_id = logger.add(self._logger_sink)
 
         self._aggregation_transforms: list[
             tuple[
-                AggregationType | str,
+                TextType | str,
                 Callable[..., Awaitable[BotOutputTransformResult | str]],
                 bool,
             ]
         ] = []
-        for agg_type, fn in self._params.bot_output_transforms or []:
-            self.add_bot_output_transformer(fn, agg_type)
+        for text_type, fn in self._params.bot_output_transforms or []:
+            self.add_bot_output_transformer(fn, text_type)
 
     @staticmethod
     def _check_progress_aware(fn: Callable) -> bool:
@@ -264,18 +346,38 @@ class RTVIObserver(BaseObserver):
             return False
         return self._rtvi.client_version[0] == RTVI.LEGACY_SUPPORTED_MAJOR
 
+    def _client_is_at_least(self, version: list[int]) -> bool:
+        """Return True when the connected client's protocol is ``version`` or later."""
+        if not self._rtvi:
+            # No client has negotiated a version, so assume the current protocol, as
+            # _is_legacy_client does.
+            return True
+        return self._rtvi.client_version >= version
+
+    @property
+    def _client_supports_backchannels(self) -> bool:
+        """Return True when the connected client supports the backchannel text type (2.2.0+)."""
+        return self._client_is_at_least([2, 2, 0])
+
+    @property
+    def _client_supports_raw_text(self) -> bool:
+        """Return True when the connected client supports the raw text messages (2.2.0+)."""
+        return self._client_is_at_least([2, 2, 0])
+
     def add_bot_output_transformer(
         self,
         transform_function: Callable[..., Awaitable[BotOutputTransformResult | str]],
-        aggregation_type: AggregationType | str = "*",
+        text_type: TextType | str = "*",
+        *,
+        aggregation_type: TextType | str | None = None,
     ):
-        """Register a text transformer for a specific aggregation type.
+        """Register a text transformer for a specific text type.
 
         The preferred transform signature is::
 
             async def my_transform(
                 text: str,
-                agg_type: AggregationType | str,
+                text_type: TextType | str,
                 accumulated_text: str | None = None,
                 remaining_text: str | None = None,
             ) -> BotOutputTransformResult: ...
@@ -286,44 +388,67 @@ class RTVIObserver(BaseObserver):
         ``accumulated_text`` and ``remaining_text`` populated so the client can display
         word-level progress on the transformed text.
 
-        The legacy 2-parameter signature ``(text, agg_type) -> str`` is still accepted but
+        The legacy 2-parameter signature ``(text, text_type) -> str`` is still accepted but
         deprecated. Progress events will fall back to applying the transform independently to
         each partial string, which may produce inconsistent results for context-dependent
         transforms.
 
         Args:
             transform_function: The transform callable.
-            aggregation_type: Aggregation type to match, or ``"*"`` for all types.
+            text_type: Text type to match, or ``"*"`` for all types.
+            aggregation_type: Text type to match, or ``"*"`` for all types.
+
+                .. deprecated:: 1.13.0
+                    Use ``text_type`` instead.
+                    Will be removed in 2.0.0.
         """
-        is_progress_aware = self._check_progress_aware(transform_function)
-        if not is_progress_aware:
-            warnings.warn(
-                f"Bot output transform '{transform_function.__name__}' uses the deprecated "
-                "2-parameter signature '(text, agg_type) -> str'. Update to the 4-parameter "
-                "signature '(text, agg_type, accumulated_text, remaining_text) -> "
-                "BotOutputTransformResult' to support word-level progress transforms.",
-                DeprecationWarning,
+        if aggregation_type is not None:
+            warn_deprecated(
+                "`aggregation_type` is deprecated since 1.13.0 and will be removed in 2.0.0. "
+                "Use `text_type` instead.",
                 stacklevel=2,
             )
-        self._aggregation_transforms.append(
-            (aggregation_type, transform_function, is_progress_aware)
-        )
+            text_type = aggregation_type
+        is_progress_aware = self._check_progress_aware(transform_function)
+        if not is_progress_aware:
+            warn_deprecated(
+                f"`{transform_function.__name__}(text, text_type) -> str` is deprecated since "
+                "1.4.0 and will be removed in 2.0.0. Use `(text, text_type, accumulated_text, "
+                "remaining_text) -> BotOutputTransformResult` instead. It supports word-level "
+                "progress transforms.",
+                stacklevel=2,
+            )
+        self._aggregation_transforms.append((text_type, transform_function, is_progress_aware))
 
     def remove_bot_output_transformer(
         self,
         transform_function: Callable[..., Awaitable[BotOutputTransformResult | str]],
-        aggregation_type: AggregationType | str = "*",
+        text_type: TextType | str = "*",
+        *,
+        aggregation_type: TextType | str | None = None,
     ):
-        """Remove a text transformer for a specific aggregation type.
+        """Remove a text transformer for a specific text type.
 
         Args:
             transform_function: The function to remove.
-            aggregation_type: The type of aggregation to remove the transformer for.
+            text_type: The type of text to remove the transformer for.
+            aggregation_type: The type of text to remove the transformer for.
+
+                .. deprecated:: 1.13.0
+                    Use ``text_type`` instead.
+                    Will be removed in 2.0.0.
         """
+        if aggregation_type is not None:
+            warn_deprecated(
+                "`aggregation_type` is deprecated since 1.13.0 and will be removed in 2.0.0. "
+                "Use `text_type` instead.",
+                stacklevel=2,
+            )
+            text_type = aggregation_type
         self._aggregation_transforms = [
-            (agg_type, func, aware)
-            for agg_type, func, aware in self._aggregation_transforms
-            if not (agg_type == aggregation_type and func == transform_function)
+            (transform_type, func, aware)
+            for transform_type, func, aware in self._aggregation_transforms
+            if not (transform_type == text_type and func == transform_function)
         ]
 
     def add_ignored_source(self, source: FrameProcessor):
@@ -383,6 +508,9 @@ class RTVIObserver(BaseObserver):
             logger.debug(
                 f"{self}: vad_user_speaking_enabled set to {frame.vad_user_speaking_enabled}"
             )
+        if frame.bot_llm_marker_enabled is not None:
+            self._params.bot_llm_marker_enabled = frame.bot_llm_marker_enabled
+            logger.debug(f"{self}: bot_llm_marker_enabled set to {frame.bot_llm_marker_enabled}")
 
     async def _logger_sink(self, message):
         """Logger sink so we can send system logs to RTVI clients."""
@@ -392,8 +520,9 @@ class RTVIObserver(BaseObserver):
     async def cleanup(self):
         """Cleanup RTVI observer resources."""
         await super().cleanup()
-        if self._params.system_logs_enabled:
+        if self._system_logger_id is not None:
             logger.remove(self._system_logger_id)
+            self._system_logger_id = None
 
     async def send_rtvi_message(self, model: BaseModel, exclude_none: bool = True):
         """Send an RTVI message.
@@ -408,6 +537,99 @@ class RTVIObserver(BaseObserver):
         """
         if self._rtvi:
             await self._rtvi.push_transport_message(model, exclude_none)
+
+    async def _report_function_call_frame(self, frame: Frame):
+        """Report a function-call frame, the pipeline's own or an external one."""
+        if isinstance(frame, FunctionCallsStartedFrame):
+            for function_call in frame.function_calls:
+                await self._report_function_call(
+                    "started", function_call.function_name, function_call.tool_call_id
+                )
+        elif isinstance(frame, FunctionCallInProgressFrame):
+            await self._report_function_call(
+                "in_progress", frame.function_name, frame.tool_call_id, arguments=frame.arguments
+            )
+        elif isinstance(frame, FunctionCallCancelFrame):
+            await self._report_function_call(
+                "stopped", frame.function_name, frame.tool_call_id, cancelled=True
+            )
+        elif isinstance(frame, FunctionCallResultFrame):
+            # An intermediate result leaves the call running.
+            if frame.properties is None or frame.properties.is_final:
+                await self._report_function_call(
+                    "stopped", frame.function_name, frame.tool_call_id, result=frame.result
+                )
+        elif isinstance(frame, ExternalFunctionCallsStartedFrame):
+            for call in frame.function_calls:
+                await self._report_function_call("started", call.function_name, call.tool_call_id)
+        elif isinstance(frame, ExternalFunctionCallInProgressFrame):
+            await self._report_function_call(
+                "in_progress", frame.function_name, frame.tool_call_id, arguments=frame.arguments
+            )
+        elif isinstance(frame, ExternalFunctionCallResultFrame):
+            if frame.is_final:
+                await self._report_function_call(
+                    "stopped", frame.function_name, frame.tool_call_id, result=frame.result
+                )
+        elif isinstance(frame, ExternalFunctionCallCancelFrame):
+            await self._report_function_call(
+                "stopped", frame.function_name, frame.tool_call_id, cancelled=True
+            )
+
+    async def _report_function_call(
+        self,
+        phase: Literal["started", "in_progress", "stopped"],
+        function_name: str,
+        tool_call_id: str,
+        *,
+        arguments: Mapping[str, Any] | None = None,
+        result: Any = None,
+        cancelled: bool = False,
+    ):
+        """Send the function-call message for a phase, as the report level allows.
+
+        The pipeline's own calls and calls reported from elsewhere (the
+        ``ExternalFunctionCall*Frame`` family) go through here alike, so both
+        obey the per-function report level.
+        """
+        report_level = self._get_function_call_report_level(function_name)
+        if report_level == RTVIFunctionCallReportLevel.DISABLED:
+            return
+        named = report_level in (
+            RTVIFunctionCallReportLevel.NAME,
+            RTVIFunctionCallReportLevel.ARGUMENTS,
+            RTVIFunctionCallReportLevel.FULL,
+        )
+        with_arguments = report_level in (
+            RTVIFunctionCallReportLevel.ARGUMENTS,
+            RTVIFunctionCallReportLevel.FULL,
+        )
+        full = report_level == RTVIFunctionCallReportLevel.FULL
+        message: BaseModel
+        if phase == "started":
+            message = RTVI.LLMFunctionCallStartMessage(
+                data=RTVI.LLMFunctionCallStartMessageData(
+                    function_name=function_name if named else None,
+                )
+            )
+        elif phase == "in_progress":
+            message = RTVI.LLMFunctionCallInProgressMessage(
+                data=RTVI.LLMFunctionCallInProgressMessageData(
+                    tool_call_id=tool_call_id,
+                    function_name=function_name if named else None,
+                    arguments=arguments if with_arguments else None,
+                )
+            )
+        else:
+            message = RTVI.LLMFunctionCallStoppedMessage(
+                data=RTVI.LLMFunctionCallStoppedMessageData(
+                    tool_call_id=tool_call_id,
+                    cancelled=cancelled,
+                    function_name=function_name if named else None,
+                    result=(result if result else None) if full and not cancelled else None,
+                )
+            )
+        await self.send_rtvi_message(message)
 
     async def on_push_frame(self, data: FramePushed):
         """Process a frame being pushed through the pipeline.
@@ -428,13 +650,20 @@ class RTVIObserver(BaseObserver):
         if frame.broadcast_sibling_id is not None and direction != FrameDirection.DOWNSTREAM:
             return
 
-        # If we have already seen this frame, let's skip it.
-        if frame.id in self._frames_seen:
+        # Audio frames are the bulk of what a pipeline pushes, and they are
+        # only handled when audio levels are reported.
+        if isinstance(frame, AudioRawFrame) and not (
+            self._params.user_audio_level_enabled or self._params.bot_audio_level_enabled
+        ):
             return
 
-        # This tells whether the frame is already processed. If false, we will try
-        # again the next time we see the frame.
-        mark_as_seen = True
+        # A frame is handled the first time it is pushed, except aggregated
+        # text, which is handled once it has gone through the output
+        # transport and has the right timing.
+        if not data.first_push and not isinstance(
+            frame, (AggregatedTextFrame, AggregatedTextProgressFrame)
+        ):
+            return
 
         if (
             isinstance(frame, (UserStartedSpeakingFrame, UserStoppedSpeakingFrame))
@@ -460,99 +689,77 @@ class RTVIObserver(BaseObserver):
             # The bot's in-flight output was cut off (VAD barge-in or a programmatic
             # run_immediately interrupt). Let clients drop what it was mid-saying.
             await self.send_rtvi_message(RTVI.BotInterruptedMessage())
-        elif (
-            isinstance(frame, (TranscriptionFrame, InterimTranscriptionFrame))
-            and self._params.user_transcription_enabled
-        ):
+            self._skipped_segments_interrupted = True
+        elif isinstance(frame, (TranscriptionFrame, InterimTranscriptionFrame)):
             await self._handle_user_transcriptions(frame)
+        elif isinstance(frame, UserBackchannelFrame) and self._params.user_input_enabled:
+            await self._send_user_input(
+                frame.text,
+                "backchannel",
+                timestamp=frame.timestamp,
+                final=True,
+                user_id=frame.user_id,
+            )
+        elif isinstance(frame, RTVISendTextFrame) and self._params.user_input_enabled:
+            await self._send_user_input(
+                frame.text,
+                "chat",
+                timestamp=time_now_iso8601(),
+                final=True,
+                user_id=frame.user_id,
+                msg_id=frame.msg_id,
+            )
         elif isinstance(frame, LLMContextFrame) and self._params.user_llm_enabled:
             await self._handle_context(frame)
         elif isinstance(frame, LLMFullResponseStartFrame) and self._params.bot_llm_enabled:
             await self.send_rtvi_message(RTVI.BotLLMStartedMessage())
         elif isinstance(frame, LLMFullResponseEndFrame) and self._params.bot_llm_enabled:
             await self.send_rtvi_message(RTVI.BotLLMStoppedMessage())
-        elif isinstance(frame, LLMTextFrame) and self._params.bot_llm_enabled:
+        elif isinstance(frame, LLMTextFrame) and (
+            self._params.bot_llm_enabled or self._params.llm_raw_text_enabled
+        ):
             await self._handle_llm_text_frame(frame)
+        elif isinstance(frame, LLMMarkerResponseFrame) and self._params.bot_llm_marker_enabled:
+            await self.send_rtvi_message(
+                RTVI.BotLLMMarkerMessage(
+                    data=RTVI.BotLLMMarkerMessageData(
+                        text=frame.marker or "",
+                        kind=frame.kind,
+                        raw=frame.raw,
+                        markers=list(frame.markers),
+                    )
+                )
+            )
         elif isinstance(frame, TTSStartedFrame) and self._params.bot_tts_enabled:
             await self.send_rtvi_message(RTVI.BotTTSStartedMessage())
         elif isinstance(frame, TTSStoppedFrame) and self._params.bot_tts_enabled:
             await self.send_rtvi_message(RTVI.BotTTSStoppedMessage())
         elif isinstance(frame, AggregatedTextProgressFrame):
-            if not isinstance(src, BaseOutputTransport):
-                # This check is to make sure we handle the frame when it has gone
-                # through the transport and has correct timing.
-                mark_as_seen = False
-            else:
+            if isinstance(src, BaseOutputTransport):
                 await self._handle_aggregated_progress(frame)
         elif isinstance(frame, AggregatedTextFrame) and (
-            self._params.bot_output_enabled or self._params.bot_tts_enabled
+            self._params.bot_output_enabled
+            or self._params.bot_tts_enabled
+            or self._params.tts_raw_text_enabled
         ):
-            if not isinstance(src, BaseOutputTransport):
-                # This check is to make sure we handle the frame when it has gone
-                # through the transport and has correct timing.
-                mark_as_seen = False
-            else:
+            if isinstance(src, BaseOutputTransport):
                 await self._handle_aggregated_llm_text(frame)
         elif isinstance(frame, MetricsFrame) and self._params.metrics_enabled:
             await self._handle_metrics(frame)
-        elif isinstance(frame, FunctionCallsStartedFrame):
-            for function_call in frame.function_calls:
-                report_level = self._get_function_call_report_level(function_call.function_name)
-                if report_level == RTVIFunctionCallReportLevel.DISABLED:
-                    continue
-                msg_data = RTVI.LLMFunctionCallStartMessageData()
-                if report_level in (
-                    RTVIFunctionCallReportLevel.NAME,
-                    RTVIFunctionCallReportLevel.FULL,
-                ):
-                    msg_data.function_name = function_call.function_name
-                message = RTVI.LLMFunctionCallStartMessage(data=msg_data)
-                await self.send_rtvi_message(message)
-        elif isinstance(frame, FunctionCallInProgressFrame):
-            report_level = self._get_function_call_report_level(frame.function_name)
-            if report_level != RTVIFunctionCallReportLevel.DISABLED:
-                msg_data = RTVI.LLMFunctionCallInProgressMessageData(
-                    tool_call_id=frame.tool_call_id
-                )
-                if report_level in (
-                    RTVIFunctionCallReportLevel.NAME,
-                    RTVIFunctionCallReportLevel.FULL,
-                ):
-                    msg_data.function_name = frame.function_name
-                if report_level == RTVIFunctionCallReportLevel.FULL:
-                    msg_data.arguments = frame.arguments
-                message = RTVI.LLMFunctionCallInProgressMessage(data=msg_data)
-                await self.send_rtvi_message(message)
-        elif isinstance(frame, FunctionCallCancelFrame):
-            report_level = self._get_function_call_report_level(frame.function_name)
-            if report_level != RTVIFunctionCallReportLevel.DISABLED:
-                msg_data = RTVI.LLMFunctionCallStoppedMessageData(
-                    tool_call_id=frame.tool_call_id,
-                    cancelled=True,
-                )
-                if report_level in (
-                    RTVIFunctionCallReportLevel.NAME,
-                    RTVIFunctionCallReportLevel.FULL,
-                ):
-                    msg_data.function_name = frame.function_name
-                message = RTVI.LLMFunctionCallStoppedMessage(data=msg_data)
-                await self.send_rtvi_message(message)
-        elif isinstance(frame, FunctionCallResultFrame):
-            report_level = self._get_function_call_report_level(frame.function_name)
-            if report_level != RTVIFunctionCallReportLevel.DISABLED:
-                msg_data = RTVI.LLMFunctionCallStoppedMessageData(
-                    tool_call_id=frame.tool_call_id,
-                    cancelled=False,
-                )
-                if report_level in (
-                    RTVIFunctionCallReportLevel.NAME,
-                    RTVIFunctionCallReportLevel.FULL,
-                ):
-                    msg_data.function_name = frame.function_name
-                if report_level == RTVIFunctionCallReportLevel.FULL:
-                    msg_data.result = frame.result if frame.result else None
-                message = RTVI.LLMFunctionCallStoppedMessage(data=msg_data)
-                await self.send_rtvi_message(message)
+        elif isinstance(
+            frame,
+            (
+                FunctionCallsStartedFrame,
+                FunctionCallInProgressFrame,
+                FunctionCallCancelFrame,
+                FunctionCallResultFrame,
+                ExternalFunctionCallsStartedFrame,
+                ExternalFunctionCallInProgressFrame,
+                ExternalFunctionCallCancelFrame,
+                ExternalFunctionCallResultFrame,
+            ),
+        ):
+            await self._report_function_call_frame(frame)
         elif isinstance(frame, RTVIServerMessageFrame):
             message = RTVI.ServerMessage(data=frame.data)
             await self.send_rtvi_message(message)
@@ -593,9 +800,6 @@ class RTVIObserver(BaseObserver):
                 await self.send_rtvi_message(message)
                 self._last_bot_audio_level = curr_time
 
-        if mark_as_seen:
-            self._frames_seen.add(frame.id)
-
     async def _handle_interruptions(self, frame: Frame):
         """Handle user speaking interruption frames."""
         message = None
@@ -634,6 +838,7 @@ class RTVIObserver(BaseObserver):
         if isinstance(frame, BotStartedSpeakingFrame):
             message = RTVI.BotStartedSpeakingMessage()
             await self.send_rtvi_message(message)
+            self._forget_interrupted_segments()
             # Flush any queued aggregated text frames
             for queued_frame in self._queued_aggregated_text_frames:
                 await self._send_aggregated_llm_text(queued_frame)
@@ -642,6 +847,7 @@ class RTVIObserver(BaseObserver):
         elif isinstance(frame, BotStoppedSpeakingFrame):
             message = RTVI.BotStoppedSpeakingMessage()
             await self.send_rtvi_message(message)
+            self._forget_interrupted_segments()
             self._bot_is_speaking = False
 
     async def _handle_aggregated_llm_text(self, frame: AggregatedTextFrame):
@@ -655,6 +861,12 @@ class RTVIObserver(BaseObserver):
 
     async def _handle_aggregated_progress(self, frame: AggregatedTextProgressFrame):
         """Handle progress frames."""
+        if self._is_skipped_type(frame.text_type):
+            if frame.remaining_text == "":
+                # The skipped segment's last word has been spoken.
+                self._skipped_segment_ids.discard(frame.segment_id)
+            return
+
         # 1.4.x clients use the old separate bot-output-progress event which was never
         # released, so progress events are simply not sent to legacy clients.
         if self._is_legacy_client:
@@ -670,21 +882,21 @@ class RTVIObserver(BaseObserver):
         accumulated = frame.accumulated_text
         remaining = frame.remaining_text
         text = frame.text
-        agg_type = frame.aggregated_by
+        text_type = frame.text_type
 
-        for aggregation_type, transform, is_progress_aware in self._aggregation_transforms:
-            if aggregation_type == agg_type or aggregation_type == "*":
+        for transform_type, transform, is_progress_aware in self._aggregation_transforms:
+            if transform_type == text_type or transform_type == "*":
                 if is_progress_aware:
-                    result = await transform(text, agg_type, accumulated, remaining)
+                    result = await transform(text, text_type, accumulated, remaining)
                     if isinstance(result, BotOutputTransformResult):
                         accumulated = result.accumulated_text or accumulated
                         remaining = result.remaining_text or remaining
                         text = result.text or text
                 else:
                     # The deprecated 2-parameter signature returns the text itself.
-                    accumulated = cast(str, await transform(accumulated, agg_type))
-                    remaining = cast(str, await transform(remaining, agg_type))
-                    text = cast(str, await transform(text, agg_type))
+                    accumulated = cast(str, await transform(accumulated, text_type))
+                    remaining = cast(str, await transform(remaining, text_type))
+                    text = cast(str, await transform(text, text_type))
 
         if self._params.bot_output_enabled:
             spoken_status: RTVI.SpokenStatus = "completed" if remaining == "" else "in-progress"
@@ -692,7 +904,7 @@ class RTVIObserver(BaseObserver):
                 data=RTVI.BotOutputMessageData(
                     text=text,
                     will_be_spoken=True,
-                    aggregated_by=agg_type,
+                    text_type=text_type,
                     segment_id=frame.segment_id,
                     spoken_status=spoken_status,
                     spoken_progress=RTVI.SpokenProgressData(
@@ -703,36 +915,67 @@ class RTVIObserver(BaseObserver):
             )
             await self.send_rtvi_message(message)
 
+    def _forget_interrupted_segments(self):
+        """Forget the skipped segments an interruption cut off."""
+        # By the time the bot next starts or stops speaking, the output transport
+        # has dropped the interrupted words, so none of them can still come.
+        if self._skipped_segments_interrupted:
+            self._skipped_segment_ids.clear()
+            self._skipped_segments_interrupted = False
+
+    def _is_skipped_type(self, text_type: TextType | str) -> bool:
+        """Whether text of this type is kept out of bot output and TTS text messages."""
+        # A client that doesn't support backchannels would show one as part of the
+        # bot's response.
+        if text_type == TextType.BACKCHANNEL and not self._client_supports_backchannels:
+            return True
+        skip_types = self._params.skip_text_types
+        return bool(skip_types and text_type in skip_types)
+
+    def _is_skipped(self, frame: AggregatedTextFrame) -> bool:
+        """Whether the frame's text type, or its segment's, keeps it from bot output."""
+        segment_id = frame.segment_id if isinstance(frame, TTSTextFrame) else None
+        if self._is_skipped_type(frame.text_type):
+            if segment_id is not None:
+                # The segment spoken in one piece: no words of it follow.
+                self._skipped_segment_ids.discard(segment_id)
+            elif frame.will_be_spoken:
+                # A segment the TTS will speak: skip the words it is spoken in too.
+                self._skipped_segment_ids.add(frame.id)
+            return True
+        # A word is skipped with the segment it was spoken in.
+        return segment_id in self._skipped_segment_ids
+
     async def _send_aggregated_llm_text(self, frame: AggregatedTextFrame):
         """Send aggregated LLM text messages."""
-        # Skip certain aggregator types if configured to do so.
-        if (
-            self._params.skip_aggregator_types
-            and frame.aggregated_by in self._params.skip_aggregator_types
-        ):
+        if self._is_skipped(frame):
             return
 
-        agg_type = frame.aggregated_by
+        text_type = frame.text_type
 
         # For 2.0.0+ clients, word and token types are not emitted as bot-output events;
         # word-level progress is covered by the spoken_status/spoken_progress fields.
         # bot-tts-text is a separate channel and is NOT suppressed here.
-        suppress_bot_output = not self._is_legacy_client and agg_type in (
-            AggregationType.WORD,
-            AggregationType.TOKEN,
+        suppress_bot_output = not self._is_legacy_client and text_type in (
+            TextType.WORD,
+            TextType.TOKEN,
         )
 
         text = frame.text
-        for aggregation_type, transform, is_progress_aware in self._aggregation_transforms:
-            if aggregation_type == agg_type or aggregation_type == "*":
+        for transform_type, transform, is_progress_aware in self._aggregation_transforms:
+            if transform_type == text_type or transform_type == "*":
                 if is_progress_aware:
-                    result = await transform(text, agg_type, None, None)
+                    result = await transform(text, text_type, None, None)
                 else:
-                    result = await transform(text, agg_type)
+                    result = await transform(text, text_type)
                 text = result.text if isinstance(result, BotOutputTransformResult) else result
 
         isTTS = isinstance(frame, TTSTextFrame)
         will_be_spoken = frame.will_be_spoken
+        # Text the TTS spoke for a segment is reported as that segment.
+        segment_id = frame.id
+        if isinstance(frame, TTSTextFrame) and frame.segment_id is not None:
+            segment_id = frame.segment_id
         if self._params.bot_output_enabled and not suppress_bot_output:
             if will_be_spoken:
                 if isTTS:
@@ -753,13 +996,18 @@ class RTVIObserver(BaseObserver):
                 text=text,
                 spoken=isTTS,
                 will_be_spoken=will_be_spoken,
-                aggregated_by=agg_type,
-                segment_id=frame.id,
+                text_type=text_type,
+                segment_id=segment_id,
                 spoken_status=spoken_status,
                 spoken_progress=progress,
             )
             message = RTVI.BotOutputMessage(data=data)
             await self.send_rtvi_message(message)
+
+        if isTTS and self._params.tts_raw_text_enabled and self._client_supports_raw_text:
+            await self.send_rtvi_message(
+                RTVI.TTSRawTextMessage(data=RTVI.TextMessageData(text=text))
+            )
 
         if isTTS and self._params.bot_tts_enabled:
             tts_message = RTVI.BotTTSTextMessage(data=RTVI.TextMessageData(text=text))
@@ -767,6 +1015,14 @@ class RTVIObserver(BaseObserver):
 
     async def _handle_llm_text_frame(self, frame: LLMTextFrame):
         """Handle LLM text output frames."""
+        if self._params.llm_raw_text_enabled and self._client_supports_raw_text:
+            await self.send_rtvi_message(
+                RTVI.LLMRawTextMessage(data=RTVI.TextMessageData(text=frame.text))
+            )
+
+        if not self._params.bot_llm_enabled:
+            return
+
         message = RTVI.BotLLMTextMessage(data=RTVI.TextMessageData(text=frame.text))
         await self.send_rtvi_message(message)
 
@@ -781,24 +1037,60 @@ class RTVIObserver(BaseObserver):
             )
             self._bot_transcription = ""
 
-    async def _handle_user_transcriptions(self, frame: Frame):
+    async def _handle_user_transcriptions(
+        self, frame: TranscriptionFrame | InterimTranscriptionFrame
+    ):
         """Handle user transcription frames."""
-        message = None
-        if isinstance(frame, TranscriptionFrame):
-            message = RTVI.UserTranscriptionMessage(
-                data=RTVI.UserTranscriptionMessageData(
-                    text=frame.text, user_id=frame.user_id, timestamp=frame.timestamp, final=True
+        final = isinstance(frame, TranscriptionFrame)
+        if self._params.user_input_enabled:
+            await self._send_user_input(
+                frame.text,
+                "transcription",
+                timestamp=frame.timestamp,
+                final=final,
+                user_id=frame.user_id,
+            )
+        if self._params.stt_raw_text_enabled and self._client_supports_raw_text:
+            await self.send_rtvi_message(
+                RTVI.STTRawTextMessage(
+                    data=RTVI.STTRawTextMessageData(
+                        text=frame.text,
+                        user_id=frame.user_id,
+                        timestamp=frame.timestamp,
+                        final=final,
+                    )
                 )
             )
-        elif isinstance(frame, InterimTranscriptionFrame):
+        if self._params.user_transcription_enabled:
             message = RTVI.UserTranscriptionMessage(
                 data=RTVI.UserTranscriptionMessageData(
-                    text=frame.text, user_id=frame.user_id, timestamp=frame.timestamp, final=False
+                    text=frame.text, user_id=frame.user_id, timestamp=frame.timestamp, final=final
                 )
             )
-
-        if message:
             await self.send_rtvi_message(message)
+
+    async def _send_user_input(
+        self,
+        text: str,
+        input_type: RTVI.UserInputType,
+        *,
+        timestamp: str,
+        final: bool,
+        user_id: str | None = None,
+        msg_id: str | None = None,
+    ):
+        """Send a user input message."""
+        message = RTVI.UserInputMessage(
+            data=RTVI.UserInputMessageData(
+                text=text,
+                input_type=input_type,
+                timestamp=timestamp,
+                final=final,
+                user_id=user_id,
+                msg_id=msg_id,
+            )
+        )
+        await self.send_rtvi_message(message)
 
     async def _handle_context(self, frame: LLMContextFrame):
         """Process LLM context frames to extract user messages for the RTVI client."""
@@ -847,6 +1139,10 @@ class RTVIObserver(BaseObserver):
                 if "ttfa" not in metrics:
                     metrics["ttfa"] = []
                 metrics["ttfa"].append(d.model_dump(exclude_none=True))
+            elif isinstance(d, TTFATMetricsData):
+                if "ttfat" not in metrics:
+                    metrics["ttfat"] = []
+                metrics["ttfat"].append(d.model_dump(exclude_none=True))
             elif isinstance(d, ProcessingMetricsData):
                 if "processing" not in metrics:
                     metrics["processing"] = []
