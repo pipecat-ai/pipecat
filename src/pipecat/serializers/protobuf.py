@@ -104,7 +104,7 @@ class ProtobufFrameSerializer(FrameSerializer):
         proto_attr = getattr(proto_frame, proto_optional_name)
         for field in dataclasses.fields(serializable):  # type: ignore
             value = getattr(serializable, field.name)
-            if value and hasattr(proto_attr, field.name):
+            if value is not None and hasattr(proto_attr, field.name):
                 setattr(proto_attr, field.name, value)
 
         return proto_frame.SerializeToString()
@@ -133,7 +133,7 @@ class ProtobufFrameSerializer(FrameSerializer):
         # Remove special fields if needed
         id = getattr(args, "id", None)
         name = getattr(args, "name", None)
-        pts = getattr(args, "pts", None)
+        pts = args.pts if "pts" in args_dict and args.HasField("pts") else None
         if "id" in args_dict:
             del args_dict["id"]
         if "name" in args_dict:
@@ -159,7 +159,7 @@ class ProtobufFrameSerializer(FrameSerializer):
             instance.id = id
         if name:
             instance.name = name
-        if pts:
+        if pts is not None:
             instance.pts = pts
 
         return instance
