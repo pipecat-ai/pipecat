@@ -876,15 +876,12 @@ class TestBotEnded(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(EvalBotEndedError):
             await m.match(expectation, time.monotonic(), 5000, 0, 0)
 
-    async def test_the_driver_fails_the_turn_as_the_bot_ended_it(self):
-        progress = []
-
+    @staticmethod
+    def _driver(stream: EvalEventStream, turn: EvalScriptTurn, progress: list) -> EvalScriptDriver:
         async def on_progress(p):
             progress.append(p)
 
-        stream = _stream()
-        turn = EvalScriptTurn(user="hi", expect=[EvalExpectation(event="llm_response")])
-        driver = EvalScriptDriver(
+        return EvalScriptDriver(
             scenario=EvalScriptScenario(name="t", turns=[turn]),
             default_timeout_ms=5000,
             client=None,
@@ -893,6 +890,12 @@ class TestBotEnded(unittest.IsolatedAsyncioTestCase):
             trace=EvalTrace(),
             progress=on_progress,
         )
+
+    async def test_the_driver_fails_the_turn_as_the_bot_ended_it(self):
+        progress = []
+        stream = _stream()
+        turn = EvalScriptTurn(user="hi", expect=[EvalExpectation(event="llm_response")])
+        driver = self._driver(stream, turn, progress)
         stream.bot_ended()
 
         failures = await driver._match_expectations(turn, 0)
@@ -900,6 +903,21 @@ class TestBotEnded(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([f.kind for f in failures], ["bot_ended"])
         self.assertIn("the bot ended the call", failures[0].reason)
         self.assertFalse(driver.turns[0].expectations[0].passed)
+        self.assertEqual(progress[-1].status, "failed")
+
+    async def test_a_send_after_wait_fails_at_once_once_the_bot_ended_the_call(self):
+        progress = []
+        stream = _stream()
+        send_after = EvalSendAfter(event="bot_started_speaking", delay_ms=0)
+        driver = self._driver(stream, EvalScriptTurn(user="hi", send_after=send_after), progress)
+        stream.bot_ended()
+
+        started = time.monotonic()
+        failure = await driver._await_send_after(send_after, 0)
+
+        self.assertLess(time.monotonic() - started, 1)
+        self.assertEqual(failure.kind, "bot_ended")
+        self.assertIn("the bot ended the call", failure.reason)
         self.assertEqual(progress[-1].status, "failed")
 
 

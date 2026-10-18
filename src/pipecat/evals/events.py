@@ -187,6 +187,11 @@ class EvalEventStream:
         return self._bot_transcribed.is_set()
 
     @property
+    def bot_has_ended(self) -> bool:
+        """Whether the bot ended the call (see :meth:`bot_ended`)."""
+        return self._bot_ended
+
+    @property
     def bot_speech_outstanding(self) -> str:
         """What of the bot's speech is not yet accounted for, for the trace."""
         parts = []
