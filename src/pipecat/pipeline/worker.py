@@ -1264,7 +1264,7 @@ class PipelineWorker(BaseWorker):
             data.append(ProcessingMetricsData(processor=p.name, value=0.0))
         return MetricsFrame(data=data)
 
-    async def _start_pipeline(self, frame: StartFrame) -> bool:
+    async def _start_pipeline(self) -> bool:
         """Push the StartFrame and wait for the pipeline to start.
 
         Pushing it waits too, while the pipeline is still held, so cancelling
@@ -1273,8 +1273,30 @@ class PipelineWorker(BaseWorker):
         Returns:
             Whether the pipeline started; see :meth:`_wait_for_pipeline_start`.
         """
+        # Processors read the pipeline configuration from FrameProcessorSetup,
+        # but the deprecated StartFrame fields carry it until they are removed,
+        # so that a processor still reading one gets the configured value.
+        frame = StartFrame(
+            audio_in_sample_rate=self._params.audio_in_sample_rate,
+            audio_out_sample_rate=self._params.audio_out_sample_rate,
+            enable_metrics=self._params.enable_metrics,
+            enable_tracing=self._enable_tracing,
+            enable_usage_metrics=self._params.enable_usage_metrics,
+            report_only_initial_ttfb=self._params.report_only_initial_ttfb,
+            tracing_context=self._tracing_context,
+        )
+        frame.metadata = self._create_start_metadata()
         await self._pipeline.queue_frame(frame)
         return await self._wait_for_pipeline_start(frame)
+
+    async def _wait_for_start_task(self) -> bool:
+        """Wait for the start task, and return whether it started the pipeline (a cancelled one didn't)."""
+        if not self._pipeline_start_task:
+            return False
+        await asyncio.wait([self._pipeline_start_task])
+        if self._pipeline_start_task.cancelled():
+            return False
+        return bool(self._pipeline_start_task.result())
 
     async def _wait_for_pipeline_start(self, frame: Frame) -> bool:
         """Wait for the specified start frame to reach the end of the pipeline.
@@ -1407,6 +1429,10 @@ class PipelineWorker(BaseWorker):
         # The StartFrame is pushed right away and each processor holds it until
         # its own setup is done (see BasePipeline._setup_processors()).
         self._pipeline_setup_task.add_done_callback(self._pipeline_setup_done)
+        # Created together, so a cancel always finds both: with the setup
+        # cancelled but no start task to cancel, the start would wait forever
+        # on a pipeline that is never released.
+        self._pipeline_start_task = self.create_task(self._start_pipeline())
 
     def _pipeline_setup_done(self, task: asyncio.Task):
         """Release the pipeline once it is set up, unless setting up was abandoned.
@@ -1480,30 +1506,13 @@ class PipelineWorker(BaseWorker):
     async def _process_push_queue(self):
         """Process frames from the push queue and send them through the pipeline.
 
-        This is the worker that runs the pipeline for the first time by sending
-        a StartFrame and by pushing any other frames queued by the user. It runs
-        until the worker is cancelled or stopped (e.g. with an EndFrame).
+        Once the start task has started the pipeline, it pushes the frames
+        queued by the user. It runs until the worker is cancelled or stopped
+        (e.g. with an EndFrame).
         """
-        # Processors read the pipeline configuration from FrameProcessorSetup,
-        # but the deprecated StartFrame fields carry it until they are removed,
-        # so that a processor still reading one gets the configured value.
-        start_frame = StartFrame(
-            audio_in_sample_rate=self._params.audio_in_sample_rate,
-            audio_out_sample_rate=self._params.audio_out_sample_rate,
-            enable_metrics=self._params.enable_metrics,
-            enable_tracing=self._enable_tracing,
-            enable_usage_metrics=self._params.enable_usage_metrics,
-            report_only_initial_ttfb=self._params.report_only_initial_ttfb,
-            tracing_context=self._tracing_context,
-        )
-        start_frame.metadata = self._create_start_metadata()
-
-        # Start the pipeline before pushing any other frame. Cancelling the
-        # worker cancels this task: a pipeline that hasn't started is only
-        # cleaned up.
-        self._pipeline_start_task = self.create_task(self._start_pipeline(start_frame))
-        await asyncio.wait([self._pipeline_start_task])
-        running = not self._pipeline_start_task.cancelled() and self._pipeline_start_task.result()
+        # No other frame goes in before the pipeline has started; one that
+        # hasn't started is only cleaned up.
+        running = await self._wait_for_start_task()
 
         if running:
             self._maybe_start_idle_task()

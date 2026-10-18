@@ -1401,6 +1401,20 @@ class TestPipelineWorkerStartup(unittest.IsolatedAsyncioTestCase):
         assert not first.got_cancel
         assert first.cleaned_up and slow.cleaned_up
 
+    async def test_cancel_at_any_point_of_starting_finishes(self):
+        """A cancel can land at any point while the worker starts, even before
+        its processors begin setting up, and the worker still finishes."""
+        for ticks in range(25):
+            worker = PipelineWorker(Pipeline([IdentityFilter()]))
+            run_task = asyncio.create_task(worker.run(WorkerParams(task_manager=TaskManager())))
+            for _ in range(ticks):
+                await asyncio.sleep(0)
+            await worker.cancel()
+
+            done, _ = await asyncio.wait({run_task}, timeout=2.0)
+
+            assert run_task in done, f"the worker hung when cancelled after {ticks} ticks"
+
     async def test_setup_timeout_never_starts_the_pipeline(self):
         """A setup that times out is abandoned: its processor and the ones after
         it never get the StartFrame, and the worker only cleans up."""
