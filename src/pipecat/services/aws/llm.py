@@ -44,6 +44,10 @@ from pipecat.services.llm_service import LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.errors import ErrorCategory
+from pipecat.utils.text.leading_thought_splitter import (
+    LeadingThoughtEvent,
+    LeadingThoughtSplitter,
+)
 from pipecat.utils.tracing.service_decorators import traced_llm
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
@@ -57,88 +61,6 @@ except ModuleNotFoundError as e:
         'In order to use AWS services, you need to `uv add "pipecat-ai[aws]"`. Also, remember to set `AWS_SECRET_ACCESS_KEY`, `AWS_ACCESS_KEY_ID`, and `AWS_REGION` environment variable.'
     )
     raise ImportError(f"Missing module: {e}") from e
-
-_THINKING_OPEN = "<thinking>"
-_THINKING_CLOSE = "</thinking>"
-
-
-class _LeadingThinkingSplitter:
-    """Split a leading ``<thinking>...</thinking>`` block off streamed text.
-
-    Amazon Nova (v1) models write their chain of thought into the answer text,
-    wrapped in ``<thinking>`` tags, before they call a tool. The tags arrive
-    split across deltas (``"<thinking"``, ``">"``, ...), so the start of the
-    response is buffered until it is clear whether it opens such a block.
-    Responses that don't start with one pass through after the first delta
-    that rules it out.
-    """
-
-    def __init__(self):
-        self._state = "detecting"  # "detecting", "thought" or "content"
-        self._buffer = ""
-
-    def feed(self, text: str) -> list[tuple[str, str]]:
-        """Consume a text delta.
-
-        Returns:
-            ``(kind, text)`` events in order, where kind is ``"text"``,
-            ``"thought_start"``, ``"thought"`` or ``"thought_end"``.
-        """
-        if self._state == "content":
-            return [("text", text)]
-
-        self._buffer += text
-        events: list[tuple[str, str]] = []
-
-        if self._state == "detecting":
-            head = self._buffer.lstrip()
-            if len(head) < len(_THINKING_OPEN) and _THINKING_OPEN.startswith(head):
-                return events
-            if not head.startswith(_THINKING_OPEN):
-                return self._pass_through()
-            self._state = "thought"
-            self._buffer = head[len(_THINKING_OPEN) :]
-            events.append(("thought_start", ""))
-
-        idx = self._buffer.find(_THINKING_CLOSE)
-        if idx != -1:
-            if thought := self._buffer[:idx]:
-                events.append(("thought", thought))
-            events.append(("thought_end", ""))
-            rest = self._buffer[idx + len(_THINKING_CLOSE) :].lstrip()
-            self._buffer = ""
-            self._state = "content"
-            if rest:
-                events.append(("text", rest))
-        else:
-            # Hold back what could be the start of the closing tag.
-            safe_end = len(self._buffer) - len(_THINKING_CLOSE) + 1
-            if safe_end > 0:
-                events.append(("thought", self._buffer[:safe_end]))
-                self._buffer = self._buffer[safe_end:]
-        return events
-
-    def finish(self, flush: bool = True) -> list[tuple[str, str]]:
-        """End the response, closing an open thought and releasing held text.
-
-        Args:
-            flush: Whether to release buffered text. ``False`` when the
-                response was cut short (interruption, error).
-        """
-        events: list[tuple[str, str]] = []
-        if self._state == "thought":
-            if self._buffer and flush:
-                events.append(("thought", self._buffer))
-            events.append(("thought_end", ""))
-        elif self._state == "detecting" and self._buffer and flush:
-            events.append(("text", self._buffer))
-        self._buffer = ""
-        self._state = "content"
-        return events
-
-    def _pass_through(self) -> list[tuple[str, str]]:
-        text, self._buffer, self._state = self._buffer, "", "content"
-        return [("text", text)]
 
 
 @dataclass
@@ -549,7 +471,11 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
         use_completion_tokens_estimate = False
 
         using_noop_tool = False
-        thinking_splitter = _LeadingThinkingSplitter()
+        # Amazon Nova (v1) models write their reasoning into a text block,
+        # wrapped in <thinking> tags, ahead of a tool call. A response can hold
+        # several such blocks, so each text block is split on its own.
+        thinking_splitter = LeadingThoughtSplitter("<thinking>", "</thinking>")
+        text_index: int | None = None
         # The content block of the reasoning in progress, and its signature.
         reasoning_index: int | None = None
         reasoning_signature: str | None = None
@@ -670,7 +596,8 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
                         block = event["contentBlockDelta"]
                         delta = block["delta"]
                         if "text" in delta:
-                            await self._push_text_events(thinking_splitter.feed(delta["text"]))
+                            text_index = block["contentBlockIndex"]
+                            await self._push_text_events(thinking_splitter.split(delta["text"]))
                             completion_tokens_estimate += self._estimate_tokens(delta["text"])
                         elif "toolUse" in delta and "input" in delta["toolUse"]:
                             # Handle partial JSON for tool use
@@ -720,6 +647,9 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
                     # Handle tool use completion
                     elif "contentBlockStop" in event:
                         index = event["contentBlockStop"]["contentBlockIndex"]
+                        if index == text_index:
+                            await self._push_text_events(thinking_splitter.flush())
+                            text_index = None
                         if index == reasoning_index:
                             await self.push_frame(LLMThoughtEndFrame(signature=reasoning_signature))
                             reasoning_index = None
@@ -753,7 +683,7 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
                         cache_read_input_tokens += usage.get("cacheReadInputTokens", 0)
                         cache_creation_input_tokens += usage.get("cacheWriteInputTokens", 0)
 
-                await self._push_text_events(thinking_splitter.finish())
+                await self._push_text_events(thinking_splitter.flush())
 
             await self.run_function_calls(function_calls)
         except asyncio.CancelledError:
@@ -802,7 +732,7 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
             # Closes a thought left open by an interrupted or failed stream.
-            await self._push_text_events(thinking_splitter.finish(flush=False))
+            await self._push_text_events(thinking_splitter.reset())
             if reasoning_index is not None:
                 await self.push_frame(LLMThoughtEndFrame())
             await self.stop_processing_metrics()
@@ -839,16 +769,16 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
     def _estimate_tokens(self, text: str) -> int:
         return int(len(re.split(r"[^\w]+", text)) * 1.3)
 
-    async def _push_text_events(self, events: list[tuple[str, str]]):
+    async def _push_text_events(self, events: list[tuple[LeadingThoughtEvent, str]]):
         """Push text as LLM text and leading ``<thinking>`` content as thoughts."""
         for kind, text in events:
-            if kind == "text":
+            if kind == LeadingThoughtEvent.TEXT:
                 await self._push_llm_text(text)
-            elif kind == "thought_start":
+            elif kind == LeadingThoughtEvent.THOUGHT_START:
                 await self.push_frame(LLMThoughtStartFrame())
-            elif kind == "thought":
+            elif kind == LeadingThoughtEvent.THOUGHT_TEXT:
                 await self.push_frame(LLMThoughtTextFrame(text))
-            elif kind == "thought_end":
+            elif kind == LeadingThoughtEvent.THOUGHT_END:
                 await self.push_frame(LLMThoughtEndFrame())
 
     async def _report_usage_metrics(
