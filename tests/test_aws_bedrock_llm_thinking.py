@@ -4,10 +4,11 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Unit tests for AWSBedrockLLMService's handling of inline ``<thinking>`` tags.
+"""Unit tests for AWSBedrockLLMService's handling of model reasoning.
 
-Amazon Nova (v1) models put their chain of thought in the answer text, wrapped
-in ``<thinking>`` tags, before a tool call. That text must not reach TTS.
+Reasoning arrives either as ``reasoningContent`` deltas (Claude, Nova 2) or, for
+Amazon Nova (v1) models, in the answer text wrapped in ``<thinking>`` tags before
+a tool call. Either way it is emitted as thoughts and must not reach TTS.
 """
 
 from unittest.mock import AsyncMock, patch
@@ -140,3 +141,64 @@ async def test_short_text_that_is_a_tag_prefix_is_flushed_at_the_end():
     _, frames = await _run(_text_events(["<"]) + _tool_events())
 
     assert "".join(f.text for f in frames if isinstance(f, LLMTextFrame)) == "<"
+
+
+# Reasoning deltas from a real us.anthropic.claude-haiku-4-5 ConverseStream
+# response with extended thinking enabled (trimmed in the middle).
+CLAUDE_REASONING_EVENTS = [
+    {"messageStart": {"role": "assistant"}},
+    *[
+        {"contentBlockDelta": {"delta": {"reasoningContent": {"text": t}}, "contentBlockIndex": 0}}
+        for t in ["The user is asking for", " the weather in Paris.", ""]
+    ],
+    {
+        "contentBlockDelta": {
+            "delta": {"reasoningContent": {"signature": "sig"}},
+            "contentBlockIndex": 0,
+        }
+    },
+    {"contentBlockStop": {"contentBlockIndex": 0}},
+]
+
+
+@pytest.mark.asyncio
+async def test_reasoning_content_is_emitted_as_a_thought_for_the_context():
+    service, frames = await _run(CLAUDE_REASONING_EVENTS + _tool_events())
+
+    (start,) = [f for f in frames if isinstance(f, LLMThoughtStartFrame)]
+    (end,) = [f for f in frames if isinstance(f, LLMThoughtEndFrame)]
+    thought = "".join(f.text for f in frames if isinstance(f, LLMThoughtTextFrame))
+    assert start.append_to_context
+    assert start.llm == "aws"
+    assert end.signature == "sig"
+    assert thought == "The user is asking for the weather in Paris."
+    assert not any(isinstance(f, LLMTextFrame) for f in frames)
+
+    (calls,) = service.run_function_calls.call_args.args
+    assert [c.function_name for c in calls] == ["get_weather"]
+
+
+@pytest.mark.asyncio
+async def test_reasoning_cut_short_is_closed_without_a_signature():
+    async def failing_stream():
+        for event in CLAUDE_REASONING_EVENTS[:2]:
+            yield event
+        raise RuntimeError("stream dropped")
+
+    service = AWSBedrockLLMService(
+        aws_access_key="test",
+        aws_secret_key="test",
+        aws_region="us-east-1",
+        settings=AWSBedrockLLMService.Settings(model="us.anthropic.claude-haiku-4-5"),
+    )
+    frames = []
+    service.push_frame = AsyncMock(side_effect=lambda frame, *args, **kwargs: frames.append(frame))
+    context = LLMContext()
+    context.add_message({"role": "user", "content": "What's the weather in Paris?"})
+    with patch.object(
+        service, "_create_converse_stream", AsyncMock(return_value={"stream": failing_stream()})
+    ):
+        await service._process_context(context)
+
+    (end,) = [f for f in frames if isinstance(f, LLMThoughtEndFrame)]
+    assert end.signature is None
