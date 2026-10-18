@@ -143,6 +143,25 @@ class TestRTVIObserverPushes(unittest.IsolatedAsyncioTestCase):
         await self._push(BotStartedSpeakingFrame())
         self.assertEqual(self._sent_outputs(), ["Please hold."])
 
+    async def test_bot_output_follows_the_speech_without_speaking_messages(self):
+        self.observer = RTVIObserver(params=RTVIObserverParams(bot_speaking_enabled=False))
+        self.observer.send_rtvi_message = AsyncMock()
+        transport = BaseOutputTransport(TransportParams())
+        cut_off = AggregatedTextFrame("Let me check.", "sentence")
+        cut_off.will_be_spoken = True
+        spoken = AggregatedTextFrame("Here it is.", "sentence")
+        spoken.will_be_spoken = True
+
+        await self._push(cut_off, source=transport)
+        await self._push(InterruptionFrame())
+        await self._push(spoken, source=transport)
+        self.assertEqual(self._sent_outputs(), [])
+
+        await self._push(BotStartedSpeakingFrame())
+        await self._push(BotStoppedSpeakingFrame())
+        self.assertEqual(self._sent_outputs(), ["Here it is."])
+        self.assertEqual([type(m) for m in self._sent_messages()], [RTVI.BotOutputMessage])
+
     def _sent_messages(self):
         return [call.args[0] for call in self.observer.send_rtvi_message.await_args_list]
 
