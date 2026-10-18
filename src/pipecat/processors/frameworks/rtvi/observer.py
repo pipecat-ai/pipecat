@@ -686,15 +686,7 @@ class RTVIObserver(BaseObserver):
         ):
             await self._handle_bot_speaking(frame)
         elif isinstance(frame, InterruptionFrame) and self._params.bot_speaking_enabled:
-            # The bot's in-flight output was cut off (VAD barge-in or a programmatic
-            # run_immediately interrupt). Let clients drop what it was mid-saying.
-            await self.send_rtvi_message(RTVI.BotInterruptedMessage())
-            self._skipped_segments_interrupted = True
-            # Queued text whose speech was cut off would otherwise go out with the
-            # next speech, and hold back text that won't be spoken.
-            self._queued_aggregated_text_frames = [
-                f for f in self._queued_aggregated_text_frames if not f.interruptible
-            ]
+            await self._handle_bot_interrupted()
         elif isinstance(frame, (TranscriptionFrame, InterimTranscriptionFrame)):
             await self._handle_user_transcriptions(frame)
         elif isinstance(frame, UserBackchannelFrame) and self._params.user_input_enabled:
@@ -854,6 +846,18 @@ class RTVIObserver(BaseObserver):
             await self.send_rtvi_message(message)
             self._forget_interrupted_segments()
             self._bot_is_speaking = False
+
+    async def _handle_bot_interrupted(self):
+        """Tell clients the bot's output was cut off, and drop what it won't say."""
+        # The bot's in-flight output was cut off (VAD barge-in or a programmatic
+        # run_immediately interrupt). Let clients drop what it was mid-saying.
+        await self.send_rtvi_message(RTVI.BotInterruptedMessage())
+        self._skipped_segments_interrupted = True
+        # Queued text whose speech was cut off would otherwise go out with the
+        # next speech, and hold back text that won't be spoken.
+        self._queued_aggregated_text_frames = [
+            f for f in self._queued_aggregated_text_frames if not f.interruptible
+        ]
 
     async def _handle_aggregated_llm_text(self, frame: AggregatedTextFrame):
         """Handle aggregated LLM text output frames."""
