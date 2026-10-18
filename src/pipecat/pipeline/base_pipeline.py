@@ -36,46 +36,47 @@ class BasePipeline(FrameProcessor):
         attempted again: the processor is left half-built for the rest of the
         session, so it loses its usability and a switcher can move off it.
 
+        Call it right after this pipeline's own setup, once it has released
+        itself with ``_setup_finished()``. Each processor holds the StartFrame
+        until its own setup is done, so one slow processor doesn't block the
+        ones ahead of it. The processors are held before anything else runs,
+        so the StartFrame can't get past one whose setup() hasn't begun yet.
+
         Args:
             processors: The processors to set up.
             setup: Configuration for frame processor setup.
         """
+        tasks = [self._create_setup_task(p, setup) for p in processors]
+        await asyncio.gather(*tasks)
 
-        async def setup_processor(processor: FrameProcessor):
-            started_at_ns = time.monotonic_ns()
-            try:
-                await processor.setup(setup)
-            except Exception as e:
-                await processor.push_error(
-                    f"Error setting up processor: {e}", exception=e, force_treat_as_permanent=True
-                )
-            finally:
-                processor._setup_finished()
-            if setup.observer:
-                await setup.observer.on_processor_setup(
-                    ProcessorSetUp(
-                        processor=processor,
-                        started_at_ns=started_at_ns,
-                        finished_at_ns=time.monotonic_ns(),
-                    )
-                )
+    def _create_setup_task(
+        self, processor: FrameProcessor, setup: FrameProcessorSetup
+    ) -> asyncio.Task:
+        """Hold the processor's StartFrame and set it up in a task of its own."""
+        processor._setup_started()
+        task = self.create_task(
+            self._setup_processor(processor, setup), f"{self}::setup::{processor}"
+        )
+        task.add_done_callback(lambda _: processor._setup_finished())
+        return task
 
-        # This pipeline's own setup is done by now; only its processors are
-        # left. Each of them holds the StartFrame until its own setup is done,
-        # so release this pipeline now. Otherwise one slow processor would hold
-        # the StartFrame here and block every processor in this pipeline,
-        # including those ahead of the slow one. The processors are held before
-        # this pipeline is released, so the StartFrame can't get past one whose
-        # setup() hasn't begun yet.
-        for p in processors:
-            p._setup_started()
-        self._setup_finished()
+    async def _setup_processor(self, processor: FrameProcessor, setup: FrameProcessorSetup):
+        """Set the processor up, reporting a failure as a permanent error."""
+        started_at_ns = time.monotonic_ns()
         try:
-            await asyncio.gather(*[setup_processor(p) for p in processors])
-        finally:
-            # A processor cancelled before its setup() began never let go.
-            for p in processors:
-                p._setup_finished()
+            await processor.setup(setup)
+        except Exception as e:
+            await processor.push_error(
+                f"Error setting up processor: {e}", exception=e, force_treat_as_permanent=True
+            )
+        if setup.observer:
+            await setup.observer.on_processor_setup(
+                ProcessorSetUp(
+                    processor=processor,
+                    started_at_ns=started_at_ns,
+                    finished_at_ns=time.monotonic_ns(),
+                )
+            )
 
     async def _cleanup_processors(self, processors: Sequence[FrameProcessor]):
         """Clean up the given processors concurrently.
