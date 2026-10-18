@@ -175,6 +175,10 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
     Provides inference capabilities for AWS Bedrock models including Amazon Nova
     and Anthropic Claude. Supports streaming responses, function calling, and
     vision capabilities.
+
+    Reasoning a model returns as ``reasoningContent`` is emitted as
+    ``LLMThought*Frame`` objects, and signed reasoning is kept in the context so
+    it can be passed back to the model.
     """
 
     Settings = AWSBedrockLLMSettings
@@ -546,6 +550,9 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
 
         using_noop_tool = False
         thinking_splitter = _LeadingThinkingSplitter()
+        # The content block of the reasoning in progress, and its signature.
+        reasoning_index: int | None = None
+        reasoning_signature: str | None = None
 
         try:
             await self.push_frame(LLMFullResponseStartFrame())
@@ -674,6 +681,25 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
                             completion_tokens_estimate += self._estimate_tokens(
                                 delta["toolUse"]["input"]
                             )
+                        elif "reasoningContent" in delta:
+                            reasoning = delta["reasoningContent"]
+                            if reasoning_index is None and (
+                                "text" in reasoning or "signature" in reasoning
+                            ):
+                                reasoning_index = block["contentBlockIndex"]
+                                await self.push_frame(
+                                    LLMThoughtStartFrame(
+                                        append_to_context=True,
+                                        llm=self.get_llm_adapter().id_for_llm_specific_messages,
+                                    )
+                                )
+                            if "text" in reasoning:
+                                await self.push_frame(LLMThoughtTextFrame(reasoning["text"]))
+                                completion_tokens_estimate += self._estimate_tokens(
+                                    reasoning["text"]
+                                )
+                            elif "signature" in reasoning:
+                                reasoning_signature = reasoning["signature"]
 
                     # Handle tool use start
                     elif "contentBlockStart" in event:
@@ -694,6 +720,10 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
                     # Handle tool use completion
                     elif "contentBlockStop" in event:
                         index = event["contentBlockStop"]["contentBlockIndex"]
+                        if index == reasoning_index:
+                            await self.push_frame(LLMThoughtEndFrame(signature=reasoning_signature))
+                            reasoning_index = None
+                            reasoning_signature = None
                         tool_use_block = tool_use_blocks.pop(index, None)
                         if tool_use_block:
                             json_accumulator = json_accumulators.pop(index, "")
@@ -773,6 +803,8 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
         finally:
             # Closes a thought left open by an interrupted or failed stream.
             await self._push_text_events(thinking_splitter.finish(flush=False))
+            if reasoning_index is not None:
+                await self.push_frame(LLMThoughtEndFrame())
             await self.stop_processing_metrics()
             await self.push_frame(LLMFullResponseEndFrame())
             comp_tokens = (
