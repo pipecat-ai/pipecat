@@ -999,9 +999,9 @@ class RTVIObserver(BaseObserver):
                     spoken_status = "new"
                     progress = RTVI.SpokenProgressData(accumulated_text="", remaining_text=text)
             else:
-                # Each sentence of a reply that skips TTS starts a segment, as
-                # spoken text does. Other text that isn't spoken has no status.
-                spoken_status = "new" if frame.skip_tts else None
+                # Text that isn't spoken gets this one message, which starts its
+                # segment as spoken text's first message does.
+                spoken_status = "new"
                 progress = None
 
             data = RTVI.BotOutputMessageData(

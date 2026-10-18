@@ -162,23 +162,25 @@ class TestRTVIObserverPushes(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self._sent_outputs(), ["Here it is."])
         self.assertEqual([type(m) for m in self._sent_messages()], [RTVI.BotOutputMessage])
 
-    async def test_a_sentence_of_a_reply_that_skips_tts_starts_a_segment(self):
+    async def test_text_that_isnt_spoken_starts_a_segment(self):
         transport = BaseOutputTransport(TransportParams())
         sentence = AggregatedTextFrame("Hello there.", "sentence")
         sentence.skip_tts = True
+        code = AggregatedTextFrame("print(1)", "code")
+        transcript = TTSTextFrame("Here it is.", TextType.SENTENCE)
 
-        await self._push(sentence, source=transport)
+        await self._push(BotStartedSpeakingFrame())
+        for frame in (sentence, code, transcript):
+            await self._push(frame, source=transport)
 
-        [data] = self._sent_output_data()
-        self.assertEqual((data.spoken_status, data.spoken_progress), ("new", None))
-
-    async def test_other_text_that_isnt_spoken_has_no_status(self):
-        transport = BaseOutputTransport(TransportParams())
-
-        await self._push(AggregatedTextFrame("print(1)", "code"), source=transport)
-
-        [data] = self._sent_output_data()
-        self.assertIsNone(data.spoken_status)
+        self.assertEqual(
+            [(d.text, d.spoken_status, d.spoken_progress) for d in self._sent_output_data()],
+            [
+                ("Hello there.", "new", None),
+                ("print(1)", "new", None),
+                ("Here it is.", "new", None),
+            ],
+        )
 
     def _sent_messages(self):
         return [call.args[0] for call in self.observer.send_rtvi_message.await_args_list]
