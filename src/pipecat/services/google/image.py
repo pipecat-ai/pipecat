@@ -24,7 +24,7 @@ from loguru import logger
 from PIL import Image
 from pydantic import BaseModel, Field
 
-from pipecat.frames.frames import CancelFrame, EndFrame, ErrorFrame, Frame, URLImageRawFrame
+from pipecat.frames.frames import ErrorFrame, Frame, URLImageRawFrame
 from pipecat.services.google.utils import update_google_client_http_options
 from pipecat.services.image_service import ImageGenService
 from pipecat.services.settings import ImageGenSettings
@@ -219,26 +219,8 @@ class GoogleImageGenService(ImageGenService):
         except Exception as e:
             yield ErrorFrame(f"Image generation error: {str(e)}")
 
-    async def stop(self, frame: EndFrame):
-        """Stop the service and close the GenAI client.
-
-        Args:
-            frame: The end frame.
-        """
-        await super().stop(frame)
-        await self._close_client()
-
-    async def cancel(self, frame: CancelFrame):
-        """Cancel the service and close the GenAI client.
-
-        Args:
-            frame: The cancel frame.
-        """
-        await super().cancel(frame)
-        await self._close_client()
-
     async def cleanup(self):
-        """Release resources held by the service."""
+        """Close the GenAI client at teardown."""
         await super().cleanup()
         await self._close_client()
 
@@ -248,6 +230,7 @@ class GoogleImageGenService(ImageGenService):
         try:
             await self._client.aio.aclose()
         except Exception:
+            # Do nothing - we're shutting down anyway
             pass
         finally:
             self._client = None
