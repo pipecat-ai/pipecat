@@ -490,6 +490,7 @@ class PipelineWorker(BaseWorker):
         self._push_queue = asyncio.Queue()
         self._process_push_task: asyncio.Task | None = None
         self._pipeline_setup_task: asyncio.Task | None = None
+        self._pipeline_start_task: asyncio.Task | None = None
         self._setup_watch_task: asyncio.Task | None = None
 
         # This is the heartbeat queue. When a heartbeat frame is received in the
@@ -1150,9 +1151,14 @@ class PipelineWorker(BaseWorker):
         )
 
     async def _cancel_pipeline_setup(self):
-        """Stop processors still setting up, which lets the StartFrame through."""
+        """Stop processors still setting up; they keep holding the StartFrame."""
         if self._pipeline_setup_task and not self._pipeline_setup_task.done():
             await self.cancel_task(self._pipeline_setup_task)
+
+    async def _cancel_pipeline_start(self):
+        """Stop waiting for the pipeline to start, so it is only cleaned up."""
+        if self._pipeline_start_task and not self._pipeline_start_task.done():
+            await self.cancel_task(self._pipeline_start_task)
 
     async def _cancel(self, *, reason: str | None = None):
         """Internal cancellation logic for the pipeline worker.
@@ -1163,14 +1169,17 @@ class PipelineWorker(BaseWorker):
         if not self._cancelled:
             logger.debug(f"Cancelling pipeline worker {self}")
             self._cancelled = True
-            if not self._pipeline_start_event.is_set():
-                self._pipeline_start_event.set()
+            # Only pushed into a started pipeline: if the StartFrame hasn't
+            # reached the end, cancelling the start task below means the
+            # pipeline is only cleaned up and this CancelFrame is never pushed.
             await self.queue_frame(CancelFrame(reason=reason))
-            # Only request it: a processor's setup() may be what is cancelling,
-            # and awaiting the setup task from inside it never returns. The
-            # task is awaited before the CancelFrame is pushed.
+            # Only request them: a processor's setup() may be what is
+            # cancelling, and awaiting the setup task from inside it never
+            # returns.
             if self._pipeline_setup_task and not self._pipeline_setup_task.done():
                 self._pipeline_setup_task.cancel()
+            if self._pipeline_start_task and not self._pipeline_start_task.done():
+                self._pipeline_start_task.cancel()
 
     async def _create_tasks(self):
         """Create and start all pipeline processing tasks."""
@@ -1181,9 +1190,9 @@ class PipelineWorker(BaseWorker):
     async def _watch_pipeline_setup(self):
         """Give up on a pipeline whose processors don't finish setting up.
 
-        The StartFrame is already in the pipeline, held by the processors still
-        being set up, so the pipeline is cancelled rather than just cleaned up.
-        Cancelling setup releases the StartFrame and the CancelFrame behind it.
+        Setting up is cancelled, so the processors still being set up keep
+        holding the StartFrame: the pipeline never starts and is only cleaned
+        up, as when setting the worker up times out.
         """
         if not self._pipeline_setup_task:
             return
@@ -1197,10 +1206,10 @@ class PipelineWorker(BaseWorker):
                 "(a processor blocked while connecting?), stopping the pipeline."
             )
             await self._call_event_handler("on_setup_timeout")
-            # The worker may already be cancelled (before setup began), in
-            # which case _cancel() does nothing, so stop setting up here.
+            # Not _cancel(), which does nothing if the worker was cancelled
+            # before setting up began.
             await self._cancel_pipeline_setup()
-            await self._cancel(reason="setup timeout")
+            await self._cancel_pipeline_start()
 
     def _maybe_start_heartbeat_tasks(self):
         """Start heartbeat tasks if heartbeats are enabled and not already running."""
@@ -1216,6 +1225,7 @@ class PipelineWorker(BaseWorker):
     async def _cancel_tasks(self):
         """Cancel all running pipeline tasks."""
         await self._cancel_pipeline_setup()
+        await self._cancel_pipeline_start()
         if self._setup_watch_task:
             await self.cancel_task(self._setup_watch_task)
             self._setup_watch_task = None
@@ -1253,6 +1263,18 @@ class PipelineWorker(BaseWorker):
             data.append(TTFBMetricsData(processor=p.name, value=0.0))
             data.append(ProcessingMetricsData(processor=p.name, value=0.0))
         return MetricsFrame(data=data)
+
+    async def _start_pipeline(self, frame: StartFrame) -> bool:
+        """Push the StartFrame and wait for the pipeline to start.
+
+        Pushing it waits too, while the pipeline is still held, so cancelling
+        this task gives up on both.
+
+        Returns:
+            Whether the pipeline started; see :meth:`_wait_for_pipeline_start`.
+        """
+        await self._pipeline.queue_frame(frame)
+        return await self._wait_for_pipeline_start(frame)
 
     async def _wait_for_pipeline_start(self, frame: Frame) -> bool:
         """Wait for the specified start frame to reach the end of the pipeline.
@@ -1383,10 +1405,17 @@ class PipelineWorker(BaseWorker):
         self._pipeline._setup_started()
         self._pipeline_setup_task = self.create_task(self._pipeline.setup(setup))
         # The StartFrame is pushed right away and each processor holds it until
-        # its own setup is done (see BasePipeline._setup_processors()). Whatever
-        # happens to setting up (done, failed, timed out or cancelled), the
-        # pipeline may not stay held after it.
-        self._pipeline_setup_task.add_done_callback(lambda _: self._pipeline._setup_finished())
+        # its own setup is done (see BasePipeline._setup_processors()).
+        self._pipeline_setup_task.add_done_callback(self._pipeline_setup_done)
+
+    def _pipeline_setup_done(self, task: asyncio.Task):
+        """Release the pipeline once it is set up, unless setting up was abandoned.
+
+        A cancelled setup (timed out, or the worker was cancelled) keeps the
+        StartFrame held, so the pipeline never starts and is only cleaned up.
+        """
+        if not task.cancelled():
+            self._pipeline._setup_finished()
 
     async def _cleanup(self, cleanup_pipeline: bool):
         """Clean up the pipeline worker and processors."""
@@ -1470,10 +1499,13 @@ class PipelineWorker(BaseWorker):
             tracing_context=self._tracing_context,
         )
         start_frame.metadata = self._create_start_metadata()
-        await self._pipeline.queue_frame(start_frame)
 
-        # Wait for the pipeline to be started before pushing any other frame.
-        running = await self._wait_for_pipeline_start(start_frame)
+        # Start the pipeline before pushing any other frame. Cancelling the
+        # worker cancels this task: a pipeline that hasn't started is only
+        # cleaned up.
+        self._pipeline_start_task = self.create_task(self._start_pipeline(start_frame))
+        await asyncio.wait([self._pipeline_start_task])
+        running = not self._pipeline_start_task.cancelled() and self._pipeline_start_task.result()
 
         if running and self._params.enable_metrics and self._params.send_initial_empty_metrics:
             await self._pipeline.queue_frame(self._initial_metrics_frame())

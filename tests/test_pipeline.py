@@ -939,10 +939,9 @@ class TestPipelineWorker(unittest.IsolatedAsyncioTestCase):
 
         assert worker.has_finished()
 
-        # The blocked processor never lets the CancelFrame drain, so the worker
-        # gives up waiting for it and reports the timeout.
-        assert len(timed_out) == 1
-        assert isinstance(timed_out[0], CancelFrame)
+        # The pipeline never started, so it is only cleaned up: no CancelFrame
+        # is pushed, so nothing waits for one to time out.
+        assert not timed_out
 
     async def test_task_start_frame_never_reaches_sink(self):
         class StartBlocker(FrameProcessor):

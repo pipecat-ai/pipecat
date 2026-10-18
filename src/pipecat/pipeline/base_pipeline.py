@@ -57,8 +57,13 @@ class BasePipeline(FrameProcessor):
         task = self.create_task(
             self._setup_processor(processor, setup), f"{self}::setup::{processor}"
         )
-        task.add_done_callback(lambda _: processor._setup_finished())
+        task.add_done_callback(lambda task: self._setup_task_done(processor, task))
         return task
+
+    def _setup_task_done(self, processor: FrameProcessor, task: asyncio.Task):
+        """Release the processor once it is set up, unless setting it up was cancelled."""
+        if not task.cancelled():
+            processor._setup_finished()
 
     async def _setup_processor(self, processor: FrameProcessor, setup: FrameProcessorSetup):
         """Set the processor up, reporting a failure as a permanent error."""
