@@ -58,6 +58,17 @@
       "message": "`SpeechmaticsSTTService.update_params` is deprecated since 0.0.104 and will be removed in 2.0.0. Use `STTUpdateSettingsFrame` instead."
     },
     {
+      "subject": "AudioBufferProcessor",
+      "module": "pipecat.processors.audio.audio_buffer_processor",
+      "kind": "class",
+      "deprecated_in": "1.8.0",
+      "removed_in": "1.13.0",
+      "announced_removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "on_bot_turn_audio",
+      "message": "Use ``on_bot_turn_audio`` instead. Will be removed in 2.0.0."
+    },
+    {
       "subject": "AICFilter.create_vad_analyzer",
       "module": "pipecat.audio.filters.aic_filter",
       "kind": "method",
