@@ -1102,6 +1102,14 @@ async def test_skip_tts_llm_text_is_pushed_as_unspoken_sentences(mode):
 
 
 @pytest.mark.asyncio
+async def test_skip_tts_response_of_only_whitespace_has_no_sentences():
+    """A response that isn't spoken and holds only whitespace pushes no text."""
+    down, _ = await run_test(MockHttpTTSService(), frames_to_send=_skip_tts_response("\n"))
+
+    assert [type(f) for f in down] == [LLMFullResponseStartFrame, LLMFullResponseEndFrame]
+
+
+@pytest.mark.asyncio
 async def test_skip_tts_text_that_isnt_llm_text_passes_through():
     """Text another processor marked skip_tts, such as an IVR tag, is pushed on as it is."""
     tag = _skip_tts(TextFrame("<dtmf>1</dtmf>"))
