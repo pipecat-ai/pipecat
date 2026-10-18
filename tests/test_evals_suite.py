@@ -133,9 +133,11 @@ class TestEvalManifestLoad(unittest.TestCase):
             "suite:\n"
             "  - bot: a.py\n    concurrency: 2\n    scenarios: [x, y]\n"
             "  - bot: b.py\n    scenarios: [x]\n"
+            "  - bot: a.py\n    scenarios: [z]\n"
         )
         m = EvalManifest.load(self.manifest_path, concurrency=8)
-        self.assertEqual([r.concurrency for r in m.runs], [2, 2, None])
+        self.assertEqual([r.concurrency for r in m.runs], [2, 2, None, None])
+        self.assertEqual([r.entry for r in m.runs], [0, 0, 1, 2])
         # The command line's cap is the suite's, not the entry's.
         self.assertEqual(m.concurrency, 8)
 
@@ -294,17 +296,18 @@ class TestBotConcurrency(unittest.IsolatedAsyncioTestCase):
             )
         )
 
-    def _count_overlap(self, suite: EvalSuite, hold: float = 0.05) -> dict[str, int]:
-        """Stand in for the bot and the harness, recording the most runs held at once per bot and in all."""
-        active: dict[str, int] = {}
-        peak: dict[str, int] = {"total": 0}
+    def _count_overlap(self, suite: EvalSuite, hold: float = 0.05, key=lambda run: run.bot) -> dict:
+        """Stand in for the bot and the harness, recording the most runs held at once per ``key`` (the bot) and in all."""
+        active: dict = {}
+        peak: dict = {"total": 0}
 
         async def spawn(run, port, files):
-            active[run.bot] = active.get(run.bot, 0) + 1
-            peak[run.bot] = max(peak.get(run.bot, 0), active[run.bot])
+            k = key(run)
+            active[k] = active.get(k, 0) + 1
+            peak[k] = max(peak.get(k, 0), active[k])
             peak["total"] = max(peak["total"], sum(active.values()))
             await asyncio.sleep(hold)
-            active[run.bot] -= 1
+            active[k] -= 1
             return None
 
         async def harness(run, port, files, *, debug, params):
@@ -327,8 +330,9 @@ class TestBotConcurrency(unittest.IsolatedAsyncioTestCase):
                 scenario_path=self.logs_dir / "s.yaml",
                 bot_path=self.logs_dir / bot,
                 concurrency=kwargs.get(bot),
+                entry=entry,
             )
-            for bot, count in bots.items()
+            for entry, (bot, count) in enumerate(bots.items())
             for i in range(count)
         ]
 
@@ -361,10 +365,11 @@ class TestBotConcurrency(unittest.IsolatedAsyncioTestCase):
                 scenario_path=self.logs_dir / "s.yaml",
                 bot_path=self.logs_dir / bot,
                 concurrency=1 if bot == "capped.py" else None,
+                entry=entry,
                 attempt=attempt,
             )
             for attempt in (1, 2, 3)
-            for bot in ("capped.py", "plain.py")
+            for entry, bot in enumerate(("capped.py", "plain.py"))
         ]
         suite = self._suite(runs, concurrency=2, repeat=3)
         peak = self._count_overlap(suite)
@@ -375,6 +380,29 @@ class TestBotConcurrency(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(peak["total"], 2)
         self.assertEqual([r.status for r in runs], ["done"] * 6)
 
+    async def test_an_entry_cap_leaves_another_entry_for_the_same_bot_alone(self):
+        runs = [
+            EvalRun(
+                bot="a.py",
+                scenario=f"s{entry}{i}",
+                scenario_path=self.logs_dir / "s.yaml",
+                bot_path=self.logs_dir / "a.py",
+                concurrency=1 if entry == 0 else None,
+                entry=entry,
+            )
+            for entry in (0, 1)
+            for i in range(3)
+        ]
+        suite = self._suite(runs, concurrency=4)
+        peak = self._count_overlap(suite, key=lambda run: run.entry)
+
+        await suite.run(self.logs_dir)
+
+        self.assertEqual(peak[0], 1)
+        self.assertEqual(peak[1], 3)
+        self.assertEqual(peak["total"], 4)
+        self.assertEqual([r.status for r in runs], ["done"] * 6)
+
     async def test_runs_are_taken_in_manifest_order(self):
         runs = [
             EvalRun(
@@ -382,14 +410,16 @@ class TestBotConcurrency(unittest.IsolatedAsyncioTestCase):
                 scenario=scenario,
                 scenario_path=self.logs_dir / "s.yaml",
                 bot_path=self.logs_dir / bot,
+                entry=entry,
             )
-            for bot, scenario in (
-                ("a.py", "s1"),
-                ("a.py", "s2"),
-                ("a.py", "s3"),
-                ("b.py", "s1"),
-                ("c.py", "s1"),
-                ("c.py", "s2"),
+            for entry, bot, scenario in (
+                (0, "a.py", "s1"),
+                (0, "a.py", "s2"),
+                (0, "a.py", "s3"),
+                (1, "b.py", "s1"),
+                (2, "c.py", "s1"),
+                (2, "c.py", "s2"),
+                (3, "a.py", "s4"),
             )
         ]
         suite = self._suite(runs, concurrency=1)
@@ -412,7 +442,8 @@ class TestBotConcurrency(unittest.IsolatedAsyncioTestCase):
 
         await suite.run(self.logs_dir)
 
-        # One at a time, each entry's scenarios run together, in manifest order.
+        # One at a time, each entry's scenarios run together, in manifest
+        # order, and a bot's second entry waits for its place.
         self.assertEqual(
             started,
             [
@@ -422,6 +453,7 @@ class TestBotConcurrency(unittest.IsolatedAsyncioTestCase):
                 ("b.py", "s1"),
                 ("c.py", "s1"),
                 ("c.py", "s2"),
+                ("a.py", "s4"),
             ],
         )
 
@@ -947,7 +979,7 @@ class TestEntryQueues(unittest.TestCase):
 
     @staticmethod
     def _run(
-        label: str, scenario: str, attempt: int = 1, concurrency: int | None = None
+        label: str, scenario: str, entry: int, attempt: int = 1, concurrency: int | None = None
     ) -> EvalRun:
         return EvalRun(
             bot="bot.py",
@@ -956,35 +988,37 @@ class TestEntryQueues(unittest.TestCase):
             loaded=None,
             bot_path=Path("bot.py"),
             scenario_path=Path(f"{scenario}.yaml"),
+            entry=entry,
             attempt=attempt,
             concurrency=concurrency,
         )
 
     def test_one_queue_per_entry_in_manifest_order(self):
         runs = [
-            self._run("a", "s1"),
-            self._run("a", "s2"),
-            self._run("b", "s1"),
-            self._run("a", "s3"),
-            self._run("c", "s1"),
+            self._run("a", "s1", 0),
+            self._run("a", "s2", 0),
+            self._run("b", "s1", 1),
+            self._run("a", "s3", 2),
+            self._run("c", "s1", 3),
         ]
         queues = EvalSuite._entry_queues(runs)
+        # A label's second entry is a queue of its own, in its manifest place.
         self.assertEqual(
             [[(r.label, r.scenario) for r in q] for _, _, q in queues],
-            [[("a", "s1"), ("a", "s2"), ("a", "s3")], [("b", "s1")], [("c", "s1")]],
+            [[("a", "s1"), ("a", "s2")], [("b", "s1")], [("a", "s3")], [("c", "s1")]],
         )
         self.assertEqual(
-            [(label, cap) for label, cap, _ in queues], [("a", None), ("b", None), ("c", None)]
+            [(entry, cap) for entry, cap, _ in queues], [(0, None), (1, None), (2, None), (3, None)]
         )
 
     def test_attempts_form_their_own_queues_attempt_major(self):
         runs = [
-            self._run("a", "s1", 1),
-            self._run("a", "s2", 1),
-            self._run("b", "s1", 1),
-            self._run("a", "s1", 2),
-            self._run("a", "s2", 2),
-            self._run("b", "s1", 2),
+            self._run("a", "s1", 0, 1),
+            self._run("a", "s2", 0, 1),
+            self._run("b", "s1", 1, 1),
+            self._run("a", "s1", 0, 2),
+            self._run("a", "s2", 0, 2),
+            self._run("b", "s1", 1, 2),
         ]
         queues = EvalSuite._entry_queues(runs)
         self.assertEqual(
@@ -997,10 +1031,10 @@ class TestEntryQueues(unittest.TestCase):
             ],
         )
 
-    def test_an_entry_cap_is_the_lowest_given_and_none_without_one(self):
+    def test_each_entry_has_its_own_cap_and_none_without_one(self):
         runs = [
-            self._run("a", "s1", concurrency=3),
-            self._run("a", "s2", concurrency=2),
-            self._run("b", "s1"),
+            self._run("a", "s1", 0, concurrency=3),
+            self._run("a", "s2", 1, concurrency=2),
+            self._run("b", "s1", 2),
         ]
-        self.assertEqual([cap for _, cap, _ in EvalSuite._entry_queues(runs)], [2, None])
+        self.assertEqual([cap for _, cap, _ in EvalSuite._entry_queues(runs)], [3, 2, None])

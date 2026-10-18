@@ -17,7 +17,7 @@ import time
 
 from loguru import logger
 
-from pipecat.evals.events import EvalEventStream
+from pipecat.evals.events import EvalBotEndedError, EvalEventStream
 from pipecat.evals.judge import EvalJudge
 from pipecat.evals.results import EvalAssertionFailure, EvalTrace
 from pipecat.evals.script import FUNCTION_CALL_EVENTS, EvalExpectation
@@ -98,6 +98,9 @@ class ExpectationMatcher:
             TimeoutError: When no matching event arrives at all (so the caller
                 can report "no matching event arrived"). A response that arrives
                 but never satisfies the content check returns a failure instead.
+            EvalBotEndedError: When the bot ends the call before the expectation
+                is met. An ``absent:`` expectation is met instead, since the
+                event can no longer arrive.
         """
         deadline = anchor + (budget_ms / 1000.0)
         self.last_match_text = ""
@@ -220,7 +223,7 @@ class ExpectationMatcher:
             until = min(deadline, time.monotonic() + JUDGE_NO_GRACE_S)
         try:
             return await self._stream.next_event(event_type, until, since=since)
-        except TimeoutError:
+        except (TimeoutError, EvalBotEndedError):
             return None
 
     def _unsatisfied(
@@ -267,6 +270,9 @@ class ExpectationMatcher:
             except TimeoutError:
                 # The quiet window held: absence confirmed.
                 self.last_match_text = f"no {expectation.event!r} for {budget_ms}ms"
+                return None
+            except EvalBotEndedError:
+                self.last_match_text = f"no {expectation.event!r} before the bot ended the call"
                 return None
             if expectation.event == "response" and not self._reply_began_after_last_match():
                 self._trace.log(

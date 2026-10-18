@@ -31,6 +31,7 @@ FAILURE_KINDS = (
     "function_args_mismatch",  # the call arrived with unexpected arguments
     "unexpected_event",  # an `absent:` expectation saw the event it forbade
     "send_after_timeout",  # a turn's `send_after` event never fired
+    "bot_ended",  # the bot ended the call before the turn's expectation was met
     "connect_failed",  # never connected to the bot's eval transport
     "closed_before_ready",  # connected, but the bot closed the connection before bot-ready
     "handshake_timeout",  # connected, but the bot never sent bot-ready

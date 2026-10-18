@@ -83,6 +83,10 @@ from pipecat.frames.frames import (
 _INTERRUPTION_EVENTS = ("user_started_speaking", "bot_interrupted")
 
 
+class EvalBotEndedError(Exception):
+    """The bot ended the call before the awaited event arrived, so it never will."""
+
+
 class EvalEventStream:
     """The bot's output as events: a queue the drivers read, fed by the pipeline.
 
@@ -157,6 +161,9 @@ class EvalEventStream:
         self._bot_turn_open = False
         self._bot_transcribed = asyncio.Event()
         self._bot_transcribed.set()
+        # Whether the bot closed the connection. Kept apart from its queued
+        # bot_ended event, which a drop of the bot's pending output discards.
+        self._bot_ended = False
 
     @property
     def bot_speaking(self) -> bool:
@@ -227,6 +234,11 @@ class EvalEventStream:
         """The bot began a spoken turn."""
         self._bot_turn_open = True
         self._bot_transcribed.clear()
+
+    def bot_ended(self) -> None:
+        """The bot closed the connection: it sends nothing more, and is no longer speaking."""
+        self._bot_ended = True
+        self._bot_quiet.set()
 
     def _update_bot_transcribed(self) -> None:
         if (
@@ -332,6 +344,10 @@ class EvalEventStream:
 
         Raises:
             TimeoutError: If none arrives before ``deadline``.
+            EvalBotEndedError: If the bot ended the call and none is left to
+                arrive. The harness's transcription of what the bot said last
+                (audio mode) is waited for first, since it can land after the
+                bot is gone.
         """
 
         def wanted(event: dict) -> bool:
@@ -344,6 +360,12 @@ class EvalEventStream:
                     self._trace.log(f"match: {event_type!r} from earlier in the turn")
                     return self._turn_log[i]
         while True:
+            if self._bot_ended and self._queue.empty():
+                if not await self.wait_bot_transcribed(deadline - time.monotonic()):
+                    raise TimeoutError()
+                # A transcription that yields text queues its event as it closes.
+                if self._queue.empty():
+                    raise EvalBotEndedError()
             event = await self.next_any(deadline)
             self._turn_log.append(event)
             if wanted(event):

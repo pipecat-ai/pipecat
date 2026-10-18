@@ -45,7 +45,7 @@ from pipecat.evals.client import (
     _PersonaTurnRelay,
     _tag_bot_segments,
 )
-from pipecat.evals.events import EvalEventStream
+from pipecat.evals.events import EvalBotEndedError, EvalEventStream
 from pipecat.evals.matcher import ExpectationMatcher
 from pipecat.evals.persona import EvalPersona
 from pipecat.evals.results import EvalTrace
@@ -56,6 +56,7 @@ from pipecat.evals.scenario import (
     EvalScriptTurn,
     EvalSendAfter,
 )
+from pipecat.evals.script_driver import EvalScriptDriver
 from pipecat.evals.script_session import EvalScriptSession
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
@@ -827,6 +828,81 @@ class TestBotTranscribed(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(await s.wait_bot_transcribed(0.01))
 
 
+class TestBotEnded(unittest.IsolatedAsyncioTestCase):
+    """Once the bot ends the call, a wait for its next event fails at once, after anything still on its way."""
+
+    async def test_a_wait_fails_at_once_once_the_bot_ended_the_call(self):
+        s = _stream()
+        s.frame_to_event(BotStartedSpeakingFrame())
+        s.bot_ended()
+        await s.append({"type": "bot_ended"})
+        self.assertFalse(s.bot_speaking)
+        started = time.monotonic()
+        with self.assertRaises(EvalBotEndedError):
+            await s.next_event("llm_response", time.monotonic() + 5)
+        self.assertLess(time.monotonic() - started, 1)
+
+    async def test_an_event_queued_before_the_bot_ended_still_matches(self):
+        s = _stream()
+        await s.append({"type": "llm_response", "text": "Goodbye!"})
+        s.bot_ended()
+        await s.append({"type": "bot_ended"})
+        event = await s.next_event("llm_response", time.monotonic() + 5)
+        self.assertEqual(event["text"], "Goodbye!")
+
+    async def test_a_transcript_landing_after_the_bot_ended_still_matches(self):
+        s = _stream(bot_audio=True)
+        s.bot_turn_started()
+        s.bot_ended()
+        wait = asyncio.create_task(s.next_event("response", time.monotonic() + 5))
+        await asyncio.sleep(0.05)
+        self.assertFalse(wait.done())
+        await s.bot_turn_stopped("Goodbye!")
+        self.assertEqual((await wait)["text"], "Goodbye!")
+
+    async def test_dropping_the_queued_bot_ended_event_keeps_the_call_ended(self):
+        s = _stream()
+        s.bot_ended()
+        await s.append({"type": "bot_ended"})
+        s.drop_pending_bot_output("before send")
+        with self.assertRaises(EvalBotEndedError):
+            await s.next_event("llm_response", time.monotonic() + 5)
+
+    async def test_an_empty_reply_then_the_bot_ending_fails_at_once(self):
+        m = _matcher()
+        await m._stream.append({"type": "llm_response", "text": ""})
+        m._stream.bot_ended()
+        expectation = EvalExpectation(event="llm_response", text_contains="Berlin")
+        with self.assertRaises(EvalBotEndedError):
+            await m.match(expectation, time.monotonic(), 5000, 0, 0)
+
+    async def test_the_driver_fails_the_turn_as_the_bot_ended_it(self):
+        progress = []
+
+        async def on_progress(p):
+            progress.append(p)
+
+        stream = _stream()
+        turn = EvalScriptTurn(user="hi", expect=[EvalExpectation(event="llm_response")])
+        driver = EvalScriptDriver(
+            scenario=EvalScriptScenario(name="t", turns=[turn]),
+            default_timeout_ms=5000,
+            client=None,
+            stream=stream,
+            judge=None,
+            trace=EvalTrace(),
+            progress=on_progress,
+        )
+        stream.bot_ended()
+
+        failures = await driver._match_expectations(turn, 0)
+
+        self.assertEqual([f.kind for f in failures], ["bot_ended"])
+        self.assertIn("the bot ended the call", failures[0].reason)
+        self.assertFalse(driver.turns[0].expectations[0].passed)
+        self.assertEqual(progress[-1].status, "failed")
+
+
 class TestMatchAbsent(unittest.IsolatedAsyncioTestCase):
     """An ``absent: true`` expectation passes on a quiet window, fails on arrival."""
 
@@ -838,6 +914,14 @@ class TestMatchAbsent(unittest.IsolatedAsyncioTestCase):
         failure = await s.match(expectation, time.monotonic(), 100, 0, 0)
         self.assertIsNone(failure)
         self.assertIn("no 'llm_response'", s.last_match_text)
+
+    async def test_absent_passes_when_the_bot_ends_the_call(self):
+        s = _matcher()
+        s._stream.bot_ended()
+        expectation = EvalExpectation(event="llm_response", absent=True)
+        failure = await s.match(expectation, time.monotonic(), 5000, 0, 0)
+        self.assertIsNone(failure)
+        self.assertIn("before the bot ended the call", s.last_match_text)
 
     async def test_absent_fails_when_event_arrives(self):
         import time

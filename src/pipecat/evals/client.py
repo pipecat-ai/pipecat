@@ -916,6 +916,7 @@ class EvalClient:
             # Before bot-ready a close is a refusal, such as Pipecat Cloud's
             # bot-starter turning away a session over the agent's limit.
             self._refuse("closed_before_ready", _close_description(websocket))
+            self._stream.bot_ended()
             await self._stream.append({"type": BOT_ENDED_EVENT})
 
         return transport

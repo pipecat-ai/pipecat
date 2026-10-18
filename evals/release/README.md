@@ -145,7 +145,7 @@ Each run writes to `test-runs/<name>/`, a timestamp unless you pass `-n`:
 Other flags: `-c` for concurrency, `-t` for the default timeout of an
 expectation without its own `within_ms`, and `--no-cache` to synthesize the
 user's audio again instead of reusing it. The suite keeps `concurrency` runs
-going, taking the next one in manifest order, so a bot's scenarios finish
+going, taking the next one in manifest order, so an entry's scenarios finish
 together. An entry whose provider rate-limits sets its own `concurrency:`, and
 never has more than that many runs going at once.
 
