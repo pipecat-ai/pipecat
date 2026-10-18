@@ -1634,13 +1634,14 @@ wheels = [
 
 [[package]]
 name = "daily-python"
-version = "0.33.0"
+version = "0.36.0"
 source = { registry = "https://pypi.org/simple" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/eb/cb/22165e19418d6ace0474e4a0a54f169de173cb1748112d494fcd924c742b/daily_python-0.33.0-cp38-abi3-macosx_13_0_arm64.whl", hash = "sha256:324bd8c2a7202994a222a9f9460f1a6e0712efe5ab0e16b478c442bc3dd48ea8", size = 11910620, upload-time = "2026-09-25T21:10:38.586Z" },
-    { url = "https://files.pythonhosted.org/packages/b4/34/57df138f62b94439310b35ce9156e2c7159b3eb25858530a722d1ad09bc8/daily_python-0.33.0-cp38-abi3-macosx_13_0_x86_64.whl", hash = "sha256:6eeb93642069082a086c264404dcb81832dd71c386dcf99b55af749389b0ddc8", size = 13236726, upload-time = "2026-09-25T21:10:41.145Z" },
-    { url = "https://files.pythonhosted.org/packages/f2/f4/15b2568816eba688ac11a6c2d785d419fd7274b01d9e59fa10d5c1b54d8a/daily_python-0.33.0-cp38-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:33d3ab7414f4b929ab472c58b1e2f30b3d254a89a764c92404ed1b6e139fd793", size = 14299286, upload-time = "2026-09-25T21:10:43.689Z" },
-    { url = "https://files.pythonhosted.org/packages/d9/4b/b4d9261e4d2859046d4d2c8b5045ddf8567d2ab67c0a544af7f78efb3b9f/daily_python-0.33.0-cp38-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:36e8a2e0a580fd6583c950e64822722693353c7831a58afa3a6e0ee476b74d7c", size = 15057464, upload-time = "2026-09-25T21:10:46.326Z" },
+    { url = "https://files.pythonhosted.org/packages/2c/38/b5a404007cbc5aa3594351b23df858963d1cba2e51789d798e4331ab3175/daily_python-0.36.0-cp38-abi3-macosx_13_0_arm64.whl", hash = "sha256:2330f709756d3abadd29d997bfdfa20097c2c246c844eda25a0a2b429c1323d2", size = 12551072, upload-time = "2026-10-17T00:54:01.949Z" },
+    { url = "https://files.pythonhosted.org/packages/13/a4/c20c214de18ef438ebbce5892e07848935da0b29541d28889cec6795c9ae/daily_python-0.36.0-cp38-abi3-macosx_13_0_x86_64.whl", hash = "sha256:fb29ddbafc5997aedbca5466f7de9c259d4aad8a69af6d284d0985b7921ce3a2", size = 13806674, upload-time = "2026-10-17T00:54:04.948Z" },
+    { url = "https://files.pythonhosted.org/packages/b4/f3/982c85d1b44a3babfd915c56054b2974391d84980c7698f31896eae4a7ec/daily_python-0.36.0-cp38-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:61f7806937f6cbf0f2e622df0f70ede3be7cd52f32e81b86c880130b093198d2", size = 14305211, upload-time = "2026-10-17T00:54:07.729Z" },
+    { url = "https://files.pythonhosted.org/packages/8f/b5/a70a012bdf11a2bcd85a96f075a8da9c957d3e67134cd044dd242debcb63/daily_python-0.36.0-cp38-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:18b5dbf1bb4d4aea4708a958573e8f95c02c78ca23e1d42354efc7eb92c1402b", size = 15066700, upload-time = "2026-10-17T00:54:10.374Z" },
+    { url = "https://files.pythonhosted.org/packages/04/03/f59f8cae3630aa8c76cdec1dc0cf6d9972c272a59366023b60c52e50d090/daily_python-0.36.0-cp38-abi3-win_amd64.whl", hash = "sha256:743f855d77e4eb71efc3dabcacf6110e8cdfcc3febba933256ab3211cf3dd7ac", size = 13751386, upload-time = "2026-10-17T00:54:12.893Z" },
 ]
 
 [[package]]
@@ -5791,6 +5792,9 @@ pocket-tts = [
 redis = [
     { name = "redis", extra = ["hiredis"] },
 ]
+rime = [
+    { name = "rime-api" },
+]
 rnnoise = [
     { name = "pyrnnoise" },
 ]
@@ -5885,7 +5889,7 @@ requires-dist = [
     { name = "camb-sdk", marker = "extra == 'camb'", specifier = ">=1.5.4,<2" },
     { name = "coremltools", marker = "extra == 'local-smart-turn'", specifier = ">=8.0" },
     { name = "cryptography", marker = "extra == 'moq'", specifier = ">=45.0.0" },
-    { name = "daily-python", marker = "extra == 'daily'", specifier = ">=0.29.0,<1" },
+    { name = "daily-python", marker = "extra == 'daily'", specifier = ">=0.36.0,<1" },
     { name = "deepgram-sdk", marker = "extra == 'deepgram'", specifier = ">=6.1.1,<8" },
     { name = "docstring-parser", specifier = ">=0.16,<1" },
     { name = "einops", marker = "extra == 'moondream'", specifier = ">=0.8.0,<1" },
@@ -5962,6 +5966,7 @@ requires-dist = [
     { name = "requests", marker = "extra == 'piper'", specifier = ">=2.32.5,<3" },
     { name = "resampy", specifier = "~=0.4.3" },
     { name = "rich", marker = "extra == 'cli'", specifier = ">=13.0.0,<14" },
+    { name = "rime-api", marker = "extra == 'rime'", specifier = "~=0.4.0" },
     { name = "ruff", marker = "extra == 'cli'", specifier = ">=0.12.1,<1" },
     { name = "sarvamai", marker = "extra == 'sarvam'", specifier = "==0.1.28" },
     { name = "sentencex", specifier = "==1.0.32" },
@@ -5984,7 +5989,7 @@ requires-dist = [
     { name = "wait-for2", marker = "python_full_version < '3.12'", specifier = ">=0.4.1,<1" },
     { name = "websockets", specifier = ">=13.1" },
 ]
-provides-extras = ["aic", "anthropic", "assemblyai", "asyncai", "aws", "aws-nova-sonic", "azure", "baseten", "bland", "cartesia", "camb", "cerebras", "cloudflare", "crusoe", "daily", "deepgram", "deepseek", "elevenlabs", "evals", "fal", "fireworks", "fish", "funasr", "gladia", "google", "gradium", "grok", "groq", "gstreamer", "heygen", "hume", "inception", "inworld", "jev", "keenable", "koala", "kokoro", "langchain", "lemonslice", "livekit", "local", "local-smart-turn", "mcp", "mem0", "meta", "mistral", "mlx-whisper", "moondream", "moonshine", "moq", "nebius", "neuphonic", "novita", "nvidia", "openai", "rnnoise", "openrouter", "perplexity", "pgmq", "piper", "pocket-tts", "qwen", "redis", "resembleai", "rime", "runner", "sagemaker", "sambanova", "sarvam", "sentry", "silero", "simli", "smallest", "soniox", "soundfile", "speechify", "speechmatics", "strands", "tavus", "together", "tracing", "typesafe", "ultravox", "vonage-video-connector", "webrtc", "webrtc-video", "websocket", "whisper", "xai", "cli"]
+provides-extras = ["aic", "anthropic", "assemblyai", "asyncai", "aws", "aws-nova-sonic", "azure", "baseten", "bland", "cartesia", "camb", "cerebras", "cloudflare", "crusoe", "daily", "deepgram", "deepseek", "elevenlabs", "evals", "fal", "fireworks", "fish", "funasr", "gladia", "google", "gradium", "grok", "groq", "gstreamer", "heygen", "hume", "inception", "inworld", "jev", "keenable", "koala", "kokoro", "langchain", "lemonslice", "livekit", "local", "local-smart-turn", "mcp", "mem0", "meta", "minimax", "mistral", "mlx-whisper", "moondream", "moonshine", "moq", "nebius", "neuphonic", "novita", "nvidia", "ollama", "openai", "openclaw", "rnnoise", "openrouter", "perplexity", "pgmq", "piper", "pocket-tts", "qwen", "redis", "resembleai", "rime", "runner", "sagemaker", "sambanova", "sarvam", "sentry", "silero", "simli", "smallest", "soniox", "soundfile", "speechify", "speechmatics", "strands", "tavus", "together", "tracing", "typesafe", "ultravox", "vonage-video-connector", "webrtc", "webrtc-video", "websocket", "whisper", "xai", "xtts", "cli"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -7781,6 +7786,19 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/3d/73/463687fb803db4c97fbe3d54354a8030b908e9685f29f4556335dc65c94c/rignore-0.8.1-pp311-pypy311_pp73-musllinux_1_2_armv7l.whl", hash = "sha256:4cc3003a462778a75aadabde87edebc0e1d205c119c703c155bb03a4f3e8be23", size = 1137382, upload-time = "2026-08-04T22:27:02.931Z" },
     { url = "https://files.pythonhosted.org/packages/70/6f/6d90ff36a046d2d05c55c9f8d6287e3d5a8ebe0fddd50dce8872019d4462/rignore-0.8.1-pp311-pypy311_pp73-musllinux_1_2_i686.whl", hash = "sha256:0dc7765f94d6660574d648c89e28c9932248499d47dad49c2786f2e49231e1d9", size = 1147729, upload-time = "2026-08-04T22:27:04.729Z" },
     { url = "https://files.pythonhosted.org/packages/d8/de/d2c11ed977298cee41c23b6625da9f816ba9f7b91005dfb6674cc0bec09c/rignore-0.8.1-pp311-pypy311_pp73-musllinux_1_2_x86_64.whl", hash = "sha256:f7b929db3f8f3fa240b0f328453de0b1b747e51b7992a9198c8412d16f4f0027", size = 1144578, upload-time = "2026-08-04T22:27:06.473Z" },
+]
+
+[[package]]
+name = "rime-api"
+version = "0.4.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "googleapis-common-protos" },
+    { name = "protobuf" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/64/83/744175410cb0bbcc3a67cbb1655dd55ef7a77d411aa8eea367834366b546/rime_api-0.4.0.tar.gz", hash = "sha256:ffd20f8c07d2c017c0f818838888e4fefa80c1d0332bd41d2e6f1afa9c339da2", size = 33586, upload-time = "2026-10-10T06:07:46.798Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/25/ba/3d9aa0cc37a73afd4dc0fa5db41ddc151eef90c8e43eb6b60617ed093a48/rime_api-0.4.0-py3-none-any.whl", hash = "sha256:0f4b899424d97b36d69a56ee12f3051cc4d18e1f605250fc3e50aa81a2cbabc4", size = 43524, upload-time = "2026-10-10T06:07:45.865Z" },
 ]
 
 [[package]]

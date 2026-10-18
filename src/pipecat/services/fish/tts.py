@@ -395,8 +395,7 @@ class FishAudioTTSService(InterruptibleTTSService):
                         event = msg.get("event")
                         if event == "audio":
                             audio_data = msg.get("audio")
-                            # Only process larger chunks to remove msgpack overhead
-                            if audio_data and len(audio_data) > 1024:
+                            if audio_data:
                                 context_id = self.get_active_audio_context_id()
                                 frame = TTSAudioRawFrame(
                                     audio_data,

@@ -49,8 +49,10 @@ To judge with OpenAI's [Decisions API](https://developers.openai.com/api/docs/gu
 instead, set `factory: evals.judges.openai_classifier`. It needs the `openai`
 extra and `OPENAI_API_KEY` exported.
 
-Jev gives verdicts but not reasons. So a local LLM, the **explainer**, writes
-the reason for every `no` and for every verdict Jev is not sure about. Jev's
+These classifiers give verdicts but not reasons. So a local LLM, the
+**explainer**, is told every `no` and every verdict the classifier is not sure
+about, and points to what in the conversation supports it. That is evidence to
+check the verdict against, not how the classifier reached it. The classifier's
 verdict always stands.
 
 **A local LLM.** The explainer, and the caller in simulations, run `gemma4:12b`
@@ -134,13 +136,16 @@ Each run writes to `test-runs/<name>/`, a timestamp unless you pass `-n`:
   here when a run fails.
 - `logs/<bot>__<scenario>.debug.log`: the full logs of every pipeline the
   harness ran (user speech, transcription, judge, harness).
+- `logs/<bot>__<scenario>.conversation.json`: a simulation's conversation,
+  what each side said and the calls the bot made, one bot turn per
+  `assistant` message (see `pipecat.evals.conversation`).
 - `recordings/<bot>__<scenario>.wav`: the conversation audio of an audio
   scenario. The manifest sets `record: true`; `-a` forces it on.
 
 Other flags: `-c` for concurrency, `-t` for the default timeout of an
 expectation without its own `within_ms`, and `--no-cache` to synthesize the
 user's audio again instead of reusing it. The suite keeps `concurrency` runs
-going, taking the next one in manifest order, so a bot's scenarios finish
+going, taking the next one in manifest order, so an entry's scenarios finish
 together. An entry whose provider rate-limits sets its own `concurrency:`, and
 never has more than that many runs going at once.
 
@@ -379,6 +384,44 @@ TTS and turn taking against a caller of its own. The file format is in the
 docstring. Run one by hand with `pipecat eval run
 scenarios/simulated/<name>.yaml --bot-url ws://localhost:7860/ws -v`, which prints
 the conversation as it happens.
+
+### Judging a conversation again
+
+Every simulation run saves its conversation to
+`logs/<bot>__<scenario>.conversation.json`. `pipecat eval judge` judges saved
+conversations against a simulation's `success` and its judged metrics, without
+running the bot again, so you can change the wording of either and see what
+the judge makes of the same conversations:
+
+```sh
+uv run python -m pipecat.evals judge evals/release/scenarios/simulated/book_table.yaml \
+    -s available evals/release/test-runs/<name>/logs/*__book_table__available.conversation.json
+```
+
+Each conversation gets one line in `judged.jsonl` (`-o` to change it):
+whether the goal was met and every metric's score, with a reason for every
+verdict, passes included, and the text of the turn each one is about. The line
+keeps the `success` and every `criterion` as they were worded, so you can tell
+which wording each verdict was judged on. Measured metrics are left out, since
+a conversation has nothing to measure. Run it from the repository root, as
+above, where a judge `factory:` such as `evals.judges` resolves.
+
+A real call is judged the same way. `EvalConversationObserver` records a bot's
+conversation in the same format and reports it once the pipeline is done:
+
+```python
+from pipecat.evals.conversation_observer import EvalConversationObserver
+
+observer = EvalConversationObserver()
+
+
+@observer.event_handler("on_conversation_ended")
+async def on_conversation_ended(observer, message):
+    Path("call.conversation.json").write_text(json.dumps(message.conversation, indent=2))
+
+
+worker = PipelineWorker(pipeline, observers=[observer])
+```
 
 ## Adding coverage
 

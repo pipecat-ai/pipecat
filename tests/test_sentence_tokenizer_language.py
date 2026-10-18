@@ -42,7 +42,7 @@ class RecordingTTS(TTSService):
     async def run_tts(self, text, context_id):
         yield None
 
-    async def _push_tts_frames(self, frame: AggregatedTextFrame, *args, **kwargs):
+    async def _handle_aggregated_text(self, frame: AggregatedTextFrame, *args, **kwargs):
         self.sentences.append((frame.text, self.text_aggregation_language))
 
 

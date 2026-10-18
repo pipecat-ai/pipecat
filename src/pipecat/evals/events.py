@@ -21,7 +21,7 @@ scenario ``event:``             RTVI server message(s)
 ``user_stopped_speaking``       ``user-stopped-speaking``
 ``vad_user_started_speaking``   ``vad-user-started-speaking`` (raw VAD, ungated by turn detection)
 ``vad_user_stopped_speaking``   ``vad-user-stopped-speaking`` (raw VAD, ungated by turn detection)
-``user_transcription``          ``user-transcription`` (final only)
+``user_transcription``          ``user-input`` of type ``transcription`` (final only)
 ``llm_started``                 ``bot-llm-started``
 ``llm_response``                the LLM text: ``bot-llm-text`` joined at ``bot-llm-stopped``
 ``llm_marker``                  ``bot-llm-marker``: the sideband marker the LLM emitted in a
@@ -43,6 +43,13 @@ scenario ``event:``             RTVI server message(s)
 ``image``                       ``eval-bot-image``: an image the bot output, with
                                 its ``width``, ``height``, and ``format``; sent
                                 only on request
+``bot_backchannel``             ``bot-output`` of type ``backchannel``, once spoken
+                                to the end: a short acknowledgment the bot said
+                                while the user talked, such as "Mm-hmm."
+``user_backchannel``            ``user-input`` of type ``backchannel``: a short
+                                acknowledgment the user said while the bot
+                                talked, which neither interrupted it nor reached
+                                the LLM
 ==========================      ==============================================
 """
 
@@ -74,6 +81,10 @@ from pipecat.frames.frames import (
 # The bot's reports that end its current turn: what it produced so far is not
 # its reply to what comes next.
 _INTERRUPTION_EVENTS = ("user_started_speaking", "bot_interrupted")
+
+
+class EvalBotEndedError(Exception):
+    """The bot ended the call before the awaited event arrived, so it never will."""
 
 
 class EvalEventStream:
@@ -131,6 +142,10 @@ class EvalEventStream:
         # reply, however late its transcription lands (audio mode).
         self._input_sent_at: float = 0.0
         self._talked_over_until: float | None = None
+        # Whether the turn sends nothing and waits for the bot's next speech,
+        # which is its reply whether or not the bot's LLM produced it (a
+        # presence check, say). Cleared when the bot starts speaking.
+        self._observing: bool = False
         # Whether the bot is speaking, by its own report: cleared when it
         # starts, set when it stops or is interrupted. An event, so a driver
         # that must not talk over the bot can wait for it without polling.
@@ -146,6 +161,9 @@ class EvalEventStream:
         self._bot_turn_open = False
         self._bot_transcribed = asyncio.Event()
         self._bot_transcribed.set()
+        # Whether the bot closed the connection. Kept apart from its queued
+        # bot_ended event, which a drop of the bot's pending output discards.
+        self._bot_ended = False
 
     @property
     def bot_speaking(self) -> bool:
@@ -154,10 +172,11 @@ class EvalEventStream:
 
     @property
     def talked_over_until(self) -> float | None:
-        """Monotonic time the bot started speaking again after the user's latest send talked over it.
+        """Monotonic time the bot started speaking again after the latest turn began.
 
-        The bot's speech that began before then is what it was saying when the
-        send talked over it. Infinity until the bot starts speaking again, and
+        The bot's speech that began before then belongs to the turn before:
+        what it was saying when a send talked over it, or the reply an observing
+        turn waited out. Infinity until the bot starts speaking again, and
         ``None`` when the latest send did not talk over it.
         """
         return self._talked_over_until
@@ -215,6 +234,11 @@ class EvalEventStream:
         """The bot began a spoken turn."""
         self._bot_turn_open = True
         self._bot_transcribed.clear()
+
+    def bot_ended(self) -> None:
+        """The bot closed the connection: it sends nothing more, and is no longer speaking."""
+        self._bot_ended = True
+        self._bot_quiet.set()
 
     def _update_bot_transcribed(self) -> None:
         if (
@@ -320,6 +344,10 @@ class EvalEventStream:
 
         Raises:
             TimeoutError: If none arrives before ``deadline``.
+            EvalBotEndedError: If the bot ended the call and none is left to
+                arrive. The harness's transcription of what the bot said last
+                (audio mode) is waited for first, since it can land after the
+                bot is gone.
         """
 
         def wanted(event: dict) -> bool:
@@ -332,6 +360,12 @@ class EvalEventStream:
                     self._trace.log(f"match: {event_type!r} from earlier in the turn")
                     return self._turn_log[i]
         while True:
+            if self._bot_ended and self._queue.empty():
+                if not await self.wait_bot_transcribed(deadline - time.monotonic()):
+                    raise TimeoutError()
+                # A transcription that yields text queues its event as it closes.
+                if self._queue.empty():
+                    raise EvalBotEndedError()
             event = await self.next_any(deadline)
             self._turn_log.append(event)
             if wanted(event):
@@ -434,6 +468,9 @@ class EvalEventStream:
             self._bot_quiet.clear()
             if self._talked_over_until == math.inf:
                 self._talked_over_until = time.monotonic()
+            if self._observing:
+                self._observing = False
+                self._awaiting_reply = False
             return {"type": "bot_started_speaking"}
         elif isinstance(frame, BotStoppedSpeakingFrame):
             self._bot_quiet.set()
@@ -509,6 +546,18 @@ class EvalEventStream:
         self._awaiting_reply = True
         self._input_sent_at = time.monotonic()
         self._talked_over_until = math.inf if self.bot_speaking else None
+        self._observing = False
+
+    def observing_boundary(self) -> None:
+        """Start a turn that sends nothing: what the bot says next belongs to it.
+
+        What the bot says until it starts speaking again, however late its
+        transcription lands, is the previous turn's and is discarded. What it
+        says from then on is the turn's, even when its LLM did not produce it.
+        """
+        self.turn_boundary()
+        self._talked_over_until = math.inf
+        self._observing = True
 
     def _interrupted(self) -> None:
         """The bot reported an interruption: drop its pending output and wait for a fresh reply."""
@@ -532,10 +581,10 @@ class EvalEventStream:
             return {"type": "vad_user_started_speaking"}
         elif msg_type == "vad-user-stopped-speaking":
             return {"type": "vad_user_stopped_speaking"}
-        elif msg_type == "user-transcription":
-            if data.get("final", True):
-                return {"type": "user_transcription", "transcript": data.get("text", "")}
-            return None
+        elif msg_type == "bot-output":
+            return self._bot_backchannel_event(data)
+        elif msg_type == "user-input":
+            return self._user_input_event(data)
         elif msg_type == EVAL_BOT_IMAGE_TYPE:
             return {
                 "type": "image",
@@ -544,6 +593,25 @@ class EvalEventStream:
                 "format": data.get("format"),
             }
         return None
+
+    def _user_input_event(self, data: dict) -> dict | None:
+        """The user's final transcription or backchannel, from a ``user-input``."""
+        input_type = data.get("input_type")
+        if input_type == "transcription" and data.get("final"):
+            return {"type": "user_transcription", "transcript": data.get("text", "")}
+        elif input_type == "backchannel":
+            return {"type": "user_backchannel", "text": data.get("text", "")}
+        return None
+
+    def _bot_backchannel_event(self, data: dict) -> dict | None:
+        """The bot's backchannel, from the ``bot-output`` reporting it was spoken to the end."""
+        if data.get("text_type") != "backchannel" or data.get("spoken_status") != "completed":
+            return None
+        progress = data.get("spoken_progress") or {}
+        return {
+            "type": "bot_backchannel",
+            "text": progress.get("accumulated_text") or data.get("text", ""),
+        }
 
     def _segment_event(self, event_type: str, text: str) -> dict:
         """One response segment; the text may be empty, as after an interruption."""

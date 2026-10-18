@@ -45,6 +45,7 @@ from pipecat.frames.frames import (
     LLMContextAssistantTurnFrame,
     LLMContextFrame,
     LLMContextSummaryRequestFrame,
+    LLMContextUserTurnFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMarkerFrame,
@@ -967,6 +968,9 @@ class LLMUserAggregator(LLMContextAggregator):
         await self.reset()
         self._context.add_message(
             cast(LLMContextMessage, {"role": self.role, "content": aggregation})
+        )
+        await self.broadcast_frame(
+            LLMContextUserTurnFrame, text=aggregation, timestamp=self._user_turn_start_timestamp
         )
         if run_llm:
             await self.push_context_frame()

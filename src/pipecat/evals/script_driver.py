@@ -12,7 +12,7 @@ from collections.abc import Awaitable, Callable
 
 from pipecat.evals.base_driver import BaseEvalDriver
 from pipecat.evals.client import EvalClient
-from pipecat.evals.events import EvalEventStream
+from pipecat.evals.events import EvalBotEndedError, EvalEventStream
 from pipecat.evals.judge import EvalJudge
 from pipecat.evals.matcher import ExpectationMatcher
 from pipecat.evals.results import (
@@ -24,7 +24,12 @@ from pipecat.evals.results import (
     EvalScriptTurnResult,
     EvalTrace,
 )
-from pipecat.evals.script import EvalScriptScenario, EvalScriptTurn, EvalSendAfter
+from pipecat.evals.script import (
+    EvalExpectation,
+    EvalScriptScenario,
+    EvalScriptTurn,
+    EvalSendAfter,
+)
 
 SEND_AFTER_MAX_WAIT_S = 30.0
 # How long a turn waits for the bot to finish speaking before it is sent. A
@@ -199,7 +204,7 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
         await self._stream.wait_bot_quiet(BOT_QUIET_MAX_WAIT_S)
         await self._stream.wait_bot_transcribed(BOT_QUIET_MAX_WAIT_S)
         self._stream.drop_pending_bot_output("the previous reply")
-        self._stream.turn_boundary()
+        self._stream.observing_boundary()
 
     async def _await_send_after(
         self, send_after: EvalSendAfter, turn_idx: int
@@ -269,7 +274,7 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
         if turn.image is not None:
             await self._client.send_image(turn.image)
         if turn.user is not None:
-            await self._say(turn.user, audio_file=turn.audio)
+            await self._say(turn.user, audio_file=turn.audio, parts=turn.parts)
         elif turn.dtmf is not None:
             await self._press(turn.dtmf)
 
@@ -279,7 +284,8 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
         """Match the turn's expectations in order, all within one deadline anchored at the send.
 
         A stalled turn then fails within a single ``within_ms`` budget rather than
-        one budget per expectation.
+        one budget per expectation, and a turn whose bot ended the call fails at
+        once.
         """
         failures: list[EvalAssertionFailure] = []
         resolved = self.turns[turn_idx].expectations
@@ -292,19 +298,12 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
                 )
             except TimeoutError:
                 reason = f"no matching {expectation.event!r} event arrived within {budget_ms}ms"
+                failures.append(await self._unmatched(turn_idx, exp_idx, expectation, reason))
+                break
+            except EvalBotEndedError:
+                reason = f"the bot ended the call before a matching {expectation.event!r} event"
                 failures.append(
-                    EvalAssertionFailure(
-                        turn_index=turn_idx,
-                        expectation_index=exp_idx,
-                        event_name=expectation.event,
-                        reason=reason,
-                        kind="timeout",
-                    )
-                )
-                resolved.append(EvalExpectationResult(exp_idx, expectation.event, passed=False))
-                self._trace.log(f"FAIL: {expectation.event}: {reason}")
-                await self._progress(
-                    EvalScriptTurnProgress(turn_idx, exp_idx, expectation.event, "timeout", reason)
+                    await self._unmatched(turn_idx, exp_idx, expectation, reason, "bot_ended")
                 )
                 break
 
@@ -326,3 +325,28 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
                     EvalScriptTurnProgress(turn_idx, exp_idx, expectation.event, "matched", matched)
                 )
         return failures
+
+    async def _unmatched(
+        self,
+        turn_idx: int,
+        exp_idx: int,
+        expectation: EvalExpectation,
+        reason: str,
+        kind: str = "timeout",
+    ) -> EvalAssertionFailure:
+        """Record an expectation whose event never arrived, and return its failure."""
+        self.turns[turn_idx].expectations.append(
+            EvalExpectationResult(exp_idx, expectation.event, passed=False)
+        )
+        self._trace.log(f"FAIL: {expectation.event}: {reason}")
+        status = "timeout" if kind == "timeout" else "failed"
+        await self._progress(
+            EvalScriptTurnProgress(turn_idx, exp_idx, expectation.event, status, reason)
+        )
+        return EvalAssertionFailure(
+            turn_index=turn_idx,
+            expectation_index=exp_idx,
+            event_name=expectation.event,
+            reason=reason,
+            kind=kind,
+        )

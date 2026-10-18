@@ -845,10 +845,12 @@ class LLMWithBackend(Pipeline):
         return self._connector.tool
 
     async def setup(self, setup: FrameProcessorSetup):
-        """Set up the frontend, register a local backend worker as a child of the pipeline worker, and open the session."""
-        await super().setup(setup)
+        """Register a local backend worker as a child of the pipeline worker, set up the frontend, and open the session."""
+        # Before setting the frontend up: it gets the StartFrame as soon as its
+        # own setup is done, and can delegate from then on.
         if isinstance(self._backend, BackendLLMWorker):
-            await self.pipeline_worker.add_workers(self._backend)
+            await setup.pipeline_worker.add_workers(self._backend)
+        await super().setup(setup)
         self._session_task = self.create_task(
             self._connector.run_session(self.pipeline_worker, self._frontend),
             f"{self}::backend_session",

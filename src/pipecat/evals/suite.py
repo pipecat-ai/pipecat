@@ -70,17 +70,18 @@ paths belongs in a file for that reason.
     Will be removed in 2.0.0.
 
 An entry's ``name:`` is its label: what the display, the ``-p`` filter, the
-results records and the artifact file names use, and what an entry's own
-``concurrency:`` is keyed on. It defaults to the ``bot:`` path, so it is only
-needed when several entries share a bot, as when sweeping a model with
-``runner_body:``; two entries may not run the same scenario under the same
-label.
+results records and the artifact file names use. It defaults to the ``bot:``
+path, so it is only needed when several entries share a bot, as when sweeping
+a model with ``runner_body:``; two entries may not run the same scenario under
+the same label.
 
 ``concurrency`` is how many runs execute at once. The suite keeps that many
 going, taking the next run from the first entry in manifest order that still
 has one, so an entry's scenarios finish together and no slot waits while any
 entry still has runs. An entry whose provider rate-limits sets its own
-``concurrency:``, and never has more than that many runs in flight.
+``concurrency:``, and never has more than that many runs in flight. Two
+entries for the same bot stay separate: each keeps its place in the manifest
+order and its own cap.
 
 Manifest-relative paths (``bot``/``bots_dir``, ``scenarios_dir``,
 ``runs_dir``) resolve relative to the manifest file, so a manifest is portable;
@@ -216,7 +217,11 @@ def _append_result(
     runs that did not pass, since that is what a failure is diagnosed from.
     """
     artifacts = {"log": str(logs_dir / f"{stem}.log")}
-    for suffix, key in ((".eval.log", "eval_log"), (".debug.log", "debug_log")):
+    for suffix, key in (
+        (".eval.log", "eval_log"),
+        (".debug.log", "debug_log"),
+        (".conversation.json", "conversation"),
+    ):
         path = logs_dir / f"{stem}{suffix}"
         if path.exists():
             artifacts[key] = str(path)
@@ -280,7 +285,7 @@ def _scenario_record(run: "EvalRun", artifacts: dict) -> dict:
 
 
 def _simulation_record(run: "EvalRun", artifacts: dict) -> dict:
-    """The results.jsonl record of a simulation run: how it ended, what the judge said, each metric's score, the conversation, and for a failed run the bot's events."""
+    """The results.jsonl record of a simulation run: how it ended, what the judge said and on what wording, each metric's score, the conversation, and for a failed run the bot's events."""
     result = run.result if isinstance(run.result, EvalSimulationResult) else None
     record = {
         "bot": run.bot,
@@ -288,14 +293,18 @@ def _simulation_record(run: "EvalRun", artifacts: dict) -> dict:
         "scenario": run.scenario,
         "kind": run.kind,
         "attempt": run.attempt,
+        "success": result.success if result else "",
         "passed": bool(result and result.passed),
         "succeeded": bool(result and result.succeeded),
         "error": run.error or (result.error if result else None),
+        "confidence": result.confidence if result else None,
+        "probabilities": result.probabilities if result else {},
         "ended_by": result.ended_by if result else "error",
         "turns": result.turns if result else 0,
         "metrics": [
             {
                 "name": m.name,
+                "criterion": m.criterion,
                 "score": m.score,
                 "passed": m.passed,
                 "min_score": m.min_score,
@@ -303,7 +312,14 @@ def _simulation_record(run: "EvalRun", artifacts: dict) -> dict:
                 "reason": m.reason,
                 "failure_kind": m.failure_kind,
                 "verdicts": [
-                    {"turn": v.turn, "passed": v.passed, "verdict": v.verdict, "reason": v.reason}
+                    {
+                        "turn": v.turn,
+                        "passed": v.passed,
+                        "verdict": v.verdict,
+                        "confidence": v.confidence,
+                        "probabilities": v.probabilities,
+                        "reason": v.reason,
+                    }
                     for v in m.verdicts
                 ],
             }
@@ -326,6 +342,8 @@ def _simulation_result_from_dict(data: dict) -> EvalSimulationResult:
         simulation_name=data["simulation_name"],
         succeeded=data["succeeded"],
         reason=data.get("reason", ""),
+        confidence=data.get("confidence"),
+        probabilities=data.get("probabilities", {}),
         error=data.get("error"),
         metrics=[
             EvalSimulationMetricScore(
@@ -335,12 +353,14 @@ def _simulation_result_from_dict(data: dict) -> EvalSimulationResult:
             for m in data.get("metrics", [])
         ],
         messages=data.get("messages", []),
+        conversation=data.get("conversation", []),
         turns=data.get("turns", 0),
         ended_by=data.get("ended_by", "error"),
         end_call=data.get("end_call"),
         duration_ms=data.get("duration_ms", 0),
         events_seen=data.get("events_seen", []),
         debug_log=data.get("debug_log", []),
+        success=data.get("success", ""),
     )
 
 
@@ -403,9 +423,12 @@ class EvalRun:
         runner_body: The bot's runner-args body given inline, written to a
             file for the bot when it is spawned; ``None`` when there is none or
             it comes from ``runner_body_path``.
-        concurrency: How many runs of this bot's entry may be in flight at
+        concurrency: How many runs of this run's entry may be in flight at
             once, when its manifest entry says; ``None`` is as many as the
             suite runs.
+        entry: The position of the run's entry in the manifest's ``suite:``
+            list. The suite takes runs in entry order and applies each
+            entry's ``concurrency`` to that entry's runs only.
         attempt: 1-based attempt number when the suite repeats (see
             :attr:`EvalManifest.repeat`); always 1 for a single pass.
         status: ``pending``, ``running``, or ``done``.
@@ -429,6 +452,7 @@ class EvalRun:
     runner_body_path: Path | None = None
     runner_body: dict | None = None
     concurrency: int | None = None
+    entry: int = 0
     kind: EvalKind = EvalKind.SCRIPT
     attempts: int = 1
     sweep: bool = False
@@ -665,7 +689,7 @@ class EvalManifest:
         slow ones.
         """
         runs: list[EvalRun] = []
-        for item in data.get("suite", []):
+        for entry, item in enumerate(data.get("suite", [])):
             bot = str(item["bot"])
             bot_path = (settings.bots_dir / bot).resolve()
             name = item.get("name")
@@ -703,6 +727,7 @@ class EvalManifest:
                             runner_body_path=body.path,
                             runner_body=body.data,
                             concurrency=concurrency,
+                            entry=entry,
                             kind=kind,
                             attempts=attempts,
                             sweep=settings.repeat_given,
@@ -756,16 +781,16 @@ class _RunQueue:
     for a run to finish.
     """
 
-    def __init__(self, queues: list[tuple[str, int | None, deque[EvalRun]]]):
+    def __init__(self, queues: list[tuple[int, int | None, deque[EvalRun]]]):
         """Initialize the queue.
 
         Args:
-            queues: Each entry's runs per attempt, with the entry's label and
-                its cap on runs in flight, ``None`` for no cap.
+            queues: Each entry's runs per attempt, with the entry's position
+                and its cap on runs in flight, ``None`` for no cap.
         """
         self._queues = queues
-        self._caps = {label: cap for label, cap, _ in queues}
-        self._in_flight = {label: 0 for label, _, _ in queues}
+        self._caps = {entry: cap for entry, cap, _ in queues}
+        self._in_flight = {entry: 0 for entry, _, _ in queues}
         self._changed = asyncio.Condition()
 
     async def take(self) -> EvalRun | None:
@@ -781,14 +806,14 @@ class _RunQueue:
     async def done(self, run: EvalRun) -> None:
         """Count the run as finished, so its entry may take another."""
         async with self._changed:
-            self._in_flight[run.label] -= 1
+            self._in_flight[run.entry] -= 1
             self._changed.notify_all()
 
     def _pick(self) -> EvalRun | None:
         """The first queued run whose entry is under its cap."""
-        for label, cap, queue in self._queues:
-            if queue and (cap is None or self._in_flight[label] < cap):
-                self._in_flight[label] += 1
+        for entry, cap, queue in self._queues:
+            if queue and (cap is None or self._in_flight[entry] < cap):
+                self._in_flight[entry] += 1
                 return queue.popleft()
         return None
 
@@ -823,6 +848,7 @@ class _RunFiles:
         log: The bot's output.
         harness_log: The harness worker's output, kept only when it crashed.
         trace: The harness's decision trace, ``<prefix>.eval.log``.
+        conversation: A simulation's conversation, ``<prefix>.conversation.json``.
         config: The worker's config, the handoff in.
         result: The worker's result, the handoff out.
         body: The bot's runner-args body, written when the manifest gives it inline.
@@ -833,6 +859,7 @@ class _RunFiles:
     log: Path
     harness_log: Path
     trace: Path
+    conversation: Path
     config: Path
     result: Path
     body: Path
@@ -859,6 +886,7 @@ class _RunFiles:
             log=logs_dir / f"{prefix}.log",
             harness_log=logs_dir / f"{prefix}.harness.log",
             trace=logs_dir / f"{prefix}.eval.log",
+            conversation=logs_dir / f"{prefix}.conversation.json",
             config=logs_dir / f"{prefix}.config.json",
             result=logs_dir / f"{prefix}.result.json",
             body=logs_dir / f"{prefix}.body.json",
@@ -1059,22 +1087,21 @@ class EvalSuite(BaseObject):
             )
 
     @staticmethod
-    def _entry_queues(runs: list[EvalRun]) -> list[tuple[str, int | None, deque[EvalRun]]]:
-        """One queue per entry label and attempt, attempt-major then in manifest order, with the label and the entry's cap.
+    def _entry_queues(runs: list[EvalRun]) -> list[tuple[int, int | None, deque[EvalRun]]]:
+        """One queue per entry and attempt, attempt-major then in manifest order, with the entry and its cap.
 
-        A queue keeps its runs in manifest order. An entry's cap is the lowest
-        ``concurrency:`` among its runs, ``None`` when none sets it, and it
-        covers all of its attempts.
+        A queue keeps its runs in manifest order. An entry's cap is its
+        ``concurrency:``, ``None`` when it sets none, and it covers all of its
+        attempts.
         """
-        queues: dict[tuple[int, str], deque[EvalRun]] = {}
-        caps: dict[str, int] = {}
+        queues: dict[tuple[int, int], deque[EvalRun]] = {}
+        caps: dict[int, int | None] = {}
         for run in runs:
-            queues.setdefault((run.attempt, run.label), deque()).append(run)
-            if run.concurrency is not None:
-                caps[run.label] = min(caps.get(run.label, run.concurrency), run.concurrency)
+            queues.setdefault((run.attempt, run.entry), deque()).append(run)
+            caps[run.entry] = run.concurrency
         return [
-            (label, caps.get(label), queue)
-            for (_, label), queue in sorted(queues.items(), key=lambda item: item[0][0])
+            (entry, caps[entry], queue)
+            for (_, entry), queue in sorted(queues.items(), key=lambda item: item[0][0])
         ]
 
     def _missing_file(self, run: EvalRun) -> str | None:
@@ -1208,6 +1235,8 @@ class EvalSuite(BaseObject):
                 handoff.unlink()
         if run.result is not None and run.result.debug_log:
             files.trace.write_text("\n".join(run.result.debug_log) + "\n")
+        if isinstance(run.result, EvalSimulationResult):
+            files.conversation.write_text(json.dumps(run.result.conversation, indent=2) + "\n")
         if results_path is not None:
             _append_result(results_path, run, files.prefix, logs_dir, record_dir)
 

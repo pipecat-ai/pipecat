@@ -105,3 +105,40 @@ def test_nested_prosody_mapping_carries_normalize_loudness():
     delta = FishAudioTTSService.Settings.from_mapping({"prosody": {"normalize_loudness": False}})
 
     assert delta.prosody_normalize_loudness is False
+
+
+class _Messages:
+    """A websocket stand-in that yields the given messages, then ends."""
+
+    def __init__(self, messages):
+        self._messages = list(messages)
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        if not self._messages:
+            raise StopAsyncIteration
+        return self._messages.pop(0)
+
+
+@pytest.mark.asyncio
+async def test_short_audio_chunks_are_kept():
+    # A decoded chunk is PCM, so a short one is real audio (an utterance's tail).
+    service = FishAudioTTSService(api_key="key")
+    chunks = [b"\x01\x00" * 160, b"\x02\x00" * 1024]
+    service._websocket = _Messages(
+        ormsgpack.packb({"event": "audio", "audio": chunk}) for chunk in chunks
+    )
+    service.get_active_audio_context_id = lambda: "ctx"
+    service.stop_ttfb_metrics = AsyncMock()
+    appended = []
+
+    async def append_to_audio_context(context_id, frame):
+        appended.append(frame.audio)
+
+    service.append_to_audio_context = append_to_audio_context
+
+    await service._receive_messages()
+
+    assert appended == chunks

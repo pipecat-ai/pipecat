@@ -235,9 +235,9 @@ class MockWebSocketTTSService(TTSService):
 class MockWebSocketPauseTTSService(TTSService):
     """Simulates a WebSocket TTS service WITH frame-processing pause (e.g. ElevenLabsTTSService).
 
-    Identical to MockWebSocketTTSService except pause_frame_processing=True.
-    on_audio_context_completed() resumes downstream processing once the full
-    audio context has been pushed, guaranteeing FooFrame arrives after TTSStoppedFrame.
+    Identical to MockWebSocketTTSService except pause_frame_processing=True, so
+    frames wait until the audio context ends, guaranteeing FooFrame arrives after
+    TTSStoppedFrame.
     """
 
     def __init__(self, **kwargs):
@@ -251,10 +251,6 @@ class MockWebSocketPauseTTSService(TTSService):
 
     def can_generate_metrics(self) -> bool:
         return False
-
-    async def on_audio_context_completed(self, context_id: str):
-        # Resume frame processing after the audio context is fully played out.
-        await self._maybe_resume_frame_processing()
 
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         async def _deliver_audio():
@@ -310,12 +306,9 @@ class MockWebSocketPauseTTSServiceZeroAudioCompletion(TTSService):
     completed (isFinal) but never sends any audio bytes — e.g. a quota-
     exhausted provider that still accepts the connection.
 
-    Does NOT override on_audio_context_completed(), matching
-    ElevenLabsTTSService's actual override: it resets alignment state but never
-    calls _maybe_resume_frame_processing(). Because no TTSAudioRawFrame is ever
-    produced, the output transport's BotStartedSpeakingFrame/
-    BotStoppedSpeakingFrame never fire in production either, so the context
-    completing in silence is the only thing that can lift the pause.
+    Because no TTSAudioRawFrame is ever produced, the output transport's
+    BotStartedSpeakingFrame/BotStoppedSpeakingFrame never fire in production
+    either. The context completing lifts the pause.
     """
 
     def __init__(self, **kwargs):
@@ -349,15 +342,11 @@ class MockWebSocketPauseTTSServiceLongPlayback(TTSService):
     whose audio context completes quickly (as ElevenLabs-style providers
     typically report isFinal shortly after the last text is sent), but whose
     actual playback — tracked independently by the output transport — keeps
-    going well after the turn's LLMFullResponseEndFrame pauses frame
-    processing.
+    going well after the turn's LLMFullResponseEndFrame.
 
-    Does NOT override on_audio_context_completed(), matching
-    ElevenLabsTTSService's actual override (resets alignment state but never
-    resumes frame processing) — only BotStoppedSpeakingFrame from the output
-    transport does that, once real playback finishes. The test injects
-    BotStartedSpeakingFrame and BotStoppedSpeakingFrame directly to model the
-    output transport's behavior without a real transport in the pipeline.
+    The test injects BotStartedSpeakingFrame and BotStoppedSpeakingFrame
+    directly to model the output transport's behavior without a real transport
+    in the pipeline.
     """
 
     def __init__(self, **kwargs):
@@ -439,7 +428,7 @@ class _MockWordTimestampHttpTTSService(TTSService):
 class _MockWordTimestampWSTTSService(TTSService):
     """WebSocket-style TTS: delivers audio asynchronously via the audio context.
 
-    Word timestamps are enqueued as ``_WordTimestampEntry`` items (audio context
+    Word timestamps are enqueued as ``WordTimestamp`` items (audio context
     already exists at call time) and processed by ``_handle_audio_context`` in
     playback order.
 
@@ -978,7 +967,7 @@ async def test_ws_skipped_frame_waits_for_spoken_words():
     """Same ordering guarantee on the WebSocket / async audio delivery path.
 
     Because audio is delivered from a background task after asyncio.sleep(), the
-    skipped frame arrives at _push_frame_respecting_previous_aggregated_frame
+    skipped frame arrives at _push_skipped_text
     *before* the spoken slot's word timestamps have been processed, directly
     exercising the hold-and-flush path.
     """
@@ -1492,7 +1481,7 @@ async def test_no_deadlock_on_interrupt_before_audio_simple():
     recreates the process task, resetting __should_block_frames to False.
 
     Timeline:
-    1. LLM response → _processing_text=True.
+    1. LLM response → text sent to TTS.
     2. LLMFullResponseEndFrame → pause_processing_frames() called.
     3. (No audio from TTS yet; BotStoppedSpeakingFrame never sent.)
     4. InterruptionFrame → _start_interruption() cancels + recreates process
@@ -1539,18 +1528,18 @@ async def test_no_deadlock_on_interrupt_before_audio_with_uninterruptible():
       - BotStoppedSpeakingFrame is never sent (no audio played).
       - resume_processing_frames() is never called → deadlock.
 
-    With the fix (_maybe_resume_frame_processing() inside _handle_interruption()),
+    With the fix (_release_frames_if_audio_contexts_ended() inside _handle_interruption()),
     the event is set and the process task unblocks, allowing subsequent frames
     (FooFrame, EndFrame) to be processed.
 
     Timeline:
-    1. LLM response → _processing_text=True.
+    1. LLM response → text sent to TTS.
     2. LLMFullResponseEndFrame → pause_processing_frames().
     3. UninterruptibleMarkerFrame enters process queue.
     4. Process task picks up UninterruptibleMarkerFrame, blocks at wait().
     5. InterruptionFrame → _start_interruption() keeps the task running
        (uninterruptible) but WITHOUT the fix __should_block_frames stays True.
-    6. With the fix: _handle_interruption() calls _maybe_resume_frame_processing()
+    6. With the fix: _handle_interruption() calls _release_frames_if_audio_contexts_ended()
        → __process_event.set() → process task unblocked.
     7. FooFrame arrives downstream.
     """
@@ -1578,7 +1567,7 @@ async def test_no_deadlock_on_interrupt_before_audio_with_uninterruptible():
     foo_frames = [f for f in down if isinstance(f, FooFrame)]
     assert any(f.label == "after_interrupt" for f in foo_frames), (
         "FooFrame after interruption was not received — pipeline deadlocked "
-        "(missing _maybe_resume_frame_processing() in _handle_interruption)"
+        "(missing _release_frames_if_audio_contexts_ended() in _handle_interruption)"
     )
 
 
@@ -1588,7 +1577,7 @@ async def test_no_deadlock_on_zero_audio_context_completion():
     TTSAudioRawFrames must not deadlock the pipeline.
 
     Timeline:
-    1. LLM response -> _processing_text=True.
+    1. LLM response -> text sent to TTS.
     2. LLMFullResponseEndFrame -> pause_processing_frames() called, the context
        still being open and able to produce audio.
     3. Provider reports the context finished with no audio (TTSStoppedFrame,
@@ -1635,13 +1624,8 @@ class _StripEverythingFilter(BaseTextFilter):
 async def test_filter_stripped_text_does_not_pause_frame_processing():
     """A text filter that strips the whole utterance must not pause frame processing.
 
-    _push_tts_frames used to set _processing_text=True before running the text
-    filters. If a filter stripped the text to empty, the early return left the
-    flag latched, and LLMFullResponseEndFrame paused frame processing waiting
-    for TTS audio that would never come — permanently muting the bot.
-
-    The mock never delivers audio, so if the pause is (wrongly) engaged there
-    is no BotStoppedSpeakingFrame to release it and FooFrame never arrives.
+    No audio context is opened for the stripped text, so nothing holds the
+    frames that follow it.
     """
     tts = MockWebSocketPauseTTSServiceNoAudio(text_filters=[_StripEverythingFilter()])
 
@@ -1658,10 +1642,6 @@ async def test_filter_stripped_text_does_not_pause_frame_processing():
         timeout=3.0,
     )
 
-    assert not tts._processing_text, (
-        "_processing_text leaked True after a filter stripped the text to empty"
-    )
-
     down = frames_received[0]
     foo_frames = [f for f in down if isinstance(f, FooFrame)]
     assert any(f.label == "after_stripped_response" for f in foo_frames), (
@@ -1670,21 +1650,20 @@ async def test_filter_stripped_text_does_not_pause_frame_processing():
 
 
 @pytest.mark.asyncio
-async def test_no_early_resume_on_long_streaming_turn():
-    """A long streaming turn whose audio is still playing must stay paused.
+async def test_no_error_on_long_streaming_turn():
+    """A long streaming turn whose audio is still playing reports no error.
 
     Timeline:
-    1. LLM response -> _processing_text=True.
+    1. LLM response -> text sent to TTS.
     2. BotStartedSpeakingFrame arrives *before* LLMFullResponseEndFrame —
        streaming TTS starts playback while the LLM is still generating, and
        the output transport only sends this frame once per turn.
-    3. LLMFullResponseEndFrame -> pause_processing_frames() called, this turn's
-       audio being on its way to the transport.
-    4. Time passes with no BotStoppedSpeakingFrame yet — nothing must resume
-       frame processing or push an ErrorFrame; playback is still legitimately
-       in progress.
-    5. BotStoppedSpeakingFrame finally arrives (playback finished) and
-       resumes frame processing normally; FooFrame must arrive afterward.
+    3. LLMFullResponseEndFrame -> frames wait for this turn's audio context
+       to end.
+    4. Time passes with no BotStoppedSpeakingFrame yet — nothing must push an
+       ErrorFrame; playback is still legitimately in progress.
+    5. BotStoppedSpeakingFrame finally arrives (playback finished); FooFrame
+       must arrive afterward.
     """
     tts = MockWebSocketPauseTTSServiceLongPlayback()
 
@@ -2818,5 +2797,227 @@ async def test_interruption_keeps_the_pause_while_uninterruptible_speech_is_open
     assert [f.interruptible for f in audio] == [False, True]
 
 
+@pytest.mark.asyncio
+async def test_next_request_waits_for_open_contexts_to_end():
+    """Back-to-back replies each get their own audio, though the bot stops between them."""
+    down, up = await asyncio.wait_for(
+        run_test(
+            _MockActiveContextTTSService(),
+            frames_to_send=[
+                TTSSpeakFrame("One.", append_to_context=False),
+                SleepFrame(sleep=0.05),
+                BotStartedSpeakingFrame(),
+                BotStoppedSpeakingFrame(),
+                TTSSpeakFrame("Two.", append_to_context=False),
+                SleepFrame(sleep=0.6),
+            ],
+        ),
+        timeout=5,
+    )
+    audio = [f for f in down if isinstance(f, TTSAudioRawFrame)]
+    assert len({f.context_id for f in audio}) == 2
+    assert not any(isinstance(f, ErrorFrame) for f in down + up)
+
+
+class _MockUntimedWordsTTSService(TTSService):
+    """Sends audio without word timestamps and never ends its contexts, so they go quiet."""
+
+    def __init__(self):
+        super().__init__(
+            push_start_frame=True,
+            push_text_frames=False,
+            push_stop_frames=True,
+            stop_frame_timeout_s=0.1,
+            sample_rate=_SAMPLE_RATE,
+        )
+
+    def can_generate_metrics(self) -> bool:
+        return False
+
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:
+        await self.append_to_audio_context(
+            context_id, TTSAudioRawFrame(_FAKE_AUDIO, _SAMPLE_RATE, 1, context_id=context_id)
+        )
+        yield None
+
+
+@pytest.mark.asyncio
+async def test_untimed_words_come_before_the_stop_frame_of_a_quiet_context():
+    """Text the provider never timed is pushed before the context's stop frame."""
+    down, _ = await asyncio.wait_for(
+        run_test(
+            _MockUntimedWordsTTSService(),
+            frames_to_send=[TTSSpeakFrame("Hello there."), SleepFrame(sleep=0.4)],
+        ),
+        timeout=5,
+    )
+    order = [
+        type(f)
+        for f in down
+        if isinstance(f, (TTSTextFrame, LLMAssistantPushAggregationFrame, TTSStoppedFrame))
+    ]
+    assert order == [TTSTextFrame, LLMAssistantPushAggregationFrame, TTSStoppedFrame]
+
+
 if __name__ == "__main__":
     unittest.main()
+
+
+class _MockFlushedContextTTSService(TTSService):
+    """Labels audio with its request's context and ends a context when it is flushed."""
+
+    def __init__(self):
+        super().__init__(
+            push_start_frame=True,
+            stop_frame_timeout_s=1.0,
+            pause_frame_processing=True,
+            sample_rate=_SAMPLE_RATE,
+        )
+
+    def can_generate_metrics(self) -> bool:
+        return False
+
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:
+        await self.append_to_audio_context(
+            context_id, TTSAudioRawFrame(_FAKE_AUDIO, _SAMPLE_RATE, 1, context_id=context_id)
+        )
+        yield None
+
+    async def flush_audio(self, context_id: str | None = None):
+        await self.append_to_audio_context(context_id, TTSStoppedFrame(context_id=context_id))
+        await self.remove_audio_context(context_id)
+
+
+@pytest.mark.asyncio
+async def test_speak_frame_in_the_middle_of_a_reply_does_not_hold_the_reply():
+    """The reply goes on after a TTSSpeakFrame, and each context ends with its own stop frame."""
+    down, _ = await asyncio.wait_for(
+        run_test(
+            _MockFlushedContextTTSService(),
+            frames_to_send=[
+                LLMFullResponseStartFrame(),
+                AggregatedTextFrame("Sure, checking.", TextType.SENTENCE),
+                TTSSpeakFrame("Let me check.", append_to_context=False),
+                AggregatedTextFrame("One moment.", TextType.SENTENCE),
+                LLMFullResponseEndFrame(),
+                SleepFrame(sleep=0.2),
+            ],
+        ),
+        timeout=5,
+    )
+    audio = [f for f in down if isinstance(f, TTSAudioRawFrame)]
+    stopped = [f for f in down if isinstance(f, TTSStoppedFrame)]
+    reply_context_id = audio[0].context_id
+    assert [f.context_id == reply_context_id for f in audio] == [True, True, False]
+    assert len({f.context_id for f in stopped}) == 2
+    assert sum(isinstance(f, LLMFullResponseEndFrame) for f in down) == 1
+
+
+@pytest.mark.asyncio
+async def test_speak_frame_after_a_reply_commits_its_text():
+    """A TTSSpeakFrame after an LLM reply pushes its own assistant aggregation."""
+    down, _ = await asyncio.wait_for(
+        run_test(
+            _MockFlushedContextTTSService(),
+            frames_to_send=[
+                LLMFullResponseStartFrame(),
+                AggregatedTextFrame("Hello there.", TextType.SENTENCE),
+                LLMFullResponseEndFrame(),
+                SleepFrame(sleep=0.1),
+                TTSSpeakFrame("Welcome."),
+                SleepFrame(sleep=0.2),
+            ],
+        ),
+        timeout=5,
+    )
+    order = [
+        type(f)
+        for f in down
+        if isinstance(f, (TTSTextFrame, LLMFullResponseEndFrame, LLMAssistantPushAggregationFrame))
+    ]
+    assert order == [
+        TTSTextFrame,
+        LLMFullResponseEndFrame,
+        TTSTextFrame,
+        LLMAssistantPushAggregationFrame,
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reuse_context_id_within_turn", [True, False])
+async def test_llm_response_end_follows_the_last_word(reuse_context_id_within_turn):
+    """With word timestamps, the turn's own end frame comes after its words, at their PTS."""
+    end_frame = LLMFullResponseEndFrame()
+    down, _ = await asyncio.wait_for(
+        run_test(
+            _MockWordTimestampWSTTSService(
+                reuse_context_id_within_turn=reuse_context_id_within_turn
+            ),
+            frames_to_send=[
+                LLMFullResponseStartFrame(),
+                TextFrame("Hello there."),
+                end_frame,
+                SleepFrame(sleep=0.2),
+            ],
+        ),
+        timeout=5,
+    )
+    frames = [f for f in down if isinstance(f, (TTSTextFrame, LLMFullResponseEndFrame))]
+    assert [type(f) for f in frames] == [TTSTextFrame, TTSTextFrame, LLMFullResponseEndFrame]
+    assert frames[-1] is end_frame
+    assert end_frame.pts == frames[-2].pts
+
+
+@pytest.mark.asyncio
+async def test_llm_response_end_of_a_reply_without_text_is_pushed():
+    """With word timestamps, a reply with nothing to speak still pushes its end frame."""
+    end_frame = LLMFullResponseEndFrame()
+    down, _ = await asyncio.wait_for(
+        run_test(
+            _MockWordTimestampWSTTSService(),
+            frames_to_send=[LLMFullResponseStartFrame(), end_frame, SleepFrame(sleep=0.2)],
+        ),
+        timeout=5,
+    )
+    assert end_frame in down
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reuse_context_id_within_turn", [True, False])
+async def test_speak_frame_settings_reach_its_spoken_context(reuse_context_id_within_turn):
+    """A TTSSpeakFrame's append_to_context, and its aggregation push, apply to its speech."""
+    down, _ = await run_test(
+        _MockWordTimestampHttpTTSService(reuse_context_id_within_turn=reuse_context_id_within_turn),
+        frames_to_send=[
+            TTSSpeakFrame(text="secret note", append_to_context=False),
+            TTSSpeakFrame(text="hello there"),
+        ],
+    )
+    started = [f for f in down if isinstance(f, TTSStartedFrame)]
+    assert [f.append_to_context for f in started] == [False, True]
+    words = {f.text: f.append_to_context for f in down if isinstance(f, TTSTextFrame)}
+    assert words == {"secret": False, "note": False, "hello": True, "there": True}
+    # Only the speak frame that goes into the context commits it once spoken.
+    assert len([f for f in down if isinstance(f, LLMAssistantPushAggregationFrame)]) == 1
+
+
+@pytest.mark.asyncio
+async def test_llm_response_end_of_a_reply_without_timed_words_has_no_pts():
+    """A reply that times no words leaves its end frame unstamped, behind its start frame."""
+    first_end, second_end = LLMFullResponseEndFrame(), LLMFullResponseEndFrame()
+    down, _ = await run_test(
+        _MockWordTimestampHttpTTSService(skip_text_types=["code"]),
+        frames_to_send=[
+            LLMFullResponseStartFrame(),
+            TextFrame("hello world."),
+            first_end,
+            SleepFrame(sleep=0.2),
+            LLMFullResponseStartFrame(),
+            AggregatedTextFrame("some code", "code"),
+            second_end,
+            SleepFrame(sleep=0.2),
+        ],
+    )
+    words = [f for f in down if isinstance(f, TTSTextFrame)]
+    assert first_end.pts == words[-1].pts
+    assert not second_end.pts

@@ -142,10 +142,8 @@ async def test_flux_tts_protocol_roundtrip():
             frames_to_send=[
                 TTSSpeakFrame(text="Hello from Flux."),
                 SleepFrame(sleep=0.3),
-                # With pause_frame_processing=True the transport's
-                # BotStoppedSpeakingFrame resumes frame processing; there is no
-                # transport in run_test, so send it explicitly (it is a system
-                # frame, so it bypasses the paused queue).
+                # The output transport sends this once playback ends; run_test
+                # has no transport.
                 BotStoppedSpeakingFrame(),
             ],
         )

@@ -45,6 +45,7 @@ class TogetherLLMService(OpenAILLMService):
 
     Settings = TogetherLLMSettings
     _settings: Settings
+    _requires_api_key = True
 
     def __init__(
         self,

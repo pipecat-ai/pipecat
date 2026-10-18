@@ -589,7 +589,6 @@ class AssemblyAISTTService(WebsocketSTTService):
         self._encoding = encoding
 
         self._termination_event = asyncio.Event()
-        self._received_termination = False
         self._connected = False
 
         self._receive_task = None
@@ -983,7 +982,9 @@ class AssemblyAISTTService(WebsocketSTTService):
 
         await self._connect_websocket()
 
-        if self._websocket and not self._receive_task:
+        # Started even when the connection failed: with no socket the receive
+        # loop goes straight to its reconnect path, which retries the connect.
+        if not self._receive_task:
             self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
     async def _disconnect(self):
@@ -998,7 +999,6 @@ class AssemblyAISTTService(WebsocketSTTService):
 
         try:
             self._termination_event.clear()
-            self._received_termination = False
 
             if self._websocket.state is State.OPEN:
                 # Send any remaining audio
@@ -1146,14 +1146,12 @@ class AssemblyAISTTService(WebsocketSTTService):
 
     async def _handle_termination(self, message: TerminationMessage):
         """Handle termination message."""
-        self._received_termination = True
         self._termination_event.set()
 
         logger.info(
             f"Session Terminated: Audio Duration={message.audio_duration_seconds}s, "
             f"Session Duration={message.session_duration_seconds}s"
         )
-        await self.push_frame(EndFrame())
 
     async def _handle_transcription(self, message: TurnMessage):
         """Handle transcription results with two turn detection modes.

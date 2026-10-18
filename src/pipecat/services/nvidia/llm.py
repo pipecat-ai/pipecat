@@ -108,7 +108,14 @@ class NvidiaLLMService(OpenAILLMService):
         if settings is not None:
             default_settings.apply_update(settings)
 
-        super().__init__(api_key=api_key, base_url=base_url, settings=default_settings, **kwargs)
+        # Local NIM takes no key, but the OpenAI client needs one: given None it
+        # would fall back to OPENAI_API_KEY and send it to NVIDIA.
+        super().__init__(
+            api_key=api_key or "not-needed",
+            base_url=base_url,
+            settings=default_settings,
+            **kwargs,
+        )
 
         if "api.nvidia.com" in base_url and not api_key:
             logger.warning(

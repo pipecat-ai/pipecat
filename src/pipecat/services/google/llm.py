@@ -465,6 +465,9 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
             config=generation_config,
         )
 
+        if response.candidates and response.candidates[0].finish_reason:
+            self._handle_finish_reason(response.candidates[0].finish_reason)
+
         # Extract text from response
         if response.candidates and response.candidates[0].content:
             for part in response.candidates[0].content.parts or []:
@@ -751,7 +754,7 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
         Anything other than a normal stop leaves the turn short of what the model
         would otherwise have said: the response was withheld (safety, recitation,
         prohibited content), a tool call was rejected, or the output hit the token
-        limit. Whatever text did arrive is still passed downstream.
+        limit. Whatever text did arrive is still passed on.
         """
         if finish_reason in (FinishReason.STOP, FinishReason.FINISH_REASON_UNSPECIFIED):
             return

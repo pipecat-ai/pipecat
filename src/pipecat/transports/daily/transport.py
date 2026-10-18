@@ -15,6 +15,7 @@ import asyncio
 from collections.abc import Awaitable, Callable, Mapping
 from concurrent.futures import CancelledError as FuturesCancelledError
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import Any
 
 import aiohttp
@@ -122,7 +123,9 @@ class DailySIPTransferFrame(DataFrame):
     utterance before the transfer occurs.
 
     Parameters:
-        settings: SIP call transfer settings.
+        settings: SIP call transfer settings. When it has no ``sessionId``, the
+            transport uses the active dial-out session, then the active
+            dial-in session.
     """
 
     settings: Mapping[str, Any] = field(default_factory=dict)
@@ -137,7 +140,9 @@ class DailySIPReferFrame(DataFrame):
     before the REFER occurs.
 
     Parameters:
-        settings: SIP REFER settings.
+        settings: SIP REFER settings. When it has no ``sessionId``, the
+            transport uses the active dial-out session, then the active
+            dial-in session.
     """
 
     settings: Mapping[str, Any] = field(default_factory=dict)
@@ -166,7 +171,8 @@ class DailyOutputDTMFFrame(OutputDTMFFrame):
     Parameters:
         session_id: Target participant session id. When ``None``, the
             transport uses the active dial-out session, then the active
-            dial-in session. If neither exists, nothing is sent.
+            dial-in session. If neither exists, nothing is sent and an
+            error is pushed.
         digit_duration_ms: Duration of each DTMF digit in milliseconds.
             When ``None``, Daily's default duration is used.
         method: DTMF delivery method (e.g. ``"telephone-event"``, ``"sip-info"``
@@ -190,7 +196,8 @@ class DailyOutputDTMFUrgentFrame(OutputDTMFUrgentFrame):
     Parameters:
         session_id: Target participant session id. When ``None``, the
             transport uses the active dial-out session, then the active
-            dial-in session. If neither exists, nothing is sent.
+            dial-in session. If neither exists, nothing is sent and an
+            error is pushed.
         digit_duration_ms: Duration of each DTMF digit in milliseconds.
             When ``None``, Daily's default duration is used.
         method: DTMF delivery method (e.g. ``"telephone-event"``, ``"sip-info"``
@@ -331,6 +338,10 @@ class DailyParams(TransportParams):
         custom_audio_track_params: Per-destination configuration for custom audio tracks.
         custom_video_track_params: Per-destination configuration for custom video tracks.
         dialin_settings: Optional settings for dial-in functionality.
+        initial_receive_bitrate: Expected download bandwidth in bits per second. The
+            SFU starts its estimate of what it can send the bot from this value, so
+            incoming video reaches full quality sooner. ``None`` keeps Daily's default
+            of 1 Mbps.
         microphone_out_enabled: Whether to enable the main microphone track.
         transcription_enabled: Whether to enable speech transcription.
         transcription_settings: Configuration for transcription service.
@@ -344,6 +355,7 @@ class DailyParams(TransportParams):
     custom_audio_track_params: Mapping[str, DailyCustomAudioTrackParams] | None = None
     custom_video_track_params: Mapping[str, DailyCustomVideoTrackParams] | None = None
     dialin_settings: DailyDialinSettings | None = None
+    initial_receive_bitrate: int | None = None
     microphone_out_enabled: bool = True
     transcription_enabled: bool = False
     transcription_settings: DailyTranscriptionSettings = DailyTranscriptionSettings()
@@ -387,6 +399,8 @@ class DailyCallbacks(BaseModel):
         on_dialout_error: Called when dial-out encounters an error.
         on_dialout_warning: Called when dial-out has a warning.
         on_dtmf_event: Called when a DTMF tone happens.
+        on_network_connection_status_updated: Called when a network connection
+            needed for the call is interrupted or connects.
         on_participant_joined: Called when a participant joins.
         on_participant_left: Called when a participant leaves.
         on_participant_updated: Called when participant info is updated.
@@ -418,6 +432,7 @@ class DailyCallbacks(BaseModel):
     on_dialout_error: Callable[[Any], Awaitable[None]]
     on_dialout_warning: Callable[[Any], Awaitable[None]]
     on_dtmf_event: Callable[[Any], Awaitable[None]]
+    on_network_connection_status_updated: Callable[[Mapping[str, Any]], Awaitable[None]]
     on_participant_joined: Callable[[Mapping[str, Any]], Awaitable[None]]
     on_participant_left: Callable[[Mapping[str, Any], str], Awaitable[None]]
     on_participant_updated: Callable[[Mapping[str, Any]], Awaitable[None]]
@@ -485,6 +500,22 @@ class DailyVideoTrack:
 CallClientError = str
 
 
+class _CallState(Enum):
+    """Where the client is in a call.
+
+    ``INTERRUPTED`` is still in the call, which Daily reports as joined, while
+    daily-core reconnects the signalling connection that carries app messages.
+    ``LEFT`` covers both ``leave()`` and a call that ends without it (the bot
+    is ejected, or the room or meeting ends). App messages can't be delivered
+    in either state.
+    """
+
+    NOT_JOINED = "not_joined"
+    JOINED = "joined"
+    INTERRUPTED = "interrupted"
+    LEFT = "left"
+
+
 class DailyTransportClient(EventHandler):
     """Core client for interacting with Daily's API.
 
@@ -538,7 +569,7 @@ class DailyTransportClient(EventHandler):
         self._dial_out_session_id: str = ""
         self._dial_in_session_id: str = ""
 
-        self._joined = False
+        self._call_state = _CallState.NOT_JOINED
         self._joined_event = asyncio.Event()
 
         self._task_manager: BaseTaskManager | None = None
@@ -573,6 +604,10 @@ class DailyTransportClient(EventHandler):
     def _speaker_name(self):
         """Generate a unique virtual speaker name for this client instance."""
         return f"speaker-{self}"
+
+    def _in_call(self) -> bool:
+        """Whether the client is in a call, even if signalling is reconnecting."""
+        return self._call_state in (_CallState.JOINED, _CallState.INTERRUPTED)
 
     @property
     def room_url(self) -> str:
@@ -621,8 +656,15 @@ class DailyTransportClient(EventHandler):
         Returns:
             An error description, or None on success.
         """
-        if not self._joined:
+        if self._call_state == _CallState.NOT_JOINED:
             self._join_message_queue.append(frame)
+            return None
+
+        # The call ended or signalling is reconnecting, either of which is
+        # reported when it happens. Reporting every dropped message would let a
+        # processor that relays errors as app messages (e.g. RTVIProcessor) feed
+        # on its own failures.
+        if self._call_state != _CallState.JOINED:
             return None
 
         participant_id = None
@@ -850,7 +892,7 @@ class DailyTransportClient(EventHandler):
             await self._callbacks.on_error(error_msg)
             return
 
-        self._joined = True
+        self._call_state = _CallState.JOINED
 
         participant_id = data.get("participants", {}).get("local", {}).get("id")
         meeting_id = data.get("meetingSession", {}).get("id")
@@ -879,51 +921,57 @@ class DailyTransportClient(EventHandler):
         camera_enabled = self._params.video_out_enabled and self._params.camera_out_enabled
         microphone_enabled = self._params.audio_out_enabled and self._params.microphone_out_enabled
 
+        client_settings: dict[str, Any] = {
+            "inputs": {
+                "camera": {
+                    "isEnabled": camera_enabled,
+                    "settings": {
+                        "customTrack": {
+                            "id": self._camera_track.track.id
+                            if self._camera_track
+                            else "no-camera-track"
+                        }
+                    },
+                },
+                "microphone": {
+                    "isEnabled": microphone_enabled,
+                    "settings": {
+                        "customTrack": {
+                            "id": self._microphone_track.track.id
+                            if self._microphone_track
+                            else "no-microphone-track"
+                        }
+                    },
+                },
+            },
+            "publishing": {
+                "camera": {
+                    "isPublishing": camera_enabled,
+                    "sendSettings": self._params.camera_out_send_settings
+                    if self._params.camera_out_send_settings
+                    else {},
+                },
+                "microphone": {
+                    "isPublishing": microphone_enabled,
+                    "sendSettings": {
+                        "channelConfig": "stereo"
+                        if self._params.audio_out_channels == 2
+                        else "mono",
+                        "bitrate": self._params.audio_out_bitrate,
+                    },
+                },
+            },
+        }
+        if self._params.initial_receive_bitrate is not None:
+            client_settings["connection"] = {
+                "initialReceiveBitrate": self._params.initial_receive_bitrate
+            }
+
         self._client.join(
             self._room_url,
             self._token,
             completion=completion_callback(future),
-            client_settings={
-                "inputs": {
-                    "camera": {
-                        "isEnabled": camera_enabled,
-                        "settings": {
-                            "customTrack": {
-                                "id": self._camera_track.track.id
-                                if self._camera_track
-                                else "no-camera-track"
-                            }
-                        },
-                    },
-                    "microphone": {
-                        "isEnabled": microphone_enabled,
-                        "settings": {
-                            "customTrack": {
-                                "id": self._microphone_track.track.id
-                                if self._microphone_track
-                                else "no-microphone-track"
-                            }
-                        },
-                    },
-                },
-                "publishing": {
-                    "camera": {
-                        "isPublishing": camera_enabled,
-                        "sendSettings": self._params.camera_out_send_settings
-                        if self._params.camera_out_send_settings
-                        else {},
-                    },
-                    "microphone": {
-                        "isPublishing": microphone_enabled,
-                        "sendSettings": {
-                            "channelConfig": "stereo"
-                            if self._params.audio_out_channels == 2
-                            else "mono",
-                            "bitrate": self._params.audio_out_bitrate,
-                        },
-                    },
-                },
-            },
+            client_settings=client_settings,
         )
 
         return await future
@@ -932,10 +980,13 @@ class DailyTransportClient(EventHandler):
     async def leave(self):
         """Leave the Daily room and cleanup resources."""
         # Transport not joined, ignore.
-        if not self._joined:
+        if self._call_state == _CallState.NOT_JOINED:
             return
 
-        self._joined = False
+        # A call that ended without leave() has nothing left to leave.
+        call_ended = self._call_state == _CallState.LEFT
+
+        self._call_state = _CallState.LEFT
         self._joined_event.clear()
 
         logger.info(f"Leaving {self._room_url}")
@@ -949,7 +1000,7 @@ class DailyTransportClient(EventHandler):
         for track_name, _ in self._custom_video_tracks.items():
             await self.remove_custom_video_track(track_name)
 
-        error = await self._leave()
+        error = None if call_ended else await self._leave()
         if not error:
             logger.info(f"Left {self._room_url}")
             await self._callbacks.on_left()
@@ -1071,6 +1122,14 @@ class DailyTransportClient(EventHandler):
         Returns:
             An error description, or None on success.
         """
+        session_id = (
+            settings.get("sessionId") or self._dial_out_session_id or self._dial_in_session_id
+        )
+        if not session_id:
+            return "Can't perform SIP REFER if 'sessionId' is not set"
+
+        settings["sessionId"] = session_id
+
         future = self._get_event_loop().create_future()
         self._client.sip_refer(settings, completion=completion_callback(future))
         return await future
@@ -1148,7 +1207,7 @@ class DailyTransportClient(EventHandler):
         Returns:
             An error description, or None on success.
         """
-        if not self._joined:
+        if self._call_state != _CallState.JOINED:
             return "Can't send message if not joined"
 
         future = self._get_event_loop().create_future()
@@ -1167,7 +1226,7 @@ class DailyTransportClient(EventHandler):
             return
 
         self._transcription_ids.append(participant_id)
-        if self._joined and self._transcription_status:
+        if self._in_call() and self._transcription_status:
             await self.update_transcription(self._transcription_ids)
 
     async def capture_participant_audio(
@@ -1539,7 +1598,7 @@ class DailyTransportClient(EventHandler):
         Args:
             state: The new call state.
         """
-        self._call_event_callback(self._callbacks.on_call_state_updated, state)
+        self._call_event_callback(self._handle_call_state_updated, state)
 
     def on_dialin_connected(self, data: Any):
         """Handle dial-in connected events.
@@ -1643,6 +1702,15 @@ class DailyTransportClient(EventHandler):
         """
         self._call_event_callback(self._callbacks.on_dtmf_event, data)
 
+    def on_network_connection_status_updated(self, status: Mapping[str, Any]):
+        """Handle network connection status events.
+
+        Args:
+            status: The connection ("signalling", "sendTransport" or
+                "recvTransport") and its event ("connected" or "interrupted").
+        """
+        self._call_event_callback(self._handle_network_connection_status_updated, status)
+
     def on_participant_joined(self, participant):
         """Handle participant joined events.
 
@@ -1676,6 +1744,12 @@ class DailyTransportClient(EventHandler):
         """
         logger.debug(f"Transcription started: {status}")
         self._transcription_status = status
+
+        # Daily reports this for every transcription in the room, not just ours,
+        # and an empty allow-list tells it to transcribe nobody.
+        if not self._params.transcription_enabled:
+            return
+
         self._call_event_callback(self.update_transcription, self._transcription_ids)
 
     def on_transcription_stopped(self, stopped_by, stopped_by_error):
@@ -1790,6 +1864,34 @@ class DailyTransportClient(EventHandler):
         for frame in self._join_message_queue:
             await self.send_message(frame)
         self._join_message_queue.clear()
+
+    async def _handle_call_state_updated(self, state: str):
+        """Track whether app messages can still be sent, then report the state."""
+        # leave() moves to LEFT before leaving, so reaching "left" while still
+        # in the call means the call ended underneath us.
+        if state == "left" and self._in_call():
+            self._call_state = _CallState.LEFT
+            await self._callbacks.on_error(
+                f"Disconnected from {self._room_url}; app messages will not be sent"
+            )
+        await self._callbacks.on_call_state_updated(state)
+
+    async def _handle_network_connection_status_updated(self, status: Mapping[str, Any]):
+        """Track whether signalling can carry app messages, then report the status."""
+        # An interruption is a warning, not an error: daily-core reconnects on
+        # its own, and the event lets the application react if it wants to.
+        if status.get("connection") == "signalling":
+            event = status.get("event")
+            if event == "interrupted" and self._call_state == _CallState.JOINED:
+                self._call_state = _CallState.INTERRUPTED
+                logger.warning(
+                    f"Signalling to {self._room_url} interrupted; "
+                    "app messages will not be sent until it reconnects"
+                )
+            elif event == "connected" and self._call_state == _CallState.INTERRUPTED:
+                self._call_state = _CallState.JOINED
+                logger.info(f"Signalling to {self._room_url} reconnected")
+        await self._callbacks.on_network_connection_status_updated(status)
 
     def _get_event_loop(self) -> asyncio.AbstractEventLoop:
         """Get the event loop from the task manager."""
@@ -2158,6 +2260,8 @@ class DailyOutputTransport(BaseOutputTransport):
 
         self._transport = transport
         self._client = client
+        # Set once a failed send is reported, until a send succeeds.
+        self._send_message_failure_reported = False
 
     async def setup(self, setup: FrameProcessorSetup):
         """Setup the output transport with shared client setup.
@@ -2228,7 +2332,13 @@ class DailyOutputTransport(BaseOutputTransport):
             frame: The transport message frame to send.
         """
         error = await self._client.send_message(frame)
-        if error:
+        if not error:
+            self._send_message_failure_reported = False
+        # Sends can fail before the client learns signalling is down. Reporting
+        # each failure would let a processor that relays errors as app messages
+        # (e.g. RTVIProcessor) feed on its own failures.
+        elif not self._send_message_failure_reported:
+            self._send_message_failure_reported = True
             await self.push_error(f"Unable to send message: {error}")
 
     async def register_video_destination(self, destination: str):
@@ -2321,7 +2431,9 @@ class DailyOutputTransport(BaseOutputTransport):
             if frame.method is not None:
                 settings["method"] = frame.method
 
-        await self._client.send_dtmf(settings)
+        error = await self._client.send_dtmf(settings)
+        if error:
+            await self.push_error(f"Unable to send DTMF: {error}")
 
 
 class DailyTransport(BaseTransport):
@@ -2340,6 +2452,10 @@ class DailyTransport(BaseTransport):
     - on_before_leave: [sync] Called just before the bot leaves the room.
     - on_error: Called when a transport error occurs. Args: (error: str)
     - on_call_state_updated: Called when the call state changes. Args: (state: str)
+    - on_network_connection_status_updated: Called when a network connection
+      needed for the call is interrupted or connects. Args: (status: dict, with
+      "connection": "signalling" | "sendTransport" | "recvTransport" and
+      "event": "connected" | "interrupted")
     - on_first_participant_joined: Called when the first participant joins.
       Args: (participant: dict)
     - on_participant_joined: Called when any participant joins.
@@ -2358,6 +2474,10 @@ class DailyTransport(BaseTransport):
       Args: (message: Any, sender: str)
     - on_transcription_message: Called when a transcription message is received.
       Args: (message: dict)
+    - on_transcription_stopped: Called when transcription stops.
+      Args: (stopped_by: str, stopped_by_error: bool)
+    - on_transcription_error: Called when a transcription error occurs.
+      Args: (message: str)
     - on_recording_started: Called when recording starts. Args: (status: str)
     - on_recording_stopped: Called when recording stops. Args: (stream_id: str)
     - on_recording_error: Called when a recording error occurs.
@@ -2431,6 +2551,7 @@ class DailyTransport(BaseTransport):
             on_dialout_error=self._on_dialout_error,
             on_dialout_warning=self._on_dialout_warning,
             on_dtmf_event=self._on_dtmf_event,
+            on_network_connection_status_updated=self._on_network_connection_status_updated,
             on_participant_joined=self._on_participant_joined,
             on_participant_left=self._on_participant_left,
             on_participant_updated=self._on_participant_updated,
@@ -2473,11 +2594,14 @@ class DailyTransport(BaseTransport):
         self._register_event_handler("on_dialout_error")
         self._register_event_handler("on_dialout_warning")
         self._register_event_handler("on_dtmf_event")
+        self._register_event_handler("on_network_connection_status_updated")
         self._register_event_handler("on_first_participant_joined")
         self._register_event_handler("on_participant_joined")
         self._register_event_handler("on_participant_left")
         self._register_event_handler("on_participant_updated")
         self._register_event_handler("on_transcription_message")
+        self._register_event_handler("on_transcription_stopped")
+        self._register_event_handler("on_transcription_error")
         self._register_event_handler("on_recording_started")
         self._register_event_handler("on_recording_stopped")
         self._register_event_handler("on_recording_error")
@@ -2935,6 +3059,10 @@ class DailyTransport(BaseTransport):
         if state == "left" and self._input:
             await self._input.remove_all_video()
         await self._call_event_handler("on_call_state_updated", state)
+
+    async def _on_network_connection_status_updated(self, status: Mapping[str, Any]):
+        """Handle network connection status events."""
+        await self._call_event_handler("on_network_connection_status_updated", status)
 
     async def _on_client_connected(self, participant: Any):
         """Handle client connected events."""
