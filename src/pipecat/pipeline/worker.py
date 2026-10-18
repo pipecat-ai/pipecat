@@ -1484,8 +1484,6 @@ class PipelineWorker(BaseWorker):
         a StartFrame and by pushing any other frames queued by the user. It runs
         until the worker is cancelled or stopped (e.g. with an EndFrame).
         """
-        self._maybe_start_idle_task()
-
         # Processors read the pipeline configuration from FrameProcessorSetup,
         # but the deprecated StartFrame fields carry it until they are removed,
         # so that a processor still reading one gets the configured value.
@@ -1506,6 +1504,9 @@ class PipelineWorker(BaseWorker):
         self._pipeline_start_task = self.create_task(self._start_pipeline(start_frame))
         await asyncio.wait([self._pipeline_start_task])
         running = not self._pipeline_start_task.cancelled() and self._pipeline_start_task.result()
+
+        if running:
+            self._maybe_start_idle_task()
 
         if running and self._params.enable_metrics and self._params.send_initial_empty_metrics:
             await self._pipeline.queue_frame(self._initial_metrics_frame())
