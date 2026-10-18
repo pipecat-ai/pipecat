@@ -656,6 +656,10 @@ class DailyTransportClient(EventHandler):
         Returns:
             An error description, or None on success.
         """
+        if not self._client:
+            # Setup timeout cleanup can release the client without leaving the call.
+            return None
+
         if self._call_state == _CallState.NOT_JOINED:
             self._join_message_queue.append(frame)
             return None
