@@ -32,6 +32,7 @@ from pipecat.frames.frames import (
 from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 from pipecat.pipeline.pipeline import Pipeline
+from pipecat.pipeline.sync_parallel_pipeline import SyncParallelPipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker, WorkerParams
 from pipecat.processors.filters.frame_filter import FrameFilter
 from pipecat.processors.filters.identity_filter import IdentityFilter
@@ -1475,6 +1476,49 @@ class TestPipelineWorkerStartup(unittest.IsolatedAsyncioTestCase):
 
         assert llm.start_at is not None
         assert len(idle_at) == 1 and idle_at[0] >= llm.start_at
+
+    async def test_sync_parallel_pipeline_starts_after_its_branches(self):
+        """A sync parallel pipeline passes the StartFrame on only once it is
+        through all its branches, so the pipeline counts as started only once
+        a slow branch is set up."""
+        t0 = time.monotonic()
+        first = StartRecorder(t0)
+        slow = StartRecorder(t0, setup_secs=0.5)
+        after = StartRecorder(t0)
+        worker = PipelineWorker(Pipeline([first, SyncParallelPipeline([slow]), after]))
+
+        started_at = []
+
+        @worker.event_handler("on_pipeline_started")
+        async def on_pipeline_started(_worker, _frame):
+            started_at.append(time.monotonic() - t0)
+
+        await worker.queue_frame(EndFrame())
+        await self.run_worker(worker)
+
+        assert first.start_at < 0.5
+        assert slow.start_at >= 0.5
+        assert after.start_at >= slow.start_at
+        assert len(started_at) == 1 and started_at[0] >= slow.start_at
+
+    async def test_sync_parallel_pipeline_set_up_late_starts_its_branches(self):
+        """The StartFrame can reach a sync parallel pipeline before its branches
+        begin setting up; their processors still hold it until they are set
+        up, so they start."""
+
+        class SlowToSetUp(SyncParallelPipeline):
+            async def setup(self, setup: FrameProcessorSetup):
+                await asyncio.sleep(0.2)
+                await super().setup(setup)
+
+        t0 = time.monotonic()
+        inner = StartRecorder(t0)
+        after = StartRecorder(t0)
+        worker = PipelineWorker(Pipeline([StartRecorder(t0), SlowToSetUp([inner]), after]))
+        await worker.queue_frame(EndFrame())
+        await self.run_worker(worker)
+
+        assert inner.start_at is not None and after.start_at is not None
 
 
 if __name__ == "__main__":
