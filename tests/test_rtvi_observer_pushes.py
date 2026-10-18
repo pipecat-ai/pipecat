@@ -118,6 +118,31 @@ class TestRTVIObserverPushes(unittest.IsolatedAsyncioTestCase):
         await self._push(BotStartedSpeakingFrame())
         self.assertEqual(self._sent_outputs(), ["Here it is.", "print(1)"])
 
+    async def test_an_interruption_drops_queued_text_whose_speech_it_cut_off(self):
+        transport = BaseOutputTransport(TransportParams())
+        spoken = AggregatedTextFrame("Let me check.", "sentence")
+        spoken.will_be_spoken = True
+
+        await self._push(spoken, source=transport)
+        await self._push(InterruptionFrame())
+        await self._push(AggregatedTextFrame("Here it is.", "sentence"), source=transport)
+        await self._push(BotStartedSpeakingFrame())
+
+        self.assertEqual(self._sent_outputs(), ["Here it is."])
+
+    async def test_an_interruption_keeps_queued_text_whose_speech_it_cant_cut_off(self):
+        transport = BaseOutputTransport(TransportParams())
+        spoken = AggregatedTextFrame("Please hold.", "sentence")
+        spoken.will_be_spoken = True
+        spoken.interruptible = False
+
+        await self._push(spoken, source=transport)
+        await self._push(InterruptionFrame())
+        self.assertEqual(self._sent_outputs(), [])
+
+        await self._push(BotStartedSpeakingFrame())
+        self.assertEqual(self._sent_outputs(), ["Please hold."])
+
     def _sent_messages(self):
         return [call.args[0] for call in self.observer.send_rtvi_message.await_args_list]
 

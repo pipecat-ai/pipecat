@@ -690,6 +690,11 @@ class RTVIObserver(BaseObserver):
             # run_immediately interrupt). Let clients drop what it was mid-saying.
             await self.send_rtvi_message(RTVI.BotInterruptedMessage())
             self._skipped_segments_interrupted = True
+            # Queued text whose speech was cut off would otherwise go out with the
+            # next speech, and hold back text that won't be spoken.
+            self._queued_aggregated_text_frames = [
+                f for f in self._queued_aggregated_text_frames if not f.interruptible
+            ]
         elif isinstance(frame, (TranscriptionFrame, InterimTranscriptionFrame)):
             await self._handle_user_transcriptions(frame)
         elif isinstance(frame, UserBackchannelFrame) and self._params.user_input_enabled:
