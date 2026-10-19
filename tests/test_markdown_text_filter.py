@@ -129,6 +129,23 @@ class TestMarkdownTextFilter(unittest.IsolatedAsyncioTestCase):
             result = await self.filter.filter(input_text)
             self.assertEqual(result, expected, f"HTML entity conversion failed for: '{input_text}'")
 
+    async def test_html_tag_removal(self):
+        """Test that HTML tags are removed and text that only looks like one is kept."""
+        test_cases = {
+            "<b>bold</b> html": "bold html",
+            "Line<br>break": "Linebreak",
+            '<span class="x">hi</span>': "hi",
+            '<a href="https://example.com" target=_blank>site</a>': "site",
+            "Stop<br/>here": "Stophere",
+            "If x<y and y>z then x<z.": "If x<y and y>z then x<z.",
+            "Ratio a<b and c>d": "Ratio a<b and c>d",
+            "Use the <Enter> key": "Use the <Enter> key",
+        }
+
+        for input_text, expected in test_cases.items():
+            result = await self.filter.filter(input_text)
+            self.assertEqual(result, expected, f"HTML tag removal failed for: '{input_text}'")
+
     async def test_asterisk_removal(self):
         """Test removal of Markdown asterisk formatting."""
         test_cases = {

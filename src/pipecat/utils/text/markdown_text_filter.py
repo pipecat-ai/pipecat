@@ -29,6 +29,22 @@ _MARKDOWN_TABLE = re.compile(
     re.MULTILINE,
 )
 
+# An HTML tag whose attributes, if any, have values. Only tags named in
+# _HTML_TAGS are stripped, so text that md.convert passes through as raw HTML
+# ("x<y and y>z", "a<b and c>d") is kept.
+_HTML_TAG = re.compile(
+    r"</?([A-Za-z][A-Za-z0-9]*)"
+    r"(?:\s+[A-Za-z_:][-\w:.]*\s*=\s*(?:\"[^\"]*\"|'[^']*'|[^\s\"'=<>`]+))*"
+    r"\s*/?>"
+)
+
+# The tags md.convert writes, plus common ones in an LLM's raw HTML.
+_HTML_TAGS = frozenset(
+    "a abbr b blockquote br caption center cite code col colgroup dd del details div dl dt "
+    "em figcaption figure font h1 h2 h3 h4 h5 h6 hr i img ins kbd li mark ol p pre q s "
+    "small span strike strong sub summary sup table tbody td tfoot th thead tr u ul".split()
+)
+
 # Placeholders that hold leading/trailing spaces and numbered list markers
 # through md.convert. Private-use characters, which real text doesn't contain,
 # so a "§" in the text ("see § 5") is kept.
@@ -187,7 +203,9 @@ class MarkdownTextFilter(BaseTextFilter):
                 filtered_text = self.remove_tables(filtered_text)
 
             # Remove HTML tags
-            filtered_text = re.sub("<[^<]+?>", "", filtered_text)
+            filtered_text = _HTML_TAG.sub(
+                lambda m: "" if m.group(1).lower() in _HTML_TAGS else m.group(0), filtered_text
+            )
 
             # Replace HTML entities, including the numeric ones md.convert writes
             # an email autolink (<me@example.com>) as
