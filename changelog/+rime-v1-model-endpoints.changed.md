@@ -1,0 +1,1 @@
+- ⚠️ `RimeV1TTSService` requires an explicit `settings.model`. The `coda` and `mistv3` models default to `wss://coda.api.rime.ai/ws` and `wss://mist.api.rime.ai/ws`. Set `websocket_url` to override the public endpoint for a custom deployment; URL paths do not select the model.
