@@ -205,6 +205,49 @@ async def test_speaker_format_update_does_not_reconnect(monkeypatch):
     reconnect.assert_not_awaited()
 
 
+@pytest.mark.asyncio
+async def test_speaker_format_update_applies_to_next_result(monkeypatch):
+    """A speaker format update keeps the stream config and labels later results."""
+    service = _make_service(settings=NvidiaSTTService.Settings(speaker_diarization=True))
+    service._config = service._create_recognition_config()
+    config = service._config
+    monkeypatch.setattr(service, "_request_reconnect", AsyncMock())
+    response = _streaming_response("Hello", words=[_word("Hello", 0)])
+
+    await service._update_settings(NvidiaSTTService.Settings(speaker_format="[{speaker}] {text}"))
+    frames = await _capture_response_frames(monkeypatch, service, response)
+
+    assert service._config is config
+    assert frames[0].text == "[0] Hello"
+
+
+@pytest.mark.asyncio
+async def test_speaker_format_with_server_setting_still_reconnects(monkeypatch):
+    """A delta mixing local and server settings still reconnects."""
+    service = _make_service()
+    service._config = service._create_recognition_config()
+    reconnect = AsyncMock()
+    monkeypatch.setattr(service, "_request_reconnect", reconnect)
+
+    await service._update_settings(
+        NvidiaSTTService.Settings(speaker_format="{speaker}: {text}", language=Language.ES)
+    )
+
+    reconnect.assert_awaited_once()
+    assert service._config.config.language_code == Language.ES
+
+
+def test_diarization_max_speakers_reaches_recognition_config():
+    """The configured speaker limit is sent with the diarization config."""
+    service = _make_service(
+        settings=NvidiaSTTService.Settings(speaker_diarization=True, diarization_max_speakers=3)
+    )
+
+    config = service._create_recognition_config()
+
+    assert config.config.diarization_config.max_speaker_count == 3
+
+
 def test_diarization_does_not_change_word_time_offsets():
     """Diarization leaves the word time offset setting as configured."""
     service = _make_service(
@@ -300,6 +343,64 @@ async def test_mixed_speakers_emit_contiguous_run_frames(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_mixed_speaker_interim_result_emits_interim_runs(monkeypatch):
+    """A mixed-speaker interim result is split into interim frames per speaker."""
+    service = _make_service(settings=NvidiaSTTService.Settings(speaker_diarization=True))
+    response = _streaming_response(
+        "Hi there hello",
+        words=[_word("Hi", 0), _word("there", 0), _word("hello", 1)],
+        is_final=False,
+    )
+
+    frames = await _capture_response_frames(monkeypatch, service, response)
+
+    assert all(isinstance(frame, InterimTranscriptionFrame) for frame in frames)
+    assert [frame.text for frame in frames] == ["Hi there", "hello"]
+    assert [frame.user_id for frame in frames] == ["0", "1"]
+
+
+@pytest.mark.asyncio
+async def test_split_result_reports_usage_and_tracing_once(monkeypatch):
+    """Usage metrics and tracing see one full transcript per result, not one per run."""
+    service = _make_service(settings=NvidiaSTTService.Settings(speaker_diarization=True))
+    calls = []
+    monkeypatch.setattr(
+        service, "push_frame", AsyncMock(side_effect=lambda f: calls.append(("frame", f.text)))
+    )
+    monkeypatch.setattr(
+        service, "emit_stt_usage_metrics", AsyncMock(side_effect=lambda: calls.append(("usage",)))
+    )
+    handle_transcription = AsyncMock()
+    monkeypatch.setattr(service, "_handle_transcription", handle_transcription)
+    response = _streaming_response(
+        "Hi there hello",
+        words=[_word("Hi", 0), _word("there", 0), _word("hello", 1)],
+    )
+
+    await service._handle_response(response, speaker_diarization=True)
+
+    assert calls == [("usage",), ("frame", "Hi there"), ("frame", "hello")]
+    handle_transcription.assert_awaited_once()
+    assert handle_transcription.await_args.kwargs["transcript"] == "Hi there hello"
+
+
+@pytest.mark.asyncio
+async def test_each_result_in_a_response_is_split_and_finalized(monkeypatch):
+    """Every final result in one response finalizes its own last run."""
+    service = _make_service(settings=NvidiaSTTService.Settings(speaker_diarization=True))
+    first = _streaming_response("Hi there", words=[_word("Hi", 0), _word("there", 1)])
+    second = _streaming_response("Bye", words=[_word("Bye", 1)])
+    response = SimpleNamespace(results=first.results + second.results)
+
+    frames = await _capture_response_frames(monkeypatch, service, response)
+
+    assert [frame.text for frame in frames] == ["Hi", "there", "Bye"]
+    assert [frame.finalized for frame in frames] == [False, True, True]
+    assert frames[0].result is first.results[0]
+    assert frames[2].result is second.results[0]
+
+
+@pytest.mark.asyncio
 async def test_separate_results_keep_joining_spaces(monkeypatch):
     """Split runs and separate results are both joined by the aggregator."""
     service = _make_service(settings=NvidiaSTTService.Settings(speaker_diarization=True))
@@ -385,12 +486,23 @@ async def test_speaker_runs_preserve_provider_text(
         ([("Hi", 0), ("there", 0), ("hello", 1)], [(0, "Hi there"), (1, "hello")]),
         ([("Hi", 0), ("there", None)], []),
         ([("Hi", 0), ("missing", 1)], []),
+        ([("Hi", 0), ("", 1)], []),
         ([], []),
     ],
 )
 def test_speaker_runs_from_word_pairs(words, expected):
     """Speaker runs are built from plain (text, speaker) pairs."""
     assert NvidiaSTTService._speaker_runs(" Hi there hello ", words) == expected
+
+
+def test_speaker_runs_locate_repeated_words_in_order():
+    """A repeated word is matched after the previous one, not at its first occurrence."""
+    runs = NvidiaSTTService._speaker_runs(
+        "no, no, no.",
+        [("no", 0), ("no", 1), ("no", 0)],
+    )
+
+    assert runs == [(0, "no,"), (1, "no,"), (0, "no.")]
 
 
 @pytest.mark.asyncio
@@ -411,6 +523,43 @@ async def test_speaker_format_labels_zero_speaker_tag(monkeypatch):
 
     assert frames[0].text == "Speaker 0: Hello"
     assert frames[0].user_id == "0"
+
+
+@pytest.mark.asyncio
+async def test_speaker_format_labels_each_run(monkeypatch):
+    """Each speaker run gets its own label."""
+    service = _make_service(
+        settings=NvidiaSTTService.Settings(
+            speaker_diarization=True,
+            speaker_format="Speaker {speaker}: {text}",
+        )
+    )
+    response = _streaming_response(
+        "Hi there hello",
+        words=[_word("Hi", 0), _word("there", 0), _word("hello", 1)],
+    )
+
+    frames = await _capture_response_frames(monkeypatch, service, response)
+
+    assert [frame.text for frame in frames] == ["Speaker 0: Hi there", "Speaker 1: hello"]
+
+
+@pytest.mark.asyncio
+async def test_speaker_format_is_not_applied_to_unsplit_fallback(monkeypatch):
+    """A result without speaker tags is emitted unlabelled."""
+    service = _make_service(
+        settings=NvidiaSTTService.Settings(
+            speaker_diarization=True,
+            speaker_format="Speaker {speaker}: {text}",
+        )
+    )
+    service._user_id = "session-user"
+    response = _streaming_response("No speaker", words=[_word("No"), _word("speaker")])
+
+    frames = await _capture_response_frames(monkeypatch, service, response)
+
+    assert [frame.text for frame in frames] == ["No speaker"]
+    assert frames[0].user_id == "session-user"
 
 
 @pytest.mark.asyncio
@@ -467,3 +616,41 @@ async def test_deferred_diarization_update_uses_active_stream_config(monkeypatch
     )
 
     assert frames[0].user_id == "0"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("speaker_diarization", [False, True])
+async def test_response_handler_reads_diarization_from_stream_config(
+    monkeypatch, speaker_diarization
+):
+    """Whether results are split follows the config the stream was opened with."""
+    service = _make_service(
+        settings=NvidiaSTTService.Settings(speaker_diarization=speaker_diarization)
+    )
+    service._user_id = "session-user"
+    config = service._create_recognition_config()
+    response = _streaming_response("Hi there", words=[_word("Hi", 0), _word("there", 1)])
+    service._asr_service = SimpleNamespace(
+        streaming_response_generator=lambda audio_chunks, streaming_config: iter([response])
+    )
+    loop = asyncio.get_running_loop()
+    monkeypatch.setattr(service, "get_event_loop", lambda: loop)
+    monkeypatch.setattr(service, "_handle_stream_drop", AsyncMock())
+    handled = asyncio.Event()
+    received = []
+
+    async def handle_response(response, *, speaker_diarization=False):
+        received.append(speaker_diarization)
+        handled.set()
+
+    monkeypatch.setattr(service, "_handle_response", handle_response)
+
+    iterator = AudioChunkIterator(loop)
+    await asyncio.to_thread(service._response_handler, iterator, config)
+    await asyncio.wait_for(handled.wait(), timeout=1)
+
+    assert received == [speaker_diarization]
+
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])
