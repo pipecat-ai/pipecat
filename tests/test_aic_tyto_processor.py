@@ -129,7 +129,6 @@ class TestAICTytoProcessor(unittest.IsolatedAsyncioTestCase):
 
     def _create(self, **kwargs):
         kwargs.setdefault("license_key", "test-key")
-        kwargs.setdefault("analysis_interval", 0.05)
         processor = self.AICTytoProcessor(**kwargs)
         self.results = []
         self.summaries = []
@@ -148,8 +147,6 @@ class TestAICTytoProcessor(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError):
             self.AICTytoProcessor(license_key="k", model_id=None, model_path=None)
         with self.assertRaises(ValueError):
-            self.AICTytoProcessor(license_key="k", analysis_interval=0)
-        with self.assertRaises(ValueError):
             self.AICTytoProcessor(license_key="k", degraded_threshold=1.5)
 
     async def test_no_analysis_before_window_is_full(self):
@@ -162,7 +159,7 @@ class TestAICTytoProcessor(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.summaries, [])
 
     async def test_analysis_triggers_on_audio_seconds(self):
-        processor = self._create(analysis_interval=5.0)
+        processor = self._create()
 
         # The sleeps add no audio. They only let each analysis finish.
         await run_test(

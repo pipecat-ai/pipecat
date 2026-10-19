@@ -52,6 +52,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, F
 DEFAULT_TYTO_MODEL_ID = "tyto-1.1-l-16khz"
 
 # Tyto analyzes a fixed 5 s window and fills a shorter window with silence.
+# The processor analyzes once per window, so the windows do not overlap.
 _TYTO_WINDOW_SECS = 5.0
 
 _INT16_SCALE = 32768.0
@@ -63,8 +64,7 @@ class AICTytoProcessor(FrameProcessor):
     """Scores the quality of the user's audio with the ai-coustics Tyto model.
 
     The processor buffers the user's audio and analyzes the latest 5 s window
-    in a background thread after every ``analysis_interval`` seconds of received
-    audio. The first analysis waits until 5 s of audio are received. Each
+    in a background thread after every 5 s of received audio. Each
     ``StartFrame`` starts a new session with no results. Each result goes to the
     ``on_analysis_result`` event and downstream in an
     :class:`~pipecat.frames.frames.AudioQualityFrame`. When the call ends, the processor combines
@@ -103,7 +103,6 @@ class AICTytoProcessor(FrameProcessor):
         model_id: str | None = DEFAULT_TYTO_MODEL_ID,
         model_path: Path | None = None,
         model_download_dir: Path | None = None,
-        analysis_interval: float = 5.0,
         degraded_threshold: float = 0.3,
         audio_filter: AICFilter | None = None,
         **kwargs,
@@ -117,8 +116,6 @@ class AICTytoProcessor(FrameProcessor):
             model_path: Optional path to a local ``.aicmodel`` file.
             model_download_dir: Directory for downloaded models. Defaults to
                 ``~/.cache/pipecat/aic-models``.
-            analysis_interval: Seconds of received audio between two analyses.
-                Shorter intervals analyze overlapping audio and use more CPU.
             degraded_threshold: ``risk_score`` value at or above which the
                 summary counts a window as degraded. Calibrate it against the
                 failures that you see in your application.
@@ -127,18 +124,14 @@ class AICTytoProcessor(FrameProcessor):
             **kwargs: Additional arguments passed to parent class.
 
         Raises:
-            ValueError: If neither ``model_id`` nor ``model_path`` is set, if
-                ``analysis_interval`` is not a positive number, or if
-                ``degraded_threshold`` is not between 0.0 and 1.0.
+            ValueError: If neither ``model_id`` nor ``model_path`` is set, or
+                if ``degraded_threshold`` is not between 0.0 and 1.0.
         """
         if model_id is None and model_path is None:
             raise ValueError(
                 "Either 'model_id' or 'model_path' must be provided. "
                 "See https://artifacts.ai-coustics.io/ for available models."
             )
-
-        if not math.isfinite(analysis_interval) or analysis_interval <= 0:
-            raise ValueError("'analysis_interval' must be a positive number.")
 
         if not 0.0 <= degraded_threshold <= 1.0:
             raise ValueError("'degraded_threshold' must be between 0.0 and 1.0.")
@@ -153,7 +146,6 @@ class AICTytoProcessor(FrameProcessor):
         self._model_download_dir = model_download_dir or (
             Path.home() / ".cache" / "pipecat" / "aic-models"
         )
-        self._analysis_interval = analysis_interval
         self._degraded_threshold = degraded_threshold
         self._audio_filter = audio_filter
 
@@ -267,7 +259,7 @@ class AICTytoProcessor(FrameProcessor):
             return
         if self._audio_secs < self._next_analysis_secs:
             return
-        self._next_analysis_secs = self._audio_secs + self._analysis_interval
+        self._next_analysis_secs = self._audio_secs + _TYTO_WINDOW_SECS
         self._analysis_task = self.create_task(self._analyze(self._audio_secs), "tyto_analysis")
 
     async def _stop_analysis(self):
@@ -330,10 +322,10 @@ class AICTytoProcessor(FrameProcessor):
             return
 
         elapsed = time.monotonic() - started
-        if elapsed > self._analysis_interval:
+        if elapsed > _TYTO_WINDOW_SECS:
             logger.warning(
                 f"{self}: Tyto analysis took {elapsed:.2f}s, longer than its "
-                f"{self._analysis_interval}s interval. Increase the interval or reduce load."
+                f"{_TYTO_WINDOW_SECS}s interval. Reduce the CPU load."
             )
 
         await self._handle_result(result, audio_secs)
