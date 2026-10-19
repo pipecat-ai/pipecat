@@ -369,62 +369,37 @@ async def test_send_message_sends_while_connected():
     client._client.send_app_message.assert_called_once()
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "frame_type", [OutputTransportMessageFrame, OutputTransportMessageUrgentFrame]
-)
-async def test_messages_before_join_are_queued(frame_type):
-    transport = _make_transport()
-    client = transport._client
-    frame = frame_type(message={"type": "test"})
+class _BlockedSetup(FrameProcessor):
+    async def setup(self, setup):
+        await super().setup(setup)
+        await asyncio.Event().wait()
 
-    error = await client.send_message(frame)
 
-    assert error is None
-    assert client._join_message_queue == [frame]
-    client._client.send_app_message.assert_not_called()
+async def _block_forever(*args, **kwargs):
+    await asyncio.Event().wait()
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "frame_type", [OutputTransportMessageFrame, OutputTransportMessageUrgentFrame]
 )
-async def test_messages_after_cleanup_without_join_are_dropped(frame_type):
-    transport = _make_transport()
-    client = transport._client
-    call_client = client._client
-    client._cleanup()
-
-    error = await client.send_message(frame_type(message={"type": "test"}))
-
-    assert error is None
-    assert not client._join_message_queue
-    call_client.release.assert_called_once()
-    call_client.send_app_message.assert_not_called()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "frame_type", [OutputTransportMessageFrame, OutputTransportMessageUrgentFrame]
-)
-async def test_messages_after_setup_timeout_cleanup_are_dropped(frame_type):
-    class BlockedSetup(FrameProcessor):
-        async def setup(self, setup):
-            await super().setup(setup)
-            await asyncio.Event().wait()
-
+@pytest.mark.parametrize("join_blocks", [False, True], ids=["joined", "join_blocks"])
+async def test_sends_after_setup_timeout_are_dropped(join_blocks, frame_type):
     transport = _make_transport(audio_in_enabled=False, audio_out_enabled=False)
     client = transport._client
     call_client = client._client
-    client._join = AsyncMock(return_value=({}, None))
+    if join_blocks:
+        client._join = AsyncMock(side_effect=_block_forever)
+        await client.send_message(frame_type(message={"n": 0}))
+    else:
+        client._join = AsyncMock(return_value=({}, None))
     client._leave = AsyncMock(return_value=None)
     for name in ("on_joined", "on_left", "on_before_leave", "on_error"):
         setattr(client._callbacks, name, AsyncMock())
-    worker = PipelineWorker(
-        Pipeline([transport.input(), transport.output(), BlockedSetup()]),
-        setup_timeout_secs=1,
-        enable_rtvi=False,
-    )
+    processors = [transport.input(), transport.output()]
+    if not join_blocks:
+        processors.append(_BlockedSetup())
+    worker = PipelineWorker(Pipeline(processors), setup_timeout_secs=0.5, enable_rtvi=False)
     setup_timed_out = asyncio.Event()
 
     @worker.event_handler("on_setup_timeout")
@@ -440,15 +415,20 @@ async def test_messages_after_setup_timeout_cleanup_are_dropped(frame_type):
 
     assert setup_timed_out.is_set()
     client._join.assert_awaited_once()
+    # The pipeline never started, so the client was released without leave().
     client._leave.assert_not_awaited()
     call_client.release.assert_called_once()
     assert client._client is None
 
-    error = await client.send_message(frame_type(message={"type": "test"}))
+    error = await client.send_message(frame_type(message={"n": 1}))
 
     assert error is None
     assert not client._join_message_queue
     call_client.send_app_message.assert_not_called()
+
+    error = await client.send_prebuilt_chat_message("hello")
+    assert error == "Can't send message if not joined"
+    call_client.send_prebuilt_chat_message.assert_not_called()
 
 
 @pytest.mark.asyncio
