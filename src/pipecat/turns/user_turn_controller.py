@@ -435,6 +435,24 @@ class UserTurnController(BaseObject):
 
         await self._end_user_turn_if_decided()
 
+    async def sync_vad_speaking_state(
+        self, frame: VADUserStartedSpeakingFrame | VADUserStoppedSpeakingFrame
+    ) -> None:
+        """Update ``_user_speaking`` from a VAD frame without running turn strategies.
+
+        Used when the user aggregator suppresses speech frames while muted: the
+        mute must not leave speaking state stale, or the turn never closes and
+        post-tool inference never runs (see #6201).
+
+        Intentionally does not call the full VAD handlers — those resume or end
+        the turn — because muted speech must not trigger turn-strategy effects.
+        """
+        if isinstance(frame, VADUserStartedSpeakingFrame):
+            self._user_speaking = True
+        else:
+            self._user_speaking = False
+        self._user_turn_stop_timeout_event.set()
+
     async def _handle_speech_started(self):
         # Speech in an open turn clears the stop decisions made so far, and
         # the inference triggered for them. It resumes the turn when the user had
