@@ -46,6 +46,7 @@ try:
     from speechmatics.agent_stt import (
         DEFAULT_CHUNK_SIZE,
         DEFAULT_MODEL,
+        SUPPORTED_SAMPLE_RATES,
         AdditionalVocabEntry,
         AgentSttAsyncClient,
         AudioEncoding,
@@ -202,6 +203,8 @@ class SpeechmaticsSTTSettings(STTSettings):
                 Use ``model`` instead. Will be removed in 2.0.0.
 
         enable_partials: Include partial segment fragments.
+        emit_sentences: Close a segment at every end of sentence, not only at the end of
+            the turn, so each sentence is emitted as its own final transcription.
         punctuation_overrides: Punctuation overrides.
         transcript_filtering_config: Post-processing applied to the transcript.
         enable_diarization: Enable speaker diarization.
@@ -219,6 +222,7 @@ class SpeechmaticsSTTSettings(STTSettings):
     )
     operating_point: Model | str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     enable_partials: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    emit_sentences: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     punctuation_overrides: dict[str, Any] | None | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
@@ -421,7 +425,8 @@ class SpeechmaticsSTTService(STTService):
                 `SPEECHMATICS_API_KEY` if not provided.
             base_url: Base URL for Speechmatics API. Uses environment variable `SPEECHMATICS_RT_URL`
                 or defaults to `wss://eu2.rt.speechmatics.com/v2/agent`.
-            sample_rate: Optional audio sample rate in Hz.
+            sample_rate: Optional audio sample rate in Hz. Speechmatics accepts 8000 and
+                16000. Defaults to the pipeline's input sample rate.
             encoding: Audio encoding format. Defaults to ``AudioEncoding.PCM_S16LE``.
             params: Input parameters for the service.
 
@@ -472,6 +477,7 @@ class SpeechmaticsSTTService(STTService):
             additional_vocab=[],
             operating_point=None,
             enable_partials=None,
+            emit_sentences=None,
             punctuation_overrides=None,
             transcript_filtering_config=None,
             enable_diarization=None,
@@ -699,6 +705,17 @@ class SpeechmaticsSTTService(STTService):
         # Log the event
         logger.debug(f"{self} connecting to Speechmatics STT service")
 
+        # The client rejects an unsupported sample rate when constructed. Check it here so
+        # the rejection is reported as permanent (a retry would fail the same way) rather
+        # than raised out of start().
+        if self.sample_rate not in SUPPORTED_SAMPLE_RATES:
+            supported = ", ".join(str(rate) for rate in SUPPORTED_SAMPLE_RATES)
+            await self._fail_permanently(
+                f"Speechmatics STT does not support a sample rate of {self.sample_rate} Hz "
+                f"(supported: {supported})"
+            )
+            return False
+
         # Agent STT client. Turn detection is a top-level turn_config (sibling of the
         # transcription config); audio encoding / sample rate go via AudioFormat.
         self._client = AgentSttAsyncClient(
@@ -903,6 +920,7 @@ class SpeechmaticsSTTService(STTService):
             output_locale=self._locale_to_speechmatics_locale(sm_language, language),
             domain=s.domain or None,
             enable_partials=assert_given(s.enable_partials),
+            emit_sentences=assert_given(s.emit_sentences),
             punctuation_overrides=assert_given(s.punctuation_overrides),
             transcript_filtering_config=assert_given(s.transcript_filtering_config),
         )
