@@ -19,19 +19,21 @@ from dataclasses import dataclass
 import pytest
 
 from pipecat.frames.frames import (
+    AggregatedTextFrame,
     DataFrame,
     ErrorFrame,
     Frame,
     InterruptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
+    LLMTextFrame,
     TextFrame,
     TTSAudioRawFrame,
     TTSSpeakFrame,
     TTSStoppedFrame,
     TTSTextFrame,
 )
-from pipecat.services.tts_service import TTSService
+from pipecat.services.tts_service import TextAggregationMode, TTSService
 from pipecat.tests.utils import SleepFrame, run_test
 
 _FAKE_AUDIO = b"\x00\x01" * 320
@@ -88,9 +90,12 @@ class MockLateAudioTTSService(TTSService):
     """WebSocket-style service without word timestamps whose audio arrives later.
 
     The spoken text is queued as soon as run_tts returns, ahead of its audio.
+
+    Args:
+        speaks: Whether the service delivers any audio at all.
     """
 
-    def __init__(self, **kwargs):
+    def __init__(self, speaks: bool = True, **kwargs):
         super().__init__(
             push_start_frame=True,
             push_stop_frames=True,
@@ -98,11 +103,15 @@ class MockLateAudioTTSService(TTSService):
             stop_frame_timeout_s=_STOP_FRAME_TIMEOUT_S,
             **kwargs,
         )
+        self._speaks = speaks
 
     def can_generate_metrics(self) -> bool:
         return False
 
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
+        if not self._speaks:
+            return
+
         async def _deliver_audio():
             await asyncio.sleep(_STOP_FRAME_TIMEOUT_S / 2)
             await self.append_to_audio_context(
@@ -404,3 +413,61 @@ async def test_an_unusable_service_adds_no_text_to_the_context():
     assert not tts.is_usable
 
     assert not any(isinstance(f, TTSTextFrame) for f in down)
+
+
+def _code_reply() -> list[Frame]:
+    """A streamed reply with a code block the TTS leaves out between two sentences."""
+    return [
+        LLMFullResponseStartFrame(),
+        LLMTextFrame("Here is the code."),
+        AggregatedTextFrame("some code", "code"),
+        LLMTextFrame(" Done."),
+        LLMFullResponseEndFrame(),
+        SleepFrame(sleep=_STOP_FRAME_TIMEOUT_S * 4),
+    ]
+
+
+def _context_entries(down: Sequence[Frame]) -> list[str]:
+    """The text reaching the context, spoken and skipped, in order."""
+    return [
+        f.text
+        for f in down
+        if isinstance(f, AggregatedTextFrame)
+        and f.append_to_context
+        and not f.will_be_spoken
+        or isinstance(f, TTSTextFrame)
+        and f.append_to_context
+    ]
+
+
+@pytest.mark.asyncio
+async def test_skipped_text_keeps_its_place_behind_text_awaiting_audio():
+    tts = MockLateAudioTTSService(
+        text_aggregation_mode=TextAggregationMode.TOKEN, skip_text_types=["code"]
+    )
+
+    down, _ = await asyncio.wait_for(run_test(tts, frames_to_send=_code_reply()), timeout=5.0)
+
+    assert [t.strip() for t in _context_entries(down)] == [
+        "Here is the code.",
+        "some code",
+        "Done.",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_silent_streaming_context_keeps_only_its_skipped_text():
+    tts = MockLateAudioTTSService(
+        speaks=False, text_aggregation_mode=TextAggregationMode.TOKEN, skip_text_types=["code"]
+    )
+
+    down, _ = await asyncio.wait_for(run_test(tts, frames_to_send=_code_reply()), timeout=5.0)
+
+    assert not any(isinstance(f, TTSTextFrame) for f in down)
+    assert _context_entries(down) == ["some code"]
+    # The skipped text still comes out ahead of the context's stop frame.
+    kinds = [type(f) for f in down]
+    skipped_index = next(
+        i for i, f in enumerate(down) if isinstance(f, AggregatedTextFrame) and f.skip_tts
+    )
+    assert skipped_index < kinds.index(TTSStoppedFrame)
