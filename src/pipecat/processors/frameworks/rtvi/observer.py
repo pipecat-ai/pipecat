@@ -63,8 +63,8 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.metrics.metrics import (
-    AudioQualityMetricsData,
-    AudioQualitySummaryMetricsData,
+    AICAudioQualityMetricsData,
+    AICAudioQualitySummaryMetricsData,
     LLMUsageMetricsData,
     ProcessingMetricsData,
     STTUsageMetricsData,
@@ -1161,11 +1161,11 @@ class RTVIObserver(BaseObserver):
                 if "characters" not in metrics:
                     metrics["characters"] = []
                 metrics["characters"].append(d.model_dump(exclude_none=True))
-            elif isinstance(d, AudioQualityMetricsData):
+            elif isinstance(d, AICAudioQualityMetricsData):
                 if "audio_quality" not in metrics:
                     metrics["audio_quality"] = []
                 metrics["audio_quality"].append(d.model_dump(exclude_none=True))
-            elif isinstance(d, AudioQualitySummaryMetricsData):
+            elif isinstance(d, AICAudioQualitySummaryMetricsData):
                 if "audio_quality_summary" not in metrics:
                     metrics["audio_quality_summary"] = []
                 metrics["audio_quality_summary"].append(d.model_dump(exclude_none=True))

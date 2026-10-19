@@ -41,10 +41,10 @@ from pipecat.frames.frames import (
     StartFrame,
 )
 from pipecat.metrics.metrics import (
-    AudioQualityMetricsData,
-    AudioQualityScores,
-    AudioQualitySummary,
-    AudioQualitySummaryMetricsData,
+    AICAudioQualityMetricsData,
+    AICAudioQualityScores,
+    AICAudioQualitySummary,
+    AICAudioQualitySummaryMetricsData,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 
@@ -56,7 +56,7 @@ _TYTO_WINDOW_SECS = 5.0
 
 _INT16_SCALE = 32768.0
 
-_SCORE_FIELDS = tuple(AudioQualityScores.model_fields)
+_SCORE_FIELDS = tuple(AICAudioQualityScores.model_fields)
 # risk_score combines the other scores. speaker_loudness is a level, not a degradation.
 _DEGRADATION_FIELDS = tuple(f for f in _SCORE_FIELDS if f not in ("risk_score", "speaker_loudness"))
 
@@ -81,9 +81,9 @@ class AICTytoProcessor(FrameProcessor):
 
     Event handlers available:
 
-    - on_analysis_result: Called with an :class:`AudioQualityMetricsData` for
+    - on_analysis_result: Called with an :class:`AICAudioQualityMetricsData` for
       each analyzed window.
-    - on_call_summary: Called with an :class:`AudioQualitySummaryMetricsData`
+    - on_call_summary: Called with an :class:`AICAudioQualitySummaryMetricsData`
       when the call ends. Not called when no window was analyzed.
 
     Example::
@@ -251,7 +251,7 @@ class AICTytoProcessor(FrameProcessor):
         # Scores of a window that is part silence padding do not describe the
         # call, so the first analysis waits for a full window.
         self._next_analysis_secs = _TYTO_WINDOW_SECS
-        self._windows: list[AudioQualityScores] = []
+        self._windows: list[AICAudioQualityScores] = []
         self._summary_sent = False
 
     def _start_analysis(self):
@@ -332,10 +332,10 @@ class AICTytoProcessor(FrameProcessor):
 
     async def _handle_result(self, result: AnalysisResult, audio_secs: float):
         assert self._model is not None
-        scores = AudioQualityScores(**{f: getattr(result, f) for f in _SCORE_FIELDS})
+        scores = AICAudioQualityScores(**{f: getattr(result, f) for f in _SCORE_FIELDS})
         self._windows.append(scores)
 
-        data = AudioQualityMetricsData(
+        data = AICAudioQualityMetricsData(
             processor=self.name, model=self._model.get_id(), value=scores, audio_secs=audio_secs
         )
         await self._call_event_handler("on_analysis_result", data)
@@ -359,22 +359,22 @@ class AICTytoProcessor(FrameProcessor):
             return
 
         assert self._model is not None
-        data = AudioQualitySummaryMetricsData(
+        data = AICAudioQualitySummaryMetricsData(
             processor=self.name, model=self._model.get_id(), value=self._summarize()
         )
         await self._call_event_handler("on_call_summary", data)
         if push_metrics and self.metrics_enabled:
             await self.push_frame(MetricsFrame(data=[data]))
 
-    def _summarize(self) -> AudioQualitySummary:
+    def _summarize(self) -> AICAudioQualitySummary:
         values = np.array([[getattr(w, f) for f in _SCORE_FIELDS] for w in self._windows])
 
-        def to_scores(row: np.ndarray) -> AudioQualityScores:
-            return AudioQualityScores(**dict(zip(_SCORE_FIELDS, row.tolist())))
+        def to_scores(row: np.ndarray) -> AICAudioQualityScores:
+            return AICAudioQualityScores(**dict(zip(_SCORE_FIELDS, row.tolist())))
 
         mean = values.mean(axis=0)
         risk = values[:, _SCORE_FIELDS.index("risk_score")]
-        return AudioQualitySummary(
+        return AICAudioQualitySummary(
             windows=len(self._windows),
             mean=to_scores(mean),
             p95=to_scores(np.percentile(values, 95, axis=0)),

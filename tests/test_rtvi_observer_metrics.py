@@ -11,10 +11,10 @@ from unittest.mock import AsyncMock
 
 from pipecat.frames.frames import MetricsFrame
 from pipecat.metrics.metrics import (
-    AudioQualityMetricsData,
-    AudioQualityScores,
-    AudioQualitySummary,
-    AudioQualitySummaryMetricsData,
+    AICAudioQualityMetricsData,
+    AICAudioQualityScores,
+    AICAudioQualitySummary,
+    AICAudioQualitySummaryMetricsData,
     LLMTokenUsage,
     LLMUsageMetricsData,
     ProcessingMetricsData,
@@ -115,18 +115,18 @@ class TestRTVIObserverMetrics(unittest.IsolatedAsyncioTestCase):
         observer = RTVIObserver(params=RTVIObserverParams(metrics_enabled=True))
         sent = []
         observer.send_rtvi_message = AsyncMock(side_effect=lambda m: sent.append(m))
-        scores = AudioQualityScores(**dict.fromkeys(AudioQualityScores.model_fields, 0.2))
+        scores = AICAudioQualityScores(**dict.fromkeys(AICAudioQualityScores.model_fields, 0.2))
 
         await observer._handle_metrics(
             MetricsFrame(
                 data=[
-                    AudioQualityMetricsData(
+                    AICAudioQualityMetricsData(
                         processor="tyto", model="tyto-1.1-l-16khz", value=scores, audio_secs=5.0
                     ),
-                    AudioQualitySummaryMetricsData(
+                    AICAudioQualitySummaryMetricsData(
                         processor="tyto",
                         model="tyto-1.1-l-16khz",
-                        value=AudioQualitySummary(
+                        value=AICAudioQualitySummary(
                             windows=1,
                             mean=scores,
                             p95=scores,

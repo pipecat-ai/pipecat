@@ -30,9 +30,9 @@ from pipecat.frames.frames import (
     MetricsFrame,
 )
 from pipecat.metrics.metrics import (
-    AudioQualityMetricsData,
-    AudioQualityScores,
-    AudioQualitySummaryMetricsData,
+    AICAudioQualityMetricsData,
+    AICAudioQualityScores,
+    AICAudioQualitySummaryMetricsData,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams
@@ -196,12 +196,12 @@ class TestAICTytoProcessor(unittest.IsolatedAsyncioTestCase):
 
         self.assertGreater(len(self.results), 0)
         result = self.results[0]
-        self.assertIsInstance(result, AudioQualityMetricsData)
+        self.assertIsInstance(result, AICAudioQualityMetricsData)
         self.assertEqual(result.model, "tyto-test")
         self.assertEqual(result.audio_secs, 6.0)
         self.assertEqual(result.value.risk_score, 0.4)
         self.assertEqual(result.value.noise, 0.6)
-        self.assertEqual(len(_metrics_of_type(down, AudioQualityMetricsData)), len(self.results))
+        self.assertEqual(len(_metrics_of_type(down, AICAudioQualityMetricsData)), len(self.results))
 
     async def test_no_metrics_frames_when_metrics_disabled(self):
         processor = self._create()
@@ -212,8 +212,8 @@ class TestAICTytoProcessor(unittest.IsolatedAsyncioTestCase):
 
         self.assertGreater(len(self.results), 0)
         self.assertEqual(len(self.summaries), 1)
-        self.assertEqual(_metrics_of_type(down, AudioQualityMetricsData), [])
-        self.assertEqual(_metrics_of_type(down, AudioQualitySummaryMetricsData), [])
+        self.assertEqual(_metrics_of_type(down, AICAudioQualityMetricsData), [])
+        self.assertEqual(_metrics_of_type(down, AICAudioQualitySummaryMetricsData), [])
 
     async def test_summary_pushed_before_end_frame(self):
         processor = self._create()
@@ -230,7 +230,7 @@ class TestAICTytoProcessor(unittest.IsolatedAsyncioTestCase):
             i
             for i, f in enumerate(down)
             if isinstance(f, MetricsFrame)
-            and any(isinstance(d, AudioQualitySummaryMetricsData) for d in f.data)
+            and any(isinstance(d, AICAudioQualitySummaryMetricsData) for d in f.data)
         )
         end_index = next(i for i, f in enumerate(down) if isinstance(f, EndFrame))
         self.assertLess(summary_index, end_index)
@@ -254,7 +254,7 @@ class TestAICTytoProcessor(unittest.IsolatedAsyncioTestCase):
         processor = self._create()
         processor._model = self.model
         processor._windows = [
-            AudioQualityScores(**dict.fromkeys(AudioQualityScores.model_fields, 0.1))
+            AICAudioQualityScores(**dict.fromkeys(AICAudioQualityScores.model_fields, 0.1))
         ]
 
         await processor._send_summary(push_metrics=False)
@@ -268,9 +268,9 @@ class TestAICTytoProcessor(unittest.IsolatedAsyncioTestCase):
         processor = self._create(degraded_threshold=0.5)
 
         def scores(risk, noise, loudness):
-            values = dict.fromkeys(AudioQualityScores.model_fields, 0.0)
+            values = dict.fromkeys(AICAudioQualityScores.model_fields, 0.0)
             values.update(risk_score=risk, noise=noise, speaker_loudness=loudness)
-            return AudioQualityScores(**values)
+            return AICAudioQualityScores(**values)
 
         processor._windows = [scores(0.2, 0.4, 0.9), scores(0.6, 0.2, 0.9)]
 

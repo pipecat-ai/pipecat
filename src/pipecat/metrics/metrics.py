@@ -228,7 +228,7 @@ class TurnMetricsData(MetricsData):
     e2e_processing_time_ms: float
 
 
-class AudioQualityScores(BaseModel):
+class AICAudioQualityScores(BaseModel):
     """Audio quality scores for one window of user audio.
 
     All scores are in the range 0.0 to 1.0. A higher value means more
@@ -255,7 +255,7 @@ class AudioQualityScores(BaseModel):
     codec_degradation: float
 
 
-class AudioQualityMetricsData(MetricsData):
+class AICAudioQualityMetricsData(MetricsData):
     """Audio quality metrics data for one analysis window.
 
     Parameters:
@@ -264,11 +264,11 @@ class AudioQualityMetricsData(MetricsData):
             analyzed. The window covers the audio just before this point.
     """
 
-    value: AudioQualityScores
+    value: AICAudioQualityScores
     audio_secs: float
 
 
-class AudioQualitySummary(BaseModel):
+class AICAudioQualitySummary(BaseModel):
     """Summary of the audio quality windows of one call.
 
     Parameters:
@@ -285,22 +285,22 @@ class AudioQualitySummary(BaseModel):
     """
 
     windows: int
-    mean: AudioQualityScores
-    p95: AudioQualityScores
-    max: AudioQualityScores
+    mean: AICAudioQualityScores
+    p95: AICAudioQualityScores
+    max: AICAudioQualityScores
     degraded_threshold: float
     degraded_fraction: float
     dominant_dimension: str
 
 
-class AudioQualitySummaryMetricsData(MetricsData):
+class AICAudioQualitySummaryMetricsData(MetricsData):
     """Audio quality metrics data for a full call.
 
     Parameters:
         value: Summary of the analyzed windows.
     """
 
-    value: AudioQualitySummary
+    value: AICAudioQualitySummary
 
 
 @deprecated(
