@@ -28,6 +28,12 @@ _MARKDOWN_TABLE = re.compile(
     re.MULTILINE,
 )
 
+# Placeholders that hold leading/trailing spaces and numbered list markers
+# through md.convert. Private-use characters, which real text doesn't contain,
+# so a "§" in the text ("see § 5") is kept.
+_SPACE = "\ue000"
+_NUM = "\ue001"
+
 
 class MarkdownTextFilter(BaseTextFilter):
     """Text filter that removes Markdown formatting from text content.
@@ -127,18 +133,18 @@ class MarkdownTextFilter(BaseTextFilter):
             if self._settings.filter_repeated_sequences:
                 filtered_text = re.sub(r"(\S)(\1{4,})", "", filtered_text)
 
-            # Preserve numbered list items with a unique marker, §NUM§
-            filtered_text = re.sub(r"^(\d+\.)\s", r"§NUM§\1 ", filtered_text)
+            # Preserve numbered list items with a unique marker
+            filtered_text = re.sub(r"^(\d+\.)\s", rf"{_NUM}\1 ", filtered_text)
 
-            # Preserve leading/trailing spaces with a unique marker, §
+            # Preserve leading/trailing spaces with a unique marker
             # Critical for word-by-word streaming in bot-tts-text
             filtered_text = re.sub(
-                r"^( +)|\s+$", lambda m: "§" * len(m.group(0)), filtered_text, flags=re.MULTILINE
+                r"^( +)|\s+$", lambda m: _SPACE * len(m.group(0)), filtered_text, flags=re.MULTILINE
             )
 
             # Remove space placeholders before tables, so that tables are converted to HTML
             # correctly
-            filtered_text = re.sub(r"§\| ", "| ", filtered_text)
+            filtered_text = filtered_text.replace(f"{_SPACE}| ", "| ")
 
             # Convert markdown to HTML
             extension = ["tables"] if self._settings.filter_tables else []
@@ -170,10 +176,10 @@ class MarkdownTextFilter(BaseTextFilter):
             filtered_text = re.sub(r"^\s*[-:]+\s*$", "", filtered_text, flags=re.MULTILINE)
 
             # Restore numbered list items
-            filtered_text = filtered_text.replace("§NUM§", "")
+            filtered_text = filtered_text.replace(_NUM, "")
 
             # Restore leading and trailing spaces
-            filtered_text = re.sub("§", " ", filtered_text)
+            filtered_text = filtered_text.replace(_SPACE, " ")
 
             ## Make links more readable
             filtered_text = re.sub(r"https?://", "", filtered_text)

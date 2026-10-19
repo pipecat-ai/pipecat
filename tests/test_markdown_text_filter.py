@@ -150,6 +150,18 @@ class TestMarkdownTextFilter(unittest.IsolatedAsyncioTestCase):
             result = await self.filter.filter(input_text)
             self.assertEqual(result, expected, f"Standalone asterisk lost in: '{input_text}'")
 
+    async def test_section_sign_preserved(self):
+        """Test that a section sign in the text is kept."""
+        test_cases = {
+            "See § 5 of the contract.": "See § 5 of the contract.",
+            "Sections §§ 3-4 apply.": "Sections §§ 3-4 apply.",
+            " § 2": " § 2",
+        }
+
+        for input_text, expected in test_cases.items():
+            result = await self.filter.filter(input_text)
+            self.assertEqual(result, expected, f"Section sign lost in: '{input_text}'")
+
     async def test_newline_handling(self):
         """Test handling of empty and whitespace-only lines."""
         test_cases = {
