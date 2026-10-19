@@ -34,3 +34,7 @@ The backend is an engineering assistant's: a code change that loops through sear
 ## Reading a verdict
 
 The judge sees each reply as the harness attributes it to a turn, so a result that arrives inside the previous turn's reply can fail the turn that expected it, and audio the user talks over is discarded. When a verdict looks wrong, read the run's logs and recording under `test-runs/<timestamp>/` before changing anything: the bot log says what the backend sent and when, and whether the frontend spoke it. Budgets in the scenarios are generous on purpose, since the eval clock lags the bot by seconds and a `response` needs the bot to stop speaking and its speech to be transcribed.
+
+## Tuning
+
+[`tuning/`](tuning/README.md) holds the checks to run before and after changing `LLMWithBackend`'s prompts or predictive delegation's classifier, and a log of their results.
