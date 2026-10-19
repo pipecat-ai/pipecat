@@ -63,8 +63,9 @@ class AICTytoProcessor(FrameProcessor):
     """Scores the quality of the user's audio with the ai-coustics Tyto model.
 
     The processor buffers the user's audio and analyzes the latest 5 s window
-    every ``analysis_interval`` seconds in a background thread. The first
-    analysis waits until 5 s of audio are buffered. Each result goes to the
+    in a background thread after every ``analysis_interval`` seconds of received
+    audio. The first analysis waits until 5 s of audio are received. Each
+    ``StartFrame`` starts a new session with no results. Each result goes to the
     ``on_analysis_result`` event and downstream in an
     :class:`~pipecat.frames.frames.AudioQualityFrame`. When the call ends, the processor combines
     the results into one summary and gives it to the ``on_call_summary``
@@ -116,8 +117,8 @@ class AICTytoProcessor(FrameProcessor):
             model_path: Optional path to a local ``.aicmodel`` file.
             model_download_dir: Directory for downloaded models. Defaults to
                 ``~/.cache/pipecat/aic-models``.
-            analysis_interval: Seconds between two analyses. Shorter intervals
-                analyze overlapping audio and use more CPU.
+            analysis_interval: Seconds of received audio between two analyses.
+                Shorter intervals analyze overlapping audio and use more CPU.
             degraded_threshold: ``risk_score`` value at or above which the
                 summary counts a window as degraded. Calibrate it against the
                 failures that you see in your application.
@@ -164,13 +165,7 @@ class AICTytoProcessor(FrameProcessor):
         self._executor: ThreadPoolExecutor | None = None
         self._analysis_task: asyncio.Task | None = None
 
-        # Re-buffering when the processor feeds the collector itself.
-        self._frames_per_block = 0
-        self._audio_buffer = bytearray()
-
-        self._audio_secs = 0.0
-        self._windows: list[AudioQualityScores] = []
-        self._summary_sent = False
+        self._reset_session()
 
         self._register_event_handler("on_analysis_result")
         self._register_event_handler("on_call_summary")
@@ -244,17 +239,34 @@ class AICTytoProcessor(FrameProcessor):
         await self.push_frame(frame, direction)
 
         if isinstance(frame, StartFrame):
-            self._start_analysis()
+            await self._stop_analysis()
+            self._reset_session()
         elif isinstance(frame, CancelFrame):
             await self._stop_analysis()
             await self._send_summary(push_metrics=False)
         elif isinstance(frame, InputAudioRawFrame):
             self._handle_audio(frame)
+            self._start_analysis()
+
+    def _reset_session(self):
+        # Re-buffering when the processor feeds the collector itself.
+        self._frames_per_block = 0
+        self._audio_buffer = bytearray()
+
+        self._audio_secs = 0.0
+        # Scores of a window that is part silence padding do not describe the
+        # call, so the first analysis waits for a full window.
+        self._next_analysis_secs = _TYTO_WINDOW_SECS
+        self._windows: list[AudioQualityScores] = []
+        self._summary_sent = False
 
     def _start_analysis(self):
-        if self._analyzer is None or self._analysis_task is not None:
+        if self._analysis_task is not None and not self._analysis_task.done():
             return
-        self._analysis_task = self.create_task(self._analysis_task_handler(), "tyto_analysis")
+        if self._audio_secs < self._next_analysis_secs:
+            return
+        self._next_analysis_secs = self._audio_secs + self._analysis_interval
+        self._analysis_task = self.create_task(self._analyze(self._audio_secs), "tyto_analysis")
 
     async def _stop_analysis(self):
         if self._analysis_task is not None:
@@ -292,37 +304,26 @@ class AICTytoProcessor(FrameProcessor):
         for block in blocks:
             self._collector.buffer(block)
 
-    async def _analysis_task_handler(self):
+    async def _analyze(self, audio_secs: float):
         assert self._analyzer is not None
-        loop = asyncio.get_running_loop()
-        delay = self._analysis_interval
-        while True:
-            await asyncio.sleep(delay)
-            delay = self._analysis_interval
+        started = time.monotonic()
+        try:
+            result = await asyncio.get_running_loop().run_in_executor(
+                self._executor, self._analyzer.analyze_buffered
+            )
+        except Exception as e:
+            self._next_analysis_secs = math.inf
+            await self.push_error(f"Tyto analysis failed, analysis stopped: {e}", exception=e)
+            return
 
-            # Scores of a window that is part silence padding do not describe
-            # the call.
-            if self._audio_secs < _TYTO_WINDOW_SECS:
-                delay = _TYTO_WINDOW_SECS - self._audio_secs
-                continue
+        elapsed = time.monotonic() - started
+        if elapsed > self._analysis_interval:
+            logger.warning(
+                f"{self}: Tyto analysis took {elapsed:.2f}s, longer than its "
+                f"{self._analysis_interval}s interval. Increase the interval or reduce load."
+            )
 
-            audio_secs = self._audio_secs
-            started = time.monotonic()
-            try:
-                result = await loop.run_in_executor(self._executor, self._analyzer.analyze_buffered)
-            except Exception as e:
-                await self.push_error(f"Tyto analysis failed, analysis stopped: {e}", exception=e)
-                return
-
-            elapsed = time.monotonic() - started
-            if elapsed > self._analysis_interval:
-                logger.warning(
-                    f"{self}: Tyto analysis took {elapsed:.2f}s, longer than its "
-                    f"{self._analysis_interval}s interval. Increase the interval or reduce load."
-                )
-            delay = max(0.0, self._analysis_interval - elapsed)
-
-            await self._handle_result(result, audio_secs)
+        await self._handle_result(result, audio_secs)
 
     async def _handle_result(self, result: AnalysisResult, audio_secs: float):
         assert self._model is not None

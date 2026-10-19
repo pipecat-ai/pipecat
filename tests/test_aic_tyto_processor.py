@@ -108,6 +108,32 @@ class TestAICTytoProcessor(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.results, [])
         self.assertEqual(self.summaries, [])
 
+    async def test_analysis_triggers_on_audio_seconds(self):
+        processor = self._create(analysis_interval=5.0)
+
+        # The sleeps add no audio. They only let each analysis finish.
+        await run_test(
+            processor,
+            frames_to_send=[
+                *[_audio_frame(1.0) for _ in range(5)],
+                SleepFrame(sleep=0.1),
+                *[_audio_frame(1.0) for _ in range(5)],
+                SleepFrame(sleep=0.1),
+                _audio_frame(1.0),
+            ],
+        )
+
+        self.assertEqual([r.audio_secs for r in self.results], [5.0, 10.0])
+
+    async def test_restart_resets_session(self):
+        processor = self._create()
+
+        await run_test(processor, frames_to_send=[_audio_frame(6.0), SleepFrame(sleep=0.1)])
+        await run_test(processor, frames_to_send=[_audio_frame(6.0), SleepFrame(sleep=0.1)])
+
+        self.assertEqual([s.value.windows for s in self.summaries], [1, 1])
+        self.assertEqual(len(self.collector.configs), 2)
+
     async def test_window_result_event_and_metrics(self):
         self.analyzer.results = [MockAnalysisResult(risk_score=0.4, noise=0.6)]
         processor = self._create()
