@@ -186,6 +186,11 @@ class MarkdownTextFilter(BaseTextFilter):
         self._in_code_block = False
         self._in_table = False
 
+    async def reset(self):
+        """Reset the code block and table tracking when a reply ends."""
+        self._in_code_block = False
+        self._in_table = False
+
     async def reset_interruption(self):
         """Reset the filter state after an interruption has been handled.
 

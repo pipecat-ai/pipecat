@@ -335,6 +335,15 @@ class TestMarkdownTextFilter(unittest.IsolatedAsyncioTestCase):
                 f"Hash-in-content handling failed for: {input_text!r}\nGot: {result!r}",
             )
 
+    async def test_reset_ends_code_block(self):
+        """Test that reset() ends a code block left open by the previous reply."""
+        filter = MarkdownTextFilter(params=MarkdownTextFilter.InputParams(filter_code=True))
+        await filter.filter("In Markdown, type ``` to start a code block.")
+        self.assertEqual(await filter.filter("Still inside."), "")
+
+        await filter.reset()
+        self.assertEqual(await filter.filter("How else can I help?"), "How else can I help?")
+
 
 if __name__ == "__main__":
     unittest.main()

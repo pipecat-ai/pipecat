@@ -1214,6 +1214,8 @@ class TTSService(AIService):
 
         # Reset aggregator state
         self._sent_non_whitespace_in_context = False
+        for filter in self._text_filters:
+            await filter.reset()
         if isinstance(frame, LLMFullResponseEndFrame):
             # Queue behind the audio contexts so the frame follows the turn's
             # audio and text.
