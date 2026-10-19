@@ -76,8 +76,7 @@ class AICTytoProcessor(FrameProcessor):
     Place the processor after ``transport.input()``. Tyto must score the audio
     before enhancement. When :class:`AICFilter` is the transport's
     ``audio_in_filter``, give the same filter as ``audio_filter``. The filter
-    then feeds each block to the analysis before it enhances the block. Without
-    ``audio_filter``, the processor scores the audio that it receives.
+    then feeds each block to the analysis before it enhances the block.
 
     Event handlers available:
 
