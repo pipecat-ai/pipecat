@@ -11,25 +11,31 @@ A small wording change can move a model in ways no unit test catches: gpt-4.1 st
 
 They use the bots in [`examples/multi-worker/llm-with-backend/`](../../../examples/multi-worker/llm-with-backend/): three with a text frontend (OpenAI Responses on gpt-4.1, Google on gemini-3.6-flash, Anthropic on claude-sonnet-4-6) and two speech-to-speech. Fastest first:
 
-1. **Classifier replay** (`classifier_replay/`, about a minute, needs `TYPESAFE_API_KEY`). 107 recorded user turns, each labelled with whether it needs the backend. Asks the classifier about each, as a running bot would, and reports false "yes" answers (delegated early, not needed) and missed ones. The classifier reads the frontend's prompts, so run it for a prompt change too.
+1. **Frontend replay** (`frontend_replay/`, minutes). 75 recorded user turns, each labelled with whether it should be delegated. Runs one text frontend's model on each and lists the turns it gets wrong: a stop answered with no `delegate` call, or small talk delegated. Run it for each of the three.
+
+   ```bash
+   uv run python evals/llm-with-backend/tuning/frontend_replay/replay.py --frontend <openai|google|anthropic> --samples 5
+   ```
+
+2. **Classifier replay** (`classifier_replay/`, about a minute, needs `TYPESAFE_API_KEY`). 107 recorded user turns, each labelled with whether it needs the backend. Asks the classifier about each, as a running bot would, and reports false "yes" answers (delegated early, not needed) and missed ones. The classifier reads the frontend's prompts, so run it for a prompt change too.
 
    ```bash
    uv run python evals/llm-with-backend/tuning/classifier_replay/replay.py
    ```
 
-2. **Text evals** (about an hour): the [suite](../README.md)'s scenarios on the three text frontends, five runs each.
+3. **Text evals** (about an hour): the [suite](../README.md)'s scenarios on the three text frontends, five runs each.
 
    ```bash
    uv run python -m pipecat.evals suite evals/llm-with-backend/manifest.yaml -s text --repeat 5
    ```
 
-3. **Audio evals**: every bot, speech-to-speech included.
+4. **Audio evals**: every bot, speech-to-speech included.
 
    ```bash
    uv run python -m pipecat.evals suite evals/llm-with-backend/manifest.yaml -s audio
    ```
 
-The replay checks only whether a turn is delegated early; the evals judge everything the bot says. A backend prompt doesn't reach the replay, so for one, run the evals only. In the replay, each turn's earlier conversation was recorded under the prompts of the time; a change moves only the decision on the last turn.
+The replays check only whether a turn is delegated; the evals judge everything the bot says. A backend prompt doesn't reach either replay, so for one, run the evals only. In both replays, each turn's earlier conversation was recorded under the prompts of the time; a change moves only the decision on the last turn.
 
 ## Recording results
 
