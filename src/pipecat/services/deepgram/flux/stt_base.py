@@ -959,8 +959,8 @@ class DeepgramFluxSTTBase(EagerEndOfTurnSTTServiceMixin, STTService):
         A Flux turn lives in one connection, so a new connection never ends the
         old one's turn. The transcript received so far is pushed as the turn's
         transcription, unfinalized since Flux never committed it, and the turn
-        stop is proposed. If the user is still speaking, the new connection
-        transcribes the rest as a new turn.
+        stop is proposed. If the user keeps talking on a new connection, the
+        rest is transcribed as a new turn.
         """
         if not self._user_is_speaking:
             return
