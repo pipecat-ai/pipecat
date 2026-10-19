@@ -106,6 +106,11 @@ class MarkdownTextFilter(BaseTextFilter):
             if self._settings.filter_tables:
                 filtered_text = _MARKDOWN_TABLE.sub("", filtered_text)
 
+            # Replace images with their alt text, as links are replaced with
+            # their text. md.convert would keep the alt text only as an <img>
+            # attribute, which the HTML tag strip removes.
+            filtered_text = re.sub(r"!\[([^\]]*)\]\([^)]*\)", r"\1", filtered_text)
+
             # Remove horizontal rules (---, ***, ___) before the newline collapse
             # below, which would indent them so md.convert no longer sees a rule.
             filtered_text = re.sub(

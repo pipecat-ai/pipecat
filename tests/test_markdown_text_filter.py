@@ -238,6 +238,18 @@ class TestMarkdownTextFilter(unittest.IsolatedAsyncioTestCase):
             result = await self.filter.filter(input_text)
             self.assertEqual(result, expected, f"Link cleaning failed for: '{input_text}'")
 
+    async def test_image_alt_text_kept(self):
+        """Test that an image is replaced with its alt text."""
+        test_cases = {
+            "See ![a cat](https://example.com/cat.png) here.": "See a cat here.",
+            "![Sales chart](chart.png)": "Sales chart",
+            "No alt ![](x.png) here.": "No alt  here.",
+        }
+
+        for input_text, expected in test_cases.items():
+            result = await self.filter.filter(input_text)
+            self.assertEqual(result, expected, f"Image alt text lost in: '{input_text}'")
+
     async def test_numbered_list_marker_handling(self):
         """Test handling of numbered lists with the special §NUM§ marker."""
         test_cases = {
