@@ -303,6 +303,20 @@ class UserTurnController(BaseObject):
         # The user stopped talking, let's reset the user turn timeout.
         self._user_turn_stop_timeout_event.set()
 
+    async def sync_vad_speaking_state(
+        self, frame: VADUserStartedSpeakingFrame | VADUserStoppedSpeakingFrame
+    ) -> None:
+        """Update ``_user_speaking`` from a VAD frame without running turn strategies.
+
+        Used when the user aggregator suppresses speech frames while muted: the
+        mute must not leave speaking state stale, or the turn never closes and
+        post-tool inference never runs (see #6201).
+        """
+        if isinstance(frame, VADUserStartedSpeakingFrame):
+            await self._handle_vad_user_started_speaking(frame)
+        else:
+            await self._handle_vad_user_stopped_speaking(frame)
+
     async def _handle_transcription(self, frame: TranscriptionFrame | InterimTranscriptionFrame):
         # We have received a transcription, let's reset the user turn timeout.
         self._user_turn_stop_timeout_event.set()

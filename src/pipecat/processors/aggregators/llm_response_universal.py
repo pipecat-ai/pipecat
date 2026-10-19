@@ -866,6 +866,16 @@ class LLMUserAggregator(LLMContextAggregator):
         await super().process_frame(frame, direction)
 
         if await self._maybe_mute_frame(frame):
+            # Keep speaking state in sync even while muted so the turn can
+            # close when the user stops during a function-call mute (#6201).
+            # Forward VAD edges downstream so the turn-completion mixin (and
+            # anything else tracking acoustic speaking) does not stay stale
+            # either — otherwise a post-tool ● is suppressed as "user still
+            # speaking". Do not run turn strategies: muted speech must not
+            # trigger inference or a new turn.
+            if isinstance(frame, (VADUserStartedSpeakingFrame, VADUserStoppedSpeakingFrame)):
+                await self._user_turn_controller.sync_vad_speaking_state(frame)
+                await self.push_frame(frame, direction)
             return
 
         if isinstance(frame, StartFrame):
@@ -1878,6 +1888,11 @@ class LLMAssistantAggregator(LLMContextAggregator):
         elif isinstance(frame, UserStoppedSpeakingFrame):
             self._user_speaking = False
             await self.push_frame(frame, direction)
+            # A post-tool (or append) context push may have been held while the
+            # user was speaking. Pay it when the turn ends even if no new user
+            # text was added (#6201).
+            if self._context_push_owed:
+                await self._maybe_push_context()
         elif isinstance(frame, BotStartedSpeakingFrame):
             self._bot_speaking = True
             await self.push_frame(frame, direction)

@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import asyncio
 import io
 import json
 import unittest
@@ -78,6 +79,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
     UserTurnStoppedMessage,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.services.llm_service import FunctionCallParams, LLMService
 from pipecat.tests.utils import SleepFrame, run_test
 from pipecat.turns.user_mute import (
     FirstSpeechUserMuteStrategy,
@@ -99,6 +101,7 @@ from pipecat.turns.user_turn_strategies import (
     UserTurnStrategies,
 )
 from pipecat.utils.text.base_text_aggregator import TextType
+from pipecat.utils.time import time_now_iso8601
 
 USER_TURN_STOP_TIMEOUT = 0.2
 TRANSCRIPTION_TIMEOUT = 0.1
@@ -734,6 +737,47 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(should_stop)
         self.assertEqual(stop_message.content, "Hello!")
         self.assertFalse(timeout)
+
+    async def test_muted_vad_stop_keeps_user_speaking_in_sync(self):
+        """VAD stop while function-call-muted must clear controller speaking state.
+
+        Regression for #6201: mute used to drop VADUserStoppedSpeakingFrame, so
+        ``_user_speaking`` stayed True and the turn never closed.
+        """
+        context = LLMContext()
+        user_aggregator = LLMUserAggregator(
+            context,
+            params=LLMUserAggregatorParams(
+                user_mute_strategies=[FunctionCallUserMuteStrategy()],
+                user_turn_strategies=UserTurnStrategies(
+                    start=[VADUserTurnStartStrategy()],
+                    stop=[SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=0.5)],
+                ),
+                user_turn_stop_timeout=2.0,
+            ),
+        )
+        pipeline = Pipeline([user_aggregator])
+        frames_to_send = [
+            VADUserStartedSpeakingFrame(),
+            TranscriptionFrame(text="book me", user_id="", timestamp="now"),
+            VADUserStoppedSpeakingFrame(),
+            SleepFrame(sleep=0.6),
+            # Resume, then mute via function call, then stop while muted.
+            VADUserStartedSpeakingFrame(),
+            SleepFrame(),
+            FunctionCallsStartedFrame(
+                function_calls=[
+                    FunctionCallFromLLM(
+                        function_name="fn_1", tool_call_id="1", arguments={}, context=None
+                    )
+                ]
+            ),
+            SleepFrame(),
+            VADUserStoppedSpeakingFrame(),
+            SleepFrame(),
+        ]
+        await run_test(pipeline, frames_to_send=frames_to_send)
+        self.assertFalse(user_aggregator._user_turn_controller._user_speaking)
 
     async def test_user_mute_strategies(self):
         context = LLMContext()
@@ -1909,8 +1953,8 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
             expected_up_frames=[LLMContextFrame],
         )
 
-    async def test_an_append_asking_to_run_while_the_user_speaks_is_settled_by_the_turns_run(self):
-        """The run the user's turn brings sees the context as it stands, so nothing is owed after it."""
+    async def test_an_append_asking_to_run_while_the_user_speaks_is_paid_when_they_stop(self):
+        """A run_llm append held while the user speaks is pushed when they stop (#6201)."""
         context = LLMContext()
         aggregator = LLMAssistantAggregator(context)
         await run_test(
@@ -1930,10 +1974,10 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
                 ),
                 SleepFrame(),
             ],
-            # An empty response is not passed on; what matters is that no
-            # context frame goes upstream after the run has started.
             expected_down_frames=[UserStartedSpeakingFrame, UserStoppedSpeakingFrame],
-            expected_up_frames=[],
+            # Paid on UserStoppedSpeakingFrame; the subsequent response start
+            # does not push again.
+            expected_up_frames=[LLMContextFrame],
         )
         assert len(context.get_messages()) == 2
 
@@ -2024,6 +2068,39 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
             frames_to_send=frames_to_send,
             expected_down_frames=[UserStartedSpeakingFrame],
             expected_up_frames=[],
+        )
+
+    async def test_function_call_result_owed_push_paid_on_user_stopped(self):
+        """A post-tool context push held while the user speaks is paid when they stop.
+
+        Regression for #6201: without this, the push stays owed forever if the
+        turn ends with no new user text.
+        """
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        frames_to_send = [
+            FunctionCallInProgressFrame(
+                function_name="get_weather",
+                tool_call_id="1",
+                arguments={"location": "Los Angeles"},
+            ),
+            UserStartedSpeakingFrame(),
+            SleepFrame(),
+            FunctionCallResultFrame(
+                function_name="get_weather",
+                tool_call_id="1",
+                arguments={"location": "Los Angeles"},
+                result={"conditions": "sunny"},
+            ),
+            SleepFrame(),
+            # No new user text — only the speaking edge that ends the turn.
+            UserStoppedSpeakingFrame(),
+        ]
+        await run_test(
+            aggregator,
+            frames_to_send=frames_to_send,
+            expected_down_frames=[UserStartedSpeakingFrame, UserStoppedSpeakingFrame],
+            expected_up_frames=[LLMContextFrame],
         )
 
     async def test_function_call_cancel_run_llm_waits_for_group(self):
@@ -3311,6 +3388,113 @@ class TestRealtimeServiceModeAggregator(unittest.IsolatedAsyncioTestCase):
         assistant = LLMAssistantAggregator(context, _realtime_service_mode=True)
         with self.assertRaises(RuntimeError):
             assistant._require_paired_user_aggregator()
+
+
+class TestFilterIncompleteFunctionCallMuteResume(unittest.IsolatedAsyncioTestCase):
+    """Regression for #6201: resume-before-tool-call + function-call mute deadlock."""
+
+    async def test_post_tool_inference_runs_when_user_resumes_before_tool_call(self):
+        """Bot must answer after the tool result even if the user resumed mid-TTFB.
+
+        With ``FilterIncompleteUserTurnStrategies`` and
+        ``FunctionCallUserMuteStrategy``, resuming speech after inference is
+        triggered but before the LLM commits to a tool call used to leave
+        ``_user_speaking`` stuck True (muted VAD stop was dropped), hold the
+        post-tool context push forever, and silence the bot for the rest of
+        the call.
+        """
+
+        class ScriptedLLM(LLMService):
+            def __init__(self):
+                super().__init__()
+                self.inferences = 0
+
+            async def process_frame(self, frame, direction):
+                await super().process_frame(frame, direction)
+                if isinstance(frame, LLMContextFrame):
+                    self.inferences += 1
+                    await self.push_frame(LLMFullResponseStartFrame())
+                    if self.inferences == 1:
+                        # TTFB window: the test resumes speaking here.
+                        await asyncio.sleep(0.5)
+                        await self.run_function_calls(
+                            [
+                                FunctionCallFromLLM(
+                                    function_name="check_availability",
+                                    tool_call_id="call_1",
+                                    arguments={},
+                                    context=frame.context,
+                                )
+                            ]
+                        )
+                    else:
+                        await self._push_llm_text("● Tuesday at ten works.")
+                    await self.push_frame(LLMFullResponseEndFrame())
+                else:
+                    await self.push_frame(frame, direction)
+
+        async def check_availability(params: FunctionCallParams):
+            await asyncio.sleep(0.3)
+            await params.result_callback({"available": ["Tuesday 10:00"]})
+
+        llm = ScriptedLLM()
+        llm.register_function("check_availability", check_availability)
+
+        context = LLMContext()
+        aggregators = LLMContextAggregatorPair(
+            context,
+            user_params=LLMUserAggregatorParams(
+                user_turn_strategies=FilterIncompleteUserTurnStrategies(
+                    start=[VADUserTurnStartStrategy()],
+                    stop=[SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=0.2)],
+                ),
+                user_mute_strategies=[FunctionCallUserMuteStrategy()],
+                user_turn_stop_timeout=1.0,
+            ),
+        )
+
+        stop_timeouts = 0
+
+        @aggregators.user().event_handler("on_user_turn_stop_timeout")
+        async def on_user_turn_stop_timeout(_aggregator):
+            nonlocal stop_timeouts
+            stop_timeouts += 1
+
+        pipeline = Pipeline([aggregators.user(), llm, aggregators.assistant()])
+
+        await run_test(
+            pipeline,
+            frames_to_send=[
+                VADUserStartedSpeakingFrame(),
+                TranscriptionFrame(
+                    "can I book an appointment", user_id="", timestamp=time_now_iso8601()
+                ),
+                SleepFrame(0.1),
+                VADUserStoppedSpeakingFrame(),
+                # Speech timeout fires and inference starts.
+                SleepFrame(0.4),
+                # User resumes before the LLM commits to the tool call.
+                VADUserStartedSpeakingFrame(),
+                SleepFrame(0.5),
+                # User stops while muted.
+                VADUserStoppedSpeakingFrame(),
+                # Wait for tool result, post-tool inference, and watchdog.
+                SleepFrame(4.0),
+            ],
+            frames_to_send_direction=FrameDirection.DOWNSTREAM,
+            start_timeout=10.0,
+        )
+
+        controller = aggregators.user()._user_turn_controller
+        self.assertGreaterEqual(
+            llm.inferences,
+            2,
+            "post-tool inference must run so the bot is not permanently silent",
+        )
+        self.assertFalse(aggregators.assistant()._user_speaking)
+        self.assertFalse(controller._user_speaking)
+        self.assertFalse(controller._user_turn)
+        self.assertGreaterEqual(stop_timeouts, 1)
 
 
 if __name__ == "__main__":
