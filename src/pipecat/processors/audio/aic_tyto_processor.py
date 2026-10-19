@@ -41,7 +41,6 @@ from pipecat.frames.frames import (
     StartFrame,
 )
 from pipecat.metrics.metrics import (
-    AUDIO_QUALITY_DEGRADATION_FIELDS,
     AudioQualityMetricsData,
     AudioQualityScores,
     AudioQualitySummary,
@@ -58,6 +57,8 @@ _TYTO_WINDOW_SECS = 5.0
 _INT16_SCALE = 32768.0
 
 _SCORE_FIELDS = tuple(AudioQualityScores.model_fields)
+# risk_score combines the other scores. speaker_loudness is a level, not a degradation.
+_DEGRADATION_FIELDS = tuple(f for f in _SCORE_FIELDS if f not in ("risk_score", "speaker_loudness"))
 
 
 class AICTytoProcessor(FrameProcessor):
@@ -341,7 +342,7 @@ class AICTytoProcessor(FrameProcessor):
         await self.push_frame(
             AudioQualityFrame(
                 risk_score=scores.risk_score,
-                degradations={f: getattr(scores, f) for f in AUDIO_QUALITY_DEGRADATION_FIELDS},
+                degradations={f: getattr(scores, f) for f in _DEGRADATION_FIELDS},
                 audio_secs=audio_secs,
             )
         )
@@ -380,7 +381,5 @@ class AICTytoProcessor(FrameProcessor):
             max=to_scores(values.max(axis=0)),
             degraded_threshold=self._degraded_threshold,
             degraded_fraction=float(np.mean(risk >= self._degraded_threshold)),
-            dominant_dimension=max(
-                AUDIO_QUALITY_DEGRADATION_FIELDS, key=lambda f: mean[_SCORE_FIELDS.index(f)]
-            ),
+            dominant_dimension=max(_DEGRADATION_FIELDS, key=lambda f: mean[_SCORE_FIELDS.index(f)]),
         )

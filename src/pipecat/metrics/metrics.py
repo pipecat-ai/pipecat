@@ -232,15 +232,15 @@ class AudioQualityScores(BaseModel):
     """Audio quality scores for one window of user audio.
 
     All scores are in the range 0.0 to 1.0. A higher value means more
-    problematic audio, except for ``speaker_loudness``, which is a neutral
-    level indicator.
+    problematic audio.
 
     Parameters:
         risk_score: Likelihood that downstream models (STT, VAD, turn-taking,
             speech-to-speech) fail on this audio.
         noise: Ambient or environmental noise.
         speaker_reverb: Speaker distance and reverberation.
-        speaker_loudness: Level of the main speaker.
+        speaker_loudness: Level of the main speaker. A neutral level, not a
+            degradation.
         interfering_speech: Speech from other speakers, live or from a device.
         packet_loss: Dropouts or discontinuities in the stream.
         codec_degradation: Artifacts from lossy speech codecs.
@@ -253,17 +253,6 @@ class AudioQualityScores(BaseModel):
     interfering_speech: float
     packet_loss: float
     codec_degradation: float
-
-
-# risk_score combines the other scores and speaker_loudness is a neutral level,
-# so neither can be the largest degradation.
-AUDIO_QUALITY_DEGRADATION_FIELDS = (
-    "noise",
-    "speaker_reverb",
-    "interfering_speech",
-    "packet_loss",
-    "codec_degradation",
-)
 
 
 class AudioQualityMetricsData(MetricsData):
