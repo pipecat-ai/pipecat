@@ -176,6 +176,23 @@ class TestMarkdownTextFilter(unittest.IsolatedAsyncioTestCase):
             result = await self.filter.filter(input_text)
             self.assertEqual(result.strip(), expected, f"Rule removal failed for: {input_text!r}")
 
+    async def test_bullet_marker_removal(self):
+        """Test removal of bullet markers, including streamed list items."""
+        test_cases = {
+            "- apples\n- pears": "apples\npears",
+            "+ apples\n+ pears": "apples\npears",
+            "\n- Coffee for three dollars.": "Coffee for three dollars.",
+            "\n+ Red.": "Red.",
+            "\n* Tea.": "Tea.",
+            "Options:\n\n- Coffee.\n- Tea.": "Options:\n Coffee.\nTea.",
+            "Plan:\n  - Sub step.": "Plan:\n  Sub step.",
+            "- -5 degrees": "-5 degrees",
+        }
+
+        for input_text, expected in test_cases.items():
+            result = await self.filter.filter(input_text)
+            self.assertEqual(result.strip(), expected, f"Bullet removal failed for: {input_text!r}")
+
     async def test_newline_handling(self):
         """Test handling of empty and whitespace-only lines."""
         test_cases = {

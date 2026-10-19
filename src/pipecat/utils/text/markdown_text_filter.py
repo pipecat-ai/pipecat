@@ -111,6 +111,13 @@ class MarkdownTextFilter(BaseTextFilter):
                 r"^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$", "", filtered_text, flags=re.MULTILINE
             )
 
+            # Strip bullet markers (-, +, *) for the same reason. A streamed list
+            # item starts its chunk on a new line, which the collapse would
+            # indent, leaving the marker to be spoken.
+            filtered_text = re.sub(
+                r"^( {0,3})[-+*][ \t]+(?=\S)", r"\1", filtered_text, flags=re.MULTILINE
+            )
+
             # Strip markdown headers to plain text before the newline collapse
             # below. md.convert can't recognize a header once the collapse
             # injects a leading space, so we normalize headers ourselves.
