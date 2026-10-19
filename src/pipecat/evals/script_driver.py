@@ -213,22 +213,34 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
         try:
             await self._wait_send_after(send_after)
         except TimeoutError as e:
-            # Only the event-anchored wait can time out; the pure-delay form
-            # just sleeps. So event is never None here, but fall back for typing.
-            event_name = send_after.event or "send_after"
-            failure = EvalAssertionFailure(
-                turn_index=turn_idx,
-                expectation_index=-1,
-                event_name=event_name,
-                reason=f"send_after never fired: {e}",
-                kind="send_after_timeout",
-            )
-            self._trace.log(f"FAIL: {event_name}: {failure.reason}")
-            await self._progress(
-                EvalScriptTurnProgress(turn_idx, -1, event_name, "timeout", failure.reason)
-            )
-            return failure
+            reason = f"send_after never fired: {e}"
+            return await self._send_after_failure(send_after, turn_idx, reason)
+        except EvalBotEndedError:
+            reason = f"the bot ended the call before {send_after.event!r} fired"
+            return await self._send_after_failure(send_after, turn_idx, reason, "bot_ended")
         return None
+
+    async def _send_after_failure(
+        self,
+        send_after: EvalSendAfter,
+        turn_idx: int,
+        reason: str,
+        kind: str = "send_after_timeout",
+    ) -> EvalAssertionFailure:
+        """Record a turn whose ``send_after`` never fired, and return its failure."""
+        # Only the event-anchored wait can fail; the pure-delay form just
+        # sleeps. So event is never None here, but fall back for typing.
+        event_name = send_after.event or "send_after"
+        self._trace.log(f"FAIL: {event_name}: {reason}")
+        status = "timeout" if kind == "send_after_timeout" else "failed"
+        await self._progress(EvalScriptTurnProgress(turn_idx, -1, event_name, status, reason))
+        return EvalAssertionFailure(
+            turn_index=turn_idx,
+            expectation_index=-1,
+            event_name=event_name,
+            reason=reason,
+            kind=kind,
+        )
 
     async def _wait_send_after(self, send_after: EvalSendAfter) -> None:
         """Wait until ``send_after.event`` has been seen and ``delay_ms`` more have passed.
@@ -237,6 +249,7 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
 
         Raises:
             TimeoutError: If the event never arrives.
+            EvalBotEndedError: If the bot ends the call before the event arrives.
         """
         target_delay_s = send_after.delay_ms / 1000.0
 
@@ -254,6 +267,9 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
                 wait_s = max(0.0, (seen_at + target_delay_s) - time.monotonic())
                 await asyncio.sleep(wait_s)
                 return
+
+            if self._stream.bot_has_ended:
+                raise EvalBotEndedError()
 
             if time.monotonic() >= deadline:
                 raise TimeoutError(
