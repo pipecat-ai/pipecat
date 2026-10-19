@@ -22,11 +22,10 @@ def _make_service(**kwargs) -> NvidiaSTTService:
     return NvidiaSTTService(api_key="test-key", **kwargs)
 
 
-def _word(text: str, speaker_tag: int | None = None) -> SimpleNamespace:
-    word = SimpleNamespace(word=text)
-    if speaker_tag is not None:
-        word.speaker_tag = speaker_tag
-    return word
+def _word(text: str, speaker_tag: int = 0) -> SimpleNamespace:
+    # Riva's ``speaker_tag`` is a proto3 int: speakers are numbered from 1, and an
+    # untagged word reads as 0.
+    return SimpleNamespace(word=text, speaker_tag=speaker_tag)
 
 
 def _streaming_response(
@@ -35,9 +34,7 @@ def _streaming_response(
     words: list[SimpleNamespace] | None = None,
     is_final: bool = True,
 ) -> SimpleNamespace:
-    alternative = SimpleNamespace(transcript=transcript)
-    if words is not None:
-        alternative.words = words
+    alternative = SimpleNamespace(transcript=transcript, words=words or [])
     result = SimpleNamespace(alternatives=[alternative], is_final=is_final)
     return SimpleNamespace(results=[result])
 
@@ -212,13 +209,13 @@ async def test_speaker_format_update_applies_to_next_result(monkeypatch):
     service._config = service._create_recognition_config()
     config = service._config
     monkeypatch.setattr(service, "_request_reconnect", AsyncMock())
-    response = _streaming_response("Hello", words=[_word("Hello", 0)])
+    response = _streaming_response("Hello", words=[_word("Hello", 1)])
 
     await service._update_settings(NvidiaSTTService.Settings(speaker_format="[{speaker}] {text}"))
     frames = await _capture_response_frames(monkeypatch, service, response)
 
     assert service._config is config
-    assert frames[0].text == "[0] Hello"
+    assert frames[0].text == "[1] Hello"
 
 
 @pytest.mark.asyncio
@@ -270,7 +267,7 @@ async def test_diarization_off_preserves_one_frame_and_session_user(monkeypatch)
     service._user_id = "session-user"
     response = _streaming_response(
         "Hi there",
-        words=[_word("Hi", 0), _word("there", 1)],
+        words=[_word("Hi", 1), _word("there", 2)],
     )
 
     frames = await _capture_response_frames(monkeypatch, service, response)
@@ -281,12 +278,12 @@ async def test_diarization_off_preserves_one_frame_and_session_user(monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_zero_speaker_tag_is_a_valid_speaker(monkeypatch):
-    """NVIDIA speaker tag zero maps to user ID zero instead of the session user."""
+async def test_tagged_final_result_maps_speaker_user_id(monkeypatch):
+    """A single-speaker final result carries the speaker tag as its user ID."""
     service = _make_service(settings=NvidiaSTTService.Settings(speaker_diarization=True))
     response = _streaming_response(
         " Hello there",
-        words=[_word("Hello", 0), _word("there", 0)],
+        words=[_word("Hello", 1), _word("there", 1)],
     )
 
     frames = await _capture_response_frames(monkeypatch, service, response)
@@ -294,7 +291,7 @@ async def test_zero_speaker_tag_is_a_valid_speaker(monkeypatch):
     assert len(frames) == 1
     assert isinstance(frames[0], TranscriptionFrame)
     assert frames[0].text == "Hello there"
-    assert frames[0].user_id == "0"
+    assert frames[0].user_id == "1"
     assert frames[0].result is response.results[0]
     assert frames[0].finalized
 
@@ -305,7 +302,7 @@ async def test_tagged_interim_result_maps_speaker_user_id(monkeypatch):
     service = _make_service(settings=NvidiaSTTService.Settings(speaker_diarization=True))
     response = _streaming_response(
         "Hello there",
-        words=[_word("Hello", 2), _word("there", 2)],
+        words=[_word("Hello", 3), _word("there", 3)],
         is_final=False,
     )
 
@@ -314,7 +311,7 @@ async def test_tagged_interim_result_maps_speaker_user_id(monkeypatch):
     assert len(frames) == 1
     assert isinstance(frames[0], InterimTranscriptionFrame)
     assert frames[0].text == "Hello there"
-    assert frames[0].user_id == "2"
+    assert frames[0].user_id == "3"
 
 
 @pytest.mark.asyncio
@@ -324,17 +321,17 @@ async def test_mixed_speakers_emit_contiguous_run_frames(monkeypatch):
     response = _streaming_response(
         "Hi there hello again",
         words=[
-            _word("Hi", 0),
-            _word("there", 0),
-            _word("hello", 1),
-            _word("again", 0),
+            _word("Hi", 1),
+            _word("there", 1),
+            _word("hello", 2),
+            _word("again", 1),
         ],
     )
 
     frames = await _capture_response_frames(monkeypatch, service, response)
 
     assert [frame.text for frame in frames] == ["Hi there", "hello", "again"]
-    assert [frame.user_id for frame in frames] == ["0", "1", "0"]
+    assert [frame.user_id for frame in frames] == ["1", "2", "1"]
     assert len({frame.timestamp for frame in frames}) == 1
     assert all(isinstance(frame, TranscriptionFrame) for frame in frames)
     assert [frame.finalized for frame in frames] == [False, False, True]
@@ -348,7 +345,7 @@ async def test_mixed_speaker_interim_result_emits_interim_runs(monkeypatch):
     service = _make_service(settings=NvidiaSTTService.Settings(speaker_diarization=True))
     response = _streaming_response(
         "Hi there hello",
-        words=[_word("Hi", 0), _word("there", 0), _word("hello", 1)],
+        words=[_word("Hi", 1), _word("there", 1), _word("hello", 2)],
         is_final=False,
     )
 
@@ -356,7 +353,7 @@ async def test_mixed_speaker_interim_result_emits_interim_runs(monkeypatch):
 
     assert all(isinstance(frame, InterimTranscriptionFrame) for frame in frames)
     assert [frame.text for frame in frames] == ["Hi there", "hello"]
-    assert [frame.user_id for frame in frames] == ["0", "1"]
+    assert [frame.user_id for frame in frames] == ["1", "2"]
 
 
 @pytest.mark.asyncio
@@ -374,7 +371,7 @@ async def test_split_result_reports_usage_and_tracing_once(monkeypatch):
     monkeypatch.setattr(service, "_handle_transcription", handle_transcription)
     response = _streaming_response(
         "Hi there hello",
-        words=[_word("Hi", 0), _word("there", 0), _word("hello", 1)],
+        words=[_word("Hi", 1), _word("there", 1), _word("hello", 2)],
     )
 
     await service._handle_response(response, speaker_diarization=True)
@@ -388,8 +385,8 @@ async def test_split_result_reports_usage_and_tracing_once(monkeypatch):
 async def test_each_result_in_a_response_is_split_and_finalized(monkeypatch):
     """Every final result in one response finalizes its own last run."""
     service = _make_service(settings=NvidiaSTTService.Settings(speaker_diarization=True))
-    first = _streaming_response("Hi there", words=[_word("Hi", 0), _word("there", 1)])
-    second = _streaming_response("Bye", words=[_word("Bye", 1)])
+    first = _streaming_response("Hi there", words=[_word("Hi", 1), _word("there", 2)])
+    second = _streaming_response("Bye", words=[_word("Bye", 2)])
     response = SimpleNamespace(results=first.results + second.results)
 
     frames = await _capture_response_frames(monkeypatch, service, response)
@@ -406,9 +403,9 @@ async def test_separate_results_keep_joining_spaces(monkeypatch):
     service = _make_service(settings=NvidiaSTTService.Settings(speaker_diarization=True))
     split = _streaming_response(
         "Hi there hello",
-        words=[_word("Hi", 0), _word("there", 0), _word("hello", 1)],
+        words=[_word("Hi", 1), _word("there", 1), _word("hello", 2)],
     )
-    single = _streaming_response("Again", words=[_word("Again", 1)])
+    single = _streaming_response("Again", words=[_word("Again", 2)])
 
     frames = await _capture_response_frames(monkeypatch, service, split)
     frames += await _capture_response_frames(monkeypatch, service, single)
@@ -423,15 +420,15 @@ async def test_consecutive_mixed_speaker_results_keep_result_spacing(monkeypatch
     service = _make_service(settings=NvidiaSTTService.Settings(speaker_diarization=True))
     first = _streaming_response(
         "Hi there hello",
-        words=[_word("Hi", 0), _word("there", 0), _word("hello", 1)],
+        words=[_word("Hi", 1), _word("there", 1), _word("hello", 2)],
     )
     second = _streaming_response(
         "Hello again friend.",
-        words=[_word("Hello", 1), _word("again", 1), _word("friend", 0)],
+        words=[_word("Hello", 2), _word("again", 2), _word("friend", 1)],
     )
     third = _streaming_response(
         " Goodnight moon.",
-        words=[_word("Goodnight", 0), _word("moon", 1)],
+        words=[_word("Goodnight", 1), _word("moon", 2)],
     )
 
     frames = await _capture_response_frames(monkeypatch, service, first)
@@ -455,13 +452,13 @@ async def test_consecutive_mixed_speaker_results_keep_result_spacing(monkeypatch
     [
         (
             "Hi, hello!",
-            [_word("Hi", 0), _word("hello", 1)],
+            [_word("Hi", 1), _word("hello", 2)],
             ["Hi,", "hello!"],
             "Hi, hello!",
         ),
         (
             "你好世界",
-            [_word("你好", 0), _word("世界", 1)],
+            [_word("你好", 1), _word("世界", 2)],
             ["你好", "世界"],
             "你好 世界",
         ),
@@ -506,8 +503,8 @@ def test_speaker_runs_locate_repeated_words_in_order():
 
 
 @pytest.mark.asyncio
-async def test_speaker_format_labels_zero_speaker_tag(monkeypatch):
-    """Speaker formatting includes tag zero and strips provider whitespace."""
+async def test_speaker_format_labels_speaker_and_strips_whitespace(monkeypatch):
+    """Speaker formatting labels the run and strips provider whitespace."""
     service = _make_service(
         settings=NvidiaSTTService.Settings(
             speaker_diarization=True,
@@ -516,13 +513,13 @@ async def test_speaker_format_labels_zero_speaker_tag(monkeypatch):
     )
     response = _streaming_response(
         " Hello",
-        words=[_word("Hello", 0)],
+        words=[_word("Hello", 1)],
     )
 
     frames = await _capture_response_frames(monkeypatch, service, response)
 
-    assert frames[0].text == "Speaker 0: Hello"
-    assert frames[0].user_id == "0"
+    assert frames[0].text == "Speaker 1: Hello"
+    assert frames[0].user_id == "1"
 
 
 @pytest.mark.asyncio
@@ -536,17 +533,17 @@ async def test_speaker_format_labels_each_run(monkeypatch):
     )
     response = _streaming_response(
         "Hi there hello",
-        words=[_word("Hi", 0), _word("there", 0), _word("hello", 1)],
+        words=[_word("Hi", 1), _word("there", 1), _word("hello", 2)],
     )
 
     frames = await _capture_response_frames(monkeypatch, service, response)
 
-    assert [frame.text for frame in frames] == ["Speaker 0: Hi there", "Speaker 1: hello"]
+    assert [frame.text for frame in frames] == ["Speaker 1: Hi there", "Speaker 2: hello"]
 
 
 @pytest.mark.asyncio
 async def test_speaker_format_is_not_applied_to_unsplit_fallback(monkeypatch):
-    """A result without speaker tags is emitted unlabelled."""
+    """A result that can't be split is emitted unlabelled."""
     service = _make_service(
         settings=NvidiaSTTService.Settings(
             speaker_diarization=True,
@@ -554,7 +551,7 @@ async def test_speaker_format_is_not_applied_to_unsplit_fallback(monkeypatch):
         )
     )
     service._user_id = "session-user"
-    response = _streaming_response("No speaker", words=[_word("No"), _word("speaker")])
+    response = _streaming_response("No speaker", words=[_word("No", 1), _word("missing", 2)])
 
     frames = await _capture_response_frames(monkeypatch, service, response)
 
@@ -566,12 +563,12 @@ async def test_speaker_format_is_not_applied_to_unsplit_fallback(monkeypatch):
 @pytest.mark.parametrize(
     "words",
     [
-        None,
-        [_word("No"), _word("speaker"), _word("metadata")],
+        [],
+        [_word("No", 1), _word("missing", 2), _word("metadata", 1)],
     ],
 )
-async def test_missing_speaker_metadata_falls_back_to_full_transcript(monkeypatch, words):
-    """Missing word or speaker metadata preserves the provider transcript."""
+async def test_unsplittable_result_falls_back_to_full_transcript(monkeypatch, words):
+    """No word information, or a word not in the transcript, keeps the transcript whole."""
     service = _make_service(settings=NvidiaSTTService.Settings(speaker_diarization=True))
     service._user_id = "session-user"
     response = _streaming_response("No speaker metadata", words=words)
@@ -580,6 +577,31 @@ async def test_missing_speaker_metadata_falls_back_to_full_transcript(monkeypatc
 
     assert len(frames) == 1
     assert frames[0].text == "No speaker metadata"
+    assert frames[0].user_id == "session-user"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "words",
+    [
+        [_word("No"), _word("speaker"), _word("tags")],
+        [_word("No", 1), _word("speaker"), _word("tags", 2)],
+    ],
+)
+async def test_untagged_words_fall_back_to_session_user(monkeypatch, words):
+    """A result with a word the server did not tag (speaker 0) is not split."""
+    service = _make_service(
+        settings=NvidiaSTTService.Settings(
+            speaker_diarization=True,
+            speaker_format="Speaker {speaker}: {text}",
+        )
+    )
+    service._user_id = "session-user"
+    response = _streaming_response("No speaker tags", words=words)
+
+    frames = await _capture_response_frames(monkeypatch, service, response)
+
+    assert [frame.text for frame in frames] == ["No speaker tags"]
     assert frames[0].user_id == "session-user"
 
 
@@ -598,7 +620,7 @@ async def test_deferred_diarization_update_uses_active_stream_config(monkeypatch
     assert not old_config.config.diarization_config.enable_speaker_diarization
     assert service._config.config.diarization_config.enable_speaker_diarization
 
-    response = _streaming_response("Hello", words=[_word("Hello", 0)])
+    response = _streaming_response("Hello", words=[_word("Hello", 1)])
     frames = await _capture_response_frames(
         monkeypatch,
         service,
@@ -615,7 +637,7 @@ async def test_deferred_diarization_update_uses_active_stream_config(monkeypatch
         speaker_diarization=True,
     )
 
-    assert frames[0].user_id == "0"
+    assert frames[0].user_id == "1"
 
 
 @pytest.mark.asyncio
@@ -629,7 +651,7 @@ async def test_response_handler_reads_diarization_from_stream_config(
     )
     service._user_id = "session-user"
     config = service._create_recognition_config()
-    response = _streaming_response("Hi there", words=[_word("Hi", 0), _word("there", 1)])
+    response = _streaming_response("Hi there", words=[_word("Hi", 1), _word("there", 2)])
     service._asr_service = SimpleNamespace(
         streaming_response_generator=lambda audio_chunks, streaming_config: iter([response])
     )

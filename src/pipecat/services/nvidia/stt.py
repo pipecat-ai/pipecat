@@ -141,9 +141,10 @@ class NvidiaSTTSettings(_NvidiaBaseSTTSettings):
         interim_results: Whether to return interim (partial) results.
         speaker_format: Optional format string for diarized speaker runs. Use
             ``{speaker}`` for the speaker tag and ``{text}`` for the transcript text.
-            If ``None``, transcript text is not modified. A result whose words don't
-            all carry a speaker tag is emitted unsplit and unformatted, with the
-            transport ``user_id``.
+            If ``None``, transcript text is not modified. NVIDIA numbers speakers
+            from ``1``. A result with an untagged word, no word information, or
+            words that can't be located in its transcript is emitted unsplit and
+            unformatted, with the transport ``user_id``.
     """
 
     interim_results: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -707,8 +708,10 @@ class NvidiaSTTService(STTService):
         alternative = result.alternatives[0]
         transcripts: list[tuple[int | None, str]] = []
         if speaker_diarization:
+            # NVIDIA numbers speakers from 1; 0 is the protobuf default for a
+            # word the server did not tag.
             words = [
-                (getattr(word, "word", ""), getattr(word, "speaker_tag", None))
+                (getattr(word, "word", ""), getattr(word, "speaker_tag", 0) or None)
                 for word in getattr(alternative, "words", None) or []
             ]
             transcripts.extend(self._speaker_runs(alternative.transcript, words))
