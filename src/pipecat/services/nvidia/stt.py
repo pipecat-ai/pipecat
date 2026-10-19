@@ -141,7 +141,9 @@ class NvidiaSTTSettings(_NvidiaBaseSTTSettings):
         interim_results: Whether to return interim (partial) results.
         speaker_format: Optional format string for diarized speaker runs. Use
             ``{speaker}`` for the speaker tag and ``{text}`` for the transcript text.
-            If ``None``, transcript text is not modified.
+            If ``None``, transcript text is not modified. A result whose words don't
+            all carry a speaker tag is emitted unsplit and unformatted, with the
+            transport ``user_id``.
     """
 
     interim_results: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -643,46 +645,55 @@ class NvidiaSTTService(STTService):
         pass
 
     @staticmethod
-    def _speaker_runs(alternative) -> list[tuple[int, str]]:
-        """Split a transcript into contiguous speaker runs without changing its text."""
-        transcript = getattr(alternative, "transcript", "")
-        words = getattr(alternative, "words", None)
+    def _speaker_runs(
+        transcript: str, words: list[tuple[str, int | None]]
+    ) -> list[tuple[int, str]]:
+        """Split a transcript into contiguous speaker runs.
+
+        Each word is located in ``transcript`` in order, and the transcript is cut
+        where the speaker changes, so each run keeps the provider's text and
+        punctuation. Runs are stripped of surrounding whitespace.
+
+        Args:
+            transcript: The full transcript of one result.
+            words: ``(text, speaker)`` pairs in transcript order.
+
+        Returns:
+            ``(speaker, text)`` runs, or an empty list if any word has no speaker
+            or cannot be located in the transcript.
+        """
         if not transcript or not words:
             return []
 
         tagged_spans: list[tuple[int, int]] = []
         cursor = 0
-        for word in words:
-            speaker_tag = getattr(word, "speaker_tag", None)
-            text = getattr(word, "word", "")
-            if speaker_tag is None or not text:
+        for text, speaker in words:
+            if speaker is None or not text:
                 return []
             start = transcript.find(text, cursor)
             if start < 0:
                 return []
-            tagged_spans.append((speaker_tag, start))
+            tagged_spans.append((speaker, start))
             cursor = start + len(text)
 
+        boundaries: list[tuple[int, int]] = [(tagged_spans[0][0], 0)]
+        for speaker, start in tagged_spans[1:]:
+            if speaker != boundaries[-1][0]:
+                boundaries.append((speaker, start))
+
         runs: list[tuple[int, str]] = []
-        run_tag = tagged_spans[0][0]
-        run_start = 0
-        for speaker_tag, start in tagged_spans[1:]:
-            if speaker_tag != run_tag:
-                runs.append((run_tag, transcript[run_start:start]))
-                run_tag = speaker_tag
-                run_start = start
-        runs.append((run_tag, transcript[run_start:]))
+        for index, (speaker, start) in enumerate(boundaries):
+            end = boundaries[index + 1][1] if index + 1 < len(boundaries) else len(transcript)
+            text = transcript[start:end].strip()
+            if text:
+                runs.append((speaker, text))
         return runs
 
     def _format_speaker_text(self, speaker_tag: int | None, text: str) -> str:
         """Apply the configured speaker format to a tagged transcript."""
         speaker_format = assert_given(self._settings.speaker_format)
         if speaker_format and speaker_tag is not None:
-            leading = text[: len(text) - len(text.lstrip())]
-            trailing = text[len(text.rstrip()) :]
-            content_end = len(text) - len(trailing) if trailing else len(text)
-            content = text[len(leading) : content_end]
-            return leading + speaker_format.format(speaker=speaker_tag, text=content) + trailing
+            return speaker_format.format(speaker=speaker_tag, text=text)
         return text
 
     async def _push_result_frames(
@@ -694,7 +705,15 @@ class NvidiaSTTService(STTService):
     ) -> None:
         """Push one frame per speaker run, or one frame for the full result."""
         alternative = result.alternatives[0]
-        transcripts = self._speaker_runs(alternative) if speaker_diarization else []
+        transcripts: list[tuple[int | None, str]] = []
+        if speaker_diarization:
+            words = [
+                (getattr(word, "word", ""), getattr(word, "speaker_tag", None))
+                for word in getattr(alternative, "words", None) or []
+            ]
+            transcripts.extend(self._speaker_runs(alternative.transcript, words))
+            if not transcripts:
+                logger.debug(f"{self} could not split result by speaker, emitting it unsplit")
         if not transcripts:
             transcripts = [(None, alternative.transcript)]
 
@@ -721,9 +740,6 @@ class NvidiaSTTService(STTService):
                     language,
                     result=result,
                 )
-            # Split runs are slices of one provider transcript, so their spacing is
-            # already in the text. Separate results still need joining spaces.
-            frame.includes_inter_frame_spaces = len(transcripts) > 1
             await self.push_frame(frame)
 
     async def _handle_response(self, response, *, speaker_diarization: bool = False):

@@ -250,7 +250,7 @@ async def test_zero_speaker_tag_is_a_valid_speaker(monkeypatch):
 
     assert len(frames) == 1
     assert isinstance(frames[0], TranscriptionFrame)
-    assert frames[0].text == " Hello there"
+    assert frames[0].text == "Hello there"
     assert frames[0].user_id == "0"
     assert frames[0].result is response.results[0]
     assert frames[0].finalized
@@ -290,18 +290,18 @@ async def test_mixed_speakers_emit_contiguous_run_frames(monkeypatch):
 
     frames = await _capture_response_frames(monkeypatch, service, response)
 
-    assert [frame.text for frame in frames] == ["Hi there ", "hello ", "again"]
+    assert [frame.text for frame in frames] == ["Hi there", "hello", "again"]
     assert [frame.user_id for frame in frames] == ["0", "1", "0"]
     assert len({frame.timestamp for frame in frames}) == 1
     assert all(isinstance(frame, TranscriptionFrame) for frame in frames)
     assert [frame.finalized for frame in frames] == [False, False, True]
-    assert all(frame.includes_inter_frame_spaces for frame in frames)
+    assert not any(frame.includes_inter_frame_spaces for frame in frames)
     assert _aggregate(frames) == "Hi there hello again"
 
 
 @pytest.mark.asyncio
 async def test_separate_results_keep_joining_spaces(monkeypatch):
-    """Only split runs carry their own spacing; separate results are still spaced."""
+    """Split runs and separate results are both joined by the aggregator."""
     service = _make_service(settings=NvidiaSTTService.Settings(speaker_diarization=True))
     split = _streaming_response(
         "Hi there hello",
@@ -312,60 +312,90 @@ async def test_separate_results_keep_joining_spaces(monkeypatch):
     frames = await _capture_response_frames(monkeypatch, service, split)
     frames += await _capture_response_frames(monkeypatch, service, single)
 
-    assert [frame.includes_inter_frame_spaces for frame in frames] == [True, True, False]
+    assert not any(frame.includes_inter_frame_spaces for frame in frames)
     assert _aggregate(frames) == "Hi there hello Again"
 
 
 @pytest.mark.asyncio
 async def test_consecutive_mixed_speaker_results_keep_result_spacing(monkeypatch):
-    """Later NVIDIA results start with a space, so split results join cleanly."""
+    """Consecutive split results join cleanly with or without a leading space."""
     service = _make_service(settings=NvidiaSTTService.Settings(speaker_diarization=True))
     first = _streaming_response(
         "Hi there hello",
         words=[_word("Hi", 0), _word("there", 0), _word("hello", 1)],
     )
     second = _streaming_response(
-        " Hello again friend",
+        "Hello again friend.",
         words=[_word("Hello", 1), _word("again", 1), _word("friend", 0)],
+    )
+    third = _streaming_response(
+        " Goodnight moon.",
+        words=[_word("Goodnight", 0), _word("moon", 1)],
     )
 
     frames = await _capture_response_frames(monkeypatch, service, first)
     frames += await _capture_response_frames(monkeypatch, service, second)
+    frames += await _capture_response_frames(monkeypatch, service, third)
 
-    assert [frame.text for frame in frames] == ["Hi there ", "hello", " Hello again ", "friend"]
-    assert _aggregate(frames) == "Hi there hello Hello again friend"
+    assert [frame.text for frame in frames] == [
+        "Hi there",
+        "hello",
+        "Hello again",
+        "friend.",
+        "Goodnight",
+        "moon.",
+    ]
+    assert _aggregate(frames) == "Hi there hello Hello again friend. Goodnight moon."
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("transcript", "words", "expected"),
+    ("transcript", "words", "expected", "aggregated"),
     [
         (
             "Hi, hello!",
             [_word("Hi", 0), _word("hello", 1)],
-            ["Hi, ", "hello!"],
+            ["Hi,", "hello!"],
+            "Hi, hello!",
         ),
         (
             "你好世界",
             [_word("你好", 0), _word("世界", 1)],
             ["你好", "世界"],
+            "你好 世界",
         ),
     ],
 )
-async def test_speaker_runs_preserve_provider_text(monkeypatch, transcript, words, expected):
-    """Splitting speaker runs preserves punctuation, whitespace, and CJK text."""
+async def test_speaker_runs_preserve_provider_text(
+    monkeypatch, transcript, words, expected, aggregated
+):
+    """Splitting speaker runs preserves punctuation and CJK text within each run."""
     service = _make_service(settings=NvidiaSTTService.Settings(speaker_diarization=True))
     response = _streaming_response(transcript, words=words)
 
     frames = await _capture_response_frames(monkeypatch, service, response)
 
     assert [frame.text for frame in frames] == expected
-    assert _aggregate(frames) == transcript
+    assert _aggregate(frames) == aggregated
+
+
+@pytest.mark.parametrize(
+    ("words", "expected"),
+    [
+        ([("Hi", 0), ("there", 0), ("hello", 1)], [(0, "Hi there"), (1, "hello")]),
+        ([("Hi", 0), ("there", None)], []),
+        ([("Hi", 0), ("missing", 1)], []),
+        ([], []),
+    ],
+)
+def test_speaker_runs_from_word_pairs(words, expected):
+    """Speaker runs are built from plain (text, speaker) pairs."""
+    assert NvidiaSTTService._speaker_runs(" Hi there hello ", words) == expected
 
 
 @pytest.mark.asyncio
 async def test_speaker_format_labels_zero_speaker_tag(monkeypatch):
-    """Speaker formatting includes tag zero and normalizes provider whitespace."""
+    """Speaker formatting includes tag zero and strips provider whitespace."""
     service = _make_service(
         settings=NvidiaSTTService.Settings(
             speaker_diarization=True,
@@ -379,7 +409,7 @@ async def test_speaker_format_labels_zero_speaker_tag(monkeypatch):
 
     frames = await _capture_response_frames(monkeypatch, service, response)
 
-    assert frames[0].text == " Speaker 0: Hello"
+    assert frames[0].text == "Speaker 0: Hello"
     assert frames[0].user_id == "0"
 
 
