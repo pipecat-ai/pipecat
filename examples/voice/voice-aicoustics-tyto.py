@@ -22,7 +22,6 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMUserAggregatorParams,
 )
 from pipecat.processors.audio.aic_tyto_processor import AICTytoProcessor
-from pipecat.processors.audio.audio_quality_nudger import AudioQualityNudger
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
@@ -88,7 +87,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments, aic_fi
         [
             transport.input(),
             tyto,
-            AudioQualityNudger(),
             stt,
             user_aggregator,
             llm,
