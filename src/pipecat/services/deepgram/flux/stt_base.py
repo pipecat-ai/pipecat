@@ -969,6 +969,7 @@ class DeepgramFluxSTTBase(EagerEndOfTurnSTTServiceMixin, STTService):
         self._clear_eager_end_of_turn()
         transcript, self._turn_transcript = self._turn_transcript, ""
         if transcript:
+            await self.emit_stt_usage_metrics()
             await self.push_frame(
                 TranscriptionFrame(
                     transcript, self._user_id, time_now_iso8601(), self._turn_language

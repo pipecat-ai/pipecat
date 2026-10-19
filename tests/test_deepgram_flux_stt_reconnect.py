@@ -22,9 +22,12 @@ from websockets.asyncio.server import serve
 
 from pipecat.frames.frames import (
     InputAudioRawFrame,
+    MetricsFrame,
     ProposedUserStoppedSpeakingFrame,
     TranscriptionFrame,
 )
+from pipecat.metrics.metrics import STTUsageMetricsData
+from pipecat.pipeline.worker import PipelineParams
 from pipecat.services.deepgram.flux.stt import DeepgramFluxSTTService
 from pipecat.tests.utils import SleepFrame, run_test
 
@@ -93,7 +96,11 @@ async def _run(server: _FakeFlux, seconds: float, configure=None):
         )
         if configure:
             configure(service)
-        down, _ = await run_test(service, frames_to_send=_audio_frames(seconds))
+        down, _ = await run_test(
+            service,
+            frames_to_send=_audio_frames(seconds),
+            pipeline_params=PipelineParams(enable_usage_metrics=True),
+        )
         # Give a connection still being served time to record what it received.
         await asyncio.sleep(0.1)
     return service, down
@@ -138,6 +145,11 @@ async def test_a_turn_cut_short_by_a_drop_ends_with_its_transcript_so_far():
     assert len(stops) == 1
     first_transcript = next(i for i, f in enumerate(down) if isinstance(f, TranscriptionFrame))
     assert first_transcript < stops[0]
+    # Usage is reported ahead of the transcript, for the STT span it closes.
+    assert any(
+        isinstance(f, MetricsFrame) and any(isinstance(d, STTUsageMetricsData) for d in f.data)
+        for f in down[:first_transcript]
+    )
     assert len(server.audio_per_connection) == 2
 
 
