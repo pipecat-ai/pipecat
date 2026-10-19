@@ -212,6 +212,20 @@ class TestMarkdownTextFilter(unittest.IsolatedAsyncioTestCase):
             result = await self.filter.filter(input_text)
             self.assertEqual(result.strip(), expected, f"Bullet removal failed for: {input_text!r}")
 
+    async def test_blockquote_marker_removal(self):
+        """Test removal of blockquote markers, including streamed quotes."""
+        test_cases = {
+            "> quote": "quote",
+            "\n> As they say, less is more.": "As they say, less is more.",
+            "Tip:\n\n> Save often.": "Tip:\n Save often.",
+            ">> Nested quote.": "Nested quote.",
+            "Use -> to point": "Use -> to point",
+        }
+
+        for input_text, expected in test_cases.items():
+            result = await self.filter.filter(input_text)
+            self.assertEqual(result.strip(), expected, f"Quote removal failed for: {input_text!r}")
+
     async def test_newline_handling(self):
         """Test handling of empty and whitespace-only lines."""
         test_cases = {
