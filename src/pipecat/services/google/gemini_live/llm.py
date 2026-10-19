@@ -344,20 +344,20 @@ class InputParams(BaseModel):
         context_window_compression: Context compression settings. Defaults to None.
         thinking: Thinking settings. Defaults to None.
             Note that these settings may require specifying a model that
-            supports them, e.g. "gemini-2.5-flash-native-audio-preview-12-2025".
+            supports them, e.g. "gemini-3.8-live".
             Live thinking models require a ``thinking_level``; when none is
             set, the service applies the lowest level the model accepts.
         enable_affective_dialog: Enable affective dialog, which allows Gemini
             to adapt to expression and tone. Defaults to None.
             Note that these settings may require specifying a model that
-            supports them, e.g. "gemini-2.5-flash-native-audio-preview-12-2025".
+            supports them, e.g. "gemini-3.8-live".
             Also note that this setting may require specifying an API version that
             supports it, e.g. HttpOptions(api_version="v1alpha").
         proactivity: Proactivity settings, which allows Gemini to proactively
             decide how to behave, such as whether to avoid responding to
             content that is not relevant. Defaults to None.
             Note that these settings may require specifying a model that
-            supports them, e.g. "gemini-2.5-flash-native-audio-preview-12-2025".
+            supports them, e.g. "gemini-3.8-live".
             Also note that this setting may require specifying an API version that
             supports it, e.g. HttpOptions(api_version="v1alpha").
         extra: Additional parameters. Defaults to empty dict.
@@ -389,7 +389,9 @@ class GeminiLiveLLMSettings(LLMSettings):
     Parameters:
         voice: TTS voice identifier (e.g. ``"Charon"``).
         modalities: Response modalities.
-        language: Language for generation.
+        language: Language for generation. A ``Language`` value is sent as
+            Gemini's locale code (``Language.ES`` as ``"es-ES"``); a string is
+            sent as given.
         media_resolution: Media resolution setting.
         vad: Voice activity detection parameters.
         turn_coverage: Which realtime input a user turn covers. Unset uses the
@@ -747,6 +749,8 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
         # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
+        if isinstance(default_settings.language, Language):
+            default_settings.language = language_to_gemini_language(default_settings.language)
 
         # Warn if user requested TEXT modality
         default_modalities = assert_given(default_settings.modalities)
@@ -884,6 +888,9 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
 
         Settings are stored but not applied to the active connection.
         """
+        if isinstance(delta, self.Settings) and isinstance(delta.language, Language):
+            delta.language = language_to_gemini_language(delta.language)
+
         changed = await super()._update_settings(delta)
 
         if not changed:

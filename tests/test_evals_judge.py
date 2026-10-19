@@ -16,10 +16,7 @@ from pipecat.classifiers.base_classifier import (
 )
 from pipecat.classifiers.llm.classifier import LLMClassifier
 from pipecat.evals.judge import (
-    JUDGE_CALL_SYSTEM_INSTRUCTION,
-    JUDGE_FINAL_SYSTEM_INSTRUCTION,
-    JUDGE_SYSTEM_INSTRUCTION,
-    RUN_JUDGE_SYSTEM_INSTRUCTION,
+    EXPLAIN_SYSTEM_INSTRUCTION,
     EvalJudge,
     JudgeVerdict,
     _Explainer,
@@ -53,9 +50,9 @@ class _FakeClassifier(BaseClassifier):
 
 
 class _FakeLLMService:
-    """Returns a queued answer to every inference, and records the call."""
+    """Returns a queued answer to every inference, and records the call; a queued exception is raised."""
 
-    def __init__(self, responses: list[str]):
+    def __init__(self, responses: list[str | Exception]):
         self._responses = list(responses)
         self.calls: list[dict] = []
         self.settings = SimpleNamespace(model="fake-model")
@@ -68,11 +65,15 @@ class _FakeLLMService:
                 "ask": context._messages[-1]["content"],
                 "system_instruction": system_instruction,
                 "max_tokens": max_tokens,
+                "response_schema": response_schema,
             }
         )
         if not self._responses:
             raise RuntimeError("FakeLLMService: no more queued responses")
-        return self._responses.pop(0)
+        response = self._responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return response
 
 
 def _choice(choice: str, confidence: float = 0.95, options=REPLY_OPTIONS) -> ChoiceResult:
@@ -99,116 +100,59 @@ def _judge(answers, explainer=None, **kwargs) -> tuple[EvalJudge, _FakeClassifie
     return EvalJudge(classifier, explainer=explainer, **kwargs), classifier
 
 
-class TestParseRunVerdicts(unittest.TestCase):
-    def test_the_goal_and_a_verdict_per_turn_per_criterion(self):
-        out = _Explainer._parse_run_verdicts(
-            '{"goal": {"verdict": "yes", "reason": "Berlin was named."}, '
-            '"turns": {"politeness": ["yes", "no"], "brevity": ["yes", "yes"]}, '
-            '"reasons": {"politeness": {"2": "curt"}}}',
-            ["politeness", "brevity"],
-            2,
+def _asked(*turns: int) -> dict[int, JudgeVerdict]:
+    """The turn verdicts a run asks the explainer about, by turn number."""
+    return {turn: JudgeVerdict(verdict="no", reason="", raw_response="") for turn in turns}
+
+
+class TestParseRunReasons(unittest.TestCase):
+    def test_the_goals_reason_and_each_asked_turns(self):
+        out = _Explainer._parse_run_reasons(
+            '{"goal": "Berlin was named.", '
+            '"turns": {"Politeness": {"2": "curt"}, "brevity": {"1": "short"}}}',
+            {"politeness": _asked(2), "brevity": _asked(1)},
         )
-        self.assertEqual((out.goal.verdict, out.goal.reason), ("yes", "Berlin was named."))
-        self.assertEqual([v.verdict for v in out.turns["politeness"]], ["yes", "no"])
-        self.assertEqual(out.turns["politeness"][1].reason, "curt")
-        self.assertEqual(out.turns["politeness"][0].reason, "")
-        self.assertEqual([v.verdict for v in out.turns["brevity"]], ["yes", "yes"])
+        self.assertEqual(out.goal, "Berlin was named.")
+        self.assertEqual(out.turns, {"politeness": {2: "curt"}, "brevity": {1: "short"}})
 
-    def test_a_short_array_or_a_missing_criterion_fails_the_turns_it_lacks(self):
-        out = _Explainer._parse_run_verdicts(
-            '```json\n{"goal": {"verdict": "no"}, "turns": {"Politeness": ["yes"]}}\n```',
-            ["politeness", "brevity"],
-            2,
+    def test_a_turn_is_the_number_in_its_key(self):
+        out = _Explainer._parse_run_reasons(
+            '{"turns": {"politeness": {"bot turn 1": "warm", "Turn 2": "curt"}}}',
+            {"politeness": _asked(1, 2)},
         )
-        self.assertEqual((out.goal.verdict, out.goal.reason), ("no", "(no reason given)"))
-        self.assertEqual([v.verdict for v in out.turns["politeness"]], ["yes", "none"])
-        self.assertEqual(out.turns["politeness"][1].reason, "(judge gave no verdict)")
-        self.assertEqual([v.reason for v in out.turns["brevity"]], ["(judge gave no verdict)"] * 2)
+        self.assertEqual(out.turns, {"politeness": {1: "warm", 2: "curt"}})
 
-    def test_no_json_fails_everything(self):
-        out = _Explainer._parse_run_verdicts("no json here", ["politeness"], 1)
-        self.assertEqual(out.goal.verdict, "none")
-        self.assertEqual(out.turns["politeness"][0].verdict, "none")
-
-
-class TestParseVerdict(unittest.TestCase):
-    def test_clean_json_yes(self):
-        v = _Explainer._parse_verdict('{"verdict": "yes", "reason": "It mentions weather."}')
-        self.assertTrue(v.passed)
-        self.assertEqual(v.reason, "It mentions weather.")
-
-    def test_clean_json_no(self):
-        v = _Explainer._parse_verdict('{"verdict": "no", "reason": "Does not mention it."}')
-        self.assertFalse(v.passed)
-        self.assertEqual(v.verdict, "no")
-        self.assertEqual(v.reason, "Does not mention it.")
-
-    def test_clean_json_continue(self):
-        v = _Explainer._parse_verdict('{"verdict": "continue", "reason": "Just a filler so far."}')
-        self.assertEqual(v.verdict, "continue")
-        self.assertFalse(v.passed)
-        self.assertEqual(v.reason, "Just a filler so far.")
-
-    def test_unknown_verdict_fails_closed(self):
-        v = _Explainer._parse_verdict('{"verdict": "maybe", "reason": "x"}')
-        self.assertEqual(v.verdict, "no")
-
-    def test_unstructured_continue_fallback(self):
-        v = _Explainer._parse_verdict("continue, more text is needed")
-        self.assertEqual(v.verdict, "continue")
-
-    def test_fenced_json(self):
-        v = _Explainer._parse_verdict('```json\n{"verdict": "yes", "reason": "ok"}\n```')
-        self.assertTrue(v.passed)
-        self.assertEqual(v.reason, "ok")
-
-    def test_fenced_json_without_lang(self):
-        v = _Explainer._parse_verdict('```\n{"verdict": "yes", "reason": "ok"}\n```')
-        self.assertTrue(v.passed)
-
-    def test_trailing_prose_after_json(self):
-        # Models sometimes append chatty text after the JSON object, and "know"
-        # contains "no", so a substring-matching fallback would misread the
-        # trailing sentence as a rejection.
-        v = _Explainer._parse_verdict(
-            ' {"verdict": "yes", "reason": "The bot greets the user."}\n\n'
-            "Let me know if you'd like to evaluate any further turns!"
+    def test_a_reason_not_given_is_empty(self):
+        out = _Explainer._parse_run_reasons(
+            '```json\n{"turns": {"politeness": {"1": "warm"}}}\n```',
+            {"politeness": _asked(1, 2)},
         )
-        self.assertTrue(v.passed)
-        self.assertEqual(v.reason, "The bot greets the user.")
+        self.assertEqual(out.goal, "")
+        self.assertEqual(out.turns, {"politeness": {1: "warm", 2: ""}})
 
-    def test_leading_prose_before_json(self):
-        v = _Explainer._parse_verdict(
-            'Sure, here is my verdict: {"verdict": "no", "reason": "wrong"}'
+    def test_no_json_gives_no_reasons(self):
+        out = _Explainer._parse_run_reasons("no json here", {"politeness": _asked(1)})
+        self.assertEqual((out.goal, out.turns), ("", {"politeness": {1: ""}}))
+
+
+class TestParseReason(unittest.TestCase):
+    def test_the_json_reason(self):
+        self.assertEqual(
+            _Explainer._parse_reason('{"reason": "It mentions weather."}'), "It mentions weather."
         )
-        self.assertFalse(v.passed)
-        self.assertEqual(v.reason, "wrong")
 
-    def test_unstructured_yes_fallback(self):
-        v = _Explainer._parse_verdict("yes, this satisfies the criterion")
-        self.assertTrue(v.passed)
+    def test_fenced_or_surrounded_json(self):
+        for response in (
+            '```json\n{"reason": "ok"}\n```',
+            'Sure: {"reason": "ok"}\n\nLet me know if you need more!',
+        ):
+            with self.subTest(response=response):
+                self.assertEqual(_Explainer._parse_reason(response), "ok")
 
-    def test_unstructured_no_fallback(self):
-        v = _Explainer._parse_verdict("no, it does not")
-        self.assertFalse(v.passed)
-
-    def test_ambiguous_response_fails_closed(self):
-        v = _Explainer._parse_verdict("the answer is yes or possibly no")
-        self.assertFalse(v.passed)
-        self.assertIn("could not parse", v.reason)
-
-    def test_garbage_response(self):
-        v = _Explainer._parse_verdict("???")
-        self.assertFalse(v.passed)
-
-    def test_extra_whitespace(self):
-        v = _Explainer._parse_verdict('  \n {"verdict": "yes", "reason": "x"}  \n ')
-        self.assertTrue(v.passed)
-
-    def test_missing_reason(self):
-        v = _Explainer._parse_verdict('{"verdict": "yes"}')
-        self.assertTrue(v.passed)
-        self.assertEqual(v.reason, "(no reason given)")
+    def test_a_plain_answer_is_the_reason(self):
+        self.assertEqual(
+            _Explainer._parse_reason("  It never mentions rain.\n"), "It never mentions rain."
+        )
 
 
 class TestJudgeEvaluate(unittest.IsolatedAsyncioTestCase):
@@ -223,6 +167,7 @@ class TestJudgeEvaluate(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(verdict.passed)
         self.assertEqual(verdict.confidence, 0.95)
+        self.assertEqual(verdict.probabilities["yes"], 0.95)
         self.assertIn("P(yes)=0.95", verdict.reason)
         state = classifier.asked[0]["state"]
         self.assertEqual(state["latest_bot_reply"], "Let me check. It's 72 and sunny.")
@@ -270,25 +215,42 @@ class TestJudgeEvaluate(unittest.IsolatedAsyncioTestCase):
 
 
 class TestJudgeExplainer(unittest.IsolatedAsyncioTestCase):
-    async def test_a_no_takes_the_explainers_reason(self):
-        llm = _FakeLLMService(['{"verdict": "no", "reason": "it never mentions rain"}'])
+    async def test_a_no_takes_the_explainers_reason_and_keeps_its_probabilities(self):
+        llm = _FakeLLMService(['{"reason": "it never mentions rain"}'])
         judge, _ = _judge([{"verdict": _choice("no")}], explainer=llm)
         judge.add_assistant_message("Hello.")
         verdict = await judge.evaluate("mentions weather")
         self.assertEqual(verdict.verdict, "no")
-        self.assertTrue(verdict.reason.startswith("it never mentions rain"))
-        self.assertIn("P(no)=0.95", verdict.reason)
+        self.assertEqual(verdict.reason, "it never mentions rain")
+        self.assertEqual(verdict.probabilities["no"], 0.95)
 
-    async def test_a_disagreeing_explainer_is_noted_and_the_classifier_stands(self):
-        llm = _FakeLLMService(['{"verdict": "yes", "reason": "it says it rains"}'])
+    async def test_the_explainer_is_told_the_verdict(self):
+        llm = _FakeLLMService(['{"reason": "it says it rains"}'] * 2)
+        for choice, outcome in (("yes", "satisfies"), ("no", "does not satisfy")):
+            judge, _ = _judge([{"verdict": _choice(choice, 0.6)}], explainer=llm)
+            judge.add_assistant_message("It rains.")
+            await judge.evaluate("mentions weather")
+            self.assertIn(f"reply {outcome} this criterion", llm.calls[-1]["ask"])
+
+    async def test_the_reason_is_asked_for_in_a_schema_and_asked_again_when_the_call_fails(self):
+        llm = _FakeLLMService([RuntimeError("timed out"), '{"reason": "it never mentions rain"}'])
         judge, _ = _judge([{"verdict": _choice("no")}], explainer=llm)
-        judge.add_assistant_message("It rains.")
+        judge.add_assistant_message("Hello.")
         verdict = await judge.evaluate("mentions weather")
-        self.assertEqual(verdict.verdict, "no")
-        self.assertIn("the explainer judged yes: it says it rains", verdict.reason)
+        self.assertEqual(verdict.reason, "it never mentions rain")
+        self.assertEqual(len(llm.calls), 2)
+        self.assertEqual(
+            llm.calls[0]["response_schema"],
+            {
+                "type": "object",
+                "properties": {"reason": {"type": "string"}},
+                "required": ["reason"],
+                "additionalProperties": False,
+            },
+        )
 
-    async def test_an_agreeing_explainer_without_a_reason_leaves_the_probabilities(self):
-        llm = _FakeLLMService(['{"verdict": "no"}'])
+    async def test_a_failed_explainer_leaves_the_probabilities(self):
+        llm = _FakeLLMService([])
         judge, _ = _judge([{"verdict": _choice("no")}], explainer=llm)
         judge.add_assistant_message("Hello.")
         verdict = await judge.evaluate("mentions weather")
@@ -307,12 +269,12 @@ class TestJudgeExplainer(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(llm.calls, [])
 
     async def test_an_unsure_yes_is_explained(self):
-        llm = _FakeLLMService(['{"verdict": "yes", "reason": "close enough"}'])
+        llm = _FakeLLMService(['{"reason": "close enough"}'])
         judge, _ = _judge([{"verdict": _choice("yes", 0.6)}], explainer=llm)
         judge.add_assistant_message("Sunny-ish.")
         verdict = await judge.evaluate("gives the weather")
         self.assertTrue(verdict.passed)
-        self.assertTrue(verdict.reason.startswith("close enough"))
+        self.assertEqual(verdict.reason, "close enough")
         self.assertEqual(len(llm.calls), 1)
 
 
@@ -467,14 +429,8 @@ class TestJudgeEvaluateRun(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(verdicts.goal.verdict, "none")
         self.assertEqual([v.verdict for v in verdicts.turns["polite"]], ["yes", "yes"])
 
-    async def test_the_explainer_reasons_only_the_verdicts_that_need_one(self):
-        llm = _FakeLLMService(
-            [
-                '{"goal": {"verdict": "yes", "reason": "booked"}, '
-                '"turns": {"polite": ["yes", "no"]}, '
-                '"reasons": {"polite": {"2": "curt"}}}'
-            ]
-        )
+    async def test_the_explainer_is_asked_only_about_the_verdicts_that_need_a_reason(self):
+        llm = _FakeLLMService(['{"turns": {"polite": {"2": "curt"}}}'])
         judge, _ = _judge(
             self._answer(0.95, {"Let me check. Done, six o'clock.": 0.9, "You're welcome.": 0.1}),
             explainer=llm,
@@ -484,10 +440,97 @@ class TestJudgeEvaluateRun(unittest.IsolatedAsyncioTestCase):
         verdicts = await judge.evaluate_run({"polite": "is polite"}, "booked")
 
         self.assertEqual(len(llm.calls), 1)
+        ask = llm.calls[0]["ask"]
+        self.assertIn("- polite, bot turn 2: fails the criterion", ask)
+        self.assertNotIn("bot turn 1:", ask.split("verdicts to explain")[1])
+        self.assertNotIn("- goal:", ask)
         self.assertEqual(verdicts.goal.reason, "P(yes)=0.95")
         first, second = verdicts.turns["polite"]
         self.assertEqual(first.reason, "P(meets)=0.90, P(fails)=0.10, P(not_applicable)=0.00")
-        self.assertTrue(second.reason.startswith("curt"))
+        self.assertEqual(second.reason, "curt")
+
+    async def test_the_schema_names_exactly_the_reasons_asked_for(self):
+        llm = _FakeLLMService(['{"turns": {"polite": {"2": "curt"}}}'])
+        judge, _ = _judge(
+            self._answer(0.95, {"Let me check. Done, six o'clock.": 0.9, "You're welcome.": 0.1}),
+            explainer=llm,
+        )
+        self._converse(judge)
+        await judge.evaluate_run({"polite": "is polite"}, "booked")
+        schema = llm.calls[0]["response_schema"]
+        self.assertEqual(schema["required"], ["turns"])
+        turns = schema["properties"]["turns"]
+        self.assertEqual(turns["required"], ["polite"])
+        self.assertEqual(turns["properties"]["polite"]["required"], ["2"])
+        self.assertFalse(turns["properties"]["polite"]["additionalProperties"])
+
+    async def test_an_answer_that_leaves_a_reason_out_is_asked_again(self):
+        llm = _FakeLLMService(
+            [
+                '{"goal": "booked", "turns": {"polite": {}}}',
+                '{"goal": "booked", "turns": {"polite": {"2": "curt"}}}',
+            ]
+        )
+        judge, _ = _judge(
+            self._answer(0.6, {"Let me check. Done, six o'clock.": 0.9, "You're welcome.": 0.1}),
+            explainer=llm,
+        )
+        self._converse(judge)
+        verdicts = await judge.evaluate_run({"polite": "is polite"}, "booked")
+        self.assertEqual(len(llm.calls), 2)
+        self.assertEqual(verdicts.goal.reason, "booked")
+        self.assertEqual(verdicts.turns["polite"][1].reason, "curt")
+
+    async def test_an_unsure_pass_is_explained_as_the_outcome_the_classifier_chose(self):
+        # The second answer fails, and the first one's reason stands.
+        llm = _FakeLLMService(['{"turns": {"polite": {"1": "thanked the caller"}}}'])
+        judge, _ = _judge(
+            self._answer(
+                0.95,
+                {
+                    "Let me check. Done, six o'clock.": 0.6,
+                    "You're welcome.": {"meets": 0.3, "fails": 0.1, "not_applicable": 0.6},
+                },
+            ),
+            explainer=llm,
+            explain_below=0.95,
+        )
+        self._converse(judge)
+
+        verdicts = await judge.evaluate_run({"polite": "is polite"}, "booked")
+
+        ask = llm.calls[0]["ask"]
+        self.assertIn("- polite, bot turn 1: meets the criterion", ask)
+        self.assertIn(
+            "- polite, bot turn 2: passes because the criterion does not apply to it", ask
+        )
+        first, second = verdicts.turns["polite"]
+        self.assertEqual(first.reason, "thanked the caller")
+        # A reason not given leaves the probabilities.
+        self.assertTrue(second.reason.startswith("P(meets)="))
+
+    async def test_explain_below_above_one_explains_every_verdict_of_a_run(self):
+        llm = _FakeLLMService(
+            [
+                '{"goal": "booked", '
+                '"turns": {"polite": {"1": "thanked the caller", "2": "warm goodbye"}}}'
+            ]
+        )
+        judge, _ = _judge(
+            self._answer(0.95, {"Let me check. Done, six o'clock.": 0.9, "You're welcome.": 0.9}),
+            explainer=llm,
+            explain_below=2,
+        )
+        self._converse(judge)
+
+        verdicts = await judge.evaluate_run({"polite": "is polite"}, "booked")
+
+        self.assertIn("- goal: achieved", llm.calls[0]["ask"])
+        self.assertEqual(verdicts.goal.reason, "booked")
+        self.assertEqual(verdicts.goal.probabilities, {"yes": 0.95, "no": 1 - 0.95})
+        self.assertEqual(
+            [v.reason for v in verdicts.turns["polite"]], ["thanked the caller", "warm goodbye"]
+        )
 
     async def test_a_transcript_passed_in_is_deprecated_and_judged_in_place_of_the_kept_one(self):
         judge, classifier = _judge(self._answer(0.9, {"given": 0.9}))
@@ -530,14 +573,14 @@ class TestJudgeOverAnLLM(unittest.IsolatedAsyncioTestCase):
         llm = _FakeLLMService(
             [
                 json.dumps({"verdict": {"choice": "no", "probabilities": {"no": 0.9}}}),
-                '{"verdict": "no", "reason": "it never mentions the weather"}',
+                '{"reason": "it never mentions the weather"}',
             ]
         )
         judge = EvalJudge(LLMClassifier(llm=llm), explainer=llm)
         judge.add_assistant_message("Hello there.")
         verdict = await judge.evaluate("describes the weather")
         self.assertEqual(verdict.verdict, "no")
-        self.assertTrue(verdict.reason.startswith("it never mentions the weather"))
+        self.assertEqual(verdict.reason, "it never mentions the weather")
         self.assertEqual(len(llm.calls), 2)
 
     async def test_without_an_explainer_the_probabilities_are_the_reason(self):
@@ -559,7 +602,7 @@ class TestJudgeOverADeprecatedService(unittest.IsolatedAsyncioTestCase):
         llm = _FakeLLMService(
             [
                 json.dumps({"verdict": {"choice": "no", "probabilities": {"no": 0.9}}}),
-                '{"verdict": "no", "reason": "it never mentions the weather"}',
+                '{"reason": "it never mentions the weather"}',
             ]
         )
         with self.assertWarns(DeprecationWarning):
@@ -567,7 +610,7 @@ class TestJudgeOverADeprecatedService(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(judge.classifier, LLMClassifier)
         judge.add_assistant_message("Hello there.")
         verdict = await judge.evaluate("describes the weather")
-        self.assertTrue(verdict.reason.startswith("it never mentions the weather"))
+        self.assertEqual(verdict.reason, "it never mentions the weather")
         self.assertEqual(len(llm.calls), 2)
 
     async def test_the_service_keyword_warns_and_works(self):
@@ -588,41 +631,28 @@ class TestJudgeExplainerPrompts(unittest.IsolatedAsyncioTestCase):
     """What the explainer is asked when a verdict needs a reason."""
 
     async def test_a_reply_is_explained_over_the_conversation(self):
-        llm = _FakeLLMService(['{"verdict": "no", "reason": "it never mentions rain"}'])
+        llm = _FakeLLMService(['{"reason": "it never mentions rain"}'])
         judge, _ = _judge([{"verdict": _choice("no")}], explainer=llm)
         judge.add_user_message("What's the weather?")
         judge.add_assistant_message("Hello there.")
         await judge.evaluate("describes the weather")
         ask = llm.calls[0]["ask"]
+        self.assertIn("most recent reply does not satisfy this criterion", ask)
         self.assertIn("Criterion: describes the weather", ask)
-        self.assertIn("Answer yes, no, or continue.", ask)
-        self.assertEqual(llm.calls[0]["system_instruction"], JUDGE_SYSTEM_INSTRUCTION)
-
-    async def test_without_continue_the_explainer_is_asked_yes_or_no(self):
-        llm = _FakeLLMService(['{"verdict": "no", "reason": "never names Berlin"}'])
-        judge, _ = _judge(
-            [{"verdict": _choice("no", options=("yes", "no"))}],
-            explainer=llm,
-            allow_continue=False,
-        )
-        judge.add_assistant_message("Take your time.")
-        await judge.evaluate("says the capital of Germany is Berlin")
-        self.assertEqual(llm.calls[0]["system_instruction"], JUDGE_FINAL_SYSTEM_INSTRUCTION)
-        self.assertIn("Answer yes or no.", llm.calls[0]["ask"])
+        self.assertEqual(llm.calls[0]["system_instruction"], EXPLAIN_SYSTEM_INSTRUCTION)
 
     async def test_a_call_is_explained_by_name_and_arguments(self):
-        llm = _FakeLLMService(['{"verdict": "no", "reason": "wrong speaker"}'])
+        llm = _FakeLLMService(['{"reason": "wrong speaker"}'])
         judge, _ = _judge([{"answer": YesNoResult(probability=0.1)}], explainer=llm)
         verdict = await judge.evaluate_call("submit", {"speaker": "Ann"}, "submitted for Bob")
-        self.assertTrue(verdict.reason.startswith("wrong speaker"))
+        self.assertEqual(verdict.reason, "wrong speaker")
         ask = llm.calls[0]["ask"]
         self.assertIn('called the function `submit` with arguments `{"speaker": "Ann"}`', ask)
-        self.assertEqual(llm.calls[0]["system_instruction"], JUDGE_CALL_SYSTEM_INSTRUCTION)
+        self.assertIn("this call does not satisfy this criterion", ask)
+        self.assertEqual(llm.calls[0]["system_instruction"], EXPLAIN_SYSTEM_INSTRUCTION)
 
     async def test_a_run_is_explained_from_the_whole_transcript(self):
-        llm = _FakeLLMService(
-            ['{"goal": {"verdict": "no", "reason": "never booked"}, "turns": {"polite": ["yes"]}}']
-        )
+        llm = _FakeLLMService(['{"goal": "never booked"}'])
         judge, _ = _judge(
             lambda state, questions: (
                 {"answer": YesNoResult(probability=0.1)}
@@ -636,15 +666,16 @@ class TestJudgeExplainerPrompts(unittest.IsolatedAsyncioTestCase):
         judge.add_assistant_message("Sure.")
         verdicts = await judge.evaluate_run({"polite": "is polite"}, "a table is booked")
         self.assertEqual(verdicts.goal.verdict, "no")
-        self.assertTrue(verdicts.goal.reason.startswith("never booked"))
+        self.assertEqual(verdicts.goal.reason, "never booked")
         ask = llm.calls[0]["ask"]
         self.assertIn("User: Book a table at six.", ask)
         self.assertIn('[tool call] book({"time": "6pm"})', ask)
         self.assertIn("Bot turn 1: Sure.", ask)
-        self.assertEqual(llm.calls[0]["system_instruction"], RUN_JUDGE_SYSTEM_INSTRUCTION)
+        self.assertIn("- goal: not achieved", ask)
+        self.assertEqual(llm.calls[0]["system_instruction"], EXPLAIN_SYSTEM_INSTRUCTION)
 
     async def test_max_tokens_caps_the_explainer(self):
-        llm = _FakeLLMService(['{"verdict": "no", "reason": "no rain"}'])
+        llm = _FakeLLMService(['{"reason": "no rain"}'])
         judge, _ = _judge([{"verdict": _choice("no")}], explainer=llm, max_tokens=64)
         judge.add_assistant_message("Hello.")
         await judge.evaluate("describes the weather")
@@ -670,9 +701,7 @@ class TestJudgeConfig(unittest.IsolatedAsyncioTestCase):
 
     def test_allow_continue_false_is_read_from_the_config(self):
         judge = EvalJudge.from_config({"service": "ollama", "allow_continue": False})
-        self.assertFalse(judge._allow_continue)
         self.assertNotIn("continue", judge._reply_outcomes)
-        self.assertFalse(judge._explainer._allow_continue)
 
 
 class TestJudgeVerdictDataclass(unittest.TestCase):

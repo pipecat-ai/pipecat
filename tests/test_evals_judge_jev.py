@@ -238,10 +238,9 @@ class TestJevConfig(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(judge._explainer)
         await judge.close()
 
-    async def test_the_explainer_follows_allow_continue(self):
+    async def test_allow_continue_is_read_from_the_config(self):
         judge = _config_judge(_FakeApi([]), {"factory": _FACTORY, "allow_continue": False})
         self.assertNotIn("continue", judge._reply_outcomes)
-        self.assertFalse(judge._explainer._allow_continue)
         await judge.close()
 
     def test_a_missing_api_key_is_an_error(self):

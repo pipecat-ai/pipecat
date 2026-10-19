@@ -40,6 +40,7 @@ class MistralLLMService(OpenAILLMService):
 
     Settings = MistralLLMSettings
     _settings: Settings
+    _requires_api_key = True
 
     def __init__(
         self,
@@ -176,7 +177,7 @@ class MistralLLMService(OpenAILLMService):
 
         # Handle Mistral-specific parameter mapping
         # Mistral uses "random_seed" instead of "seed"
-        if self._settings.seed:
+        if isinstance(self._settings.seed, int):
             params["random_seed"] = self._settings.seed
 
         # Add any extra parameters

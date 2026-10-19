@@ -6,6 +6,7 @@
 
 import argparse
 import io
+import os
 import sys
 import tempfile
 import types
@@ -26,6 +27,7 @@ from pipecat.runner.run import (
     _parse_ice_servers,
     _print_startup_message,
     _resolve_file_storage,
+    _run_telephony_bot,
     _setup_daily_routes,
     _setup_file_uploads_routes,
     _setup_telephony_routes,
@@ -1025,6 +1027,52 @@ class TestWsAuthConnectionBehavior(unittest.TestCase):
         with patch("pipecat.runner.run._run_telephony_bot", new=AsyncMock()):
             with TestClient(app).websocket_connect("/ws"):
                 pass
+
+
+class TestRunnerBody(unittest.IsolatedAsyncioTestCase):
+    """``--runner-body`` reaches WebSocket sessions, which have no /start body."""
+
+    async def test_telephony_bot_gets_the_runner_body(self):
+        import tempfile
+
+        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+            f.write("image_path: cat.jpg\n")
+        self.addCleanup(os.unlink, f.name)
+        bot_module = types.SimpleNamespace(bot=AsyncMock())
+        args = argparse.Namespace(runner_body=f.name)
+
+        with patch("pipecat.runner.run._get_bot_module", return_value=bot_module):
+            await _run_telephony_bot(MagicMock(), args)
+
+        runner_args = bot_module.bot.await_args.args[0]
+        self.assertEqual(runner_args.body, {"image_path": "cat.jpg"})
+
+    async def test_telephony_bot_without_a_runner_body(self):
+        bot_module = types.SimpleNamespace(bot=AsyncMock())
+        args = argparse.Namespace(runner_body=None)
+
+        with patch("pipecat.runner.run._get_bot_module", return_value=bot_module):
+            await _run_telephony_bot(MagicMock(), args)
+
+        self.assertIsNone(bot_module.bot.await_args.args[0].body)
+
+
+class TestDeprecatedEvalTransportOption(unittest.TestCase):
+    """``-t eval`` runs the dev runner's server like a run without ``-t``."""
+
+    def test_eval_transport_runs_the_server(self):
+        from pipecat.runner import run
+
+        with (
+            patch.object(sys, "argv", ["bot.py", "-t", "eval"]),
+            patch.object(run, "_configure_server_app") as configure,
+            patch.object(run.uvicorn, "run") as uvicorn_run,
+            redirect_stdout(io.StringIO()),
+        ):
+            run.main()
+
+        uvicorn_run.assert_called_once()
+        self.assertIsNone(configure.call_args.args[0].transport)
 
 
 class TestAllowedOriginsUtil(unittest.TestCase):

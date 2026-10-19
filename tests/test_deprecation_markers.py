@@ -106,6 +106,45 @@ def test_no_replacement_directive_extracts_no_replacement():
     assert dscan.relation_for(use, "Foo") == "use_existing"
 
 
+def test_directives_are_attributed_to_the_entry_they_sit_under():
+    """A directive under an event bullet or an Args entry deprecates that entry alone."""
+    docstring = """A processor.
+
+    Events:
+
+    - on_ready: Triggered when ready.
+    - on_old_event: Triggered by the old thing.
+
+      .. deprecated:: 1.8.0
+          Use ``on_ready`` instead. Will be removed in 2.0.0.
+
+    Args:
+        old_param: An old parameter.
+
+            .. deprecated:: 1.8.0
+                Use ``new_param`` instead. Will be removed in 2.0.0.
+    """
+    entries = [(param, kind) for _, _, param, kind in dscan.iter_directives(docstring)]
+
+    assert entries == [("on_old_event", "event"), ("old_param", "parameter")]
+
+
+def test_top_level_directive_deprecates_the_symbol():
+    """A directive outside any entry deprecates the symbol the docstring belongs to."""
+    docstring = """A processor.
+
+    .. deprecated:: 1.8.0
+        Use ``NewProcessor`` instead. Will be removed in 2.0.0.
+
+    Events:
+
+    - on_ready: Triggered when ready.
+    """
+    entries = [(param, kind) for _, _, param, kind in dscan.iter_directives(docstring)]
+
+    assert entries == [(None, "parameter")]
+
+
 # --- @deprecated decorator message consistency -------------------------------
 
 
@@ -424,6 +463,13 @@ def test_compute_removals_detects_disappeared_symbol():
 def test_compute_removals_no_change_when_nothing_removed():
     prev = _dep_registry(_dep_record("A"))
     current = _dep_registry(_dep_record("A"))
+    assert drem.compute_removals(prev, current, "2.0.0", []) == []
+
+
+def test_compute_removals_ignores_subject_recorded_by_member():
+    """A subject now recorded per member (``X`` → ``X.member``) wasn't removed."""
+    prev = _dep_registry(_dep_record("Proc"))
+    current = _dep_registry(_dep_record("Proc.on_event", kind="event"))
     assert drem.compute_removals(prev, current, "2.0.0", []) == []
 
 

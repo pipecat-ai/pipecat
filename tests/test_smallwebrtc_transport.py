@@ -51,6 +51,7 @@ from aiortc.mediastreams import MediaStreamError  # noqa: E402
 from av import AudioFrame, VideoFrame  # noqa: E402
 
 from pipecat.frames.frames import OutputTransportMessageUrgentFrame  # noqa: E402
+from pipecat.transports.base_transport import TransportParams  # noqa: E402
 from pipecat.transports.smallwebrtc.connection import (  # noqa: E402
     SmallWebRTCConnection,
 )
@@ -59,6 +60,7 @@ from pipecat.transports.smallwebrtc.transport import (  # noqa: E402
     SCREEN_VIDEO_SOURCE,
     SmallWebRTCCallbacks,
     SmallWebRTCClient,
+    SmallWebRTCTransport,
 )
 
 
@@ -483,6 +485,19 @@ class TestTrackStatus(unittest.IsolatedAsyncioTestCase):
                 ("microphone", False),
             ],
         )
+
+
+class TestSmallWebRTCTransportNames(unittest.TestCase):
+    def test_input_and_output_processors_take_their_own_names(self):
+        transport = SmallWebRTCTransport(
+            webrtc_connection=MagicMock(),
+            params=TransportParams(),
+            input_name="webrtc-in",
+            output_name="webrtc-out",
+        )
+
+        self.assertEqual(transport.input().name, "webrtc-in")
+        self.assertEqual(transport.output().name, "webrtc-out")
 
 
 if __name__ == "__main__":

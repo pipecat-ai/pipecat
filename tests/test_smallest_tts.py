@@ -6,11 +6,16 @@
 
 """Tests for SmallestTTSService word-timestamp and continuation handling."""
 
+import asyncio
+import base64
 import json
 
 import pytest
+from websockets.protocol import State
 
+from pipecat.frames.frames import TTSAudioRawFrame, TTSSpeakFrame, TTSTextFrame
 from pipecat.services.smallest.tts import SmallestTTSService
+from pipecat.tests.utils import SleepFrame, run_test
 
 CTX = "ctx-1"
 
@@ -70,6 +75,20 @@ def test_build_msg_omits_buffer_delay_by_default():
 def test_build_msg_includes_buffer_delay_when_set():
     service = SmallestTTSService(api_key="test-key", max_buffer_delay_ms=1500)
     assert service._build_msg("hi")["max_buffer_delay_ms"] == 1500
+
+
+def test_build_msg_omits_content_filter_by_default():
+    """The server's own default (filter off) applies unless an action is set."""
+    service = _make_service()
+    assert "content_filter" not in service._build_msg("hi")
+
+
+@pytest.mark.parametrize("action", ["reject", "flag"])
+def test_build_msg_enables_content_filter_with_action(action):
+    service = SmallestTTSService(
+        api_key="test-key", settings=SmallestTTSService.Settings(content_filter=action)
+    )
+    assert service._build_msg("hi")["content_filter"] == {"enabled": True, "action": action}
 
 
 @pytest.mark.asyncio
@@ -214,3 +233,46 @@ async def test_word_timestamp_offset_resets_on_new_turn():
 
     captured = await _drive(service, [_word_msg("Fresh", 0.3, 0.6, request_id="c")])
     assert captured == [("Fresh", pytest.approx(0.3))]
+
+
+class _FakeSpeakingWebsocket:
+    """Answers each text fragment with audio and the timestamp of its first word."""
+
+    state = State.OPEN
+
+    def __init__(self):
+        self._messages: asyncio.Queue[str] = asyncio.Queue()
+
+    async def send(self, data: str):
+        text = json.loads(data)["text"]
+        if text.strip():
+            audio = base64.b64encode(b"\x00\x01" * 1600).decode()
+            self._messages.put_nowait(json.dumps({"status": "chunk", "data": {"audio": audio}}))
+            self._messages.put_nowait(_word_msg(text.split()[0], 0.0, 0.1, request_id="r1"))
+
+    async def close(self):
+        pass
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self) -> str:
+        return await self._messages.get()
+
+
+@pytest.mark.asyncio
+async def test_speaks_with_word_timestamps():
+    """Spoken text produces audio and a word frame for each timed word."""
+    service = SmallestTTSService(api_key="test-key", sample_rate=16000, stop_frame_timeout_s=0.2)
+    websocket = _FakeSpeakingWebsocket()
+
+    async def websocket_connect(*args, **kwargs):
+        return websocket
+
+    service._websocket_connect = websocket_connect
+    down, _ = await asyncio.wait_for(
+        run_test(service, frames_to_send=[TTSSpeakFrame("Hello."), SleepFrame(sleep=0.4)]),
+        timeout=5,
+    )
+    assert any(isinstance(f, TTSAudioRawFrame) for f in down)
+    assert [f.text for f in down if isinstance(f, TTSTextFrame)] == ["Hello."]

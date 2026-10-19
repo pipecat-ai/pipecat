@@ -44,6 +44,7 @@ from pipecat.services.settings import LLMSettings, ServiceSettings, STTSettings,
 from pipecat.transcriptions.language import Language
 from pipecat.utils.deprecation import deprecated, renamed_init_field, warn_deprecated
 from pipecat.utils.errors import ErrorCategory
+from pipecat.utils.security.redaction import redact_secrets
 from pipecat.utils.text.base_text_aggregator import TextType
 from pipecat.utils.time import nanoseconds_to_str
 from pipecat.utils.utils import obj_count, obj_id
@@ -680,6 +681,29 @@ class TranslationFrame(TextFrame):
 
 
 @dataclass
+class UserBackchannelFrame(DataFrame):
+    """A short acknowledgment the user said while the bot talks, such as "mhm".
+
+    Pushed in place of a transcription, so the bot keeps talking and the
+    acknowledgment stays out of the LLM context.
+
+    Parameters:
+        text: What the user said.
+        user_id: Identifier for the user who spoke.
+        timestamp: When the user said it.
+    """
+
+    text: str
+    user_id: str
+    timestamp: str
+
+    def __str__(self):
+        return (
+            f"{self.name}(user: {self.user_id}, text: [{self.text}], timestamp: {self.timestamp})"
+        )
+
+
+@dataclass
 class LLMContextAssistantTimestampFrame(DataFrame):
     """Timestamp information for assistant messages in LLM context.
 
@@ -702,6 +726,23 @@ class LLMContextAssistantTurnFrame(DataFrame):
     Parameters:
         text: The assistant's aggregated spoken text for this turn.
         timestamp: ISO-8601 timestamp of when the assistant turn started.
+    """
+
+    text: str
+    timestamp: str
+
+
+@dataclass
+class LLMContextUserTurnFrame(DataFrame):
+    """The aggregated text of a user turn, as written to the LLM context.
+
+    Broadcast by the LLM user aggregator each time it writes what the user said
+    to the context, so it holds what the bot heard: a transcription the
+    aggregator leaves out, such as one while the user is muted, is not in it.
+
+    Parameters:
+        text: The user's aggregated transcript for this turn.
+        timestamp: ISO-8601 timestamp of when the user turn started.
     """
 
     text: str
@@ -972,6 +1013,9 @@ class TTSSpeakFrame(DataFrame):
     A frame that contains text that should be spoken by the TTS service
     in the pipeline (if any).
 
+    Set ``interruptible=False`` on the frame to preserve its synthesis and
+    generated audio and text through interruptions.
+
     Parameters:
         text: The text to be spoken.
         append_to_context: Whether the spoken text should be appended to the LLM
@@ -1001,6 +1045,24 @@ class TTSSpeakFrame(DataFrame):
                 stacklevel=3,
             )
             self.append_to_context = True
+
+
+@dataclass
+class BotBackchannelFrame(TTSSpeakFrame):
+    """A short acknowledgment for the bot to say while the user talks, such as "Mm-hmm.".
+
+    The TTS service speaks it like any :class:`TTSSpeakFrame`, and its text
+    frames have type ``TextType.BACKCHANNEL``. Interruptions don't cut it off
+    unless ``interruptible`` is set to True on the frame.
+
+    Parameters:
+        append_to_context: Whether the spoken text should be appended to the LLM
+            context. Defaults to False.
+    """
+
+    append_to_context: bool = False
+    text_type: TextType | str = field(default=TextType.BACKCHANNEL, init=False)
+    interruptible: bool = field(default=False, init=False)
 
 
 @dataclass
@@ -1198,7 +1260,10 @@ class ErrorFrame(SystemFrame):
     the pipeline.
 
     Parameters:
-        error: Description of the error that occurred.
+        error: Description of the error that occurred. Credentials it quotes
+            (an API key, a signed URL's signature, an auth header) are masked,
+            since the description is logged and reported wherever the error
+            goes.
         fatal: Whether the error is fatal and requires bot shutdown.
 
             .. deprecated:: 1.8.0
@@ -1228,6 +1293,8 @@ class ErrorFrame(SystemFrame):
 
     def __post_init__(self):
         super().__post_init__()
+        if isinstance(self.error, str):
+            self.error = redact_secrets(self.error)
         # Only a set flag carries behavior worth warning about, and
         # `FatalErrorFrame` already warns about itself.
         if self.fatal and not isinstance(self, FatalErrorFrame):

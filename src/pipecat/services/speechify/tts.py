@@ -257,10 +257,16 @@ class SpeechifyTTSSettings(TTSSettings):
             Adds latency.
         text_normalization: Whether to spell out numbers, dates and similar tokens
             before synthesis. Adds latency.
+        safety_identifier: Stable, opaque identifier for the end user a request is
+            synthesized for, so Speechify can rate-limit or block that user instead of
+            the whole workspace. 1 to 64 characters of letters, digits and
+            ``. _ - : | + / =`` — a keyed hash of an internal user id, never personal
+            data such as an email address, which Speechify rejects.
     """
 
     loudness_normalization: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     text_normalization: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    safety_identifier: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class SpeechifyHttpTTSService(TTSService):
@@ -307,6 +313,7 @@ class SpeechifyHttpTTSService(TTSService):
             language=None,
             loudness_normalization=None,
             text_normalization=None,
+            safety_identifier=None,
         )
         if settings is not None:
             default_settings.apply_update(settings)
@@ -406,6 +413,10 @@ class SpeechifyHttpTTSService(TTSService):
         language = assert_given(self._settings.language)
         if language:
             payload["language"] = language
+
+        safety_identifier = assert_given(self._settings.safety_identifier)
+        if safety_identifier:
+            payload["safety_identifier"] = safety_identifier
 
         options: dict[str, Any] = {}
         loudness_normalization = assert_given(self._settings.loudness_normalization)

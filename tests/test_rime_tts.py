@@ -36,6 +36,26 @@ def test_coda_sampling_params_are_included_in_websocket_params():
     assert params["timeScaleFactor"] == 1.2
 
 
+def test_inline_speed_lists_one_speed_per_bracketed_span():
+    service = RimeTTSService(api_key="test-api-key")
+
+    text = f"{service.INLINE_SPEED('slow', 0.5)} and {service.INLINE_SPEED('fast', 1.5)}"
+    msg = service._build_msg(text)
+
+    assert msg["text"] == "[slow] and [fast]"
+    assert msg["inlineSpeedAlpha"] == "0.5,1.5"
+
+
+def test_pronounce_wraps_the_phoneme_in_braces():
+    service = RimeTTSService(api_key="test-api-key")
+
+    text = service.PRONOUNCE("Say hello", "hello", "h'El0")
+    msg = service._build_msg(text)
+
+    assert msg["text"] == "Say {h'El0}"
+    assert msg["phonemizeBetweenBrackets"] is True
+
+
 def test_non_json_service_defaults_to_coda_without_a_voice():
     with pytest.warns(DeprecationWarning, match="RimeNonJsonTTSService"):
         service = RimeNonJsonTTSService(api_key="test-api-key")

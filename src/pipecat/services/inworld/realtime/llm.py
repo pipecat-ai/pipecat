@@ -848,7 +848,7 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
         if "session_properties" in changed and input_rate and output_rate:
             self._ensure_audio_config(input_rate, output_rate)
 
-        handled = {"session_properties", "system_instruction", "model"}
+        handled = {"session_properties", "system_instruction", "model", "temperature"}
         if changed.keys() & handled:
             await self._send_session_update()
         self._warn_unhandled_updated_settings(changed.keys() - handled)

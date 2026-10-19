@@ -295,8 +295,8 @@ service owns one `AggregatedFrameSequencer`; the sequencer builds a
 
 | `TTSService` | Sequencer method | When |
 | --- | --- | --- |
-| `_push_tts_frames` | `register_spoken` | A frame is dispatched to the TTS |
-| `_push_tts_frames` | `register_skipped` | A frame bypasses TTS (e.g. a code block) |
+| `_handle_aggregated_text` | `register_spoken` | A frame is dispatched to the TTS |
+| `_handle_aggregated_text` | `register_skipped` | A frame bypasses TTS (e.g. a code block) |
 | `_add_word_timestamps` | `process_word` | A word-timestamp event arrives |
 | `_apply_force_complete` | `force_complete` | An audio context ends |
 | end of text input | `finalize` | No more tokens for this context |
@@ -307,7 +307,7 @@ about queues the sequencer cannot see:
 
 | `TTSService` | What it does                                                                            | Why |
 | --- |-----------------------------------------------------------------------------------------| --- |
-| `push_frame` | Stamps the `will_be_spoken` anchor with `max(_word_last_pts, clock.now())`              | Progress frames carry a PTS and travel the transport's clock queue. |
+| `push_frame` | Stamps the `will_be_spoken` anchor with `max(_word_timestamp_tracker.last_pts, clock.now())`              | Progress frames carry a PTS and travel the transport's clock queue. |
 | `_push_sequencer_frames` | Routes all the frames received from the AggregatedFrameSequencer through the audio-context queue when streaming | Keeps a single consumer emitting anchors, words and audio in order, rather than racing the audio-context task |
 
 ### 3.6 End to end: the code-helper example

@@ -13,6 +13,8 @@ that module. Mounted as the ``eval`` subcommand of the ``pipecat`` CLI (see
 
 import asyncio
 import contextlib
+import json
+import math
 import shutil
 import sys
 import time
@@ -44,7 +46,8 @@ from pipecat.evals.scenario import (
     describe_simulation,
     is_scenario_file,
 )
-from pipecat.evals.session import EvalSession, EvalSessionParams
+from pipecat.evals.session import DEFAULT_BOT_READY_TIMEOUT_S, EvalSession, EvalSessionParams
+from pipecat.evals.simulation_judge import EvalSimulationJudge
 from pipecat.evals.suite import (
     SCENARIO_SUFFIXES,
     EvalManifest,
@@ -297,8 +300,9 @@ async def _execute_scenario(
     Updates ``run`` in place.
 
     The ``eval run`` counterpart to the suite's _run_one: it connects to a fixed
-    URL instead of spawning, always writes the decision trace (``<scenario>.eval.log``)
-    and, under ``--debug``, the combined ``<scenario>.debug.log``.
+    URL instead of spawning, always writes the decision trace (``<scenario>.eval.log``),
+    a simulation's ``<scenario>.conversation.json``, and, under ``--debug``, the
+    combined ``<scenario>.debug.log``.
     """
     run.status = "running"
     run.started_at = time.monotonic()
@@ -316,10 +320,14 @@ async def _execute_scenario(
                 if isinstance(loaded, EvalSimulationScenario):
                     print(f"    {_bold('conversation:')}")
             run.result = await session.run()
+        Path(logs_dir).mkdir(parents=True, exist_ok=True)
         if run.result.debug_log:
-            Path(logs_dir).mkdir(parents=True, exist_ok=True)
             (Path(logs_dir) / f"{run.stem}.eval.log").write_text(
                 "\n".join(run.result.debug_log) + "\n"
+            )
+        if isinstance(run.result, EvalSimulationResult):
+            (Path(logs_dir) / f"{run.stem}.conversation.json").write_text(
+                json.dumps(run.result.conversation, indent=2) + "\n"
             )
     except Exception as e:  # noqa: BLE001
         # Errors raised inside the session's run() are caught there and returned
@@ -388,9 +396,9 @@ def run(
         help="One or more scenario YAML files (scripted, or simulations), or directories of them.",
     ),
     bot_url: str = typer.Option(
-        "ws://localhost:7860",
+        "ws://localhost:7860/ws",
         "--bot-url",
-        help="WebSocket URL of the bot's eval transport.",
+        help="WebSocket URL of the bot: the dev runner's /ws route, or a Pipecat Cloud session's.",
     ),
     verbose: bool = typer.Option(
         False,
@@ -430,7 +438,8 @@ def run(
     logs_dir: str = typer.Option(
         ".",
         "--logs-dir",
-        help="Directory for each scenario's logs: <logs-dir>/<scenario>.eval.log (+ .debug.log).",
+        help="Directory for each scenario's logs: <logs-dir>/<scenario>.eval.log (+ .debug.log, "
+        "and a simulation's .conversation.json).",
     ),
     debug: bool = typer.Option(
         False,
@@ -441,15 +450,19 @@ def run(
     stop_bot: bool = typer.Option(
         False,
         "--stop-bot",
-        help="Cancel the bot's pipeline (exit it) after the run. By default the "
-        "bot is left running so it can serve more scenarios.",
+        help="Deprecated, no effect: the harness always ends the bot's session after a run.",
     ),
     trigger_disconnect: bool = typer.Option(
         False,
         "--trigger-disconnect",
-        help="Fire the bot's on_client_disconnected handler when the eval client "
-        "disconnects. Bots often cancel their pipeline there, so it's off by "
-        "default. A scenario's 'trigger_disconnect:' field opts in on its own.",
+        help="Deprecated: a bot fires on_client_disconnected whenever the eval client "
+        "disconnects. Only affects a bot serving the server EvalTransport.",
+    ),
+    bot_ready_timeout: float = typer.Option(
+        DEFAULT_BOT_READY_TIMEOUT_S,
+        "--bot-ready-timeout",
+        help="Seconds to wait, once connected, for the bot's RTVI bot-ready, which "
+        "covers the bot's startup.",
     ),
 ) -> None:
     """Run one or more scenarios, scripted or simulations, against an already-running bot.
@@ -471,12 +484,23 @@ def run(
     if audio:
         _print_run_settings(runs, None, audio)
 
+    if stop_bot:
+        _console.print(
+            "[yellow]--stop-bot is deprecated since 1.13.0 and has no effect: "
+            "the harness always ends the bot's session after a run.[/yellow]"
+        )
+    if trigger_disconnect:
+        _console.print(
+            "[yellow]--trigger-disconnect is deprecated since 1.13.0: a bot fires "
+            "on_client_disconnected whenever the eval client disconnects.[/yellow]"
+        )
+
     params = EvalSessionParams(
         default_timeout_ms=timeout * 1000,
         cache_dir=cache_dir,
         use_cache=not no_cache,
-        stop_bot=stop_bot,
         trigger_disconnect=trigger_disconnect,
+        bot_ready_timeout_s=bot_ready_timeout,
     )
     started = time.monotonic()
     asyncio.run(
@@ -496,6 +520,184 @@ def run(
         runs, Path(logs_dir).resolve(), time.monotonic() - started, dashboard_shown
     )
     raise typer.Exit(code=exit_code)
+
+
+#
+# `pipecat eval judge` — judge saved conversations against a simulation.
+#
+
+
+def _judged_simulation(path: Path, name: str | None) -> EvalSimulationScenario:
+    """The simulation in ``path`` to judge with: the one called ``name``, or the file's only one."""
+    try:
+        file = EvalScenarioFile.load(path)
+    except (ValueError, FileNotFoundError) as e:
+        raise typer.BadParameter(str(e), param_hint="SCENARIO_PATH")
+    simulations = [s for s in file if isinstance(s, EvalSimulationScenario)]
+    names = ", ".join(s.name for s in simulations) or "none"
+    if name is None and len(simulations) != 1:
+        raise typer.BadParameter(f"pick one of the file's simulations: {names}", param_hint="-s")
+    matches = [s for s in simulations if name is None or s.name in (name, f"{file.name}/{name}")]
+    if not matches:
+        raise typer.BadParameter(f"no simulation {name!r}; the file has: {names}", param_hint="-s")
+    return matches[0]
+
+
+async def _judge_conversation(
+    simulation: EvalSimulationScenario, path: Path
+) -> EvalSimulationResult:
+    """Judge one conversation file, with a judge of its own that explains every verdict.
+
+    A file that can't be read or judged is the result's error.
+    """
+    try:
+        messages = json.loads(path.read_text())
+        judgement = await EvalSimulationJudge(simulation, explain_below=math.inf).judge(messages)
+    except Exception as e:  # noqa: BLE001
+        return EvalSimulationResult(
+            simulation_name=simulation.name,
+            succeeded=False,
+            error=f"error: {type(e).__name__}: {e}",
+            success=simulation.success,
+        )
+    goal = judgement.goal
+    return EvalSimulationResult(
+        simulation_name=simulation.name,
+        succeeded=goal.verdict == "yes",
+        reason=goal.reason,
+        confidence=goal.confidence,
+        probabilities=goal.probabilities,
+        error=f"judge gave no verdict on the goal: {goal.reason}"
+        if goal.verdict == "none"
+        else None,
+        metrics=judgement.metrics,
+        messages=[
+            {"role": m["role"], "content": m["content"]}
+            for m in messages
+            if m["role"] in ("user", "assistant")
+        ],
+        conversation=messages,
+        turns=sum(1 for m in messages if m["role"] == "user"),
+        success=simulation.success,
+    )
+
+
+def _judgement_record(path: Path, result: EvalSimulationResult) -> dict:
+    """The JSONL line of a judged conversation: the goal's verdict and every metric's, each with the wording it was judged on, and each turn's with its reason and what the bot said."""
+    bot_turns = [m["content"] for m in result.messages if m["role"] == "assistant"]
+    return {
+        "conversation": str(path),
+        "scenario": result.simulation_name,
+        "success": result.success,
+        "passed": result.passed,
+        "succeeded": result.succeeded,
+        "error": result.error,
+        "confidence": result.confidence,
+        "probabilities": result.probabilities,
+        "reason": result.reason,
+        "metrics": [
+            {
+                "name": m.name,
+                "criterion": m.criterion,
+                "score": m.score,
+                "passed": m.passed,
+                "min_score": m.min_score,
+                "reason": m.reason,
+                "failure_kind": m.failure_kind,
+                "verdicts": [
+                    {
+                        "turn": v.turn,
+                        "passed": v.passed,
+                        "verdict": v.verdict,
+                        "confidence": v.confidence,
+                        "probabilities": v.probabilities,
+                        "reason": v.reason,
+                        "text": bot_turns[v.turn - 1] if v.turn <= len(bot_turns) else "",
+                    }
+                    for v in m.verdicts
+                ],
+            }
+            for m in result.metrics
+        ],
+    }
+
+
+def _print_judgement(path: Path, result: EvalSimulationResult, verbose: bool) -> None:
+    """Print a judged conversation's verdict line and, verbose, the judge's reasons under it."""
+    if result.passed:
+        print(f"  {_green('✓')} {path}")
+    else:
+        print(f"  {_red('✗')} {path}  {_dim(result.failure or '')}")
+    if verbose:
+        _print_simulation_detail(result)
+
+
+async def _judge_all(
+    simulation: EvalSimulationScenario,
+    paths: list[Path],
+    output: Path,
+    concurrency: int,
+    verbose: bool,
+) -> list[EvalSimulationResult]:
+    """Judge every conversation, ``concurrency`` at a time, writing each line as it is judged."""
+    semaphore = asyncio.Semaphore(concurrency)
+    results: list[EvalSimulationResult] = []
+    with output.open("w") as f:
+
+        async def judge_one(path: Path) -> None:
+            async with semaphore:
+                result = await _judge_conversation(simulation, path)
+            f.write(json.dumps(_judgement_record(path, result)) + "\n")
+            f.flush()
+            _print_judgement(path, result, verbose)
+            results.append(result)
+
+        await asyncio.gather(*(judge_one(path) for path in paths))
+    return results
+
+
+@eval_app.command("judge")
+def judge(
+    scenario_path: Path = typer.Argument(..., help="Scenario YAML file holding the simulation."),
+    conversations: list[Path] = typer.Argument(
+        ...,
+        help="Conversation files to judge: a run's <stem>.conversation.json, or the same "
+        "format saved from a real call.",
+    ),
+    scenario: str = typer.Option(
+        None,
+        "-s",
+        "--scenario",
+        help="The simulation to judge with when the file holds several, with or without "
+        "the file's name (book_table/available or available).",
+    ),
+    output: Path = typer.Option(
+        Path("judged.jsonl"), "-o", "--output", help="JSONL file to write, one line per file."
+    ),
+    concurrency: int = typer.Option(
+        4, "-c", "--concurrency", help="How many conversations to judge at once."
+    ),
+    verbose: bool = typer.Option(
+        False, "-v", "--verbose", help="Print the judge's reason and each metric's score."
+    ),
+) -> None:
+    """Judge saved conversations against a simulation's success and its criterion metrics.
+
+    Each conversation gets the verdicts the simulation's own run would, with a
+    reason for every one, passes included. Measured metrics are left out, since
+    they come from a live run. Exits non-zero when a conversation did not pass.
+    """
+    logger.remove()
+    simulation = _judged_simulation(scenario_path, scenario)
+    results = asyncio.run(_judge_all(simulation, conversations, output, concurrency, verbose))
+    passed = sum(1 for r in results if r.passed)
+    print()
+    print(
+        f"  {_color(f'{passed}/{len(results)} passed', '32' if passed == len(results) else '31')}"
+    )
+    print(f"  results: {output}")
+    print()
+    raise typer.Exit(code=0 if passed == len(results) else 1)
 
 
 #
