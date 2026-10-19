@@ -39,7 +39,7 @@ from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.audio.turn.base_turn_analyzer import BaseTurnParams
 from pipecat.audio.vad.vad_analyzer import VADParams
-from pipecat.metrics.metrics import AudioQualityScores, MetricsData
+from pipecat.metrics.metrics import MetricsData
 from pipecat.services.settings import LLMSettings, ServiceSettings, STTSettings, TTSSettings
 from pipecat.transcriptions.language import Language
 from pipecat.utils.deprecation import deprecated, renamed_init_field, warn_deprecated
@@ -1580,17 +1580,22 @@ class MetricsFrame(SystemFrame):
 class AudioQualityFrame(SystemFrame):
     """Frame containing the audio quality scores of one window of user audio.
 
-    Emitted downstream by audio quality analyzers such as
+    Emitted downstream by audio quality analyzers, for example
     :class:`~pipecat.processors.audio.aic_tyto_processor.AICTytoProcessor`,
-    whether or not metrics are enabled.
+    whether or not metrics are enabled. All scores are in the range 0.0 to
+    1.0, and a higher value means worse audio.
 
     Parameters:
-        scores: Scores for the window.
+        risk_score: Chance that downstream models (STT, VAD, turn-taking)
+            fail on this audio.
+        degradations: Score for each degradation type. Keys are names that
+            the analyzer defines, such as ``"noise"``.
         audio_secs: Seconds of user audio received when the window was
             analyzed.
     """
 
-    scores: AudioQualityScores
+    risk_score: float
+    degradations: dict[str, float]
     audio_secs: float
 
 

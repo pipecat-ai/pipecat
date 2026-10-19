@@ -337,7 +337,13 @@ class AICTytoProcessor(FrameProcessor):
             processor=self.name, model=self._model.get_id(), value=scores, audio_secs=audio_secs
         )
         await self._call_event_handler("on_analysis_result", data)
-        await self.push_frame(AudioQualityFrame(scores=scores, audio_secs=audio_secs))
+        await self.push_frame(
+            AudioQualityFrame(
+                risk_score=scores.risk_score,
+                degradations={f: getattr(scores, f) for f in AUDIO_QUALITY_DEGRADATION_FIELDS},
+                audio_secs=audio_secs,
+            )
+        )
         if self.metrics_enabled:
             await self.push_frame(MetricsFrame(data=[data]))
 

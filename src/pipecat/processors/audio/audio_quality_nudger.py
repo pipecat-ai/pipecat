@@ -14,10 +14,9 @@ Classes:
 from loguru import logger
 
 from pipecat.frames.frames import AudioQualityFrame, Frame, LLMMessagesAppendFrame
-from pipecat.metrics.metrics import AUDIO_QUALITY_DEGRADATION_FIELDS
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
-_DEGRADATION_DESCRIPTIONS = {
+DEFAULT_DEGRADATION_DESCRIPTIONS = {
     "noise": "loud background noise",
     "speaker_reverb": "the user is far from the microphone or in an echoing room",
     "interfering_speech": "other people talk near the user",
@@ -25,16 +24,18 @@ _DEGRADATION_DESCRIPTIONS = {
     "codec_degradation": "a poor connection that distorts the audio",
 }
 
-_DEGRADED_MESSAGE = (
+DEFAULT_DEGRADED_MESSAGE = (
     "The user's audio quality is poor, most likely because of {description}. "
     "The transcription of what the user says can contain errors. "
     "Confirm requests that seem unclear or unlikely before you act on them, and keep your answers "
     "short. Tell the user about the audio problem one time and suggest how to fix it."
 )
 
-_RECOVERED_MESSAGE = (
+DEFAULT_RECOVERED_MESSAGE = (
     "The user's audio quality is good again. Do not mention the audio problem anymore."
 )
+
+_UNKNOWN_DESCRIPTION = "an unknown problem"
 
 
 class AudioQualityNudger(FrameProcessor):
@@ -56,10 +57,14 @@ class AudioQualityNudger(FrameProcessor):
 
     Example::
 
-        tyto = AICTytoProcessor(license_key=key, audio_filter=aic_filter)
-        nudger = AudioQualityNudger()
+        nudger = AudioQualityNudger(
+            degraded_message="The user's audio is poor because of {description}. "
+            "Ask the user to repeat unclear requests.",
+            recovered_message="The user's audio is good again.",
+            degradation_descriptions={"noise": "a noisy room"},
+        )
 
-        pipeline = Pipeline([transport.input(), tyto, nudger, stt, user_aggregator, ...])
+        pipeline = Pipeline([transport.input(), analyzer, nudger, stt, user_aggregator, ...])
     """
 
     def __init__(
@@ -68,6 +73,9 @@ class AudioQualityNudger(FrameProcessor):
         degraded_threshold: float = 0.5,
         recovered_threshold: float = 0.3,
         smoothing: float = 0.3,
+        degraded_message: str = DEFAULT_DEGRADED_MESSAGE,
+        recovered_message: str = DEFAULT_RECOVERED_MESSAGE,
+        degradation_descriptions: dict[str, str] | None = None,
         **kwargs,
     ):
         """Initialize the audio quality nudger.
@@ -80,6 +88,13 @@ class AudioQualityNudger(FrameProcessor):
                 audio counts as good again.
             smoothing: Weight of the newest window in the moving average.
                 Higher values react faster to changes.
+            degraded_message: Message for degraded audio. A ``{description}``
+                placeholder gets the description of the largest degradation.
+            recovered_message: Message for audio that is good again.
+            degradation_descriptions: Descriptions for degradation names. They
+                replace the entries with the same name in
+                ``DEFAULT_DEGRADATION_DESCRIPTIONS``. A name with no
+                description goes into the message as it is.
             **kwargs: Additional arguments passed to parent class.
 
         Raises:
@@ -101,6 +116,12 @@ class AudioQualityNudger(FrameProcessor):
         self._degraded_threshold = degraded_threshold
         self._recovered_threshold = recovered_threshold
         self._smoothing = smoothing
+        self._degraded_message = degraded_message
+        self._recovered_message = recovered_message
+        self._descriptions = {
+            **DEFAULT_DEGRADATION_DESCRIPTIONS,
+            **(degradation_descriptions or {}),
+        }
 
         self._risk: float | None = None
         self._degradations: dict[str, float] = {}
@@ -121,29 +142,29 @@ class AudioQualityNudger(FrameProcessor):
             await self._handle_scores(frame)
 
     async def _handle_scores(self, frame: AudioQualityFrame):
-        scores = frame.scores
-        self._risk = self._smooth(self._risk, scores.risk_score)
-        for field in AUDIO_QUALITY_DEGRADATION_FIELDS:
-            self._degradations[field] = self._smooth(
-                self._degradations.get(field), getattr(scores, field)
-            )
+        self._risk = self._smooth(self._risk, frame.risk_score)
+        for name, value in frame.degradations.items():
+            self._degradations[name] = self._smooth(self._degradations.get(name), value)
 
         if not self._degraded and self._risk >= self._degraded_threshold:
             self._degraded = True
-            largest = max(self._degradations, key=lambda f: self._degradations[f])
+            if self._degradations:
+                largest = max(self._degradations, key=lambda n: self._degradations[n])
+                description = self._descriptions.get(largest, largest)
+            else:
+                largest = None
+                description = _UNKNOWN_DESCRIPTION
             logger.debug(
                 f"{self}: audio degraded at {frame.audio_secs:.0f}s "
                 f"(risk {self._risk:.2f}, largest degradation: {largest})"
             )
-            await self._push_message(
-                _DEGRADED_MESSAGE.format(description=_DEGRADATION_DESCRIPTIONS[largest])
-            )
+            await self._push_message(self._degraded_message.format(description=description))
         elif self._degraded and self._risk < self._recovered_threshold:
             self._degraded = False
             logger.debug(
                 f"{self}: audio recovered at {frame.audio_secs:.0f}s (risk {self._risk:.2f})"
             )
-            await self._push_message(_RECOVERED_MESSAGE)
+            await self._push_message(self._recovered_message)
 
     def _smooth(self, average: float | None, value: float) -> float:
         if average is None:
