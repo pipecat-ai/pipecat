@@ -5,6 +5,7 @@
 #
 
 import asyncio
+import threading
 import unittest
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -20,13 +21,22 @@ except ImportError:
     aic_sdk = None
     HAS_AIC_SDK = False
 
-from pipecat.frames.frames import EndFrame, ErrorFrame, InputAudioRawFrame, MetricsFrame
+from pipecat.frames.frames import (
+    AudioQualityFrame,
+    CancelFrame,
+    EndFrame,
+    ErrorFrame,
+    InputAudioRawFrame,
+    MetricsFrame,
+)
 from pipecat.metrics.metrics import (
     AudioQualityMetricsData,
     AudioQualityScores,
     AudioQualitySummaryMetricsData,
 )
+from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.tests.utils import SleepFrame, run_test
 from tests.aic_mocks import MockAnalysisResult, MockAnalyzer, MockCollector, MockModel
 
@@ -38,6 +48,23 @@ SAMPLE_RATE = 16000
 def _audio_frame(secs: float) -> InputAudioRawFrame:
     samples = np.zeros(int(secs * SAMPLE_RATE), dtype=np.int16)
     return InputAudioRawFrame(audio=samples.tobytes(), sample_rate=SAMPLE_RATE, num_channels=1)
+
+
+class _CancelProbe(FrameProcessor):
+    """Records frames and releases ``gate`` while a CancelFrame push is in progress."""
+
+    def __init__(self, gate: threading.Event):
+        super().__init__(enable_direct_mode=True)
+        self.gate = gate
+        self.frames = []
+
+    async def process_frame(self, frame, direction: FrameDirection):
+        self.frames.append(frame)
+        if isinstance(frame, CancelFrame):
+            self.gate.set()
+            await asyncio.sleep(0.1)
+        await super().process_frame(frame, direction)
+        await self.push_frame(frame, direction)
 
 
 def _metrics_of_type(frames, metrics_type):
@@ -186,6 +213,20 @@ class TestAICTytoProcessor(unittest.IsolatedAsyncioTestCase):
         self.assertLess(summary_index, end_index)
         self.assertEqual(self.summaries[0].value.windows, len(self.results))
 
+    async def test_slow_summary_handler_completes_after_end_frame(self):
+        processor = self._create()
+        slow_summaries = []
+
+        # The handler outlasts the EndFrame. Cleanup must wait for it.
+        @processor.event_handler("on_call_summary")
+        async def on_slow_call_summary(processor, data):
+            await asyncio.sleep(0.3)
+            slow_summaries.append(data)
+
+        await run_test(processor, frames_to_send=[_audio_frame(6.0), SleepFrame(sleep=0.3)])
+
+        self.assertEqual(len(slow_summaries), 1)
+
     async def test_summary_sent_once(self):
         processor = self._create()
         processor._model = self.model
@@ -254,6 +295,22 @@ class TestAICTytoProcessor(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(self.analyzer.analyze_calls, 1)
         self.assertTrue(any(isinstance(f, ErrorFrame) for f in up))
+        self.assertEqual(self.results, [])
+
+    async def test_no_result_after_cancel_frame(self):
+        self.analyzer.gate = threading.Event()
+        processor = self._create()
+        probe = _CancelProbe(self.analyzer.gate)
+
+        await run_test(
+            Pipeline([processor, probe]),
+            frames_to_send=[_audio_frame(6.0), SleepFrame(sleep=0.1), CancelFrame()],
+            send_end_frame=False,
+        )
+
+        cancel_index = next(i for i, f in enumerate(probe.frames) if isinstance(f, CancelFrame))
+        after_cancel = probe.frames[cancel_index + 1 :]
+        self.assertFalse(any(isinstance(f, AudioQualityFrame) for f in after_cancel))
         self.assertEqual(self.results, [])
 
     async def test_cleanup_ends_session_and_releases_model(self):

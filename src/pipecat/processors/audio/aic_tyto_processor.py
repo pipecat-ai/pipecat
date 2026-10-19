@@ -236,14 +236,17 @@ class AICTytoProcessor(FrameProcessor):
             await self.push_frame(frame, direction)
             return
 
+        if isinstance(frame, CancelFrame):
+            await self._stop_analysis()
+            await self._send_summary(push_metrics=False)
+            await self.push_frame(frame, direction)
+            return
+
         await self.push_frame(frame, direction)
 
         if isinstance(frame, StartFrame):
             await self._stop_analysis()
             self._reset_session()
-        elif isinstance(frame, CancelFrame):
-            await self._stop_analysis()
-            await self._send_summary(push_metrics=False)
         elif isinstance(frame, InputAudioRawFrame):
             self._handle_audio(frame)
             self._start_analysis()

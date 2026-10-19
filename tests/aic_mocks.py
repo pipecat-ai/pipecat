@@ -12,6 +12,7 @@ Keep behavior aligned with the live ``aic_sdk`` 3.0 surface so the suite stays
 representative.
 """
 
+import threading
 from typing import Any
 
 import numpy as np
@@ -156,17 +157,21 @@ class MockAnalyzer:
     """Stand-in for ``aic_sdk.Analyzer``.
 
     Returns the queued results in order and repeats the last one when the
-    queue is empty. ``error`` makes ``analyze_buffered`` raise.
+    queue is empty. ``error`` makes ``analyze_buffered`` raise. ``gate`` makes
+    ``analyze_buffered`` block until the event is set.
     """
 
     def __init__(self, results: list[MockAnalysisResult] | None = None) -> None:
         self.results = list(results or [MockAnalysisResult()])
         self.analyze_calls = 0
         self.error: Exception | None = None
+        self.gate: threading.Event | None = None
         self.terminated = False
 
     def analyze_buffered(self) -> MockAnalysisResult:
         self.analyze_calls += 1
+        if self.gate is not None:
+            self.gate.wait()
         if self.error is not None:
             raise self.error
         if len(self.results) > 1:
