@@ -554,7 +554,9 @@ class MOQCallbacks(BaseModel):
         on_error: Called when the underlying transport errors, with the
             message, the exception, the error category when it is known,
             and whether the transport can no longer do its job.
-        on_audio_received: Called with decoded mono PCM audio from the peer's audio track.
+        on_audio_received: Called with decoded mono PCM audio from the peer's audio
+            track, its sample rate, and the media timestamp of its first sample in
+            microseconds.
         on_message_received: Called with each RTVI message from the peer's transcript stream.
     """
 
@@ -564,7 +566,7 @@ class MOQCallbacks(BaseModel):
     on_client_disconnected: Callable[[], Awaitable[None]]
     on_track_subscribed: Callable[[MOQTrack], Awaitable[None]]
     on_error: Callable[[str, Exception, ErrorCategory | None, bool], Awaitable[None]]
-    on_audio_received: Callable[[bytes, int], Awaitable[None]]
+    on_audio_received: Callable[[bytes, int, int], Awaitable[None]]
     on_message_received: Callable[[dict], Awaitable[None]]
 
 
@@ -1626,7 +1628,7 @@ class MOQTransportClient:
                     pcm = frame.data
                     if source_channels > 1:
                         pcm = _downmix_s16_to_mono(pcm, source_channels)
-                    await self._callbacks.on_audio_received(pcm, target_rate)
+                    await self._callbacks.on_audio_received(pcm, target_rate, frame.timestamp_us)
         except asyncio.CancelledError:
             pass
         except _MoqError as e:
@@ -1903,12 +1905,18 @@ class MOQInputTransport(BaseInputTransport):
         await super().cancel(frame)
         await self._client.cancel()
 
-    async def push_received_audio(self, audio: bytes, sample_rate: int):
+    async def push_received_audio(self, audio: bytes, sample_rate: int, timestamp_us: int):
         """Push a received audio frame downstream.
+
+        The frame's ``pts`` is the peer's media timestamp for its first sample,
+        so a processor can place the audio on the peer's track timeline even
+        across decode gaps, where counting samples would drift.
 
         Args:
             audio: Raw mono 16-bit PCM audio bytes.
             sample_rate: Sample rate of ``audio``, in Hz.
+            timestamp_us: The peer's media timestamp of the first sample, in
+                microseconds.
         """
         # The MoQ session comes up during setup(), so a fast peer's audio can
         # arrive before StartFrame has created the audio queue
@@ -1916,9 +1924,9 @@ class MOQInputTransport(BaseInputTransport):
         # with an AttributeError.
         if self._audio_task is None:
             return
-        await self.push_audio_frame(
-            InputAudioRawFrame(audio=audio, sample_rate=sample_rate, num_channels=1)
-        )
+        frame = InputAudioRawFrame(audio=audio, sample_rate=sample_rate, num_channels=1)
+        frame.pts = timestamp_us * 1000
+        await self.push_audio_frame(frame)
 
     async def push_received_message(self, message: dict):
         """Push a received RTVI message to :class:`~pipecat.processors.frameworks.rtvi.RTVIProcessor` upstream.
@@ -2246,15 +2254,17 @@ class MOQTransport(BaseTransport):
             message, exception, category=category, force_treat_as_permanent=permanent
         )
 
-    async def _on_audio_received(self, audio: bytes, sample_rate: int):
+    async def _on_audio_received(self, audio: bytes, sample_rate: int, timestamp_us: int):
         """Handle decoded PCM audio received from the peer's audio track.
 
         Args:
             audio: Raw mono 16-bit PCM audio bytes.
             sample_rate: Sample rate of ``audio``, in Hz.
+            timestamp_us: The peer's media timestamp of the first sample, in
+                microseconds.
         """
         if self._input is not None:
-            await self._input.push_received_audio(audio, sample_rate)
+            await self._input.push_received_audio(audio, sample_rate, timestamp_us)
 
     async def _on_message_received(self, message: dict):
         """Handle an RTVI message received from the peer's transcript stream.
