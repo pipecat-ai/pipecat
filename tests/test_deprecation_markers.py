@@ -466,6 +466,13 @@ def test_compute_removals_no_change_when_nothing_removed():
     assert drem.compute_removals(prev, current, "2.0.0", []) == []
 
 
+def test_compute_removals_ignores_subject_recorded_by_member():
+    """A subject now recorded per member (``X`` → ``X.member``) wasn't removed."""
+    prev = _dep_registry(_dep_record("Proc"))
+    current = _dep_registry(_dep_record("Proc.on_event", kind="event"))
+    assert drem.compute_removals(prev, current, "2.0.0", []) == []
+
+
 def test_compute_removals_is_idempotent():
     """A subject already recorded as removed is not appended again."""
     prev = _dep_registry(_dep_record("Gone"))
