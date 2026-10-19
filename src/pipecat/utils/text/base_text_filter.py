@@ -61,6 +61,15 @@ class BaseTextFilter(ABC):
         """
         pass
 
+    async def reset(self):
+        """Reset state tied to the reply that just ended.
+
+        Called when an LLM reply ends. Subclasses that carry state across
+        ``filter`` calls (for example, being inside a code block) should clear
+        it here, since that state never continues into the next reply.
+        """
+        pass
+
     async def reset_interruption(self):
         """Reset the filter state after an interruption has been handled.
 
