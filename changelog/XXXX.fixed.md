@@ -1,0 +1,1 @@
+- Fixed `TTSService` adding text to the assistant context when the TTS produced no audio for it (for example, a provider error, a provider that returns no audio, or a service that is no longer usable). Text from an audio context that ends without audio is now dropped with a warning, while skipped text (such as code blocks) is still added as before.
