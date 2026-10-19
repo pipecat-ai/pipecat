@@ -37,7 +37,11 @@ from pipecat.frames.frames import (
     LLMThoughtTextFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
-from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_context import (
+    LLMContext,
+    LLMContextMessage,
+    LLMSpecificMessage,
+)
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.settings import LLMSettings
@@ -588,6 +592,12 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
             await self.push_frame(LLMFullResponseStartFrame())
             await self.start_processing_metrics()
 
+            # What this request sends, held by identity so a refusal can remove
+            # exactly the turn it refused. Taken before conversion, so a message
+            # appended while the request is being built or is in flight is never
+            # counted as part of it.
+            sent_messages = list(context.get_messages())
+
             params_from_context = await self._get_llm_invocation_params(context)
 
             self._log_llm_response(context)
@@ -685,6 +695,8 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
 
                 if event.type == "message_delta":
                     self._handle_stop_reason(event.delta)
+                    if getattr(event.delta, "stop_reason", None) == "refusal":
+                        self._remove_refused_turn(context, sent_messages)
 
                 # Usage counts are cumulative: message_start reports them so far
                 # and message_delta for the whole message, so each replaces the
@@ -802,6 +814,83 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
         category = getattr(getattr(result, "stop_details", None), "category", None)
         detail = f" ({category})" if category else ""
         logger.warning(f"{self}: response incomplete, the model stopped for {stop_reason}{detail}")
+
+    @staticmethod
+    def _is_completed_assistant_reply(message: LLMContextMessage) -> bool:
+        """Whether a message is an assistant reply that ended a turn.
+
+        An assistant message that only calls tools is part of the turn that
+        triggered it, as are the tool results that answer it, so neither counts.
+        """
+        if isinstance(message, LLMSpecificMessage):
+            inner = message.message
+            if not isinstance(inner, dict) or inner.get("role") != "assistant":
+                return False
+            content = inner.get("content")
+            return not (
+                isinstance(content, list)
+                and any(isinstance(b, dict) and b.get("type") == "tool_use" for b in content)
+            )
+        return message.get("role") == "assistant" and not message.get("tool_calls")
+
+    @staticmethod
+    def _is_turn_input(message: LLMContextMessage) -> bool:
+        """Whether a message is user or tool input, which a refusal can be blamed on."""
+        if isinstance(message, LLMSpecificMessage):
+            inner = message.message
+            return isinstance(inner, dict) and inner.get("role") == "user"
+        return message.get("role") in ("user", "tool")
+
+    def _remove_refused_turn(self, context: LLMContext, sent_messages: list[LLMContextMessage]):
+        """Remove the turn a refused request carried, so the call can go on.
+
+        Re-sending a refused request usually earns another refusal, so a refused
+        turn left in the context silences every turn after it. Anthropic's docs
+        ask to reset the context by removing the turn that triggered the
+        refusal. That turn is everything the request carried after the last
+        completed assistant reply: the user message(s), plus any tool calls,
+        tool results and thoughts that came with them, since a tool result can
+        trigger a refusal as well. System and developer messages stay.
+
+        Only messages the refused request actually sent are removed, matched by
+        identity, so a message appended while the request was in flight is
+        kept. The refused turn comes after every earlier thinking block, so
+        removing it right away invalidates none of them.
+
+        Nothing is removed if the request carried no user or tool input after
+        the last reply: the refusal then wasn't triggered by this turn (e.g. the
+        system prompt was), and removing anything wouldn't help.
+
+        Args:
+            context: The context the refused request was built from.
+            sent_messages: The context's messages at the time of the request.
+        """
+        start = 0
+        for i in range(len(sent_messages) - 1, -1, -1):
+            if self._is_completed_assistant_reply(sent_messages[i]):
+                start = i + 1
+                break
+
+        turn = [
+            m
+            for m in sent_messages[start:]
+            if isinstance(m, LLMSpecificMessage) or m.get("role") not in ("system", "developer")
+        ]
+        if not any(self._is_turn_input(m) for m in turn):
+            return
+
+        turn_ids = {id(m) for m in turn}
+        messages = context.get_messages()
+        remaining = [m for m in messages if id(m) not in turn_ids]
+        removed = len(messages) - len(remaining)
+        if not removed:
+            return
+
+        logger.warning(
+            f"{self}: removing the refused turn ({removed} message(s)) from the context, "
+            "so the turns after it aren't refused too"
+        )
+        context.set_messages(remaining)
 
     def _estimate_tokens(self, text: str) -> int:
         return int(len(re.split(r"[^\w]+", text)) * 1.3)
