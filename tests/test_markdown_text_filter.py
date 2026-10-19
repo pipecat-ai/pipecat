@@ -356,7 +356,7 @@ class TestMarkdownTextFilter(unittest.IsolatedAsyncioTestCase):
         test_cases = {
             "```python\nprint(1)\n```": "",
             "Here:\n```python\nprint(1)\n```\nDone.": "Here: Done.",
-            "Sure! ```python\nprint(1)\n``` That prints 1.": "Sure! That prints 1.",
+            "Sure!\n```python\nprint(1)\n``` That prints 1.": "Sure! That prints 1.",
             "\n\n```python\nprint(1)\n```\n\nThat prints 1.": "That prints 1.",
         }
 
@@ -364,6 +364,18 @@ class TestMarkdownTextFilter(unittest.IsolatedAsyncioTestCase):
             filter = MarkdownTextFilter(params=MarkdownTextFilter.InputParams(filter_code=True))
             result = await filter.filter(input_text)
             self.assertEqual(result, expected, f"Code block removal failed for: {input_text!r}")
+
+    async def test_inline_fence_is_text(self):
+        """Test that ``` inside a sentence doesn't open a code block."""
+        filter = MarkdownTextFilter(params=MarkdownTextFilter.InputParams(filter_code=True))
+        chunks = {
+            "In Markdown, type ``` to start a code block.": "In Markdown, type ``` to start a code block.",
+            "Then write your code.": "Then write your code.",
+        }
+
+        for input_text, expected in chunks.items():
+            result = await filter.filter(input_text)
+            self.assertEqual(result, expected, f"Inline fence handling failed for: {input_text!r}")
 
     async def test_code_block_removal_across_chunks(self):
         """Test removal of a code block that spans several chunks."""

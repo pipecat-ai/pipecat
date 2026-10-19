@@ -29,6 +29,10 @@ _MARKDOWN_TABLE = re.compile(
     re.MULTILINE,
 )
 
+# A code fence: ``` at the start of a line, as in CommonMark. A ``` inside a
+# sentence ("type ``` to start a code block") is text.
+_CODE_FENCE = re.compile(r"^[ \t]*```", re.MULTILINE)
+
 # An HTML tag whose attributes either have values or are boolean HTML
 # attributes (<details open>). Only tags named in _HTML_TAGS are stripped, so
 # text that md.convert passes through as raw HTML ("x<y and y>z",
@@ -278,13 +282,14 @@ class MarkdownTextFilter(BaseTextFilter):
             self._in_code_block = False
             return text
 
-        if "```" not in text:
+        parts = _CODE_FENCE.split(text)
+        if len(parts) == 1:
             return "" if self._in_code_block else text
 
-        # Split on the fences; the parts alternate between outside and inside
-        # a code block, starting from where the previous chunk left off.
+        # The parts between fences alternate between outside and inside a code
+        # block, starting from where the previous chunk left off.
         kept = []
-        for part in text.split("```"):
+        for part in parts:
             if not self._in_code_block and part.strip():
                 kept.append(part.strip())
             self._in_code_block = not self._in_code_block
