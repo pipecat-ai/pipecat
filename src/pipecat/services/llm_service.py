@@ -49,6 +49,7 @@ from pipecat.frames.frames import (
     LLMContextSummaryResultFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
+    LLMFunctionCallDetectedFrame,
     LLMServiceMetadataFrame,
     LLMTextFrame,
     LLMUpdateSettingsFrame,
@@ -426,6 +427,9 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         # invocation params and logging alike.
         self._adapter.file_resolver = self._file_resolver
         self._functions: dict[str | None, FunctionCallRegistryItem] = {}
+        # Whether the response being streamed has pushed an
+        # LLMFunctionCallDetectedFrame yet; reset by each LLMFullResponseStartFrame.
+        self._function_call_detected = False
         # Cleanup callables carried by registered tool handlers, awaited at
         # service teardown (see _record_tool_cleanup).
         self._tool_cleanups: list[Callable[[], Awaitable[None]]] = []
@@ -947,6 +951,9 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             if self._skip_tts is not None:
                 frame.skip_tts = self._skip_tts
 
+        if isinstance(frame, LLMFullResponseStartFrame):
+            self._function_call_detected = False
+
         # The gate decides synchronously, so its verdict can't be torn by
         # another task pushing at the same time. Everything it hands back is
         # pushed past it — routing that back through here would re-gate it.
@@ -973,6 +980,17 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             await self._push_turn_text(text)
         else:
             await self.push_frame(LLMTextFrame(text))
+
+    async def _push_llm_function_call_detected(self):
+        """Push an ``LLMFunctionCallDetectedFrame``, once per response.
+
+        Services call this from their streaming loop as soon as a function call
+        appears in the response.
+        """
+        if self._function_call_detected:
+            return
+        self._function_call_detected = True
+        await self.push_frame(LLMFunctionCallDetectedFrame())
 
     async def _handle_interruptions(self, _: InterruptionFrame):
         for function_name, entry in self._functions.items():

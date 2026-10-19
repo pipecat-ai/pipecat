@@ -2516,6 +2516,20 @@ class LLMFullResponseEndFrame(ControlFrame):
 
 
 @dataclass
+class LLMFunctionCallDetectedFrame(ControlFrame):
+    """Frame indicating that the LLM response being streamed calls a function.
+
+    Pushed downstream by an LLM service, at most once per response, as soon as
+    the first function call appears in the stream. It arrives in order with the
+    response's ``LLMTextFrame``s, so a processor downstream knows which text the
+    model wrote after deciding to call a function. The calls themselves run
+    once the response ends.
+    """
+
+    pass
+
+
+@dataclass
 class LLMAssistantPushAggregationFrame(ControlFrame):
     """Frame that forces the LLM assistant aggregator to push its current aggregation to context.
 

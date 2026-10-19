@@ -598,6 +598,7 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
                             # so the call itself is what the caller gets and TTFAT
                             # ends here rather than going unmeasured.
                             await self.stop_ttfat_metrics()
+                            await self._push_llm_function_call_detected()
                             index = block["contentBlockIndex"]
                             tool_use_blocks[index] = {
                                 "id": content_block_start["toolUse"].get("toolUseId", ""),

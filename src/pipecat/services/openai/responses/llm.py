@@ -1208,6 +1208,7 @@ class OpenAIResponsesLLMService(
                     # call itself is what the caller gets and TTFAT ends here
                     # rather than going unmeasured.
                     await self.stop_ttfat_metrics()
+                    await self._push_llm_function_call_detected()
                     item_id = item.get("id", "")
                     function_calls[item_id] = {
                         "name": item.get("name", ""),
@@ -1459,6 +1460,7 @@ class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
                         # the call itself is what the caller gets and TTFAT ends
                         # here rather than going unmeasured.
                         await self.stop_ttfat_metrics()
+                        await self._push_llm_function_call_detected()
                         item_id = item.id or ""
                         function_calls[item_id] = {
                             "name": item.name,

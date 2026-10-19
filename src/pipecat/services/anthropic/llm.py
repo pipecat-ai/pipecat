@@ -658,6 +658,7 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
                         # the call itself is what the caller gets and TTFAT ends
                         # here rather than going unmeasured.
                         await self.stop_ttfat_metrics()
+                        await self._push_llm_function_call_detected()
                         tool_use_block = event.content_block
                         json_accumulator = ""
                     elif event.content_block.type == "thinking":

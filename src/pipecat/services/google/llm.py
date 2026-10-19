@@ -826,6 +826,7 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
                                 # text, so the call itself is what the caller gets
                                 # and TTFAT ends here rather than going unmeasured.
                                 await self.stop_ttfat_metrics()
+                                await self._push_llm_function_call_detected()
                                 function_call = part.function_call
                                 function_call_id = function_call.id or str(uuid.uuid4())
                                 logger.debug(
