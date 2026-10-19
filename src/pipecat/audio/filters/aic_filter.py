@@ -16,12 +16,12 @@ Classes:
 """
 
 import asyncio
+from collections.abc import Callable
 from pathlib import Path
 from threading import Lock
 
 import numpy as np
 from aic_sdk import (
-    Collector,
     Model,
     ParameterOutOfRangeError,
     ProcessorAsync,
@@ -283,7 +283,7 @@ class AICFilter(BaseAudioFilter):
         self._model = None
         self._processor = None
         self._processor_ctx = None
-        self._collector: Collector | None = None
+        self._pre_process_tap: Callable[[np.ndarray, int], None] | None = None
 
         # Pre-allocated buffers (resized in start() once frames_per_block is known)
         self._in_f32: np.ndarray | None = None
@@ -309,28 +309,22 @@ class AICFilter(BaseAudioFilter):
 
         self._processor_ctx.set_parameter(ProcessorParameter.Bypass, 1.0 if self._bypass else 0.0)
 
-    def _initialize_collector(self):
-        if self._collector is None or self._frames_per_block == 0:
-            return
+    def set_pre_process_tap(self, tap: Callable[[np.ndarray, int], None] | None):
+        """Set a callable that receives the input audio before enhancement.
 
-        self._collector.initialize(ProcessorConfig(self._sample_rate, self._frames_per_block))
+        The filter calls ``tap(block, sample_rate)`` with each float32 block,
+        normalized to the range -1 to +1, before it enhances the block. The
+        filter writes each new block into the same buffer, so the tap must copy
+        the data that it keeps. The filter does not remove the tap when it
+        stops. The caller that sets the tap must also remove it.
 
-    def set_analysis_collector(self, collector: Collector | None):
-        """Set a collector that receives the input audio before enhancement.
-
-        The filter gives each block to the collector before it enhances the
-        block, so an analysis model scores the original signal. The filter
-        initializes the collector with its own sample rate and block size,
-        either now or when the filter starts.
-
-        The collector gets no audio when the enhancement processor fails to
+        The tap gets no audio when the enhancement processor fails to
         initialize, because the filter then passes audio through unchanged.
 
         Args:
-            collector: The collector to feed, or None to stop feeding.
+            tap: The callable to call for each block, or None to remove the tap.
         """
-        self._collector = collector
-        self._initialize_collector()
+        self._pre_process_tap = tap
 
     async def start(self, sample_rate: int):
         """Initialize the filter with the transport's sample rate.
@@ -356,8 +350,6 @@ class AICFilter(BaseAudioFilter):
         # Allocate processing buffers now that we know the block size
         self._in_f32 = np.zeros(self._frames_per_block, dtype=np.float32)
         self._out_i16 = np.zeros(self._frames_per_block, dtype=np.int16)
-
-        self._initialize_collector()
 
         # Create configuration
         config = ProcessorConfig.optimal(
@@ -421,7 +413,6 @@ class AICFilter(BaseAudioFilter):
 
         self._processor = None
         self._processor_ctx = None
-        self._collector = None
         self._model = None
         self._aic_ready = False
         self._audio_buffer.clear()
@@ -490,8 +481,8 @@ class AICFilter(BaseAudioFilter):
             np.copyto(self._in_f32, block_i16)
             self._in_f32 /= self._scale
 
-            if self._collector is not None:
-                self._collector.buffer(self._in_f32)
+            if self._pre_process_tap is not None:
+                self._pre_process_tap(self._in_f32, self._sample_rate)
 
             out_f32 = await self._processor.process_async(self._in_f32)
 

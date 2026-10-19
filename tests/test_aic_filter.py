@@ -35,7 +35,6 @@ def _model_manager_ref_count(manager, key: str) -> int:
 
 
 from tests.aic_mocks import (  # noqa: E402
-    MockCollector,
     MockModel,
     MockProcessorContext,
 )
@@ -751,59 +750,43 @@ class TestAICFilter(unittest.IsolatedAsyncioTestCase):
         # Filter state still updated to reflect the requested enable.
         self.assertFalse(filter_instance._bypass)
 
-    async def test_collector_set_before_start_is_initialized_on_start(self):
-        """A collector set before start() is initialized with the filter's rate and block size."""
-        filter_instance = self._create_filter_with_mocks()
-        collector = MockCollector()
-        filter_instance.set_analysis_collector(collector)
-        self.assertEqual(collector.configs, [])
-
-        with (
-            patch(f"{AIC_FILTER_MODULE}.AICModelManager") as mock_manager_cls,
-            patch(f"{AIC_FILTER_MODULE}.ProcessorConfig") as mock_config_cls,
-            patch(f"{AIC_FILTER_MODULE}.ProcessorAsync", return_value=self.mock_processor),
-        ):
-            mock_manager_cls.acquire = AsyncMock(return_value=(self.mock_model, "test-cache-key"))
-            await filter_instance.start(16000)
-
-            mock_config_cls.assert_called_once_with(16000, 160)
-            self.assertEqual(collector.configs, [mock_config_cls.return_value])
-
-    async def test_collector_set_after_start_is_initialized_at_once(self):
-        """A collector set after start() is initialized immediately."""
-        filter_instance = self._create_filter_with_mocks()
-        await self._start_filter_with_mocks(filter_instance)
-        collector = MockCollector()
-
-        filter_instance.set_analysis_collector(collector)
-
-        self.assertEqual(len(collector.configs), 1)
-        self.assertEqual(collector.configs[0].block_size, 160)
-
-    async def test_collector_receives_blocks_before_enhancement(self):
-        """The collector gets each normalized block before process_async changes it."""
+    async def test_tap_receives_blocks_before_enhancement(self):
+        """The tap gets each normalized block and the sample rate before process_async."""
         filter_instance = self._create_filter_with_mocks()
 
         async def enhancing_process_async(audio_array):
             return audio_array * 0.5
 
         self.mock_processor.process_async = enhancing_process_async
-        collector = MockCollector()
-        filter_instance.set_analysis_collector(collector)
+        calls = []
+        filter_instance.set_pre_process_tap(lambda block, rate: calls.append((block.copy(), rate)))
         await self._start_filter_with_mocks(filter_instance)
 
         samples = np.random.randint(-32768, 32767, size=320, dtype=np.int16)
         await filter_instance.filter(samples.tobytes())
 
-        self.assertEqual(len(collector.blocks), 2)
+        self.assertEqual([rate for _, rate in calls], [16000, 16000])
         expected = samples.astype(np.float32) / 32768.0
-        np.testing.assert_allclose(np.concatenate(collector.blocks), expected)
+        np.testing.assert_allclose(np.concatenate([block for block, _ in calls]), expected)
 
-    async def test_collector_detached_on_stop(self):
-        """stop() drops the collector so a later session does not feed it."""
+    async def test_tap_removed_with_none(self):
+        """Setting the tap to None stops the calls."""
         filter_instance = self._create_filter_with_mocks()
-        collector = MockCollector()
-        filter_instance.set_analysis_collector(collector)
+        calls = []
+        filter_instance.set_pre_process_tap(lambda block, rate: calls.append(rate))
+        await self._start_filter_with_mocks(filter_instance)
+
+        filter_instance.set_pre_process_tap(None)
+        samples = np.random.randint(-32768, 32767, size=160, dtype=np.int16)
+        await filter_instance.filter(samples.tobytes())
+
+        self.assertEqual(calls, [])
+
+    async def test_tap_kept_across_stop_and_start(self):
+        """stop() keeps the tap, because the caller that sets it also removes it."""
+        filter_instance = self._create_filter_with_mocks()
+        calls = []
+        filter_instance.set_pre_process_tap(lambda block, rate: calls.append(rate))
         await self._start_filter_with_mocks(filter_instance)
         await filter_instance.stop()
 
@@ -812,7 +795,7 @@ class TestAICFilter(unittest.IsolatedAsyncioTestCase):
         samples = np.random.randint(-32768, 32767, size=160, dtype=np.int16)
         await filter_instance.filter(samples.tobytes())
 
-        self.assertEqual(collector.blocks, [])
+        self.assertEqual(calls, [16000])
 
 
 if __name__ == "__main__":

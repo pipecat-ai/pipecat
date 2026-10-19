@@ -186,16 +186,13 @@ class AICTytoProcessor(FrameProcessor):
         )
         self._collector, self._analyzer = analyzer_pair(self._model, self._license_key)
 
-        if self._audio_filter is not None:
-            self._audio_filter.set_analysis_collector(self._collector)
-
     async def cleanup(self):
         """Stop the analysis, end the analysis session and release the model."""
         await self._stop_analysis()
         await super().cleanup()
 
         if self._audio_filter is not None:
-            self._audio_filter.set_analysis_collector(None)
+            self._audio_filter.set_pre_process_tap(None)
 
         if self._analyzer is not None and self._executor is not None:
             # On the analysis executor, so it cannot overlap an analysis that
@@ -247,12 +244,14 @@ class AICTytoProcessor(FrameProcessor):
         if isinstance(frame, StartFrame):
             await self._stop_analysis()
             self._reset_session()
+            if self._audio_filter is not None:
+                self._audio_filter.set_pre_process_tap(self._on_filter_block)
         elif isinstance(frame, InputAudioRawFrame):
             self._handle_audio(frame)
             self._start_analysis()
 
     def _reset_session(self):
-        # Re-buffering when the processor feeds the collector itself.
+        # Zero until the first block of the session initializes the collector.
         self._frames_per_block = 0
         self._audio_buffer = bytearray()
 
@@ -306,6 +305,17 @@ class AICTytoProcessor(FrameProcessor):
         blocks /= _INT16_SCALE
         for block in blocks:
             self._collector.buffer(block)
+
+    def _on_filter_block(self, block: np.ndarray, sample_rate: int):
+        # None when setup failed.
+        if self._collector is None:
+            return
+
+        if self._frames_per_block == 0:
+            self._frames_per_block = len(block)
+            self._collector.initialize(ProcessorConfig(sample_rate, self._frames_per_block))
+
+        self._collector.buffer(block)
 
     async def _analyze(self, audio_secs: float):
         assert self._analyzer is not None

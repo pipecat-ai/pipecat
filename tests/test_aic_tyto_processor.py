@@ -67,6 +67,32 @@ class _CancelProbe(FrameProcessor):
         await self.push_frame(frame, direction)
 
 
+class _TapFilter:
+    def __init__(self):
+        self.tap = None
+        self.taps = []
+
+    def set_pre_process_tap(self, tap):
+        self.tap = tap
+        self.taps.append(tap)
+
+
+class _TapFeeder(FrameProcessor):
+    """Stands in for the input transport, which calls the filter tap for each block."""
+
+    def __init__(self, audio_filter: _TapFilter):
+        super().__init__()
+        self.audio_filter = audio_filter
+
+    async def process_frame(self, frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+        if isinstance(frame, InputAudioRawFrame) and self.audio_filter.tap is not None:
+            samples = np.frombuffer(frame.audio, dtype=np.int16).astype(np.float32)
+            for block in samples.reshape(-1, 160):
+                self.audio_filter.tap(block, frame.sample_rate)
+        await self.push_frame(frame, direction)
+
+
 def _metrics_of_type(frames, metrics_type):
     return [
         d
@@ -275,7 +301,7 @@ class TestAICTytoProcessor(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.collector.blocks), 3)
         self.assertTrue(all(len(b) == 160 for b in self.collector.blocks))
 
-    async def test_filter_mode_attaches_collector_and_skips_buffering(self):
+    async def test_filter_mode_attaches_tap_and_skips_buffering(self):
         audio_filter = MagicMock()
         processor = self._create(audio_filter=audio_filter)
 
@@ -283,9 +309,25 @@ class TestAICTytoProcessor(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(self.collector.blocks, [])
         self.assertEqual(
-            [c.args for c in audio_filter.set_analysis_collector.call_args_list],
-            [(self.collector,), (None,)],
+            [c.args for c in audio_filter.set_pre_process_tap.call_args_list],
+            [(processor._on_filter_block,), (None,)],
         )
+
+    async def test_filter_tap_feeds_collector_and_reattaches_on_start(self):
+        audio_filter = _TapFilter()
+        processor = self._create(audio_filter=audio_filter)
+        # The sleep lets the StartFrame reach the processor before the audio.
+        frames = [SleepFrame(sleep=0.05), _audio_frame(320 / SAMPLE_RATE)]
+
+        for _ in range(2):
+            await run_test(Pipeline([_TapFeeder(audio_filter), processor]), frames_to_send=frames)
+
+        self.assertEqual(
+            [(c.sample_rate, c.block_size) for c in self.collector.configs],
+            [(SAMPLE_RATE, 160), (SAMPLE_RATE, 160)],
+        )
+        self.assertEqual(len(self.collector.blocks), 4)
+        self.assertEqual(audio_filter.taps, [processor._on_filter_block, None] * 2)
 
     async def test_analysis_error_stops_analysis(self):
         self.analyzer.error = RuntimeError("processing not allowed")
