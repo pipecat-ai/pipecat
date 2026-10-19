@@ -184,6 +184,10 @@ class MarkdownTextFilter(BaseTextFilter):
             # asterisk ("Press * then #", "5 * 3") is content and stays.
             filtered_text = re.sub(r"(^|\s)\*(?=\S)|(?<=\S)\*($|\s)", r"\1\2", filtered_text)
 
+            # Remove struck-through text with its markers, which md.convert
+            # doesn't handle: it's text the reply takes back, so it isn't spoken
+            filtered_text = re.sub(r"[ \t]?~~(?=\S).+?(?<=\S)~~", "", filtered_text)
+
             # Remove Markdown table formatting
             filtered_text = re.sub(r"\|", "", filtered_text)
             filtered_text = re.sub(r"^\s*[-:]+\s*$", "", filtered_text, flags=re.MULTILINE)

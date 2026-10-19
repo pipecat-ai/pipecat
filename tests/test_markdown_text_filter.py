@@ -155,6 +155,20 @@ class TestMarkdownTextFilter(unittest.IsolatedAsyncioTestCase):
             result = await self.filter.filter(input_text)
             self.assertEqual(result, expected, f"Standalone asterisk lost in: '{input_text}'")
 
+    async def test_strikethrough_removal(self):
+        """Test removal of struck-through text."""
+        test_cases = {
+            "The price was ~~ten~~ eight dollars.": "The price was eight dollars.",
+            "It is ~~not ready~~ ready now.": "It is ready now.",
+            "~~Old.~~ New.": " New.",
+            "About ~~ 5 minutes": "About ~~ 5 minutes",
+            "Roughly ~5 minutes": "Roughly ~5 minutes",
+        }
+
+        for input_text, expected in test_cases.items():
+            result = await self.filter.filter(input_text)
+            self.assertEqual(result, expected, f"Strikethrough removal failed for: '{input_text}'")
+
     async def test_section_sign_preserved(self):
         """Test that a section sign in the text is kept."""
         test_cases = {
