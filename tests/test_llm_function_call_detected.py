@@ -23,6 +23,7 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.sambanova.llm import SambaNovaLLMService
 from pipecat.tests.utils import run_test
 
 
@@ -47,6 +48,12 @@ class SuppressTextAfterFunctionCall(FrameProcessor):
 class _FakeStream:
     def __init__(self, chunks):
         self._chunks = chunks
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        await self.close()
 
     def __aiter__(self):
         return self._iterate()
@@ -75,9 +82,11 @@ def _tool_call(index=0):
     )
 
 
-def _service(*responses):
-    with patch.object(OpenAILLMService, "create_client"):
-        service = OpenAILLMService(settings=OpenAILLMService.Settings(model="test-model"))
+def _service(*responses, service_class=OpenAILLMService):
+    with patch.object(service_class, "create_client"):
+        service = service_class(
+            api_key="test-key", settings=service_class.Settings(model="test-model")
+        )
     service.get_chat_completions = AsyncMock(side_effect=[_FakeStream(r) for r in responses])
     service.run_function_calls = AsyncMock()
     return service
@@ -100,8 +109,12 @@ TOOL_CALL_RESPONSE = [
 
 
 @pytest.mark.asyncio
-async def test_frame_is_pushed_once_in_order_with_the_text():
-    down, _ = await run_test(_service(TOOL_CALL_RESPONSE), frames_to_send=[_context_frame()])
+@pytest.mark.parametrize("service_class", [OpenAILLMService, SambaNovaLLMService])
+async def test_frame_is_pushed_once_in_order_with_the_text(service_class):
+    down, _ = await run_test(
+        _service(TOOL_CALL_RESPONSE, service_class=service_class),
+        frames_to_send=[_context_frame()],
+    )
 
     kinds = [
         type(f)
@@ -158,3 +171,7 @@ async def test_detection_resets_with_the_next_response():
 
     assert _texts(down) == ["Let me check.", "Anything else?"]
     assert sum(isinstance(f, LLMFunctionCallDetectedFrame) for f in down) == 1
+
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])
