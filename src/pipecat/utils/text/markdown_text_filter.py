@@ -29,12 +29,16 @@ _MARKDOWN_TABLE = re.compile(
     re.MULTILINE,
 )
 
-# An HTML tag whose attributes, if any, have values. Only tags named in
-# _HTML_TAGS are stripped, so text that md.convert passes through as raw HTML
-# ("x<y and y>z", "a<b and c>d") is kept.
+# An HTML tag whose attributes either have values or are boolean HTML
+# attributes (<details open>). Only tags named in _HTML_TAGS are stripped, so
+# text that md.convert passes through as raw HTML ("x<y and y>z",
+# "a<b and c>d") is kept.
 _HTML_TAG = re.compile(
     r"</?([A-Za-z][A-Za-z0-9]*)"
-    r"(?:\s+[A-Za-z_:][-\w:.]*\s*=\s*(?:\"[^\"]*\"|'[^']*'|[^\s\"'=<>`]+))*"
+    r"(?:\s+(?:[A-Za-z_:][-\w:.]*\s*=\s*(?:\"[^\"]*\"|'[^']*'|[^\s\"'=<>`]+)"
+    r"|(?i:allowfullscreen|async|autofocus|autoplay|checked|controls|default|defer"
+    r"|disabled|hidden|inert|loop|multiple|muted|nomodule|novalidate|open|readonly"
+    r"|required|reversed|selected)(?=[\s/>])))*"
     r"\s*/?>"
 )
 
