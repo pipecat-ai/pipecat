@@ -118,6 +118,11 @@ class TestMarkdownTextFilter(unittest.IsolatedAsyncioTestCase):
             "2 &gt; 1": "2 > 1",
             "Line&nbsp;break": "Line break",
             "Mixed &amp; &lt;entities&gt;": "Mixed & <entities>",
+            "Say &quot;hi&quot;": 'Say "hi"',
+            "Copyright &copy; 2024": "Copyright © 2024",
+            "Email <me@example.com> now": "Email me@example.com now",
+            "Go to example.com/?a=1&copy=2": "Go to example.com/?a=1&copy=2",
+            "AT&T": "AT&T",
         }
 
         for input_text, expected in test_cases.items():

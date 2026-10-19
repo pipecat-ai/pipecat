@@ -10,6 +10,7 @@ This module provides a text filter that converts Markdown content to plain text
 while preserving structure and handling special cases like code blocks and tables.
 """
 
+import html
 import re
 from collections.abc import Mapping
 from typing import Any
@@ -171,11 +172,10 @@ class MarkdownTextFilter(BaseTextFilter):
             # Remove HTML tags
             filtered_text = re.sub("<[^<]+?>", "", filtered_text)
 
-            # Replace HTML entities
+            # Replace HTML entities, including the numeric ones md.convert writes
+            # an email autolink (<me@example.com>) as
             filtered_text = filtered_text.replace("&nbsp;", " ")
-            filtered_text = filtered_text.replace("&lt;", "<")
-            filtered_text = filtered_text.replace("&gt;", ">")
-            filtered_text = filtered_text.replace("&amp;", "&")
+            filtered_text = html.unescape(filtered_text)
 
             # Remove double asterisks (consecutive without any exceptions)
             filtered_text = re.sub(r"\*\*", "", filtered_text)
