@@ -34,6 +34,8 @@ _MARKDOWN_TABLE = re.compile(
 # so a "§" in the text ("see § 5") is kept.
 _SPACE = "\ue000"
 _NUM = "\ue001"
+# Placeholder for an asterisk that is content, not emphasis.
+_STAR = "\ue002"
 
 
 class MarkdownTextFilter(BaseTextFilter):
@@ -105,6 +107,15 @@ class MarkdownTextFilter(BaseTextFilter):
             # would join a table to the text around it.
             if self._settings.filter_tables:
                 filtered_text = _MARKDOWN_TABLE.sub("", filtered_text)
+
+            # Hold escaped asterisks (\*) and asterisks between digits (2*3,
+            # 2**3) in a placeholder: they're content, but md.convert and the
+            # asterisk removal below would read them as emphasis.
+            filtered_text = re.sub(
+                r"\\\*|(?<=\d)\*+(?=\d)",
+                lambda m: _STAR * m.group(0).count("*"),
+                filtered_text,
+            )
 
             # Replace images with their alt text, as links are replaced with
             # their text. md.convert would keep the alt text only as an <img>
@@ -197,6 +208,9 @@ class MarkdownTextFilter(BaseTextFilter):
             # Remove Markdown table formatting
             filtered_text = re.sub(r"\|", "", filtered_text)
             filtered_text = re.sub(r"^\s*[-:]+\s*$", "", filtered_text, flags=re.MULTILINE)
+
+            # Restore content asterisks
+            filtered_text = filtered_text.replace(_STAR, "*")
 
             # Restore numbered list items
             filtered_text = filtered_text.replace(_NUM, "")

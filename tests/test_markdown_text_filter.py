@@ -149,6 +149,9 @@ class TestMarkdownTextFilter(unittest.IsolatedAsyncioTestCase):
             "Press * then #": "Press * then #",
             "5 * 3 = 15": "5 * 3 = 15",
             "Use the * key": "Use the * key",
+            "2*3*4 is 24": "2*3*4 is 24",
+            "2**3 is 8": "2**3 is 8",
+            "Type \\*literal\\* asterisks": "Type *literal* asterisks",
         }
 
         for input_text, expected in test_cases.items():
