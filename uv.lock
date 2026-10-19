@@ -5974,7 +5974,7 @@ requires-dist = [
     { name = "simli-ai", marker = "extra == 'simli'", specifier = "~=2.0.1" },
     { name = "soundfile", specifier = "~=0.13.1" },
     { name = "soxr", specifier = "~=1.0.0" },
-    { name = "speechmatics-agent-stt", marker = "extra == 'speechmatics'", specifier = "~=0.1.0" },
+    { name = "speechmatics-agent-stt", marker = "extra == 'speechmatics'", specifier = "~=0.3.0" },
     { name = "strands-agents", marker = "extra == 'strands'", specifier = ">=1.9.1,<2" },
     { name = "tenacity", marker = "extra == 'livekit'", specifier = ">=8.2.3,<10.0.0" },
     { name = "timm", marker = "extra == 'moondream'", specifier = ">=1.0.13,<2" },
@@ -8566,14 +8566,14 @@ wheels = [
 
 [[package]]
 name = "speechmatics-agent-stt"
-version = "0.1.0"
+version = "0.3.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "speechmatics-rt" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/b5/52/fdc366b34c77aef07b5af89e764c2a40457f125bbcba9df825cfad24bb56/speechmatics_agent_stt-0.1.0.tar.gz", hash = "sha256:ca17027d43aab73df16ce757600027f107b07de60aa2434274a0fe0bc0889452", size = 16798, upload-time = "2026-09-07T08:58:17.231Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/87/51/76479daa3874002aec0468cc8ee0fd5e92b284ca2fef59b9a269b3992ebb/speechmatics_agent_stt-0.3.0.tar.gz", hash = "sha256:9296481150af27686839f2d263bba50fa15fc17183a74b004af0e8d72dd31246", size = 17516, upload-time = "2026-10-19T09:11:43.05Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/23/0b/71650f93c1328a6a96313b26c60830c9903d01177f8821aaec4b8c45d097/speechmatics_agent_stt-0.1.0-py3-none-any.whl", hash = "sha256:0e87e1a954660515763834ff268b509a0025cd5484aef092e13a047621d11d5b", size = 17896, upload-time = "2026-09-07T08:58:16.158Z" },
+    { url = "https://files.pythonhosted.org/packages/5f/cd/fc66de6ce21c049bbb069f26df26aab3dec610678fddf7595addef027513/speechmatics_agent_stt-0.3.0-py3-none-any.whl", hash = "sha256:94386c9f721987496b0f887ae626be846fc8024f5fb8f7aed38f06aff4643eb5", size = 18302, upload-time = "2026-10-19T09:11:41.941Z" },
 ]
 
 [[package]]
