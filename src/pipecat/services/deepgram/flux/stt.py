@@ -22,7 +22,6 @@ from pipecat.frames.frames import (
 from pipecat.services.deepgram.flux.stt_base import (
     DeepgramFluxSTTBase,
     DeepgramFluxSTTSettings,
-    FluxConnectionNotConfirmedError,
     FluxEventType,
     FluxMessageType,
 )
@@ -429,10 +428,10 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
         events.
 
         Raises:
-            FluxConnectionNotConfirmedError: If ``Connected`` doesn't arrive
-                within ``_CONNECTION_TIMEOUT``. It's reported as a permanent
-                error first, since Flux rejects an unsupported setting by
-                staying silent and retrying would be rejected the same way.
+            ConnectionError: If ``Connected`` doesn't arrive within
+                ``_CONNECTION_TIMEOUT``. Flux refuses unsupported settings with
+                an HTTP 400 during the handshake, so a connection that opens
+                but never confirms is retried like a dropped one.
         """
         messages = aiter(self._get_websocket())
         try:
@@ -443,12 +442,13 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
             # Closed before confirming; the receive loop treats it as a drop.
             return
         except TimeoutError:
-            error = FluxConnectionNotConfirmedError(
-                f"Flux did not confirm the connection within {self._CONNECTION_TIMEOUT}s; "
-                "the endpoint may not accept the current connection settings"
-            )
-            await self.push_error(error_msg=str(error), exception=error)
-            raise error from None
+            # The connection never carried a session, so it counts as failing
+            # right after connecting, and the receive loop gives up after a
+            # few in a row rather than retrying forever.
+            self._last_connect_time = time.monotonic()
+            raise ConnectionError(
+                f"Flux did not confirm the connection within {self._CONNECTION_TIMEOUT}s"
+            ) from None
 
         await self._call_event_handler("on_connected")
         # The watchdog stops when its connection closes, so each confirmed

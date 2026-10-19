@@ -43,7 +43,8 @@ class _FakeFlux:
     drop_mid_turn: bool = False
     # Continue that turn on the second connection: the rest of what the user says.
     resume_turn: bool = False
-    confirm: bool = True
+    # How many connections, from the first, never get Connected; None for all.
+    unconfirmed: int | None = 0
     handshakes: int = 0
     audio_per_connection: list[int] = field(default_factory=list)
 
@@ -59,7 +60,7 @@ class _FakeFlux:
     async def handle(self, websocket):
         index = len(self.audio_per_connection)
         self.audio_per_connection.append(0)
-        if self.confirm:
+        if self.unconfirmed is not None and index >= self.unconfirmed:
             await websocket.send(json.dumps({"type": "Connected", "request_id": "test"}))
         async for message in websocket:
             if not isinstance(message, bytes):
@@ -181,15 +182,30 @@ async def test_a_turn_ends_when_reconnecting_gives_up():
 
 
 @pytest.mark.asyncio
-async def test_an_unconfirmed_connection_is_given_up_for_good(monkeypatch):
-    # Flux rejects an unsupported setting by never sending Connected, so a
-    # retry would be rejected the same way.
+async def test_an_unconfirmed_connection_is_retried(monkeypatch):
     monkeypatch.setattr(DeepgramFluxSTTService, "_CONNECTION_TIMEOUT", 0.1)
-    server = _FakeFlux(confirm=False)
+    server = _FakeFlux(unconfirmed=1)
 
     service, _ = await _run(server, seconds=0.5)
 
-    assert server.handshakes == 1
+    assert server.handshakes == 2
+    assert server.audio_per_connection[1] > 0
+    assert service.is_usable
+
+
+@pytest.mark.asyncio
+async def test_connections_that_never_confirm_are_given_up_after_three(monkeypatch):
+    monkeypatch.setattr(DeepgramFluxSTTService, "_CONNECTION_TIMEOUT", 0.1)
+    server = _FakeFlux(unconfirmed=None)
+
+    def stable_before_timeout(service):
+        # As in production, the wait for Connected outlasts the time after
+        # which a connection counts as stable rather than a quick failure.
+        service._quick_failure_tracker.min_stable_duration = 0.05
+
+    service, _ = await _run(server, seconds=1.0, configure=stable_before_timeout)
+
+    assert server.handshakes == 3
     assert not service.is_usable
 
 

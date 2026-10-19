@@ -380,9 +380,10 @@ class DeepgramFluxSTTBase(EagerEndOfTurnSTTServiceMixin, STTService):
             The category, or None to fall back to the default classification.
         """
         if isinstance(exception, FluxConnectionNotConfirmedError):
-            # Flux stays silent rather than refusing the connection when a
-            # setting is unsupported, so an unconfirmed connection means the
-            # request was rejected, not that the network was slow.
+            # Raised by the SageMaker transport, whose endpoint can leave a
+            # session for a rejected setting open without confirming it, so
+            # an unconfirmed session means the request was rejected, not that
+            # the network was slow.
             return ErrorCategory.INVALID_REQUEST
         if isinstance(exception, FluxFatalError):
             return self._ERROR_CODE_CATEGORIES.get(exception.code)
