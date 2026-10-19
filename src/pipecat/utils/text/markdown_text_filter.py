@@ -105,6 +105,12 @@ class MarkdownTextFilter(BaseTextFilter):
             if self._settings.filter_tables:
                 filtered_text = _MARKDOWN_TABLE.sub("", filtered_text)
 
+            # Remove horizontal rules (---, ***, ___) before the newline collapse
+            # below, which would indent them so md.convert no longer sees a rule.
+            filtered_text = re.sub(
+                r"^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$", "", filtered_text, flags=re.MULTILINE
+            )
+
             # Strip markdown headers to plain text before the newline collapse
             # below. md.convert can't recognize a header once the collapse
             # injects a leading space, so we normalize headers ourselves.

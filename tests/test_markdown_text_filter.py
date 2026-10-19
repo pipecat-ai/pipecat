@@ -162,6 +162,20 @@ class TestMarkdownTextFilter(unittest.IsolatedAsyncioTestCase):
             result = await self.filter.filter(input_text)
             self.assertEqual(result, expected, f"Section sign lost in: '{input_text}'")
 
+    async def test_horizontal_rule_removal(self):
+        """Test removal of horizontal rules, alone or between paragraphs."""
+        test_cases = {
+            "\n---\n": "",
+            "\n***\n": "",
+            "\n___\n": "",
+            "Done.\n\n- - -\n\nNext.": "Done.\n Next.",
+            "First part.\n\n---\n\nSecond part.": "First part.\n Second part.",
+        }
+
+        for input_text, expected in test_cases.items():
+            result = await self.filter.filter(input_text)
+            self.assertEqual(result.strip(), expected, f"Rule removal failed for: {input_text!r}")
+
     async def test_newline_handling(self):
         """Test handling of empty and whitespace-only lines."""
         test_cases = {
