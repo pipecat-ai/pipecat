@@ -1058,6 +1058,24 @@ class TestEpochReanchor(unittest.IsolatedAsyncioTestCase):
         await client.publish_audio(b"\x00" * 480)
         client._audio_out.reset_epoch.assert_called_once()
 
+    async def test_a_pacing_reset_mid_sleep_re_anchors(self):
+        """``reset_audio_pacing`` (interruption) can land while a paced
+        write sleeps. The write must complete — re-anchored like a fresh
+        write — with the frame written and the clock advanced."""
+        client = self._client_with_audio()
+        budget = client._params.audio_out_max_buffer_ms / 1000.0
+        client._publish_audio_clock = time.monotonic() + budget + 0.2
+        write = asyncio.ensure_future(client.publish_audio(b"\x00" * 480))
+        await asyncio.sleep(0.05)
+        client.reset_audio_pacing()
+        await write
+        client._audio_out.reset_epoch.assert_called_once()
+        client._audio_out.write.assert_called_once()
+        duration_s = 480 / (client._audio_out_sample_rate * 2)
+        self.assertAlmostEqual(
+            client._publish_audio_clock, time.monotonic() + duration_s, delta=0.1
+        )
+
 
 # ----------------------------------------------------------------------
 # Runner arguments: relay_url

@@ -906,6 +906,12 @@ class MOQTransportClient:
         wait = self._publish_audio_clock - now - budget
         if wait > 0:
             await asyncio.sleep(wait)
+            if self._publish_audio_clock is None:
+                # reset_audio_pacing() landed mid-sleep (interruption):
+                # re-anchor like a fresh write.
+                self._audio_out.reset_epoch()
+                logger.debug("MOQ: audio epoch re-anchored after pacing reset mid-write")
+                self._publish_audio_clock = time.monotonic()
 
         # Advance the virtual clock and the presentation timestamp by the
         # duration of this chunk. S16 = 2 bytes/sample, mono.
