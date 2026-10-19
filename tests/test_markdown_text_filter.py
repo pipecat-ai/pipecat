@@ -26,7 +26,7 @@ class TestMarkdownTextFilter(unittest.IsolatedAsyncioTestCase):
         expected_text = """
             Bold text and italic text
             1. Numbered list item
-            - Bullet point
+            Bullet point
             Some inline code here\nSubtitle
         """
 
@@ -225,6 +225,9 @@ class TestMarkdownTextFilter(unittest.IsolatedAsyncioTestCase):
             "\n* Tea.": "Tea.",
             "Options:\n\n- Coffee.\n- Tea.": "Options:\n Coffee.\nTea.",
             "Plan:\n  - Sub step.": "Plan:\n  Sub step.",
+            "- Step one.\n    - Sub step.\n- Step two.": "Step one.\n    Sub step.\nStep two.",
+            "\n    - Sub step.": "Sub step.",
+            "\n\t- Sub step.": "Sub step.",
             "- -5 degrees": "-5 degrees",
         }
 

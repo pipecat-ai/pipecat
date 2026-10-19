@@ -147,9 +147,9 @@ class MarkdownTextFilter(BaseTextFilter):
             # Strip bullet (-, +, *) and blockquote (>) markers for the same
             # reason. A streamed list item or quote starts its chunk on a new
             # line, which the collapse would indent, leaving the marker to be
-            # spoken.
+            # spoken. Any indent counts, since nested list items are indented.
             filtered_text = re.sub(
-                r"^( {0,3})(?:[-+*]|>+)[ \t]+(?=\S)", r"\1", filtered_text, flags=re.MULTILINE
+                r"^([ \t]*)(?:[-+*]|>+)[ \t]+(?=\S)", r"\1", filtered_text, flags=re.MULTILINE
             )
 
             # Strip markdown headers to plain text before the newline collapse
