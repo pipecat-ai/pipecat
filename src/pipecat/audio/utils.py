@@ -27,6 +27,49 @@ from pipecat.audio.resamplers.soxr_stream_resampler import SOXRStreamAudioResamp
 SPEAKING_THRESHOLD = 20
 
 
+def apply_half_hann_fade_out(pcm: bytes, num_channels: int = 1) -> bytes:
+    """Fade signed 16-bit PCM from its current level to exact silence.
+
+    A descending half-Hann envelope preserves the first sample (gain = 1.0),
+    reaches zero at the final sample (gain = 0.0), and has smooth endpoint slopes
+    (zero derivative). This avoids adding an end-to-silence value discontinuity
+    when releasing audio that immediately follows samples already committed to
+    playout.
+
+    Args:
+        pcm: Signed 16-bit PCM audio.
+        num_channels: Number of audio channels (defaults to 1).
+
+    Returns:
+        PCM audio with the same byte length and a descending half-Hann envelope.
+
+    Raises:
+        ValueError: If the PCM data does not contain complete 16-bit samples.
+    """
+    bytes_per_sample = 2 * num_channels
+    if len(pcm) % bytes_per_sample != 0:
+        raise ValueError(f"PCM data must contain complete {num_channels}-channel 16-bit samples")
+    if not pcm:
+        return pcm
+
+    samples = np.frombuffer(pcm, dtype=np.int16)
+    num_frames = len(samples) // num_channels
+    if num_frames == 1:
+        return bytes(len(pcm))
+
+    phase = np.linspace(0.0, np.pi, num=num_frames, dtype=np.float64)
+    gains = 0.5 * (1.0 + np.cos(phase))
+    if num_channels > 1:
+        gains = np.repeat(gains, num_channels)
+
+    faded = np.rint(samples.astype(np.float64) * gains).astype(np.int16)
+
+    # Pin both contract endpoints instead of relying on floating-point cosine.
+    faded[:num_channels] = samples[:num_channels]
+    faded[-num_channels:] = 0
+    return faded.tobytes()
+
+
 def create_file_resampler(**kwargs) -> BaseAudioResampler:
     """Create an audio resampler instance for batch processing of complete audio files.
 

@@ -334,6 +334,31 @@ class TestBaseOutputTransportInterruptions(unittest.IsolatedAsyncioTestCase):
         finally:
             await transport.cancel(CancelFrame())
 
+    async def test_interruption_calls_interrupt_audio(self):
+        transport = await self._make_transport()
+        transport.interrupt_audio = AsyncMock()
+        try:
+            await transport.process_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
+            transport.interrupt_audio.assert_awaited_once_with(None)
+        finally:
+            await transport.cancel(CancelFrame())
+
+    async def test_interruption_during_stop_does_not_hang(self):
+        transport = await self._make_transport()
+        try:
+            end_frame = EndFrame()
+            # Start stopping in background
+            stop_task = asyncio.create_task(
+                transport.process_frame(end_frame, FrameDirection.DOWNSTREAM)
+            )
+            await asyncio.sleep(0.02)
+            # Interrupt arrives while stopping
+            await transport.process_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
+            # stop() must complete without timing out
+            await asyncio.wait_for(stop_task, timeout=1.0)
+        finally:
+            await transport.cancel(CancelFrame())
+
 
 class TestBaseOutputTransportChunkInterruptibility(unittest.IsolatedAsyncioTestCase):
     """A chunk cut from the audio buffer keeps the ``interruptible`` flag of the audio it holds."""
