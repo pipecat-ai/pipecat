@@ -10,7 +10,7 @@ import base64
 import json
 import re
 from collections.abc import AsyncGenerator
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from typing import Any
 
@@ -137,6 +137,16 @@ def language_to_cartesia_language(language: Language) -> str:
     return resolve_language(language, LANGUAGE_MAP, use_base_code=True)
 
 
+def _wire_language(language: str, model: str | None) -> str:
+    """Preserve locale tags for Sonic 3.6 and use legacy mapping for other models."""
+    if model == "sonic-3.6":
+        return language
+    try:
+        return language_to_cartesia_language(Language(language))
+    except ValueError:
+        return language
+
+
 def format_cartesia_pronunciation(word: str, ipa: str) -> str | None:
     """Render a pronunciation as Cartesia inline phonemes.
 
@@ -230,6 +240,8 @@ class CartesiaTTSSettings(TTSSettings):
     """Settings for CartesiaTTSService and CartesiaHttpTTSService.
 
     Parameters:
+        language: Language or locale tag, such as ``en`` or ``es-MX``. Sonic 3.6
+            preserves locale tags; older models use base language codes.
         generation_config: Generation configuration for Cartesia models. Includes volume,
             speed (numeric), and emotion (string) parameters.
         pronunciation_dict_id: The ID of the pronunciation dictionary to use for
@@ -420,6 +432,7 @@ class CartesiaTTSService(WebsocketTTSService):
         self._max_buffer_delay_ms = max_buffer_delay_ms
 
         self._receive_task = None
+        self._context_settings: dict[str, CartesiaTTSSettings] = {}
 
     @classmethod
     def format_pronunciation(cls, word: str, ipa: str) -> str | None:
@@ -453,7 +466,7 @@ class CartesiaTTSService(WebsocketTTSService):
         Returns:
             The Cartesia-specific language code, or None if not supported.
         """
-        return language_to_cartesia_language(language)
+        return language.value
 
     # A set of Cartesia-specific helpers for text transformations
     @staticmethod
@@ -538,9 +551,12 @@ class CartesiaTTSService(WebsocketTTSService):
                 result.append((cleaned, start))
         return result
 
-    def _word_timestamps_include_inter_frame_spaces(self) -> bool:
+    def _word_timestamps_include_inter_frame_spaces(self, context_id: str | None = None) -> bool:
         """Whether timestamp text should be treated as carrying its own spacing."""
-        current_language = assert_given(self._settings.language)
+        settings = (
+            self._context_settings.get(context_id, self._settings) if context_id else self._settings
+        )
+        current_language = assert_given(settings.language)
         return bool(current_language and self._is_chinese_or_japanese_language(current_language))
 
     def _build_msg(
@@ -550,15 +566,18 @@ class CartesiaTTSService(WebsocketTTSService):
         add_timestamps: bool = True,
         context_id: str = "",
     ):
+        settings = self._settings
+        if context_id:
+            settings = self._context_settings.setdefault(context_id, replace(settings))
         voice_config = {}
         voice_config["mode"] = "id"
-        voice_config["id"] = self._settings.voice
+        voice_config["id"] = settings.voice
 
         msg = {
             "transcript": text,
             "continue": continue_transcript,
             "context_id": context_id,
-            "model_id": self._settings.model,
+            "model_id": settings.model,
             "voice": voice_config,
             "output_format": {
                 "container": self._output_container,
@@ -572,8 +591,10 @@ class CartesiaTTSService(WebsocketTTSService):
         if self._max_buffer_delay_ms is not None:
             msg["max_buffer_delay_ms"] = self._max_buffer_delay_ms
 
-        if self._settings.language:
-            msg["language"] = self._settings.language
+        if settings.language:
+            msg["language"] = _wire_language(
+                assert_given(settings.language), assert_given(settings.model)
+            )
 
         generation_config = assert_given(self._settings.generation_config)
         if generation_config:
@@ -650,6 +671,7 @@ class CartesiaTTSService(WebsocketTTSService):
 
     async def on_audio_context_interrupted(self, context_id: str):
         """Cancel the active Cartesia context when the bot is interrupted."""
+        self._context_settings.pop(context_id, None)
         await self.stop_all_metrics()
         if context_id:
             cancel_msg = json.dumps({"context_id": context_id, "cancel": True})
@@ -663,6 +685,7 @@ class CartesiaTTSService(WebsocketTTSService):
         done once it has sent its ``done`` message, which is handled in
         ``_process_messages``.
         """
+        self._context_settings.pop(context_id, None)
         await super().on_audio_context_completed(context_id)
 
     async def flush_audio(self, context_id: str | None = None):
@@ -735,7 +758,7 @@ class CartesiaTTSService(WebsocketTTSService):
                 # Cartesia reports Chinese and Japanese one character at a time, with
                 # each punctuation mark as its own token. Merging attaches the mark to
                 # the character before it ("す", "。" -> "す。").
-                cjk = self._word_timestamps_include_inter_frame_spaces()
+                cjk = self._word_timestamps_include_inter_frame_spaces(ctx_id)
                 await self.add_word_timestamps(
                     processed_timestamps,
                     ctx_id,
@@ -971,7 +994,7 @@ class CartesiaHttpTTSService(TTSService):
         Returns:
             The Cartesia-specific language code, or None if not supported.
         """
-        return language_to_cartesia_language(language)
+        return language.value
 
     async def setup(self, setup: FrameProcessorSetup):
         """Set up the service.
@@ -1027,7 +1050,9 @@ class CartesiaHttpTTSService(TTSService):
             }
 
             if self._settings.language:
-                payload["language"] = self._settings.language
+                payload["language"] = _wire_language(
+                    assert_given(self._settings.language), assert_given(self._settings.model)
+                )
 
             generation_config = assert_given(self._settings.generation_config)
             if generation_config:
