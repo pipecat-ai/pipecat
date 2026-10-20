@@ -138,8 +138,9 @@ def language_to_cartesia_language(language: Language) -> str:
 
 
 def _wire_language(language: str, model: str | None) -> str:
-    """Preserve locale tags for Sonic 3.6 and use legacy mapping for other models."""
-    if model == "sonic-3.6":
+    """Preserve locale tags for Sonic 3.6+ and use legacy mapping for other models."""
+    version = re.match(r"sonic-(\d+)(?:\.(\d+))?(?:-|$)", model or "")
+    if version and (int(version[1]), int(version[2] or 0)) >= (3, 6):
         return language
     try:
         return language_to_cartesia_language(Language(language))
@@ -240,7 +241,7 @@ class CartesiaTTSSettings(TTSSettings):
     """Settings for CartesiaTTSService and CartesiaHttpTTSService.
 
     Parameters:
-        language: Language or locale tag, such as ``en`` or ``es-MX``. Sonic 3.6
+        language: Language or locale tag, such as ``en`` or ``es-MX``. Sonic 3.6+
             preserves locale tags; older models use base language codes.
         generation_config: Generation configuration for Cartesia models. Includes volume,
             speed (numeric), and emotion (string) parameters.

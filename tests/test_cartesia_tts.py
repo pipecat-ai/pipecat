@@ -34,10 +34,24 @@ def _service(language: str) -> CartesiaTTSService:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("service_cls", [CartesiaTTSService, CartesiaHttpTTSService])
-@pytest.mark.parametrize("model", ["sonic-3.6", "sonic-3.5"])
+@pytest.mark.parametrize(
+    "model, preserves_locale",
+    [
+        ("sonic-3.6", True),
+        ("sonic-3.6-2026-08-27", True),
+        ("sonic-3.10", True),
+        ("sonic-4", True),
+        ("sonic-3.5", False),
+        ("sonic-3.5-2026-07-01", False),
+        ("sonic-3", False),
+        ("sonic-preview", False),
+        ("other-4", False),
+        (None, False),
+    ],
+)
 @pytest.mark.parametrize("language", [Language.ES_MX, "en-GB", "ja-JP", "fr", None])
 @pytest.mark.parametrize("update", [False, True])
-async def test_language_wire_format(service_cls, model, language, update):
+async def test_language_wire_format(service_cls, model, preserves_locale, language, update):
     service = service_cls(
         api_key="test",
         settings=service_cls.Settings(
@@ -58,7 +72,7 @@ async def test_language_wire_format(service_cls, model, language, update):
         payload = service._session.post.call_args.kwargs["json"]
 
     expected = str(language) if language is not None else None
-    if expected and model != "sonic-3.6":
+    if expected and not preserves_locale:
         expected = expected.split("-")[0]
     assert payload.get("language") == expected
     assert "locale" not in payload
