@@ -501,6 +501,9 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
         # LLM completion
         response = await self._client.chat.completions.create(**params)
 
+        if response.choices[0].finish_reason:
+            self._handle_finish_reason(response.choices[0].finish_reason)
+
         return response.choices[0].message.content
 
     def _token_usage(self, usage: CompletionUsage) -> LLMTokenUsage:
@@ -597,6 +600,9 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
 
                     await self.stop_ttfb_metrics()
 
+                    if chunk.choices[0].finish_reason:
+                        self._handle_finish_reason(chunk.choices[0].finish_reason)
+
                     if not chunk.choices[0].delta:
                         continue
 
@@ -680,6 +686,21 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
                 )
 
             await self.run_function_calls(function_calls)
+
+    def _handle_finish_reason(self, finish_reason: str):
+        """Log why the model stopped generating, when it stopped for a notable reason.
+
+        Anything other than a normal stop leaves the turn short of what the model
+        would otherwise have said: the output hit the token limit, or the provider's
+        content filter withheld it. Whatever text did arrive is still passed on.
+
+        Args:
+            finish_reason: The ``finish_reason`` of a streamed choice.
+        """
+        if finish_reason in ("stop", "tool_calls", "function_call"):
+            return
+
+        logger.warning(f"{self}: response incomplete, the model stopped for {finish_reason}")
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames for LLM completion requests.
