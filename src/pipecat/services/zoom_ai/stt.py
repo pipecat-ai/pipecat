@@ -20,6 +20,7 @@ https://developers.zoom.us/docs/ai-services/scribe/ and https://www.zoom.ai/
 """
 
 import asyncio
+import copy
 import json
 import re
 import time
@@ -109,11 +110,42 @@ def _recognition_config(settings: Any) -> dict[str, Any]:
         config["language_detection"] = {"mode": settings.language_detection}
     if settings.diarization:
         config["diarization"] = True
-    if settings.profanity_filter:
-        config["profanity_filter"] = True
     if settings.vocabulary:
         config["vocabulary"] = {"phrases": list(settings.vocabulary)}
     return config
+
+
+def _merge(base: dict[str, Any], extra: dict[str, Any]) -> dict[str, Any]:
+    """``base`` with ``extra`` merged in, nested objects merged key by key; ``extra`` wins."""
+    merged = dict(base)
+    for key, value in extra.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _merge(merged[key], value)
+        else:
+            merged[key] = copy.deepcopy(value)
+    return merged
+
+
+@dataclass(frozen=True)
+class _RequestView:
+    """What the service acts on, read from the final request (settings plus ``extra``)."""
+
+    diarization: bool
+    text_polishing: bool
+    language_detection: bool
+    silence_duration_ms: int | None
+
+    @classmethod
+    def of(cls, request: dict[str, Any]) -> "_RequestView":
+        config = request.get("config") or {}
+        polishing = (request.get("outputs") or {}).get("text_polishing") or {}
+        silence = (request.get("turn_detection") or {}).get("silence_duration_ms")
+        return cls(
+            diarization=bool(config.get("diarization")),
+            text_polishing=bool(polishing.get("enabled")),
+            language_detection=bool(config.get("language_detection")),
+            silence_duration_ms=silence if isinstance(silence, int) else None,
+        )
 
 
 def _polished_text(payload: dict[str, Any]) -> str | None:
@@ -129,7 +161,9 @@ def _polished_text(payload: dict[str, Any]) -> str | None:
     return _clean(text)
 
 
-def _reported_language(scribe_language: object, settings: Any) -> Language | None:
+def _reported_language(
+    scribe_language: object, detecting: bool, configured: object
+) -> Language | None:
     """The frame language: Scribe's, else None when detecting, else the configured one.
 
     With language detection on and no language from Scribe, the language isn't known, so
@@ -137,7 +171,7 @@ def _reported_language(scribe_language: object, settings: Any) -> Language | Non
     """
     if isinstance(scribe_language, str) and scribe_language:
         return _frame_language(scribe_language)
-    return None if settings.language_detection else _frame_language(settings.language)
+    return None if detecting else _frame_language(configured)
 
 
 def _frame_language(value: object) -> Language | None:
@@ -226,20 +260,22 @@ class ZoomScribeLiveSTTSettings(STTSettings):
             tags are removed from the transcript text.
         vocabulary: Words and phrases that customize recognition
             (``config.vocabulary.phrases``).
-        profanity_filter: Scribe's profanity filter (``config.profanity_filter``).
-            Off by default.
         text_polishing: Scribe's text polishing (``outputs.text_polishing``).
             The polished text is the transcript, and the recognized text is in
             the Scribe event attached as ``TranscriptionFrame.result``
             (``transcript``); if polishing fails, the recognized text is used.
             Off by default.
+        extra: Scribe request fields to add or override, shaped like the
+            request, e.g. ``{"config": {"profanity_filter": True}}`` or
+            ``{"outputs": {...}}``. Merged into the ``session.update`` over the settings
+            above, so Scribe fields this service has no setting for can be used.
+            ``audio.format`` stays ``pcm16``.
     """
 
     silence_duration_ms: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     diarization: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     language_detection: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     vocabulary: list[str] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    profanity_filter: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     text_polishing: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
@@ -299,7 +335,6 @@ class ZoomScribeLiveSTTService(WebsocketSTTService):
             diarization=False,
             language_detection=None,
             vocabulary=None,
-            profanity_filter=False,
             text_polishing=False,
         )
         if settings is not None:
@@ -325,6 +360,8 @@ class ZoomScribeLiveSTTService(WebsocketSTTService):
         self._input_gap_task = None
         self._last_input_time = time.monotonic()
         self._gap_filled = False  # silence already sent for the current input gap
+        # What the current session was configured with (settings plus ``extra``).
+        self._view = _RequestView.of(self._session_update())
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -436,7 +473,7 @@ class ZoomScribeLiveSTTService(WebsocketSTTService):
                 continue
             self._gap_filled = True
             await self._flush_audio()
-            window_ms = self._settings.silence_duration_ms or 1000
+            window_ms = self._view.silence_duration_ms or 1000
             self._send_buffer.extend(bytes(SCRIBE_SAMPLE_RATE * 2 * (window_ms + 100) // 1000))
             await self._flush_audio()
 
@@ -469,8 +506,16 @@ class ZoomScribeLiveSTTService(WebsocketSTTService):
         if self._settings.silence_duration_ms is not None:
             update["turn_detection"] = {"silence_duration_ms": self._settings.silence_duration_ms}
         if self._settings.text_polishing:
-            # Live returns only the polished text unless the transcript is asked for too.
-            update["outputs"] = {"text_polishing": {"enabled": True, "include_transcript": True}}
+            update["outputs"] = {"text_polishing": {"enabled": True}}
+        update = _merge(update, self._settings.extra)
+        # Fields the service depends on, whatever ``extra`` says.
+        update["type"] = "session.update"
+        update["audio"] = {**(update.get("audio") or {}), "format": "pcm16"}
+        polishing = (update.get("outputs") or {}).get("text_polishing")
+        if isinstance(polishing, dict) and polishing.get("enabled"):
+            # Live returns only the polished text unless the transcript is asked for too,
+            # and the transcript is the fallback when polishing fails.
+            polishing["include_transcript"] = True
         return update
 
     async def _connect(self):
@@ -507,7 +552,9 @@ class ZoomScribeLiveSTTService(WebsocketSTTService):
             )
             self._websocket = websocket
             self._session_closed.clear()
-            await websocket.send(json.dumps(self._session_update()))
+            update = self._session_update()
+            self._view = _RequestView.of(update)
+            await websocket.send(json.dumps(update))
             await self._call_event_handler("on_connected")
         except Exception as e:
             self._websocket = None
@@ -571,7 +618,7 @@ class ZoomScribeLiveSTTService(WebsocketSTTService):
             await self._push_final_transcript(event)
         elif kind == "session.updated":
             # Scribe never rejects diarization; it reports whether labels will come.
-            if self._settings.diarization and event.get("diarization_enabled") is False:
+            if self._view.diarization and event.get("diarization_enabled") is False:
                 logger.warning(f"{self} Scribe can't label speakers for this session")
         elif kind == "error":
             error = event.get("error")
@@ -596,7 +643,7 @@ class ZoomScribeLiveSTTService(WebsocketSTTService):
 
     async def _push_final_transcript(self, event: dict[str, Any]):
         text = _clean(event.get("transcript"))
-        if self._settings.text_polishing:
+        if self._view.text_polishing:
             polished = _polished_text(event)
             if polished is not None:
                 text = polished
@@ -606,7 +653,9 @@ class ZoomScribeLiveSTTService(WebsocketSTTService):
                 # reconnect): open the turn so the aggregator doesn't drop it.
                 self._user_turn_open = True
                 await self.broadcast_frame(ProposedUserStartedSpeakingFrame)
-            language = _reported_language(event.get("language"), self._settings)
+            language = _reported_language(
+                event.get("language"), self._view.language_detection, self._settings.language
+            )
             await self.emit_stt_usage_metrics()
             await self.push_frame(
                 TranscriptionFrame(
@@ -651,19 +700,20 @@ class ZoomScribeFastSTTSettings(STTSettings):
             default. The words are in the segments of ``TranscriptionFrame.result``.
         vocabulary: Words and phrases that customize recognition
             (``config.vocabulary.phrases``).
-        profanity_filter: Scribe's profanity filter (``config.profanity_filter``).
-            Off by default.
         text_polishing: Scribe's text polishing (``outputs.text_polishing``).
             The polished text is the transcript, and the recognized text is in
             ``TranscriptionFrame.result`` (``result.text_display``); if polishing
             fails, the recognized text is used. Off by default.
+        extra: Scribe request fields to add or override, shaped like the
+            request, e.g. ``{"config": {"profanity_filter": True}}`` or
+            ``{"outputs": {...}}``. Merged into the request over the settings
+            above, so Scribe fields this service has no setting for can be used.
     """
 
     diarization: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     word_time_offsets: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     language_detection: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     vocabulary: list[str] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    profanity_filter: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     text_polishing: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
@@ -715,7 +765,6 @@ class ZoomScribeFastSTTService(SegmentedSTTService):
             word_time_offsets=False,
             language_detection=None,
             vocabulary=None,
-            profanity_filter=False,
             text_polishing=False,
         )
         if settings is not None:
@@ -781,12 +830,18 @@ class ZoomScribeFastSTTService(SegmentedSTTService):
         }
         if self._settings.word_time_offsets:
             config["word_time_offsets"] = True
-        # Upload the utterance as multipart form data (`file`, `config` and `outputs`).
+        request: dict[str, Any] = {"config": config}
+        if self._settings.text_polishing:
+            request["outputs"] = {"text_polishing": {"enabled": True}}
+        request = _merge(request, self._settings.extra)
+        request.pop("file", None)  # the service uploads the audio
+        view = _RequestView.of(request)
+        # Upload the utterance as multipart form data: `file`, then one JSON field per
+        # top-level request field (`config`, `outputs`, ...).
         form = aiohttp.FormData()
         form.add_field("file", audio, filename="utterance.wav", content_type="audio/wav")
-        form.add_field("config", json.dumps(config))
-        if self._settings.text_polishing:
-            form.add_field("outputs", json.dumps({"text_polishing": {"enabled": True}}))
+        for name, value in request.items():
+            form.add_field(name, json.dumps(value))
 
         if self._session is None:
             self._session = aiohttp.ClientSession()
@@ -812,7 +867,7 @@ class ZoomScribeFastSTTService(SegmentedSTTService):
             return
 
         text = _clean((result.get("result") or {}).get("text_display"))
-        if self._settings.text_polishing:
+        if view.text_polishing:
             polished = _polished_text(result)
             if polished is not None:
                 text = polished
@@ -823,7 +878,9 @@ class ZoomScribeFastSTTService(SegmentedSTTService):
             detected = (result.get("result") or {}).get("language") or next(
                 (s["language"] for s in segments if s.get("language")), None
             )
-            language = _reported_language(detected, self._settings)
+            language = _reported_language(
+                detected, view.language_detection, self._settings.language
+            )
             await self._handle_transcription(text, True, language)
             yield TranscriptionFrame(
                 text=text,
