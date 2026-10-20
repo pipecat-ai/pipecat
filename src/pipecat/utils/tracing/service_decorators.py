@@ -1502,8 +1502,15 @@ class _RealtimeReply:
 
     @property
     def complete(self) -> bool:
-        """Whether every late-arriving piece of data has arrived."""
-        return self.usage is not None and (not self.answers_speech or bool(self.input_pieces))
+        """Whether the reply can be exported before the grace period runs out.
+
+        Usage is reported once, so a reply that answers no speech is done when
+        it has usage. A reply that answers speech is never complete early: the
+        user's transcript comes in pieces (Gemini Live sends one frame per
+        sentence, plus a trailing fragment on a timeout), and nothing marks
+        the last one. It waits for the grace period or the next reply.
+        """
+        return self.usage is not None and not self.answers_speech
 
 
 class _RealtimeLLMTraceState:
@@ -1524,7 +1531,9 @@ class _RealtimeLLMTraceState:
         self.speech_end_turn_ctx = None
         # Earliest speech onset since the last speech end, in seconds.
         self.speech_onset: float | None = None
-        # Whether the user has started speaking since the open reply opened.
+        # Whether the user has spoken since the last reply that answered them
+        # opened. Speech not yet answered keeps its transcripts out of the
+        # replies around it.
         self.user_started_since_reply = True
         # Data that arrived while no reply was open, kept for the next one.
         self.held_ttfb: float | None = None
@@ -1546,6 +1555,13 @@ def traced_realtime_llm(cls: P) -> P:
       span. The user's transcript and the reply text are attributes on it,
       along with token usage, TTFB and the modalities.
     - one ``llm_tool_call`` span per function call, beside the reply.
+
+    A reply opens on ``LLMFullResponseStartFrame``, or on the first
+    ``FunctionCallInProgressFrame`` when no Start came first. It ends on
+    ``LLMFullResponseEndFrame`` or ``InterruptionFrame`` and is exported once
+    its late data (usage, the user's transcript) is in: at once for a reply
+    that answers no speech, otherwise when the next reply opens or after a
+    short grace period.
 
     The decorator wraps the class's ``push_frame`` (reading each frame after
     the original push), ``start_llm_usage_metrics`` and ``cleanup``. It checks
@@ -1598,7 +1614,7 @@ def traced_realtime_llm(cls: P) -> P:
                 span.set_attribute("output", output)
             span.set_attribute("output_modality", "AUDIO" if reply.had_audio else "TEXT")
             if reply.input_pieces:
-                span.set_attribute("input", " ".join(reply.input_pieces).strip())
+                span.set_attribute("input", " ".join(p.strip() for p in reply.input_pieces))
                 span.set_attribute("input_modality", "AUDIO")
             if reply.ttfb is not None:
                 span.set_attribute("metrics.ttfb", reply.ttfb)
@@ -1688,7 +1704,12 @@ def traced_realtime_llm(cls: P) -> P:
         state.speech_end_turn_ctx = None
         # speech_onset is kept: a user already speaking when the reply starts
         # ends it at their onset, clamped to the reply's own start.
-        state.user_started_since_reply = False
+        if answers_speech:
+            # This reply answers the user's speech; what they say from now on
+            # is theirs. A reply that answers no speech (a tool follow-up)
+            # leaves an utterance already under way to the reply that will
+            # answer it.
+            state.user_started_since_reply = False
         state.reply = reply
 
     def mark_pending_interrupted(state: _RealtimeLLMTraceState):
@@ -1734,8 +1755,6 @@ def traced_realtime_llm(cls: P) -> P:
         target = state.reply or state.pending
         if target is not None and not state.user_started_since_reply:
             target.input_pieces.append(text)
-            if target is state.pending:
-                export_if_complete(service, state)
         else:
             state.held_transcript.append(text)
 
@@ -1843,6 +1862,11 @@ def traced_realtime_llm(cls: P) -> P:
         elif isinstance(
             frame, (FunctionCallInProgressFrame, FunctionCallResultFrame, FunctionCallCancelFrame)
         ):
+            if isinstance(frame, FunctionCallInProgressFrame) and state.reply is None:
+                # A function call is model output, so a reply is under way even
+                # when no Start frame announced it: OpenAI Realtime pushes none
+                # for a response that only calls tools.
+                open_reply(service, state)
             handle_tool_frame(service, state, frame)
         elif isinstance(frame, (EndFrame, CancelFrame)):
             close_all(service, state)
