@@ -65,7 +65,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         api_key=os.environ["SPEECHMATICS_API_KEY"],
         settings=SpeechmaticsSTTService.Settings(
             enable_diarization=True,
-            speaker_active_format="<{speaker_id}>{text}</{speaker_id}>",
+            speaker_format="<{speaker}>{text}</{speaker}>",
         ),
     )
 
@@ -131,12 +131,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
         await asyncio.sleep(10)
         logger.info(
-            "Updating Speechmatics STT settings: speaker_active_format=<SPEAKER_{speaker_id}>{text}</SPEAKER_{speaker_id}>"
+            "Updating Speechmatics STT settings: speaker_format=<SPEAKER_{speaker}>{text}</SPEAKER_{speaker}>"
         )
         await worker.queue_frame(
             STTUpdateSettingsFrame(
                 delta=SpeechmaticsSTTService.Settings(
-                    speaker_active_format="<SPEAKER_{speaker_id}>{text}</SPEAKER_{speaker_id}>"
+                    speaker_format="<SPEAKER_{speaker}>{text}</SPEAKER_{speaker}>"
                 )
             )
         )
