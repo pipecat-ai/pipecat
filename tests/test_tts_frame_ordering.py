@@ -1091,6 +1091,23 @@ async def test_skipped_frame_follows_the_text_frame_spoken_before_it():
     assert context.messages[-1]["content"] == "Hello there. print(1) Done."
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("service", [MockHttpPushTextTTSService, _MockWordTimestampHttpTTSService])
+async def test_the_context_records_the_text_as_the_llm_wrote_it(service):
+    """A filter changes what is spoken, not what the context records, whatever the service."""
+    context = LLMContext()
+    await run_test(
+        Pipeline([service(text_filters=[MarkdownTextFilter()]), LLMAssistantAggregator(context)]),
+        frames_to_send=[
+            LLMFullResponseStartFrame(),
+            LLMTextFrame("It's **fixed** now."),
+            LLMFullResponseEndFrame(),
+        ],
+    )
+
+    assert context.messages[-1]["content"] == "It's **fixed** now."
+
+
 # ---------------------------------------------------------------------------
 # Tests: LLM text marked skip_tts
 # ---------------------------------------------------------------------------

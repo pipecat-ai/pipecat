@@ -1726,7 +1726,9 @@ class TTSService(AIService):
         # get the original (non-transformed) text after the TTS generation has
         # completed. This way, if we are interrupted, the text is not added to the
         # assistant context and the context that IS added does not include
-        # TTS-specific tags or transformations.
+        # TTS-specific tags or transformations. The frame carries the text as the
+        # LLM wrote it, which the context records, as it does for services with
+        # word timestamps.
         #
         # In streaming (TOKEN) mode this is handled instead by the sequencer's
         # per-sentence promotion (see AggregatedFrameSequencer._promote): a call
@@ -1734,7 +1736,12 @@ class TTSService(AIService):
         # should carry.
         if not self._push_text_frames or self._is_streaming_tokens:
             return
-        frame = TTSTextFrame(text, text_type=src_frame.text_type, segment_id=src_frame.id)
+        frame = TTSTextFrame(
+            text,
+            text_type=src_frame.text_type,
+            raw_text=src_frame.raw_text,
+            segment_id=src_frame.id,
+        )
         frame.will_be_spoken = True
         frame.context_id = context_id
         frame.append_to_context = append_to_context
