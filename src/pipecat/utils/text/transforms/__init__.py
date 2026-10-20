@@ -32,10 +32,12 @@ from pipecat.utils.text.transforms.percentages import expand_percentages
 from pipecat.utils.text.transforms.phone import expand_phone_numbers
 from pipecat.utils.text.transforms.replacements import replace_text
 from pipecat.utils.text.transforms.strip_markdown import strip_markdown
+from pipecat.utils.text.transforms.text_transform import TextTransform
 from pipecat.utils.text.transforms.units import expand_units
 from pipecat.utils.text.transforms.voice_formatter import VoiceFormatter
 
 __all__ = [
+    "TextTransform",
     "normalize_acronyms",
     "expand_currency",
     "normalize_dates",

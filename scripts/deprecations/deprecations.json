@@ -4513,6 +4513,17 @@
       "location": "pipecat/services/tts_service.py"
     },
     {
+      "subject": "TTSService.text_filters",
+      "module": "pipecat.services.tts_service",
+      "kind": "parameter",
+      "deprecated_in": "1.14.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "text_transforms",
+      "message": "Use ``text_transforms`` instead, with :func:`~pipecat.utils.text.transforms.strip_markdown` in place of :class:`~pipecat.utils.text.markdown_text_filter.MarkdownTextFilter`. Will be removed in 2.0.0.",
+      "location": "pipecat/services/tts_service.py"
+    },
+    {
       "subject": "WebsocketWordTTSService",
       "module": "pipecat.services.tts_service",
       "kind": "class",
@@ -4929,6 +4940,28 @@
       "replacement": "TextType",
       "message": "Use :class:`TextType` instead. Will be removed in 2.0.0.",
       "location": "pipecat/utils/text/base_text_aggregator.py"
+    },
+    {
+      "subject": "BaseTextFilter",
+      "module": "pipecat.utils.text.base_text_filter",
+      "kind": "class",
+      "deprecated_in": "1.14.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "pipecat.utils.text.transforms.TextTransform",
+      "message": "Use a :data:`~pipecat.utils.text.transforms.TextTransform` instead: an async ``(text, text_type) -> text`` callable registered with ``text_transforms`` on a TTS service to rewrite what is spoken, or on :class:`~pipecat.processors.aggregators.llm_text_processor.LLMTextProcessor` to rewrite what everything downstream sees. Will be removed in 2.0.0.",
+      "location": "pipecat/utils/text/base_text_filter.py"
+    },
+    {
+      "subject": "MarkdownTextFilter",
+      "module": "pipecat.utils.text.markdown_text_filter",
+      "kind": "class",
+      "deprecated_in": "1.14.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "strip_markdown",
+      "message": "`MarkdownTextFilter` is deprecated since 1.14.0 and will be removed in 2.0.0. Use `strip_markdown` instead.",
+      "location": "pipecat/utils/text/markdown_text_filter.py"
     },
     {
       "subject": "BaseUIWorker",
