@@ -47,7 +47,6 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.settings import STTSettings
-from pipecat.services.stt_latency import ZOOM_SCRIBE_FAST_TTFS_P99
 from pipecat.services.stt_service import SegmentedSTTService, WebsocketSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
@@ -698,6 +697,10 @@ class ZoomScribeFastSTTSettings(STTSettings):
             speaker tags are removed from the transcript text.
         word_time_offsets: Word timings (``config.word_time_offsets``). Off by
             default. The words are in the segments of ``TranscriptionFrame.result``.
+        channel_separation: Recognize each channel of stereo audio separately
+            (``config.channel_separation``). Off by default. Each segment of
+            ``TranscriptionFrame.result`` has its ``channel``. The service uploads
+            the pipeline's audio as mono, so every segment is channel 0.
         vocabulary: Words and phrases that customize recognition
             (``config.vocabulary.phrases``).
         text_polishing: Scribe's text polishing (``outputs.text_polishing``).
@@ -712,6 +715,7 @@ class ZoomScribeFastSTTSettings(STTSettings):
 
     diarization: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     word_time_offsets: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    channel_separation: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     language_detection: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     vocabulary: list[str] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     text_polishing: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -740,7 +744,7 @@ class ZoomScribeFastSTTService(SegmentedSTTService):
         aiohttp_session: aiohttp.ClientSession | None = None,
         timeout_secs: float = 10.0,
         settings: Settings | None = None,
-        ttfs_p99_latency: float | None = ZOOM_SCRIBE_FAST_TTFS_P99,
+        ttfs_p99_latency: float | None = None,
         **kwargs,
     ):
         """Initialize the Zoom Scribe Fast STT service.
@@ -755,7 +759,8 @@ class ZoomScribeFastSTTService(SegmentedSTTService):
             timeout_secs: Request timeout in seconds.
             settings: Runtime-updatable settings.
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
-                Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
+                ``None`` uses Pipecat's default. Measure it for your deployment with
+                https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to the parent SegmentedSTTService.
         """
         default_settings = self.Settings(
@@ -763,6 +768,7 @@ class ZoomScribeFastSTTService(SegmentedSTTService):
             language=Language.EN_US,
             diarization=False,
             word_time_offsets=False,
+            channel_separation=False,
             language_detection=None,
             vocabulary=None,
             text_polishing=False,
@@ -830,6 +836,8 @@ class ZoomScribeFastSTTService(SegmentedSTTService):
         }
         if self._settings.word_time_offsets:
             config["word_time_offsets"] = True
+        if self._settings.channel_separation:
+            config["channel_separation"] = True
         request: dict[str, Any] = {"config": config}
         if self._settings.text_polishing:
             request["outputs"] = {"text_polishing": {"enabled": True}}

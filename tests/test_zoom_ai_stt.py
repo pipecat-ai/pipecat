@@ -1132,3 +1132,14 @@ async def test_fast_closes_only_a_session_it_created():
     created = service._session
     await service.cleanup()
     assert created.closed
+
+
+@pytest.mark.asyncio
+async def test_fast_channel_separation_is_requested_only_when_on():
+    off, on = _ScribeFast(body=_FAST_RESULT), _ScribeFast(body=_FAST_RESULT)
+
+    await _run_fast(off)
+    await _run_fast(on, settings=ZoomScribeFastSTTService.Settings(channel_separation=True))
+
+    assert "channel_separation" not in off.requests[0]["config"]
+    assert on.requests[0]["config"]["channel_separation"] is True
