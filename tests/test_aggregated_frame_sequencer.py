@@ -1051,6 +1051,60 @@ class TestCJKContextAssembly(unittest.IsolatedAsyncioTestCase):
 # ---------------------------------------------------------------------------
 
 
+class TestMarkReportedAfterSlotCompletes(unittest.IsolatedAsyncioTestCase):
+    """A sentence's final mark reported as its own word is recorded in context once.
+
+    Some providers report Japanese one character at a time with the mark as a
+    separate word ("で", "す", "。"). "す" takes "す。" and completes the slot, so
+    the "。" that follows belongs to no slot and must not be attributed to the
+    next sentence or recorded again.
+    """
+
+    @staticmethod
+    def _context_text(frames) -> str:
+        """Join word frames the way the assistant context aggregator does."""
+        parts = [
+            TextPartForConcatenation(
+                f.raw_text or f.text,
+                includes_inter_part_spaces=f.includes_inter_frame_spaces,
+            )
+            for f in frames
+            if isinstance(f, TTSTextFrame) and f.append_to_context
+        ]
+        return concatenate_aggregated_text(parts)
+
+    async def _process(self, sentences: list[str], words: list[str]) -> list:
+        seq = _seq()
+        for sentence in sentences:
+            await seq.register_spoken(
+                _spoken_frame(sentence, raw_text=sentence),
+                "ctx1",
+                sentence,
+                True,
+                includes_inter_frame_spaces=True,
+            )
+        frames = []
+        for i, word in enumerate(words):
+            frames.extend(seq.process_word(word, pts=(i + 1) * 10, context_id="ctx1"))
+        return frames
+
+    async def test_mark_between_and_after_sentences(self):
+        frames = await self._process(["です。", "歯科ですか？"], list("です。歯科ですか？"))
+        self.assertEqual(self._context_text(frames), "です。歯科ですか？")
+
+    async def test_mark_word_is_still_emitted(self):
+        frames = await self._process(["です。", "歯科です。"], list("です。歯科です。"))
+        marks = [f for f in frames if isinstance(f, TTSTextFrame) and f.text == "。"]
+        self.assertEqual(len(marks), 2)
+        self.assertTrue(all(not f.append_to_context for f in marks))
+
+    async def test_mark_reported_with_its_word(self):
+        words = ["で", "す。", "歯", "科", "で", "す。"]
+        frames = await self._process(["です。", "歯科です。"], words)
+        self.assertEqual(self._context_text(frames), "です。歯科です。")
+        self.assertTrue(all(f.append_to_context for f in frames if isinstance(f, TTSTextFrame)))
+
+
 class TestAggregatedTextProgressFrame(unittest.IsolatedAsyncioTestCase):
     async def _seq_with_spoken(self, text: str, ctx: str = "ctx1") -> AggregatedFrameSequencer:
         seq = _seq()

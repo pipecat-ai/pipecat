@@ -20,6 +20,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.utils.context.word_completion_tracker import WordCompletionTracker
 from pipecat.utils.string import match_endofsentence
+from pipecat.utils.text.alnum_utils import has_alnum
 from pipecat.utils.text.simple_text_aggregator import SimpleTextAggregator
 
 
@@ -173,6 +174,16 @@ class _ParallelSentenceAggregator:
         self._reset()
 
 
+def _trailing_marks(text: str) -> str:
+    """Return the run of punctuation (no letters, digits or spaces) ending *text*."""
+    text = text.rstrip()
+    end = len(text)
+    start = end
+    while start > 0 and not text[start - 1].isalnum() and not text[start - 1].isspace():
+        start -= 1
+    return text[start:end]
+
+
 @dataclass
 class _AggregatedFrameSlot:
     """Ordered slot tracking one AggregatedTextFrame through TTS processing.
@@ -302,6 +313,11 @@ class AggregatedFrameSequencer:
         # context (streaming mode only). Aggregators are created lazily per context.
         self._streaming_contexts: dict[str, _StreamingContext] = {}
         self._buffered_words: list[_BufferedWord] = []
+        # Per context: marks the last completed slot's final word took into the
+        # context without the provider having reported them yet ("す" carrying
+        # "す。"). A provider that reports them afterwards as their own word
+        # ("。") must not get them recorded a second time.
+        self._taken_marks: dict[str | None, str] = {}
 
     async def register_spoken(
         self,
@@ -511,6 +527,22 @@ class AggregatedFrameSequencer:
             )
             return []
 
+        # Streaming mode buffers such a mark instead (see the buffering below).
+        taken = self._taken_marks.pop(context_id, "")
+        mark = word.strip()
+        if not self._streaming and mark and not has_alnum(mark) and taken.startswith(mark):
+            if taken[len(mark) :]:
+                self._taken_marks[context_id] = taken[len(mark) :]
+            return [
+                self._build_word_frame(
+                    mark,
+                    pts,
+                    context_id,
+                    suppress_in_context=True,
+                    includes_inter_frame_spaces=includes_inter_frame_spaces,
+                )
+            ]
+
         active = self._get_active_slot(context_id)
         is_complete = False
         raw_overflow_word = None
@@ -581,6 +613,15 @@ class AggregatedFrameSequencer:
 
         if is_complete and active:
             active.complete = True
+            if raw_text and not suppress:
+                taken_marks = _trailing_marks(raw_text)
+                spoken_marks = _trailing_marks(frame_text or "")
+                if (
+                    taken_marks.startswith(spoken_marks)
+                    and taken_marks != spoken_marks
+                    and ">" not in taken_marks
+                ):
+                    self._taken_marks[emit_context_id] = taken_marks[len(spoken_marks) :]
             frames.extend(self.flush(last_word_pts=pts))
             if raw_overflow_word:
                 logger.debug(f"{self._name} Emitting overflow word '{raw_overflow_word}'")
@@ -722,6 +763,7 @@ class AggregatedFrameSequencer:
         self._streaming_contexts = {
             key: value for key, value in self._streaming_contexts.items() if key in keep
         }
+        self._taken_marks = {key: value for key, value in self._taken_marks.items() if key in keep}
 
     # -------------------------------------------------------------------------
     # Internal helpers
