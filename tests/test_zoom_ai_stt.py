@@ -371,8 +371,8 @@ async def test_live_recognition_options_are_requested_only_when_set(monkeypatch)
             model="zoom-scribe-multilingual",
             language_detection="continuous",
             vocabulary=["Pipecat", "LiveKit"],
-            profanity_filter=True,
             text_polishing=True,
+            extra={"config": {"profanity_filter": True}},
         )
     )
 
@@ -386,6 +386,62 @@ async def test_live_recognition_options_are_requested_only_when_set(monkeypatch)
         "vocabulary": {"phrases": ["Pipecat", "LiveKit"]},
     }
     assert update["outputs"] == {"text_polishing": {"enabled": True, "include_transcript": True}}
+
+
+@pytest.mark.asyncio
+async def test_live_extra_is_merged_into_the_session_update(monkeypatch):
+    websocket = _FakeWebsocket()
+    _patch_connect(monkeypatch, websocket)
+    extra = {
+        "config": {"vocabulary_id": "acct_vocab_1", "diarization": False},
+        "turn_detection": {"max_segment_duration_ms": 15000},
+        "outputs": {"future_output": {"enabled": True}},
+        "audio": {"format": "opus"},  # the service sends PCM16, so this is kept
+    }
+    service = _live(settings=ZoomScribeLiveSTTService.Settings(diarization=True, extra=extra))
+
+    await service._connect_websocket()
+
+    update = json.loads(websocket.sent[0])
+    assert update["config"] == {"diarization": False, "vocabulary_id": "acct_vocab_1"}
+    assert update["turn_detection"] == {
+        "silence_duration_ms": 350,
+        "max_segment_duration_ms": 15000,
+    }
+    assert update["outputs"] == {"future_output": {"enabled": True}}
+    assert update["audio"] == {"format": "pcm16"}
+    assert extra["audio"] == {"format": "opus"}  # the caller's dict isn't modified
+
+
+@pytest.mark.asyncio
+async def test_live_acts_on_settings_given_through_extra(monkeypatch):
+    websocket = _FakeWebsocket()
+    _patch_connect(monkeypatch, websocket)
+    service = _live(
+        settings=ZoomScribeLiveSTTService.Settings(
+            extra={"outputs": {"text_polishing": {"enabled": True}}}
+        )
+    )
+    await service._connect_websocket()
+    update = json.loads(websocket.sent[0])
+    # The transcript is the fallback when polishing fails, so it is always requested.
+    assert update["outputs"] == {"text_polishing": {"enabled": True, "include_transcript": True}}
+
+    service._websocket = _FakeWebsocket(
+        [
+            _event(
+                "transcription.completed",
+                item_id="item_1",
+                transcript="Um, hello hello there.",
+                outputs={"text_polishing": {"text": "Hello there."}},
+            )
+        ]
+    )
+    frames = _record_frames(monkeypatch, service)
+    await service._receive_messages()
+
+    [frame] = [f for f in frames if isinstance(f, TranscriptionFrame)]
+    assert frame.text == "Hello there."
 
 
 @pytest.mark.asyncio
@@ -824,6 +880,7 @@ class _ScribeFast:
                 "headers": dict(request.headers),
                 "config": json.loads(str(form["config"])),
                 "outputs": json.loads(str(form["outputs"])) if "outputs" in form else None,
+                "fields": {k: json.loads(str(v)) for k, v in form.items() if k != "file"},
                 "filename": upload.filename,
                 "content_type": upload.content_type,
                 "audio": upload.file.read(),
@@ -931,8 +988,8 @@ async def test_fast_recognition_options_and_text_polishing():
             model="zoom-scribe-en-pro",
             language_detection="once",
             vocabulary=["Pipecat"],
-            profanity_filter=True,
             text_polishing=True,
+            extra={"config": {"profanity_filter": True}},
         ),
     )
 
@@ -969,6 +1026,31 @@ async def test_fast_frame_carries_the_detected_language(result, detection, expec
     )
 
     assert frame.language is expected
+
+
+@pytest.mark.asyncio
+async def test_fast_extra_becomes_request_fields():
+    fake = _ScribeFast(body=_FAST_RESULT)
+
+    await _run_fast(
+        fake,
+        settings=ZoomScribeFastSTTService.Settings(
+            extra={
+                "config": {"segmentation_mode": "none"},
+                "outputs": {"future_output": {"enabled": True}},
+                "reference_id": "req-42",
+                "file": "ignored",  # the service uploads the audio
+            }
+        ),
+    )
+
+    [request] = fake.requests
+    assert request["fields"] == {
+        "config": {"language": "en-US", "segmentation_mode": "none"},
+        "outputs": {"future_output": {"enabled": True}},
+        "reference_id": "req-42",
+    }
+    assert request["audio"] == b"RIFF0000WAVE"
 
 
 @pytest.mark.asyncio
