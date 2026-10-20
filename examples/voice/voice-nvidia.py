@@ -72,7 +72,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         #
         # settings=NvidiaSTTService.Settings(
         #     speaker_diarization=True,
-        #     diarization_max_speakers=2,
+        #     max_speakers=2,
         #     speaker_format="Speaker {speaker}: {text}",
         # ),
     )
