@@ -121,6 +121,20 @@ def svc():
     return Stub()
 
 
+_GRACE_SECS = 0.05
+
+
+@pytest.fixture(autouse=True)
+def short_grace(monkeypatch):
+    """Replies that answer speech export after the grace period; keep it short."""
+    monkeypatch.setattr(service_decorators, "_REALTIME_REPLY_EXPORT_GRACE_SECS", _GRACE_SECS)
+
+
+async def _settle():
+    """Let the grace period run out so pending replies export."""
+    await asyncio.sleep(_GRACE_SECS * 3)
+
+
 def _spans(exporter, name="llm_response"):
     return [s for s in exporter.get_finished_spans() if s.name == name]
 
@@ -156,6 +170,7 @@ async def _normal_reply(svc, *, speech_end=None, text="Hi there.", usage=True):
     await svc.push_frame(LLMFullResponseEndFrame())
     if usage:
         await svc.start_llm_usage_metrics(_usage())
+    await _settle()
 
 
 # ---------------------------------------------------------------------------
@@ -201,6 +216,9 @@ async def test_usage_and_transcript_after_end_are_waited_for(exporter, svc):
     assert _spans(exporter) == [], "still waiting for the transcript"
 
     await svc.push_frame(TranscriptionFrame("Hello.", "", "", finalized=False), UP)
+    assert _spans(exporter) == [], "the transcript may come in several pieces"
+
+    await _settle()
     (span,) = _spans(exporter)
     assert span.attributes["input"] == "Hello."
     assert span.attributes["gen_ai.usage.input_tokens"] == 10
@@ -209,12 +227,53 @@ async def test_usage_and_transcript_after_end_are_waited_for(exporter, svc):
 
 
 @pytest.mark.asyncio
-async def test_grace_period_exports_an_incomplete_reply(exporter, svc, monkeypatch):
-    monkeypatch.setattr(service_decorators, "_REALTIME_REPLY_EXPORT_GRACE_SECS", 0.05)
-    await _normal_reply(svc, speech_end=time.time(), usage=False)
+async def test_transcript_sentences_after_usage_all_belong_to_the_reply(exporter, svc):
+    # Gemini Live pushes one TranscriptionFrame per sentence, often after the
+    # reply has ended and its usage has arrived.
+    await svc.push_frame(VADUserStoppedSpeakingFrame(stop_secs=0.2))
+    await svc.push_frame(LLMFullResponseStartFrame())
+    await svc.push_frame(LLMTextFrame("Sunny, 21 degrees."))
+    await svc.push_frame(LLMFullResponseEndFrame())
+    await svc.start_llm_usage_metrics(_usage())
+    await svc.push_frame(
+        TranscriptionFrame("What's the weather in Rome?", "", "", finalized=False), UP
+    )
+    await svc.push_frame(TranscriptionFrame(" Use Celsius.", "", "", finalized=False), UP)
     assert _spans(exporter) == []
 
-    await asyncio.sleep(0.15)
+    # The next reply closes the pending one without waiting for the grace period.
+    await svc.push_frame(VADUserStoppedSpeakingFrame(stop_secs=0.2))
+    await svc.push_frame(LLMFullResponseStartFrame())
+    await svc.push_frame(TranscriptionFrame("Thanks.", "", "", finalized=False), UP)
+    await svc.push_frame(LLMFullResponseEndFrame())
+    await svc.start_llm_usage_metrics(_usage())
+    await _settle()
+
+    first, second = _spans(exporter)
+    assert first.attributes["input"] == "What's the weather in Rome? Use Celsius."
+    assert second.attributes["input"] == "Thanks."
+
+
+@pytest.mark.asyncio
+async def test_reply_without_speech_exports_as_soon_as_usage_arrives(exporter, svc):
+    await svc.push_frame(LLMFullResponseStartFrame())
+    await svc.push_frame(LLMTextFrame("Hello! How can I help?"))
+    await svc.push_frame(LLMFullResponseEndFrame())
+    assert _spans(exporter) == []
+    await svc.start_llm_usage_metrics(_usage())
+    (span,) = _spans(exporter)
+    assert "input" not in span.attributes
+
+
+@pytest.mark.asyncio
+async def test_grace_period_exports_an_incomplete_reply(exporter, svc):
+    await svc.push_frame(VADUserStoppedSpeakingFrame(stop_secs=0.2))
+    await svc.push_frame(LLMFullResponseStartFrame())
+    await svc.push_frame(LLMTextFrame("Hi there."))
+    await svc.push_frame(LLMFullResponseEndFrame())
+    assert _spans(exporter) == []
+
+    await _settle()
     (span,) = _spans(exporter)
     assert "gen_ai.usage.input_tokens" not in span.attributes
     assert span.attributes["output"] == "Hi there."
@@ -234,6 +293,7 @@ async def test_interruption_with_late_usage_and_duplicate_end(exporter, svc):
     assert _spans(exporter) == []
     await svc.start_llm_usage_metrics(_usage(prompt=3, completion=1))
 
+    await _settle()
     (span,) = _spans(exporter)
     assert span.attributes["input"] == "Tell me a story"
     assert span.attributes["llm.interrupted"] is True
@@ -258,6 +318,7 @@ async def test_barge_in_transcript_goes_to_the_next_reply(exporter, svc):
     await svc.push_frame(LLMFullResponseEndFrame())
     await svc.start_llm_usage_metrics(_usage())
 
+    await _settle()
     first, second = _spans(exporter)
     assert first.attributes["input"] == "First question"
     assert first.attributes["output"] == "Answer one"
@@ -307,6 +368,7 @@ async def test_user_stopped_speaking_is_the_fallback_start_and_a_late_one_is_ign
     await svc.push_frame(LLMFullResponseEndFrame())
     await svc.start_llm_usage_metrics(_usage())
 
+    await _settle()
     (span,) = _spans(exporter)
     assert before <= span.start_time <= after
     assert span.attributes["input"] == "Hi"
@@ -315,6 +377,7 @@ async def test_user_stopped_speaking_is_the_fallback_start_and_a_late_one_is_ign
     await svc.push_frame(LLMFullResponseStartFrame())
     await svc.push_frame(LLMFullResponseEndFrame())
     await svc.start_llm_usage_metrics(_usage())
+    await _settle()
     _, second = _spans(exporter)
     assert second.start_time > after
 
@@ -329,6 +392,7 @@ async def test_vad_speech_end_wins_over_user_stopped_speaking(exporter, svc):
     await svc.push_frame(LLMFullResponseEndFrame())
     await svc.start_llm_usage_metrics(_usage())
 
+    await _settle()
     (span,) = _spans(exporter)
     assert span.start_time == int(speech_end * 1e9)
 
@@ -359,6 +423,7 @@ async def test_reply_is_parented_to_the_turn_of_its_speech_end(exporter, svc):
     await svc.start_llm_usage_metrics(_usage())
     turn_b.end()
 
+    await _settle()
     (span,) = _spans(exporter)
     assert span.parent.span_id == turn_a.get_span_context().span_id
 
@@ -442,6 +507,7 @@ async def test_ttfb_before_start_belongs_to_the_next_reply(exporter, svc):
     await svc.start_llm_usage_metrics(_usage())
     await svc.push_frame(TranscriptionFrame("Hi", "", "", finalized=False), UP)
 
+    await _settle()
     (span,) = _spans(exporter)
     assert span.attributes["metrics.ttfb"] == 0.42
     assert span.attributes["gen_ai.response.time_to_first_chunk"] == 0.42
@@ -558,11 +624,22 @@ async def test_interrupted_reply_never_ends_before_its_start(exporter, svc):
     await svc.push_frame(VADUserStartedSpeakingFrame(start_secs=0.1))
     await asyncio.sleep(0.01)
     await svc.push_frame(LLMFullResponseStartFrame())
+    # The utterance under way is not the follow-up's input, even though it
+    # arrives while the follow-up is open.
+    await svc.push_frame(TranscriptionFrame("Actually, wait.", "", "", finalized=False), UP)
     await svc.push_frame(InterruptionFrame())
     await svc.start_llm_usage_metrics(_usage())
+    await svc.push_frame(VADUserStoppedSpeakingFrame(stop_secs=0.2))
+    await svc.push_frame(LLMFullResponseStartFrame())
+    await svc.push_frame(LLMTextFrame("Sure, go ahead."))
+    await svc.push_frame(LLMFullResponseEndFrame())
+    await svc.start_llm_usage_metrics(_usage())
+    await _settle()
 
-    (span,) = _spans(exporter)
-    assert span.end_time == span.start_time
+    follow_up, answer = _spans(exporter)
+    assert follow_up.end_time == follow_up.start_time
+    assert "input" not in follow_up.attributes
+    assert answer.attributes["input"] == "Actually, wait."
 
 
 # ---------------------------------------------------------------------------
@@ -598,6 +675,45 @@ async def test_tool_call_span_covers_in_progress_to_final_result(exporter, svc):
     assert attrs["gen_ai.tool.call.result"] == '{"temp_c": 21}'
     assert span.parent.span_id == turn.get_span_context().span_id
     assert span.status.status_code == trace.StatusCode.UNSET
+
+
+@pytest.mark.asyncio
+async def test_tool_only_response_without_start_frame_opens_a_reply(exporter, svc):
+    # OpenAI Realtime pushes no LLMFullResponseStartFrame for a response that
+    # only calls a tool: the function call frames, then usage and End from
+    # response.done, then a Start for the follow-up response.
+    speech_end = time.time() - 0.5
+    await svc.push_frame(VADUserStoppedSpeakingFrame(stop_secs=0.2, timestamp=speech_end + 0.2))
+    await svc.push_frame(TranscriptionFrame("Weather in Rome?", "", "", finalized=False), UP)
+    await svc.push_frame(
+        FunctionCallInProgressFrame(
+            function_name="get_weather", tool_call_id="c1", arguments={"city": "Rome"}
+        )
+    )
+    await svc.start_llm_usage_metrics(_usage(prompt=7, completion=2))
+    await svc.push_frame(LLMFullResponseEndFrame())
+    await svc.push_frame(
+        FunctionCallResultFrame(
+            function_name="get_weather",
+            tool_call_id="c1",
+            arguments={"city": "Rome"},
+            result={"temp_c": 21},
+        )
+    )
+    await svc.push_frame(LLMFullResponseStartFrame())
+    await svc.push_frame(LLMTextFrame("Sunny, 21 degrees."))
+    await svc.push_frame(LLMFullResponseEndFrame())
+    await svc.start_llm_usage_metrics(_usage(prompt=9, completion=4))
+
+    tool_reply, follow_up = _spans(exporter)
+    assert tool_reply.start_time == int(speech_end * 1e9)
+    assert tool_reply.attributes["input"] == "Weather in Rome?"
+    assert tool_reply.attributes["gen_ai.usage.input_tokens"] == 7
+    assert "output" not in tool_reply.attributes
+    assert follow_up.attributes["output"] == "Sunny, 21 degrees."
+    assert follow_up.attributes["gen_ai.usage.input_tokens"] == 9
+    (tool,) = _spans(exporter, "llm_tool_call")
+    assert tool.attributes["gen_ai.tool.name"] == "get_weather"
 
 
 @pytest.mark.asyncio
