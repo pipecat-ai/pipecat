@@ -144,8 +144,8 @@ class NvidiaSTTSettings(_NvidiaBaseSTTSettings):
             If ``None``, transcript text is not modified. NVIDIA numbers speakers
             from ``1``. A result with an untagged word, no word information, or
             words that can't be located in its transcript is emitted unsplit and
-            unformatted, with the transport ``user_id``. Interim results carry no
-            word information, so they are always emitted that way.
+            unformatted, with no ``speaker_label``. Interim results carry no word
+            information, so they are always emitted that way.
     """
 
     interim_results: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -244,7 +244,7 @@ class NvidiaSTTService(STTService):
     through streaming recognition. Supports interim results and continuous audio
     processing for low-latency applications. When speaker diarization is enabled, each
     contiguous speaker run of a final result is emitted as a separate frame with its speaker
-    tag in ``user_id``.
+    tag in ``speaker_label``.
     """
 
     Settings = NvidiaSTTSettings
@@ -677,23 +677,24 @@ class NvidiaSTTService(STTService):
                 continue
             speaker_label = str(speaker_tag) if speaker_tag is not None else None
             text = self._apply_speaker_format(transcript, speaker_label)
-            user_id = speaker_label or self._user_id
             if result.is_final:
                 frame = TranscriptionFrame(
                     text,
-                    user_id,
+                    self._user_id,
                     timestamp,
                     language,
                     result=result,
                     finalized=index == len(transcripts) - 1,
+                    speaker_label=speaker_label,
                 )
             else:
                 frame = InterimTranscriptionFrame(
                     text,
-                    user_id,
+                    self._user_id,
                     timestamp,
                     language,
                     result=result,
+                    speaker_label=speaker_label,
                 )
             await self.push_frame(frame)
 

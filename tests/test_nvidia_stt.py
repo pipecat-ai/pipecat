@@ -261,7 +261,7 @@ def test_diarization_does_not_change_word_time_offsets():
 
 
 @pytest.mark.asyncio
-async def test_diarization_off_preserves_one_frame_and_session_user(monkeypatch):
+async def test_diarization_off_emits_one_unlabelled_frame(monkeypatch):
     """Speaker metadata has no effect unless diarization is enabled."""
     service = _make_service()
     service._user_id = "session-user"
@@ -275,12 +275,14 @@ async def test_diarization_off_preserves_one_frame_and_session_user(monkeypatch)
     assert len(frames) == 1
     assert frames[0].text == "Hi there"
     assert frames[0].user_id == "session-user"
+    assert frames[0].speaker_label is None
 
 
 @pytest.mark.asyncio
-async def test_tagged_final_result_maps_speaker_user_id(monkeypatch):
-    """A single-speaker final result carries the speaker tag as its user ID."""
+async def test_tagged_final_result_carries_speaker_label(monkeypatch):
+    """A single-speaker final result carries the speaker tag as its label."""
     service = _make_service(settings=NvidiaSTTService.Settings(speaker_diarization=True))
+    service._user_id = "session-user"
     response = _streaming_response(
         " Hello there",
         words=[_word("Hello", 1), _word("there", 1)],
@@ -291,7 +293,8 @@ async def test_tagged_final_result_maps_speaker_user_id(monkeypatch):
     assert len(frames) == 1
     assert isinstance(frames[0], TranscriptionFrame)
     assert frames[0].text == "Hello there"
-    assert frames[0].user_id == "1"
+    assert frames[0].speaker_label == "1"
+    assert frames[0].user_id == "session-user"
     assert frames[0].result is response.results[0]
     assert frames[0].finalized
 
@@ -321,12 +324,14 @@ async def test_interim_results_are_not_split_by_speaker(monkeypatch, words):
     assert isinstance(frames[0], InterimTranscriptionFrame)
     assert frames[0].text == " Hi there hello"
     assert frames[0].user_id == "session-user"
+    assert frames[0].speaker_label is None
 
 
 @pytest.mark.asyncio
 async def test_mixed_speakers_emit_contiguous_run_frames(monkeypatch):
     """A mixed-speaker NVIDIA result becomes one frame per contiguous run."""
     service = _make_service(settings=NvidiaSTTService.Settings(speaker_diarization=True))
+    service._user_id = "session-user"
     response = _streaming_response(
         "Hi there hello again",
         words=[
@@ -340,7 +345,8 @@ async def test_mixed_speakers_emit_contiguous_run_frames(monkeypatch):
     frames = await _capture_response_frames(monkeypatch, service, response)
 
     assert [frame.text for frame in frames] == ["Hi there", "hello", "again"]
-    assert [frame.user_id for frame in frames] == ["1", "2", "1"]
+    assert [frame.speaker_label for frame in frames] == ["1", "2", "1"]
+    assert all(frame.user_id == "session-user" for frame in frames)
     assert len({frame.timestamp for frame in frames}) == 1
     assert all(isinstance(frame, TranscriptionFrame) for frame in frames)
     assert [frame.finalized for frame in frames] == [False, False, True]
@@ -486,7 +492,7 @@ async def test_speaker_format_labels_speaker_and_strips_whitespace(monkeypatch):
     frames = await _capture_response_frames(monkeypatch, service, response)
 
     assert frames[0].text == "Speaker 1: Hello"
-    assert frames[0].user_id == "1"
+    assert frames[0].speaker_label == "1"
 
 
 @pytest.mark.asyncio
@@ -524,6 +530,7 @@ async def test_speaker_format_is_not_applied_to_unsplit_fallback(monkeypatch):
 
     assert [frame.text for frame in frames] == ["No speaker"]
     assert frames[0].user_id == "session-user"
+    assert frames[0].speaker_label is None
 
 
 @pytest.mark.asyncio
@@ -545,6 +552,7 @@ async def test_unsplittable_result_falls_back_to_full_transcript(monkeypatch, wo
     assert len(frames) == 1
     assert frames[0].text == "No speaker metadata"
     assert frames[0].user_id == "session-user"
+    assert frames[0].speaker_label is None
 
 
 @pytest.mark.asyncio
@@ -555,7 +563,7 @@ async def test_unsplittable_result_falls_back_to_full_transcript(monkeypatch, wo
         [_word("No", 1), _word("speaker"), _word("tags", 2)],
     ],
 )
-async def test_untagged_words_fall_back_to_session_user(monkeypatch, words):
+async def test_untagged_words_are_not_labelled(monkeypatch, words):
     """A result with a word the server did not tag (speaker 0) is not split."""
     service = _make_service(
         settings=NvidiaSTTService.Settings(
@@ -570,6 +578,7 @@ async def test_untagged_words_fall_back_to_session_user(monkeypatch, words):
 
     assert [frame.text for frame in frames] == ["No speaker tags"]
     assert frames[0].user_id == "session-user"
+    assert frames[0].speaker_label is None
 
 
 @pytest.mark.asyncio
@@ -595,7 +604,7 @@ async def test_deferred_diarization_update_uses_active_stream_config(monkeypatch
         speaker_diarization=False,
     )
 
-    assert frames[0].user_id == "session-user"
+    assert frames[0].speaker_label is None
 
     frames = await _capture_response_frames(
         monkeypatch,
@@ -604,7 +613,8 @@ async def test_deferred_diarization_update_uses_active_stream_config(monkeypatch
         speaker_diarization=True,
     )
 
-    assert frames[0].user_id == "1"
+    assert frames[0].speaker_label == "1"
+    assert frames[0].user_id == "session-user"
 
 
 @pytest.mark.asyncio
