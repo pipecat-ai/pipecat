@@ -1679,23 +1679,20 @@ class TTSService(AIService):
     async def _push_sequencer_frames(self, frames: list[Frame], context_id: str | None):
         """Emit frames returned by the aggregated-frame sequencer in audio order.
 
-        In streaming (TOKEN) mode these frames — a promoted sentence anchor and any
-        replayed word/progress frames — describe an audio context whose audio and
-        word frames are emitted by the dedicated audio-context task. Routing them
-        through that context's queue keeps a single consumer emitting everything in
-        order; pushing directly here would let them race the audio-context task.
-        When the context is gone (or the sequencer is non-streaming), push directly.
+        These frames — skipped text the spoken text before it has released, and in
+        streaming (TOKEN) mode a promoted sentence anchor and any replayed
+        word/progress frames — follow text queued in an audio context, whose audio
+        and text frames are emitted by the dedicated audio-context task. Routing
+        them through that context's queue keeps a single consumer emitting
+        everything in order; pushing directly here would let them overtake it.
+        When the context is gone, push directly.
 
         Args:
             frames: Frames returned by register_spoken/register_skipped/finalize.
             context_id: The context these frames belong to.
         """
         for f in frames:
-            if (
-                self._is_streaming_tokens
-                and context_id
-                and self.audio_context_available(context_id)
-            ):
+            if context_id and self.audio_context_available(context_id):
                 await self.append_to_audio_context(context_id, f)
             else:
                 await self.push_frame(f)
@@ -1745,8 +1742,9 @@ class TTSService(AIService):
         await self.append_to_audio_context(context_id, frame)
         # TTSTextFrame is queued; mark the spoken slot complete so any skipped
         # frames (e.g. code blocks) waiting behind it can be flushed in order.
-        for f in self._aggregated_frame_sequencer.complete_spoken_slot():
-            await self.push_frame(f)
+        await self._push_sequencer_frames(
+            self._aggregated_frame_sequencer.complete_spoken_slot(), context_id
+        )
 
     async def _stream_audio_frames_from_iterator(
         self,
