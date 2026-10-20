@@ -1201,11 +1201,12 @@ class InworldTTSService(WebsocketTTSService):
             create_config["applyTextNormalization"] = self._apply_text_normalization
         if self._auto_mode is not None:
             create_config["autoMode"] = self._auto_mode
-        if (
+        sentence_boundary = bool(
             self._auto_mode
             and self._is_streaming_tokens
             and _supports_sentence_boundary(self._settings.model)
-        ):
+        )
+        if sentence_boundary:
             # Let the server find sentence boundaries in the raw token stream.
             create_config["autoModeStrategy"] = "SENTENCE_BOUNDARY"
         if self._timestamp_transport_strategy is not None:
@@ -1214,7 +1215,11 @@ class InworldTTSService(WebsocketTTSService):
         # Set buffer settings for timely audio generation.
         # Use provided values or defaults that work well for streaming LLM output.
         create_config["maxBufferDelayMs"] = self._buffer_settings["maxBufferDelayMs"] or 3000
-        create_config["bufferCharThreshold"] = self._buffer_settings["bufferCharThreshold"] or 250
+        buffer_char_threshold = self._buffer_settings["bufferCharThreshold"]
+        # With SENTENCE_BOUNDARY the threshold also cuts long sentences, so only a set
+        # value is sent and the server default applies otherwise.
+        if buffer_char_threshold or not sentence_boundary:
+            create_config["bufferCharThreshold"] = buffer_char_threshold or 250
 
         create_config["timestampType"] = self._timestamp_type
 

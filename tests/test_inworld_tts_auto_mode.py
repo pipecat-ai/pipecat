@@ -30,6 +30,18 @@ async def test_token_mode_uses_sentence_boundary():
     config = await _create_config(text_aggregation_mode=TextAggregationMode.TOKEN)
     assert config["autoMode"] is True
     assert config["autoModeStrategy"] == "SENTENCE_BOUNDARY"
+    assert "bufferCharThreshold" not in config
+
+
+@pytest.mark.asyncio
+async def test_sentence_boundary_sends_a_set_buffer_char_threshold():
+    with pytest.deprecated_call():
+        params = InworldTTSService.InputParams(buffer_char_threshold=400)
+        config = await _create_config(
+            text_aggregation_mode=TextAggregationMode.TOKEN, params=params
+        )
+    assert config["autoModeStrategy"] == "SENTENCE_BOUNDARY"
+    assert config["bufferCharThreshold"] == 400
 
 
 @pytest.mark.asyncio
@@ -44,3 +56,4 @@ async def test_token_mode_uses_sentence_boundary():
 async def test_sentence_boundary_not_requested(kwargs):
     config = await _create_config(**kwargs)
     assert "autoModeStrategy" not in config
+    assert config["bufferCharThreshold"] == 250
