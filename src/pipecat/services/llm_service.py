@@ -66,7 +66,10 @@ from pipecat.services.ai_service import AIService
 from pipecat.services.settings import LLMSettings
 from pipecat.services.websocket_service import WebsocketService
 from pipecat.turns.speculation_gate import SpeculationGate
-from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionLLMServiceMixin
+from pipecat.turns.user_turn_completion_mixin import (
+    IncompleteType,
+    UserTurnCompletionLLMServiceMixin,
+)
 from pipecat.utils.async_tool_cancellation import (
     ASYNC_TOOL_CANCELLATION_INSTRUCTIONS,
     CANCEL_TOOL_PREFIX,
@@ -947,12 +950,20 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             if self._skip_tts is not None:
                 frame.skip_tts = self._skip_tts
 
+        # Turn completion follows the response as the LLM produces it, the way
+        # it reads the response's text, so a response the gate holds or
+        # discards still starts and ends there.
+        await self._follow_response_frame(frame)
+
         # The gate decides synchronously, so its verdict can't be torn by
         # another task pushing at the same time. Everything it hands back is
-        # pushed past it — routing that back through here would re-gate it.
+        # pushed past it and past the turn completion mixin, which has followed
+        # it already — routing that back through here would re-gate it.
         emitted = self._speculation_gate.process(frame, direction)
         for gated_frame, gated_direction in emitted:
-            await super().push_frame(gated_frame, gated_direction)
+            await super(UserTurnCompletionLLMServiceMixin, self).push_frame(
+                gated_frame, gated_direction
+            )
 
     async def _push_llm_text(self, text: str):
         """Push LLM text, using turn completion detection if enabled.
@@ -973,6 +984,17 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             await self._push_turn_text(text)
         else:
             await self.push_frame(LLMTextFrame(text))
+
+    async def _start_incomplete_timeout(self, incomplete_type: IncompleteType):
+        """Arm the re-prompt for an incomplete turn, unless the response is speculative.
+
+        A speculative response answers a turn that hasn't ended, and the context
+        a re-prompt would run against doesn't hold it yet. The stop strategy
+        that started the speculation decides what follows it.
+        """
+        if self._speculation_gate.is_speculating:
+            return
+        await super()._start_incomplete_timeout(incomplete_type)
 
     async def _handle_interruptions(self, _: InterruptionFrame):
         for function_name, entry in self._functions.items():

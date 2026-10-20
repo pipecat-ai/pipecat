@@ -19,6 +19,7 @@ from enum import Enum
 from loguru import logger
 
 from pipecat.frames.frames import (
+    EagerEndOfTurnCancelFrame,
     Frame,
     FunctionCallsStartedFrame,
     InterruptionFrame,
@@ -458,6 +459,10 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
             self._user_turn_completion_voiced = False
         elif isinstance(frame, VADUserStoppedSpeakingFrame):
             self._user_speaking = False
+        elif isinstance(frame, EagerEndOfTurnCancelFrame):
+            # A withdrawn speculative response was never spoken, so a ● it
+            # carried leaves the turn without its spoken completion.
+            self._user_turn_completion_voiced = False
 
         # Pass frame to parent
         await super().process_frame(frame, direction)
@@ -471,6 +476,15 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
         Args:
             frame: The frame to push downstream.
             direction: The direction of frame flow. Defaults to downstream.
+        """
+        await self._follow_response_frame(frame)
+        await super().push_frame(frame, direction)
+
+    async def _follow_response_frame(self, frame: Frame):
+        """Follow the response the LLM produces: its tool calls, start and end.
+
+        A host that holds a response's frames back calls this as the LLM produces
+        them, so a response it holds or discards still starts and ends here.
         """
         if isinstance(frame, FunctionCallsStartedFrame):
             # Broadcast turn completion now, before the function dispatches
@@ -500,8 +514,6 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
         elif isinstance(frame, LLMFullResponseEndFrame):
             await self._report_response()
             await self._turn_reset()
-
-        await super().push_frame(frame, direction)
 
     async def _push_marker(
         self, marker: str, kind: str, append_to_context_immediately: bool = True
