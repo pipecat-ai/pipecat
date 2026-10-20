@@ -13,7 +13,9 @@ This example demonstrates a conversational bot with:
 
 Required environment variables:
 - KRISP_API_KEY: Krisp master API key (session tokens are created from it)
-- OPENAI_API_KEY: OpenAI API key for STT, LLM and TTS
+- DEEPGRAM_API_KEY: Deepgram API key for STT
+- CARTESIA_API_KEY: Cartesia API key for TTS
+- OPENAI_API_KEY: OpenAI API key for LLM
 
 Optional environment variables:
 - KRISP_NOISE_SUPPRESSION_LEVEL: Noise suppression level 0-100 (default: 100)
@@ -42,9 +44,9 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
+from pipecat.services.cartesia.tts import CartesiaTTSService
+from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.services.openai.stt import OpenAIRealtimeSTTService
-from pipecat.services.openai.tts import OpenAITTSService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.livekit.transport import LiveKitParams
@@ -92,12 +94,12 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info("Starting bot")
 
-    stt = OpenAIRealtimeSTTService(api_key=os.environ["OPENAI_API_KEY"])
+    stt = DeepgramSTTService(api_key=os.environ["DEEPGRAM_API_KEY"])
 
-    tts = OpenAITTSService(
-        api_key=os.environ["OPENAI_API_KEY"],
-        settings=OpenAITTSService.Settings(
-            voice="ballad",
+    tts = CartesiaTTSService(
+        api_key=os.environ["CARTESIA_API_KEY"],
+        settings=CartesiaTTSService.Settings(
+            voice="86e30c1d-714b-4074-a1f2-1cb6b552fb49",
         ),
     )
 
