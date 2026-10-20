@@ -175,7 +175,7 @@ class ExternalUserTurnStopStrategy(BaseUserTurnStopStrategy):
 
     async def _handle_transcription(self, frame: TranscriptionFrame):
         """Handle user transcription."""
-        self._text += frame.text
+        self._text = f"{self._text} {frame.text}" if self._text else frame.text
         # We just got a final result, so let's reset interim results.
         self._seen_interim_results = False
         # Reset aggregation timer.
