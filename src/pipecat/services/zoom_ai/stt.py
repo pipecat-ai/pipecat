@@ -129,6 +129,17 @@ def _polished_text(payload: dict[str, Any]) -> str | None:
     return _clean(text)
 
 
+def _reported_language(scribe_language: object, settings: Any) -> Language | None:
+    """The frame language: Scribe's, else None when detecting, else the configured one.
+
+    With language detection on and no language from Scribe, the language isn't known, so
+    it is left out rather than guessed.
+    """
+    if isinstance(scribe_language, str) and scribe_language:
+        return _frame_language(scribe_language)
+    return None if settings.language_detection else _frame_language(settings.language)
+
+
 def _frame_language(value: object) -> Language | None:
     """Convert a stored Scribe locale back to a Language for transcription frames."""
     if isinstance(value, Language):
@@ -201,7 +212,8 @@ class ZoomScribeLiveSTTSettings(STTSettings):
             uses Scribe's default model.
         language_detection: Scribe language detection mode
             (``config.language_detection.mode``). ``None`` turns it off. A
-            detected language Scribe reports is in ``TranscriptionFrame.language``.
+            detected language Scribe reports is in ``TranscriptionFrame.language``;
+            when Scribe reports none, it is ``None``.
         silence_duration_ms: Milliseconds of silence that end a turn in Scribe's
             voice activity detection. Defaults to 350, tuned for voice agents;
             lower is faster, higher keeps sentences with longer pauses together.
@@ -594,7 +606,7 @@ class ZoomScribeLiveSTTService(WebsocketSTTService):
                 # reconnect): open the turn so the aggregator doesn't drop it.
                 self._user_turn_open = True
                 await self.broadcast_frame(ProposedUserStartedSpeakingFrame)
-            language = _frame_language(event.get("language") or self._settings.language)
+            language = _reported_language(event.get("language"), self._settings)
             await self.emit_stt_usage_metrics()
             await self.push_frame(
                 TranscriptionFrame(
@@ -628,7 +640,9 @@ class ZoomScribeFastSTTSettings(STTSettings):
         model: Scribe speech recognition model (``config.model``). ``None``
             uses Scribe's default model.
         language_detection: Scribe language detection mode
-            (``config.language_detection.mode``). ``None`` turns it off.
+            (``config.language_detection.mode``). ``None`` turns it off. A
+            detected language Scribe reports is in ``TranscriptionFrame.language``;
+            when Scribe reports none, it is ``None``.
         diarization: Whether Scribe labels each transcript segment with a
             speaker. Off by default. The labels are in the segments of the
             Scribe response attached as ``TranscriptionFrame.result``. Scribe's
@@ -803,7 +817,13 @@ class ZoomScribeFastSTTService(SegmentedSTTService):
             if polished is not None:
                 text = polished
         if text:
-            language = _frame_language(self._settings.language)
+            # The detected language: the result's (one-time detection) or the first
+            # segment's (continuous detection), when Scribe reports one.
+            segments = (result.get("result") or {}).get("segments") or []
+            detected = (result.get("result") or {}).get("language") or next(
+                (s["language"] for s in segments if s.get("language")), None
+            )
+            language = _reported_language(detected, self._settings)
             await self._handle_transcription(text, True, language)
             yield TranscriptionFrame(
                 text=text,
