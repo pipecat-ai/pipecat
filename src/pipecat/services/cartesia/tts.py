@@ -732,12 +732,15 @@ class CartesiaTTSService(WebsocketTTSService):
                 processed_timestamps = self._normalize_word_timestamps(
                     msg["word_timestamps"]["words"], msg["word_timestamps"]["start"]
                 )
+                # Cartesia reports Chinese and Japanese one character at a time, with
+                # each punctuation mark as its own token. Merging attaches the mark to
+                # the character before it ("す", "。" -> "す。").
+                cjk = self._word_timestamps_include_inter_frame_spaces()
                 await self.add_word_timestamps(
                     processed_timestamps,
                     ctx_id,
-                    includes_inter_frame_spaces=(
-                        True if self._word_timestamps_include_inter_frame_spaces() else None
-                    ),
+                    includes_inter_frame_spaces=True if cjk else None,
+                    pre_merge_tokens=cjk,
                 )
             elif msg["type"] == "chunk":
                 frame = TTSAudioRawFrame(
