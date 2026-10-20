@@ -30,28 +30,50 @@ probability of a "yes" per utterance: median (min-max)
 
 ## Frontend replay
 
-The three frontend models on the recorded turns in `frontend_replay/`, five runs per turn (2026-10-14). A wrong decision is a turn the model should have delegated and answered itself, or the reverse; the turns from the eval scenarios include every stop and correction they make.
+The three frontend models on the recorded turns in `frontend_replay/`, five runs per turn (2026-10-20). A wrong decision is a turn the model should have delegated and answered itself, or the reverse; the turns from the eval scenarios include every stop and correction they make. The acknowledgement is what the user hears for a delegated turn: the text the model wrote with the `delegate` call, if any, and its reply after the call; it is said twice when both have text.
 
 ```bash
 uv run python scripts/llm-with-backend/tuning/frontend_replay/replay.py --frontend <openai|google|anthropic> --samples 5
 ```
 
-| frontend                        | wrong decisions, 75 turns × 5 | where                                                                                                                                         |
-| ------------------------------- | ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `openai` (gpt-4.1)              | 6                             | two stops recorded from the Claude bot, whose acknowledgement precedes the `delegate` call, a shape gpt-4.1 does not produce itself: 2/5 each |
-| `google` (gemini-3.6-flash)     | 2                             | one accepted offer recorded from the Claude bot: 3/5                                                                                          |
-| `anthropic` (claude-sonnet-4-6) | 1                             | one accepted offer recorded from the Gemini bot: 4/5                                                                                          |
+| frontend                        | wrong decisions, 75 turns × 5 | where                                                                                                                                                                                                                                   | acknowledgement words, median | said twice |
+| ------------------------------- | ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- | ---------- |
+| `openai` (gpt-4.1)              | 0                             |                                                                                                                                                                                                                                         | 8                             | 0 of 275   |
+| `google` (gemini-3.6-flash)     | 0                             |                                                                                                                                                                                                                                         | 14                            | 28 of 275  |
+| `anthropic` (claude-sonnet-4-6) | 2                             | two second requests made while work is under way, recorded from the Gemini bot ("check whether CI is green on main as well") and the gpt-4.1 bot ("also, look up what the on-call runbook says"): 4/5 each (the second 9/10 on a rerun) | 15                            | 114 of 273 |
 
-Before this pairing instruction, the same replay had gpt-4.1 at 52 wrong decisions, missing every stop and correction in the scenarios (0/5 or 1/5 on each), Claude at 8 and Gemini at 5.
+With the previous `AFTER DELEGATING` paragraph ("Acknowledge briefly, without offering updates or asking whether to go ahead"), run the same day: gpt-4.1 7 wrong decisions and 23 words, Gemini 1 and 18, Claude 1 and 28. gpt-4.1's usual acknowledgement was "I'm looking into the flaky retry test in the HTTP client now. I'll let you know as soon as I have an update."; now it is "On it." in 128 of 275, and otherwise one short sentence. Its acknowledgements with a second sentence are the turns that asked for a joke, where the joke is the second sentence, and stops, where the confirmation is.
+
+Three things in the paragraph were settled by this replay. The examples name no particular request: an example that mirrored one of the recorded requests ("Let me pull up that runbook") had Claude answer that request with the words, delegating 4/10. "An acknowledgement is never a substitute for the delegate call" holds Claude to the `delegate` call on a second request made while work is under way ("also, look up what the runbook says": 9/10 with the sentence, 7/10 with a softer one, 3/5 without). And the paragraph says nothing about the reply after the call: told that reply adds nothing, Claude on one turn filled it with an invented backend message instead ("Backend: The on-call runbook says..."), in 7 to 11 of 375 runs; with this paragraph, 0 of 375.
+
+Before the pairing instruction's rewrite around its one rule, the same replay had gpt-4.1 at 52 wrong decisions, missing every stop and correction in the scenarios (0/5 or 1/5 on each), Claude at 8 and Gemini at 5.
 
 ## Text evals
 
-The twelve text scenarios on the three bots with a text frontend, five runs each, without predictive delegation (2026-10-14). The frontends run on their services' default models (`gpt-4.1`, `gemini-3.6-flash`, `claude-sonnet-4-6`), the backend on `claude-sonnet-4-6`, and the judge is the release suite's text judge. Each table comes from the run's `results.jsonl` through `results_table.py`:
+The twelve text scenarios on the three bots with a text frontend, five runs each, without predictive delegation (2026-10-20, with this `AFTER DELEGATING` paragraph). The frontends run on their services' default models (`gpt-4.1`, `gemini-3.6-flash`, `claude-sonnet-4-6`), the backend on `claude-sonnet-4-6`, and the judge is the release suite's text judge. Each table comes from the run's `results.jsonl` through `results_table.py`:
 
 ```bash
 uv run python -m pipecat.evals suite evals/llm-with-backend/manifest.yaml -s text --repeat 5
 uv run python scripts/llm-with-backend/tuning/results_table.py <runs-dir>/<run>/results.jsonl
 ```
+
+| scenario                      | anthropic-frontend | google-frontend | openai-responses-frontend |
+| ----------------------------- | ------------------ | --------------- | ------------------------- |
+| `accepted_offer/text`         | 5/5                | 5/5             | 5/5                       |
+| `aside_while_waiting/text`    | 5/5                | 5/5             | 5/5                       |
+| `cancel_and_replace/text`     | 5/5                | 5/5             | 5/5                       |
+| `cancel_delegation/text`      | 5/5                | 5/5             | 5/5                       |
+| `concurrent_delegations/text` | 0/5                | 1/5             | 0/5                       |
+| `delegate_ack/text`           | 5/5                | 4/5             | 5/5                       |
+| `delegate_with_aside/text`    | 5/5                | 5/5             | 5/5                       |
+| `frontend_only/text`          | 5/5                | 5/5             | 5/5                       |
+| `implicit_cancel/text`        | 4/5                | 5/5             | 5/5                       |
+| `partial_cancel/text`         | 5/5                | 5/5             | 4/5                       |
+| `progress_inquiry/text`       | 5/5                | 5/5             | 5/5                       |
+| `superseding_delegation/text` | 5/5                | 5/5             | 5/5                       |
+| **total**                     | **54/60**          | **55/60**       | **54/60**                 |
+
+The same sweep on 2026-10-14, with the previous `AFTER DELEGATING` paragraph, for comparison:
 
 | scenario                      | anthropic-frontend | google-frontend | openai-responses-frontend |
 | ----------------------------- | ------------------ | --------------- | ------------------------- |
@@ -69,7 +91,7 @@ uv run python scripts/llm-with-backend/tuning/results_table.py <runs-dir>/<run>/
 | `superseding_delegation/text` | 5/5                | 5/5             | 5/5                       |
 | **total**                     | **53/60**          | **53/60**       | **50/60**                 |
 
-The same sweep, run at the same time on the pairing instruction before this one, for comparison:
+And the same sweep on 2026-10-14 on the pairing instruction before this one:
 
 | scenario                      | anthropic-frontend | google-frontend | openai-responses-frontend |
 | ----------------------------- | ------------------ | --------------- | ------------------------- |
@@ -111,7 +133,7 @@ The classifier, live, from the bots' logs: every request and stop scored 0.88 or
 
 ### Stops
 
-The scenarios' stops and corrections (`cancel_delegation`, `implicit_cancel`, `partial_cancel` and `superseding_delegation`, 20 runs per frontend) with no `delegate` call: gpt-4.1 2, Claude 0 and Gemini 0, against 16, 1 and 0 before. gpt-4.1's two are both `partial_cancel`, "forget the tests" while a runbook lookup is also running.
+The scenarios' stops and corrections (`cancel_delegation`, `implicit_cancel`, `partial_cancel` and `superseding_delegation`, 20 runs per frontend) with no `delegate` call: gpt-4.1 1, Claude 0 and Gemini 0 (2026-10-20), against 2, 0 and 0 on 2026-10-14 and 16, 1 and 0 before the rewrite. gpt-4.1's one is `partial_cancel`, "forget the tests" while a runbook lookup is also running.
 
 ### Known failures
 

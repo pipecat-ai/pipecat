@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Replay recorded user turns through a frontend model and count its delegate calls.
+"""Replay recorded user turns through a frontend model, counting its delegate calls and recording what it says around them.
 
 Each line of ``turns.jsonl`` is a user's turn from a run of the text eval
 scenarios on one of the three example bots with a text frontend (OpenAI
@@ -13,7 +13,11 @@ and whether the turn should be delegated. For each turn, the script builds the
 frontend as the example does, with the example's instruction and the pairing
 instruction and tool description as they are in the code, runs the model on
 the context several times, and reports the turns where the model's decision
-differs from the expected one.
+differs from the expected one. A turn the model delegates runs on, as in the
+bot: the ``delegate`` call settles and the model replies, so the acknowledgement
+the user would hear, what the model said with the call and in that reply, is
+reported too, with the words it took and how often it was said twice (with
+the call and again after it).
 
 One of the tuning checks: see ``scripts/llm-with-backend/tuning/README.md``.
 Needs the frontend's key in ``.env``::
@@ -38,15 +42,22 @@ sys.path.insert(0, str(HERE.parents[3] / "examples" / "multi-worker" / "llm-with
 
 from backend import FRONTEND_INSTRUCTIONS  # noqa: E402
 
-from pipecat.frames.frames import (  # noqa: E402
-    FunctionCallInProgressFrame,
-    LLMContextFrame,
-    LLMTextFrame,
+from pipecat.frames.frames import LLMContextFrame  # noqa: E402
+from pipecat.pipeline.llm_with_backend import (  # noqa: E402
+    DELEGATE_TOOL_NAME,
+    BackendConnector,
+    ConnectorContext,
 )
-from pipecat.pipeline.llm_with_backend import BackendConnector, ConnectorContext  # noqa: E402
+from pipecat.pipeline.pipeline import Pipeline  # noqa: E402
 from pipecat.processors.aggregators.llm_context import LLMContext, LLMContextMessage  # noqa: E402
+from pipecat.processors.aggregators.llm_response_universal import (  # noqa: E402
+    LLMContextAggregatorPair,
+)
 from pipecat.services.llm_service import LLMService  # noqa: E402
-from pipecat.tests.utils import run_test  # noqa: E402
+from pipecat.tests.utils import SleepFrame, run_test  # noqa: E402
+
+#: How long a turn is given for the model's reply after a delegate call.
+REPLY_SECS = 8
 
 
 def _frontend(name: str) -> LLMService[Any]:
@@ -75,8 +86,14 @@ def _frontend(name: str) -> LLMService[Any]:
     raise ValueError(f"unknown frontend {name!r}: expected openai, google or anthropic")
 
 
-async def _run_once(frontend: str, messages: list[dict]) -> tuple[bool, str]:
-    """Run the frontend on a context once: whether it called delegate, and what it said."""
+async def _run_once(frontend: str, messages: list[dict]) -> tuple[bool, list[str]]:
+    """Run the frontend on a context once: whether it called delegate, and what it said.
+
+    The frontend runs ahead of an assistant aggregator, as in the bot, so a
+    delegate call settles and the model replies to its result. What it said is
+    read back from the context: the text it wrote with the call, if any, then
+    the reply.
+    """
     llm = _frontend(frontend)
     connector = BackendConnector()
     connector.bind(ConnectorContext(backend_name="backend", frontend_is_realtime=False))
@@ -96,10 +113,26 @@ async def _run_once(frontend: str, messages: list[dict]) -> tuple[bool, str]:
             list[LLMContextMessage], [m for m in messages if m.get("role") != "llm_specific"]
         )
     )
-    down, _ = await run_test(llm, frames_to_send=[LLMContextFrame(context)], start_timeout=5.0)
-    called = any(isinstance(f, FunctionCallInProgressFrame) for f in down)
-    text = "".join(f.text for f in down if isinstance(f, LLMTextFrame))
-    return called, text
+    recorded = len(context.get_messages())
+    aggregator = LLMContextAggregatorPair(context).assistant()
+    await run_test(
+        Pipeline([llm, aggregator]),
+        frames_to_send=[LLMContextFrame(context), SleepFrame(sleep=REPLY_SECS)],
+        start_timeout=5.0,
+    )
+    added = [m for m in context.get_messages()[recorded:] if isinstance(m, dict)]
+    called = any(
+        call.get("function", {}).get("name") == DELEGATE_TOOL_NAME
+        for m in added
+        if m.get("role") == "assistant"
+        for call in m.get("tool_calls") or []
+    )
+    said = [
+        content
+        for m in added
+        if m.get("role") == "assistant" and isinstance(content := m.get("content"), str) and content
+    ]
+    return called, said
 
 
 async def _replay(turns: list[dict], frontend: str, samples: int, concurrency: int) -> list[dict]:
@@ -126,13 +159,19 @@ async def _replay(turns: list[dict], frontend: str, samples: int, concurrency: i
     return [{**turn, "runs": runs[i]} for i, turn in enumerate(turns)]
 
 
+def _words(said: list[str]) -> int:
+    return sum(len(text.split()) for text in said)
+
+
 def _report(results: list[dict], show: bool):
     wrong_total = 0
+    acks: list[list[str]] = []
     for result in results:
         runs = result["runs"]
         delegated = sum(1 for called, _ in runs if called)
         wrong = len(runs) - delegated if result["needs_delegate"] else delegated
         wrong_total += wrong
+        acks.extend(said for called, said in runs if called)
         user = [m for m in result["messages"] if m.get("role") == "user"][-1]["content"]
         expected = "delegate" if result["needs_delegate"] else "answer"
         mark = "!!" if wrong else "  "
@@ -141,20 +180,31 @@ def _report(results: list[dict], show: bool):
             f"{result['frontend']}/{result['kind']}: {user[:60]}"
         )
         if show:
-            for called, text in runs:
-                print(f"       [{'D' if called else '-'}] {text[:150]!r}")
+            for called, said in runs:
+                print(f"       [{'D' if called else '-'}] {' | '.join(said)[:150]!r}")
     print(f"\nwrong decisions: {wrong_total} over {len(results)} turns")
+    if acks:
+        words = sorted(_words(said) for said in acks)
+        twice = sum(1 for said in acks if len(said) > 1)
+        print(
+            f"acknowledgements: {len(acks)}, words median {words[len(words) // 2]}, "
+            f"max {words[-1]}, said twice {twice}"
+        )
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Replay recorded user turns through a frontend model and count its delegate calls."
+        description="Replay recorded user turns through a frontend model, counting its delegate calls and recording what it says around them."
     )
     parser.add_argument("--frontend", default="openai", help="openai, google or anthropic")
     parser.add_argument("--samples", type=int, default=5, help="Runs per turn.")
     parser.add_argument("--concurrency", type=int, default=4)
     parser.add_argument("--filter", help="Only turns whose user text contains this.")
-    parser.add_argument("--show", action="store_true", help="Print what the model said each run.")
+    parser.add_argument(
+        "--show",
+        action="store_true",
+        help="Print what the model said each run, with the call and after it.",
+    )
     parser.add_argument("--out", type=Path, help="Write each turn's runs to this JSON file.")
     args = parser.parse_args()
     load_dotenv(override=True)
