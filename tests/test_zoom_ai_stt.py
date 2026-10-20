@@ -24,6 +24,7 @@ from pipecat.frames.frames import (
     ProposedUserStoppedSpeakingFrame,
     TranscriptionFrame,
 )
+from pipecat.services.zoom_ai import stt as zoom_stt
 from pipecat.services.zoom_ai.stt import (
     SEND_CHUNK_BYTES,
     ZoomScribeFastSTTService,
@@ -109,24 +110,25 @@ async def test_connect_sends_the_session_update(monkeypatch):
     assert calls[0]["kwargs"]["subprotocols"] == ["live-asr"]
     headers = calls[0]["kwargs"]["additional_headers"]
     assert headers["Authorization"] == "Bearer test-key"
-    assert headers["User-Agent"].startswith("ZoomAI/1.0 (integration=Pipecat; plugin=pipecat-ai/")
+    assert headers["User-Agent"].startswith("pipecat/")
+    assert headers["x-zm-trackingid"].startswith("zoom_ai_community_integration_pipecat_")
     assert json.loads(websocket.sent[0]) == {
         "type": "session.update",
         "language": "en-US",
         "audio": {"format": "pcm16"},
-        "config": {"turn_detection": {"type": "acoustic_vad", "silence_duration_ms": 350}},
+        "turn_detection": {"silence_duration_ms": 350},
     }
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("silence_duration_ms", "expected_config"),
+    ("silence_duration_ms", "expected"),
     [
-        (500, {"turn_detection": {"type": "acoustic_vad", "silence_duration_ms": 500}}),
+        (500, {"silence_duration_ms": 500}),
         (None, None),  # Scribe's server default: exactly the documented session.update
     ],
 )
-async def test_silence_duration_setting(monkeypatch, silence_duration_ms, expected_config):
+async def test_silence_duration_setting(monkeypatch, silence_duration_ms, expected):
     websocket = _FakeWebsocket()
     _patch_connect(monkeypatch, websocket)
     service = _live(
@@ -135,7 +137,7 @@ async def test_silence_duration_setting(monkeypatch, silence_duration_ms, expect
 
     await service._connect_websocket()
 
-    assert json.loads(websocket.sent[0]).get("config") == expected_config
+    assert json.loads(websocket.sent[0]).get("turn_detection") == expected
 
 
 @pytest.mark.asyncio
@@ -147,6 +149,38 @@ async def test_language_setting_maps_to_a_scribe_locale(monkeypatch):
     await service._connect_websocket()
 
     assert json.loads(websocket.sent[0])["language"] == "de-DE"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("turn_open", [True, False])
+async def test_input_gap_mid_turn_sends_silence_to_end_it(monkeypatch, turn_open):
+    """Input stopping mid-turn (e.g. a mute) gets enough silence for Scribe to end the turn."""
+    monkeypatch.setattr(zoom_stt, "INPUT_GAP_SECS", 0.02)
+    service = _live()
+    websocket = _FakeWebsocket()
+    service._websocket = websocket
+    service._user_turn_open = turn_open
+    service._last_input_time = 0  # input stopped long ago
+
+    task = asyncio.create_task(service._input_gap_handler())
+    await asyncio.sleep(0.1)
+    task.cancel()
+
+    sent = [m for m in websocket.sent if isinstance(m, bytes)]
+    # silence_duration_ms (350) plus 100 ms, once per gap; nothing without an open turn
+    assert sent == ([bytes(16000 * 2 * 450 // 1000)] if turn_open else [])
+
+
+def test_plaintext_urls_warn_except_for_localhost(monkeypatch):
+    warnings = []
+    monkeypatch.setattr(zoom_stt.logger, "warning", lambda msg, *a, **k: warnings.append(msg))
+    ZoomScribeLiveSTTService(api_key="test-key", url="ws://scribe.example.com/live")
+    ZoomScribeFastSTTService(api_key="test-key", url="http://scribe.example.com/transcribe")
+    assert len(warnings) == 2 and all("not encrypted" in w for w in warnings)
+    warnings.clear()
+    ZoomScribeLiveSTTService(api_key="test-key", url="ws://localhost:8080/live")
+    ZoomScribeLiveSTTService(api_key="test-key")
+    assert warnings == []
 
 
 @pytest.mark.asyncio
@@ -262,17 +296,19 @@ async def test_disconnect_closes_an_open_turn(monkeypatch):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "code, category",
+    "code, fatal, category",
     [
-        ("invalid_config", ErrorCategory.INVALID_REQUEST),
-        ("UNSUPPORTED_LANGUAGE", ErrorCategory.INVALID_REQUEST),
-        ("internal", ErrorCategory.UNKNOWN),
+        ("invalid_config", True, ErrorCategory.INVALID_REQUEST),
+        ("UNSUPPORTED_LANGUAGE", True, ErrorCategory.INVALID_REQUEST),
+        ("internal", True, ErrorCategory.UNKNOWN),
+        # Scribe sends this one as non-fatal, but it didn't apply the session.update.
+        ("invalid_config", False, ErrorCategory.INVALID_REQUEST),
     ],
 )
-async def test_fatal_error_event_is_reported(monkeypatch, code, category):
+async def test_fatal_error_event_is_reported(monkeypatch, code, fatal, category):
     service = _live()
     service._websocket = _FakeWebsocket(
-        [_event("error", error={"code": code, "message": "bad things", "fatal": True})]
+        [_event("error", error={"code": code, "message": "bad things", "fatal": fatal})]
     )
     push_error = AsyncMock()
     monkeypatch.setattr(service, "push_error", push_error)
@@ -321,11 +357,106 @@ async def test_live_diarization_is_requested_only_when_on(monkeypatch):
         "type": "session.update",
         "language": "en-US",
         "audio": {"format": "pcm16"},
-        "config": {
-            "turn_detection": {"type": "acoustic_vad", "silence_duration_ms": 350},
-            "diarization": True,
-        },
+        "config": {"diarization": True},
+        "turn_detection": {"silence_duration_ms": 350},
     }
+
+
+@pytest.mark.asyncio
+async def test_live_recognition_options_are_requested_only_when_set(monkeypatch):
+    websocket = _FakeWebsocket()
+    _patch_connect(monkeypatch, websocket)
+    service = _live(
+        settings=ZoomScribeLiveSTTService.Settings(
+            model="zoom-scribe-multilingual",
+            language_detection="continuous",
+            vocabulary=["Pipecat", "LiveKit"],
+            profanity_filter=True,
+            text_polishing=True,
+        )
+    )
+
+    await service._connect_websocket()
+
+    update = json.loads(websocket.sent[0])
+    assert update["config"] == {
+        "model": "zoom-scribe-multilingual",
+        "language_detection": {"mode": "continuous"},
+        "profanity_filter": True,
+        "vocabulary": {"phrases": ["Pipecat", "LiveKit"]},
+    }
+    assert update["outputs"] == {"text_polishing": {"enabled": True, "include_transcript": True}}
+
+
+@pytest.mark.asyncio
+async def test_live_frames_carry_the_detected_language(monkeypatch):
+    service = _live(settings=ZoomScribeLiveSTTService.Settings(language_detection="continuous"))
+    service._websocket = _FakeWebsocket(
+        [
+            _event(
+                "transcription.completed",
+                item_id="item_1",
+                transcript="Buenos días.",
+                language="es",
+            )
+        ]
+    )
+    frames = _record_frames(monkeypatch, service)
+
+    await service._receive_messages()
+
+    [frame] = [f for f in frames if isinstance(f, TranscriptionFrame)]
+    assert frame.language is Language.ES
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("polished", "expected"),
+    [
+        ("[polishing_failed: timeout]", "Um, hello hello there."),  # falls back to the transcript
+        ("[Speaker 1] Hello there.", "Hello there."),  # speaker tags removed
+    ],
+)
+async def test_live_polished_text_edge_cases(monkeypatch, polished, expected):
+    service = _live(settings=ZoomScribeLiveSTTService.Settings(text_polishing=True))
+    service._websocket = _FakeWebsocket(
+        [
+            _event(
+                "transcription.completed",
+                item_id="item_1",
+                transcript="Um, hello hello there.",
+                outputs={"text_polishing": {"text": polished}},
+            )
+        ]
+    )
+    frames = _record_frames(monkeypatch, service)
+
+    await service._receive_messages()
+
+    [frame] = [f for f in frames if isinstance(f, TranscriptionFrame)]
+    assert frame.text == expected
+
+
+@pytest.mark.asyncio
+async def test_live_text_polishing_pushes_the_polished_text(monkeypatch):
+    service = _live(settings=ZoomScribeLiveSTTService.Settings(text_polishing=True))
+    service._websocket = _FakeWebsocket(
+        [
+            _event(
+                "transcription.completed",
+                item_id="item_1",
+                transcript="Um, hello hello there.",
+                outputs={"text_polishing": {"text": "Hello there."}},
+            )
+        ]
+    )
+    frames = _record_frames(monkeypatch, service)
+
+    await service._receive_messages()
+
+    [frame] = [f for f in frames if isinstance(f, TranscriptionFrame)]
+    assert frame.text == "Hello there."
+    assert frame.result["transcript"] == "Um, hello hello there."
 
 
 @pytest.mark.asyncio
@@ -591,10 +722,9 @@ async def test_settings_change_reconnects_with_the_new_config(monkeypatch):
     websocket.state = State.OPEN
     await service._connect_websocket()
 
-    assert json.loads(websocket.sent[-1])["config"] == {
-        "turn_detection": {"type": "acoustic_vad", "silence_duration_ms": 500},
-        "diarization": True,
-    }
+    update = json.loads(websocket.sent[-1])
+    assert update["config"] == {"diarization": True}
+    assert update["turn_detection"] == {"silence_duration_ms": 500}
     assert not service._session_closed.is_set()  # stop() waits again on the new session
 
 
@@ -679,6 +809,7 @@ class _ScribeFast:
             {
                 "headers": dict(request.headers),
                 "config": json.loads(str(form["config"])),
+                "outputs": json.loads(str(form["outputs"])) if "outputs" in form else None,
                 "filename": upload.filename,
                 "content_type": upload.content_type,
                 "audio": upload.file.read(),
@@ -723,12 +854,14 @@ async def test_fast_uploads_the_utterance_and_config():
 
     [request] = fake.requests
     assert request["headers"]["Authorization"] == "Bearer test-key"
-    assert request["headers"]["User-Agent"].startswith(
-        "ZoomAI/1.0 (integration=Pipecat; plugin=pipecat-ai/"
+    assert request["headers"]["User-Agent"].startswith("pipecat/")
+    assert request["headers"]["x-zm-trackingid"].startswith(
+        "zoom_ai_community_integration_pipecat_"
     )
     assert (request["filename"], request["content_type"]) == ("utterance.wav", "audio/wav")
     assert request["audio"] == b"RIFF0000WAVE"
     assert request["config"] == {"language": "en-US"}
+    assert request["outputs"] is None
 
     [frame] = frames
     assert isinstance(frame, TranscriptionFrame)
@@ -767,6 +900,40 @@ async def test_fast_speaker_labels_stay_in_the_raw_result():
 
     assert frame.text == "Hi. We built it."
     assert frame.result["result"]["segments"] == segments
+
+
+@pytest.mark.asyncio
+async def test_fast_recognition_options_and_text_polishing():
+    body = {
+        "request_id": "req_5",
+        "result": {"text_display": "Um, hello hello there.", "segments": []},
+        "outputs": {"text_polishing": {"text": "Hello there."}},
+    }
+    fake = _ScribeFast(body=body)
+
+    [frame] = await _run_fast(
+        fake,
+        settings=ZoomScribeFastSTTService.Settings(
+            model="zoom-scribe-en-pro",
+            language_detection="once",
+            vocabulary=["Pipecat"],
+            profanity_filter=True,
+            text_polishing=True,
+        ),
+    )
+
+    [request] = fake.requests
+    assert request["config"] == {
+        "language": "en-US",
+        "model": "zoom-scribe-en-pro",
+        "language_detection": {"mode": "once"},
+        "profanity_filter": True,
+        "vocabulary": {"phrases": ["Pipecat"]},
+    }
+    # Text polishing is its own multipart field, as `outputs` sits beside `config`.
+    assert request["outputs"] == {"text_polishing": {"enabled": True}}
+    assert frame.text == "Hello there."
+    assert frame.result["result"]["text_display"] == "Um, hello hello there."
 
 
 @pytest.mark.asyncio
