@@ -2386,6 +2386,9 @@ class PipelineFlushFrame(ControlFrame):
     origin: str | None = field(default=None, compare=False)
     flush_id: int = field(default_factory=obj_id, compare=False)
 
+    def __str__(self):
+        return f"{self.name}(flush_id: {self.flush_id}, returning: {self.returning})"
+
 
 @dataclass
 class BotConnectedFrame(SystemFrame):
