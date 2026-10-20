@@ -297,21 +297,30 @@ async def test_tagged_final_result_maps_speaker_user_id(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_tagged_interim_result_maps_speaker_user_id(monkeypatch):
-    """Tagged interim word metadata is exposed on the interim frame."""
-    service = _make_service(settings=NvidiaSTTService.Settings(speaker_diarization=True))
-    response = _streaming_response(
-        "Hello there",
-        words=[_word("Hello", 3), _word("there", 3)],
-        is_final=False,
+@pytest.mark.parametrize(
+    "words",
+    [
+        [],
+        [_word("Hi", 1), _word("there", 1), _word("hello", 2)],
+    ],
+)
+async def test_interim_results_are_not_split_by_speaker(monkeypatch, words):
+    """Interim results are emitted whole, unlabelled, with the session user."""
+    service = _make_service(
+        settings=NvidiaSTTService.Settings(
+            speaker_diarization=True,
+            speaker_format="Speaker {speaker}: {text}",
+        )
     )
+    service._user_id = "session-user"
+    response = _streaming_response(" Hi there hello", words=words, is_final=False)
 
     frames = await _capture_response_frames(monkeypatch, service, response)
 
     assert len(frames) == 1
     assert isinstance(frames[0], InterimTranscriptionFrame)
-    assert frames[0].text == "Hello there"
-    assert frames[0].user_id == "3"
+    assert frames[0].text == " Hi there hello"
+    assert frames[0].user_id == "session-user"
 
 
 @pytest.mark.asyncio
@@ -337,23 +346,6 @@ async def test_mixed_speakers_emit_contiguous_run_frames(monkeypatch):
     assert [frame.finalized for frame in frames] == [False, False, True]
     assert not any(frame.includes_inter_frame_spaces for frame in frames)
     assert _aggregate(frames) == "Hi there hello again"
-
-
-@pytest.mark.asyncio
-async def test_mixed_speaker_interim_result_emits_interim_runs(monkeypatch):
-    """A mixed-speaker interim result is split into interim frames per speaker."""
-    service = _make_service(settings=NvidiaSTTService.Settings(speaker_diarization=True))
-    response = _streaming_response(
-        "Hi there hello",
-        words=[_word("Hi", 1), _word("there", 1), _word("hello", 2)],
-        is_final=False,
-    )
-
-    frames = await _capture_response_frames(monkeypatch, service, response)
-
-    assert all(isinstance(frame, InterimTranscriptionFrame) for frame in frames)
-    assert [frame.text for frame in frames] == ["Hi there", "hello"]
-    assert [frame.user_id for frame in frames] == ["1", "2"]
 
 
 @pytest.mark.asyncio

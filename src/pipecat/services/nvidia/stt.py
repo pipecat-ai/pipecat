@@ -144,7 +144,8 @@ class NvidiaSTTSettings(_NvidiaBaseSTTSettings):
             If ``None``, transcript text is not modified. NVIDIA numbers speakers
             from ``1``. A result with an untagged word, no word information, or
             words that can't be located in its transcript is emitted unsplit and
-            unformatted, with the transport ``user_id``.
+            unformatted, with the transport ``user_id``. Interim results carry no
+            word information, so they are always emitted that way.
     """
 
     interim_results: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -242,7 +243,8 @@ class NvidiaSTTService(STTService):
     Provides real-time transcription capabilities using NVIDIA's Nemotron Speech ASR models
     through streaming recognition. Supports interim results and continuous audio
     processing for low-latency applications. When speaker diarization is enabled, each
-    contiguous speaker run is emitted as a separate frame with its speaker tag in ``user_id``.
+    contiguous speaker run of a final result is emitted as a separate frame with its speaker
+    tag in ``user_id``.
     """
 
     Settings = NvidiaSTTSettings
@@ -707,7 +709,8 @@ class NvidiaSTTService(STTService):
         """Push one frame per speaker run, or one frame for the full result."""
         alternative = result.alternatives[0]
         transcripts: list[tuple[int | None, str]] = []
-        if speaker_diarization:
+        # NVIDIA sends word information, and so speaker tags, only on final results.
+        if speaker_diarization and result.is_final:
             # NVIDIA numbers speakers from 1; 0 is the protobuf default for a
             # word the server did not tag.
             words = [
