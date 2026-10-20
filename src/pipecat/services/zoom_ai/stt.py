@@ -14,19 +14,20 @@ Two services, matching the two Scribe processing modes:
 - :class:`ZoomScribeFastSTTService` (Scribe Fast): one HTTP request per
   utterance, segmented by the pipeline's VAD.
 
-See https://developers.zoom.us/docs/ai-services/scribe/ for the API.
-
-Requests identify the integration to Zoom with a ``User-Agent`` header,
-``ZoomAI/1.0 (integration=Pipecat; plugin=pipecat-ai/<version>)``. It
-contains only the integration name and version, never user data.
+Settings map to the Scribe API fields of the same name. For what each feature
+does, and its availability, pricing and enablement, see
+https://developers.zoom.us/docs/ai-services/scribe/ and https://www.zoom.ai/
 """
 
 import asyncio
 import json
 import re
+import time
+import uuid
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import urlparse
 
 import aiohttp
 from loguru import logger
@@ -66,6 +67,11 @@ SEND_CHUNK_BYTES = SCRIBE_SAMPLE_RATE * 2 // 20
 DEFAULT_SILENCE_DURATION_MS = 350
 # How long stop() waits for Scribe to send the last transcript and session.closed.
 SESSION_CLOSE_TIMEOUT_SECS = 2.0
+TRACKING_ID_PREFIX = "zoom_ai_community_integration_pipecat_"
+# When input stops mid-turn (e.g. the user muted), Scribe's VAD hears no silence and
+# the turn stays open. After this long without input, send enough silence to end it.
+INPUT_GAP_SECS = 1.0
+_LOOPBACK_HOSTS = ("localhost", "127.0.0.1", "::1")
 
 # Scribe adds speaker or channel tags to transcripts when diarization is on.
 _SPEAKER_TAG = re.compile(r"\[(?:speaker[ _]?\d+|spk_\d+|channel\d+)\]\s*", re.IGNORECASE)
@@ -76,9 +82,51 @@ def _clean(text: str | None) -> str:
 
 
 def _headers(api_key: str) -> dict[str, str]:
-    # Identifies this integration to Zoom (name and version only, no user data).
-    user_agent = f"ZoomAI/1.0 (integration=Pipecat; plugin=pipecat-ai/{pipecat_version()})"
-    return {"Authorization": f"Bearer {api_key}", "User-Agent": user_agent}
+    return {
+        "Authorization": f"Bearer {api_key}",
+        "User-Agent": f"pipecat/{pipecat_version()}",
+        "x-zm-trackingid": f"{TRACKING_ID_PREFIX}{uuid.uuid4()}",
+    }
+
+
+def _check_url(url: str, name: str) -> str:
+    """Return ``url``, warning if it sends the API key and audio unencrypted to a remote host."""
+    parsed = urlparse(url)
+    if parsed.scheme.lower() in ("http", "ws") and parsed.hostname not in _LOOPBACK_HOSTS:
+        logger.warning(
+            f"Zoom Scribe {name} is not encrypted ({parsed.scheme}://); "
+            "the API key and audio are sent in plaintext"
+        )
+    return url
+
+
+def _recognition_config(settings: Any) -> dict[str, Any]:
+    """The optional ``config`` fields shared by Scribe Live and Fast."""
+    config: dict[str, Any] = {}
+    if settings.model:
+        config["model"] = settings.model
+    if settings.language_detection:
+        config["language_detection"] = {"mode": settings.language_detection}
+    if settings.diarization:
+        config["diarization"] = True
+    if settings.profanity_filter:
+        config["profanity_filter"] = True
+    if settings.vocabulary:
+        config["vocabulary"] = {"phrases": list(settings.vocabulary)}
+    return config
+
+
+def _polished_text(payload: dict[str, Any]) -> str | None:
+    """Scribe's polished text (``outputs.text_polishing.text``), or None if absent or failed.
+
+    When polishing fails, Scribe still returns the transcription and puts a
+    ``[polishing_failed: <reason>]`` marker in place of the polished text.
+    """
+    polishing = (payload.get("outputs") or {}).get("text_polishing") or {}
+    text = polishing.get("text")
+    if not isinstance(text, str) or text.lstrip().startswith("[polishing_failed"):
+        return None
+    return _clean(text)
 
 
 def _frame_language(value: object) -> Language | None:
@@ -149,6 +197,11 @@ class ZoomScribeLiveSTTSettings(STTSettings):
     Changing a setting reconnects with a new Scribe session.
 
     Parameters:
+        model: Scribe speech recognition model (``config.model``). ``None``
+            uses Scribe's default model.
+        language_detection: Scribe language detection mode
+            (``config.language_detection.mode``). ``None`` turns it off. A
+            detected language Scribe reports is in ``TranscriptionFrame.language``.
         silence_duration_ms: Milliseconds of silence that end a turn in Scribe's
             voice activity detection. Defaults to 350, tuned for voice agents;
             lower is faster, higher keeps sentences with longer pauses together.
@@ -159,10 +212,23 @@ class ZoomScribeLiveSTTSettings(STTSettings):
             as ``TranscriptionFrame.result``: ``speaker``, plus ``speaker_segments``
             with each one's span when several speakers spoke. Scribe's speaker
             tags are removed from the transcript text.
+        vocabulary: Words and phrases that customize recognition
+            (``config.vocabulary.phrases``).
+        profanity_filter: Scribe's profanity filter (``config.profanity_filter``).
+            Off by default.
+        text_polishing: Scribe's text polishing (``outputs.text_polishing``).
+            The polished text is the transcript, and the recognized text is in
+            the Scribe event attached as ``TranscriptionFrame.result``
+            (``transcript``); if polishing fails, the recognized text is used.
+            Off by default.
     """
 
     silence_duration_ms: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     diarization: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    language_detection: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    vocabulary: list[str] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    profanity_filter: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    text_polishing: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class ZoomScribeLiveSTTService(WebsocketSTTService):
@@ -207,7 +273,8 @@ class ZoomScribeLiveSTTService(WebsocketSTTService):
         Args:
             api_key: Zoom AI Services API key or JWT. It is sent on every request and
                 reconnect, so it must stay valid for as long as the service runs.
-            url: Scribe Live WebSocket URL.
+            url: Scribe Live WebSocket URL. A plaintext ``ws://`` URL to a host other
+                than localhost logs a warning.
             sample_rate: Input audio sample rate. Audio is resampled to 16 kHz.
             should_interrupt: Whether a user turn started by Scribe interrupts the bot.
             settings: Runtime-updatable settings.
@@ -218,6 +285,10 @@ class ZoomScribeLiveSTTService(WebsocketSTTService):
             language=Language.EN_US,
             silence_duration_ms=DEFAULT_SILENCE_DURATION_MS,
             diarization=False,
+            language_detection=None,
+            vocabulary=None,
+            profanity_filter=False,
+            text_polishing=False,
         )
         if settings is not None:
             default_settings.apply_update(settings)
@@ -231,7 +302,7 @@ class ZoomScribeLiveSTTService(WebsocketSTTService):
             **kwargs,
         )
         self._api_key = api_key
-        self._url = url
+        self._url = _check_url(url, "url")
         self._should_interrupt = should_interrupt
         self._resampler = create_stream_resampler()
         self._send_buffer = bytearray()
@@ -239,6 +310,9 @@ class ZoomScribeLiveSTTService(WebsocketSTTService):
         self._receive_task = None
         self._session_closed = asyncio.Event()
         self._awaiting_final = False
+        self._input_gap_task = None
+        self._last_input_time = time.monotonic()
+        self._gap_filled = False  # silence already sent for the current input gap
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -327,9 +401,32 @@ class ZoomScribeLiveSTTService(WebsocketSTTService):
         if self.sample_rate != SCRIBE_SAMPLE_RATE:
             audio = await self._resampler.resample(audio, self.sample_rate, SCRIBE_SAMPLE_RATE)
         self._send_buffer.extend(audio)
+        self._last_input_time = time.monotonic()
+        self._gap_filled = False
         if len(self._send_buffer) >= SEND_CHUNK_BYTES:
             await self._flush_audio()
         yield None
+
+    async def _input_gap_handler(self):
+        """End a Scribe turn that input stopped in the middle of (e.g. the user muted).
+
+        Scribe's VAD ends a turn after ``silence_duration_ms`` of silence, but no audio is
+        not silence. Once input has stopped for ``INPUT_GAP_SECS`` with a turn open, send
+        that much silence (plus 100 ms), once per gap.
+        """
+        while True:
+            await asyncio.sleep(INPUT_GAP_SECS / 2)
+            if (
+                not self._user_turn_open
+                or self._gap_filled
+                or time.monotonic() - self._last_input_time < INPUT_GAP_SECS
+            ):
+                continue
+            self._gap_filled = True
+            await self._flush_audio()
+            window_ms = self._settings.silence_duration_ms or 1000
+            self._send_buffer.extend(bytes(SCRIBE_SAMPLE_RATE * 2 * (window_ms + 100) // 1000))
+            await self._flush_audio()
 
     async def _flush_audio(self):
         if not self._send_buffer:
@@ -354,16 +451,14 @@ class ZoomScribeLiveSTTService(WebsocketSTTService):
             "language": self._settings.language or "en-US",
             "audio": {"format": "pcm16"},
         }
-        config: dict[str, Any] = {}
-        if self._settings.silence_duration_ms is not None:
-            config["turn_detection"] = {
-                "type": "acoustic_vad",
-                "silence_duration_ms": self._settings.silence_duration_ms,
-            }
-        if self._settings.diarization:
-            config["diarization"] = True
+        config = _recognition_config(self._settings)
         if config:
             update["config"] = config
+        if self._settings.silence_duration_ms is not None:
+            update["turn_detection"] = {"silence_duration_ms": self._settings.silence_duration_ms}
+        if self._settings.text_polishing:
+            # Live returns only the polished text unless the transcript is asked for too.
+            update["outputs"] = {"text_polishing": {"enabled": True, "include_transcript": True}}
         return update
 
     async def _connect(self):
@@ -375,9 +470,14 @@ class ZoomScribeLiveSTTService(WebsocketSTTService):
             self._receive_task = self.create_task(
                 self._receive_task_handler(self._report_error), name="receive"
             )
+        if not self._input_gap_task:
+            self._input_gap_task = self.create_task(self._input_gap_handler(), name="input_gap")
 
     async def _disconnect(self):
         await super()._disconnect()
+        if self._input_gap_task:
+            await self.cancel_task(self._input_gap_task)
+            self._input_gap_task = None
         if self._receive_task:
             await self.cancel_task(self._receive_task)
             self._receive_task = None
@@ -470,7 +570,10 @@ class ZoomScribeLiveSTTService(WebsocketSTTService):
 
     async def _handle_error_event(self, error: dict[str, Any]):
         message = f"Zoom Scribe Live error {error.get('code')}: {error.get('message')}"
-        if not error.get("fatal"):
+        # invalid_config means Scribe didn't apply the session.update (e.g. text polishing
+        # for an unsupported locale), so the session can't work, though Scribe marks it
+        # non-fatal.
+        if not error.get("fatal") and str(error.get("code")).lower() != "invalid_config":
             logger.warning(f"{self} {message}")
             return
         # A config error (e.g. UNSUPPORTED_LANGUAGE) would fail again, so it isn't retried.
@@ -481,13 +584,17 @@ class ZoomScribeLiveSTTService(WebsocketSTTService):
 
     async def _push_final_transcript(self, event: dict[str, Any]):
         text = _clean(event.get("transcript"))
+        if self._settings.text_polishing:
+            polished = _polished_text(event)
+            if polished is not None:
+                text = polished
         if text:
             if not self._user_turn_open:
                 # No speech_started for this transcript (e.g. it was lost in a
                 # reconnect): open the turn so the aggregator doesn't drop it.
                 self._user_turn_open = True
                 await self.broadcast_frame(ProposedUserStartedSpeakingFrame)
-            language = _frame_language(self._settings.language)
+            language = _frame_language(event.get("language") or self._settings.language)
             await self.emit_stt_usage_metrics()
             await self.push_frame(
                 TranscriptionFrame(
@@ -518,16 +625,32 @@ class ZoomScribeFastSTTSettings(STTSettings):
     """Settings for :class:`ZoomScribeFastSTTService`.
 
     Parameters:
+        model: Scribe speech recognition model (``config.model``). ``None``
+            uses Scribe's default model.
+        language_detection: Scribe language detection mode
+            (``config.language_detection.mode``). ``None`` turns it off.
         diarization: Whether Scribe labels each transcript segment with a
             speaker. Off by default. The labels are in the segments of the
             Scribe response attached as ``TranscriptionFrame.result``. Scribe's
             speaker tags are removed from the transcript text.
-        word_time_offsets: Whether Scribe returns word-level timestamps. Off by
+        word_time_offsets: Word timings (``config.word_time_offsets``). Off by
             default. The words are in the segments of ``TranscriptionFrame.result``.
+        vocabulary: Words and phrases that customize recognition
+            (``config.vocabulary.phrases``).
+        profanity_filter: Scribe's profanity filter (``config.profanity_filter``).
+            Off by default.
+        text_polishing: Scribe's text polishing (``outputs.text_polishing``).
+            The polished text is the transcript, and the recognized text is in
+            ``TranscriptionFrame.result`` (``result.text_display``); if polishing
+            fails, the recognized text is used. Off by default.
     """
 
     diarization: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     word_time_offsets: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    language_detection: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    vocabulary: list[str] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    profanity_filter: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    text_polishing: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class ZoomScribeFastSTTService(SegmentedSTTService):
@@ -561,7 +684,8 @@ class ZoomScribeFastSTTService(SegmentedSTTService):
         Args:
             api_key: Zoom AI Services API key or JWT. It is sent with every request, so it
                 must stay valid for as long as the service runs.
-            url: Scribe Fast transcription URL.
+            url: Scribe Fast transcription URL. A plaintext ``http://`` URL to a host
+                other than localhost logs a warning.
             aiohttp_session: Optional session to reuse. One is created and owned
                 by the service otherwise.
             timeout_secs: Request timeout in seconds.
@@ -571,7 +695,14 @@ class ZoomScribeFastSTTService(SegmentedSTTService):
             **kwargs: Additional arguments passed to the parent SegmentedSTTService.
         """
         default_settings = self.Settings(
-            model=None, language=Language.EN_US, diarization=False, word_time_offsets=False
+            model=None,
+            language=Language.EN_US,
+            diarization=False,
+            word_time_offsets=False,
+            language_detection=None,
+            vocabulary=None,
+            profanity_filter=False,
+            text_polishing=False,
         )
         if settings is not None:
             default_settings.apply_update(settings)
@@ -582,7 +713,7 @@ class ZoomScribeFastSTTService(SegmentedSTTService):
             **kwargs,
         )
         self._api_key = api_key
-        self._url = url
+        self._url = _check_url(url, "url")
         self._session = aiohttp_session
         self._owns_session = aiohttp_session is None
         self._timeout = aiohttp.ClientTimeout(total=timeout_secs)
@@ -630,15 +761,18 @@ class ZoomScribeFastSTTService(SegmentedSTTService):
         Yields:
             A TranscriptionFrame, or an ErrorFrame if the request fails.
         """
-        config: dict[str, Any] = {"language": self._settings.language or "en-US"}
-        if self._settings.diarization:
-            config["diarization"] = True
+        config: dict[str, Any] = {
+            "language": self._settings.language or "en-US",
+            **_recognition_config(self._settings),
+        }
         if self._settings.word_time_offsets:
             config["word_time_offsets"] = True
-        # Upload the utterance as multipart form data (`file` + `config`).
+        # Upload the utterance as multipart form data (`file`, `config` and `outputs`).
         form = aiohttp.FormData()
         form.add_field("file", audio, filename="utterance.wav", content_type="audio/wav")
         form.add_field("config", json.dumps(config))
+        if self._settings.text_polishing:
+            form.add_field("outputs", json.dumps({"text_polishing": {"enabled": True}}))
 
         if self._session is None:
             self._session = aiohttp.ClientSession()
@@ -664,6 +798,10 @@ class ZoomScribeFastSTTService(SegmentedSTTService):
             return
 
         text = _clean((result.get("result") or {}).get("text_display"))
+        if self._settings.text_polishing:
+            polished = _polished_text(result)
+            if polished is not None:
+                text = polished
         if text:
             language = _frame_language(self._settings.language)
             await self._handle_transcription(text, True, language)
