@@ -1628,6 +1628,18 @@ class TestRegisterSpokenStreaming(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(word_frames[0].will_be_spoken)
         self.assertTrue(word_frames[0].append_to_context)
 
+    async def test_no_tracker_sentence_text_is_trimmed_for_the_context(self):
+        # The context joins its parts with a space, so a second sentence that
+        # keeps its token's leading space would be joined with two.
+        seq = _seq(streaming=True)
+        result = []
+        for t in ("Hi.", " Bye", " now", ".", " Ok"):
+            result += await seq.register_spoken(
+                _spoken_frame(t), "ctx1", t, append_to_context=True, build_tracker=False
+            )
+        word_frames = [f for f in result if isinstance(f, TTSTextFrame)]
+        self.assertEqual([(f.text, f.raw_text) for f in word_frames][-1], ("Bye now.", "Bye now."))
+
 
 # ---------------------------------------------------------------------------
 # register_spoken — streaming: words buffered until a pending sentence promotes
