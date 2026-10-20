@@ -2375,6 +2375,8 @@ class PipelineFlushFrame(ControlFrame):
         origin: Name of the worker that started the flush. A probe that crosses
             into another pipeline is answered there, out of sight of whoever is
             waiting, so the answering worker reports progress back to this name.
+        flush_id: Identifies the flush. Each leg of the trip is a new frame
+            carrying the same ``flush_id``.
     """
 
     interruptible: bool = field(default=False, init=False)
@@ -2382,6 +2384,7 @@ class PipelineFlushFrame(ControlFrame):
     event: asyncio.Event | None = field(default=None, compare=False)
     returning: bool = field(default=False, compare=False)
     origin: str | None = field(default=None, compare=False)
+    flush_id: int = field(default_factory=obj_id, compare=False)
 
 
 @dataclass

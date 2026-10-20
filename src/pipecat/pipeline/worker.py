@@ -979,16 +979,16 @@ class PipelineWorker(BaseWorker):
 
         logger.debug(f"{self}: pushing flush probe downstream")
 
-        self._flush_progress[probe.id] = 0
+        self._flush_progress[probe.flush_id] = 0
         try:
             await self._push_queue.put(probe)
             while True:
-                frames, reports = self._frames_reaching_sink, self._flush_progress[probe.id]
+                frames, reports = self._frames_reaching_sink, self._flush_progress[probe.flush_id]
                 try:
                     await asyncio.wait_for(event.wait(), timeout)
                     return True
                 except TimeoutError:
-                    reported = self._flush_progress[probe.id] != reports
+                    reported = self._flush_progress[probe.flush_id] != reports
                     if self._frames_reaching_sink == frames and not reported:
                         logger.warning(
                             f"{self}: pipeline flush gave up after {timeout}s of no progress"
@@ -997,7 +997,7 @@ class PipelineWorker(BaseWorker):
                     if reported:
                         logger.debug(f"{self}: flush still in flight, whoever has it is working")
         finally:
-            self._flush_progress.pop(probe.id, None)
+            self._flush_progress.pop(probe.flush_id, None)
 
     def track_flush_probe(self, frame: PipelineFlushFrame) -> None:
         """Report progress on a probe from another worker while we hold it.
@@ -1010,7 +1010,7 @@ class PipelineWorker(BaseWorker):
             frame: The flush probe entering this pipeline.
         """
         if self._handle_flush_frame and frame.origin and frame.origin != self.name:
-            self._foreign_probes[frame.id] = frame.origin
+            self._foreign_probes[frame.flush_id] = frame.origin
 
     async def on_bus_message(self, message: BusMessage) -> None:
         """Handle outbound bus messages: TTS playback and RTVI UI translation.
@@ -1542,7 +1542,8 @@ class PipelineWorker(BaseWorker):
         pushing upstream: an ``LLMContextFrame`` pushed up after a function
         call result, say, whose response only comes back down afterwards. A
         probe that stopped at the source would return while that response was
-        still being generated, or still being synthesized.
+        still being generated, or still being synthesized. Each leg is pushed
+        as a new probe with the same ``flush_id``.
 
         Args:
             frame: The probe, carrying the event its initiator awaits.
@@ -1550,14 +1551,19 @@ class PipelineWorker(BaseWorker):
         """
         if not at_sink:
             logger.debug(f"{self}: flush probe reached source — sending it down again")
-            frame.returning = True
-            await self._source.push_frame(frame, FrameDirection.DOWNSTREAM)
+            probe = PipelineFlushFrame(
+                event=frame.event, origin=frame.origin, flush_id=frame.flush_id, returning=True
+            )
+            await self._source.push_frame(probe, FrameDirection.DOWNSTREAM)
         elif not frame.returning:
             logger.debug(f"{self}: flush probe reached sink — bouncing upstream")
-            await self._sink.push_frame(frame, FrameDirection.UPSTREAM)
+            probe = PipelineFlushFrame(
+                event=frame.event, origin=frame.origin, flush_id=frame.flush_id
+            )
+            await self._sink.push_frame(probe, FrameDirection.UPSTREAM)
         else:
             logger.debug(f"{self}: flush probe reached sink again — pipeline drained")
-            self._foreign_probes.pop(frame.id, None)
+            self._foreign_probes.pop(frame.flush_id, None)
             if frame.event:
                 frame.event.set()
 
