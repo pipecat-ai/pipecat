@@ -267,15 +267,20 @@ class AICTytoProcessor(FrameProcessor):
             await self.cancel_task(self._analysis_task)
             self._analysis_task = None
 
+    # Used without AICFilter. Buffers and counts the frame audio. With AICFilter,
+    # the frame audio is enhanced, so _on_filter_block supplies the audio.
     def _handle_audio(self, frame: InputAudioRawFrame):
         # None when setup failed.
         if self._collector is None or self._model is None:
             return
 
-        self._audio_secs += frame.num_frames / frame.sample_rate
-
+        # With AICFilter, the tap counts the audio. The filter does not call the
+        # tap when it fails to initialize. An analysis of the empty collector
+        # then gives the scores of silence.
         if self._audio_filter is not None:
             return
+
+        self._audio_secs += frame.num_frames / frame.sample_rate
 
         # The transport can override the pipeline's input sample rate, so the
         # first frame sets the collector configuration.
@@ -298,6 +303,8 @@ class AICTytoProcessor(FrameProcessor):
         for block in blocks:
             self._collector.buffer(block)
 
+    # Used with AICFilter. The filter calls this tap with each block before
+    # enhancement. Buffers and counts the block.
     def _on_filter_block(self, block: np.ndarray, sample_rate: int):
         # None when setup failed.
         if self._collector is None:
@@ -308,6 +315,7 @@ class AICTytoProcessor(FrameProcessor):
             self._collector.initialize(ProcessorConfig(sample_rate, self._frames_per_block))
 
         self._collector.buffer(block)
+        self._audio_secs += len(block) / sample_rate
 
     async def _analyze(self, audio_secs: float):
         assert self._analyzer is not None

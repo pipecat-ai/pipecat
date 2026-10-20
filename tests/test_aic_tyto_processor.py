@@ -326,6 +326,22 @@ class TestAICTytoProcessor(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.collector.blocks), 4)
         self.assertEqual(audio_filter.taps, [processor._on_filter_block, None] * 2)
 
+    async def test_filter_mode_analyzes_only_tapped_audio(self):
+        audio_filter = _TapFilter()
+        processor = self._create(audio_filter=audio_filter)
+        frames = [SleepFrame(sleep=0.05), _audio_frame(6.0), SleepFrame(sleep=0.1)]
+
+        # No feeder simulates a filter that failed to initialize.
+        await run_test(processor, frames_to_send=frames)
+
+        self.assertEqual(self.analyzer.analyze_calls, 0)
+        self.assertEqual(self.summaries, [])
+
+        await run_test(Pipeline([_TapFeeder(audio_filter), processor]), frames_to_send=frames)
+
+        self.assertEqual(self.analyzer.analyze_calls, 1)
+        self.assertEqual(len(self.summaries), 1)
+
     async def test_analysis_error_stops_analysis(self):
         self.analyzer.error = RuntimeError("processing not allowed")
         processor = self._create()
