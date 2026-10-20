@@ -389,6 +389,20 @@ async def test_live_recognition_options_are_requested_only_when_set(monkeypatch)
 
 
 @pytest.mark.asyncio
+async def test_live_frame_language_is_none_when_detection_reports_none(monkeypatch):
+    service = _live(settings=ZoomScribeLiveSTTService.Settings(language_detection="continuous"))
+    service._websocket = _FakeWebsocket(
+        [_event("transcription.completed", item_id="item_1", transcript="Hola.")]
+    )
+    frames = _record_frames(monkeypatch, service)
+
+    await service._receive_messages()
+
+    [frame] = [f for f in frames if isinstance(f, TranscriptionFrame)]
+    assert frame.language is None
+
+
+@pytest.mark.asyncio
 async def test_live_frames_carry_the_detected_language(monkeypatch):
     service = _live(settings=ZoomScribeLiveSTTService.Settings(language_detection="continuous"))
     service._websocket = _FakeWebsocket(
@@ -934,6 +948,27 @@ async def test_fast_recognition_options_and_text_polishing():
     assert request["outputs"] == {"text_polishing": {"enabled": True}}
     assert frame.text == "Hello there."
     assert frame.result["result"]["text_display"] == "Um, hello hello there."
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("result", "detection", "expected"),
+    [
+        ({"language": "es-ES", "segments": []}, "once", Language.ES_ES),  # one-time detection
+        ({"segments": [{"text": "Hola.", "language": "es"}]}, "continuous", Language.ES),
+        ({"segments": [{"text": "Hola."}]}, "continuous", None),  # detecting, none reported
+        ({"segments": [{"text": "Hola."}]}, None, Language.EN_US),  # the configured one
+    ],
+)
+async def test_fast_frame_carries_the_detected_language(result, detection, expected):
+    body = {"request_id": "req_6", "result": {"text_display": "Hola.", **result}}
+
+    [frame] = await _run_fast(
+        _ScribeFast(body=body),
+        settings=ZoomScribeFastSTTService.Settings(language_detection=detection),
+    )
+
+    assert frame.language is expected
 
 
 @pytest.mark.asyncio
