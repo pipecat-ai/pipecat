@@ -883,6 +883,14 @@ class MOQTransportClient:
         if self._audio_out is None or not self._audio_out_sample_rate:
             return
 
+        budget = self._params.audio_out_max_buffer_ms / 1000.0
+        if self._publish_audio_clock is not None:
+            wait = self._publish_audio_clock - time.monotonic() - budget
+            if wait > 0:
+                await asyncio.sleep(wait)
+                if self._audio_out is None:
+                    return
+
         now = time.monotonic()
         if self._publish_audio_clock is None or self._publish_audio_clock < now:
             # Writes resumed after idle (turn gap, interruption re-anchor).
@@ -895,23 +903,9 @@ class MOQTransportClient:
                 self._audio_out.reset_epoch()
                 logger.debug(
                     f"MOQ: audio epoch re-anchored after "
-                    f"{'first write' if gap is None else f'{gap:.3f}s gap'}"
+                    f"{'a fresh clock' if gap is None else f'a {gap:.3f}s gap'}"
                 )
             self._publish_audio_clock = now
-
-        # Sleep so we're never more than `audio_out_max_buffer_ms` ahead
-        # of wall-clock. Pacing happens BEFORE the write so the moq
-        # library never sees more than that much audio queued at once.
-        budget = self._params.audio_out_max_buffer_ms / 1000.0
-        wait = self._publish_audio_clock - now - budget
-        if wait > 0:
-            await asyncio.sleep(wait)
-            if self._publish_audio_clock is None:
-                # reset_audio_pacing() landed mid-sleep (interruption):
-                # re-anchor like a fresh write.
-                self._audio_out.reset_epoch()
-                logger.debug("MOQ: audio epoch re-anchored after pacing reset mid-write")
-                self._publish_audio_clock = time.monotonic()
 
         # Advance the virtual clock and the presentation timestamp by the
         # duration of this chunk. S16 = 2 bytes/sample, mono.

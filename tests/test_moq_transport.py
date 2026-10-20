@@ -1076,6 +1076,35 @@ class TestEpochReanchor(unittest.IsolatedAsyncioTestCase):
             client._publish_audio_clock, time.monotonic() + duration_s, delta=0.1
         )
 
+    async def test_a_teardown_mid_sleep_drops_the_write(self):
+        """``_run``'s finally clears ``_audio_out`` while a paced write
+        sleeps (peer left with a full buffer). The write must return
+        without raising and without touching the closed producer."""
+        client = self._client_with_audio()
+        producer = client._audio_out
+        budget = client._params.audio_out_max_buffer_ms / 1000.0
+        client._publish_audio_clock = time.monotonic() + budget + 0.2
+        write = asyncio.ensure_future(client.publish_audio(b"\x00" * 480))
+        await asyncio.sleep(0.05)
+        client._audio_out = None
+        await write
+        producer.write.assert_not_called()
+
+    async def test_a_teardown_and_reset_mid_sleep_drops_the_write(self):
+        """A teardown and a pacing reset landing in the same sleep must
+        not re-anchor the closed producer's epoch."""
+        client = self._client_with_audio()
+        producer = client._audio_out
+        budget = client._params.audio_out_max_buffer_ms / 1000.0
+        client._publish_audio_clock = time.monotonic() + budget + 0.2
+        write = asyncio.ensure_future(client.publish_audio(b"\x00" * 480))
+        await asyncio.sleep(0.05)
+        client.reset_audio_pacing()
+        client._audio_out = None
+        await write
+        producer.reset_epoch.assert_not_called()
+        producer.write.assert_not_called()
+
 
 # ----------------------------------------------------------------------
 # Runner arguments: relay_url
