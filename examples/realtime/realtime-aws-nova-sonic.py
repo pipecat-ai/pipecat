@@ -29,6 +29,7 @@ from pipecat.services.aws.nova_sonic.session_continuation import SessionContinua
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.livekit.transport import LiveKitParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 from pipecat.workers.runner import WorkerRunner
 
@@ -66,6 +67,10 @@ transport_params = {
         audio_in_enabled=True,
         audio_out_enabled=True,
     ),
+    "livekit": lambda: LiveKitParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
     "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
@@ -85,26 +90,14 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         "You are a friendly assistant. The user and you will engage in a spoken dialog exchanging "
         "the transcripts of a natural real-time conversation. Keep your responses short, generally "
         "two or three sentences for chatty scenarios."
-        # HACK: if using the older Nova Sonic (pre-2) model, note that you need to inject a special
-        # bit of text into this instruction to allow the first assistant response to be
-        # programmatically triggered (which happens in the on_client_connected handler)
-        # f"{AWSNovaSonicLLMService.AWAIT_TRIGGER_ASSISTANT_RESPONSE_INSTRUCTION}"
     )
 
     # Create the AWS Nova Sonic LLM service
     llm = AWSNovaSonicLLMService(
         secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"],
         access_key_id=os.environ["AWS_ACCESS_KEY_ID"],
-        # as of 2026-08-31, these are the supported regions:
-        # - Nova 2 Sonic (the default model):
-        #   - us-east-1
-        #   - us-west-2
-        #   - eu-north-1
-        #   - ap-northeast-1
-        # - Nova Sonic (the older model):
-        #   - us-east-1
-        #   - eu-north-1
-        #   - ap-northeast-1
+        # as of 2026-10-08, the supported regions for the default model (Nova 2.5
+        # Sonic) are us-east-1, us-west-2, eu-north-1, and ap-northeast-1
         region=os.environ["AWS_REGION"],
         session_token=os.getenv("AWS_SESSION_TOKEN"),
         settings=AWSNovaSonicLLMService.Settings(
@@ -187,10 +180,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             {"role": "developer", "content": "Please introduce yourself to the user."}
         )
         await worker.queue_frames([LLMRunFrame()])
-        # HACK: if using the older Nova Sonic (pre-2) model, you need this special way of
-        # triggering the first assistant response. Note that this trigger requires a special
-        # corresponding bit of text in the system instruction.
-        # await llm.trigger_assistant_response()
 
     # Handle client disconnection events
     @transport.event_handler("on_client_disconnected")

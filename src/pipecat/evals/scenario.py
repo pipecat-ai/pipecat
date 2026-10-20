@@ -111,7 +111,6 @@ scenario from a fragment it includes.
 """
 
 import re
-import warnings
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -137,7 +136,7 @@ from pipecat.evals.simulation import (
     _parse_simulation,
     describe_simulation,
 )
-from pipecat.utils.deprecation import deprecated
+from pipecat.utils.deprecation import deprecated, warn_deprecated
 from pipecat.utils.yaml import include_loader
 
 __all__ = [
@@ -242,11 +241,10 @@ class EvalScenarioFile:
 
         entries = data.get("scenarios")
         if entries is None:
-            warnings.warn(
-                f"{path}: a scenario file's top level holding 'turns:' or 'persona:' is "
-                "deprecated since 1.11.0 and will be removed in 2.0.0. Put the scenario under a "
-                "'scenarios:' list instead.",
-                DeprecationWarning,
+            warn_deprecated(
+                "`top-level turns: or persona:` is deprecated since 1.11.0 and will be "
+                "removed in 2.0.0. Use a `scenarios:` list instead. "
+                f"Found in {path}.",
                 stacklevel=2,
             )
             return cls(name=name, path=path, scenarios=[_scenario_from_mapping(data, path)])

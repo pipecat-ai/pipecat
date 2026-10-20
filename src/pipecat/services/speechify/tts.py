@@ -42,6 +42,9 @@ CALLER_HEADERS = {
     "Speechify-Caller-Version": pipecat_version(),
 }
 
+# Pinned so behavior doesn't depend on the workspace default; `pcm_16000` is 16 kHz from here on.
+SPEECHIFY_API_VERSION = "2026-09-30"
+
 # PCM rates Speechify can synthesize, as the `pcm_<rate>` output formats.
 SPEECHIFY_PCM_SAMPLE_RATES = (8000, 16000, 22050, 24000, 44100, 48000)
 
@@ -254,20 +257,29 @@ class SpeechifyTTSSettings(TTSSettings):
             Adds latency.
         text_normalization: Whether to spell out numbers, dates and similar tokens
             before synthesis. Adds latency.
+        safety_identifier: Stable, opaque identifier for the end user a request is
+            synthesized for, so Speechify can rate-limit or block that user instead of
+            the whole workspace. 1 to 64 characters of letters, digits and
+            ``. _ - : | + / =`` — a keyed hash of an internal user id, never personal
+            data such as an email address, which Speechify rejects.
     """
 
     loudness_normalization: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     text_normalization: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    safety_identifier: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class SpeechifyHttpTTSService(TTSService):
     """Speechify HTTP-based TTS service with word timestamps.
 
     Streams PCM audio and word-level speech marks over Server-Sent Events from
-    Speechify's ``/v1/audio/stream/with-timestamps`` endpoint. Speech marks are only
-    produced by the streaming-native models, ``simba-3.2`` (English) and ``simba-3.0``
-    (multilingual); the legacy ``simba-english`` and ``simba-multilingual`` models are
-    rejected by this endpoint.
+    Speechify's ``/v1/audio/stream/with-timestamps`` endpoint, using the streaming-native
+    models ``simba-3.2`` (English) and ``simba-3.0`` (multilingual).
+
+    Requests pin Speechify's API version to :data:`SPEECHIFY_API_VERSION` rather than
+    letting the workspace default decide it. The legacy ``simba-english`` and
+    ``simba-multilingual`` models are retired at that version and return a
+    ``model_retired`` error.
     """
 
     Settings = SpeechifyTTSSettings
@@ -301,6 +313,7 @@ class SpeechifyHttpTTSService(TTSService):
             language=None,
             loudness_normalization=None,
             text_normalization=None,
+            safety_identifier=None,
         )
         if settings is not None:
             default_settings.apply_update(settings)
@@ -320,6 +333,7 @@ class SpeechifyHttpTTSService(TTSService):
         self._headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
+            "Speechify-Version": SPEECHIFY_API_VERSION,
             **CALLER_HEADERS,
         }
 
@@ -399,6 +413,10 @@ class SpeechifyHttpTTSService(TTSService):
         language = assert_given(self._settings.language)
         if language:
             payload["language"] = language
+
+        safety_identifier = assert_given(self._settings.safety_identifier)
+        if safety_identifier:
+            payload["safety_identifier"] = safety_identifier
 
         options: dict[str, Any] = {}
         loudness_normalization = assert_given(self._settings.loudness_normalization)

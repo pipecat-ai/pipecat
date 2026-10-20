@@ -52,6 +52,7 @@ from pipecat.services.xai.realtime.events import SessionProperties
 from pipecat.services.xai.realtime.llm import GrokRealtimeLLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.livekit.transport import LiveKitParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 from pipecat.turns.user_stop import BaseUserTurnStopStrategy
 from pipecat.workers.runner import WorkerRunner
@@ -120,6 +121,10 @@ transport_params = {
         audio_out_enabled=True,
     ),
     "daily": lambda: DailyParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
+    "livekit": lambda: LiveKitParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
     ),

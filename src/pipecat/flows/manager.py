@@ -27,7 +27,6 @@ The flow manager coordinates all aspects of a conversation, including:
 import asyncio
 import inspect
 import re
-import warnings
 from collections.abc import Callable, Mapping
 from typing import Any, cast
 
@@ -76,7 +75,7 @@ from pipecat.processors.aggregators.llm_context import NOT_GIVEN, LLMContext, No
 from pipecat.services.llm_service import FunctionCallParams, LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.transports.base_transport import BaseTransport
-from pipecat.utils.deprecation import deprecated
+from pipecat.utils.deprecation import deprecated, warn_deprecated
 
 # A ``{{ key }}`` or ``{{ key.sub.key }}`` placeholder in a node's prompt text.
 # Only identifiers and dots are accepted, so prose braces are left alone. A
@@ -138,10 +137,9 @@ class FlowManager:
         if worker is not None and task is not None:
             raise ValueError("Pass either 'worker' or 'task' (deprecated), not both.")
         if task is not None:
-            warnings.warn(
-                "The 'task' parameter is deprecated since 1.5.0 and will be removed "
-                "in 2.0.0. Use 'worker' instead.",
-                DeprecationWarning,
+            warn_deprecated(
+                "`FlowManager(task=...)` is deprecated since 1.5.0 and will be removed "
+                "in 2.0.0. Use `worker` instead.",
                 stacklevel=2,
             )
             worker = task
@@ -435,22 +433,20 @@ class FlowManager:
         if effective_param_count == 0:
             if not self._showed_deprecation_warning_for_zero_arg_handler:
                 self._showed_deprecation_warning_for_zero_arg_handler = True
-                warnings.warn(
-                    "Zero-argument function handlers are deprecated and will be "
-                    "removed in 2.0.0. Update handlers to accept "
-                    "(args: FlowArgs, flow_manager: FlowManager) instead.",
-                    DeprecationWarning,
+                warn_deprecated(
+                    "`async def handler()` is deprecated since 1.5.0 and will be "
+                    "removed in 2.0.0. Use `async def handler(args: FlowArgs, "
+                    "flow_manager: FlowManager)` instead.",
                     stacklevel=2,
                 )
             return await cast(ZeroArgFunctionHandler, handler)()
         elif effective_param_count == 1:
             if not self._showed_deprecation_warning_for_legacy_handler:
                 self._showed_deprecation_warning_for_legacy_handler = True
-                warnings.warn(
-                    "Single-argument (legacy) function handlers are deprecated "
-                    "and will be removed in 2.0.0. Update handlers to accept "
-                    "(args: FlowArgs, flow_manager: FlowManager) instead.",
-                    DeprecationWarning,
+                warn_deprecated(
+                    "`async def handler(args)` is deprecated since 1.5.0 and will be "
+                    "removed in 2.0.0. Use `async def handler(args: FlowArgs, "
+                    "flow_manager: FlowManager)` instead.",
                     stacklevel=2,
                 )
             return await cast(LegacyFunctionHandler, handler)(args)
@@ -758,10 +754,9 @@ class FlowManager:
             if role_messages and not role_message:
                 if not self._showed_deprecation_warning_for_role_messages:
                     self._showed_deprecation_warning_for_role_messages = True
-                    warnings.warn(
-                        "'role_messages' is deprecated and will be removed in 2.0.0. "
-                        "Use 'role_message' (singular, str) instead.",
-                        DeprecationWarning,
+                    warn_deprecated(
+                        "`role_messages` is deprecated since 1.5.0 and will be removed in "
+                        "2.0.0. Use `role_message` (singular, str) instead.",
                         stacklevel=2,
                     )
 
@@ -855,13 +850,12 @@ class FlowManager:
             if update_config.strategy == ContextStrategy.RESET_WITH_SUMMARY:
                 if not self._showed_deprecation_warning_for_reset_with_summary:
                     self._showed_deprecation_warning_for_reset_with_summary = True
-                    warnings.warn(
-                        "RESET_WITH_SUMMARY is deprecated and will be removed in 2.0.0. "
-                        "Use Pipecat's native context summarization instead. To trigger "
+                    warn_deprecated(
+                        "`RESET_WITH_SUMMARY` is deprecated since 1.5.0 and will be removed "
+                        "in 2.0.0. Use Pipecat's native context summarization instead. To trigger "
                         "on-demand summarization during a node transition, push an "
                         "LLMSummarizeContextFrame in a pre-action. See "
                         "https://docs.pipecat.ai/guides/fundamentals/context-summarization",
-                        DeprecationWarning,
                         stacklevel=2,
                     )
 
@@ -911,8 +905,13 @@ class FlowManager:
                 else LLMMessagesAppendFrame
             )
 
-            frames.append(frame_type(messages=messages))
-            frames.append(LLMSetToolsFrame(tools=functions))
+            # A node's context and tools must land even if the user interrupts
+            # while they are queued, or the LLM runs with the previous node's.
+            context_frame = frame_type(messages=messages)
+            context_frame.interruptible = False
+            tools_frame = LLMSetToolsFrame(tools=functions)
+            tools_frame.interruptible = False
+            frames += [context_frame, tools_frame]
 
             await self._worker.queue_frames(frames)
 

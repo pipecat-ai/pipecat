@@ -31,7 +31,7 @@ class DeepSeekLLMAdapter(OpenAILLMAdapter):
     thinking mode after a tool call.
     """
 
-    def get_llm_invocation_params(
+    async def get_llm_invocation_params(
         self,
         context: LLMContext,
         *,
@@ -51,7 +51,7 @@ class DeepSeekLLMAdapter(OpenAILLMAdapter):
             Dictionary of parameters for DeepSeek's ChatCompletion API, with
             ``reasoning_content`` present on every assistant message.
         """
-        params = super().get_llm_invocation_params(
+        params = await super().get_llm_invocation_params(
             context,
             system_instruction=system_instruction,
             convert_developer_to_user=convert_developer_to_user,

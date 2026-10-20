@@ -57,8 +57,10 @@ class CartesiaTurnsSTTSettings(STTSettings):
 
     The four ``turn_*`` fields tune server-side turn detection. Cartesia binds
     them to a connection, so updating any of them at runtime triggers a
-    reconnect. See https://docs.cartesia.ai/use-the-api/stt/turns for the
-    Balanced, Responsive and Patient starting profiles.
+    reconnect, and requires the three thresholds to stay in order:
+    ``turn_start_threshold`` > ``turn_eager_end_threshold`` >
+    ``turn_end_threshold``. See https://docs.cartesia.ai/use-the-api/stt/turns
+    for the Balanced, Responsive and Patient starting profiles.
 
     Parameters:
         keyterm: Key terms or phrases to bias transcription towards, sent as
@@ -69,9 +71,9 @@ class CartesiaTurnsSTTSettings(STTSettings):
         turn_start_threshold: Likelihood above which the server emits
             ``turn.start``. 0.5–0.9; Cartesia defaults to 0.8.
         turn_eager_end_threshold: Likelihood below which the server emits
-            ``turn.eager_end``. 0.3–0.6; Cartesia defaults to 0.4.
+            ``turn.eager_end``. 0.3–0.8; Cartesia defaults to 0.6.
         turn_end_threshold: Likelihood below which the server emits
-            ``turn.end``. 0.05–0.5; Cartesia defaults to 0.2.
+            ``turn.end``. 0.05–0.5; Cartesia defaults to 0.3.
         turn_end_timeout_ms: Milliseconds to wait after the user stops speaking
             before emitting ``turn.end``. 640–11200; Cartesia defaults to 5600.
     """
@@ -122,6 +124,11 @@ class CartesiaTurnsSTTService(EagerEndOfTurnSTTServiceMixin, WebsocketSTTService
 
     Settings = CartesiaTurnsSTTSettings
     _settings: Settings
+
+    # How long to wait for the server's ``connected`` frame after the
+    # handshake. Reconnects run while sending audio, so an unbounded wait
+    # would stall the audio path.
+    _CONNECTION_TIMEOUT = 10.0
 
     def __init__(
         self,
@@ -366,7 +373,14 @@ class CartesiaTurnsSTTService(EagerEndOfTurnSTTServiceMixin, WebsocketSTTService
                 self._watchdog_task = self.create_task(self._watchdog_task_handler())
 
             logger.debug("WebSocket connected, waiting for server confirmation...")
-            await self._connection_established_event.wait()
+            try:
+                await asyncio.wait_for(
+                    self._connection_established_event.wait(), timeout=self._CONNECTION_TIMEOUT
+                )
+            except TimeoutError:
+                raise TimeoutError(
+                    f"Cartesia did not confirm the connection within {self._CONNECTION_TIMEOUT}s"
+                ) from None
             logger.debug(f"Connected to Cartesia Ink-2 ASR (request_id={self._request_id})")
             await self._call_event_handler("on_connected")
         except Exception as e:
@@ -440,8 +454,7 @@ class CartesiaTurnsSTTService(EagerEndOfTurnSTTServiceMixin, WebsocketSTTService
             Frame: ``None`` (transcription results are pushed by the receive
                 task), or :class:`ErrorFrame` on send failure.
         """
-        if not self._websocket:
-            return
+        # With no socket (the first connect failed), send_with_retry reconnects.
         try:
             self._last_stt_time = time.monotonic()
             self._last_audio_chunk_duration = len(audio) / (self.sample_rate * 2)

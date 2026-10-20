@@ -6,13 +6,13 @@
 
 """Base user turn stop strategy for determining when the user stopped speaking."""
 
-import warnings
 from dataclasses import dataclass
 
 from pipecat.frames.frames import Frame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.turns.types import ProcessFrameResult, UserTurnSpeculation
 from pipecat.utils.base_object import BaseObject
+from pipecat.utils.deprecation import warn_deprecated
 
 
 @dataclass
@@ -83,15 +83,12 @@ class BaseUserTurnStopStrategy(BaseObject):
         """
         super().__init__(**kwargs)
         if enable_user_speaking_frames is not None:
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    "`BaseUserTurnStopStrategy.enable_user_speaking_frames` is deprecated "
-                    "since 1.8.0 and will be removed in 2.0.0. Use "
-                    "`trigger_user_turn_stopped(enable_user_speaking_frames=...)` instead.",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
+            warn_deprecated(
+                "`BaseUserTurnStopStrategy.enable_user_speaking_frames` is deprecated "
+                "since 1.8.0 and will be removed in 2.0.0. Use "
+                "`trigger_user_turn_stopped(enable_user_speaking_frames=...)` instead.",
+                stacklevel=2,
+            )
         self._enable_user_speaking_frames = (
             True if enable_user_speaking_frames is None else enable_user_speaking_frames
         )
@@ -103,14 +100,14 @@ class BaseUserTurnStopStrategy(BaseObject):
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
-        # reset() is deprecated.
+        # reset() is deprecated. stacklevel=3 steps past ABCMeta.__new__, which
+        # calls this hook, so the warning points at the subclass's definition.
         if cls.reset is not BaseUserTurnStopStrategy.reset:
-            warnings.warn(
-                f"`{cls.__name__}` overrides `reset`, which is deprecated since 1.6.0 "
-                "and will be removed in 2.0.0. Override `handle_user_turn_started` and "
+            warn_deprecated(
+                f"`{cls.__name__}.reset` is deprecated since 1.6.0 and will be removed in "
+                "2.0.0. Use overrides of `handle_user_turn_started` and "
                 "`handle_user_turn_stopped` instead.",
-                DeprecationWarning,
-                stacklevel=2,
+                stacklevel=3,
             )
 
     @property

@@ -7,9 +7,9 @@
 """Multi-bot eval suite runner.
 
 An :class:`EvalManifest` lists bots to spawn and the scenarios to run
-against each, scripted and simulated alike. An :class:`EvalSuite` spawns
-each bot with its eval transport on its own port and drives it with the
-harness in a subprocess, several at a time. ``pipecat eval suite`` is the
+against each, scripted and simulated alike. An :class:`EvalSuite` runs
+each bot on its own port with the dev runner and drives it with the harness
+in a subprocess, several at a time. ``pipecat eval suite`` is the
 CLI in front of it; the release evals are a manifest plus that command.
 
 Manifest format (YAML)::
@@ -22,7 +22,7 @@ Manifest format (YAML)::
     scenarios_dir: scenarios      # resolved relative to this manifest file
     # {python}=interpreter (default sys.executable), {bot}=bot path,
     # {port}=assigned per run by the suite runner
-    spawn: "{python} {bot} -t eval --port {port}"
+    spawn: "{python} {bot} --port {port}"
     suite:
       - bot: examples/voice/voice-cartesia.py
         scenarios: [simple_math, greeting]
@@ -70,16 +70,18 @@ paths belongs in a file for that reason.
     Will be removed in 2.0.0.
 
 An entry's ``name:`` is its label: what the display, the ``-p`` filter, the
-results records and the artifact file names use, and what an entry's own
-``concurrency:`` is keyed on. It defaults to the ``bot:`` path, so it is only
-needed when several entries share a bot, as when sweeping a model with
-``runner_body:``; two entries may not run the same scenario under the same
-label.
+results records and the artifact file names use. It defaults to the ``bot:``
+path, so it is only needed when several entries share a bot, as when sweeping
+a model with ``runner_body:``; two entries may not run the same scenario under
+the same label.
 
-``concurrency`` is how many runs execute at once. An entry may set its own
-``concurrency:`` to cap the runs of that bot below it, for a provider that
-rate-limits concurrent connections; the suite's figure (or ``--concurrency``)
-still bounds the whole.
+``concurrency`` is how many runs execute at once. The suite keeps that many
+going, taking the next run from the first entry in manifest order that still
+has one, so an entry's scenarios finish together and no slot waits while any
+entry still has runs. An entry whose provider rate-limits sets its own
+``concurrency:``, and never has more than that many runs in flight. Two
+entries for the same bot stay separate: each keeps its place in the manifest
+order and its own cap.
 
 Manifest-relative paths (``bot``/``bots_dir``, ``scenarios_dir``,
 ``runs_dir``) resolve relative to the manifest file, so a manifest is portable;
@@ -87,9 +89,10 @@ the same values passed as CLI overrides resolve against the working directory.
 
 ``repeat`` (or ``--repeat``) runs every (bot, scenario) pair N times, which is how
 a flaky behavior gets measured rather than sampled: a bot that passes a scenario
-half the time looks identical to a reliable one in a single pass. Attempts are
-interleaved across bots and carry an :attr:`EvalRun.attempt` number that joins
-their artifact filenames, so no attempt overwrites another's logs.
+half the time looks identical to a reliable one in a single pass. Attempts run
+attempt-major, every entry's first attempt before any entry's second, and carry
+an :attr:`EvalRun.attempt` number that joins their artifact filenames, so no
+attempt overwrites another's logs.
 """
 
 import asyncio
@@ -100,7 +103,7 @@ import shlex
 import sys
 import time
 import traceback
-import warnings
+from collections import deque
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -122,21 +125,22 @@ from pipecat.evals.script import EvalScriptScenario
 from pipecat.evals.session import EvalSessionParams, _params_with_deprecated_knobs
 from pipecat.evals.simulation import EvalSimulationScenario
 from pipecat.utils.base_object import BaseObject
+from pipecat.utils.deprecation import warn_deprecated
 
 DEFAULT_BASE_PORT = 7900
 DEFAULT_CONCURRENCY = 4
 # How long to wait for a freshly spawned bot to start listening (the harness
 # retries the connect, so this doubles as readiness waiting).
 BOT_CONNECT_TIMEOUT_S = 60.0
-# How long to wait for a bot subprocess to exit after the harness asks it to
-# stop (via eval-cancel) before escalating to terminate/kill.
+# How long to wait for a bot subprocess to exit after it is asked to terminate
+# before killing it.
 BOT_STOP_TIMEOUT_S = 10.0
 # Safety net for a hung harness worker. The harness's own per-expectation timeouts
 # bound a healthy run far below this; the cap only catches a worker that wedges, so
 # it can't hold a concurrency slot forever.
 WORKER_SAFETY_TIMEOUT_S = 600.0
 # Default spawn template; {python}/{bot}/{port} are substituted per run.
-DEFAULT_SPAWN = "{python} {bot} -t eval --port {port}"
+DEFAULT_SPAWN = "{python} {bot} --port {port}"
 # What a scenario file may be named, wherever one is looked for.
 SCENARIO_SUFFIXES = (".yaml", ".yml")
 
@@ -213,7 +217,11 @@ def _append_result(
     runs that did not pass, since that is what a failure is diagnosed from.
     """
     artifacts = {"log": str(logs_dir / f"{stem}.log")}
-    for suffix, key in ((".eval.log", "eval_log"), (".debug.log", "debug_log")):
+    for suffix, key in (
+        (".eval.log", "eval_log"),
+        (".debug.log", "debug_log"),
+        (".conversation.json", "conversation"),
+    ):
         path = logs_dir / f"{stem}{suffix}"
         if path.exists():
             artifacts[key] = str(path)
@@ -277,7 +285,7 @@ def _scenario_record(run: "EvalRun", artifacts: dict) -> dict:
 
 
 def _simulation_record(run: "EvalRun", artifacts: dict) -> dict:
-    """The results.jsonl record of a simulation run: how it ended, what the judge said, each metric's score, the conversation, and for a failed run the bot's events."""
+    """The results.jsonl record of a simulation run: how it ended, what the judge said and on what wording, each metric's score, the conversation, and for a failed run the bot's events."""
     result = run.result if isinstance(run.result, EvalSimulationResult) else None
     record = {
         "bot": run.bot,
@@ -285,14 +293,18 @@ def _simulation_record(run: "EvalRun", artifacts: dict) -> dict:
         "scenario": run.scenario,
         "kind": run.kind,
         "attempt": run.attempt,
+        "success": result.success if result else "",
         "passed": bool(result and result.passed),
         "succeeded": bool(result and result.succeeded),
         "error": run.error or (result.error if result else None),
+        "confidence": result.confidence if result else None,
+        "probabilities": result.probabilities if result else {},
         "ended_by": result.ended_by if result else "error",
         "turns": result.turns if result else 0,
         "metrics": [
             {
                 "name": m.name,
+                "criterion": m.criterion,
                 "score": m.score,
                 "passed": m.passed,
                 "min_score": m.min_score,
@@ -300,7 +312,14 @@ def _simulation_record(run: "EvalRun", artifacts: dict) -> dict:
                 "reason": m.reason,
                 "failure_kind": m.failure_kind,
                 "verdicts": [
-                    {"turn": v.turn, "passed": v.passed, "verdict": v.verdict, "reason": v.reason}
+                    {
+                        "turn": v.turn,
+                        "passed": v.passed,
+                        "verdict": v.verdict,
+                        "confidence": v.confidence,
+                        "probabilities": v.probabilities,
+                        "reason": v.reason,
+                    }
                     for v in m.verdicts
                 ],
             }
@@ -323,6 +342,8 @@ def _simulation_result_from_dict(data: dict) -> EvalSimulationResult:
         simulation_name=data["simulation_name"],
         succeeded=data["succeeded"],
         reason=data.get("reason", ""),
+        confidence=data.get("confidence"),
+        probabilities=data.get("probabilities", {}),
         error=data.get("error"),
         metrics=[
             EvalSimulationMetricScore(
@@ -332,12 +353,14 @@ def _simulation_result_from_dict(data: dict) -> EvalSimulationResult:
             for m in data.get("metrics", [])
         ],
         messages=data.get("messages", []),
+        conversation=data.get("conversation", []),
         turns=data.get("turns", 0),
         ended_by=data.get("ended_by", "error"),
         end_call=data.get("end_call"),
         duration_ms=data.get("duration_ms", 0),
         events_seen=data.get("events_seen", []),
         debug_log=data.get("debug_log", []),
+        success=data.get("success", ""),
     )
 
 
@@ -400,13 +423,17 @@ class EvalRun:
         runner_body: The bot's runner-args body given inline, written to a
             file for the bot when it is spawned; ``None`` when there is none or
             it comes from ``runner_body_path``.
-        concurrency: How many of this bot's runs may execute at once, when its
-            manifest entry caps that; ``None`` leaves only the suite's cap.
+        concurrency: How many runs of this run's entry may be in flight at
+            once, when its manifest entry says; ``None`` is as many as the
+            suite runs.
+        entry: The position of the run's entry in the manifest's ``suite:``
+            list. The suite takes runs in entry order and applies each
+            entry's ``concurrency`` to that entry's runs only.
         attempt: 1-based attempt number when the suite repeats (see
             :attr:`EvalManifest.repeat`); always 1 for a single pass.
         status: ``pending``, ``running``, or ``done``.
         stopping: True while the bot is being stopped after the run is done.
-            The run still holds its concurrency slot, so the next one waits.
+            The run still counts as in flight, so the next one waits.
         result: The outcome, once the run is done.
         error: Spawn/connection error message, if the run failed before producing a result.
         started_at: Monotonic start time, for the live elapsed counter.
@@ -425,6 +452,7 @@ class EvalRun:
     runner_body_path: Path | None = None
     runner_body: dict | None = None
     concurrency: int | None = None
+    entry: int = 0
     kind: EvalKind = EvalKind.SCRIPT
     attempts: int = 1
     sweep: bool = False
@@ -494,8 +522,8 @@ class EvalManifest:
         spawn: Spawn command template (``{python}``/``{bot}``/``{port}`` substituted).
         python: Interpreter used to spawn each bot.
         concurrency: How many runs to execute at once.
-        repeat: How many times to run each (bot, scenario) pair. Attempts are
-            interleaved rather than grouped per bot, so every bot meets the same
+        repeat: How many times to run each (bot, scenario) pair. Attempts run
+            attempt-major rather than grouped per bot, so every bot meets the same
             machine conditions in the same stretch of the sweep and a transient
             slowdown shows up as a band across all of them instead of a regression
             in whichever bot happened to be running.
@@ -657,11 +685,11 @@ class EvalManifest:
         times as its file says unless a repeat makes the suite a measurement; a
         file that fails to load still gets its run, which reports the error.
         Attempts are attempt-major (bot A #1, bot B #1, ..., bot A #2), so a
-        sweep spreads each attempt across the bots without fast ones waiting on
+        sweep runs each attempt across the bots without fast ones waiting on
         slow ones.
         """
         runs: list[EvalRun] = []
-        for item in data.get("suite", []):
+        for entry, item in enumerate(data.get("suite", [])):
             bot = str(item["bot"])
             bot_path = (settings.bots_dir / bot).resolve()
             name = item.get("name")
@@ -699,6 +727,7 @@ class EvalManifest:
                             runner_body_path=body.path,
                             runner_body=body.data,
                             concurrency=concurrency,
+                            entry=entry,
                             kind=kind,
                             attempts=attempts,
                             sweep=settings.repeat_given,
@@ -728,10 +757,9 @@ class EvalManifest:
         if spec is None:
             return _RunnerBody()
         if isinstance(spec, str):
-            warnings.warn(
-                f"{where} a bare 'runner_body: <file>' is deprecated since 1.11.0 and will be "
-                "removed in 2.0.0. Use 'runner_body: {path: <file>}' instead.",
-                DeprecationWarning,
+            warn_deprecated(
+                "`runner_body: <file>` is deprecated since 1.11.0 and will be removed in "
+                f"2.0.0. Use `runner_body: {{path: <file>}}` instead. Found in {where}.",
                 stacklevel=2,
             )
             spec = {"path": spec}
@@ -744,6 +772,73 @@ class EvalManifest:
         return _RunnerBody(data=spec["data"])
 
 
+class _RunQueue:
+    """The suite's runs, handed out to workers in manifest order.
+
+    Each queue is one entry's runs for one attempt, in the order the entries
+    were given. A worker takes the next run from the first queue whose entry
+    is under its cap; when every queue with runs left is at its cap, it waits
+    for a run to finish.
+    """
+
+    def __init__(self, queues: list[tuple[int, int | None, deque[EvalRun]]]):
+        """Initialize the queue.
+
+        Args:
+            queues: Each entry's runs per attempt, with the entry's position
+                and its cap on runs in flight, ``None`` for no cap.
+        """
+        self._queues = queues
+        self._caps = {entry: cap for entry, cap, _ in queues}
+        self._in_flight = {entry: 0 for entry, _, _ in queues}
+        self._changed = asyncio.Condition()
+
+    async def take(self) -> EvalRun | None:
+        """The next run to make, or ``None`` when none is left."""
+        async with self._changed:
+            while any(queue for _, _, queue in self._queues):
+                run = self._pick()
+                if run is not None:
+                    return run
+                await self._changed.wait()
+            return None
+
+    async def done(self, run: EvalRun) -> None:
+        """Count the run as finished, so its entry may take another."""
+        async with self._changed:
+            self._in_flight[run.entry] -= 1
+            self._changed.notify_all()
+
+    def _pick(self) -> EvalRun | None:
+        """The first queued run whose entry is under its cap."""
+        for entry, cap, queue in self._queues:
+            if queue and (cap is None or self._in_flight[entry] < cap):
+                self._in_flight[entry] += 1
+                return queue.popleft()
+        return None
+
+
+@dataclass(frozen=True)
+class _SuiteRunSetup:
+    """What one :meth:`EvalSuite.run` call sets up for every run it makes.
+
+    Parameters:
+        ports: The port assigned to each run, keyed by the run's ``id()``.
+        logs_dir: Directory for per-run logs.
+        record_dir: Directory for per-run conversation recordings, or ``None``.
+        results_path: JSONL file to append one record per finished run to, or ``None``.
+        debug: Whether each run saves its combined ``<run>.debug.log``.
+        params: How each run behaves.
+    """
+
+    ports: dict[int, int]
+    logs_dir: Path
+    record_dir: Path | None
+    results_path: Path | None
+    debug: bool
+    params: EvalSessionParams
+
+
 @dataclass(frozen=True)
 class _RunFiles:
     """Where one run's artifacts go, all named by the run's prefix.
@@ -753,6 +848,7 @@ class _RunFiles:
         log: The bot's output.
         harness_log: The harness worker's output, kept only when it crashed.
         trace: The harness's decision trace, ``<prefix>.eval.log``.
+        conversation: A simulation's conversation, ``<prefix>.conversation.json``.
         config: The worker's config, the handoff in.
         result: The worker's result, the handoff out.
         body: The bot's runner-args body, written when the manifest gives it inline.
@@ -763,6 +859,7 @@ class _RunFiles:
     log: Path
     harness_log: Path
     trace: Path
+    conversation: Path
     config: Path
     result: Path
     body: Path
@@ -789,6 +886,7 @@ class _RunFiles:
             log=logs_dir / f"{prefix}.log",
             harness_log=logs_dir / f"{prefix}.harness.log",
             trace=logs_dir / f"{prefix}.eval.log",
+            conversation=logs_dir / f"{prefix}.conversation.json",
             config=logs_dir / f"{prefix}.config.json",
             result=logs_dir / f"{prefix}.result.json",
             body=logs_dir / f"{prefix}.body.json",
@@ -884,10 +982,13 @@ class EvalSuite(BaseObject):
     ) -> None:
         """Run all of the suite's runs, in place, with the manifest's concurrency.
 
-        Each run gets its own port (``base_port + index``). Runs come off one
-        queue with no barrier between attempts, so a slow bot never holds up the
-        rest. A bot whose entry caps its own concurrency has its runs limited
-        to that as well.
+        Each run gets its own port (``base_port + index``). ``concurrency``
+        workers each take the next run and run it until none is left. Runs are
+        taken in manifest order, every entry's first attempt before any
+        entry's second, so an entry's scenarios finish together and no worker
+        waits while any entry still has runs. An entry with a ``concurrency:``
+        of its own never has more than that many runs in flight, across its
+        attempts; a worker that finds it full takes the next entry's run.
 
         Args:
             logs_dir: Directory for per-run logs.
@@ -927,72 +1028,81 @@ class EvalSuite(BaseObject):
             results_path.parent.mkdir(parents=True, exist_ok=True)
         self._bound_cpu_threads()
         handler = self._add_legacy_update_callback(on_update) if on_update is not None else None
-        sem = asyncio.Semaphore(self.manifest.concurrency)
-        bot_sems = self._bot_semaphores()
+        setup = _SuiteRunSetup(
+            ports={id(run): self.manifest.base_port + i for i, run in enumerate(self.runs)},
+            logs_dir=logs_dir,
+            record_dir=record_dir,
+            results_path=results_path,
+            debug=debug,
+            params=params,
+        )
+        queue = _RunQueue(self._entry_queues(self.runs))
+        workers = min(self.manifest.concurrency, len(self.runs))
         try:
-            await asyncio.gather(
-                *(
-                    self._run_one(
-                        run,
-                        self.manifest.base_port + i,
-                        logs_dir,
-                        record_dir,
-                        results_path,
-                        sem,
-                        bot_sems.get(run.label),
-                        debug,
-                        params,
-                    )
-                    for i, run in enumerate(self.runs)
-                )
-            )
+            await asyncio.gather(*(self._run_worker(queue, setup) for _ in range(workers)))
         finally:
             if handler is not None:
                 self.remove_event_handler("on_update", handler)
 
-    async def _run_one(
-        self,
-        run: EvalRun,
-        port: int,
-        logs_dir: Path,
-        record_dir: Path | None,
-        results_path: Path | None,
-        sem: asyncio.Semaphore,
-        bot_sem: asyncio.Semaphore | None,
-        debug: bool,
-        params: EvalSessionParams,
-    ) -> None:
-        """Spawn one bot, run its scenario against it, and record the outcome on ``run``."""
-        # The bot's own cap comes first, so a run waiting on it holds no suite slot.
-        async with bot_sem or contextlib.nullcontext(), sem:
-            files = _RunFiles.for_run(run, logs_dir, record_dir)
-            run.status = "running"
-            run.started_at = time.monotonic()
-            await self._call_event_handler("on_update", run)
-            bot: asyncio.subprocess.Process | None = None
-            worker: asyncio.subprocess.Process | None = None
+    async def _run_worker(self, queue: "_RunQueue", setup: _SuiteRunSetup) -> None:
+        """Take runs from the queue and run them, one after another, until none is left."""
+        while (run := await queue.take()) is not None:
             try:
-                run.error = self._missing_file(run)
-                if run.error is not None:
-                    return
-                bot = await self._spawn_bot(run, port, files)
-                worker = await self._run_harness(run, port, files, debug=debug, params=params)
-            except Exception as e:
-                # The worker reports its own failures in its result; this is a
-                # problem on the suite's side (spawning, reading the result back).
-                run.error = f"error: {type(e).__name__}: {e}"
-                with contextlib.suppress(OSError):
-                    files.trace.write_text(traceback.format_exc())
+                await self._run_one(run, setup)
             finally:
-                await self._finish(run, files, bot, worker, results_path, logs_dir, record_dir)
+                await queue.done(run)
 
-    def _bot_semaphores(self) -> dict[str, asyncio.Semaphore]:
-        """One semaphore per label whose entry caps its concurrency; the lowest cap wins for a label listed twice."""
-        caps: dict[str, int] = {}
-        for run in self.runs:
-            if run.concurrency is not None:
-                caps[run.label] = min(caps.get(run.label, run.concurrency), run.concurrency)
-        return {label: asyncio.Semaphore(cap) for label, cap in caps.items()}
+    async def _run_one(self, run: EvalRun, setup: _SuiteRunSetup) -> None:
+        """Spawn one bot, run its scenario against it, and record the outcome on ``run``."""
+        port = setup.ports[id(run)]
+        files = _RunFiles.for_run(run, setup.logs_dir, setup.record_dir)
+        run.status = "running"
+        run.started_at = time.monotonic()
+        await self._call_event_handler("on_update", run)
+        bot: asyncio.subprocess.Process | None = None
+        worker: asyncio.subprocess.Process | None = None
+        try:
+            run.error = self._missing_file(run)
+            if run.error is not None:
+                return
+            bot = await self._spawn_bot(run, port, files)
+            worker = await self._run_harness(
+                run, port, files, debug=setup.debug, params=setup.params
+            )
+        except Exception as e:
+            # The worker reports its own failures in its result; this is a
+            # problem on the suite's side (spawning, reading the result back).
+            run.error = f"error: {type(e).__name__}: {e}"
+            with contextlib.suppress(OSError):
+                files.trace.write_text(traceback.format_exc())
+        finally:
+            await self._finish(
+                run,
+                files,
+                bot,
+                worker,
+                setup.results_path,
+                setup.logs_dir,
+                setup.record_dir,
+            )
+
+    @staticmethod
+    def _entry_queues(runs: list[EvalRun]) -> list[tuple[int, int | None, deque[EvalRun]]]:
+        """One queue per entry and attempt, attempt-major then in manifest order, with the entry and its cap.
+
+        A queue keeps its runs in manifest order. An entry's cap is its
+        ``concurrency:``, ``None`` when it sets none, and it covers all of its
+        attempts.
+        """
+        queues: dict[tuple[int, int], deque[EvalRun]] = {}
+        caps: dict[int, int | None] = {}
+        for run in runs:
+            queues.setdefault((run.attempt, run.entry), deque()).append(run)
+            caps[run.entry] = run.concurrency
+        return [
+            (entry, caps[entry], queue)
+            for (_, entry), queue in sorted(queues.items(), key=lambda item: item[0][0])
+        ]
 
     def _missing_file(self, run: EvalRun) -> str | None:
         """Why the run cannot start, when one of its files is missing."""
@@ -1046,15 +1156,12 @@ class EvalSuite(BaseObject):
                 "connect_timeout_s": BOT_CONNECT_TIMEOUT_S,
                 "record_path": str(files.record) if files.record else None,
                 "cache_dir": self.manifest.cache_dir,
-                # The suite spawned this bot, so it is cancelled on teardown, which is
-                # faster than the kill fallback.
-                "stop_bot": True,
             }
         )
         config = {
             "scenario_path": str(run.scenario_path),
             "scenario_name": run.scenario,
-            "bot_url": f"ws://localhost:{port}",
+            "bot_url": f"ws://localhost:{port}/ws",
             "params": run_params.model_dump(),
             "debug": debug,
             "logs_dir": str(files.log.parent),
@@ -1128,6 +1235,8 @@ class EvalSuite(BaseObject):
                 handoff.unlink()
         if run.result is not None and run.result.debug_log:
             files.trace.write_text("\n".join(run.result.debug_log) + "\n")
+        if isinstance(run.result, EvalSimulationResult):
+            files.conversation.write_text(json.dumps(run.result.conversation, indent=2) + "\n")
         if results_path is not None:
             _append_result(results_path, run, files.prefix, logs_dir, record_dir)
 
@@ -1146,10 +1255,9 @@ class EvalSuite(BaseObject):
 
     def _add_legacy_update_callback(self, on_update: Callable[[EvalRun], None]):
         """Register a bare ``on_update`` callback as an event handler; returns the handler, to remove after the run."""
-        warnings.warn(
+        warn_deprecated(
             "`on_update` is deprecated since 1.9.0 and will be removed in 2.0.0. "
             "Use the `on_update` event handler instead.",
-            DeprecationWarning,
             stacklevel=3,
         )
 
@@ -1173,16 +1281,18 @@ class EvalSuite(BaseObject):
 
     @staticmethod
     async def _stop_bot(proc: asyncio.subprocess.Process) -> None:
-        """Wait for the bot to exit, then terminate and kill if it lingers."""
+        """Terminate the bot, and kill it if it lingers.
+
+        The bot's session ended with the harness's connection, but the dev
+        runner serving it keeps running until it is told to stop.
+        """
         if proc.returncode is not None:
             return
-        try:
-            await asyncio.wait_for(proc.wait(), timeout=BOT_STOP_TIMEOUT_S)
-            return
-        except TimeoutError:
+        with contextlib.suppress(ProcessLookupError):
             proc.terminate()
         try:
             await asyncio.wait_for(proc.wait(), timeout=BOT_STOP_TIMEOUT_S)
         except TimeoutError:
-            proc.kill()
+            with contextlib.suppress(ProcessLookupError):
+                proc.kill()
             await proc.wait()

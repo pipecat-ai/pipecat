@@ -339,8 +339,17 @@ class TestTurnCommittedWithoutATranscript(unittest.IsolatedAsyncioTestCase):
         # response it produced is discarded rather than spoken.
         context = LLMContext()
 
+        # Without recovery for the empty turn, which would write to the context.
+        user_aggregator = LLMUserAggregator(
+            context,
+            params=LLMUserAggregatorParams(
+                user_turn_strategies=EagerUserTurnStrategies(),
+                user_turn_stop_timeout=0.3,
+                empty_user_turn=None,
+            ),
+        )
         down, _ = await run_test(
-            aggregator(context, user_turn_stop_timeout=0.3),
+            user_aggregator,
             frames_to_send=[
                 ProposedUserStartedSpeakingFrame(),
                 SleepFrame(),

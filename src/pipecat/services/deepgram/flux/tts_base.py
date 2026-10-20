@@ -64,6 +64,14 @@ class DeepgramFluxTTSBase(TTSService):
     Flux keeps acoustic state across turns on a single connection, so prosody
     and pacing stay consistent throughout a conversation.
 
+    Flux's inline pronunciation markup is Early Access and is rejected with a
+    fatal ``DATA-0002`` on any connection whose ``speed`` is not 1.0, so
+    ``format_pronunciation`` is left at the base implementation and
+    :meth:`~pipecat.services.tts_service.TTSService.pronunciation_transform_ipa`
+    speaks the words as written. The Aura-2 services take inline pronunciations;
+    see https://developers.deepgram.com/docs/tts-voice-controls for which
+    controls each model supports.
+
     Event handlers:
 
     - on_connected: Called when the connection is established.

@@ -40,14 +40,15 @@ importing this module is cheap.
 
 import importlib
 import os
-import warnings
 from typing import TYPE_CHECKING, Any
 
+from pipecat.classifiers.base_classifier import BaseClassifier
+from pipecat.classifiers.llm.classifier import LLMClassifier
 from pipecat.services.llm_service import LLMService
 from pipecat.services.stt_service import STTService
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language
-from pipecat.utils.deprecation import deprecated
+from pipecat.utils.deprecation import deprecated, warn_deprecated
 from pipecat.utils.types import NOT_GIVEN, NotGiven
 
 if TYPE_CHECKING:
@@ -166,10 +167,9 @@ def tts_service_from_config(
         if name == "kokoro":
             inner = kokoro_service(voice_cfg)
         elif name == "cartesia":
-            warnings.warn(
-                "`service: cartesia` in `user.speech` is deprecated since 1.9.0 and will be "
+            warn_deprecated(
+                "`user.speech.service: cartesia` is deprecated since 1.9.0 and will be "
                 "removed in 2.0.0. Use `factory` instead.",
-                DeprecationWarning,
                 stacklevel=2,
             )
             inner = _cartesia_service(voice_cfg)
@@ -201,15 +201,19 @@ def kokoro_service(voice_cfg: dict) -> TTSService:
               When omitted, Kokoro keeps its own default (English). Voices are
               language-specific, so a non-English language needs a matching voice
               — ``af_heart`` speaks US English whatever the language is set to.
+            - ``speed``: Optional speech rate multiplier (Kokoro accepts 0.5 to
+              2.0; 1.0 is its default). Pauses scale with it too, so a faster
+              rate also shortens the silences at commas.
     """
     from pipecat.services.kokoro.tts import KokoroTTSService
 
-    return KokoroTTSService(
-        settings=KokoroTTSService.Settings(
-            voice=str(voice_cfg.get("voice", "")),
-            language=_cfg_language(voice_cfg),
-        ),
+    settings = KokoroTTSService.Settings(
+        voice=str(voice_cfg.get("voice", "")),
+        language=_cfg_language(voice_cfg),
     )
+    if voice_cfg.get("speed") is not None:
+        settings.speed = float(voice_cfg["speed"])
+    return KokoroTTSService(settings=settings)
 
 
 @deprecated(
@@ -350,6 +354,47 @@ DEFAULT_OPENAI_MODEL = "gpt-4o"
 DEFAULT_OLLAMA_JUDGE_EXTRA = {"reasoning_effort": "none"}
 
 
+def classifier_from_config(config: dict | None, *, where: str) -> BaseClassifier:
+    """Build the classifier a ``judge.eval:`` block names.
+
+    A ``factory`` (a dotted path to a callable taking the config) builds it,
+    and may return a :class:`~pipecat.classifiers.base_classifier.BaseClassifier`
+    or an LLM service, which an
+    :class:`~pipecat.classifiers.llm.classifier.LLMClassifier` then asks.
+    Otherwise the block names an LLM, as :func:`llm_service_from_config`
+    reads it, and an ``LLMClassifier`` asks that.
+
+    Args:
+        config: Mapping with a ``factory``, or the keys
+            :func:`llm_service_from_config` reads. ``None`` uses all defaults.
+        where: The config block's name in the file, for error messages.
+
+    Returns:
+        The configured classifier.
+
+    Raises:
+        ValueError: If ``service`` is unknown, ``factory`` is not a dotted
+            path, or the factory returned neither a classifier nor an LLM
+            service.
+    """
+    config = config or {}
+    custom = config.get("factory")
+    if custom:
+        module_name, _, attr = custom.rpartition(".")
+        if not module_name:
+            raise ValueError(f"{where}.factory must be a dotted path: {custom!r}")
+        built = getattr(importlib.import_module(module_name), attr)(config)
+        if isinstance(built, BaseClassifier):
+            return built
+        if isinstance(built, LLMService):
+            return LLMClassifier(llm=built)
+        raise ValueError(
+            f"{where}.factory {custom!r} returned {type(built).__name__}, "
+            "not a BaseClassifier or an LLM service"
+        )
+    return LLMClassifier(llm=llm_service_from_config(config, where=where))
+
+
 def llm_service_from_config(config: dict | None, *, where: str) -> LLMService[Any]:
     """Build an LLM service from a ``service:`` block, the judge's or a persona's.
 
@@ -387,10 +432,9 @@ def llm_service_from_config(config: dict | None, *, where: str) -> LLMService[An
     if service_name == "ollama":
         return ollama_service(config)
     if service_name == "openai":
-        warnings.warn(
-            f"`service: openai` in `{where}` is deprecated since 1.9.0 and will be removed in "
+        warn_deprecated(
+            f"`{where}.service: openai` is deprecated since 1.9.0 and will be removed in "
             "2.0.0. Use `factory` instead.",
-            DeprecationWarning,
             stacklevel=2,
         )
         return _openai_service(config)

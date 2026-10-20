@@ -1,5 +1,7 @@
 eval:
-  service: ollama
-  model: gemma4:12b
-  extra:
-    reasoning_effort: none
+  factory: evals.judges.typesafe_classifier
+  explainer:
+    service: ollama
+    model: gemma4:12b
+    extra:
+      reasoning_effort: none

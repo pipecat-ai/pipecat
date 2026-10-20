@@ -253,6 +253,17 @@ class TestBuilders(unittest.TestCase):
         assert info.status == "finished"
         assert info.result == '{"answer": 42}'
 
+    def test_non_ascii_result_is_not_escaped(self):
+        # The aggregator passes a result already serialized with
+        # ensure_ascii=False; the payload must not escape it a second time.
+        result = '{"status": "आपका ऑर्डर कल पहुँचेगा"}'
+        msg = async_tool_messages.build_final_result_message("call_x", result)
+        assert "आपका ऑर्डर कल पहुँचेगा" in msg["content"]
+        assert "\\u" not in msg["content"]
+        info = async_tool_messages.parse_message(msg)
+        assert info is not None
+        assert info.result == result
+
 
 if __name__ == "__main__":
     unittest.main()

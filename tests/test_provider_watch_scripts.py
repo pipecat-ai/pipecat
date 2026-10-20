@@ -57,6 +57,8 @@ class TestInventory:
             ("cartesia/tts", "CartesiaTTSService", True),
             ("deepgram/stt", "DeepgramSTTService", True),
             ("google/realtime", "GeminiLiveLLMService", True),
+            ("openai/live-realtime", "OpenAILiveLLMService", True),
+            ("azure/voice_live-realtime", "AzureVoiceLiveLLMService", True),
             ("groq/llm", "GroqLLMService", True),
             ("azure/tts", "AzureTTSService", False),
         ],
@@ -344,6 +346,25 @@ class TestProbe:
         )
         assert result.returncode != 0
         assert "at most 3" in result.stderr
+
+    def test_settings_reach_services_that_forward_kwargs(self, units):
+        """A constructor taking ``**kwargs`` still gets the model and settings."""
+        import importlib
+
+        import probe
+
+        unit, info = probe._find_unit("OpenAIResponsesLLMService")
+        cls = getattr(importlib.import_module(info.module), info.name)
+        kwargs, _ = probe.build_kwargs(
+            cls,
+            unit,
+            probe._registry_entry(unit, info.name),
+            model="gpt-5-mini",
+            settings_overrides={"system_instruction": "Be brief."},
+            kwarg_overrides={},
+        )
+        assert kwargs["settings"].model == "gpt-5-mini"
+        assert kwargs["settings"].system_instruction == "Be brief."
 
 
 class TestPublish:

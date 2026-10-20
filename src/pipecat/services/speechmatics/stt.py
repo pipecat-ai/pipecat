@@ -8,7 +8,6 @@
 
 import asyncio
 import os
-import warnings
 from collections.abc import AsyncGenerator, Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -37,6 +36,7 @@ from pipecat.services.stt_latency import SPEECHMATICS_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
+from pipecat.utils.deprecation import warn_deprecated
 from pipecat.utils.network import exponential_backoff_time
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
@@ -46,6 +46,7 @@ try:
     from speechmatics.agent_stt import (
         DEFAULT_CHUNK_SIZE,
         DEFAULT_MODEL,
+        SUPPORTED_SAMPLE_RATES,
         AdditionalVocabEntry,
         AgentSttAsyncClient,
         AudioEncoding,
@@ -144,10 +145,9 @@ def _resolve_model(
             "Pass only `model` (`operating_point` is deprecated)."
         )
     if model is None and operating_point is not None:
-        warnings.warn(
+        warn_deprecated(
             "`operating_point` is deprecated since 1.10.0 and will be removed in 2.0.0. "
             "Use `model` instead.",
-            DeprecationWarning,
             stacklevel=3,
         )
     resolved = model or operating_point or DEFAULT_MODEL
@@ -203,7 +203,10 @@ class SpeechmaticsSTTSettings(STTSettings):
                 Use ``model`` instead. Will be removed in 2.0.0.
 
         enable_partials: Include partial segment fragments.
+        emit_sentences: Close a segment at every end of sentence, not only at the end of
+            the turn, so each sentence is emitted as its own final transcription.
         punctuation_overrides: Punctuation overrides.
+        transcript_filtering_config: Post-processing applied to the transcript.
         enable_diarization: Enable speaker diarization.
         speaker_sensitivity: Diarization sensitivity.
         max_speakers: Maximum number of speakers to detect.
@@ -219,7 +222,11 @@ class SpeechmaticsSTTSettings(STTSettings):
     )
     operating_point: Model | str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     enable_partials: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    emit_sentences: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     punctuation_overrides: dict[str, Any] | None | NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
+    transcript_filtering_config: dict[str, Any] | None | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
     enable_diarization: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -341,6 +348,11 @@ class SpeechmaticsSTTService(STTService):
                 in the STT engine. This is useful for languages that use different punctuation
                 than English. See documentation for more information.
 
+            transcript_filtering_config: Post-processing applied to the transcript, as
+                Speechmatics' `transcript_filtering_config` object. `remove_disfluencies`
+                drops fillers such as "um" and "uh"; `replacements` rewrites matched words.
+                Defaults to None, which leaves the transcript as the engine produced it.
+
             enable_diarization: Enable speaker diarization. When enabled, the STT engine will
                 determine and attribute words to unique speakers. The speaker_sensitivity
                 parameter can be used to adjust the sensitivity of diarization.
@@ -385,6 +397,7 @@ class SpeechmaticsSTTService(STTService):
         operating_point: Model | str | None = None
         enable_partials: bool | None = None
         punctuation_overrides: dict | None = None
+        transcript_filtering_config: dict | None = None
 
         # Diarization
         enable_diarization: bool | None = None
@@ -412,7 +425,8 @@ class SpeechmaticsSTTService(STTService):
                 `SPEECHMATICS_API_KEY` if not provided.
             base_url: Base URL for Speechmatics API. Uses environment variable `SPEECHMATICS_RT_URL`
                 or defaults to `wss://eu2.rt.speechmatics.com/v2/agent`.
-            sample_rate: Optional audio sample rate in Hz.
+            sample_rate: Optional audio sample rate in Hz. Speechmatics accepts 8000 and
+                16000. Defaults to the pipeline's input sample rate.
             encoding: Audio encoding format. Defaults to ``AudioEncoding.PCM_S16LE``.
             params: Input parameters for the service.
 
@@ -463,7 +477,9 @@ class SpeechmaticsSTTService(STTService):
             additional_vocab=[],
             operating_point=None,
             enable_partials=None,
+            emit_sentences=None,
             punctuation_overrides=None,
+            transcript_filtering_config=None,
             enable_diarization=None,
             speaker_sensitivity=None,
             max_speakers=None,
@@ -689,6 +705,17 @@ class SpeechmaticsSTTService(STTService):
         # Log the event
         logger.debug(f"{self} connecting to Speechmatics STT service")
 
+        # The client rejects an unsupported sample rate when constructed. Check it here so
+        # the rejection is reported as permanent (a retry would fail the same way) rather
+        # than raised out of start().
+        if self.sample_rate not in SUPPORTED_SAMPLE_RATES:
+            supported = ", ".join(str(rate) for rate in SUPPORTED_SAMPLE_RATES)
+            await self._fail_permanently(
+                f"Speechmatics STT does not support a sample rate of {self.sample_rate} Hz "
+                f"(supported: {supported})"
+            )
+            return False
+
         # Agent STT client. Turn detection is a top-level turn_config (sibling of the
         # transcription config); audio encoding / sample rate go via AudioFormat.
         self._client = AgentSttAsyncClient(
@@ -893,7 +920,9 @@ class SpeechmaticsSTTService(STTService):
             output_locale=self._locale_to_speechmatics_locale(sm_language, language),
             domain=s.domain or None,
             enable_partials=assert_given(s.enable_partials),
+            emit_sentences=assert_given(s.emit_sentences),
             punctuation_overrides=assert_given(s.punctuation_overrides),
+            transcript_filtering_config=assert_given(s.transcript_filtering_config),
         )
 
     # ============================================================================
@@ -1239,6 +1268,10 @@ class SpeechmaticsSTTService(STTService):
             Language.ES: "es",
             Language.SV: "sv",
             Language.SW: "sw",
+            # Speechmatics' Tagalog pack also covers Filipino, its standardized register,
+            # so both map onto the one code the provider offers.
+            Language.TL: "tl",
+            Language.FIL: "tl",
             Language.TA: "ta",
             Language.TH: "th",
             Language.TR: "tr",
@@ -1314,15 +1347,20 @@ class SpeechmaticsSTTService(STTService):
 
         # Show deprecation warnings
         def _deprecation_warning(old: str, new: str | None = None) -> None:
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                if new:
-                    message = f"`{old}` is deprecated, use `InputParams.{new}`"
-                else:
-                    message = f"`{old}` is deprecated and not used"
-                # 3 frames out of this nested helper is the caller constructing
-                # the service, which is the code that has to change.
-                warnings.warn(message, DeprecationWarning, stacklevel=3)
+            # The caller constructing the service, which is the code that has to
+            # change: past this helper, _check_deprecated_args, and __init__.
+            if new:
+                warn_deprecated(
+                    f"`SpeechmaticsSTTService({old}=...)` is deprecated since 0.0.77 and "
+                    f"will be removed in 2.0.0. Use `InputParams.{new}` instead.",
+                    stacklevel=4,
+                )
+            else:
+                warn_deprecated(
+                    f"`SpeechmaticsSTTService({old}=...)` is deprecated since 0.0.77 and "
+                    "will be removed in 2.0.0. No replacement. It has no effect.",
+                    stacklevel=4,
+                )
 
         # List of deprecated arguments and their new location
         deprecated_args = [

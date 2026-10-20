@@ -116,8 +116,9 @@ class _HopKind(Enum):
     try the whole word again on the next one."""
 
     NO_MATCH = auto()
-    """The word does not belong here. Step past punctuation at the start of the
-    segment and stop, without moving the cursors into the other two texts."""
+    """Nothing here matches the word, usually a symbol the provider reports
+    differently from the text. Step every cursor past the next run of
+    punctuation, which the word stands for, and stop."""
 
 
 @dataclass(frozen=True)
@@ -131,8 +132,8 @@ class _Hop:
     Parameters:
         kind: Which of the four outcomes happened.
         segment_advance: How many characters to move forward in this segment.
-            The length of the match for ``PLACED``, or a step past leading
-            punctuation for ``NO_MATCH``. The other two leave it at 0 because
+            The length of the match for ``PLACED``, or a step past the next run
+            of punctuation for ``NO_MATCH``. The other two leave it at 0 because
             they finish the whole segment anyway.
         word_consumed: How many characters of the word this segment used up, and
             so how many to drop before offering the rest to the next segment.
@@ -359,14 +360,29 @@ class TextSegmentMap:
 
     @staticmethod
     def _word_variants(word: str) -> tuple[str, ...]:
-        """Return *word*, then *word* with any punctuation at its end removed.
+        """Return *word*, then with its last mark removed, then with every trailing mark removed.
 
         A TTS can add punctuation the text it was given never had -- reading a
         list item ``"my account"`` as a sentence and reporting ``"account."``.
-        Matching tries the word as it arrived first, then the trimmed form.
+        Matching tries the word as it arrived first, then the trimmed forms.
+
+        Dropping only the added mark comes before dropping them all, so the
+        marks the text does have are still matched: ``"images:."`` lands past
+        the colon in ``"images:"``, and ``"---."`` keeps something to match at
+        all. The variants are tried in order and empty ones are skipped.
         """
-        trimmed = strip_trailing_punctuation(word)
-        return (word,) if trimmed == word else (word, trimmed)
+        all_marks_dropped = strip_trailing_punctuation(word)
+        # No trailing mark to drop: "hello" -> ("hello",)
+        if all_marks_dropped == word:
+            return (word,)
+
+        last_mark_dropped = word[:-1]
+        # A single trailing mark, so both trims agree: "account." -> ("account.", "account")
+        if last_mark_dropped == all_marks_dropped:
+            return (word, all_marks_dropped)
+
+        # Several trailing marks: "images:." -> ("images:.", "images:", "images")
+        return (word, last_mark_dropped, all_marks_dropped)
 
     @staticmethod
     def _literal_hop(
@@ -570,9 +586,9 @@ class TextSegmentMap:
           finished so the word can try the next one. This is checked last, so a
           word that really does match something like a trailing emoji is found
           by the passes above first.
-        - ``NO_MATCH`` otherwise. The word belongs somewhere else, so the cursor
-          only steps past punctuation at the start of the segment, never past
-          anything that was actually spoken.
+        - ``NO_MATCH`` otherwise. The word is taken to stand for the next run of
+          punctuation (see :meth:`_unmatched_symbol_len`), so the cursors step
+          past that run alone, never past a letter or digit.
         """
         candidates = TextSegmentMap._match_candidates(segment_remaining)
 
@@ -591,14 +607,34 @@ class TextSegmentMap:
         if not has_alnum(segment_remaining):
             return _Hop(_HopKind.EXHAUSTED)
 
-        # Foreign token: nudge past leading punctuation only, then stop. Unlike
-        # the skip candidates this does not stop at markup -- it moves the raw
-        # cursor rather than deciding a match, so there is no tag name it could
-        # mistake for spoken content.
         return _Hop(
             _HopKind.NO_MATCH,
-            segment_advance=TextSegmentMap._leading_nonalnum_len(segment_remaining),
+            segment_advance=TextSegmentMap._unmatched_symbol_len(segment_remaining),
         )
+
+    @staticmethod
+    def _unmatched_symbol_len(segment_remaining: str) -> int:
+        """Count how far a word that matched nothing moves the cursor.
+
+        Such a word is usually a symbol the provider reports differently from
+        the text -- ``"-"`` for ``"→"`` -- so it stands for the next run of
+        punctuation, and the cursor steps past that run alone::
+
+            " → step two"     -> 2, stops before " step"
+            " → ### **Title**" -> 2, stops before " ###"
+
+        Stopping at whitespace is what matters: the symbols after it (``###``,
+        ``**``) arrive as events of their own, and stepping past them would leave
+        those events nothing to match.
+        """
+        i = len(segment_remaining) - len(segment_remaining.lstrip())
+        while (
+            i < len(segment_remaining)
+            and not segment_remaining[i].isalnum()
+            and not segment_remaining[i].isspace()
+        ):
+            i += 1
+        return i
 
     def _advance_cursors_to(self, seg: TextSegment, new_pos: int) -> None:
         """Move every cursor to *new_pos* within *seg*, and finish *seg* if reached.
@@ -746,13 +782,10 @@ class TextSegmentMap:
         for hop in hops:
             seg = self._segments[self._seg_idx]
 
-            if hop.kind is _HopKind.NO_MATCH:
-                # The word belongs somewhere else entirely (a provider swapping a
-                # symbol, say). Nudge the raw cursor past any leading punctuation
-                # so the next word is not blocked by it, but leave the cursors
-                # that mean something alone -- nothing was really spoken here.
-                self._seg_raw_pos += hop.segment_advance
-            elif hop.kind is _HopKind.PLACED:
+            if hop.kind is _HopKind.PLACED or hop.kind is _HopKind.NO_MATCH:
+                # NO_MATCH is a symbol the provider reports differently from the
+                # text ("-" for "→"). It was still spoken, so every cursor moves
+                # past the symbol it stands for, the same as a placed word.
                 self._advance_cursors_to(seg, self._seg_raw_pos + hop.segment_advance)
             else:
                 # CROSSES or EXHAUSTED: this segment is done either way, and the

@@ -8,29 +8,33 @@ plus one custom command and one client-emitted event.
 
 ## What it shows
 
-- **Read-side deixis**: select a paragraph, ask "review this", and the
-  worker grounds in the selected text.
-- **Async fan-out**: a paragraph review spawns two peer workers (clarity
-  + tone) in parallel via `request_job_group(..., params=JobGroupParams(...))`. The in-flight card
-  streams each worker's progress.
-- **Custom UI command**: as each worker completes, `on_job_response`
-  emits an `add_note` command with the worker's feedback; the client
-  renders a note attached to the reviewed paragraph.
-- **State-changing actions**: dictating a note fills the textarea and
-  clicks Save (`fills` + `click` from the bundled `reply` tool).
-- **Write-side deixis**: "where does it talk about rhythms?" → the worker
-  finds the paragraph and uses `select_text` to put the page selection
-  on it.
+- **The voice LLM leads, the UI worker grounds and acts.** The voice LLM
+  has three tools: `review_selection()`, `add_note(text)` and the generic
+  `screen(action, target, value)` from `screen_tools("ui")`. Each sends a
+  job to `ReviewWorker` and returns short data. The voice LLM never sees
+  the page, and the UI worker never runs an LLM turn.
+- **Read-side deixis**: select a paragraph and ask "review this" or
+  "explain this". The worker reads its `selection` from its own snapshot,
+  and `screen("selection")` hands the text to the voice, so no tool needs
+  a ref.
+- **Async fan-out**: `review_selection` says "Reviewing this paragraph"
+  through TTS, then runs two peer workers (clarity + tone) in parallel as
+  a job group. The in-flight card streams each worker's progress, and
+  when both have answered the voice gives their feedback.
+- **Custom UI command**: as each reviewer completes, `on_job_response`
+  emits an `add_note` command with its feedback; the client renders a
+  note attached to the reviewed paragraph.
+- **Grounded actions**: `add_note(text)` has the worker find the notes
+  textarea and the Save button with its classifier, fill and click. The
+  classifier is the worker's own LLM through an `LLMClassifier`; pass a
+  `JevClassifier` for faster, calibrated answers.
+- **Write-side deixis**: "where does it talk about rhythms?" is
+  `screen("select_text", "the paragraph about rhythms")`; the classifier
+  picks the paragraph by its text and the page selection lands on it.
 - **Client-emitted UI event**: clicking a note sends a `note_click` event
   back; the worker's `@ui_event("note_click")` handler dispatches
   `select_text` to jump to the paragraph. The round-trip event/command
   pattern.
-- **Two LLM tools coexisting**: `ReplyToolMixin`'s `reply` handles normal
-  turns; a custom `start_review` tool handles review kick-off. The prompt
-  steers the model to pick one (single tool call per turn).
-- **`on_job_response` interception**: the worker overrides this hook to
-  translate reviewer responses into `add_note` commands — the peers don't
-  know they're driving a UI; the worker mediates.
 
 ## What's new vs. the prior demos
 
@@ -38,8 +42,8 @@ plus one custom command and one client-emitted event.
 |---|---|
 | hello-snapshot | snapshot streaming, voice/UI delegation |
 | deixis | scroll, highlight + bidirectional text selection |
-| form-fill | fills + click |
-| async-tasks | job-group fan-out + cancel |
+| form-fill | grounded fill + click through the screen tool |
+| async-tasks | job-group fan-out + cancel, results back to the voice |
 
 This one stitches all four together, plus the two patterns no prior demo
 touched: a **custom UI command** (`add_note`) and a **custom

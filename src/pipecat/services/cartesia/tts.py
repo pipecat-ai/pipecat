@@ -9,7 +9,6 @@
 import base64
 import json
 import re
-import warnings
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -30,6 +29,8 @@ from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TextAggregationMode, TTSService, WebsocketTTSService
 from pipecat.transcriptions.language import Language, resolve_language
+from pipecat.utils.deprecation import warn_deprecated
+from pipecat.utils.text.phonemes import ipa_phones, normalize_ipa, stress_before_vowels
 from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
 from pipecat.utils.tracing.service_decorators import traced_tts
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
@@ -45,11 +46,10 @@ def _resolve_cartesia_version(cartesia_version: str | None) -> str:
     if cartesia_version is None:
         return _CARTESIA_API_VERSION
 
-    warnings.warn(
+    warn_deprecated(
         "`cartesia_version` is deprecated since 1.8.0 and will be removed in 2.0.0. "
         "No replacement. The service sends the API version it is written against, "
         "so overriding it can break request and response handling.",
-        DeprecationWarning,
         stacklevel=3,
     )
     return cartesia_version
@@ -135,6 +135,28 @@ def language_to_cartesia_language(language: Language) -> str:
     }
 
     return resolve_language(language, LANGUAGE_MAP, use_base_code=True)
+
+
+def format_cartesia_pronunciation(word: str, ipa: str) -> str | None:
+    """Render a pronunciation as Cartesia inline phonemes.
+
+    Cartesia reads ``<<…>>`` blocks of ``|``-separated IPA phones, with stress
+    marks directly before the vowel they stress. Each word of the IPA becomes its
+    own block.
+
+    Args:
+        word: The word being pronounced (unused: the block replaces it).
+        ipa: The pronunciation, in IPA.
+
+    Returns:
+        The inline phoneme blocks, e.g. ``<<m|ɛ|t|f|ˈ|ɔ|ɹ|m|ɪ|n>>``, or None for an
+        empty pronunciation.
+    """
+    blocks = [
+        "<<" + "|".join(stress_before_vowels(ipa_phones(w))) + ">>"
+        for w in normalize_ipa(ipa).split()
+    ]
+    return " ".join(blocks) or None
 
 
 class CartesiaEmotion(StrEnum):
@@ -399,6 +421,21 @@ class CartesiaTTSService(WebsocketTTSService):
 
         self._receive_task = None
 
+    @classmethod
+    def format_pronunciation(cls, word: str, ipa: str) -> str | None:
+        """Render a pronunciation as Cartesia inline phonemes.
+
+        See :func:`format_cartesia_pronunciation`.
+
+        Args:
+            word: The word being pronounced.
+            ipa: The pronunciation, in IPA.
+
+        Returns:
+            The inline phoneme blocks, or None when the pronunciation cannot be used.
+        """
+        return format_cartesia_pronunciation(word, ipa)
+
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
 
@@ -603,7 +640,6 @@ class CartesiaTTSService(WebsocketTTSService):
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
-            await self.remove_active_audio_context()
             self._websocket = None
             await self._call_event_handler("on_disconnected")
 
@@ -899,6 +935,21 @@ class CartesiaHttpTTSService(TTSService):
 
         self._session: aiohttp.ClientSession | None = aiohttp_session
         self._owns_session = aiohttp_session is None
+
+    @classmethod
+    def format_pronunciation(cls, word: str, ipa: str) -> str | None:
+        """Render a pronunciation as Cartesia inline phonemes.
+
+        See :func:`format_cartesia_pronunciation`.
+
+        Args:
+            word: The word being pronounced.
+            ipa: The pronunciation, in IPA.
+
+        Returns:
+            The inline phoneme blocks, or None when the pronunciation cannot be used.
+        """
+        return format_cartesia_pronunciation(word, ipa)
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.

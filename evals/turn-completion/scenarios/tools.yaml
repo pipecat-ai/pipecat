@@ -1,0 +1,233 @@
+# Function calling. A complete request that needs a tool should produce the
+# call (● optional); a cut-off one must be ◐ with no call.
+#
+# Text modality; every scenario shares the judge below. A scenario's
+# context: is the history the assistant aggregator would have left.
+
+name: tools
+
+judge: !include judge_text.yaml
+
+scenarios:
+- name: tool_weather_complete
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Hi! How can I help you today?
+  turns:
+  - user: What's the weather in Los Angeles right now?
+    expect:
+    - event: function_call
+      calls:
+      - name: get_current_weather
+- name: tool_weather_complete_stt
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Hi! How can I help you today?
+  turns:
+  - user: what's the weather in los angeles right now
+    expect:
+    - event: function_call
+      calls:
+      - name: get_current_weather
+- name: tool_weather_cutoff
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Hi! How can I help you today?
+  turns:
+  - user: What's the weather in
+    expect:
+    - event: llm_marker
+      marker: incomplete
+      marker_first: true
+      markers: 1
+      text_after: false
+    - event: function_call
+      absent: true
+      within_ms: 2000
+- name: tool_weather_cutoff_stt
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Hi! How can I help you today?
+  turns:
+  - user: what's the weather in
+    expect:
+    - event: llm_marker
+      marker: incomplete
+      marker_first: true
+      markers: 1
+      text_after: false
+    - event: function_call
+      absent: true
+      within_ms: 2000
+- name: tool_weather_hmm
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Hi! How can I help you today?
+  turns:
+  - user: What's the weather in... hmm
+    expect:
+    - event: llm_marker
+      marker: incomplete
+      marker_first: true
+      markers: 1
+      text_after: false
+    - event: function_call
+      absent: true
+      within_ms: 2000
+- name: tool_weather_hmm_stt
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Hi! How can I help you today?
+  turns:
+  - user: what's the weather in hmm
+    expect:
+    - event: llm_marker
+      marker: incomplete
+      marker_first: true
+      markers: 1
+      text_after: false
+    - event: function_call
+      absent: true
+      within_ms: 2000
+- name: tool_weather_continuation
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Hi! How can I help you today?
+  turns:
+  - user: What's the weather in
+    expect:
+    - event: llm_marker
+      marker: incomplete
+      marker_first: true
+      markers: 1
+      text_after: false
+    - event: function_call
+      absent: true
+      within_ms: 2000
+  - user: Los Angeles, California?
+    expect:
+    - event: function_call
+      calls:
+      - name: get_current_weather
+- name: tool_weather_continuation_stt
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Hi! How can I help you today?
+  turns:
+  - user: what's the weather in
+    expect:
+    - event: llm_marker
+      marker: incomplete
+      marker_first: true
+      markers: 1
+      text_after: false
+    - event: function_call
+      absent: true
+      within_ms: 2000
+  - user: los angeles california
+    expect:
+    - event: function_call
+      calls:
+      - name: get_current_weather
+- name: tool_appointment_partial
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Hi! How can I help you today?
+  turns:
+  - user: Book me an appointment for Tuesday at
+    expect:
+    - event: llm_marker
+      marker: incomplete
+      marker_first: true
+      markers: 1
+      text_after: false
+    - event: function_call
+      absent: true
+      within_ms: 2000
+- name: tool_appointment_partial_stt
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Hi! How can I help you today?
+  turns:
+  - user: book me an appointment for tuesday at
+    expect:
+    - event: llm_marker
+      marker: incomplete
+      marker_first: true
+      markers: 1
+      text_after: false
+    - event: function_call
+      absent: true
+      within_ms: 2000
+- name: tool_appointment_complete
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Hi! How can I help you today?
+  turns:
+  - user: Book me an appointment for Tuesday at three in the afternoon.
+    expect:
+    - event: function_call
+      calls:
+      - name: book_appointment
+- name: tool_appointment_complete_stt
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Hi! How can I help you today?
+  turns:
+  - user: book me an appointment for tuesday at three in the afternoon
+    expect:
+    - event: function_call
+      calls:
+      - name: book_appointment
+- name: tool_unrelated_complete
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Hi! How can I help you today?
+  turns:
+  - user: What's the capital of Germany?
+    expect:
+    - event: llm_marker
+      marker: complete
+      marker_first: true
+      markers: 1
+      text_after: true
+- name: tool_unrelated_complete_stt
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Hi! How can I help you today?
+  turns:
+  - user: what's the capital of germany
+    expect:
+    - event: llm_marker
+      marker: complete
+      marker_first: true
+      markers: 1
+      text_after: true

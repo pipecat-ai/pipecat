@@ -149,7 +149,7 @@ class XAISTTService(WebsocketSTTService):
             **kwargs: Additional arguments passed to WebsocketSTTService.
         """
         default_settings = self.Settings(
-            model=None,
+            model="grok-voice-transcribe-2.0",
             language=Language.EN,
             interim_results=True,
             endpointing=None,
@@ -243,6 +243,7 @@ class XAISTTService(WebsocketSTTService):
             params["language"] = s.language
 
         optional_fields = {
+            "model": s.model,
             "interim_results": s.interim_results,
             "endpointing": s.endpointing,
             "multichannel": s.multichannel,
@@ -263,7 +264,9 @@ class XAISTTService(WebsocketSTTService):
         """Establish the WebSocket connection and start the receive task."""
         await super()._connect()
         await self._connect_websocket()
-        if self._websocket and not self._receive_task:
+        # Started even when the connection failed: with no socket the receive
+        # loop goes straight to its reconnect path, which retries the connect.
+        if not self._receive_task:
             self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
     async def _disconnect(self):

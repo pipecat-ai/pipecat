@@ -27,6 +27,7 @@ from pipecat.services.elevenlabs.tts_base import (
     ELEVENLABS_MODEL_LANGUAGES,
     ELEVENLABS_V2_5_LANGUAGES,
     ELEVENLABS_V3_LANGUAGES,
+    ELEVENLABS_V4_LANGUAGES,
     elevenlabs_language_code,
     language_to_elevenlabs_language,
 )
@@ -152,6 +153,7 @@ def test_elevenlabs_english_timestamp_chunks_reassemble_with_spaces():
 def test_elevenlabs_timestamp_spacing_languages():
     assert _word_timestamps_include_inter_frame_spaces("ja") is True
     assert _word_timestamps_include_inter_frame_spaces("zh-CN") is True
+    assert _word_timestamps_include_inter_frame_spaces("yue") is True
     assert _word_timestamps_include_inter_frame_spaces("en") is False
 
 
@@ -316,7 +318,7 @@ async def test_keepalive_does_not_stamp_context_before_init():
     # Simulate the start of an LLM turn: TTSService sets the turn context id on
     # LLMFullResponseStartFrame, before run_tts sends the voice_settings init.
     service._turn_context_id = "ctx-1"
-    service._playing_context_id = None
+    service.reset_active_audio_context()
     assert "ctx-1" not in service._context_init_sent
 
     await service._send_keepalive()
@@ -333,7 +335,7 @@ async def test_keepalive_stamps_context_after_init():
     ws = _FakeWebSocket()
     service._websocket = ws
     service._turn_context_id = "ctx-1"
-    service._playing_context_id = None
+    service.reset_active_audio_context()
     # run_tts records the context once its voice_settings init has gone out.
     service._context_init_sent.add("ctx-1")
 
@@ -349,7 +351,7 @@ async def test_keepalive_without_active_context_sends_empty():
     ws = _FakeWebSocket()
     service._websocket = ws
     service._turn_context_id = None
-    service._playing_context_id = None
+    service.reset_active_audio_context()
 
     await service._send_keepalive()
 
@@ -460,6 +462,12 @@ def test_v3_language_set_extends_the_v2_5_set():
     assert len(ELEVENLABS_V3_LANGUAGES) == 74
 
 
+def test_v4_language_set_extends_the_v3_set():
+    """Eleven v4 adds languages; it never drops one Eleven v3 supports."""
+    assert ELEVENLABS_V3_LANGUAGES < ELEVENLABS_V4_LANGUAGES
+    assert len(ELEVENLABS_V4_LANGUAGES) == 84
+
+
 def test_language_code_is_gated_by_model():
     """A language the model doesn't cover is dropped rather than sent."""
     # Welsh is v3-only.
@@ -468,6 +476,10 @@ def test_language_code_is_gated_by_model():
     # German is common to both.
     assert elevenlabs_language_code("eleven_flash_v2_5", "de") == "de"
     assert elevenlabs_language_code("eleven_v3", "de") == "de"
+    # Cantonese is v4-only.
+    assert elevenlabs_language_code("eleven_v4_turbo", "yue") == "yue"
+    assert elevenlabs_language_code("eleven_v4", "yue") == "yue"
+    assert elevenlabs_language_code("eleven_v3", "yue") is None
 
 
 def test_models_without_language_support_send_no_code():
@@ -491,3 +503,5 @@ def test_every_mapped_language_is_accepted_by_some_model():
         code = language_to_elevenlabs_language(language)
         if code in ELEVENLABS_V3_LANGUAGES:
             assert elevenlabs_language_code("eleven_v3", code) == code
+        if code in ELEVENLABS_V4_LANGUAGES:
+            assert elevenlabs_language_code("eleven_v4_turbo", code) == code

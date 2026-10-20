@@ -27,11 +27,14 @@ uv run pytest tests/test_name.py::test_function_name
 # Preview changelog
 uv run towncrier build --draft --version Unreleased
 
-# Run a behavioral eval scenario against a running bot (bot started with `-t eval`)
-pipecat eval run scenarios/<name>.yaml --bot-url ws://localhost:7860
+# Run a behavioral eval scenario against a running bot (started with `python bot.py`)
+pipecat eval run scenarios/<name>.yaml --bot-url ws://localhost:7860/ws
 
 # Run the full release-eval suite (spawns bots from a manifest, runs scenarios in parallel)
 pipecat eval suite evals/release/manifest.yaml -p <bot-pattern> -s <scenario>
+
+# Judge saved simulation conversations (<stem>.conversation.json) again, without the bot
+pipecat eval judge scenarios/<name>.yaml -s <scenario> logs/*.conversation.json -o judged.jsonl
 
 # Lint and format check
 uv run ruff check
@@ -39,6 +42,9 @@ uv run ruff format --check
 
 # Update dependencies (after editing pyproject.toml)
 uv lock && uv sync
+
+# Refresh the Pipecat UI component snapshot vendored into the CLI's React client templates
+node scripts/cli/sync-pipecat-ui.mjs
 ```
 
 ## Architecture
@@ -73,7 +79,7 @@ All data flows as **Frame** objects through a pipeline of **FrameProcessors**:
 
 - **Serializers** (`src/pipecat/serializers/`): Convert frames to/from wire formats for WebSocket transports. `FrameSerializer` base class defines `serialize()` and `deserialize()`. Telephony serializers (Twilio, Plivo, Vonage, Telnyx, Exotel, Genesys) handle provider-specific protocols and audio encoding (e.g., μ-law).
 
-- **RTVI** (`src/pipecat/processors/frameworks/rtvi.py`): Real-Time Voice Interface protocol bridging clients and the pipeline. `RTVIProcessor` handles incoming client messages (text input, audio, DTMF keypresses, function call results). `RTVIObserver` converts pipeline frames to outgoing messages: user/bot speaking events, transcriptions, LLM/TTS lifecycle, function calls, metrics, and audio levels.
+- **RTVI** (`src/pipecat/processors/frameworks/rtvi/`): Real-Time Voice Interface protocol bridging clients and the pipeline. `RTVIProcessor` handles incoming client messages (text input, audio, DTMF keypresses, function call results). `RTVIObserver` converts pipeline frames to outgoing messages: user/bot speaking events, transcriptions, LLM/TTS lifecycle, function calls, metrics, and audio levels.
 
 - **Observers** (`src/pipecat/observers/`): Monitor frame flow without modifying the pipeline. Passed to `PipelineWorker` via the `observers` parameter. Implement `on_process_frame()` and `on_push_frame()` callbacks.
 
@@ -102,7 +108,7 @@ Runnable examples live in `examples/multi-worker/` (local handoff, distributed h
 
 - **Interruptions**: Interruptions are usually triggered by a user turn start strategy (e.g. `VADUserTurnStartStrategy`), but any processor can trigger one by calling `await self.broadcast_interruption()`, which broadcasts an `InterruptionFrame` both upstream and downstream. The old `push_interruption_task_frame_and_wait()` is deprecated and delegates to `broadcast_interruption()`.
 
-- **Uninterruptible Frames**: These are frames that will not be removed from internal queues even if there's an interruption. For example, `EndFrame` and `StopFrame`.
+- **Uninterruptible Frames**: These are frames that will not be removed from internal queues even if there's an interruption. Every frame carries an `interruptible` flag, True by default; a frame class such as `EndFrame` or `StopFrame` declares `interruptible: bool = field(default=False, init=False)` to be uninterruptible by default, and setting the flag on a frame before pushing it decides for that frame alone.
 
 - **Events**: Most classes in Pipecat have `BaseObject` as the very base class. `BaseObject` has support for events. Events can run in the background in an async task (default) or synchronously (`sync=True`) if we want immediate action. Synchronous event handlers need to execute fast.
 
@@ -140,7 +146,7 @@ Runnable examples live in `examples/multi-worker/` (local handoff, distributed h
 ## Code Style
 
 - **Docstrings**: Google-style. Classes describe purpose; `__init__` has `Args:` section; dataclasses use `Parameters:` section.
-- **Deprecations**: Every deprecation needs a `.. deprecated:: <version>` directive in the docstring (never inline `[DEPRECATED]` tags) — it's the registry's source of truth. Its body must **lead with the replacement as the first reference** — `Use :class:`X` instead.` / `Moved to :mod:`X`.` / `Merged into :class:`X`.` — or state `No replacement.` explicitly; **never lead with a contextual reference** (the deprecated thing itself, a `DeprecationWarning`, or a related-but-not-replacement API), and don't rely on incidental words like "no longer" to signal no-replacement. Prefer Sphinx roles (`:class:`/`:meth:`/`:func:`/`:attr:`/`:mod:`) over plain backticks, but use a backtick when a role wouldn't resolve (aliases like `Service.Settings`, usage idioms, parameters). For the runtime warning: **classes, functions, methods, and properties** use the PEP 702 `@deprecated` decorator from `pipecat.utils.deprecation` with a string-literal message matching the canonical template — `` `Subject` is deprecated since X.Y.Z and will be removed in A.B.C. Use `Replacement` instead. `` — where the removal is a concrete version (e.g. `2.0.0`, never "a future release") and the tail is `No replacement.` when nothing replaces it. Parameters, module moves, and behavior/value changes can't use the decorator — call `warnings.warn(..., DeprecationWarning)` by hand. Enforced by `tests/test_deprecation_markers.py`; full conventions in `CONTRIBUTING.md`.
+- **Deprecations**: Every deprecation needs a `.. deprecated:: <version>` directive in the docstring (never inline `[DEPRECATED]` tags) — it's the registry's source of truth. Its body must **lead with the replacement as the first reference** — `Use :class:`X` instead.` / `Moved to :mod:`X`.` / `Merged into :class:`X`.` — or state `No replacement.` explicitly; **never lead with a contextual reference** (the deprecated thing itself, a `DeprecationWarning`, or a related-but-not-replacement API), and don't rely on incidental words like "no longer" to signal no-replacement. Prefer Sphinx roles (`:class:`/`:meth:`/`:func:`/`:attr:`/`:mod:`) over plain backticks, but use a backtick when a role wouldn't resolve (aliases like `Service.Settings`, usage idioms, parameters). For the runtime warning: **classes, functions, methods, and properties** use the PEP 702 `@deprecated` decorator from `pipecat.utils.deprecation` with a string-literal message matching the canonical template — `` `Subject` is deprecated since X.Y.Z and will be removed in A.B.C. Use `Replacement` instead. `` — where the removal is a concrete version (e.g. `2.0.0`, never "a future release") and the tail is `No replacement.` when nothing replaces it. Parameters, fields, module moves, and behavior/value changes can't use the decorator — call `warn_deprecated(message, stacklevel=...)` from `pipecat.utils.deprecation`, never `warnings.warn` directly, with a literal message in the same template and `stacklevel` pointing at the caller's code where it can. Enforced by `tests/test_deprecation_markers.py`; full conventions in `CONTRIBUTING.md`.
 - **Linting**: Ruff (line length 100). Pre-commit hooks enforce formatting.
 - **Type hints**: Required for complex async code.
 - **Dataclass vs Pydantic**: Use `@dataclass` for frames and internal pipeline data (high-frequency, no validation needed). Use Pydantic `BaseModel` for configuration, parameters, metrics, and external API data (benefits from validation and serialization). Specifically:
@@ -220,14 +226,16 @@ When adding a new service:
 
 There are two kinds of scenario, told apart by the scenario's keys:
 
-- A **scripted** scenario (`turns:`) writes the user's turns out, each with `expect:` assertions on the events the bot emits back: latency, `text_contains` and `text_excludes`, an expected `function_call`, the turn-completion `marker` the LLM produced (`llm_marker` with `marker: complete | short | long | incomplete`, plus `marker_first`, `markers` and `text_after` checks on the response's raw text), or an LLM judge of the reply. Deterministic input, so it pins one behavior; scenarios are reusable across bots. A run's result records each turn's expectations with what they matched, so a passed run keeps the marker it saw.
+- A **scripted** scenario (`turns:`) writes the user's turns out, each with `expect:` assertions on the events the bot emits back: latency, `text_contains` and `text_excludes`, an expected `function_call` (with an `eval:` to judge the call by its name and arguments, where `args:` cannot match verbatim), the turn-completion `marker` the LLM produced (`llm_marker` with `marker: complete | short | long | incomplete`, plus `marker_first`, `markers` and `text_after` checks on the response's raw text), or an LLM judge of the reply. Deterministic input, so it pins one behavior; scenarios are reusable across bots. A run's result records each turn's expectations with what they matched, so a passed run keeps the marker it saw.
 - A **simulated** scenario, a simulation for short (`persona:` and `goal:`), lets an LLM play a caller who pursues the goal and hangs up with an `end_call` tool. A judge then reads the whole conversation, the bot's tool calls in place, and decides whether the bot did its job (`success:`, prose) and how each reply scored on the `metrics:`. A judged metric (`criterion`, optionally `min_score`) says what every reply should be and scores the share of turns that satisfied it; a measured one (`measure: turns | duration | words | latency` with `min_value` / `max_value`, or `measure: function_calls` with the `calls` the bot should make, `[]` for none) is computed from the run. A run passes when the goal is met and no metric falls short, and a simulation's `runs` must all pass.
 
 To confirm a behavior while developing:
 
-1. Run the bot with its eval transport: `python bot.py -t eval --port 7860`
-2. Run a scenario of either kind against it: `pipecat eval run scenarios/<name>.yaml --bot-url ws://localhost:7860 -v`
+1. Run the bot with the dev runner: `python bot.py --port 7860`
+2. Run a scenario of either kind against it: `pipecat eval run scenarios/<name>.yaml --bot-url ws://localhost:7860/ws -v`
 
-For many bots at once, `pipecat eval suite <manifest.yaml>` spawns each bot and runs its scenarios in parallel; a manifest lists both kinds under `scenarios:`, and `-k simulation` runs only the simulations. A manifest entry may also carry a `runner_body:` (the `/start` body the bot would normally get, as a `path:` to a file or inline `data:`), a `concurrency:` cap of its own, and a `name:` that labels its runs when several entries share one bot. Reusable scenarios and the pre-release validation manifest live in `evals/release/` — see its `README.md` for the full workflow (prerequisites: a local Ollama judge `gemma4:12b`, plus Kokoro/Moonshine for audio mode) and the `pipecat.evals.script` and `pipecat.evals.simulation` module docstrings for the two file formats.
+Every simulation run saves its conversation (what each side said and the bot's function calls) to `<stem>.conversation.json`, in the format the `pipecat.evals.conversation` module docstring describes. `pipecat eval judge <scenario.yaml> -s <name> <files...>` judges saved conversations again against the simulation's `success` and judged metrics, with a reason for every verdict and without the bot; from Python, `EvalSimulationJudge(simulation).judge(messages)` (`src/pipecat/evals/simulation_judge.py`) does the same. Use it to tune a criterion's wording on runs you already have. `EvalConversationObserver` (`pipecat.evals.conversation_observer`) records the same file from a bot's own pipeline, so a real call is judged the same way.
+
+For many bots at once, `pipecat eval suite <manifest.yaml>` spawns each bot and runs its scenarios in parallel; a manifest lists both kinds under `scenarios:`, and `-k simulation` runs only the simulations. A manifest entry may also carry a `runner_body:` (the `/start` body the bot would normally get, as a `path:` to a file or inline `data:`), a `concurrency:` cap of its own, and a `name:` that labels its runs when several entries share one bot. Reusable scenarios and the pre-release validation manifest live in `evals/release/` — see its `README.md` for the full workflow (prerequisites: `TYPESAFE_API_KEY` exported for the Jev judge, a local Ollama `gemma4:12b` for the judge's explainer and the simulated caller, plus Kokoro/Moonshine for audio mode) and the `pipecat.evals.script` and `pipecat.evals.simulation` module docstrings for the two file formats.
 
 From Python, `EvalScenarioFile.load(path)` (`src/pipecat/evals/scenario.py`) reads a file and holds its scenarios, each of whichever kind it is, and `EvalSession.from_scenario(scenario, bot_url, params=EvalSessionParams(...)).run()` (`src/pipecat/evals/session.py`) runs one, building the scripted or simulation session the scenario needs; `EvalSessionParams` is how the run behaves (timeouts, recording, caching, teardown), the services it uses are keyword arguments, and the result is an `EvalScriptResult` or an `EvalSimulationResult` (`src/pipecat/evals/results.py`).

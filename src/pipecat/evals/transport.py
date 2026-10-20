@@ -10,7 +10,8 @@ The harness sets per-connection query flags. ``skip_tts`` silences the
 bot's speech for the session (text mode), applied before
 ``on_client_connected`` so a greeting made there is silent too.
 ``capture_bot_audio`` forwards the bot's synthesized audio to the harness,
-for transcription and the recording. ``trigger_disconnect`` fires the bot's
+for transcription and the recording. ``capture_bot_images`` reports each
+image the bot outputs, by size and format. ``trigger_disconnect`` fires the bot's
 ``on_client_disconnected`` when the connection ends; it is off by default,
 since bots often cancel their pipeline there and the server serves several
 scenarios in a row.
@@ -18,19 +19,22 @@ scenarios in a row.
 The input transport also serves the harness's image to a vision bot, which
 has no camera under eval. The user's audio arrives as a continuous stream,
 so nothing else is special on the way in.
+
+The server, :class:`EvalTransport`, is deprecated:
+:class:`~pipecat.evals.fastapi_transport.EvalFastAPIWebsocketTransport` is the
+same transport over a WebSocket the bot accepted itself, which the dev runner
+and Pipecat Cloud both hand it. This module keeps the parameters both use.
 """
 
-import asyncio
-import io
 from urllib.parse import parse_qs, urlsplit
 
 from loguru import logger
-from PIL import Image
 
+from pipecat.evals.serializer import EvalSerializer
 from pipecat.frames.frames import (
     Frame,
     LLMConfigureOutputFrame,
-    UserImageRawFrame,
+    OutputImageRawFrame,
     UserImageRequestFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
@@ -40,9 +44,11 @@ from pipecat.transports.websocket.server import (
     SingleClientWebsocketServerParams,
     SingleClientWebsocketServerTransport,
 )
+from pipecat.utils.deprecation import deprecated
 
 SKIP_TTS_QUERY_PARAM = "skip_tts"
 CAPTURE_AUDIO_QUERY_PARAM = "capture_bot_audio"
+CAPTURE_IMAGES_QUERY_PARAM = "capture_bot_images"
 TRIGGER_DISCONNECT_QUERY_PARAM = "trigger_disconnect"
 
 
@@ -83,41 +89,43 @@ class EvalInputTransport(SingleClientWebsocketServerInputTransport):
             await self._serve_user_image(frame)
 
     async def _serve_user_image(self, request: UserImageRequestFrame) -> None:
-        serializer = getattr(self._params, "serializer", None)
+        serializer = self._params.serializer
         image = None
-        if serializer is not None and hasattr(serializer, "get_user_image"):
-            image = serializer.get_user_image()
+        if isinstance(serializer, EvalSerializer):
+            image = await serializer.user_image_frame(request)
         if image is None:
             logger.warning(f"{self}: UserImageRequestFrame but no eval image registered")
             return
-        data, _fmt = image
-        # The harness sends the image encoded over the wire, but a real camera
-        # transport pushes raw frames -- so decode it to raw RGB here and serve a
-        # genuine ``UserImageRawFrame``. The LLM context re-encodes raw frames to
-        # JPEG anyway, and consumers that decode directly (e.g. a local vision
-        # model doing ``Image.frombytes``) need the raw pixels and real size.
-        decoded = await asyncio.to_thread(lambda: Image.open(io.BytesIO(data)).convert("RGB"))
-        await self.push_frame(
-            UserImageRawFrame(
-                image=decoded.tobytes(),
-                size=decoded.size,
-                format="RGB",
-                user_id=request.user_id,
-                text=request.text,
-                append_to_context=request.append_to_context,
-                request=request,
-            )
-        )
+        await self.push_frame(image)
 
 
 class EvalOutputTransport(SingleClientWebsocketServerOutputTransport):
-    """Output transport of the eval transport; adds nothing to the WebSocket server output yet, and exists for symmetry with :class:`EvalInputTransport`."""
+    """Output transport that reports the bot's images to the harness.
 
-    pass
+    The WebSocket server output has no video, so an image the bot outputs is
+    handed to the serializer as it arrives, whether or not the bot enabled
+    video output; the serializer sends it only when the harness asked.
+    """
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Report output images; otherwise behave like the base output transport."""
+        await super().process_frame(frame, direction)
+        if isinstance(frame, OutputImageRawFrame):
+            await self._write_frame(frame)
 
 
+@deprecated(
+    "`EvalTransport` is deprecated since 1.13.0 and will be removed in 2.0.0. "
+    "Use `EvalFastAPIWebsocketTransport` instead."
+)
 class EvalTransport(SingleClientWebsocketServerTransport):
-    """WebSocket server transport used by the eval harness (see the module docstring)."""
+    """WebSocket server transport used by the eval harness (see the module docstring).
+
+    .. deprecated:: 1.13.0
+        Use :class:`~pipecat.evals.fastapi_transport.EvalFastAPIWebsocketTransport`
+        instead, which ``create_transport`` builds when an eval harness connects
+        to the dev runner. Will be removed in 2.0.0.
+    """
 
     def input(self) -> SingleClientWebsocketServerInputTransport:
         """Return an input transport that can serve harness-provided images."""
@@ -138,6 +146,8 @@ class EvalTransport(SingleClientWebsocketServerTransport):
         serializer = getattr(self._params, "serializer", None)
         if serializer is not None and hasattr(serializer, "set_capture_audio"):
             serializer.set_capture_audio(_query_flag(websocket, CAPTURE_AUDIO_QUERY_PARAM))
+        if serializer is not None and hasattr(serializer, "set_capture_images"):
+            serializer.set_capture_images(_query_flag(websocket, CAPTURE_IMAGES_QUERY_PARAM))
 
         if self._input is not None:
             skip_tts = _query_flag(websocket, SKIP_TTS_QUERY_PARAM)

@@ -154,6 +154,24 @@ ELEVENLABS_V3_LANGUAGES: frozenset[str] = frozenset(
     }
 )
 
+#: Languages the Eleven v4 models accept as a ``language_code``. A superset of
+#: :data:`ELEVENLABS_V3_LANGUAGES`. This is the set the API accepts, which
+#: differs from the list ElevenLabs publishes for the models.
+ELEVENLABS_V4_LANGUAGES: frozenset[str] = ELEVENLABS_V3_LANGUAGES | frozenset(
+    {
+        "ast",
+        "mi",
+        "mn",
+        "mt",
+        "my",
+        "oc",
+        "or",
+        "tg",
+        "uz",
+        "yue",
+    }
+)
+
 #: Models that accept a ``language_code``, and the languages each one takes.
 #: Sending a language a model doesn't cover is rejected with a 400, so the
 #: language is checked against this mapping rather than only the model id.
@@ -167,6 +185,8 @@ ELEVENLABS_MODEL_LANGUAGES: dict[str, frozenset[str]] = {
     "eleven_turbo_v2_5": ELEVENLABS_V2_5_LANGUAGES,
     "eleven_v3": ELEVENLABS_V3_LANGUAGES,
     "eleven_v3_conversational": ELEVENLABS_V3_LANGUAGES,
+    "eleven_v4": ELEVENLABS_V4_LANGUAGES,
+    "eleven_v4_turbo": ELEVENLABS_V4_LANGUAGES,
 }
 
 
@@ -220,6 +240,7 @@ def language_to_elevenlabs_language(language: Language) -> str:
         Language.AF: "af",
         Language.AR: "ar",
         Language.AS: "as",
+        Language.AST: "ast",
         Language.AZ: "az",
         Language.BE: "be",
         Language.BG: "bg",
@@ -262,14 +283,20 @@ def language_to_elevenlabs_language(language: Language) -> str:
         Language.LN: "ln",
         Language.LT: "lt",
         Language.LV: "lv",
+        Language.MI: "mi",
         Language.MK: "mk",
         Language.ML: "ml",
+        Language.MN: "mn",
         Language.MR: "mr",
         Language.MS: "ms",
+        Language.MT: "mt",
+        Language.MY: "my",
         Language.NE: "ne",
         Language.NL: "nl",
         Language.NO: "no",
         Language.NY: "ny",
+        Language.OC: "oc",
+        Language.OR: "or",
         Language.PA: "pa",
         Language.PL: "pl",
         Language.PS: "ps",
@@ -285,11 +312,14 @@ def language_to_elevenlabs_language(language: Language) -> str:
         Language.SW: "sw",
         Language.TA: "ta",
         Language.TE: "te",
+        Language.TG: "tg",
         Language.TH: "th",
         Language.TR: "tr",
         Language.UK: "uk",
         Language.UR: "ur",
+        Language.UZ: "uz",
         Language.VI: "vi",
+        Language.YUE: "yue",
         Language.ZH: "zh",
     }
 
@@ -327,9 +357,9 @@ def output_format_from_sample_rate(sample_rate: int) -> str:
 
 
 def _is_chinese_or_japanese_language(language: str) -> bool:
-    """Check if the given language is Chinese or Japanese."""
+    """Check if the given language is Chinese (including Cantonese) or Japanese."""
     base_lang = language.split("-")[0].lower()
-    return base_lang in {"zh", "ja"}
+    return base_lang in {"zh", "yue", "ja"}
 
 
 def _word_timestamps_include_inter_frame_spaces(language: str | None) -> bool:
@@ -535,7 +565,6 @@ class ElevenLabsTTSBase(WebsocketTTSService):
         self._partial_word_start_time = 0.0
 
         self._receive_task = None
-        self._keepalive_task = None
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -652,8 +681,8 @@ class ElevenLabsTTSBase(WebsocketTTSService):
         if self._websocket and not self._receive_task:
             self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
-        if self._websocket and not self._keepalive_task:
-            self._keepalive_task = self.create_task(self._keepalive_task_handler())
+        if self._websocket:
+            self._create_keepalive_task(interval=10)
 
     async def _disconnect(self):
         await super()._disconnect()
@@ -662,9 +691,7 @@ class ElevenLabsTTSBase(WebsocketTTSService):
             await self.cancel_task(self._receive_task)
             self._receive_task = None
 
-        if self._keepalive_task:
-            await self.cancel_task(self._keepalive_task)
-            self._keepalive_task = None
+        await self._cancel_keepalive_task()
 
         await self._disconnect_websocket()
 
@@ -720,7 +747,6 @@ class ElevenLabsTTSBase(WebsocketTTSService):
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
-            await self.remove_active_audio_context()
             self._websocket = None
             self._clear_connection_state()
             await self._call_event_handler("on_disconnected")
@@ -749,17 +775,6 @@ class ElevenLabsTTSBase(WebsocketTTSService):
         """Reset alignment state after all audio for the context has played."""
         self._reset_alignment_state(context_id)
         await super().on_audio_context_completed(context_id)
-
-    async def _keepalive_task_handler(self):
-        """Send periodic keepalive messages to maintain WebSocket connection."""
-        KEEPALIVE_SLEEP = 10
-        while True:
-            await asyncio.sleep(KEEPALIVE_SLEEP)
-            try:
-                await self._send_keepalive()
-            except websockets.ConnectionClosed as e:
-                logger.warning(f"{self} keepalive error: {e}")
-                break
 
     @traced_tts
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:

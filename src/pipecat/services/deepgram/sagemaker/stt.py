@@ -17,6 +17,7 @@ import json
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, fields
 from typing import Any
+from urllib.parse import urlencode
 
 from loguru import logger
 
@@ -39,15 +40,29 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
-from pipecat.services.aws.sagemaker.bidi_client import SageMakerBidiClient
+from pipecat.services.aws.sagemaker.bidi_client import (
+    SageMakerBidiClient,
+    SageMakerBidiSessionError,
+    classify_sagemaker_bidi_error,
+)
 from pipecat.services.deepgram.stt import DeepgramSTTService, LiveOptions
 from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import DEEPGRAM_SAGEMAKER_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
+from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 from pipecat.utils.types import is_given
+
+
+def _query_value(value: Any) -> str | list[str]:
+    """Format a setting for the query string: lowercase booleans, one entry per list item."""
+    if isinstance(value, bool):
+        return str(value).lower()
+    if isinstance(value, (list, tuple)):
+        return [str(item) for item in value]
+    return str(value)
 
 
 @dataclass
@@ -215,6 +230,11 @@ class DeepgramSageMakerSTTService(STTService):
         self._connection_task: asyncio.Task | None = None
         self._response_task: asyncio.Task | None = None
         self._keepalive_task: asyncio.Task | None = None
+        self._warned_no_session = False
+
+    def _classify_error(self, exception: Exception) -> ErrorCategory | None:
+        """Classify SageMaker session failures, which carry no HTTP status attribute."""
+        return classify_sagemaker_bidi_error(exception)
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -294,6 +314,9 @@ class DeepgramSageMakerSTTService(STTService):
                 await self._client.send_audio_chunk(audio)
             except Exception as e:
                 yield ErrorFrame(error=f"Unknown error occurred: {e}")
+        elif not self._warned_no_session:
+            self._warned_no_session = True
+            logger.warning(f"{self}: no active SageMaker session, audio is being dropped")
         yield None
 
     def _build_query_string(self) -> str:
@@ -308,7 +331,7 @@ class DeepgramSageMakerSTTService(STTService):
             value = getattr(s, f.name)
             if not is_given(value) or value is None:
                 continue
-            params[f.name] = str(value).lower() if isinstance(value, bool) else str(value)
+            params[f.name] = _query_value(value)
 
         # model and language
         if is_given(s.model) and s.model is not None:
@@ -329,9 +352,10 @@ class DeepgramSageMakerSTTService(STTService):
         if s.extra:
             for key, value in s.extra.items():
                 if value is not None:
-                    params[key] = str(value).lower() if isinstance(value, bool) else str(value)
+                    params[key] = _query_value(value)
 
-        return "&".join(f"{k}={v}" for k, v in params.items())
+        # A list becomes one parameter per item (keyterm=a&keyterm=b).
+        return urlencode(params, doseq=True)
 
     async def _connect(self):
         """Launch the SageMaker connection in the background.
@@ -373,10 +397,17 @@ class DeepgramSageMakerSTTService(STTService):
             self._keepalive_task = self.create_task(self._send_keepalive())
 
             logger.debug("Connected to Deepgram on SageMaker")
+            self._warned_no_session = False
             await self._call_event_handler("on_connected")
 
         except Exception as e:
-            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
+            # Nothing reconnects after a failed session start, so the service
+            # can't transcribe any more of this call.
+            await self.push_error(
+                error_msg=f"Unknown error occurred: {e}",
+                exception=e,
+                force_treat_as_permanent=isinstance(e, SageMakerBidiSessionError),
+            )
             await self._call_event_handler("on_connection_error", str(e))
 
     async def _disconnect(self):

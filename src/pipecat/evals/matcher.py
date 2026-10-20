@@ -17,7 +17,7 @@ import time
 
 from loguru import logger
 
-from pipecat.evals.events import EvalEventStream
+from pipecat.evals.events import EvalBotEndedError, EvalEventStream
 from pipecat.evals.judge import EvalJudge
 from pipecat.evals.results import EvalAssertionFailure, EvalTrace
 from pipecat.evals.script import FUNCTION_CALL_EVENTS, EvalExpectation
@@ -25,6 +25,16 @@ from pipecat.evals.script import FUNCTION_CALL_EVENTS, EvalExpectation
 # How long a judge's "no" waits for more of the reply once the bot has stopped
 # speaking: the transcription of its last sentence lands after the stop.
 JUDGE_NO_GRACE_S = 2.0
+
+
+def _call_matches(event: dict, name: str | None, args: dict | None) -> bool:
+    """Whether a call event is the one a ``calls:`` entry names, with the arguments it gives."""
+    if name is not None and event.get("name") != name:
+        return False
+    if args is None:
+        return True
+    actual = event.get("args") or {}
+    return all(actual.get(k) == v for k, v in args.items())
 
 
 class ExpectationMatcher:
@@ -49,17 +59,17 @@ class ExpectationMatcher:
         self._stream = stream
         self._judge = judge
         self._trace = trace
-        # function_call events popped while matching another expectation, held so
-        # the turn's calls can be matched by name in any order (reset per turn).
-        self._pending_function_calls: list[dict] = []
         # Text content of the most recently matched event (the bot's response, or
         # a user transcript), surfaced to verbose progress. Empty for events with
         # no text (llm_started, function_call, speaking events).
         self.last_match_text: str = ""
+        # When the most recent expectation matched, so an absence check can tell
+        # a reply that began after it from the rest of the one it matched.
+        self._last_match_at: float = 0.0
 
     def reset_turn(self) -> None:
-        """Forget the previous turn's unclaimed function calls."""
-        self._pending_function_calls = []
+        """Forget the previous turn's events."""
+        self._stream.begin_turn()
 
     async def match(
         self,
@@ -88,35 +98,42 @@ class ExpectationMatcher:
             TimeoutError: When no matching event arrives at all (so the caller
                 can report "no matching event arrived"). A response that arrives
                 but never satisfies the content check returns a failure instead.
+            EvalBotEndedError: When the bot ends the call before the expectation
+                is met. An ``absent:`` expectation is met instead, since the
+                event can no longer arrive.
         """
         deadline = anchor + (budget_ms / 1000.0)
         self.last_match_text = ""
 
         if expectation.absent:
             return await self._match_absent(expectation, deadline, budget_ms, turn_idx, exp_idx)
+        # Where in the turn the expectation looks for its event from: only what
+        # arrives from here on, or back from the start of the turn.
+        since = 0 if expectation.check_from == "turn_start" else self._stream.turn_position
         if expectation.aggregates:
             return await self._match_aggregating(
-                expectation, deadline, budget_ms, turn_idx, exp_idx
+                expectation, deadline, budget_ms, turn_idx, exp_idx, since
             )
         if expectation.event in FUNCTION_CALL_EVENTS:
             # A call expectation holds the set of calls the turn should make; it
             # completes only when all are found, in any order (a response
             # arriving doesn't short-circuit it).
-            return await self._match_function_calls(expectation, deadline, turn_idx, exp_idx)
-        return await self._match_one(expectation, deadline, turn_idx, exp_idx)
+            return await self._match_function_calls(expectation, deadline, turn_idx, exp_idx, since)
+        return await self._match_one(expectation, deadline, turn_idx, exp_idx, since)
 
     async def _match_one(
-        self, expectation: EvalExpectation, deadline: float, turn_idx: int, exp_idx: int
+        self, expectation: EvalExpectation, deadline: float, turn_idx: int, exp_idx: int, since: int
     ) -> EvalAssertionFailure | None:
         """Match a single event and check its payload and judge assertion."""
         self._trace.log(f"match: waiting for {expectation.event!r}")
-        event = await self._stream.next_event(expectation.event, deadline)
+        event = await self._stream.next_event(expectation.event, deadline, since=since)
         payload_failure = self._check_payload(event, expectation, turn_idx, exp_idx)
         if payload_failure:
             return payload_failure
         judge_failure = await self._check_judge(event, expectation, turn_idx, exp_idx)
         if judge_failure is None:
             self.last_match_text = self._match_summary(event)
+            self._last_match_at = time.monotonic()
         return judge_failure
 
     async def _match_aggregating(
@@ -126,6 +143,7 @@ class ExpectationMatcher:
         budget_ms: int,
         turn_idx: int,
         exp_idx: int,
+        since: int,
     ) -> EvalAssertionFailure | None:
         """Accumulate reply segments until the content check passes or fails."""
         if expectation.eval is not None and self._judge is None:
@@ -155,7 +173,7 @@ class ExpectationMatcher:
                 event, pending = pending, None
             else:
                 try:
-                    event = await self._stream.next_event(expectation.event, deadline)
+                    event = await self._stream.next_event(expectation.event, deadline, since=since)
                 except TimeoutError:
                     if not seen_any:
                         raise  # no response at all: the caller reports the missing event
@@ -176,13 +194,14 @@ class ExpectationMatcher:
             self._trace.log(f"eval: {status} (aggregate={aggregate.strip()!r}) {reason}")
             if status == "pass":
                 self.last_match_text = aggregate
+                self._last_match_at = time.monotonic()
                 return None
             if status == "fail":
                 # Only the judge can affirmatively fail an aggregate, and only
                 # once the reply is complete: a "no" on a reply still being
                 # spoken, or whose last sentence is still being transcribed, is
                 # a "continue" that the next segment may turn into a "yes".
-                pending = await self._rest_of_reply(expectation.event, deadline)
+                pending = await self._rest_of_reply(expectation.event, deadline, since)
                 if pending is None:
                     return self._failure(expectation, turn_idx, exp_idx, reason, "judge_no")
                 self._trace.log("eval: no, but the reply goes on: judging the rest")
@@ -191,7 +210,7 @@ class ExpectationMatcher:
             aggregate += " "
             last_reason = reason
 
-    async def _rest_of_reply(self, event_type: str, deadline: float) -> dict | None:
+    async def _rest_of_reply(self, event_type: str, deadline: float, since: int) -> dict | None:
         """The next segment of a reply the judge rejected, or ``None`` when the reply is over.
 
         While the bot is speaking the next segment is awaited within the turn's
@@ -203,8 +222,8 @@ class ExpectationMatcher:
         else:
             until = min(deadline, time.monotonic() + JUDGE_NO_GRACE_S)
         try:
-            return await self._stream.next_event(event_type, until)
-        except TimeoutError:
+            return await self._stream.next_event(event_type, until, since=since)
+        except (TimeoutError, EvalBotEndedError):
             return None
 
     def _unsatisfied(
@@ -237,14 +256,31 @@ class ExpectationMatcher:
         turn_idx: int,
         exp_idx: int,
     ) -> EvalAssertionFailure | None:
-        """Pass when no event of this type arrives before the deadline; an arriving one fails at once, with its content."""
+        """Pass when no event of this type arrives before the deadline; an arriving one fails at once, with its content.
+
+        A reply reaches the stream in segments, one per pause in the bot's
+        speech, so a ``response`` that continues the reply an earlier
+        expectation matched is not a new one: only a response the bot began
+        after that match counts.
+        """
         self._trace.log(f"match: expecting NO {expectation.event!r} for {budget_ms}ms")
-        try:
-            event = await self._stream.next_event(expectation.event, deadline)
-        except TimeoutError:
-            # The quiet window held: absence confirmed.
-            self.last_match_text = f"no {expectation.event!r} for {budget_ms}ms"
-            return None
+        while True:
+            try:
+                event = await self._stream.next_event(expectation.event, deadline)
+            except TimeoutError:
+                # The quiet window held: absence confirmed.
+                self.last_match_text = f"no {expectation.event!r} for {budget_ms}ms"
+                return None
+            except EvalBotEndedError:
+                self.last_match_text = f"no {expectation.event!r} before the bot ended the call"
+                return None
+            if expectation.event == "response" and not self._reply_began_after_last_match():
+                self._trace.log(
+                    f"absent: the matched reply goes on, not a new one: "
+                    f"{self._match_summary(event)!r}"
+                )
+                continue
+            break
         return self._failure(
             expectation,
             turn_idx,
@@ -254,27 +290,55 @@ class ExpectationMatcher:
             "unexpected_event",
         )
 
+    def _reply_began_after_last_match(self) -> bool:
+        """Whether the bot started a reply since the most recent match, by its LLM or its speech."""
+        times = self._stream.latest_event_times
+        began = max(times.get("llm_started", 0.0), times.get("bot_started_speaking", 0.0))
+        return began > self._last_match_at
+
     async def _match_function_calls(
         self,
         expectation: EvalExpectation,
         deadline: float,
         turn_idx: int,
         exp_idx: int,
+        since: int,
     ) -> EvalAssertionFailure | None:
-        """Match every call in the expectation, in any order, within the budget; else a failure naming the call that was missing or whose args did not match."""
+        """Match every call in the expectation, in any order, within the budget; else a failure naming the call that was missing or whose args did not match.
+
+        The calls are looked for from ``since`` on, so they may arrive in any
+        order, and a call the LLM corrects and repeats still satisfies it.
+
+        With ``eval:``, each matched call is also put to the judge, and the
+        first one it rejects fails the expectation.
+        """
+        if expectation.eval is not None and self._judge is None:
+            return self._failure(
+                expectation,
+                turn_idx,
+                exp_idx,
+                "scenario uses 'eval:' but no judge could be built",
+                "no_judge",
+            )
+
         matched: list[str] = []
         for spec in expectation.calls or []:
             want = spec.args or None
             self._trace.log(f"match: waiting for {expectation.event!r} ({spec.signature})")
             try:
-                event = await self._next_function_call(spec.name, deadline, want, expectation.event)
+                event = await self._stream.next_event(
+                    expectation.event,
+                    deadline,
+                    since=since,
+                    accept=lambda ev, name=spec.name, args=want: _call_matches(ev, name, args),
+                )
             except TimeoutError:
                 # A call of the right name with the wrong arguments is a different
                 # failure from the call never being made, and the bot's arguments
                 # are what the reader needs to see.
                 near = [
                     ev.get("args")
-                    for ev in self._pending_function_calls
+                    for ev in self._stream.unclaimed_since(since)
                     if ev.get("type") == expectation.event
                     and (spec.name is None or ev.get("name") == spec.name)
                 ]
@@ -295,46 +359,47 @@ class ExpectationMatcher:
                     f"function call {missing!r} not seen (matched: {seen})",
                     "missing_function_call",
                 )
+            judge_failure = await self._check_call_judge(event, expectation, turn_idx, exp_idx)
+            if judge_failure:
+                return judge_failure
             matched.append(str(event.get("name")))
 
         self.last_match_text = ", ".join(matched) or "function call"
+        self._last_match_at = time.monotonic()
         return None
 
-    async def _next_function_call(
+    async def _check_call_judge(
         self,
-        name: str | None,
-        deadline: float,
-        args: dict | None = None,
-        event_type: str = "function_call",
-    ) -> dict:
-        """The next call event matching ``name`` (``None`` for any) and ``args``.
+        event: dict,
+        expectation: EvalExpectation,
+        turn_idx: int,
+        exp_idx: int,
+    ) -> EvalAssertionFailure | None:
+        """Put a matched call to the judge if ``eval:`` was set on the expectation.
 
-        Calls seen but not yet claimed are buffered, so a turn's calls can arrive
-        in any order and a call the LLM corrects and repeats still satisfies it.
-        Raises TimeoutError at ``deadline``.
+        The judge is asked about the call by name and arguments, in the light
+        of the spoken conversation so far. A call is not a partial reply, so a
+        ``continue`` fails it like a ``no``.
         """
-
-        def matches(ev: dict) -> bool:
-            if ev.get("type") != event_type:
-                return False
-            if name is not None and ev.get("name") != name:
-                return False
-            if args is None:
-                return True
-            actual = ev.get("args") or {}
-            return all(actual.get(k) == v for k, v in args.items())
-
-        for i, ev in enumerate(self._pending_function_calls):
-            if matches(ev):
-                return self._pending_function_calls.pop(i)
-
-        while True:
-            event = await self._stream.next_any(deadline)
-            if event.get("type") not in FUNCTION_CALL_EVENTS:
-                continue
-            if matches(event):
-                return event
-            self._pending_function_calls.append(event)
+        if expectation.eval is None:
+            return None
+        # _match_function_calls fails before matching when there is no judge.
+        assert self._judge is not None
+        name = str(event.get("name") or "?")
+        args = event.get("args") or {}
+        with logger.contextualize(eval_pipeline="judge"):
+            verdict = await self._judge.evaluate_call(name, args, expectation.eval)
+        self._trace.log(f"eval: {verdict.verdict} ({self._match_summary(event)}) {verdict.reason}")
+        if verdict.passed:
+            return None
+        return self._failure(
+            expectation,
+            turn_idx,
+            exp_idx,
+            f"eval {expectation.eval!r} on {self._match_summary(event)}: "
+            f"judge said {verdict.verdict} — {verdict.reason}",
+            "judge_no",
+        )
 
     async def _evaluate_aggregate(
         self, aggregate: str, expectation: EvalExpectation

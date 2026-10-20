@@ -6,9 +6,8 @@
 
 """Decorator for marking methods as LLM tools."""
 
-import warnings
-
 from pipecat.adapters.schemas.direct_function import tool_options
+from pipecat.utils.deprecation import warn_deprecated
 
 
 def tool(fn=None, *, cancel_on_interruption=True, timeout_secs=None, timeout=None):
@@ -46,14 +45,11 @@ def tool(fn=None, *, cancel_on_interruption=True, timeout_secs=None, timeout=Non
                 Use ``timeout_secs`` instead. Will be removed in 2.0.0.
     """
     if timeout is not None:
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "The `timeout` argument to `@tool` is deprecated since 1.4.0, "
-                "use `timeout_secs` instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
+        warn_deprecated(
+            "`@tool(timeout=...)` is deprecated since 1.4.0 and will be removed in 2.0.0. "
+            "Use `timeout_secs` instead.",
+            stacklevel=2,
+        )
         # An explicit timeout_secs wins over the deprecated alias.
         if timeout_secs is None:
             timeout_secs = timeout

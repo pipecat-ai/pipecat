@@ -32,6 +32,7 @@ from pipecat.frames.frames import (
 from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 from pipecat.pipeline.pipeline import Pipeline
+from pipecat.pipeline.sync_parallel_pipeline import SyncParallelPipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker, WorkerParams
 from pipecat.processors.filters.frame_filter import FrameFilter
 from pipecat.processors.filters.identity_filter import IdentityFilter
@@ -310,6 +311,37 @@ class TestPipelineWorker(unittest.IsolatedAsyncioTestCase):
         assert frame_received
         assert frame_count_1 == 1
         assert frame_count_2 == 1
+
+    async def test_task_observer_can_remove_itself(self):
+        frame_count = 0
+        proxy_task: asyncio.Task | None = None
+        removed = asyncio.Event()
+
+        class SelfRemovingObserver(BaseObserver):
+            async def on_push_frame(self, data: FramePushed):
+                nonlocal frame_count, proxy_task
+
+                if isinstance(data.source, IdentityFilter) and isinstance(data.frame, TextFrame):
+                    frame_count += 1
+                    proxy_task = asyncio.current_task()
+                    await worker.remove_observer(self)
+                    removed.set()
+
+        identity = IdentityFilter()
+        pipeline = Pipeline([identity])
+        worker = PipelineWorker(pipeline)
+        worker.add_observer(SelfRemovingObserver())
+
+        async def push_frames():
+            await worker.queue_frame(TextFrame(text="First frame"))
+            await asyncio.wait_for(removed.wait(), timeout=1.0)
+            await worker.queue_frames([TextFrame(text="Second frame"), EndFrame()])
+
+        await asyncio.gather(worker.run(WorkerParams(task_manager=TaskManager())), push_frames())
+
+        assert frame_count == 1
+        # The observer was running on its own proxy task, which must still end.
+        assert proxy_task is not None and proxy_task.done()
 
     async def test_task_started_ended_event_handler(self):
         start_received = False
@@ -908,10 +940,9 @@ class TestPipelineWorker(unittest.IsolatedAsyncioTestCase):
 
         assert worker.has_finished()
 
-        # The blocked processor never lets the CancelFrame drain, so the worker
-        # gives up waiting for it and reports the timeout.
-        assert len(timed_out) == 1
-        assert isinstance(timed_out[0], CancelFrame)
+        # The pipeline never started, so it is only cleaned up: no CancelFrame
+        # is pushed, so nothing waits for one to time out.
+        assert not timed_out
 
     async def test_task_start_frame_never_reaches_sink(self):
         class StartBlocker(FrameProcessor):
@@ -972,6 +1003,57 @@ class TestPipelineWorker(unittest.IsolatedAsyncioTestCase):
 
         # Nothing else tells the application its pipeline never came up.
         assert len(timed_out) == 1
+
+    async def test_task_cancel_before_setup_never_finishes(self):
+        """A cancel that arrives before processors are set up still stops a
+        processor that never finishes setting up."""
+
+        class SetupBlocker(IdentityFilter):
+            def __init__(self, **kwargs):
+                super().__init__(**kwargs)
+                self._block = asyncio.Event()
+
+            async def setup(self, setup: FrameProcessorSetup):
+                await super().setup(setup)
+                await self._block.wait()
+
+        pipeline = Pipeline([SetupBlocker()])
+        worker = PipelineWorker(pipeline, setup_timeout_secs=0.1)
+
+        timed_out = []
+
+        @worker.event_handler("on_pipeline_timeout")
+        async def on_pipeline_timeout(_worker, frame):
+            timed_out.append(frame)
+
+        await worker.cancel()
+        await asyncio.wait_for(worker.run(WorkerParams(task_manager=TaskManager())), timeout=2.0)
+
+        assert worker.has_finished()
+        assert not timed_out
+
+    async def test_task_cancel_from_setup(self):
+        """A processor can cancel the worker from its own setup(), e.g. when
+        it can't connect."""
+
+        class SetupCanceller(IdentityFilter):
+            async def setup(self, setup: FrameProcessorSetup):
+                await super().setup(setup)
+                await setup.pipeline_worker.cancel(reason="cannot connect")
+
+        pipeline = Pipeline([IdentityFilter(), SetupCanceller()])
+        worker = PipelineWorker(pipeline)
+
+        timed_out = []
+
+        @worker.event_handler("on_pipeline_timeout")
+        async def on_pipeline_timeout(_worker, frame):
+            timed_out.append(frame)
+
+        await asyncio.wait_for(worker.run(WorkerParams(task_manager=TaskManager())), timeout=2.0)
+
+        assert worker.has_finished()
+        assert not timed_out
 
     async def test_task_setup_timeout_still_cleans_the_rest_up(self):
         """Setting up is abandoned part-way, so processors are cleaned up from
@@ -1142,6 +1224,315 @@ class TestPipelineWorker(unittest.IsolatedAsyncioTestCase):
 
         await worker.run(WorkerParams(task_manager=TaskManager()))
         assert timeout_count >= 2
+
+
+class StartRecorder(FrameProcessor):
+    """Takes ``setup_secs`` to set up, like a service connecting, and records
+    when it gets the StartFrame (seconds since ``t0``), whether it gets a
+    CancelFrame and whether it is cleaned up. ``pre_setup_secs`` are spent
+    before ``FrameProcessor.setup()``, like a processor that connects first."""
+
+    def __init__(
+        self,
+        t0: float,
+        setup_secs: float = 0.0,
+        fail_setup: bool = False,
+        pre_setup_secs: float = 0.0,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self._t0 = t0
+        self._setup_secs = setup_secs
+        self._fail_setup = fail_setup
+        self._pre_setup_secs = pre_setup_secs
+        self.start_at: float | None = None
+        self.got_cancel = False
+        self.cleaned_up = False
+
+    async def setup(self, setup: FrameProcessorSetup):
+        if self._pre_setup_secs:
+            await asyncio.sleep(self._pre_setup_secs)
+        await super().setup(setup)
+        await asyncio.sleep(self._setup_secs)
+        if self._fail_setup:
+            raise RuntimeError("cannot connect")
+
+    async def cleanup(self):
+        await super().cleanup()
+        self.cleaned_up = True
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+        if isinstance(frame, StartFrame):
+            self.start_at = time.monotonic() - self._t0
+        elif isinstance(frame, CancelFrame):
+            self.got_cancel = True
+        await self.push_frame(frame, direction)
+
+
+class TestPipelineWorkerStartup(unittest.IsolatedAsyncioTestCase):
+    """Each processor holds the StartFrame only for its own setup."""
+
+    async def run_worker(self, worker: PipelineWorker):
+        await asyncio.wait_for(worker.run(WorkerParams(task_manager=TaskManager())), timeout=5.0)
+
+    async def test_start_frame_not_held_by_unrelated_setup(self):
+        """A slow service setup (e.g. an LLM connecting) must not delay the
+        StartFrame for processors before it. The input transport only starts
+        reading audio once it gets the StartFrame, so callers' first audio
+        would wait on the slowest connection (#5868)."""
+        stt_setup_secs = 0.2
+        llm_setup_secs = 1.0
+        t0 = time.monotonic()
+
+        transport_input = StartRecorder(t0, name="input")
+        stt = StartRecorder(t0, setup_secs=stt_setup_secs, name="stt")
+        llm = StartRecorder(t0, setup_secs=llm_setup_secs, name="llm")
+
+        worker = PipelineWorker(Pipeline([transport_input, stt, llm]))
+
+        started_at = []
+
+        @worker.event_handler("on_pipeline_started")
+        async def on_pipeline_started(_worker, _frame):
+            started_at.append(time.monotonic() - t0)
+
+        await worker.queue_frame(EndFrame())
+        await self.run_worker(worker)
+
+        # The input transport has nothing to connect, so it starts right away.
+        assert transport_input.start_at < stt_setup_secs
+        # STT starts once its own connection is up, not the LLM's.
+        assert stt_setup_secs <= stt.start_at < llm_setup_secs
+        # The pipeline still only counts as started once everything is set up.
+        assert llm.start_at >= llm_setup_secs
+        assert len(started_at) == 1 and started_at[0] >= llm_setup_secs
+
+    async def test_slow_setup_in_parallel_branch(self):
+        """A parallel pipeline doesn't hold the StartFrame for its branches."""
+        t0 = time.monotonic()
+        first = StartRecorder(t0)
+        fast = StartRecorder(t0, setup_secs=0.1)
+        slow = StartRecorder(t0, setup_secs=1.0)
+
+        worker = PipelineWorker(Pipeline([first, ParallelPipeline([fast], [slow])]))
+        await worker.queue_frame(EndFrame())
+        await self.run_worker(worker)
+
+        assert first.start_at < 0.1
+        assert slow.start_at >= 1.0
+
+    async def test_slow_setup_in_nested_pipeline(self):
+        """A nested pipeline doesn't hold the StartFrame for its processors."""
+        t0 = time.monotonic()
+        first = StartRecorder(t0)
+        inner_fast = StartRecorder(t0, setup_secs=0.1)
+        inner_slow = StartRecorder(t0, setup_secs=1.0)
+
+        worker = PipelineWorker(Pipeline([first, Pipeline([inner_fast, inner_slow])]))
+        await worker.queue_frame(EndFrame())
+        await self.run_worker(worker)
+
+        assert first.start_at < 0.1
+        assert 0.1 <= inner_fast.start_at < 1.0
+        assert inner_slow.start_at >= 1.0
+
+    async def test_failed_setup_still_starts(self):
+        """A processor that fails to set up still lets the StartFrame through,
+        so the rest of the pipeline starts."""
+        t0 = time.monotonic()
+        after = StartRecorder(t0)
+        worker = PipelineWorker(
+            Pipeline([StartRecorder(t0), StartRecorder(t0, setup_secs=0.1, fail_setup=True), after])
+        )
+
+        started = []
+
+        @worker.event_handler("on_pipeline_started")
+        async def on_pipeline_started(_worker, _frame):
+            started.append(True)
+
+        await worker.queue_frame(EndFrame())
+        await self.run_worker(worker)
+
+        assert len(started) == 1
+        assert after.start_at is not None
+
+    async def test_start_timeout_counts_from_setup_done(self):
+        """Setting up has its own timeout, so a setup that takes longer than
+        start_timeout_secs doesn't make the StartFrame time out."""
+        t0 = time.monotonic()
+        llm = StartRecorder(t0, setup_secs=0.5)
+        worker = PipelineWorker(
+            Pipeline([StartRecorder(t0), llm]), start_timeout_secs=0.2, setup_timeout_secs=5.0
+        )
+
+        timed_out = []
+
+        @worker.event_handler("on_pipeline_timeout")
+        async def on_pipeline_timeout(_worker, frame):
+            timed_out.append(frame)
+
+        await worker.queue_frame(EndFrame())
+        await self.run_worker(worker)
+
+        assert not timed_out
+        assert llm.start_at >= 0.5
+
+    async def test_cancel_while_setting_up(self):
+        """Cancelling doesn't wait for a processor that is still connecting,
+        e.g. when the caller hangs up first."""
+        t0 = time.monotonic()
+        first = StartRecorder(t0)
+        slow = StartRecorder(t0, setup_secs=30.0)
+        worker = PipelineWorker(Pipeline([first, slow]), cancel_timeout_secs=1.0)
+
+        async def cancel_soon():
+            await asyncio.sleep(0.2)
+            await worker.cancel()
+
+        await asyncio.gather(self.run_worker(worker), cancel_soon())
+
+        assert worker.has_finished()
+        assert time.monotonic() - t0 < 1.0
+        # The cancelled setup is abandoned, so that processor never starts. The
+        # pipeline never started either, so it is cleaned up, not cancelled.
+        assert first.start_at is not None and slow.start_at is None
+        assert not first.got_cancel
+        assert first.cleaned_up and slow.cleaned_up
+
+    async def test_cancel_at_any_point_of_starting_finishes(self):
+        """A cancel can land at any point while the worker starts, even before
+        its processors begin setting up, and the worker still finishes."""
+        for ticks in range(25):
+            worker = PipelineWorker(Pipeline([IdentityFilter()]))
+            run_task = asyncio.create_task(worker.run(WorkerParams(task_manager=TaskManager())))
+            for _ in range(ticks):
+                await asyncio.sleep(0)
+            await worker.cancel()
+
+            done, _ = await asyncio.wait({run_task}, timeout=2.0)
+
+            assert run_task in done, f"the worker hung when cancelled after {ticks} ticks"
+
+    async def test_setup_timeout_never_starts_the_pipeline(self):
+        """A setup that times out is abandoned: its processor and the ones after
+        it never get the StartFrame, and the worker only cleans up."""
+        t0 = time.monotonic()
+        first = StartRecorder(t0)
+        blocked = StartRecorder(t0, setup_secs=30.0)
+        after = StartRecorder(t0)
+        worker = PipelineWorker(
+            Pipeline([first, blocked, after]), setup_timeout_secs=0.2, cancel_timeout_secs=3.0
+        )
+
+        events = []
+
+        @worker.event_handler("on_setup_timeout")
+        async def on_setup_timeout(_worker):
+            events.append("setup_timeout")
+
+        @worker.event_handler("on_pipeline_started")
+        async def on_pipeline_started(_worker, _frame):
+            events.append("pipeline_started")
+
+        @worker.event_handler("on_pipeline_timeout")
+        async def on_pipeline_timeout(_worker, _frame):
+            events.append("pipeline_timeout")
+
+        await self.run_worker(worker)
+
+        assert events == ["setup_timeout"]
+        assert first.start_at is not None
+        assert blocked.start_at is None and after.start_at is None
+        assert not first.got_cancel
+        assert first.cleaned_up and blocked.cleaned_up and after.cleaned_up
+        # Nothing waits for a CancelFrame to drain.
+        assert time.monotonic() - t0 < 3.0
+
+    async def test_setup_timeout_before_frame_processor_setup(self):
+        """A processor that times out before calling FrameProcessor.setup()
+        has nothing to start with, and doesn't hold up the teardown."""
+        t0 = time.monotonic()
+        blocked = StartRecorder(t0, pre_setup_secs=30.0)
+        worker = PipelineWorker(
+            Pipeline([StartRecorder(t0), blocked, StartRecorder(t0)]),
+            setup_timeout_secs=0.2,
+            cancel_timeout_secs=3.0,
+        )
+
+        timed_out = []
+
+        @worker.event_handler("on_pipeline_timeout")
+        async def on_pipeline_timeout(_worker, frame):
+            timed_out.append(frame)
+
+        await self.run_worker(worker)
+
+        assert not timed_out
+        assert blocked.start_at is None
+        assert time.monotonic() - t0 < 3.0
+
+    async def test_idle_timeout_counts_from_start(self):
+        """Setting up isn't idle time: the idle timeout only counts once the
+        pipeline has started."""
+        t0 = time.monotonic()
+        llm = StartRecorder(t0, setup_secs=0.5)
+        worker = PipelineWorker(Pipeline([StartRecorder(t0), llm]), idle_timeout_secs=0.2)
+
+        idle_at = []
+
+        @worker.event_handler("on_idle_timeout")
+        async def on_idle_timeout(_worker):
+            idle_at.append(time.monotonic() - t0)
+
+        await self.run_worker(worker)
+
+        assert llm.start_at is not None
+        assert len(idle_at) == 1 and idle_at[0] >= llm.start_at
+
+    async def test_sync_parallel_pipeline_starts_after_its_branches(self):
+        """A sync parallel pipeline passes the StartFrame on only once it is
+        through all its branches, so the pipeline counts as started only once
+        a slow branch is set up."""
+        t0 = time.monotonic()
+        first = StartRecorder(t0)
+        slow = StartRecorder(t0, setup_secs=0.5)
+        after = StartRecorder(t0)
+        worker = PipelineWorker(Pipeline([first, SyncParallelPipeline([slow]), after]))
+
+        started_at = []
+
+        @worker.event_handler("on_pipeline_started")
+        async def on_pipeline_started(_worker, _frame):
+            started_at.append(time.monotonic() - t0)
+
+        await worker.queue_frame(EndFrame())
+        await self.run_worker(worker)
+
+        assert first.start_at < 0.5
+        assert slow.start_at >= 0.5
+        assert after.start_at >= slow.start_at
+        assert len(started_at) == 1 and started_at[0] >= slow.start_at
+
+    async def test_sync_parallel_pipeline_set_up_late_starts_its_branches(self):
+        """The StartFrame can reach a sync parallel pipeline before its branches
+        begin setting up; their processors still hold it until they are set
+        up, so they start."""
+
+        class SlowToSetUp(SyncParallelPipeline):
+            async def setup(self, setup: FrameProcessorSetup):
+                await asyncio.sleep(0.2)
+                await super().setup(setup)
+
+        t0 = time.monotonic()
+        inner = StartRecorder(t0)
+        after = StartRecorder(t0)
+        worker = PipelineWorker(Pipeline([StartRecorder(t0), SlowToSetUp([inner]), after]))
+        await worker.queue_frame(EndFrame())
+        await self.run_worker(worker)
+
+        assert inner.start_at is not None and after.start_at is not None
 
 
 if __name__ == "__main__":

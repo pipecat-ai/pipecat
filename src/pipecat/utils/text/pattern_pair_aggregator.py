@@ -18,7 +18,7 @@ from enum import Enum
 from loguru import logger
 
 from pipecat.utils.string import longest_trailing_partial_match
-from pipecat.utils.text.base_text_aggregator import Aggregation, AggregationType
+from pipecat.utils.text.base_text_aggregator import Aggregation, TextType
 from pipecat.utils.text.simple_text_aggregator import SimpleTextAggregator
 
 
@@ -116,9 +116,7 @@ class PatternPairAggregator(SimpleTextAggregator):
         pattern_start = self._match_start_of_pattern(self._text)
         stripped_text = self._text.strip()
         type = (
-            pattern_start[1].get("type", AggregationType.SENTENCE)
-            if pattern_start
-            else AggregationType.SENTENCE
+            pattern_start[1].get("type", TextType.SENTENCE) if pattern_start else TextType.SENTENCE
         )
         return Aggregation(text=stripped_text, type=type)
 
@@ -150,9 +148,9 @@ class PatternPairAggregator(SimpleTextAggregator):
         Returns:
             Self for method chaining.
         """
-        if type in [AggregationType.SENTENCE, AggregationType.WORD, AggregationType.TOKEN]:
+        if type in [TextType.SENTENCE, TextType.WORD, TextType.TOKEN]:
             raise ValueError(
-                f"The aggregation type '{type}' is reserved for default behavior and can not be used for custom patterns."
+                f"The text type '{type}' is reserved for default behavior and can not be used for custom patterns."
             )
         self._patterns[type] = {
             "start": start_pattern,
@@ -342,14 +340,14 @@ class PatternPairAggregator(SimpleTextAggregator):
                 result = self._text[: pattern_start[0]]
                 self._text = self._text[pattern_start[0] :]
                 agg_type = (
-                    AggregationType.TOKEN
-                    if self._aggregation_type == AggregationType.TOKEN
-                    else AggregationType.SENTENCE
+                    TextType.TOKEN
+                    if self._aggregation_type == TextType.TOKEN
+                    else TextType.SENTENCE
                 )
                 yield PatternMatch(content=result.strip(), type=agg_type, full_match=result)
                 continue
 
-            if self._aggregation_type != AggregationType.TOKEN:
+            if self._aggregation_type != TextType.TOKEN:
                 # Use parent's lookahead logic for sentence detection
                 aggregation = await super()._check_sentence_with_lookahead(char)
                 if aggregation:
@@ -365,7 +363,7 @@ class PatternPairAggregator(SimpleTextAggregator):
         # partial start delimiter (e.g. "<thin" of "<think>") is held back so a
         # delimiter split across chunks isn't leaked as plain text; it's
         # retained in the buffer to be completed by the next chunk.
-        if self._aggregation_type == AggregationType.TOKEN and self._text:
+        if self._aggregation_type == TextType.TOKEN and self._text:
             if self._match_start_of_pattern(self._text) is None:
                 held_back = longest_trailing_partial_match(
                     self._text, [pattern["start"] for pattern in self._patterns.values()]
@@ -377,7 +375,7 @@ class PatternPairAggregator(SimpleTextAggregator):
                     self._last_processed_position = len(self._text)
                     yield PatternMatch(
                         content=content,
-                        type=AggregationType.TOKEN,
+                        type=TextType.TOKEN,
                         full_match=content,
                     )
 
@@ -416,11 +414,7 @@ class PatternPairAggregator(SimpleTextAggregator):
         stripped = result_text.strip()
         if not stripped:
             return None
-        agg_type = (
-            AggregationType.TOKEN
-            if self._aggregation_type == AggregationType.TOKEN
-            else AggregationType.SENTENCE
-        )
+        agg_type = TextType.TOKEN if self._aggregation_type == TextType.TOKEN else TextType.SENTENCE
         return PatternMatch(content=stripped, type=agg_type, full_match=result_text)
 
     def _find_earliest_droppable_start(self, text: str) -> int | None:

@@ -80,6 +80,28 @@
       "location": "pipecat/bus/bridge_processor.py"
     },
     {
+      "subject": "pipecat.classifiers.jev.classifier",
+      "module": "pipecat.classifiers.jev.classifier",
+      "kind": "module",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "move",
+      "replacement": "pipecat.classifiers.typesafe.jev.classifier",
+      "message": "Moved to :mod:`pipecat.classifiers.typesafe.jev.classifier`. Will be removed in 2.0.0.",
+      "location": "pipecat/classifiers/jev/classifier.py"
+    },
+    {
+      "subject": "pipecat.classifiers.jev.client",
+      "module": "pipecat.classifiers.jev.client",
+      "kind": "module",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "move",
+      "replacement": "pipecat.classifiers.typesafe.jev.client",
+      "message": "Moved to :mod:`pipecat.classifiers.typesafe.jev.client`. Will be removed in 2.0.0.",
+      "location": "pipecat/classifiers/jev/client.py"
+    },
+    {
       "subject": "pipecat.evals.harness",
       "module": "pipecat.evals.harness",
       "kind": "module",
@@ -99,6 +121,17 @@
       "relation": "use_existing",
       "replacement": "add_user_message",
       "message": "Feed the judge with :meth:`add_user_message`, :meth:`add_assistant_message` and :meth:`add_tool_call` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/evals/judge.py"
+    },
+    {
+      "subject": "EvalJudge.service",
+      "module": "pipecat.evals.judge",
+      "kind": "parameter",
+      "deprecated_in": "1.12.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "pipecat.classifiers.llm.classifier.LLMClassifier",
+      "message": "Use :class:`~pipecat.classifiers.llm.classifier.LLMClassifier` over the service as the ``classifier``, passing the service as the ``explainer`` for the reasons. Will be removed in 2.0.0.",
       "location": "pipecat/evals/judge.py"
     },
     {
@@ -176,6 +209,17 @@
       "relation": "use_existing",
       "replacement": "EvalScenarioFile.load",
       "message": "`EvalScriptScenario.load` is deprecated since 1.11.0 and will be removed in 2.0.0. Use `EvalScenarioFile.load` instead.",
+      "location": "pipecat/evals/script.py"
+    },
+    {
+      "subject": "EvalScriptScenario.trigger_disconnect",
+      "module": "pipecat.evals.script",
+      "kind": "parameter",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "No replacement. A bot fires ``on_client_disconnected`` whenever the harness disconnects. Will be removed in 2.0.0.",
       "location": "pipecat/evals/script.py"
     },
     {
@@ -432,6 +476,28 @@
       "location": "pipecat/evals/session.py"
     },
     {
+      "subject": "EvalSessionParams.stop_bot",
+      "module": "pipecat.evals.session",
+      "kind": "parameter",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "No replacement. The harness always ends the bot's session. Will be removed in 2.0.0.",
+      "location": "pipecat/evals/session.py"
+    },
+    {
+      "subject": "EvalSessionParams.trigger_disconnect",
+      "module": "pipecat.evals.session",
+      "kind": "parameter",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "No replacement. A bot fires ``on_client_disconnected`` whenever the harness disconnects. Will be removed in 2.0.0.",
+      "location": "pipecat/evals/session.py"
+    },
+    {
       "subject": "EvalSimulationScenario.load",
       "module": "pipecat.evals.simulation",
       "kind": "method",
@@ -440,6 +506,17 @@
       "relation": "use_existing",
       "replacement": "EvalScenarioFile.load",
       "message": "`EvalSimulationScenario.load` is deprecated since 1.11.0 and will be removed in 2.0.0. Use `EvalScenarioFile.load` instead.",
+      "location": "pipecat/evals/simulation.py"
+    },
+    {
+      "subject": "EvalSimulationScenario.trigger_disconnect",
+      "module": "pipecat.evals.simulation",
+      "kind": "parameter",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "No replacement. A bot fires ``on_client_disconnected`` whenever the harness disconnects. Will be removed in 2.0.0.",
       "location": "pipecat/evals/simulation.py"
     },
     {
@@ -496,6 +573,39 @@
       "replacement": "runner_body: {path: <file>}",
       "message": "Use ``runner_body: {path: <file>}`` instead of a bare ``runner_body: <file>``. Will be removed in 2.0.0.",
       "location": "pipecat/evals/suite.py"
+    },
+    {
+      "subject": "EvalTransport",
+      "module": "pipecat.evals.transport",
+      "kind": "class",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "EvalFastAPIWebsocketTransport",
+      "message": "`EvalTransport` is deprecated since 1.13.0 and will be removed in 2.0.0. Use `EvalFastAPIWebsocketTransport` instead.",
+      "location": "pipecat/evals/transport.py"
+    },
+    {
+      "subject": "VoicemailDetector.custom_system_prompt",
+      "module": "pipecat.extensions.voicemail.voicemail_detector",
+      "kind": "parameter",
+      "deprecated_in": "1.12.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "classifier",
+      "message": "Use ``classifier`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/extensions/voicemail/voicemail_detector.py"
+    },
+    {
+      "subject": "VoicemailDetector.llm",
+      "module": "pipecat.extensions.voicemail.voicemail_detector",
+      "kind": "parameter",
+      "deprecated_in": "1.12.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "classifier",
+      "message": "Use ``classifier`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/extensions/voicemail/voicemail_detector.py"
     },
     {
       "subject": "FlowManager.task",
@@ -573,6 +683,39 @@
       "replacement": "flows_tool_options",
       "message": "`flows_direct_function` is deprecated since 1.5.0 and will be removed in 2.0.0. Use `flows_tool_options` instead.",
       "location": "pipecat/flows/types.py"
+    },
+    {
+      "subject": "AggregatedTextFrame.aggregated_by",
+      "module": "pipecat.frames.frames",
+      "kind": "property",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "text_type",
+      "message": "`AggregatedTextFrame.aggregated_by` is deprecated since 1.13.0 and will be removed in 2.0.0. Use `text_type` instead.",
+      "location": "pipecat/frames/frames.py"
+    },
+    {
+      "subject": "AggregatedTextProgressFrame.aggregated_by",
+      "module": "pipecat.frames.frames",
+      "kind": "property",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "text_type",
+      "message": "`AggregatedTextProgressFrame.aggregated_by` is deprecated since 1.13.0 and will be removed in 2.0.0. Use `text_type` instead.",
+      "location": "pipecat/frames/frames.py"
+    },
+    {
+      "subject": "AggregationType",
+      "module": "pipecat.frames.frames",
+      "kind": "attribute",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "pipecat.utils.text.base_text_aggregator.TextType",
+      "message": "Use :class:`~pipecat.utils.text.base_text_aggregator.TextType` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/frames/frames.py"
     },
     {
       "subject": "CancelTaskFrame",
@@ -751,6 +894,17 @@
       "location": "pipecat/frames/frames.py"
     },
     {
+      "subject": "UninterruptibleFrame",
+      "module": "pipecat.frames.frames",
+      "kind": "class",
+      "deprecated_in": "1.11.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "interruptible",
+      "message": "`UninterruptibleFrame` is deprecated since 1.11.0 and will be removed in 2.0.0. Use the `interruptible` field with `default=False` instead.",
+      "location": "pipecat/frames/frames.py"
+    },
+    {
       "subject": "SmartTurnMetricsData",
       "module": "pipecat.metrics.metrics",
       "kind": "class",
@@ -762,6 +916,72 @@
       "location": "pipecat/metrics/metrics.py"
     },
     {
+      "subject": "BaseObserver.on_startup_warmup",
+      "module": "pipecat.observers.base_observer",
+      "kind": "method",
+      "deprecated_in": "1.12.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "`BaseObserver.on_startup_warmup` is deprecated since 1.12.0 and will be removed in 2.0.0. No replacement.",
+      "location": "pipecat/observers/base_observer.py"
+    },
+    {
+      "subject": "StartupWarmup",
+      "module": "pipecat.observers.base_observer",
+      "kind": "class",
+      "deprecated_in": "1.12.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "`StartupWarmup` is deprecated since 1.12.0 and will be removed in 2.0.0. No replacement.",
+      "location": "pipecat/observers/base_observer.py"
+    },
+    {
+      "subject": "StartupTimingObserver.on_startup_warmup",
+      "module": "pipecat.observers.startup_timing_observer",
+      "kind": "method",
+      "deprecated_in": "1.12.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "`StartupTimingObserver.on_startup_warmup` is deprecated since 1.12.0 and will be removed in 2.0.0. No replacement.",
+      "location": "pipecat/observers/startup_timing_observer.py"
+    },
+    {
+      "subject": "StartupTimingReport.warmup",
+      "module": "pipecat.observers.startup_timing_observer",
+      "kind": "parameter",
+      "deprecated_in": "1.12.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "No replacement. Nothing warms deferred imports at startup. Will be removed in 2.0.0.",
+      "location": "pipecat/observers/startup_timing_observer.py"
+    },
+    {
+      "subject": "StartupWarmupTiming",
+      "module": "pipecat.observers.startup_timing_observer",
+      "kind": "class",
+      "deprecated_in": "1.12.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "`StartupWarmupTiming` is deprecated since 1.12.0 and will be removed in 2.0.0. No replacement.",
+      "location": "pipecat/observers/startup_timing_observer.py"
+    },
+    {
+      "subject": "TurnTrackingObserver.max_frames",
+      "module": "pipecat.observers.turn_tracking_observer",
+      "kind": "parameter",
+      "deprecated_in": "1.12.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "No replacement. The observer receives each frame once. Will be removed in 2.0.0.",
+      "location": "pipecat/observers/turn_tracking_observer.py"
+    },
+    {
       "subject": "LatencyBreakdown.chronological_events",
       "module": "pipecat.observers.user_bot_latency_observer",
       "kind": "method",
@@ -770,6 +990,17 @@
       "relation": "use_existing",
       "replacement": "LatencyBreakdown.turn_contribution_lines",
       "message": "`LatencyBreakdown.chronological_events` is deprecated since 1.9.0 and will be removed in 2.0.0. Use `LatencyBreakdown.turn_contribution_lines` instead.",
+      "location": "pipecat/observers/user_bot_latency_observer.py"
+    },
+    {
+      "subject": "UserBotLatencyObserver.max_frames",
+      "module": "pipecat.observers.user_bot_latency_observer",
+      "kind": "parameter",
+      "deprecated_in": "1.12.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "No replacement. The observer receives each frame once. Will be removed in 2.0.0.",
       "location": "pipecat/observers/user_bot_latency_observer.py"
     },
     {
@@ -850,6 +1081,17 @@
       "location": "pipecat/pipeline/worker.py"
     },
     {
+      "subject": "WorkerObserver.on_startup_warmup",
+      "module": "pipecat.pipeline.worker_observer",
+      "kind": "method",
+      "deprecated_in": "1.12.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "`WorkerObserver.on_startup_warmup` is deprecated since 1.12.0 and will be removed in 2.0.0. No replacement.",
+      "location": "pipecat/pipeline/worker_observer.py"
+    },
+    {
       "subject": "LLMAssistantAggregatorParams.context_summarization_config",
       "module": "pipecat.processors.aggregators.llm_response_universal",
       "kind": "parameter",
@@ -894,25 +1136,25 @@
       "location": "pipecat/processors/aggregators/llm_response_universal.py"
     },
     {
-      "subject": "AudioBufferProcessor",
+      "subject": "AudioBufferProcessor.on_bot_turn_audio_data",
       "module": "pipecat.processors.audio.audio_buffer_processor",
-      "kind": "class",
-      "deprecated_in": "1.8.0",
-      "removed_in": "2.0.0",
-      "relation": "use_existing",
-      "replacement": "on_user_turn_audio",
-      "message": "Use ``on_user_turn_audio`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/processors/audio/audio_buffer_processor.py"
-    },
-    {
-      "subject": "AudioBufferProcessor",
-      "module": "pipecat.processors.audio.audio_buffer_processor",
-      "kind": "class",
+      "kind": "event",
       "deprecated_in": "1.8.0",
       "removed_in": "2.0.0",
       "relation": "use_existing",
       "replacement": "on_bot_turn_audio",
       "message": "Use ``on_bot_turn_audio`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/processors/audio/audio_buffer_processor.py"
+    },
+    {
+      "subject": "AudioBufferProcessor.on_user_turn_audio_data",
+      "module": "pipecat.processors.audio.audio_buffer_processor",
+      "kind": "event",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "on_user_turn_audio",
+      "message": "Use ``on_user_turn_audio`` instead. Will be removed in 2.0.0.",
       "location": "pipecat/processors/audio/audio_buffer_processor.py"
     },
     {
@@ -982,6 +1224,39 @@
       "location": "pipecat/processors/frame_processor.py"
     },
     {
+      "subject": "BotLLMTextMessage",
+      "module": "pipecat.processors.frameworks.rtvi.models",
+      "kind": "class",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "LLMRawTextMessage",
+      "message": "Use :class:`LLMRawTextMessage` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/processors/frameworks/rtvi/models.py"
+    },
+    {
+      "subject": "BotOutputMessageData.aggregated_by",
+      "module": "pipecat.processors.frameworks.rtvi.models",
+      "kind": "parameter",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "text_type",
+      "message": "Use ``text_type`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/processors/frameworks/rtvi/models.py"
+    },
+    {
+      "subject": "BotTTSTextMessage",
+      "module": "pipecat.processors.frameworks.rtvi.models",
+      "kind": "class",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "TTSRawTextMessage",
+      "message": "Use :class:`TTSRawTextMessage` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/processors/frameworks/rtvi/models.py"
+    },
+    {
       "subject": "LLMFunctionCallMessage",
       "module": "pipecat.processors.frameworks.rtvi.models",
       "kind": "class",
@@ -1002,6 +1277,72 @@
       "replacement": "LLMFunctionCallInProgressMessageData",
       "message": "`LLMFunctionCallMessageData` is deprecated since 0.0.102 and will be removed in 2.0.0. Use `LLMFunctionCallInProgressMessageData` instead.",
       "location": "pipecat/processors/frameworks/rtvi/models.py"
+    },
+    {
+      "subject": "UserTranscriptionMessage",
+      "module": "pipecat.processors.frameworks.rtvi.models",
+      "kind": "class",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "STTRawTextMessage",
+      "message": "Use :class:`STTRawTextMessage` instead, or :class:`UserInputMessage` for what the user said. Will be removed in 2.0.0.",
+      "location": "pipecat/processors/frameworks/rtvi/models.py"
+    },
+    {
+      "subject": "UserTranscriptionMessageData",
+      "module": "pipecat.processors.frameworks.rtvi.models",
+      "kind": "class",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "STTRawTextMessageData",
+      "message": "Use :class:`STTRawTextMessageData` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/processors/frameworks/rtvi/models.py"
+    },
+    {
+      "subject": "RTVIObserver.add_bot_output_transformer.aggregation_type",
+      "module": "pipecat.processors.frameworks.rtvi.observer",
+      "kind": "parameter",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "text_type",
+      "message": "Use ``text_type`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/processors/frameworks/rtvi/observer.py"
+    },
+    {
+      "subject": "RTVIObserver.remove_bot_output_transformer.aggregation_type",
+      "module": "pipecat.processors.frameworks.rtvi.observer",
+      "kind": "parameter",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "text_type",
+      "message": "Use ``text_type`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/processors/frameworks/rtvi/observer.py"
+    },
+    {
+      "subject": "RTVIObserverParams.skip_aggregator_types",
+      "module": "pipecat.processors.frameworks.rtvi.observer",
+      "kind": "parameter",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "skip_text_types",
+      "message": "Use ``skip_text_types`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/processors/frameworks/rtvi/observer.py"
+    },
+    {
+      "subject": "RTVIObserverParams.user_transcription_enabled",
+      "module": "pipecat.processors.frameworks.rtvi.observer",
+      "kind": "parameter",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "No replacement. It only turns off ``user-transcription``, which is deprecated in favor of ``user-input`` and ``stt-raw-text``. Will be removed in 2.0.0.",
+      "location": "pipecat/processors/frameworks/rtvi/observer.py"
     },
     {
       "subject": "RTVIProcessor.handle_function_call",
@@ -1026,6 +1367,17 @@
       "location": "pipecat/processors/frameworks/rtvi/processor.py"
     },
     {
+      "subject": "EvalRunnerArguments",
+      "module": "pipecat.runner.types",
+      "kind": "class",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "WebSocketRunnerArguments",
+      "message": "`EvalRunnerArguments` is deprecated since 1.13.0 and will be removed in 2.0.0. Use `WebSocketRunnerArguments` instead.",
+      "location": "pipecat/runner/types.py"
+    },
+    {
       "subject": "MOQRunnerArguments.serve_bind",
       "module": "pipecat.runner.types",
       "kind": "parameter",
@@ -1035,6 +1387,39 @@
       "replacement": "bind",
       "message": "Use ``bind`` instead, which also covers client mode. Will be removed in 2.0.0.",
       "location": "pipecat/runner/types.py"
+    },
+    {
+      "subject": "get_transport_client_id",
+      "module": "pipecat.runner.utils",
+      "kind": "function",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "BaseTransport.get_client_id()",
+      "message": "`get_transport_client_id` is deprecated since 1.13.0 and will be removed in 2.0.0. Use `BaseTransport.get_client_id()` instead.",
+      "location": "pipecat/runner/utils.py"
+    },
+    {
+      "subject": "maybe_capture_participant_camera",
+      "module": "pipecat.runner.utils",
+      "kind": "function",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "TransportParams.video_in_sources",
+      "message": "`maybe_capture_participant_camera` is deprecated since 1.13.0 and will be removed in 2.0.0. Use `TransportParams.video_in_sources` or `BaseTransport.capture_participant_video()` instead.",
+      "location": "pipecat/runner/utils.py"
+    },
+    {
+      "subject": "maybe_capture_participant_screen",
+      "module": "pipecat.runner.utils",
+      "kind": "function",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "TransportParams.video_in_sources",
+      "message": "`maybe_capture_participant_screen` is deprecated since 1.13.0 and will be removed in 2.0.0. Use `TransportParams.video_in_sources` or `BaseTransport.capture_participant_video()` instead.",
+      "location": "pipecat/runner/utils.py"
     },
     {
       "subject": "AnthropicLLMService.InputParams",
@@ -2200,6 +2585,17 @@
       "relation": "use_existing",
       "replacement": "settings=GoogleImageGenService.Settings(...)",
       "message": "Use ``settings=GoogleImageGenService.Settings(...)`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/services/google/image.py"
+    },
+    {
+      "subject": "GoogleImageGenSettings.negative_prompt",
+      "module": "pipecat.services.google.image",
+      "kind": "parameter",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "No replacement. Gemini image models do not accept a negative prompt, so the value is ignored. Will be removed in 2.0.0.",
       "location": "pipecat/services/google/image.py"
     },
     {
@@ -3677,6 +4073,17 @@
       "location": "pipecat/services/sambanova/llm.py"
     },
     {
+      "subject": "SarvamRealtimeSTTSettings.language_code",
+      "module": "pipecat.services.sarvam.stt",
+      "kind": "parameter",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "language",
+      "message": "Use ``language`` instead, with ``None`` for ``auto``. Will be removed in 2.0.0.",
+      "location": "pipecat/services/sarvam/stt.py"
+    },
+    {
       "subject": "SarvamSTTService.InputParams",
       "module": "pipecat.services.sarvam.stt",
       "kind": "class",
@@ -4029,6 +4436,17 @@
       "location": "pipecat/services/tts_service.py"
     },
     {
+      "subject": "TTSService.add_text_transformer.aggregation_type",
+      "module": "pipecat.services.tts_service",
+      "kind": "parameter",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "text_type",
+      "message": "Use ``text_type`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/services/tts_service.py"
+    },
+    {
       "subject": "TTSService.aggregate_sentences",
       "module": "pipecat.services.tts_service",
       "kind": "parameter",
@@ -4047,7 +4465,18 @@
       "removed_in": "2.0.0",
       "relation": "none",
       "replacement": null,
-      "message": "No replacement. Frame processing is now paused only while there is audio still to be played, so the pause is lifted by the ``BotStoppedSpeakingFrame`` that follows playback or by the audio context completing in silence, and no timer is needed to break it. Will be removed in 2.0.0.",
+      "message": "No replacement. Frame processing is now paused only while an audio context is open, and every context ends, so no timer is needed to break the pause. Will be removed in 2.0.0.",
+      "location": "pipecat/services/tts_service.py"
+    },
+    {
+      "subject": "TTSService.remove_text_transformer.aggregation_type",
+      "module": "pipecat.services.tts_service",
+      "kind": "parameter",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "text_type",
+      "message": "Use ``text_type`` instead. Will be removed in 2.0.0.",
       "location": "pipecat/services/tts_service.py"
     },
     {
@@ -4070,6 +4499,17 @@
       "relation": "use_existing",
       "replacement": "TTSUpdateSettingsFrame(voice=...)",
       "message": "`TTSService.set_voice` is deprecated since 0.0.104 and will be removed in 2.0.0. Use `TTSUpdateSettingsFrame(voice=...)` instead.",
+      "location": "pipecat/services/tts_service.py"
+    },
+    {
+      "subject": "TTSService.skip_aggregator_types",
+      "module": "pipecat.services.tts_service",
+      "kind": "parameter",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "skip_text_types",
+      "message": "Use ``skip_text_types`` instead. Will be removed in 2.0.0.",
       "location": "pipecat/services/tts_service.py"
     },
     {
@@ -4293,6 +4733,17 @@
       "location": "pipecat/transports/base_input.py"
     },
     {
+      "subject": "BaseTransport.capture_participant_video.framerate",
+      "module": "pipecat.transports.base_transport",
+      "kind": "parameter",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "on_request_only=True",
+      "message": "Use ``on_request_only=True`` instead of a ``framerate`` of ``0``. Will be removed in 2.0.0.",
+      "location": "pipecat/transports/base_transport.py"
+    },
+    {
       "subject": "TransportParams.video_out_bitrate",
       "module": "pipecat.transports.base_transport",
       "kind": "parameter",
@@ -4313,6 +4764,17 @@
       "replacement": "bind",
       "message": "Use ``bind`` instead, which also covers client mode. Will be removed in 2.0.0.",
       "location": "pipecat/transports/moq/transport.py"
+    },
+    {
+      "subject": "SmallWebRTCTransport.capture_participant_video.participant_id",
+      "module": "pipecat.transports.smallwebrtc.transport",
+      "kind": "parameter",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "participant_id",
+      "message": "Pass ``participant_id`` first, as on other transports. Calls without it, ``capture_participant_video(video_source=...)`` or ``capture_participant_video(\"camera\")``, keep their old meaning, passing on every frame unless ``framerate`` is given. Will be removed in 2.0.0.",
+      "location": "pipecat/transports/smallwebrtc/transport.py"
     },
     {
       "subject": "WebsocketServerCallbacks",
@@ -4456,6 +4918,39 @@
       "replacement": "LLMAutoContextSummarizationConfig",
       "message": "`LLMContextSummarizationConfig` is deprecated since 0.0.104 and will be removed in 2.0.0. Use `LLMAutoContextSummarizationConfig` instead.",
       "location": "pipecat/utils/context/llm_context_summarization.py"
+    },
+    {
+      "subject": "AggregationType",
+      "module": "pipecat.utils.text.base_text_aggregator",
+      "kind": "attribute",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "TextType",
+      "message": "Use :class:`TextType` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/utils/text/base_text_aggregator.py"
+    },
+    {
+      "subject": "BaseUIWorker",
+      "module": "pipecat.workers.base_ui_worker",
+      "kind": "class",
+      "deprecated_in": "1.12.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "UIWorker",
+      "message": "`BaseUIWorker` is deprecated since 1.12.0 and will be removed in 2.0.0. Use `UIWorker` instead.",
+      "location": "pipecat/workers/base_ui_worker.py"
+    },
+    {
+      "subject": "pipecat.workers.base_ui_worker",
+      "module": "pipecat.workers.base_ui_worker",
+      "kind": "module",
+      "deprecated_in": "1.12.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "pipecat.workers.ui.UIWorker",
+      "message": "Use :class:`~pipecat.workers.ui.UIWorker` instead, which reports its job groups to the client itself; dispatch from one of its ``@job`` handlers where a ``BaseUIWorker`` was used as a dispatcher. Will be removed in 2.0.0.",
+      "location": "pipecat/workers/base_ui_worker.py"
     },
     {
       "subject": "BaseWorker.create_job_group_and_request_job.cancel_on_error",
@@ -4742,6 +5237,28 @@
       "replacement": "JobGroupContext",
       "message": "`UIJobGroupContext` is deprecated since 1.8.0 and will be removed in 2.0.0. Use `JobGroupContext` instead.",
       "location": "pipecat/workers/ui/ui_job_context.py"
+    },
+    {
+      "subject": "ReplyToolMixin",
+      "module": "pipecat.workers.ui.ui_tools",
+      "kind": "class",
+      "deprecated_in": "1.12.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "screen_tools",
+      "message": "`ReplyToolMixin` is deprecated since 1.12.0 and will be removed in 2.0.0. Use `screen_tools` instead.",
+      "location": "pipecat/workers/ui/ui_tools.py"
+    },
+    {
+      "subject": "UIWorker.respond_to_job.tts_speak",
+      "module": "pipecat.workers.ui.ui_worker",
+      "kind": "parameter",
+      "deprecated_in": "1.12.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "No replacement: respond with ``answer`` and let the requester's voice LLM say it. Will be removed in 2.0.0.",
+      "location": "pipecat/workers/ui/ui_worker.py"
     },
     {
       "subject": "UIWorker.start_ui_job_group",

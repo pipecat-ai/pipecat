@@ -197,6 +197,8 @@ class ResembleAITTSService(WebsocketTTSService):
 
     async def _disconnect(self):
         """Disconnect from the Resemble AI WebSocket."""
+        await super()._disconnect()
+
         if self._receive_task:
             await self.cancel_task(self._receive_task)
             self._receive_task = None
@@ -260,7 +262,7 @@ class ResembleAITTSService(WebsocketTTSService):
         """Stop metrics after the Resemble AI context finishes playing.
 
         No close message is needed: Resemble AI signals completion with an
-        ``audio_end`` message (handled in ``_process_messages``), after which
+        ``audio_end`` message (handled in ``_receive_messages``), after which
         the server-side context is already closed.
         """
         await super().on_audio_context_completed(context_id)
@@ -269,9 +271,9 @@ class ResembleAITTSService(WebsocketTTSService):
         """Flush any pending audio and finalize the current context."""
         logger.trace(f"{self}: flushing audio")
         # For Resemble AI, we just wait for the audio_end message
-        # which is handled in _process_messages
+        # which is handled in _receive_messages
 
-    async def _process_messages(self):
+    async def _receive_messages(self):
         """Process incoming WebSocket messages from Resemble AI."""
         async for message in self._get_websocket():
             try:
@@ -416,17 +418,6 @@ class ResembleAITTSService(WebsocketTTSService):
                     await self._connect_websocket()
             else:
                 logger.warning(f"{self} unknown message type: {msg_type}")
-
-    async def _receive_messages(self):
-        """Main loop for receiving messages from Resemble AI."""
-        while True:
-            try:
-                await self._process_messages()
-            except Exception as e:
-                await self.push_error(error_msg=f"Error in receive loop: {e}", exception=e)
-                # Try to reconnect
-                logger.debug(f"{self} Resemble AI connection lost, reconnecting")
-                await self._connect_websocket()
 
     @traced_tts
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:

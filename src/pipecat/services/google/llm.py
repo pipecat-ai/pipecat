@@ -13,6 +13,7 @@ including LLM services, context management, and message aggregation.
 import asyncio
 import io
 import os
+import re
 import uuid
 from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import aclosing
@@ -44,6 +45,7 @@ from pipecat.services.google.utils import update_google_client_http_options
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.utils.deprecation import deprecated
+from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.tracing.service_decorators import traced_llm
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 
@@ -53,6 +55,7 @@ os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "false"
 try:
     import google.genai as genai
     from google.api_core.exceptions import DeadlineExceeded
+    from google.genai.errors import ClientError
     from google.genai.types import (
         FinishReason,
         GenerateContentConfig,
@@ -69,17 +72,57 @@ except ModuleNotFoundError as e:
     raise ImportError(f"Missing module: {e}") from e
 
 
-# The lowest thinking level each model accepts, keyed by model name prefix. A
-# model that isn't listed is assumed to accept "minimal", the fastest setting.
-_LOWEST_MODEL_THINKING_LEVELS = {
-    "gemini-3.7-flash": "low",
-    "gemini-3.8-flash": "low",
+# The lowest thinking setting Google documents for each model, sent when the
+# caller doesn't configure ``thinking``, keyed by model name. The 2.5 models
+# take a budget, where 0 turns thinking off and 2.5 Pro's minimum is 128; later
+# models take a level. 3.7 Flash, 3.8 Flash, 3.1 Pro and 4 Argon reject
+# "minimal", and the Flash-Lite models already default to it. Aliases such as
+# ``gemini-flash-latest`` are left out, since the model they name changes.
+_THINKING_DEFAULTS: dict[str, dict[str, Any]] = {
+    "gemini-2.5-flash": {"thinking_budget": 0},
+    "gemini-2.5-flash-lite": {"thinking_budget": 0},
+    "gemini-2.5-pro": {"thinking_budget": 128},
+    "gemini-3-flash-preview": {"thinking_level": "minimal"},
+    "gemini-3.1-flash-lite": {"thinking_level": "minimal"},
+    "gemini-3.1-pro-preview": {"thinking_level": "low"},
+    "gemini-3.1-pro-preview-customtools": {"thinking_level": "low"},
+    "gemini-3.5-flash": {"thinking_level": "minimal"},
+    "gemini-3.5-flash-lite": {"thinking_level": "minimal"},
+    "gemini-3.6-flash": {"thinking_level": "minimal"},
+    "gemini-3.7-flash": {"thinking_level": "low"},
+    "gemini-3.8-flash": {"thinking_level": "low"},
+    "gemini-4-argon": {"thinking_level": "low"},
+    "gemma-4-26b-a4b-it": {"thinking_level": "minimal"},
+    "gemma-4-31b-it": {"thinking_level": "minimal"},
 }
+
+
+def _model_name(model: str) -> str:
+    """The name a model id refers to, for looking the model up.
+
+    ``_THINKING_DEFAULTS`` and ``_MODELS_SUPPORTING_THINKING_LEVEL`` are keyed by
+    name. Ids can name a model by resource path (``models/gemini-3.6-flash``,
+    ``publishers/google/models/gemini-3.6-flash``) or by version
+    (``gemini-2.5-flash-001``).
+    """
+    return re.sub(r"-\d{3}$", "", model.lower().rsplit("/", 1)[-1])
+
 
 # Models that take their thinking configuration from thinking_level, keyed by
 # model name prefix. Whether one of these honors a thinking_budget set alongside
 # it varies by model and by backend, so such a budget can't be relied on.
-_MODELS_SUPPORTING_THINKING_LEVEL = ("gemini-3",)
+_MODELS_SUPPORTING_THINKING_LEVEL = ("gemini-3", "gemini-4", "gemma-4")
+
+
+def _can_think(name: str) -> bool:
+    """Whether a model name belongs to a Gemini or Gemma text model that can think.
+
+    Covers Gemini 2.5 and later, Gemma 4, and aliases such as
+    ``gemini-flash-latest``. Image, speech and embedding models are excluded.
+    """
+    if any(kind in name for kind in ("image", "tts", "audio", "live", "embedding")):
+        return False
+    return bool(re.match(r"gemini-(2\.5|[3-9])|gemma-4|gemini-[a-z-]+-latest$", name))
 
 
 class GoogleThinkingConfig(BaseModel):
@@ -100,7 +143,7 @@ class GoogleThinkingConfig(BaseModel):
             -1 for dynamic thinking (model decides), 0 to disable thinking,
             or a specific token count (e.g., 128-32768 for 2.5 Pro).
             If not provided, most models today default to dynamic thinking.
-            See https://ai.google.dev/gemini-api/docs/thinking#set-budget
+            See https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/thinking#gemini-2-5-and-earlier-models
             for default values and allowed ranges.
             Note: Gemini 3 models must use thinking_level instead.
         include_thoughts: Whether to include thought summaries in the response.
@@ -121,7 +164,11 @@ class GoogleLLMSettings(LLMSettings):
     """Settings for GoogleLLMService.
 
     Parameters:
-        thinking: Thinking configuration.
+        thinking: Thinking configuration. If this is not provided, Pipecat
+            sends the lowest thinking setting Google documents for the model,
+            for the fastest responses, and logs what it sent. Models Pipecat
+            doesn't list, and any model when ``use_provider_thinking_default`` is
+            set, run at Google's default.
         safety_settings: Content safety filters, as a list of
             :class:`~google.genai.types.SafetySetting`. Each entry pairs a harm
             category with the threshold at which content is blocked. Categories
@@ -168,6 +215,8 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
     # Overriding the default adapter to use the Gemini one.
     adapter_class = GeminiLLMAdapter
 
+    supports_response_schema: bool = True
+
     # Backward compatibility: ThinkingConfig used to be defined inline here.
     ThinkingConfig = GoogleThinkingConfig
 
@@ -190,9 +239,9 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
             thinking: Thinking configuration with thinking_budget, thinking_level, and include_thoughts.
                 Used to control the model's internal "thinking" process used before generating a response.
                 Gemini 2.5 series models use thinking_budget; Gemini 3 models use thinking_level.
-                If this is not provided, Pipecat disables thinking for all
-                models where that's possible (the 2.5 series, except 2.5 Pro),
-                to reduce latency.
+                If this is not provided, Pipecat sends the lowest thinking setting Google
+                documents for the model, for the fastest responses, and logs what it sent.
+                Models Pipecat doesn't list run at Google's default.
             extra: Additional parameters as a dictionary.
         """
 
@@ -335,11 +384,27 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
         """Create the Gemini client instance. Subclasses can override this."""
         self._client = genai.Client(api_key=self._api_key, http_options=self._http_options)
 
+    @staticmethod
+    def model_supports_response_schema(model: str) -> bool:
+        """Whether a model can enforce a response schema.
+
+        Gemini takes a JSON schema from the 2.5 models on. A model id without
+        a version is assumed to support it.
+
+        Args:
+            model: The model name.
+        """
+        match = re.search(r"gemini(?:-[a-z]+)*-(\d+)(?:\.(\d+))?", model)
+        if not match:
+            return True
+        return (int(match.group(1)), int(match.group(2) or 0)) >= (2, 5)
+
     async def run_inference(
         self,
         context: LLMContext,
         max_tokens: int | None = None,
         system_instruction: str | None = None,
+        response_schema: dict[str, Any] | None = None,
     ) -> str | None:
         """Run a one-shot, out-of-band (i.e. out-of-pipeline) inference with the given LLM context.
 
@@ -349,6 +414,9 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
                 overrides the service's default max_tokens setting.
             system_instruction: Optional system instruction to use for this inference.
                 If provided, overrides any system instruction in the context.
+            response_schema: Optional JSON schema the reply must follow. The
+                service asks the provider to enforce it, so the reply is JSON
+                text matching the schema.
 
         Returns:
             The LLM's response as a string, or None if no response is generated.
@@ -360,8 +428,10 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
             self._settings.system_instruction
         )
         adapter = self.get_llm_adapter()
-        params = adapter.get_llm_invocation_params(
-            context, system_instruction=effective_instruction
+        params = await adapter.get_llm_invocation_params(
+            context,
+            system_instruction=effective_instruction,
+            ensure_last_message_is_user=self._should_inject_trailing_user_message(),
         )
         messages = params["messages"]
         system = params["system_instruction"]
@@ -376,6 +446,11 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
         if max_tokens is not None:
             generation_params["max_output_tokens"] = max_tokens
 
+        response_schema = self._check_response_schema(response_schema)
+        if response_schema is not None:
+            generation_params["response_mime_type"] = "application/json"
+            generation_params["response_json_schema"] = response_schema
+
         generation_config = GenerateContentConfig(**generation_params)
 
         # Use the new google-genai client's async method
@@ -389,6 +464,9 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
             contents=cast(Any, messages),
             config=generation_config,
         )
+
+        if response.candidates and response.candidates[0].finish_reason:
+            self._handle_finish_reason(response.candidates[0].finish_reason)
 
         # Extract text from response
         if response.candidates and response.candidates[0].content:
@@ -442,7 +520,7 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
 
         # Applied last, so an explicit thinking config from the settings or from
         # extra wins over the low-latency default.
-        self._maybe_unset_thinking_budget(generation_params)
+        self._maybe_apply_thinking_default(generation_params)
 
         return generation_params
 
@@ -475,7 +553,7 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
             return
 
         model = assert_given(self._settings.model)
-        if not model or not model.startswith(_MODELS_SUPPORTING_THINKING_LEVEL):
+        if not model or not _model_name(model).startswith(_MODELS_SUPPORTING_THINKING_LEVEL):
             return
 
         logger.warning(
@@ -483,42 +561,66 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
             "ignore it or reject the request outright. Use thinking_level instead."
         )
 
-    def _maybe_unset_thinking_budget(self, generation_params: dict[str, Any]):
-        try:
-            model = assert_given(self._settings.model)
-            # If we have an image model, we don't apply a thinking default.
-            if model is None or "image" in model:
-                return
-            # If thinking_config is already set, don't override it.
-            if "thinking_config" in generation_params:
-                return
-            # Apply model-aware low-latency thinking defaults.
-            # Gemini 2.5 Flash: disable thinking via thinking_budget.
-            # Gemini 3+ Flash: use the lowest thinking_level the model accepts.
-            if model.startswith("gemini-2.5-flash"):
-                generation_params["thinking_config"] = {"thinking_budget": 0}
-            elif model.startswith("gemini-3") and "flash" in model:
-                level = next(
-                    (
-                        lowest
-                        for prefix, lowest in _LOWEST_MODEL_THINKING_LEVELS.items()
-                        if model.startswith(prefix)
-                    ),
-                    "minimal",
-                )
-                generation_params["thinking_config"] = {"thinking_level": level}
-        except Exception as e:
-            logger.error(f"Failed to unset thinking budget: {e}")
+    def _maybe_apply_thinking_default(self, generation_params: dict[str, Any]):
+        """Send the model's lowest thinking setting when none is configured.
+
+        Applies the model's entry in ``_THINKING_DEFAULTS``, if it has one.
+        Generation params that already set ``thinking_config``, from the
+        settings or from ``extra``, are left as they are, and so are all
+        generation params when ``use_provider_thinking_default`` is set. The first
+        request for each model logs the setting sent, or that the model runs at
+        Google's default, warning for an unlisted model that can think.
+
+        Args:
+            generation_params: The generation params dict (modified in place).
+        """
+        if "thinking_config" in generation_params:
+            return
+        model = assert_given(self._settings.model) or ""
+        name = _model_name(model)
+        thinking = _THINKING_DEFAULTS.get(name)
+        self._apply_thinking_default(
+            generation_params,
+            model,
+            {"thinking_config": thinking} if thinking is not None else None,
+            can_think=_can_think(name),
+            provider="Google",
+            settings_fields="`thinking`",
+        )
+
+    # Models known to accept a request whose contents end with a model turn,
+    # continuing that turn as the start of the response. Newer models reject
+    # such requests, so this is a frozen legacy set: any model NOT matching is
+    # assumed to reject them and gets a trailing user message injected when
+    # needed. gemini-3.5-flash accepts them but shares a prefix with
+    # gemini-3.5-flash-lite, which doesn't, so it's left out.
+    _PREFILL_SUPPORTED_PATTERNS = (
+        "gemini-2.",
+        "gemini-3-",
+        "gemini-3.1-",
+        "gemini-pro-latest",
+    )
+
+    def _should_inject_trailing_user_message(self) -> bool:
+        """Whether to fix up requests whose contents end with a model turn.
+
+        Models without support for continuing a trailing model turn reject such
+        requests, so injection is on for every model not known to support it.
+        Subclasses with other model naming can override
+        ``_PREFILL_SUPPORTED_PATTERNS``.
+        """
+        model = self._settings.model or ""
+        return not any(model.startswith(p) for p in self._PREFILL_SUPPORTED_PATTERNS)
 
     async def _stream_content(self, context: LLMContext) -> AsyncIterator[GenerateContentResponse]:
         adapter = self.get_llm_adapter()
-        params = adapter.get_llm_invocation_params(
-            context, system_instruction=assert_given(self._settings.system_instruction)
+        params = await adapter.get_llm_invocation_params(
+            context,
+            system_instruction=assert_given(self._settings.system_instruction),
+            ensure_last_message_is_user=self._should_inject_trailing_user_message(),
         )
 
-        logger.debug(
-            f"{self}: Generating chat from context {adapter.get_messages_for_logging(context)}"
-        )
+        self._log_llm_response(context)
 
         messages = params["messages"]
 
@@ -652,7 +754,7 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
         Anything other than a normal stop leaves the turn short of what the model
         would otherwise have said: the response was withheld (safety, recitation,
         prohibited content), a tool call was rejected, or the output hit the token
-        limit. Whatever text did arrive is still passed downstream.
+        limit. Whatever text did arrive is still passed on.
         """
         if finish_reason in (FinishReason.STOP, FinishReason.FINISH_REASON_UNSPECIFIED):
             return
@@ -684,11 +786,18 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
                 # We use assignment (not accumulation) because the final chunk always contains
                 # the authoritative, billable token usage for the entire response.
                 if chunk.usage_metadata:
-                    prompt_tokens = chunk.usage_metadata.prompt_token_count or 0
-                    completion_tokens = chunk.usage_metadata.candidates_token_count or 0
-                    total_tokens = chunk.usage_metadata.total_token_count or 0
-                    cache_read_input_tokens = chunk.usage_metadata.cached_content_token_count or 0
                     reasoning_tokens = chunk.usage_metadata.thoughts_token_count or 0
+                    # Gemini counts tool results fed back to the model apart from the
+                    # prompt, and thinking tokens apart from the candidates, but they
+                    # are input and output too.
+                    prompt_tokens = (chunk.usage_metadata.prompt_token_count or 0) + (
+                        chunk.usage_metadata.tool_use_prompt_token_count or 0
+                    )
+                    completion_tokens = (
+                        chunk.usage_metadata.candidates_token_count or 0
+                    ) + reasoning_tokens
+                    total_tokens = prompt_tokens + completion_tokens
+                    cache_read_input_tokens = chunk.usage_metadata.cached_content_token_count or 0
 
                 if not chunk.candidates:
                     continue
@@ -838,8 +947,33 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
             await self.push_error(error_msg="LLM completion timeout", exception=e)
         except LLMContextConversionError as e:
             await self.push_error(error_msg=str(e), exception=e)
+            # A conversion failure (e.g. corrupt base64 data) can't reach the
+            # API at all, but is just as much evidence of an invalid file as a
+            # rejection from Gemini itself, so it gets the same best-effort
+            # cleanup.
+            context.remove_invalid_file_message()
         except Exception as e:
-            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
+            # Gemini doesn't say which field was invalid, but ClientError.status
+            # carries the gRPC-style code, and INVALID_ARGUMENT (unsupported MIME
+            # type, corrupt bytes, etc.) is grounds to remove a pending file
+            # message on a best-effort basis. The rest of the 4xx range —
+            # UNAUTHENTICATED, PERMISSION_DENIED, NOT_FOUND, RESOURCE_EXHAUSTED —
+            # says nothing about whether our request (or its file) was bad, and
+            # removing the file there would discard it for no benefit. When a
+            # message is removed as a result of this error, the fault lay in
+            # application-supplied content and the context is repaired, so the
+            # error is pushed as APPLICATION instead of letting the rejection
+            # classify as permanent and cost the service its usability.
+            removed = (
+                isinstance(e, ClientError)
+                and e.status == "INVALID_ARGUMENT"
+                and context.remove_invalid_file_message()
+            )
+            await self.push_error(
+                error_msg=f"Unknown error occurred: {e}",
+                exception=e,
+                category=ErrorCategory.APPLICATION if removed else None,
+            )
         finally:
             if grounding_metadata and isinstance(grounding_metadata, dict):
                 llm_search_frame = LLMSearchResponseFrame(

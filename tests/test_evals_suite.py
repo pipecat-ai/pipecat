@@ -133,9 +133,11 @@ class TestEvalManifestLoad(unittest.TestCase):
             "suite:\n"
             "  - bot: a.py\n    concurrency: 2\n    scenarios: [x, y]\n"
             "  - bot: b.py\n    scenarios: [x]\n"
+            "  - bot: a.py\n    scenarios: [z]\n"
         )
         m = EvalManifest.load(self.manifest_path, concurrency=8)
-        self.assertEqual([r.concurrency for r in m.runs], [2, 2, None])
+        self.assertEqual([r.concurrency for r in m.runs], [2, 2, None, None])
+        self.assertEqual([r.entry for r in m.runs], [0, 0, 1, 2])
         # The command line's cap is the suite's, not the entry's.
         self.assertEqual(m.concurrency, 8)
 
@@ -246,7 +248,7 @@ class TestSuiteUpdateEvent(unittest.IsolatedAsyncioTestCase):
             warnings.simplefilter("always")
             await self.suite.run(self.logs_dir, use_cache=False, default_timeout_ms=1234)
         self.assertEqual([w.category for w in caught], [DeprecationWarning])
-        self.assertIn("`EvalSuite.run`", str(caught[0].message))
+        self.assertIn("`EvalSuite.run(", str(caught[0].message))
 
     async def test_callback_stays_scoped_to_the_call_it_was_passed_to(self):
         """The callback is a per-call parameter, so a reused suite doesn't accumulate it."""
@@ -268,7 +270,7 @@ class TestSuiteUpdateEvent(unittest.IsolatedAsyncioTestCase):
 
 
 class TestBotConcurrency(unittest.IsolatedAsyncioTestCase):
-    """A bot's own cap limits its runs; the suite's cap limits the rest."""
+    """The suite keeps ``concurrency`` runs going; an entry's own cap limits its runs in flight."""
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -279,41 +281,152 @@ class TestBotConcurrency(unittest.IsolatedAsyncioTestCase):
         logger.remove()
         logger.add(sys.stderr)
 
-    async def test_capped_bot_runs_one_at_a_time_while_others_overlap(self):
-        runs = [
-            EvalRun(
-                bot=bot,
-                scenario=f"s{i}",
-                scenario_path=self.logs_dir / "s.yaml",
-                bot_path=self.logs_dir / bot,
-                concurrency=1 if bot == "capped.py" else None,
-            )
-            for bot in ("capped.py", "free.py")
-            for i in range(3)
-        ]
-        suite = EvalSuite(
+    def _suite(self, runs: list[EvalRun], concurrency: int, repeat: int = 1) -> EvalSuite:
+        return EvalSuite(
             EvalManifest(
                 runs=runs,
                 spawn=DEFAULT_SPAWN,
                 python=sys.executable,
-                concurrency=4,
-                repeat=1,
+                concurrency=concurrency,
+                repeat=repeat,
                 base_port=7900,
                 runs_dir=None,
                 record=False,
                 cache_dir=None,
             )
         )
-        # Stand in for the bot and the harness: each run holds its slot for a
-        # moment, and the test records how many of each bot were held at once.
-        active: dict[str, int] = {}
-        peak: dict[str, int] = {}
+
+    def _count_overlap(self, suite: EvalSuite, hold: float = 0.05, key=lambda run: run.bot) -> dict:
+        """Stand in for the bot and the harness, recording the most runs held at once per ``key`` (the bot) and in all."""
+        active: dict = {}
+        peak: dict = {"total": 0}
 
         async def spawn(run, port, files):
-            active[run.bot] = active.get(run.bot, 0) + 1
-            peak[run.bot] = max(peak.get(run.bot, 0), active[run.bot])
-            await asyncio.sleep(0.05)
-            active[run.bot] -= 1
+            k = key(run)
+            active[k] = active.get(k, 0) + 1
+            peak[k] = max(peak.get(k, 0), active[k])
+            peak["total"] = max(peak["total"], sum(active.values()))
+            await asyncio.sleep(hold)
+            active[k] -= 1
+            return None
+
+        async def harness(run, port, files, *, debug, params):
+            return None
+
+        async def finish(run, files, bot, worker, results_path, logs_dir, record_dir):
+            run.status = "done"
+
+        suite._missing_file = lambda run: None
+        suite._spawn_bot = spawn
+        suite._run_harness = harness
+        suite._finish = finish
+        return peak
+
+    def _runs(self, bots: dict[str, int], **kwargs) -> list[EvalRun]:
+        return [
+            EvalRun(
+                bot=bot,
+                scenario=f"s{i}",
+                scenario_path=self.logs_dir / "s.yaml",
+                bot_path=self.logs_dir / bot,
+                concurrency=kwargs.get(bot),
+                entry=entry,
+            )
+            for entry, (bot, count) in enumerate(bots.items())
+            for i in range(count)
+        ]
+
+    async def test_one_entry_fills_every_slot(self):
+        runs = self._runs({"a.py": 10})
+        suite = self._suite(runs, concurrency=4)
+        peak = self._count_overlap(suite)
+
+        await suite.run(self.logs_dir)
+
+        self.assertEqual(peak["a.py"], 4)
+        self.assertEqual([r.status for r in runs], ["done"] * 10)
+
+    async def test_an_entry_cap_limits_its_runs_in_flight(self):
+        runs = self._runs({"capped.py": 3, "plain.py": 3}, **{"capped.py": 1})
+        suite = self._suite(runs, concurrency=4)
+        peak = self._count_overlap(suite)
+
+        await suite.run(self.logs_dir)
+
+        self.assertEqual(peak["capped.py"], 1)
+        self.assertEqual(peak["total"], 4)
+        self.assertEqual([r.status for r in runs], ["done"] * 6)
+
+    async def test_an_entry_cap_holds_across_attempts(self):
+        runs = [
+            EvalRun(
+                bot=bot,
+                scenario="s",
+                scenario_path=self.logs_dir / "s.yaml",
+                bot_path=self.logs_dir / bot,
+                concurrency=1 if bot == "capped.py" else None,
+                entry=entry,
+                attempt=attempt,
+            )
+            for attempt in (1, 2, 3)
+            for entry, bot in enumerate(("capped.py", "plain.py"))
+        ]
+        suite = self._suite(runs, concurrency=2, repeat=3)
+        peak = self._count_overlap(suite)
+
+        await suite.run(self.logs_dir)
+
+        self.assertEqual(peak["capped.py"], 1)
+        self.assertEqual(peak["total"], 2)
+        self.assertEqual([r.status for r in runs], ["done"] * 6)
+
+    async def test_an_entry_cap_leaves_another_entry_for_the_same_bot_alone(self):
+        runs = [
+            EvalRun(
+                bot="a.py",
+                scenario=f"s{entry}{i}",
+                scenario_path=self.logs_dir / "s.yaml",
+                bot_path=self.logs_dir / "a.py",
+                concurrency=1 if entry == 0 else None,
+                entry=entry,
+            )
+            for entry in (0, 1)
+            for i in range(3)
+        ]
+        suite = self._suite(runs, concurrency=4)
+        peak = self._count_overlap(suite, key=lambda run: run.entry)
+
+        await suite.run(self.logs_dir)
+
+        self.assertEqual(peak[0], 1)
+        self.assertEqual(peak[1], 3)
+        self.assertEqual(peak["total"], 4)
+        self.assertEqual([r.status for r in runs], ["done"] * 6)
+
+    async def test_runs_are_taken_in_manifest_order(self):
+        runs = [
+            EvalRun(
+                bot=bot,
+                scenario=scenario,
+                scenario_path=self.logs_dir / "s.yaml",
+                bot_path=self.logs_dir / bot,
+                entry=entry,
+            )
+            for entry, bot, scenario in (
+                (0, "a.py", "s1"),
+                (0, "a.py", "s2"),
+                (0, "a.py", "s3"),
+                (1, "b.py", "s1"),
+                (2, "c.py", "s1"),
+                (2, "c.py", "s2"),
+                (3, "a.py", "s4"),
+            )
+        ]
+        suite = self._suite(runs, concurrency=1)
+        started: list[tuple[str, str]] = []
+
+        async def spawn(run, port, files):
+            started.append((run.bot, run.scenario))
             return None
 
         async def harness(run, port, files, *, debug, params):
@@ -329,9 +442,20 @@ class TestBotConcurrency(unittest.IsolatedAsyncioTestCase):
 
         await suite.run(self.logs_dir)
 
-        self.assertEqual(peak["capped.py"], 1)
-        self.assertEqual(peak["free.py"], 3)
-        self.assertEqual([r.status for r in runs], ["done"] * 6)
+        # One at a time, each entry's scenarios run together, in manifest
+        # order, and a bot's second entry waits for its place.
+        self.assertEqual(
+            started,
+            [
+                ("a.py", "s1"),
+                ("a.py", "s2"),
+                ("a.py", "s3"),
+                ("b.py", "s1"),
+                ("c.py", "s1"),
+                ("c.py", "s2"),
+                ("a.py", "s4"),
+            ],
+        )
 
 
 class TestRunFiles(unittest.TestCase):
@@ -428,6 +552,29 @@ class TestSpawnWithRunnerBody(unittest.IsolatedAsyncioTestCase):
         seen = await self._spawn(run)
         self.assertEqual(seen["argv"][2:], ["--runner-body", str(body)])
         self.assertEqual(Path(seen["cwd"]).resolve(), body.parent)
+
+
+class TestStopBot(unittest.IsolatedAsyncioTestCase):
+    """A run's bot is terminated as soon as the run ends: its dev runner outlives the session."""
+
+    async def test_running_bot_is_terminated_promptly(self):
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable, "-c", "import time; time.sleep(60)"
+        )
+        started = asyncio.get_running_loop().time()
+
+        await EvalSuite._stop_bot(proc)
+
+        self.assertIsNotNone(proc.returncode)
+        self.assertLess(asyncio.get_running_loop().time() - started, 5)
+
+    async def test_exited_bot_is_left_alone(self):
+        proc = await asyncio.create_subprocess_exec(sys.executable, "-c", "pass")
+        await proc.wait()
+
+        await EvalSuite._stop_bot(proc)
+
+        self.assertEqual(proc.returncode, 0)
 
 
 if __name__ == "__main__":
@@ -720,17 +867,27 @@ class TestSimulationRecords(unittest.TestCase):
                     passed=False,
                     reason="turn 2: curt",
                     min_score=1.0,
+                    criterion="stays polite",
                     verdicts=[
                         EvalSimulationTurnVerdict(1, True, "warm"),
-                        EvalSimulationTurnVerdict(2, False, "curt"),
+                        EvalSimulationTurnVerdict(
+                            2, False, "curt", "no", 0.9, {"meets": 0.1, "fails": 0.9}
+                        ),
                     ],
                 )
             ],
             messages=[{"role": "user", "content": "hi"}],
+            conversation=[
+                {"role": "user", "content": "hi"},
+                {"role": "tool_call", "name": "book", "arguments": {}, "cancelled": False},
+            ],
             turns=2,
             ended_by="end_call",
             end_call={"success": True, "reason": "done"},
             duration_ms=1234,
+            confidence=0.8,
+            probabilities={"yes": 0.8, "no": 0.2},
+            success="the bot booked a table",
         )
         rebuilt = _simulation_result_from_dict(json.loads(json.dumps(dataclasses.asdict(result))))
         self.assertEqual(rebuilt, result)
@@ -754,6 +911,12 @@ class TestSimulationRecords(unittest.TestCase):
                     turns=3,
                     ended_by="bot",
                     events_seen=[{"type": "llm_started"}],
+                    success="the bot booked a table",
+                    metrics=[
+                        EvalSimulationMetricScore(
+                            name="politeness", score=1.0, criterion="stays polite"
+                        )
+                    ],
                 ),
             )
             _append_result(base / "results.jsonl", run, "flows_x.py__book__002", base, None)
@@ -766,4 +929,112 @@ class TestSimulationRecords(unittest.TestCase):
             self.assertFalse(record["succeeded"])
             self.assertEqual(record["ended_by"], "bot")
             self.assertEqual(record["reason"], "no table")
+            self.assertEqual(record["success"], "the bot booked a table")
+            self.assertEqual(record["metrics"][0]["criterion"], "stays polite")
             self.assertEqual(record["events_seen"], [{"type": "llm_started"}])
+
+
+class TestSimulationConversationFile(unittest.IsolatedAsyncioTestCase):
+    async def test_a_finished_simulation_writes_its_conversation_and_the_record_points_to_it(self):
+        from pipecat.evals.suite import _RunFiles
+
+        conversation = [
+            {"role": "user", "content": "A table at six."},
+            {"role": "tool_call", "name": "book", "arguments": {"time": "6"}, "cancelled": False},
+            {"role": "assistant", "content": "Booked."},
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            run = EvalRun(
+                bot="flows/x.py",
+                scenario="book",
+                scenario_path=base / "book.yaml",
+                kind=EvalKind.SIMULATION,
+                result=EvalSimulationResult(
+                    simulation_name="book", succeeded=True, conversation=conversation
+                ),
+            )
+            suite = EvalSuite(
+                EvalManifest(
+                    runs=[run],
+                    spawn=DEFAULT_SPAWN,
+                    python=sys.executable,
+                    concurrency=1,
+                    repeat=1,
+                    base_port=7900,
+                    runs_dir=None,
+                    record=False,
+                    cache_dir=None,
+                )
+            )
+            files = _RunFiles.for_run(run, base, None)
+            await suite._finish(run, files, None, None, base / "results.jsonl", base, None)
+            self.assertEqual(json.loads(files.conversation.read_text()), conversation)
+            record = json.loads((base / "results.jsonl").read_text())
+            self.assertEqual(record["artifacts"]["conversation"], str(files.conversation))
+
+
+class TestEntryQueues(unittest.TestCase):
+    """Each entry gets its own queue, in manifest order, with its cap."""
+
+    @staticmethod
+    def _run(
+        label: str, scenario: str, entry: int, attempt: int = 1, concurrency: int | None = None
+    ) -> EvalRun:
+        return EvalRun(
+            bot="bot.py",
+            name=label,
+            scenario=scenario,
+            loaded=None,
+            bot_path=Path("bot.py"),
+            scenario_path=Path(f"{scenario}.yaml"),
+            entry=entry,
+            attempt=attempt,
+            concurrency=concurrency,
+        )
+
+    def test_one_queue_per_entry_in_manifest_order(self):
+        runs = [
+            self._run("a", "s1", 0),
+            self._run("a", "s2", 0),
+            self._run("b", "s1", 1),
+            self._run("a", "s3", 2),
+            self._run("c", "s1", 3),
+        ]
+        queues = EvalSuite._entry_queues(runs)
+        # A label's second entry is a queue of its own, in its manifest place.
+        self.assertEqual(
+            [[(r.label, r.scenario) for r in q] for _, _, q in queues],
+            [[("a", "s1"), ("a", "s2")], [("b", "s1")], [("a", "s3")], [("c", "s1")]],
+        )
+        self.assertEqual(
+            [(entry, cap) for entry, cap, _ in queues], [(0, None), (1, None), (2, None), (3, None)]
+        )
+
+    def test_attempts_form_their_own_queues_attempt_major(self):
+        runs = [
+            self._run("a", "s1", 0, 1),
+            self._run("a", "s2", 0, 1),
+            self._run("b", "s1", 1, 1),
+            self._run("a", "s1", 0, 2),
+            self._run("a", "s2", 0, 2),
+            self._run("b", "s1", 1, 2),
+        ]
+        queues = EvalSuite._entry_queues(runs)
+        self.assertEqual(
+            [[(r.label, r.scenario, r.attempt) for r in q] for _, _, q in queues],
+            [
+                [("a", "s1", 1), ("a", "s2", 1)],
+                [("b", "s1", 1)],
+                [("a", "s1", 2), ("a", "s2", 2)],
+                [("b", "s1", 2)],
+            ],
+        )
+
+    def test_each_entry_has_its_own_cap_and_none_without_one(self):
+        runs = [
+            self._run("a", "s1", 0, concurrency=3),
+            self._run("a", "s2", 1, concurrency=2),
+            self._run("b", "s1", 2),
+        ]
+        self.assertEqual([cap for _, cap, _ in EvalSuite._entry_queues(runs)], [3, 2, None])

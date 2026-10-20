@@ -6,20 +6,13 @@
 
 """Azure OpenAI Realtime LLM service implementation."""
 
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 from loguru import logger
 from websockets.asyncio.client import connect as websocket_connect
 
+from pipecat.services.azure.common import AzureTokenProvider
 from pipecat.services.openai.realtime.llm import OpenAIRealtimeLLMService
-
-AzureTokenProvider = Callable[[], Awaitable[str]]
-"""Async callable returning a Microsoft Entra ID bearer token.
-
-Matches :func:`azure.identity.aio.get_bearer_token_provider` used with the
-``https://ai.azure.com/.default`` scope.
-"""
 
 
 @dataclass

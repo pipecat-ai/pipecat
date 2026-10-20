@@ -7,6 +7,8 @@
 """UI bus carriers exchanged between ``PipelineWorker`` and ``UIWorker``."""
 
 from pipecat.bus.ui.messages import (
+    UI_CANCEL_JOB_GROUP_EVENT_NAME,
+    UI_SNAPSHOT_EVENT_NAME,
     BusUICommandMessage,
     BusUIDataMessage,
     BusUIEventMessage,
@@ -17,6 +19,8 @@ from pipecat.bus.ui.messages import (
 )
 
 __all__ = [
+    "UI_CANCEL_JOB_GROUP_EVENT_NAME",
+    "UI_SNAPSHOT_EVENT_NAME",
     "BusUICommandMessage",
     "BusUIDataMessage",
     "BusUIEventMessage",

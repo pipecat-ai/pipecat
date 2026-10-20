@@ -6,7 +6,10 @@
 
 import tempfile
 import unittest
+import warnings
 from pathlib import Path
+
+from loguru import logger
 
 from pipecat.evals.scenario import (
     EvalExpectation,
@@ -72,7 +75,7 @@ class TestScenarioGroups(unittest.TestCase):
         with self.assertWarns(DeprecationWarning) as cm:
             scenarios = EvalScenarioFile.load(_write("name: greet\nturns: [{user: hi}]\n"))
         self.assertEqual([s.name for s in scenarios], ["greet"])
-        self.assertIn("'scenarios:' list", str(cm.warning))
+        self.assertIn("`scenarios:` list", str(cm.warning))
 
     def test_entries_are_named_under_the_group(self):
         scenarios = EvalScenarioFile.load(_write(GROUP))
@@ -265,6 +268,32 @@ class TestEvalsScenarioParser(unittest.TestCase):
         )
         self.assertTrue(s.user_audio)
         self.assertEqual(s.user_speech, {"service": "cartesia", "voice": "v1"})
+
+    def test_user_turn_with_pauses(self):
+        s = _script(
+            _write(
+                "name: a\n"
+                "user: {modality: audio, speech: {service: kokoro, voice: v1}}\n"
+                "turns:\n"
+                "  - user: ['So last week I went to', {pause_ms: 2000}, 'Spain.']\n"
+            )
+        )
+        turn = s.turns[0]
+        self.assertEqual(turn.user, "So last week I went to Spain.")
+        self.assertEqual(turn.parts, ["So last week I went to", 2000, "Spain."])
+
+    def test_user_turn_pauses_are_validated(self):
+        audio = "user: {modality: audio, speech: {service: kokoro, voice: v1}}\n"
+        cases = {
+            "pauses but no text": audio + "turns: [{user: [{pause_ms: 500}]}]\n",
+            "items must be text": audio + "turns: [{user: ['Hi', {pause_ms: 0}]}]\n",
+            "text modality": "turns: [{user: ['Hi', {pause_ms: 500}, 'there']}]\n",
+        }
+        for message, body in cases.items():
+            with self.subTest(message=message):
+                with self.assertRaises(ValueError) as cm:
+                    _script(_write("name: a\n" + body))
+                self.assertIn(message, str(cm.exception))
 
     def test_user_audio_requires_speech(self):
         with self.assertRaises(ValueError) as cm:
@@ -738,24 +767,69 @@ class TestEvalsScenarioParser(unittest.TestCase):
         self.assertIsNone(e.text_contains)
         self.assertIsNone(e.eval)
 
+    def _load_capturing_warnings(self, yaml_text: str) -> tuple[EvalScriptScenario, list[str]]:
+        """Parse ``yaml_text``, collecting the warnings the parser logs."""
+        warnings: list[str] = []
+        handler = logger.add(lambda msg: warnings.append(msg.record["message"]), level="WARNING")
+        try:
+            return _script(_write(yaml_text)), warnings
+        finally:
+            logger.remove(handler)
+
     def test_eval_on_non_bot_event_warns(self):
-        """eval: on user-side events should produce a parser warning
-        (the user transcript is deterministic, so judging it adds cost without
-        signal). We can't easily assert on loguru output, but the parse
-        should succeed and the field should be preserved."""
-        s = _script(
-            _write(
-                """
-                name: misused_eval
-                turns:
-                  - user: "hi"
-                    expect:
-                      - event: user_stopped_speaking
-                        eval: "is a greeting"
-                """
-            )
+        """eval: on user-side events produces a parser warning (the user
+        transcript is deterministic, so judging it adds cost without signal),
+        but the parse succeeds and the field is preserved."""
+        s, warnings = self._load_capturing_warnings(
+            """
+            name: misused_eval
+            turns:
+              - user: "hi"
+                expect:
+                  - event: user_stopped_speaking
+                    eval: "is a greeting"
+            """
         )
         self.assertEqual(s.turns[0].expect[0].eval, "is a greeting")
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("'eval:' on event 'user_stopped_speaking'", warnings[0])
+
+    def test_eval_on_function_call_is_accepted(self):
+        """eval: on a function call judges the matched calls, so it is not a misuse."""
+        s, warnings = self._load_capturing_warnings(
+            """
+            name: judged_call
+            turns:
+              - user: "suggest a session"
+                expect:
+                  - event: function_call
+                    calls: [{name: submit_session_suggestion}]
+                    eval: "the suggestion is about tracing"
+            """
+        )
+        exp = s.turns[0].expect[0]
+        self.assertEqual(exp.event, "function_call")
+        self.assertEqual(exp.calls, [EvalFunctionCall(name="submit_session_suggestion")])
+        self.assertEqual(exp.eval, "the suggestion is about tracing")
+        self.assertEqual(warnings, [])
+
+    def test_eval_on_a_stopped_call_is_rejected(self):
+        """A stopped call carries no arguments, so there is nothing for a judge to see."""
+        with self.assertRaises(ValueError) as ctx:
+            _script(
+                _write(
+                    """
+                    name: judged_stop
+                    turns:
+                      - user: "suggest a session"
+                        expect:
+                          - event: function_call_stopped
+                            calls: [{name: submit_session_suggestion}]
+                            eval: "the suggestion is about tracing"
+                    """
+                )
+            )
+        self.assertIn("'function_call_stopped'", str(ctx.exception))
 
     def test_turn_dataclass_construction(self):
         """Direct construction (used by tests / programmatic eval generation)."""
@@ -926,5 +1000,54 @@ class TestTurnAudioFile(unittest.TestCase):
         self.assertIn("turn(s) [1]", str(cm.exception))
 
 
+class TestDeprecatedTriggerDisconnect(unittest.TestCase):
+    def test_the_field_is_deprecated_and_still_read(self):
+        path = _write("name: t\ntrigger_disconnect: true\nturns: [{user: hi}]\n")
+        with self.assertWarns(DeprecationWarning) as cm:
+            scenario = _script(path)
+        self.assertTrue(scenario.trigger_disconnect)
+        self.assertIn("`trigger_disconnect:`", str(cm.warning))
+
+    def test_a_scenario_without_it_does_not_warn(self):
+        path = _write("name: t\nturns: [{user: hi}]\n")
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            scenario = _script(path)
+        self.assertFalse(scenario.trigger_disconnect)
+        self.assertEqual([w for w in caught if "trigger_disconnect" in str(w.message)], [])
+
+
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestCheckFrom(unittest.TestCase):
+    """The ``check_from:`` key on an expectation."""
+
+    def _turns(self, expectation: str):
+        return (
+            "name: g\nscenarios:\n  - name: a\n    turns:\n      - user: hi\n"
+            f"        expect:\n          - {expectation}\n"
+        )
+
+    def test_defaults_to_previous(self):
+        scenario = EvalScenarioFile.load(_write(self._turns("{event: response}"))).scenarios[0]
+        self.assertEqual(scenario.turns[0].expect[0].check_from, "previous")
+
+    def test_turn_start_is_accepted(self):
+        scenario = EvalScenarioFile.load(
+            _write(self._turns("{event: response, check_from: turn_start}"))
+        ).scenarios[0]
+        self.assertEqual(scenario.turns[0].expect[0].check_from, "turn_start")
+
+    def test_other_values_are_rejected(self):
+        with self.assertRaises(ValueError) as cm:
+            EvalScenarioFile.load(_write(self._turns("{event: response, check_from: later}")))
+        self.assertIn("'check_from:' must be one of previous, turn_start", str(cm.exception))
+
+    def test_not_combined_with_absent(self):
+        with self.assertRaises(ValueError) as cm:
+            EvalScenarioFile.load(
+                _write(self._turns("{event: response, absent: true, check_from: turn_start}"))
+            )
+        self.assertIn("cannot be combined with 'check_from'", str(cm.exception))

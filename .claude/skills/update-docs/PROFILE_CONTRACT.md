@@ -53,6 +53,10 @@ step with nothing to apply, so write all of them.
 | **Guide directories** | Doc directories holding prose that cites this repo's API. | Step 7 |
 | **New pages** | Page template, destination path, and *every* registration step — navigation plus any index or support-matrix page. | Step 8 |
 
+A profile may also have a **Checks** section: commands that compare the docs
+with the source and print each mismatch. Step 8 and `REVIEW.md` run them. Leave
+it out when the docs repo has no check for this repo's pages.
+
 ## Writing one
 
 Start from the profile of whichever repo is closest in shape, then work through

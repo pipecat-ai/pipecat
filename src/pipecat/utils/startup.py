@@ -24,12 +24,13 @@ across hook invocations.
 
 import importlib.util
 import os
-import warnings
 from pathlib import Path
 from types import ModuleType
 from typing import Any
 
 from loguru import logger
+
+from pipecat.utils.deprecation import warn_deprecated
 
 _module_cache: dict[str, ModuleType] = {}
 
@@ -86,11 +87,10 @@ async def run_setup_hook(
                 logger.debug(f"{target} running {function_name} from {path}")
                 await getattr(module, function_name)(target)
             elif deprecated_function_name and hasattr(module, deprecated_function_name):
-                warnings.warn(
-                    f"setup file {path} defines '{deprecated_function_name}'; "
-                    f"rename it to '{function_name}'. The old name will be removed "
-                    f"in 2.0.0.",
-                    DeprecationWarning,
+                warn_deprecated(
+                    f"`{deprecated_function_name}` is deprecated since 1.3.0 and will be "
+                    f"removed in 2.0.0. Use `{function_name}` instead. Rename it in setup "
+                    f"file {path}.",
                     stacklevel=2,
                 )
                 logger.debug(f"{target} running {deprecated_function_name} from {path}")

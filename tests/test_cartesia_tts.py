@@ -9,7 +9,7 @@ import unittest
 from pipecat.frames.frames import (
     AggregatedTextFrame,
     AggregatedTextProgressFrame,
-    AggregationType,
+    TextType,
     TTSTextFrame,
 )
 from pipecat.services.cartesia.tts import CartesiaTTSService
@@ -201,7 +201,7 @@ class TestCartesiaUpdateSettingsFinalizesOldContext(unittest.IsolatedAsyncioTest
         service._aggregated_frame_sequencer = seq
         service._turn_context_id = old_ctx
         for token in ("Hi", " there"):
-            frame = AggregatedTextFrame(token, AggregationType.SENTENCE, raw_text=token)
+            frame = AggregatedTextFrame(token, TextType.SENTENCE, raw_text=token)
             await seq.register_spoken(frame, old_ctx, token, append_to_context=True)
         assert seq._slots == []  # nothing promoted — sentence has no boundary yet
 

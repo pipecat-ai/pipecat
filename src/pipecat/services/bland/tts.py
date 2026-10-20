@@ -40,7 +40,7 @@ _SAMPLE_RATES = (8000, 16000, 24000, 44100, 48000)
 # generates natively, so it is the shortest path to audio.
 _DEFAULT_SAMPLE_RATE = 48000
 
-_DEFAULT_VOICE_ID = "2f29fdbb-c55e-4add-9c7c-93437ebf379d"
+_DEFAULT_VOICE_ID = "29158307-9893-4149-8a75-bc9ce313d64e"
 _READY_TIMEOUT_SECONDS = 10.0
 _CLOSE_TIMEOUT_SECONDS = 5.0
 
@@ -52,10 +52,15 @@ class BlandTTSSettings(TTSSettings):
     Parameters:
         expressiveness: 0.0-1.0. Higher values produce more varied intonation.
         stability: 0.0-1.0. Higher values produce more consistent delivery.
+        auto_formatting: Rewrite numbers into the form the voice reads best
+            before synthesis. Phone numbers and SSNs, spelled out ("seven three
+            two...") or written as bare digits ("7327412065"), are read digit
+            by digit in groups. Off unless set.
     """
 
     expressiveness: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     stability: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    auto_formatting: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 def _default_settings(settings: BlandTTSSettings | None) -> BlandTTSSettings:
@@ -65,6 +70,7 @@ def _default_settings(settings: BlandTTSSettings | None) -> BlandTTSSettings:
         language=None,
         expressiveness=None,
         stability=None,
+        auto_formatting=None,
     )
     if settings is not None:
         defaults.apply_update(settings)
@@ -105,6 +111,15 @@ def _controls(settings: BlandTTSSettings) -> dict[str, float]:
     return controls
 
 
+def _apply_request_options(request: dict[str, Any], settings: BlandTTSSettings) -> None:
+    """Add the settings Bland reads from a session's ``init`` or a ``/v2/tts`` body."""
+    if controls := _controls(settings):
+        request["controls"] = controls
+    auto_formatting = assert_given(settings.auto_formatting)
+    if auto_formatting is not None:
+        request["auto_formatting"] = auto_formatting
+
+
 class BlandTTSService(WebsocketTTSService):
     """Bland realtime WebSocket text-to-speech service.
 
@@ -132,7 +147,7 @@ class BlandTTSService(WebsocketTTSService):
         tts = BlandTTSService(
             api_key=os.getenv("BLAND_API_KEY"),
             settings=BlandTTSService.Settings(
-                voice="2f29fdbb-c55e-4add-9c7c-93437ebf379d"
+                voice="29158307-9893-4149-8a75-bc9ce313d64e"
             ),
         )
     """
@@ -173,6 +188,7 @@ class BlandTTSService(WebsocketTTSService):
             sample_rate=sample_rate,
             push_start_frame=True,
             push_stop_frames=False,
+            pause_frame_processing=True,
             text_aggregation_mode=text_aggregation_mode,
             # Bland appends each `speak.text` verbatim, so consecutive sentences
             # would otherwise glue together. Applies in sentence mode only; when
@@ -185,24 +201,6 @@ class BlandTTSService(WebsocketTTSService):
         self._api_key = api_key
         self._url = url
         self._receive_task = None
-        # Binary frames carry no ID, so audio belongs to the turn Bland announced
-        # with `utterance_start`.
-        self._utterance_context_id: str | None = None
-        # The turn whose deltas have reached the current socket, and the turn that
-        # can no longer be completed. One slot each: the protocol carries one turn
-        # at a time, so a new context supersedes.
-        self._sent_context_id: str | None = None
-        self._abandoned_context_id: str | None = None
-
-    def _abandon_turn(self, context_id: str) -> None:
-        """Stop feeding a turn that cannot finish, without ending the session."""
-        self._abandoned_context_id = context_id
-        if self._utterance_context_id == context_id:
-            self._utterance_context_id = None
-        # No longer in flight, so a socket closing later must not report it a
-        # second time as a turn it lost.
-        if self._sent_context_id == context_id:
-            self._sent_context_id = None
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -257,8 +255,7 @@ class BlandTTSService(WebsocketTTSService):
                 "voice": self._settings.voice,
                 "audio": {"encoding": "pcm_s16le", "sample_rate": self._bland_sample_rate},
             }
-            if controls := _controls(self._settings):
-                init["controls"] = controls
+            _apply_request_options(init, self._settings)
             await websocket.send(json.dumps(init))
 
             # `ready` confirms wallet and concurrency admission, so a
@@ -282,7 +279,6 @@ class BlandTTSService(WebsocketTTSService):
 
             logger.debug(f"{self}: session ready (session_id: {message.get('session_id')})")
             self._websocket = websocket
-            self._utterance_context_id = None
             await self._call_event_handler("on_connected")
         except BaseException as e:
             if websocket is not None:
@@ -297,11 +293,11 @@ class BlandTTSService(WebsocketTTSService):
             await self._call_event_handler("on_connection_error", f"{e}")
 
     async def _close_socket(self):
-        """Settle and close the socket, leaving pipeline state untouched.
+        """Settle and close the socket.
 
-        Split from ``_disconnect_websocket`` so a mid-turn reconnect can replace
-        the transport without destroying the audio context of the turn it is about
-        to resume.
+        Split from ``_disconnect_websocket`` so ``run_tts`` can replace a socket
+        Bland closed while idle without stopping the metrics of the turn it is
+        about to send.
         """
         websocket = self._websocket
         try:
@@ -333,14 +329,11 @@ class BlandTTSService(WebsocketTTSService):
                     await websocket.close()
                 except Exception as e:
                     logger.debug(f"{self} failed to close Bland websocket: {e}")
-            self._utterance_context_id = None
-            self._sent_context_id = None
             self._websocket = None
 
     async def _disconnect_websocket(self):
         await self.stop_all_metrics()
         await self._close_socket()
-        await self.remove_active_audio_context()
         await self._call_event_handler("on_disconnected")
 
     def _get_websocket(self):
@@ -359,9 +352,10 @@ class BlandTTSService(WebsocketTTSService):
         """
         changed = await super()._update_settings(delta)
 
-        # `init` fixes the voice and controls for the life of a session. Nothing
-        # else in TTSSettings reaches Bland, so nothing else earns a reconnect.
-        if changed.keys() & {"voice", "expressiveness", "stability"}:
+        # `init` fixes the voice, controls and formatting for the life of a
+        # session. Nothing else in TTSSettings reaches Bland, so nothing else
+        # earns a reconnect.
+        if changed.keys() & {"voice", "expressiveness", "stability", "auto_formatting"}:
             await self._disconnect()
             await self._connect()
 
@@ -375,11 +369,6 @@ class BlandTTSService(WebsocketTTSService):
                 await self._websocket.send(json.dumps({"type": "cancel", "context_id": context_id}))
             except Exception as e:
                 logger.error(f"{self} error sending cancel message: {e}")
-        # A cancelled turn is over locally straight away, without waiting for the
-        # server's `utterance_end`: a socket dying before that arrives would
-        # otherwise report the turn as one the connection lost mid-flight.
-        if context_id:
-            self._abandon_turn(context_id)
         await super().on_audio_context_interrupted(context_id)
 
     async def flush_audio(self, context_id: str | None = None):
@@ -396,29 +385,16 @@ class BlandTTSService(WebsocketTTSService):
         except Exception as e:
             logger.error(f"{self} error sending end_of_turn message: {e}")
 
-    async def _receive_messages(self):
-        try:
-            await self._read_until_closed()
-        finally:
-            # The loop only exits when the socket is gone. A turn still in flight
-            # dies with it: turn state lives in the session, so the reconnect the
-            # base class is about to perform knows nothing about it. Feeding the
-            # rest of the turn into the new session would speak the tail of a
-            # sentence as if it were the whole thing.
-            lost = self._sent_context_id
-            if lost is not None:
-                self._abandon_turn(lost)
-                await self.push_error(
-                    error_msg=f"{self} lost the connection mid-turn; turn {lost} was dropped"
-                )
-                if self.audio_context_available(lost):
-                    await self.append_to_audio_context(lost, TTSStoppedFrame(context_id=lost))
-                    await self.remove_audio_context(lost)
+    async def _close_turn(self, context_id: str | None):
+        """Stop and close a turn's audio context, if it is still open."""
+        if context_id and self.audio_context_available(context_id):
+            await self.append_to_audio_context(context_id, TTSStoppedFrame(context_id=context_id))
+            await self.remove_audio_context(context_id)
 
-    async def _read_until_closed(self):
+    async def _receive_messages(self):
         async for message in self._get_websocket():
             if isinstance(message, bytes):
-                context_id = self._utterance_context_id or self.get_active_audio_context_id()
+                context_id = self.get_active_audio_context_id()
                 await self.stop_ttfb_metrics()
                 await self.append_to_audio_context(
                     context_id,
@@ -436,45 +412,16 @@ class BlandTTSService(WebsocketTTSService):
             context_id = msg.get("context_id")
 
             if msg_type == "utterance_start":
-                self._utterance_context_id = context_id
+                logger.trace(f"{self}: turn {context_id} started")
             elif msg_type == "utterance_end":
-                self._utterance_context_id = None
-                # Terminated, so it is no longer a turn a dying socket could lose.
-                if self._sent_context_id == context_id:
-                    self._sent_context_id = None
                 reason = msg.get("reason")
-                if reason == "complete":
-                    await self.append_to_audio_context(
-                        context_id, TTSStoppedFrame(context_id=context_id)
-                    )
-                    await self.remove_audio_context(context_id)
-                elif reason == "failed":
-                    # The server sends the detail as an `error` frame just before
-                    # this terminal, and that branch abandons the turn — so an
-                    # already-abandoned context has been reported and does not need
-                    # a second, vaguer frame. Report only if nothing did.
-                    if self._abandoned_context_id != context_id:
-                        await self.push_error(error_msg=f"{self} turn {context_id} failed")
-                    self._abandon_turn(context_id)
-                    await self.append_to_audio_context(
-                        context_id, TTSStoppedFrame(context_id=context_id)
-                    )
-                    await self.remove_audio_context(context_id)
+                if reason == "failed":
+                    # The failure's detail is reported from the `error` message
+                    # that precedes it.
+                    logger.warning(f"{self}: turn {context_id} failed")
                 else:
                     logger.trace(f"{self}: turn {context_id} ended as {reason}")
-                    # Preempted or cancelled: over for good either way. Deltas
-                    # still arriving under that context_id have the server admit
-                    # and bill a fresh turn, speaking a sentence tail nobody
-                    # asked for.
-                    self._abandon_turn(context_id)
-                    # An explicit Pipecat interruption normally removed this
-                    # context already, but a server-side preemption can arrive
-                    # first, so the guard closes whichever side still owns it.
-                    if context_id and self.audio_context_available(context_id):
-                        await self.append_to_audio_context(
-                            context_id, TTSStoppedFrame(context_id=context_id)
-                        )
-                        await self.remove_audio_context(context_id)
+                await self._close_turn(context_id)
             elif msg_type == "error":
                 code = msg.get("code")
                 if code == "idle_timeout":
@@ -486,20 +433,9 @@ class BlandTTSService(WebsocketTTSService):
                     await self.push_error(
                         error_msg=f"{self} error {code}: {msg.get('message', msg)}"
                     )
-                # Every error carrying a context_id ends that turn, in one of two
-                # shapes. An admission refusal — turn admission happens on the
-                # first `speak` — never creates the turn, so no `utterance_end`
-                # arrives to release Pipecat's pre-created audio context; that is
-                # released here. A mid-turn rejection such as `context_overflow`
-                # is followed by `utterance_end(failed)`. Abandoning covers both:
-                # either way the remaining deltas must stop.
-                if context_id:
-                    self._abandon_turn(context_id)
-                    if self.audio_context_available(context_id):
-                        await self.append_to_audio_context(
-                            context_id, TTSStoppedFrame(context_id=context_id)
-                        )
-                        await self.remove_audio_context(context_id)
+                # An error carrying a context_id ends that turn. A refused turn
+                # never starts, so no `utterance_end` arrives to close it.
+                await self._close_turn(context_id)
             elif msg_type == "done":
                 logger.debug(f"{self}: session settled (session_id: {msg.get('session_id')})")
             else:
@@ -516,25 +452,12 @@ class BlandTTSService(WebsocketTTSService):
         Yields:
             Frame: Nothing directly; audio arrives on the receive task.
         """
-        if context_id == self._abandoned_context_id:
-            # This turn can no longer be completed and has already been reported.
-            # Its remaining deltas would only ask again, once per token.
-            yield None
-            return
-
         try:
             if not self._websocket or self._websocket.state is State.CLOSED:
                 # Bland ends a session after 60s without a client message, which a
-                # conversational gap reaches easily. Cycle the socket rather than
-                # calling `_disconnect()`: that removes the active audio context —
-                # the context of the very turn this call is about to send. The
-                # receive task has finished but is still set after a server close,
-                # so it has to be cleared or `_connect()` will not restart it.
-                #
-                # A turn the socket died under is abandoned by the receive loop
-                # rather than here: the base class reconnects the moment that loop
-                # exits, so by the time the next delta arrives the socket is healthy
-                # again and this branch cannot see the failure.
+                # conversational gap reaches easily. The receive task has finished
+                # but is still set after a server close, so it has to be cleared or
+                # `_connect()` will not restart it.
                 if self._receive_task:
                     await self.cancel_task(self._receive_task)
                     self._receive_task = None
@@ -544,8 +467,6 @@ class BlandTTSService(WebsocketTTSService):
             await self._get_websocket().send(
                 json.dumps({"type": "speak", "context_id": context_id, "text": text})
             )
-            self._sent_context_id = context_id
-
             await self.start_tts_usage_metrics(text)
 
             # The audio frames will be handled in _receive_messages
@@ -674,8 +595,7 @@ class BlandHttpTTSService(TTSService):
                 "container": "raw",
             },
         }
-        if controls := _controls(self._settings):
-            payload["controls"] = controls
+        _apply_request_options(payload, self._settings)
 
         headers = {
             "Authorization": f"Bearer {self._api_key}",

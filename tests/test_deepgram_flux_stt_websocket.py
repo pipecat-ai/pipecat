@@ -33,7 +33,7 @@ async def test_healthy_sends_preserve_audio_and_control_messages(timeout):
 
 
 @pytest.mark.asyncio
-async def test_stalled_audio_send_reconnects_and_retries():
+async def test_stalled_audio_send_closes_connection_without_waiting_for_reconnect():
     service = DeepgramFluxSTTService(api_key="test", ws_send_timeout=0.01)
     service._sample_rate = 8000
     stalled = AsyncMock(state=State.OPEN)
@@ -47,27 +47,26 @@ async def test_stalled_audio_send_reconnects_and_retries():
     stalled.send.side_effect = stall
     stalled.transport = Mock()
     stalled.transport.abort.side_effect = abort
-    healthy = AsyncMock(state=State.OPEN)
     service._websocket = stalled
-
-    async def connect():
-        service._websocket = healthy
-
-    service._connect_websocket = AsyncMock(side_effect=connect)
+    service._try_reconnect = AsyncMock()
     audio = b"\0" * 320
 
     async def transcribe():
         return [frame async for frame in service.run_stt(audio)]
 
-    assert await asyncio.wait_for(transcribe(), timeout=1) == [None]
-    service._connect_websocket.assert_awaited_once()
+    frames = await asyncio.wait_for(transcribe(), timeout=1)
+    assert len(frames) == 1
+    assert isinstance(frames[0], ErrorFrame)
+    assert "websocket send timed out" in frames[0].error
+    service._try_reconnect.assert_not_awaited()
     stalled.send.assert_awaited_once_with(audio)
     assert stalled.state is State.CLOSED
-    healthy.send.assert_awaited_once_with(audio)
+    stalled.transport.abort.assert_called_once()
+    stalled.wait_closed.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_stalled_retry_yields_error_instead_of_hanging():
+async def test_stalled_retry_raises_timeout_instead_of_hanging():
     service = DeepgramFluxSTTService(api_key="test", ws_send_timeout=0.01)
     service._sample_rate = 8000
     first = AsyncMock(state=State.OPEN)
@@ -86,13 +85,10 @@ async def test_stalled_retry_yields_error_instead_of_hanging():
     service._websocket = first
     service._try_reconnect = AsyncMock(side_effect=reconnect)
 
-    async def transcribe():
-        return [frame async for frame in service.run_stt(b"\0" * 320)]
-
-    frames = await asyncio.wait_for(transcribe(), timeout=1)
-    assert len(frames) == 1
-    assert isinstance(frames[0], ErrorFrame)
-    assert "websocket send timed out" in frames[0].error
+    with pytest.raises(TimeoutError, match="websocket send timed out"):
+        await asyncio.wait_for(
+            service.send_with_retry(b"\0" * 320, service._report_error), timeout=1
+        )
     retry.transport.abort.assert_called_once()
     retry.wait_closed.assert_awaited_once()
     service._try_reconnect.assert_awaited_once()

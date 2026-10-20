@@ -21,6 +21,7 @@ from pipecat.runner.utils import create_transport
 from pipecat.services.sarvam.stt import SarvamRealtimeSTTService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.livekit.transport import LiveKitParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 from pipecat.workers.runner import WorkerRunner
 
@@ -48,6 +49,9 @@ transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
     ),
+    "livekit": lambda: LiveKitParams(
+        audio_in_enabled=True,
+    ),
     "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
     ),
@@ -63,7 +67,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     `stream_type="fast"` emits interim transcripts as the utterance develops,
     so the logger prints partial text before each final. `endpointing="vad"`
     (the default) has Sarvam decide the utterance boundaries.
-    `language_code="auto"` detects the language per utterance instead of
+    `language=None` detects the language per utterance instead of
     pinning one.
 
     The `VADProcessor` is what lets the service time transcript latency: TTFB
@@ -75,7 +79,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     stt = SarvamRealtimeSTTService(
         api_key=os.environ["SARVAM_API_KEY"],
         settings=SarvamRealtimeSTTService.Settings(
-            language_code="auto",
+            language=None,
             stream_type="fast",
         ),
     )

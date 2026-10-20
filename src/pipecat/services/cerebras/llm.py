@@ -30,6 +30,7 @@ class CerebrasLLMService(OpenAILLMService):
 
     Settings = CerebrasLLMSettings
     _settings: Settings
+    _requires_api_key = True
 
     def __init__(
         self,
