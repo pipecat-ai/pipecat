@@ -36,11 +36,11 @@ The three frontend models on the recorded turns in `frontend_replay/`, five runs
 uv run python evals/llm-with-backend/tuning/frontend_replay/replay.py --frontend <openai|google|anthropic> --samples 5
 ```
 
-| frontend | wrong decisions, 75 turns × 5 | where |
-| --- | --- | --- |
-| `openai` (gpt-4.1) | 6 | two stops recorded from the Claude bot, whose acknowledgement precedes the `delegate` call, a shape gpt-4.1 does not produce itself: 2/5 each |
-| `google` (gemini-3.6-flash) | 2 | one accepted offer recorded from the Claude bot: 3/5 |
-| `anthropic` (claude-sonnet-4-6) | 1 | one accepted offer recorded from the Gemini bot: 4/5 |
+| frontend                        | wrong decisions, 75 turns × 5 | where                                                                                                                                         |
+| ------------------------------- | ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `openai` (gpt-4.1)              | 6                             | two stops recorded from the Claude bot, whose acknowledgement precedes the `delegate` call, a shape gpt-4.1 does not produce itself: 2/5 each |
+| `google` (gemini-3.6-flash)     | 2                             | one accepted offer recorded from the Claude bot: 3/5                                                                                          |
+| `anthropic` (claude-sonnet-4-6) | 1                             | one accepted offer recorded from the Gemini bot: 4/5                                                                                          |
 
 Before this pairing instruction, the same replay had gpt-4.1 at 52 wrong decisions, missing every stop and correction in the scenarios (0/5 or 1/5 on each), Claude at 8 and Gemini at 5.
 
@@ -53,59 +53,59 @@ uv run python -m pipecat.evals suite evals/llm-with-backend/manifest.yaml -s tex
 uv run python evals/llm-with-backend/tuning/results_table.py <runs-dir>/<run>/results.jsonl
 ```
 
-| scenario | anthropic-frontend | google-frontend | openai-responses-frontend |
-| --- | --- | --- | --- |
-| `accepted_offer/text` | 5/5 | 5/5 | 5/5 |
-| `aside_while_waiting/text` | 5/5 | 5/5 | 4/5 |
-| `cancel_and_replace/text` | 5/5 | 5/5 | 5/5 |
-| `cancel_delegation/text` | 5/5 | 5/5 | 5/5 |
-| `concurrent_delegations/text` | 1/5 | 0/5 | 1/5 |
-| `delegate_ack/text` | 5/5 | 5/5 | 4/5 |
-| `delegate_with_aside/text` | 5/5 | 5/5 | 5/5 |
-| `frontend_only/text` | 5/5 | 5/5 | 5/5 |
-| `implicit_cancel/text` | 2/5 | 3/5 | 4/5 |
-| `partial_cancel/text` | 5/5 | 5/5 | 3/5 |
-| `progress_inquiry/text` | 5/5 | 5/5 | 4/5 |
-| `superseding_delegation/text` | 5/5 | 5/5 | 5/5 |
-| **total** | **53/60** | **53/60** | **50/60** |
+| scenario                      | anthropic-frontend | google-frontend | openai-responses-frontend |
+| ----------------------------- | ------------------ | --------------- | ------------------------- |
+| `accepted_offer/text`         | 5/5                | 5/5             | 5/5                       |
+| `aside_while_waiting/text`    | 5/5                | 5/5             | 4/5                       |
+| `cancel_and_replace/text`     | 5/5                | 5/5             | 5/5                       |
+| `cancel_delegation/text`      | 5/5                | 5/5             | 5/5                       |
+| `concurrent_delegations/text` | 1/5                | 0/5             | 1/5                       |
+| `delegate_ack/text`           | 5/5                | 5/5             | 4/5                       |
+| `delegate_with_aside/text`    | 5/5                | 5/5             | 5/5                       |
+| `frontend_only/text`          | 5/5                | 5/5             | 5/5                       |
+| `implicit_cancel/text`        | 2/5                | 3/5             | 4/5                       |
+| `partial_cancel/text`         | 5/5                | 5/5             | 3/5                       |
+| `progress_inquiry/text`       | 5/5                | 5/5             | 4/5                       |
+| `superseding_delegation/text` | 5/5                | 5/5             | 5/5                       |
+| **total**                     | **53/60**          | **53/60**       | **50/60**                 |
 
 The same sweep, run at the same time on the pairing instruction before this one, for comparison:
 
-| scenario | anthropic-frontend | google-frontend | openai-responses-frontend |
-| --- | --- | --- | --- |
-| `accepted_offer/text` | 5/5 | 5/5 | 5/5 |
-| `aside_while_waiting/text` | 5/5 | 5/5 | 3/5 |
-| `cancel_and_replace/text` | 5/5 | 5/5 | 5/5 |
-| `cancel_delegation/text` | 2/5 | 5/5 | 2/5 |
-| `concurrent_delegations/text` | 0/5 | 0/5 | 0/5 |
-| `delegate_ack/text` | 5/5 | 5/5 | 5/5 |
-| `delegate_with_aside/text` | 5/5 | 5/5 | 5/5 |
-| `frontend_only/text` | 5/5 | 5/5 | 5/5 |
-| `implicit_cancel/text` | 2/5 | 4/5 | 1/5 |
-| `partial_cancel/text` | 5/5 | 5/5 | 0/5 |
-| `progress_inquiry/text` | 5/5 | 5/5 | 4/5 |
-| `superseding_delegation/text` | 5/5 | 5/5 | 1/5 |
-| **total** | **49/60** | **54/60** | **36/60** |
+| scenario                      | anthropic-frontend | google-frontend | openai-responses-frontend |
+| ----------------------------- | ------------------ | --------------- | ------------------------- |
+| `accepted_offer/text`         | 5/5                | 5/5             | 5/5                       |
+| `aside_while_waiting/text`    | 5/5                | 5/5             | 3/5                       |
+| `cancel_and_replace/text`     | 5/5                | 5/5             | 5/5                       |
+| `cancel_delegation/text`      | 2/5                | 5/5             | 2/5                       |
+| `concurrent_delegations/text` | 0/5                | 0/5             | 0/5                       |
+| `delegate_ack/text`           | 5/5                | 5/5             | 5/5                       |
+| `delegate_with_aside/text`    | 5/5                | 5/5             | 5/5                       |
+| `frontend_only/text`          | 5/5                | 5/5             | 5/5                       |
+| `implicit_cancel/text`        | 2/5                | 4/5             | 1/5                       |
+| `partial_cancel/text`         | 5/5                | 5/5             | 0/5                       |
+| `progress_inquiry/text`       | 5/5                | 5/5             | 4/5                       |
+| `superseding_delegation/text` | 5/5                | 5/5             | 1/5                       |
+| **total**                     | **49/60**          | **54/60**       | **36/60**                 |
 
 ### With predictive delegation
 
 The same twelve scenarios with `predictive_delegation=PredictiveDelegation(JevClassifier(...))` added to each bot's `LLMWithBackend`, five runs each, run after the sweeps above:
 
-| scenario | anthropic-frontend | google-frontend | openai-responses-frontend |
-| --- | --- | --- | --- |
-| `accepted_offer/text` | 5/5 | 5/5 | 5/5 |
-| `aside_while_waiting/text` | 5/5 | 5/5 | 5/5 |
-| `cancel_and_replace/text` | 5/5 | 5/5 | 5/5 |
-| `cancel_delegation/text` | 5/5 | 5/5 | 5/5 |
-| `concurrent_delegations/text` | 1/5 | 0/5 | 1/5 |
-| `delegate_ack/text` | 5/5 | 5/5 | 4/5 |
-| `delegate_with_aside/text` | 5/5 | 5/5 | 5/5 |
-| `frontend_only/text` | 5/5 | 5/5 | 5/5 |
-| `implicit_cancel/text` | 5/5 | 4/5 | 4/5 |
-| `partial_cancel/text` | 5/5 | 5/5 | 5/5 |
-| `progress_inquiry/text` | 5/5 | 5/5 | 5/5 |
-| `superseding_delegation/text` | 5/5 | 5/5 | 5/5 |
-| **total** | **56/60** | **54/60** | **54/60** |
+| scenario                      | anthropic-frontend | google-frontend | openai-responses-frontend |
+| ----------------------------- | ------------------ | --------------- | ------------------------- |
+| `accepted_offer/text`         | 5/5                | 5/5             | 5/5                       |
+| `aside_while_waiting/text`    | 5/5                | 5/5             | 5/5                       |
+| `cancel_and_replace/text`     | 5/5                | 5/5             | 5/5                       |
+| `cancel_delegation/text`      | 5/5                | 5/5             | 5/5                       |
+| `concurrent_delegations/text` | 1/5                | 0/5             | 1/5                       |
+| `delegate_ack/text`           | 5/5                | 5/5             | 4/5                       |
+| `delegate_with_aside/text`    | 5/5                | 5/5             | 5/5                       |
+| `frontend_only/text`          | 5/5                | 5/5             | 5/5                       |
+| `implicit_cancel/text`        | 5/5                | 4/5             | 4/5                       |
+| `partial_cancel/text`         | 5/5                | 5/5             | 5/5                       |
+| `progress_inquiry/text`       | 5/5                | 5/5             | 5/5                       |
+| `superseding_delegation/text` | 5/5                | 5/5             | 5/5                       |
+| **total**                     | **56/60**          | **54/60**       | **54/60**                 |
 
 The classifier, live, from the bots' logs: every request and stop scored 0.88 or more and was delegated early; the status question in `progress_inquiry` scored 0.10–0.11 in all 15 runs and small talk 0.11–0.35, none delegated early. The failures are `concurrent_delegations` and the judge hesitating on acknowledgements.
 
@@ -126,40 +126,40 @@ The thirteen audio scenarios on all five bots, one run each, without predictive 
 uv run python -m pipecat.evals suite evals/llm-with-backend/manifest.yaml -s audio
 ```
 
-| scenario | anthropic-frontend | gemini-live-frontend | google-frontend | openai-realtime-frontend | openai-responses-frontend |
-| --- | --- | --- | --- | --- | --- |
-| `accepted_offer/audio` | 1/1 | 1/1 | 1/1 | 1/1 | 1/1 |
-| `aside_while_waiting/audio` | 0/1 | 1/1 | 1/1 | 0/1 | 1/1 |
-| `cancel_and_replace/audio` | 1/1 | 1/1 | 1/1 | 1/1 | 1/1 |
-| `cancel_delegation/audio` | 0/1 | 1/1 | 1/1 | 0/1 | 1/1 |
-| `concurrent_delegations/audio` | 1/1 | 0/1 | 0/1 | 1/1 | 0/1 |
-| `delegate_ack/audio` | 1/1 | 1/1 | 1/1 | 1/1 | 1/1 |
-| `delegate_with_aside/audio` | 1/1 | 1/1 | 1/1 | 1/1 | 0/1 |
-| `frontend_only/audio` | 1/1 | 1/1 | 1/1 | 1/1 | 1/1 |
-| `implicit_cancel/audio` | 0/1 | 1/1 | 1/1 | 1/1 | 0/1 |
-| `partial_cancel/audio` | 1/1 | 0/1 | 1/1 | 1/1 | 1/1 |
-| `progress_inquiry/audio` | 1/1 | 0/1 | 1/1 | 1/1 | 1/1 |
-| `result_during_interruption/audio` | 1/1 | 1/1 | 1/1 | 1/1 | 1/1 |
-| `superseding_delegation/audio` | 1/1 | 1/1 | 1/1 | 1/1 | 1/1 |
-| **total** | **10/13** | **10/13** | **12/13** | **11/13** | **10/13** |
+| scenario                           | anthropic-frontend | gemini-live-frontend | google-frontend | openai-realtime-frontend | openai-responses-frontend |
+| ---------------------------------- | ------------------ | -------------------- | --------------- | ------------------------ | ------------------------- |
+| `accepted_offer/audio`             | 1/1                | 1/1                  | 1/1             | 1/1                      | 1/1                       |
+| `aside_while_waiting/audio`        | 0/1                | 1/1                  | 1/1             | 0/1                      | 1/1                       |
+| `cancel_and_replace/audio`         | 1/1                | 1/1                  | 1/1             | 1/1                      | 1/1                       |
+| `cancel_delegation/audio`          | 0/1                | 1/1                  | 1/1             | 0/1                      | 1/1                       |
+| `concurrent_delegations/audio`     | 1/1                | 0/1                  | 0/1             | 1/1                      | 0/1                       |
+| `delegate_ack/audio`               | 1/1                | 1/1                  | 1/1             | 1/1                      | 1/1                       |
+| `delegate_with_aside/audio`        | 1/1                | 1/1                  | 1/1             | 1/1                      | 0/1                       |
+| `frontend_only/audio`              | 1/1                | 1/1                  | 1/1             | 1/1                      | 1/1                       |
+| `implicit_cancel/audio`            | 0/1                | 1/1                  | 1/1             | 1/1                      | 0/1                       |
+| `partial_cancel/audio`             | 1/1                | 0/1                  | 1/1             | 1/1                      | 1/1                       |
+| `progress_inquiry/audio`           | 1/1                | 0/1                  | 1/1             | 1/1                      | 1/1                       |
+| `result_during_interruption/audio` | 1/1                | 1/1                  | 1/1             | 1/1                      | 1/1                       |
+| `superseding_delegation/audio`     | 1/1                | 1/1                  | 1/1             | 1/1                      | 1/1                       |
+| **total**                          | **10/13**          | **10/13**            | **12/13**       | **11/13**                | **10/13**                 |
 
 The same pass, run at the same time on the pairing instruction before this one:
 
-| scenario | anthropic-frontend | gemini-live-frontend | google-frontend | openai-realtime-frontend | openai-responses-frontend |
-| --- | --- | --- | --- | --- | --- |
-| `accepted_offer/audio` | 1/1 | 1/1 | 1/1 | 1/1 | 1/1 |
-| `aside_while_waiting/audio` | 0/1 | 1/1 | 0/1 | 1/1 | 1/1 |
-| `cancel_and_replace/audio` | 0/1 | 1/1 | 1/1 | 0/1 | 1/1 |
-| `cancel_delegation/audio` | 0/1 | 0/1 | 1/1 | 0/1 | 0/1 |
-| `concurrent_delegations/audio` | 1/1 | 1/1 | 1/1 | 0/1 | 0/1 |
-| `delegate_ack/audio` | 1/1 | 1/1 | 1/1 | 1/1 | 1/1 |
-| `delegate_with_aside/audio` | 0/1 | 1/1 | 1/1 | 1/1 | 1/1 |
-| `frontend_only/audio` | 1/1 | 1/1 | 1/1 | 1/1 | 1/1 |
-| `implicit_cancel/audio` | 0/1 | 1/1 | 1/1 | 1/1 | 0/1 |
-| `partial_cancel/audio` | 1/1 | 1/1 | 1/1 | 1/1 | 0/1 |
-| `progress_inquiry/audio` | 0/1 | 0/1 | 1/1 | 1/1 | 1/1 |
-| `result_during_interruption/audio` | 1/1 | 1/1 | 1/1 | 1/1 | 1/1 |
-| `superseding_delegation/audio` | 1/1 | 1/1 | 1/1 | 1/1 | 0/1 |
-| **total** | **7/13** | **11/13** | **12/13** | **10/13** | **8/13** |
+| scenario                           | anthropic-frontend | gemini-live-frontend | google-frontend | openai-realtime-frontend | openai-responses-frontend |
+| ---------------------------------- | ------------------ | -------------------- | --------------- | ------------------------ | ------------------------- |
+| `accepted_offer/audio`             | 1/1                | 1/1                  | 1/1             | 1/1                      | 1/1                       |
+| `aside_while_waiting/audio`        | 0/1                | 1/1                  | 0/1             | 1/1                      | 1/1                       |
+| `cancel_and_replace/audio`         | 0/1                | 1/1                  | 1/1             | 0/1                      | 1/1                       |
+| `cancel_delegation/audio`          | 0/1                | 0/1                  | 1/1             | 0/1                      | 0/1                       |
+| `concurrent_delegations/audio`     | 1/1                | 1/1                  | 1/1             | 0/1                      | 0/1                       |
+| `delegate_ack/audio`               | 1/1                | 1/1                  | 1/1             | 1/1                      | 1/1                       |
+| `delegate_with_aside/audio`        | 0/1                | 1/1                  | 1/1             | 1/1                      | 1/1                       |
+| `frontend_only/audio`              | 1/1                | 1/1                  | 1/1             | 1/1                      | 1/1                       |
+| `implicit_cancel/audio`            | 0/1                | 1/1                  | 1/1             | 1/1                      | 0/1                       |
+| `partial_cancel/audio`             | 1/1                | 1/1                  | 1/1             | 1/1                      | 0/1                       |
+| `progress_inquiry/audio`           | 0/1                | 0/1                  | 1/1             | 1/1                      | 1/1                       |
+| `result_during_interruption/audio` | 1/1                | 1/1                  | 1/1             | 1/1                      | 1/1                       |
+| `superseding_delegation/audio`     | 1/1                | 1/1                  | 1/1             | 1/1                      | 0/1                       |
+| **total**                          | **7/13**           | **11/13**            | **12/13**       | **10/13**                | **8/13**                  |
 
 One run per scenario is noisy. Across the five example bots, 53/65 against 48/65 before. The scenarios' stops and corrections with no `delegate` call: gpt-4.1 0 of 4 (4 of 4 before), Gemini Live 1 (`partial_cancel`; 1 before, `cancel_delegation`), the others 0. The rest are the judge answering "continue" to a correct acknowledgement, the Claude and OpenAI Realtime frontends adding a line after a stop's acknowledgement, which the absence check catches, and `aside_while_waiting` on Claude, where the backend's fix outran the scenario's window. `delegate_with_aside/audio` on the gpt-4.1 bot, five more runs a side: the `delegate` call was made in 5 of 5 (4 of 5 before, the miss the fix promised with no call). The scenario itself passed 1 of 5 and 2 of 5: in audio the user's sentence splits into two turns, the second cutting the joke off mid-sentence, and the judge sees the truncated reply.
