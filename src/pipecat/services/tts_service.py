@@ -20,6 +20,7 @@ from loguru import logger
 from websockets.protocol import State
 
 from pipecat.audio.utils import create_stream_resampler
+from pipecat.expressive.expression import ExpressionCapabilities
 from pipecat.frames.frames import (
     AggregatedTextFrame,
     BotStartedSpeakingFrame,
@@ -41,6 +42,7 @@ from pipecat.frames.frames import (
     TextType,
     TranscriptionFrame,
     TTSAudioRawFrame,
+    TTSMetadataFrame,
     TTSSpeakFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
@@ -449,6 +451,24 @@ class TTSService(AIService):
         carry the latency for those.
         """
         return True
+
+    def expression_capabilities(self) -> ExpressionCapabilities | None:
+        """The expression tags this service can perform, or None.
+
+        Part of expressive conversation (alpha). Override to declare the
+        events, modes, pauses and emphasis the service can perform. The
+        default, None, declares none.
+        """
+        return None
+
+    def service_metadata_frame(self) -> TTSMetadataFrame:
+        """Build the TTS metadata frame broadcast at start.
+
+        Overrides :meth:`AIService.service_metadata_frame` to return a
+        :class:`~pipecat.frames.frames.TTSMetadataFrame` carrying the service's
+        :meth:`expression_capabilities`.
+        """
+        return TTSMetadataFrame(service_name=self.name, expression=self.expression_capabilities())
 
     async def start_tts_usage_metrics(self, text: str):
         """Record TTS usage metrics.

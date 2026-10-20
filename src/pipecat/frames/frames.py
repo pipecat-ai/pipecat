@@ -39,6 +39,7 @@ from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
 from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.audio.turn.base_turn_analyzer import BaseTurnParams
 from pipecat.audio.vad.vad_analyzer import VADParams
+from pipecat.expressive.expression import ExpressionCapabilities
 from pipecat.metrics.metrics import MetricsData
 from pipecat.services.settings import LLMSettings, ServiceSettings, STTSettings, TTSSettings
 from pipecat.transcriptions.language import Language
@@ -2087,6 +2088,18 @@ class LLMServiceMetadataFrame(ServiceMetadataFrame):
     """
 
     is_realtime_service: bool = False
+
+
+@dataclass
+class TTSMetadataFrame(ServiceMetadataFrame):
+    """Metadata broadcast by a TTS service at pipeline start.
+
+    Parameters:
+        expression: The expression tags the service can perform, or None when
+            it performs none. Part of expressive conversation (alpha).
+    """
+
+    expression: ExpressionCapabilities | None = None
 
 
 @dataclass
