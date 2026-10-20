@@ -13,6 +13,7 @@ from collections.abc import AsyncGenerator
 
 from loguru import logger
 from pydantic import BaseModel
+from websockets.exceptions import InvalidStatus
 from websockets.protocol import State
 
 from pipecat.frames.frames import (
@@ -35,6 +36,21 @@ __all__ = [
     "FluxEventType",
     "FluxMessageType",
 ]
+
+
+def _describe_refusal(exception: Exception) -> str | None:
+    """Describe Deepgram refusing the handshake, if that is what failed.
+
+    Deepgram explains a refusal (an invalid setting, a bad API key) in the
+    ``dg-error`` response header, which the exception's own message leaves out.
+    """
+    if isinstance(exception, InvalidStatus):
+        reason = exception.response.headers.get("dg-error")
+        if reason:
+            return (
+                f"Deepgram refused the connection (HTTP {exception.response.status_code}): {reason}"
+            )
+    return None
 
 
 class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
@@ -342,9 +358,10 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
             headers = {k: v for k, v in response_headers.items() if k.startswith("dg-")}
             logger.debug(f'{self}: Websocket connection initialized: {{"headers": {headers}}}')
         except Exception as e:
-            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
+            refusal = _describe_refusal(e)
+            await self.push_error(error_msg=refusal or f"Unknown error occurred: {e}", exception=e)
             self._websocket = None
-            await self._call_event_handler("on_connection_error", f"{e}")
+            await self._call_event_handler("on_connection_error", refusal or f"{e}")
 
     async def _disconnect_websocket(self):
         """Close the WebSocket connection and reset connection state.
