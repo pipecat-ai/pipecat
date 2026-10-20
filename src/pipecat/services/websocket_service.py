@@ -56,7 +56,7 @@ WS_SEND_TIMEOUT = 5.0
 
 
 class _BoundedConnection(ClientConnection):
-    """Websocket connection with bounded closing and sending.
+    """Websocket connection with bounded sends that reports an unacknowledged close.
 
     ``websockets`` enforces ``close_timeout`` internally and absorbs the outcome:
     :meth:`close` returns normally whether the peer acknowledged the handshake or
