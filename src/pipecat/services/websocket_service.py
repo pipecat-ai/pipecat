@@ -50,12 +50,12 @@ class ReportErrorCallback(Protocol):
 WS_CLOSE_TIMEOUT = 2.0
 
 # Default ceiling, in seconds, on a single websocket send. A send only waits
-# when the peer has stopped reading and the write buffer is full, so any send
-# that outlasts this has a connection that will not recover on its own.
-WS_SEND_TIMEOUT = 10.0
+# once the peer has stopped taking data and the write buffers are full, so on a
+# working connection it returns immediately.
+WS_SEND_TIMEOUT = 5.0
 
 
-class _BoundedCloseConnection(ClientConnection):
+class _BoundedConnection(ClientConnection):
     """Websocket connection with bounded closing and sending.
 
     ``websockets`` enforces ``close_timeout`` internally and absorbs the outcome:
@@ -74,17 +74,19 @@ class _BoundedCloseConnection(ClientConnection):
     async def send(self, *args, **kwargs) -> None:
         """Send a message, dropping the connection if the send stalls.
 
-        A stalled send leaves the stream in an unknown state, so the transport is
-        aborted rather than left to be reused. The abort closes the connection,
-        which unblocks anything else waiting on it (such as the keepalive ping)
-        and lets the owning service's receive loop reconnect.
+        The transport is aborted rather than closed: a closing handshake writes
+        to the same full buffer and would wait just as long. The abort releases
+        anything else waiting on the connection (such as the keepalive ping),
+        and the send fails the way any dropped connection does, so callers'
+        ``ConnectionClosed`` handling and the receive loop's reconnect take over.
 
         Args:
             *args: Positional arguments passed to ``send()``.
             **kwargs: Keyword arguments passed to ``send()``.
 
         Raises:
-            ConnectionError: If the send did not complete within ``send_timeout``.
+            ConnectionClosedError: If the send did not complete within
+                ``send_timeout``.
         """
         if self.send_timeout is None:
             await super().send(*args, **kwargs)
@@ -96,14 +98,19 @@ class _BoundedCloseConnection(ClientConnection):
         except TimeoutError as e:
             if not timeout.expired():
                 raise
+            peer = self.request.headers["Host"] if self.request else self.remote_address
             logger.warning(
-                f"Websocket send did not complete within {self.send_timeout}s; "
+                f"Websocket send to {peer} did not complete within {self.send_timeout}s; "
                 f"the peer has stopped reading, dropping the connection"
             )
+            # The same steps websockets takes when one of its own sends fails.
+            # abort() drops the connection along with its unsent data, and
+            # connection_lost() then runs on the next loop iteration, marking
+            # the connection CLOSED and setting close_exc (code 1006). The wait
+            # is shielded because other tasks await the same future.
             self.transport.abort()
-            raise ConnectionError(
-                f"websocket send timed out after {self.send_timeout}s; connection dropped"
-            ) from e
+            await asyncio.shield(self.connection_lost_waiter)
+            raise self.protocol.close_exc from e
 
     async def close(self, code: int = 1000, reason: str = "") -> None:
         """Close the connection, logging if the peer never acknowledged it.
@@ -167,7 +174,7 @@ class WebsocketService(ABC):
                 longer to complete a graceful close.
             ws_send_timeout: Maximum time, in seconds, a single send may wait on
                 a peer that has stopped reading before the connection is dropped
-                and the send raises :class:`ConnectionError`. Applied to
+                and the send raises ``ConnectionClosedError``. Applied to
                 connections opened through :meth:`_websocket_connect`. Pass
                 ``None`` to wait indefinitely.
             **kwargs: Additional arguments (unused, for compatibility).
@@ -203,24 +210,21 @@ class WebsocketService(ABC):
 
         Wraps :func:`websockets.asyncio.client.connect`, defaulting
         ``close_timeout`` to ``ws_close_timeout`` and bounding each send by
-        ``ws_send_timeout``. Pass ``close_timeout`` or ``send_timeout``
-        explicitly to override either for a service whose peer needs different
-        behavior.
+        ``ws_send_timeout``. Pass ``close_timeout`` explicitly to override it
+        for a service whose peer needs different closing behavior.
 
         Args:
             uri: The websocket URI to connect to.
-            **kwargs: Additional arguments passed to ``connect()``, except
-                ``send_timeout``, which bounds each send on the connection.
+            **kwargs: Additional arguments passed to ``connect()``.
 
         Returns:
             The connected websocket.
         """
         kwargs.setdefault("close_timeout", self._ws_close_timeout)
-        kwargs.setdefault("create_connection", _BoundedCloseConnection)
-        send_timeout = kwargs.pop("send_timeout", self._ws_send_timeout)
+        kwargs.setdefault("create_connection", _BoundedConnection)
         websocket = await websocket_connect(uri, **kwargs)
-        if isinstance(websocket, _BoundedCloseConnection):
-            websocket.send_timeout = send_timeout
+        if isinstance(websocket, _BoundedConnection):
+            websocket.send_timeout = self._ws_send_timeout
         return websocket
 
     async def _verify_connection(self) -> bool:
