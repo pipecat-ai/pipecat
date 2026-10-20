@@ -63,6 +63,7 @@ from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.time import time_now_iso8601
+from pipecat.utils.tracing.service_decorators import traced_realtime_llm
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 
 from . import events
@@ -211,6 +212,7 @@ _EXPECTED_ERROR_CODES = {
 }
 
 
+@traced_realtime_llm
 class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
     """Azure Voice Live LLM service for real-time audio and text communication.
 
