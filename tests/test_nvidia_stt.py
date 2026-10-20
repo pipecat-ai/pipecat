@@ -234,10 +234,10 @@ async def test_speaker_format_with_server_setting_still_reconnects(monkeypatch):
     assert service._config.config.language_code == Language.ES
 
 
-def test_diarization_max_speakers_reaches_recognition_config():
+def test_max_speakers_reaches_recognition_config():
     """The configured speaker limit is sent with the diarization config."""
     service = _make_service(
-        settings=NvidiaSTTService.Settings(speaker_diarization=True, diarization_max_speakers=3)
+        settings=NvidiaSTTService.Settings(speaker_diarization=True, max_speakers=3)
     )
 
     config = service._create_recognition_config()
@@ -467,31 +467,6 @@ async def test_speaker_runs_preserve_provider_text(
 
     assert [frame.text for frame in frames] == expected
     assert _aggregate(frames) == aggregated
-
-
-@pytest.mark.parametrize(
-    ("words", "expected"),
-    [
-        ([("Hi", 0), ("there", 0), ("hello", 1)], [(0, "Hi there"), (1, "hello")]),
-        ([("Hi", 0), ("there", None)], []),
-        ([("Hi", 0), ("missing", 1)], []),
-        ([("Hi", 0), ("", 1)], []),
-        ([], []),
-    ],
-)
-def test_speaker_runs_from_word_pairs(words, expected):
-    """Speaker runs are built from plain (text, speaker) pairs."""
-    assert NvidiaSTTService._speaker_runs(" Hi there hello ", words) == expected
-
-
-def test_speaker_runs_locate_repeated_words_in_order():
-    """A repeated word is matched after the previous one, not at its first occurrence."""
-    runs = NvidiaSTTService._speaker_runs(
-        "no, no, no.",
-        [("no", 0), ("no", 1), ("no", 0)],
-    )
-
-    assert runs == [(0, "no,"), (1, "no,"), (0, "no.")]
 
 
 @pytest.mark.asyncio

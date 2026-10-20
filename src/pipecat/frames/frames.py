@@ -590,12 +590,20 @@ class TranscriptionFrame(TextFrame):
     contains the result from the STT service if available.
 
     Parameters:
-        user_id: Identifier for the user who spoke.
+        user_id: Identifier of the participant whose audio was transcribed, as
+            reported by the input transport (e.g. a Daily or LiveKit participant
+            id). Empty when the transport does not identify participants.
         timestamp: When the transcription occurred.
         language: Detected or specified language of the speech.
         result: Raw result from the STT service.
         finalized: Whether this is the final transcription for an utterance.
             Set by STT services that support commit/finalize signals.
+        speaker_label: Label the STT service's speaker diarization assigned to
+            this text (e.g. ``"A"``, ``"S1"``, ``"2"``), or ``None`` when
+            diarization is off or the service gave no label. Labels are opaque
+            and provider-specific, only distinguish speakers within one
+            transcription stream, and are not participant identities: several
+            speakers can share one ``user_id`` when they share an audio stream.
     """
 
     user_id: str
@@ -603,9 +611,10 @@ class TranscriptionFrame(TextFrame):
     language: Language | None = None
     result: Any | None = None
     finalized: bool = False
+    speaker_label: str | None = None
 
     def __str__(self):
-        return f"{self.name}(user: {self.user_id}, text: [{self.text}], language: {self.language}, timestamp: {self.timestamp})"
+        return f"{self.name}(user: {self.user_id}, speaker: {self.speaker_label}, text: [{self.text}], language: {self.language}, timestamp: {self.timestamp})"
 
 
 @dataclass
@@ -617,19 +626,28 @@ class InterimTranscriptionFrame(TextFrame):
     contains the result from the STT service if available.
 
     Parameters:
-        user_id: Identifier for the user who spoke.
+        user_id: Identifier of the participant whose audio was transcribed, as
+            reported by the input transport (e.g. a Daily or LiveKit participant
+            id). Empty when the transport does not identify participants.
         timestamp: When the interim transcription occurred.
         language: Detected or specified language of the speech.
         result: Raw result from the STT service.
+        speaker_label: Label the STT service's speaker diarization assigned to
+            this text (e.g. ``"A"``, ``"S1"``, ``"2"``), or ``None`` when
+            diarization is off or the service gave no label. Labels are opaque
+            and provider-specific, only distinguish speakers within one
+            transcription stream, and are not participant identities: several
+            speakers can share one ``user_id`` when they share an audio stream.
     """
 
     user_id: str
     timestamp: str
     language: Language | None = None
     result: Any | None = None
+    speaker_label: str | None = None
 
     def __str__(self):
-        return f"{self.name}(user: {self.user_id}, text: [{self.text}], language: {self.language}, timestamp: {self.timestamp})"
+        return f"{self.name}(user: {self.user_id}, speaker: {self.speaker_label}, text: [{self.text}], language: {self.language}, timestamp: {self.timestamp})"
 
 
 @dataclass
@@ -644,19 +662,28 @@ class EagerTranscriptionFrame(TextFrame):
     :class:`~pipecat.turns.user_stop.EagerUserTurnStopStrategy`.
 
     Parameters:
-        user_id: Identifier for the user who spoke.
+        user_id: Identifier of the participant whose audio was transcribed, as
+            reported by the input transport (e.g. a Daily or LiveKit participant
+            id). Empty when the transport does not identify participants.
         timestamp: When the eager end of turn occurred.
         language: Detected or specified language of the speech.
         result: Raw result from the STT service.
+        speaker_label: Label the STT service's speaker diarization assigned to
+            this text (e.g. ``"A"``, ``"S1"``, ``"2"``), or ``None`` when
+            diarization is off or the service gave no label. Labels are opaque
+            and provider-specific, only distinguish speakers within one
+            transcription stream, and are not participant identities: several
+            speakers can share one ``user_id`` when they share an audio stream.
     """
 
     user_id: str
     timestamp: str
     language: Language | None = None
     result: Any | None = None
+    speaker_label: str | None = None
 
     def __str__(self):
-        return f"{self.name}(user: {self.user_id}, text: [{self.text}], language: {self.language}, timestamp: {self.timestamp})"
+        return f"{self.name}(user: {self.user_id}, speaker: {self.speaker_label}, text: [{self.text}], language: {self.language}, timestamp: {self.timestamp})"
 
 
 @dataclass

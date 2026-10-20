@@ -10,7 +10,7 @@ import asyncio
 import time
 from abc import abstractmethod
 from collections.abc import AsyncGenerator
-from typing import Any
+from typing import Any, TypeVar
 
 from loguru import logger
 from websockets.protocol import State
@@ -47,6 +47,9 @@ from pipecat.utils.types import is_given
 # Duration in seconds of silent audio sent for WebSocket keepalive (100ms).
 _KEEPALIVE_SILENCE_DURATION = 0.1
 
+# A provider's own speaker label type (e.g. ``int`` tags or ``str`` labels).
+_SpeakerT = TypeVar("_SpeakerT")
+
 
 class STTService(AIService):
     """Base class for speech-to-text services.
@@ -68,6 +71,14 @@ class STTService(AIService):
     window could measure; anchoring one to a speech or turn boundary measures how
     long the user talked. :class:`SegmentedSTTService` does issue a discrete
     request per utterance, so its subclasses time that call and report both.
+
+    Services that support speaker diarization put the provider's label for each
+    transcript in the frame's ``speaker_label``, splitting a final result into
+    one frame per contiguous speaker run (see :meth:`_speaker_runs`), and format
+    the text with :meth:`_apply_speaker_format`. They declare their own enable
+    flag and a ``speaker_format`` field in their ``Settings``, treated as local
+    (changing it does not reconnect). ``user_id`` always remains the transport
+    participant.
 
     Event handlers:
         on_connected: Called when connected to the STT service.
@@ -318,6 +329,71 @@ class STTService(AIService):
             2026-04-28, first-party services return a string.
         """
         return Language(language)
+
+    @staticmethod
+    def _speaker_runs(
+        transcript: str, words: list[tuple[str, _SpeakerT | None]]
+    ) -> list[tuple[_SpeakerT, str]]:
+        """Split a transcript into contiguous speaker runs.
+
+        Each word is located in ``transcript`` in order, and the transcript is cut
+        where the speaker changes, so each run keeps the provider's text and
+        punctuation. Runs are stripped of surrounding whitespace.
+
+        Args:
+            transcript: The full transcript of one result.
+            words: ``(text, speaker)`` pairs in transcript order.
+
+        Returns:
+            ``(speaker, text)`` runs, or an empty list if any word has no speaker
+            or cannot be located in the transcript.
+        """
+        if not transcript or not words:
+            return []
+
+        tagged_spans: list[tuple[_SpeakerT, int]] = []
+        cursor = 0
+        for text, speaker in words:
+            if speaker is None or not text:
+                return []
+            start = transcript.find(text, cursor)
+            if start < 0:
+                return []
+            tagged_spans.append((speaker, start))
+            cursor = start + len(text)
+
+        boundaries: list[tuple[_SpeakerT, int]] = [tagged_spans[0]]
+        for speaker, start in tagged_spans[1:]:
+            if speaker != boundaries[-1][0]:
+                boundaries.append((speaker, start))
+
+        runs: list[tuple[_SpeakerT, str]] = []
+        for index, (speaker, start) in enumerate(boundaries):
+            end = boundaries[index + 1][1] if index + 1 < len(boundaries) else len(transcript)
+            text = transcript[start:end].strip()
+            if text:
+                runs.append((speaker, text))
+        return runs
+
+    def _apply_speaker_format(self, text: str, speaker_label: str | None) -> str:
+        """Apply the service's ``speaker_format`` setting to a diarized transcript.
+
+        ``speaker_format`` uses ``{speaker}`` for the speaker label and ``{text}``
+        for the transcript text (e.g. ``"{speaker}: {text}"``). Services without
+        that setting leave text unchanged.
+
+        Args:
+            text: The transcript text.
+            speaker_label: The provider's speaker label for ``text``, if any.
+
+        Returns:
+            The formatted text, or ``text`` unchanged when there is no format or
+            no speaker label.
+        """
+        speaker_format = getattr(self._settings, "speaker_format", None)
+        if speaker_format and speaker_label is not None:
+            return speaker_format.format(speaker=speaker_label, text=text)
+        return text
 
     async def _process_assistant_turn(self, text: str) -> None:
         """Called when the assistant's turn completes with the aggregated reply text.

@@ -119,7 +119,7 @@ class _NvidiaBaseSTTSettings(STTSettings):
         max_alternatives: Maximum number of recognition alternatives.
         word_time_offsets: Whether to include word-level time offsets.
         speaker_diarization: Whether to enable speaker diarization.
-        diarization_max_speakers: Maximum number of speakers for diarization.
+        max_speakers: Maximum number of speakers for diarization.
     """
 
     profanity_filter: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -130,7 +130,7 @@ class _NvidiaBaseSTTSettings(STTSettings):
     max_alternatives: int | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     word_time_offsets: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     speaker_diarization: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    diarization_max_speakers: int | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    max_speakers: int | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 @dataclass
@@ -339,7 +339,7 @@ class NvidiaSTTService(STTService):
             interim_results=True,
             word_time_offsets=False,
             speaker_diarization=False,
-            diarization_max_speakers=0,
+            max_speakers=0,
             speaker_format=None,
         )
 
@@ -434,7 +434,7 @@ class NvidiaSTTService(STTService):
         speaker_diarization = assert_given(s.speaker_diarization)
         if speaker_diarization:
             riva.client.add_speaker_diarization_to_config(
-                config, speaker_diarization, assert_given(s.diarization_max_speakers)
+                config, speaker_diarization, assert_given(s.max_speakers)
             )
 
         return config
@@ -647,58 +647,6 @@ class NvidiaSTTService(STTService):
         """Handle a transcription result with tracing."""
         pass
 
-    @staticmethod
-    def _speaker_runs(
-        transcript: str, words: list[tuple[str, int | None]]
-    ) -> list[tuple[int, str]]:
-        """Split a transcript into contiguous speaker runs.
-
-        Each word is located in ``transcript`` in order, and the transcript is cut
-        where the speaker changes, so each run keeps the provider's text and
-        punctuation. Runs are stripped of surrounding whitespace.
-
-        Args:
-            transcript: The full transcript of one result.
-            words: ``(text, speaker)`` pairs in transcript order.
-
-        Returns:
-            ``(speaker, text)`` runs, or an empty list if any word has no speaker
-            or cannot be located in the transcript.
-        """
-        if not transcript or not words:
-            return []
-
-        tagged_spans: list[tuple[int, int]] = []
-        cursor = 0
-        for text, speaker in words:
-            if speaker is None or not text:
-                return []
-            start = transcript.find(text, cursor)
-            if start < 0:
-                return []
-            tagged_spans.append((speaker, start))
-            cursor = start + len(text)
-
-        boundaries: list[tuple[int, int]] = [(tagged_spans[0][0], 0)]
-        for speaker, start in tagged_spans[1:]:
-            if speaker != boundaries[-1][0]:
-                boundaries.append((speaker, start))
-
-        runs: list[tuple[int, str]] = []
-        for index, (speaker, start) in enumerate(boundaries):
-            end = boundaries[index + 1][1] if index + 1 < len(boundaries) else len(transcript)
-            text = transcript[start:end].strip()
-            if text:
-                runs.append((speaker, text))
-        return runs
-
-    def _format_speaker_text(self, speaker_tag: int | None, text: str) -> str:
-        """Apply the configured speaker format to a tagged transcript."""
-        speaker_format = assert_given(self._settings.speaker_format)
-        if speaker_format and speaker_tag is not None:
-            return speaker_format.format(speaker=speaker_tag, text=text)
-        return text
-
     async def _push_result_frames(
         self,
         result,
@@ -727,8 +675,9 @@ class NvidiaSTTService(STTService):
         for index, (speaker_tag, transcript) in enumerate(transcripts):
             if not transcript:
                 continue
-            text = self._format_speaker_text(speaker_tag, transcript)
-            user_id = str(speaker_tag) if speaker_tag is not None else self._user_id
+            speaker_label = str(speaker_tag) if speaker_tag is not None else None
+            text = self._apply_speaker_format(transcript, speaker_label)
+            user_id = speaker_label or self._user_id
             if result.is_final:
                 frame = TranscriptionFrame(
                     text,
@@ -891,7 +840,7 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
             max_alternatives=1,
             word_time_offsets=False,
             speaker_diarization=False,
-            diarization_max_speakers=0,
+            max_speakers=0,
         )
 
         # 2. (no deprecated direct args for this service)
