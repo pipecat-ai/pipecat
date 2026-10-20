@@ -21,7 +21,7 @@ from pipecat.frames.frames import LLMTextFrame
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.anthropic.llm import AnthropicLLMService
-from pipecat.services.settings import ToolCallTextPolicy
+from pipecat.services.settings import ToolCallPolicy
 
 
 class _FakeStream:
@@ -57,7 +57,7 @@ def _message_delta_tool_use():
     )
 
 
-def _service(events, *, policy=ToolCallTextPolicy.PRESERVE):
+def _service(events, *, policy=ToolCallPolicy.PRESERVE_TEXT_AFTER_TOOL_CALL_DETECTED):
     fake_client = SimpleNamespace(
         beta=SimpleNamespace(messages=SimpleNamespace(create=AsyncMock()))
     )
@@ -133,7 +133,7 @@ async def test_anthropic_text_after_a_tool_call_can_be_suppressed():
             _message_delta_tool_use(),
             _text_delta("After."),
         ],
-        policy=ToolCallTextPolicy.SUPPRESS_AFTER_TOOL_CALL_DETECTED,
+        policy=ToolCallPolicy.SUPPRESS_TEXT_AFTER_TOOL_CALL_DETECTED,
     )
 
     pushed = await _run_and_collect(service, _context())
@@ -151,7 +151,7 @@ async def test_anthropic_suppression_state_resets_for_the_next_response():
             _message_delta_tool_use(),
             _text_delta("Suppressed."),
         ],
-        policy=ToolCallTextPolicy.SUPPRESS_AFTER_TOOL_CALL_DETECTED,
+        policy=ToolCallPolicy.SUPPRESS_TEXT_AFTER_TOOL_CALL_DETECTED,
     )
 
     pushed: list[str] = []

@@ -20,7 +20,7 @@ from pipecat.frames.frames import LLMFullResponseStartFrame, LLMTextFrame
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.services.settings import ToolCallTextPolicy
+from pipecat.services.settings import ToolCallPolicy
 
 
 class _FakeStream:
@@ -58,7 +58,7 @@ def _tool_call(*, index=0, call_id="call_1", name="lookup", arguments="{}"):
     )
 
 
-def _service(chunks, *, policy=ToolCallTextPolicy.PRESERVE):
+def _service(chunks, *, policy=ToolCallPolicy.PRESERVE_TEXT_AFTER_TOOL_CALL_DETECTED):
     with patch.object(OpenAILLMService, "create_client"):
         service = OpenAILLMService(
             settings=OpenAILLMService.Settings(
@@ -113,7 +113,7 @@ async def test_text_after_a_tool_call_can_be_suppressed():
             _chunk(tool_calls=[_tool_call()]),
             _chunk(content="After."),
         ],
-        policy=ToolCallTextPolicy.SUPPRESS_AFTER_TOOL_CALL_DETECTED,
+        policy=ToolCallPolicy.SUPPRESS_TEXT_AFTER_TOOL_CALL_DETECTED,
     )
 
     pushed = await _run_and_collect(service, _context())
@@ -133,7 +133,7 @@ async def test_any_tool_call_delta_starts_suppression():
             ),
             _chunk(content="After an id-only tool delta."),
         ],
-        policy=ToolCallTextPolicy.SUPPRESS_AFTER_TOOL_CALL_DETECTED,
+        policy=ToolCallPolicy.SUPPRESS_TEXT_AFTER_TOOL_CALL_DETECTED,
     )
 
     pushed = await _run_and_collect(service, _context())
@@ -153,7 +153,7 @@ async def test_parallel_tool_calls_are_unchanged_when_text_is_suppressed():
             ),
             _chunk(content="After."),
         ],
-        policy=ToolCallTextPolicy.SUPPRESS_AFTER_TOOL_CALL_DETECTED,
+        policy=ToolCallPolicy.SUPPRESS_TEXT_AFTER_TOOL_CALL_DETECTED,
     )
 
     pushed = await _run_and_collect(service, _context())
@@ -171,7 +171,7 @@ async def test_suppression_state_resets_for_the_next_response():
             _chunk(tool_calls=[_tool_call()]),
             _chunk(content="Suppressed."),
         ],
-        policy=ToolCallTextPolicy.SUPPRESS_AFTER_TOOL_CALL_DETECTED,
+        policy=ToolCallPolicy.SUPPRESS_TEXT_AFTER_TOOL_CALL_DETECTED,
     )
 
     pushed: list[str] = []
@@ -195,7 +195,14 @@ async def test_suppression_state_resets_for_the_next_response():
 
 
 @pytest.mark.asyncio
-async def test_policy_can_be_updated_between_responses():
+@pytest.mark.parametrize(
+    "policy",
+    [
+        ToolCallPolicy.SUPPRESS_TEXT_AFTER_TOOL_CALL_DETECTED,
+        "suppress_text_after_tool_call_detected",
+    ],
+)
+async def test_policy_can_be_updated_between_responses(policy):
     chunks = [
         _chunk(tool_calls=[_tool_call()]),
         _chunk(content="After."),
@@ -205,11 +212,7 @@ async def test_policy_can_be_updated_between_responses():
     pushed = await _run_and_collect(service, _context())
     assert pushed == ["After."]
 
-    await service._update_settings(
-        OpenAILLMService.Settings(
-            tool_call_text_policy=ToolCallTextPolicy.SUPPRESS_AFTER_TOOL_CALL_DETECTED
-        )
-    )
+    await service._update_settings(OpenAILLMService.Settings(tool_call_text_policy=policy))
     service.get_chat_completions = AsyncMock(return_value=_FakeStream(chunks))
     pushed = await _run_and_collect(service, _context())
     assert pushed == []
@@ -219,8 +222,8 @@ async def test_policy_can_be_updated_between_responses():
 @pytest.mark.parametrize(
     "policy",
     [
-        ToolCallTextPolicy.PRESERVE,
-        ToolCallTextPolicy.SUPPRESS_AFTER_TOOL_CALL_DETECTED,
+        ToolCallPolicy.PRESERVE_TEXT_AFTER_TOOL_CALL_DETECTED,
+        ToolCallPolicy.SUPPRESS_TEXT_AFTER_TOOL_CALL_DETECTED,
     ],
 )
 async def test_tool_call_takes_precedence_over_content_in_the_same_delta(policy):

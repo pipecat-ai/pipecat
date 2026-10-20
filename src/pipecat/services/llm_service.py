@@ -63,7 +63,7 @@ from pipecat.processors.aggregators.llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.ai_service import AIService
-from pipecat.services.settings import LLMSettings, ToolCallTextPolicy
+from pipecat.services.settings import LLMSettings, ToolCallPolicy
 from pipecat.services.websocket_service import WebsocketService
 from pipecat.turns.speculation_gate import SpeculationGate
 from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionLLMServiceMixin
@@ -428,7 +428,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         self._functions: dict[str | None, FunctionCallRegistryItem] = {}
         # Set by providers mid-stream once a tool call is detected, and reset
         # per response (see ``push_frame``). Read by ``_push_llm_text`` to drop
-        # text after a tool call when ``tool_call_text_policy`` is SUPPRESS.
+        # text after a tool call when the policy suppresses post-detection text.
         self._tool_call_detected: bool = False
         # Cleanup callables carried by registered tool handlers, awaited at
         # service teardown (see _record_tool_cleanup).
@@ -968,7 +968,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
 
         Text is suppressed once a tool call has been detected in the current
         response when ``tool_call_text_policy`` is
-        :attr:`ToolCallTextPolicy.SUPPRESS_AFTER_TOOL_CALL_DETECTED`. Providers signal
+        :attr:`ToolCallPolicy.SUPPRESS_TEXT_AFTER_TOOL_CALL_DETECTED`. Providers signal
         detection via :meth:`_note_tool_call_detected`.
 
         Args:
@@ -976,7 +976,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         """
         if (
             self._settings.tool_call_text_policy
-            == ToolCallTextPolicy.SUPPRESS_AFTER_TOOL_CALL_DETECTED
+            == ToolCallPolicy.SUPPRESS_TEXT_AFTER_TOOL_CALL_DETECTED
             and self._tool_call_detected
         ):
             return

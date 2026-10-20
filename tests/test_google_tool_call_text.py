@@ -21,7 +21,7 @@ from pipecat.frames.frames import LLMTextFrame
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.google.llm import GoogleLLMService
-from pipecat.services.settings import ToolCallTextPolicy
+from pipecat.services.settings import ToolCallPolicy
 
 
 class _FakeStream:
@@ -65,7 +65,7 @@ def _chunk(parts):
     )
 
 
-def _service(chunks, *, policy=ToolCallTextPolicy.PRESERVE):
+def _service(chunks, *, policy=ToolCallPolicy.PRESERVE_TEXT_AFTER_TOOL_CALL_DETECTED):
     with patch.object(GoogleLLMService, "create_client"):
         service = GoogleLLMService(
             api_key="test-key",
@@ -132,7 +132,7 @@ async def test_google_text_after_a_tool_call_can_be_suppressed():
             _chunk([_text_part("Before."), _function_call_part()]),
             _chunk([_text_part("After.")]),
         ],
-        policy=ToolCallTextPolicy.SUPPRESS_AFTER_TOOL_CALL_DETECTED,
+        policy=ToolCallPolicy.SUPPRESS_TEXT_AFTER_TOOL_CALL_DETECTED,
     )
 
     pushed = await _run_and_collect(service, _context())
@@ -148,7 +148,7 @@ async def test_google_suppression_state_resets_for_the_next_response():
             _chunk([_function_call_part()]),
             _chunk([_text_part("Suppressed.")]),
         ],
-        policy=ToolCallTextPolicy.SUPPRESS_AFTER_TOOL_CALL_DETECTED,
+        policy=ToolCallPolicy.SUPPRESS_TEXT_AFTER_TOOL_CALL_DETECTED,
     )
 
     pushed: list[str] = []

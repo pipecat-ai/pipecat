@@ -38,7 +38,7 @@ from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.aws.utils import resolve_credentials
 from pipecat.services.llm_service import LLMService
-from pipecat.services.settings import LLMSettings, ToolCallTextPolicy
+from pipecat.services.settings import LLMSettings, ToolCallPolicy
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.tracing.service_decorators import traced_llm
@@ -196,7 +196,7 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
             effort=None,
             enable_prompt_caching=False,
             additional_model_request_fields={},
-            tool_call_text_policy=ToolCallTextPolicy.PRESERVE,
+            tool_call_text_policy=ToolCallPolicy.PRESERVE_TEXT_AFTER_TOOL_CALL_DETECTED,
         )
 
         # 2. Apply direct init arg overrides (deprecated)

@@ -21,7 +21,7 @@ from pipecat.frames.frames import LLMFullResponseStartFrame, LLMTextFrame
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.sambanova.llm import SambaNovaLLMService
-from pipecat.services.settings import ToolCallTextPolicy
+from pipecat.services.settings import ToolCallPolicy
 
 
 class _FakeStream:
@@ -66,7 +66,7 @@ def _tool_call(*, call_id="call_1", name="lookup", arguments="{}"):
     )
 
 
-def _service(chunks, *, policy=ToolCallTextPolicy.PRESERVE):
+def _service(chunks, *, policy=ToolCallPolicy.PRESERVE_TEXT_AFTER_TOOL_CALL_DETECTED):
     with patch.object(SambaNovaLLMService, "create_client"):
         service = SambaNovaLLMService(
             api_key="test-key",
@@ -122,7 +122,7 @@ async def test_sambanova_text_after_a_tool_call_can_be_suppressed():
             _chunk(tool_calls=[_tool_call()]),
             _chunk(content="After."),
         ],
-        policy=ToolCallTextPolicy.SUPPRESS_AFTER_TOOL_CALL_DETECTED,
+        policy=ToolCallPolicy.SUPPRESS_TEXT_AFTER_TOOL_CALL_DETECTED,
     )
 
     pushed = await _run_and_collect(service, _context())
@@ -138,7 +138,7 @@ async def test_sambanova_suppression_state_resets_for_the_next_response():
             _chunk(tool_calls=[_tool_call()]),
             _chunk(content="Suppressed."),
         ],
-        policy=ToolCallTextPolicy.SUPPRESS_AFTER_TOOL_CALL_DETECTED,
+        policy=ToolCallPolicy.SUPPRESS_TEXT_AFTER_TOOL_CALL_DETECTED,
     )
 
     pushed: list[str] = []

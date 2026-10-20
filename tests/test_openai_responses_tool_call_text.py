@@ -27,7 +27,7 @@ from pipecat.frames.frames import LLMFullResponseStartFrame, LLMTextFrame
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.openai.responses.llm import OpenAIResponsesHttpLLMService
-from pipecat.services.settings import ToolCallTextPolicy
+from pipecat.services.settings import ToolCallPolicy
 
 
 class _FakeAsyncStream:
@@ -90,7 +90,7 @@ def _completed():
     return event
 
 
-def _service(*, policy=ToolCallTextPolicy.PRESERVE):
+def _service(*, policy=ToolCallPolicy.PRESERVE_TEXT_AFTER_TOOL_CALL_DETECTED):
     with patch.object(OpenAIResponsesHttpLLMService, "_create_client"):
         service = OpenAIResponsesHttpLLMService(
             api_key="test-key",
@@ -152,7 +152,7 @@ async def test_responses_text_is_preserved_by_default_around_a_tool_call():
 
 @pytest.mark.asyncio
 async def test_responses_text_after_a_tool_call_can_be_suppressed():
-    service = _service(policy=ToolCallTextPolicy.SUPPRESS_AFTER_TOOL_CALL_DETECTED)
+    service = _service(policy=ToolCallPolicy.SUPPRESS_TEXT_AFTER_TOOL_CALL_DETECTED)
     pushed = await _run_and_collect(
         service,
         [
@@ -170,7 +170,7 @@ async def test_responses_text_after_a_tool_call_can_be_suppressed():
 
 @pytest.mark.asyncio
 async def test_responses_suppression_state_resets_for_the_next_response():
-    service = _service(policy=ToolCallTextPolicy.SUPPRESS_AFTER_TOOL_CALL_DETECTED)
+    service = _service(policy=ToolCallPolicy.SUPPRESS_TEXT_AFTER_TOOL_CALL_DETECTED)
     pushed: list[str] = []
 
     async def fake_push(self_, frame, direction=FrameDirection.DOWNSTREAM):

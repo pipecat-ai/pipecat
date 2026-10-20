@@ -63,7 +63,7 @@ from pipecat.services.llm_service import (
     WebsocketReconnectedError,
 )
 from pipecat.services.openai.base_llm import OPENAI_MODEL_WITHOUT_RESPONSE_SCHEMA
-from pipecat.services.settings import LLMSettings, ToolCallTextPolicy
+from pipecat.services.settings import LLMSettings, ToolCallPolicy
 from pipecat.utils.http import TIMEOUT_EXCEPTIONS, connection_limits
 from pipecat.utils.tracing.service_decorators import traced_llm
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
@@ -320,7 +320,7 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
             reasoning=None,
             filter_incomplete_user_turns=False,
             user_turn_completion_config=None,
-            tool_call_text_policy=ToolCallTextPolicy.PRESERVE,
+            tool_call_text_policy=ToolCallPolicy.PRESERVE_TEXT_AFTER_TOOL_CALL_DETECTED,
             extra={},
         )
 

@@ -43,7 +43,7 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.google.frames import LLMSearchResponseFrame
 from pipecat.services.google.utils import update_google_client_http_options
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
-from pipecat.services.settings import LLMSettings, ToolCallTextPolicy
+from pipecat.services.settings import LLMSettings, ToolCallPolicy
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.tracing.service_decorators import traced_llm
@@ -330,7 +330,7 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
             user_turn_completion_config=None,
             thinking=None,
             safety_settings=None,
-            tool_call_text_policy=ToolCallTextPolicy.PRESERVE,
+            tool_call_text_policy=ToolCallPolicy.PRESERVE_TEXT_AFTER_TOOL_CALL_DETECTED,
             extra={},
         )
 
