@@ -6,6 +6,9 @@
 
 from .base_user_turn_stop_strategy import BaseUserTurnStopStrategy, UserTurnStoppedParams
 from .deferred_user_turn_stop_strategy import DeferredUserTurnStopStrategy, deferred
+from .eager_llm_turn_completion_user_turn_stop_strategy import (
+    EagerLLMTurnCompletionUserTurnStopStrategy,
+)
 from .eager_match_policy import EagerMatchPolicy, ExactMatch, NormalizedMatch
 from .eager_user_turn_stop_strategy import EagerUserTurnStopStrategy
 from .external_user_turn_completion_stop_strategy import ExternalUserTurnCompletionStopStrategy
@@ -17,6 +20,7 @@ from .turn_analyzer_user_turn_stop_strategy import TurnAnalyzerUserTurnStopStrat
 __all__ = [
     "BaseUserTurnStopStrategy",
     "DeferredUserTurnStopStrategy",
+    "EagerLLMTurnCompletionUserTurnStopStrategy",
     "EagerMatchPolicy",
     "EagerUserTurnStopStrategy",
     "ExactMatch",

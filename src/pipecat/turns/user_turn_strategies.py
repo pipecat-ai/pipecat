@@ -16,6 +16,7 @@ from pipecat.turns.user_start import (
 )
 from pipecat.turns.user_stop import (
     BaseUserTurnStopStrategy,
+    EagerLLMTurnCompletionUserTurnStopStrategy,
     EagerMatchPolicy,
     EagerUserTurnStopStrategy,
     ExternalUserTurnStopStrategy,
@@ -216,5 +217,41 @@ class EagerUserTurnStrategies(ExternalUserTurnStrategies):
             EagerUserTurnStopStrategy(
                 match_policy=self.match_policy,
                 speculation_timeout=self.speculation_timeout,
+            )
+        ]
+
+
+@dataclass
+class FilterIncompleteEagerUserTurnStrategies(EagerUserTurnStrategies):
+    """Eager strategies that end a turn only once the LLM says it's complete.
+
+    Answers the service's prediction like
+    :class:`EagerUserTurnStrategies`, with the LLM beginning each response with
+    a turn-completion marker as in :class:`FilterIncompleteUserTurnStrategies`.
+    When the service commits to the end of the turn, the response is spoken
+    once its marker is ● (complete); a ◐ or ○ (incomplete) keeps the turn open
+    for the user to go on. See
+    :class:`~pipecat.turns.user_stop.EagerLLMTurnCompletionUserTurnStopStrategy`.
+
+    Parameters:
+        config: Optional configuration applied to the LLM via the
+            ``filter_incomplete_user_turns`` setting. If None, defaults from
+            :class:`~pipecat.turns.user_turn_completion_mixin.UserTurnCompletionConfig`
+            are used.
+
+    Example::
+
+        user_turn_strategies=FilterIncompleteEagerUserTurnStrategies()
+    """
+
+    config: UserTurnCompletionConfig | None = None
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.stop = [
+            EagerLLMTurnCompletionUserTurnStopStrategy(
+                match_policy=self.match_policy,
+                speculation_timeout=self.speculation_timeout,
+                config=self.config,
             )
         ]
