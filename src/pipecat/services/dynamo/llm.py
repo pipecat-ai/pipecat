@@ -138,6 +138,9 @@ class DynamoRealtimeLLMService(LLMService[OpenAILLMAdapter]):
             raise ValueError("Dynamo requires a model in settings")
         supported = {"model", "system_instruction", "max_tokens"}
         for name, value in settings.given_fields().items():
+            if name == "use_provider_thinking_default":
+                # Dynamo leaves thinking configuration to the backend.
+                continue
             if name == "filter_incomplete_user_turns" and value is False:
                 continue
             if name not in supported and value is not None:

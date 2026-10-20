@@ -537,6 +537,30 @@ def test_unsupported_sampling_settings_fail_explicitly(make_service, setting):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("provider_default", [False, True])
+async def test_framework_thinking_preference_preserves_model_updates(
+    make_service, provider_default
+):
+    """Framework thinking preferences allow model updates without changing wire options."""
+    settings = DynamoRealtimeLLMService.Settings.from_mapping(
+        {"model": "dynamo-model", "use_provider_thinking_default": provider_default}
+    )
+    service, sockets, sessions = make_service(settings=settings)
+
+    await service._update_settings(DynamoRealtimeLLMService.Settings(model="updated-model"))
+    await service._process_context(LLMContext([{"role": "user", "content": "Hello."}]))
+
+    assert service._settings.given_fields()["use_provider_thinking_default"] is provider_default
+    update = next(event for event in sockets[0].sent if event["type"] == "session.update")
+    assert update["session"] == {
+        "type": "realtime",
+        "model": "updated-model",
+        "output_modalities": ["text"],
+    }
+    assert sockets[0].closed and sessions[0].closed
+
+
+@pytest.mark.asyncio
 async def test_tools_are_rejected_before_opening_connection(make_service):
     """Text-only transport cannot accept a tool-enabled context."""
     service, sockets, _ = make_service()
