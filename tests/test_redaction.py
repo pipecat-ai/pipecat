@@ -9,7 +9,7 @@
 import unittest
 
 from pipecat.frames.frames import ErrorFrame
-from pipecat.utils.security.redaction import _MAX_PAIR_DEPTH, REDACTED, redact_secrets
+from pipecat.utils.security.redaction import redact_secrets
 
 
 class TestRedactSecrets(unittest.TestCase):
@@ -162,15 +162,9 @@ class TestRedactSecrets(unittest.TestCase):
             "a:b:c:https://x/p?token=[REDACTED]&n=1",
         )
 
-    def test_keeps_a_chain_as_deep_as_the_limit(self):
-        message = "a:" * _MAX_PAIR_DEPTH + "z"
+    def test_keeps_a_long_chain_of_pairs_without_credentials_as_written(self):
+        message = "a:" * 5000 + "z"
         self.assertEqual(redact_secrets(message), message)
-
-    def test_masks_the_rest_of_a_chain_deeper_than_the_limit(self):
-        self.assertEqual(
-            redact_secrets("a:" * (_MAX_PAIR_DEPTH + 1) + "z"),
-            "a:" * (_MAX_PAIR_DEPTH + 1) + REDACTED,
-        )
 
     def test_keeps_the_detail_after_an_exception_name_holding_a_credential_word(self):
         for message in (
@@ -206,6 +200,59 @@ class TestRedactSecrets(unittest.TestCase):
         ):
             with self.subTest(message=message):
                 self.assertEqual(redact_secrets(message), expected)
+
+    def test_masks_a_credential_pair_that_follows_another_pair(self):
+        for message, expected in (
+            (
+                "ValueError: Authorization: Bearer abc123",
+                "ValueError: Authorization: Bearer [REDACTED]",
+            ),
+            (
+                "Unknown error occurred: api_key: abc123",
+                "Unknown error occurred: api_key: [REDACTED]",
+            ),
+            ("error: api_key = abc123", "error: api_key = [REDACTED]"),
+            ("X: 'Authorization': 'Bearer abc123'", "X: 'Authorization': '[REDACTED]'"),
+            ("KeyError: api_key: abc123", "KeyError: api_key: [REDACTED]"),
+            ("api_key: token: abc123", "api_key: token: [REDACTED]"),
+            (
+                "error: headers=Authorization: Bearer abc123",
+                "error: headers=Authorization: Bearer [REDACTED]",
+            ),
+            ("error: c=token: abc123", "error: c=token: [REDACTED]"),
+            ("a:b:token: abc123", "a:b:token: [REDACTED]"),
+        ):
+            with self.subTest(message=message):
+                self.assertEqual(redact_secrets(message), expected)
+
+    def test_masks_a_credentials_value_that_reads_like_a_name(self):
+        for message, expected in (
+            ("token: abc: def", "token: [REDACTED] def"),
+            ("password: token:", "password: [REDACTED]"),
+        ):
+            with self.subTest(message=message):
+                self.assertEqual(redact_secrets(message), expected)
+
+    def test_masks_a_credential_at_the_end_of_a_long_spaced_chain(self):
+        result = redact_secrets("a: " * 5001 + "password: hunter2")
+        self.assertTrue(result.endswith("password: [REDACTED]"))
+
+    def test_a_prefix_does_not_change_what_a_message_masks(self):
+        messages = (
+            "api_key: abc123",
+            "Authorization: Bearer abc123",
+            "'token': 'abc123'",
+            "headers=Authorization: Bearer abc123",
+            "url=https://x/p?token=abc123&n=1",
+            "KeyError: 'audio_content'",
+            "InvalidSignature: Signature verification failed",
+        )
+        for prefix in ("Unknown error occurred: ", "Error: ", "Deepgram error: ", "a:b:"):
+            for message in messages:
+                with self.subTest(prefix=prefix, message=message):
+                    self.assertEqual(
+                        redact_secrets(prefix + message), prefix + redact_secrets(message)
+                    )
 
 
 class TestErrorFrameRedaction(unittest.TestCase):
