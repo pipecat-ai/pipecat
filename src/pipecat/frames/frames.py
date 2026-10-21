@@ -477,12 +477,17 @@ class AggregatedTextFrame(TextFrame):
             None for ordinary sentence aggregations.
         will_be_spoken: Whether the TTS service will speak this frame. Set to ``True``
             by the TTS service just before synthesis. Defaults to ``False``.
+        modes: The modes the text is spoken in, such as ``["cheerful"]``, and
+            ``"emphasis"`` for stressed words; empty for the voice's baseline.
+            None when the text carries no delivery. Part of expressive
+            conversation (alpha).
     """
 
     text_type: TextType | str
     context_id: str | None = None
     raw_text: str | None = None
     will_be_spoken: bool = field(default=False, init=False)
+    modes: list[str] | None = field(default=None, kw_only=True)
 
     @property
     @deprecated(

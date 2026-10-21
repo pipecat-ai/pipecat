@@ -226,12 +226,15 @@ class _StreamingContext:
         text_type: The text type of a promoted sentence: ``SENTENCE`` for
             streamed tokens, or the type the context's text was given with, such
             as a ``TTSSpeakFrame``'s.
+        modes: The modes of the pending sentence's tokens, which a promoted
+            sentence carries.
     """
 
     aggregator: "_ParallelSentenceAggregator"
     append_to_context: bool
     build_tracker: bool
     text_type: TextType | str = TextType.SENTENCE
+    modes: list[str] | None = None
 
 
 class AggregatedFrameSequencer:
@@ -370,16 +373,21 @@ class AggregatedFrameSequencer:
             )
             return []
 
+        frames: list[Frame] = []
+        pending = self._streaming_contexts.get(context_id)
+        if pending is not None and pending.modes != frame.modes:
+            # A sentence's tokens share their modes, so a change of modes ends it.
+            frames.extend(await self.finalize(context_id))
         if context_id not in self._streaming_contexts:
             self._streaming_contexts[context_id] = _StreamingContext(
                 _ParallelSentenceAggregator(language),
                 append_to_context,
                 build_tracker,
                 TextType.SENTENCE if frame.text_type == TextType.TOKEN else frame.text_type,
+                frame.modes,
             )
         sc = self._streaming_contexts[context_id]
         sc.aggregator.set_language(language)
-        frames: list[Frame] = []
         async for agg in sc.aggregator.aggregate(
             tts_text, frame.raw_text or frame.text, frame.text
         ):
@@ -573,6 +581,7 @@ class AggregatedFrameSequencer:
                     raw_text=raw_text,
                     suppress_in_context=suppress,
                     includes_inter_frame_spaces=slot_ifs,
+                    modes=active.frame.modes if active else None,
                 )
             )
 
@@ -694,6 +703,7 @@ class AggregatedFrameSequencer:
                                 segment_id=slot.frame.id,
                                 raw_text=raw_remaining,
                                 includes_inter_frame_spaces=slot.includes_inter_frame_spaces,
+                                modes=slot.frame.modes,
                             )
                         )
                         # That frame carries the rest of the text, so the progress view
@@ -808,7 +818,7 @@ class AggregatedFrameSequencer:
             return []
 
         frame = AggregatedTextFrame(
-            agg.user_facing_text, sc.text_type, raw_text=agg.llm_text or None
+            agg.user_facing_text, sc.text_type, raw_text=agg.llm_text or None, modes=sc.modes
         )
         frame.context_id = context_id
         frame.will_be_spoken = True
@@ -831,6 +841,7 @@ class AggregatedFrameSequencer:
                 sc.text_type,
                 raw_text=agg.llm_text.strip() or None,
                 segment_id=frame.id,
+                modes=sc.modes,
             )
             word_frame.context_id = context_id
             word_frame.will_be_spoken = True
@@ -931,9 +942,13 @@ class AggregatedFrameSequencer:
         raw_text: str | None = None,
         suppress_in_context: bool = False,
         includes_inter_frame_spaces: bool = False,
+        modes: list[str] | None = None,
     ) -> Frame:
-        """Build a TTSTextFrame with all standard word-timestamp attributes set."""
-        frame = TTSTextFrame(text, text_type=TextType.WORD, segment_id=segment_id)
+        """Build a TTSTextFrame with all standard word-timestamp attributes set.
+
+        The word carries the modes of the segment it is spoken in.
+        """
+        frame = TTSTextFrame(text, text_type=TextType.WORD, segment_id=segment_id, modes=modes)
         frame.pts = pts
         frame.context_id = context_id
         if suppress_in_context:
