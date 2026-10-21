@@ -102,8 +102,8 @@ class TwilioFrameSerializer(FrameSerializer):
             stream_sid: The Twilio Media Stream SID.
             call_sid: The associated Twilio Call SID (optional, but required for auto hang-up).
             account_sid: Twilio account SID (required for auto hang-up).
-            auth_token: Twilio auth token. Used for auto hang-up unless an API key
-                is provided. Do not combine with api_key_sid/api_key_secret.
+            auth_token: Twilio Auth Token for auto hang-up. Mutually exclusive with
+                api_key_sid/api_key_secret.
             api_key_sid: Twilio API key SID (starts with "SK"). Alternative to
                 auth_token for auto hang-up. Must be provided with api_key_secret.
             api_key_secret: Twilio API key secret. Must be provided with api_key_sid.
