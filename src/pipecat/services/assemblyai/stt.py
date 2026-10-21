@@ -34,6 +34,7 @@ from pipecat.frames.frames import (
     StartFrame,
     STTMetadataFrame,
     TranscriptionFrame,
+    TranscriptionSpeaker,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
@@ -1214,14 +1215,14 @@ class AssemblyAISTTService(WebsocketSTTService):
                     f"for language '{message.language_code}', falling back to English"
                 )
 
-        label = message.speaker if message.speaker not in UNASSIGNED_SPEAKER_LABELS else None
-        speaker = self._speaker(label or None)
-        transcript_text = self._apply_speaker_format(message.transcript, speaker)
-
         # Determine if this is a final turn from AssemblyAI
         is_final_turn = message.end_of_turn and (
             not self._settings.format_turns or message.turn_is_formatted
         )
+
+        # Only final turns carry speakers, so only they are split and formatted.
+        runs = self._turn_runs(message) if is_final_turn else []
+        transcript_text = " ".join(text for _, text in runs) or message.transcript
 
         if self._vad_force_turn_endpoint:
             # --- Pipecat turn detection mode ---
@@ -1234,16 +1235,7 @@ class AssemblyAISTTService(WebsocketSTTService):
                 # Report usage before the transcription frame so tracing can
                 # attach it to the STT span the frame closes.
                 await self.emit_stt_usage_metrics()
-                await self.push_frame(
-                    TranscriptionFrame(
-                        transcript_text,
-                        self._user_id,
-                        time_now_iso8601(),
-                        language,
-                        message,
-                        speaker=speaker,
-                    )
-                )
+                await self._push_transcription_runs(runs, language=language, result=message)
                 await self._trace_transcription(transcript_text, True, language)
                 await self._call_event_handler("on_end_of_turn", transcript_text)
             else:
@@ -1254,7 +1246,6 @@ class AssemblyAISTTService(WebsocketSTTService):
                         time_now_iso8601(),
                         language,
                         message,
-                        speaker=speaker,
                     )
                 )
         else:
@@ -1266,16 +1257,8 @@ class AssemblyAISTTService(WebsocketSTTService):
                 # Report usage before the transcription frame so tracing can
                 # attach it to the STT span the frame closes.
                 await self.emit_stt_usage_metrics()
-                await self.push_frame(
-                    TranscriptionFrame(
-                        transcript_text,
-                        self._user_id,
-                        time_now_iso8601(),
-                        language,
-                        message,
-                        finalized=True,
-                        speaker=speaker,
-                    )
+                await self._push_transcription_runs(
+                    runs, language=language, result=message, finalized=True
                 )
                 await self._trace_transcription(transcript_text, True, language)
                 # Propose the turn stop immediately. broadcast_frame pushes
@@ -1292,9 +1275,33 @@ class AssemblyAISTTService(WebsocketSTTService):
                         time_now_iso8601(),
                         language,
                         message,
-                        speaker=speaker,
                     )
                 )
+
+    def _turn_runs(self, message: TurnMessage) -> list[tuple[TranscriptionSpeaker | None, str]]:
+        """Split a turn's transcript into runs by speaker, with formatted text.
+
+        A turn can hold more than one speaker, so it is split by the speaker of
+        each final word. A word whose speaker is not assigned yet takes the
+        turn's label. Without word speakers, or when the words can't be matched
+        to the transcript, the whole turn goes to the turn's label.
+        """
+        turn_label = message.speaker if message.speaker not in UNASSIGNED_SPEAKER_LABELS else None
+        if any(word.speaker for word in message.words):
+            words = [
+                (
+                    word.text,
+                    word.speaker
+                    if word.speaker and word.speaker not in UNASSIGNED_SPEAKER_LABELS
+                    else turn_label,
+                )
+                for word in message.words
+            ]
+            runs = self._diarized_runs(message.transcript, words)
+            if runs[0][0] is not None:
+                return runs
+        speaker = self._speaker(turn_label or None)
+        return [(speaker, self._apply_speaker_format(message.transcript, speaker))]
 
 
 # Default host for the Sync speech-to-text API.
