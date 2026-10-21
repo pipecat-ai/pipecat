@@ -1,0 +1,1 @@
+- `strip_markdown` reduces a Markdown link or image to its label or alt text, so the URL is no longer read out. Pass `strip_urls=False` (through `functools.partial`) to keep the syntax as it was.

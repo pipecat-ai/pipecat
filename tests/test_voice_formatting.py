@@ -6,6 +6,7 @@
 
 import locale
 import unittest
+from functools import partial
 
 from pipecat.utils.text.alnum_utils import alnum_only
 from pipecat.utils.text.transforms.acronyms import normalize_acronyms
@@ -52,6 +53,67 @@ class TestStripMarkdown(unittest.IsolatedAsyncioTestCase):
         text = "Hello world"
         result = await strip_markdown(text, "*")
         self.assertEqual(result, text)
+
+    async def test_content_asterisks_kept(self):
+        cases = {
+            "Press * then #": "Press * then #",
+            "5 * 3 = 15": "5 * 3 = 15",
+            "2 * 3 * 4 = 24": "2 * 3 * 4 = 24",
+            "Use the * key, then * again": "Use the * key, then * again",
+            "2*3*4 is 24": "2*3*4 is 24",
+            "2**3 is 8": "2**3 is 8",
+            "Type \\*literal\\* asterisks": "Type *literal* asterisks",
+        }
+        for text, expected in cases.items():
+            self.assertEqual(await strip_markdown(text, "*"), expected, text)
+
+    async def test_list_bullets(self):
+        cases = {
+            "\n- Coffee for three dollars.": "\nCoffee for three dollars.",
+            "- Step one.\n    - Sub step.": "Step one.\n    Sub step.",
+            "* item one\n* item two": "item one\nitem two",
+            "+ plus item": "plus item",
+            "1. First\n2. Second": "1. First\n2. Second",
+            "a - b": "a - b",
+        }
+        for text, expected in cases.items():
+            self.assertEqual(await strip_markdown(text, "*"), expected, text)
+
+    async def test_strikethrough_dropped(self):
+        cases = {
+            "The price was ~~ten~~ eight dollars.": "The price was eight dollars.",
+            "It is ~~not ready~~ ready now.": "It is ready now.",
+            "~~Old.~~ New.": " New.",
+            "About ~~ 5 minutes": "About ~~ 5 minutes",
+            "Roughly ~5 minutes": "Roughly ~5 minutes",
+        }
+        for text, expected in cases.items():
+            self.assertEqual(await strip_markdown(text, "*"), expected, text)
+
+    async def test_links_reduced_to_label(self):
+        cases = {
+            "See [the docs](https://example.com/docs) here.": "See the docs here.",
+            "See ![a cat](cat.png) here.": "See a cat here.",
+            "Go to [example.com](https://example.com).": "Go to example.com.",
+            "Visit https://example.com today": "Visit https://example.com today",
+            "[**bold** link](x)": "bold link",
+        }
+        for text, expected in cases.items():
+            self.assertEqual(await strip_markdown(text, "*"), expected, text)
+
+    async def test_links_kept(self):
+        keep = partial(strip_markdown, strip_urls=False)
+        text = "See [the docs](https://example.com/docs) here."
+        self.assertEqual(await keep(text, "*"), text)
+
+    async def test_horizontal_rules(self):
+        cases = {
+            "First part.\n\n---\n\nSecond part.": "First part.\n\n\nSecond part.",
+            "* * *\ntext": "text",
+            "___\ntext": "text",
+        }
+        for text, expected in cases.items():
+            self.assertEqual(await strip_markdown(text, "*"), expected, text)
 
 
 class TestExpandPhoneNumbers(unittest.IsolatedAsyncioTestCase):
