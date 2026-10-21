@@ -21,6 +21,8 @@ from websockets.protocol import State
 
 from pipecat.audio.utils import create_stream_resampler
 from pipecat.expressive.expression import ExpressionCapabilities
+from pipecat.expressive.parser import ExpressionParser, Segment
+from pipecat.expressive.segment_frames import segment_frames
 from pipecat.frames.frames import (
     AggregatedTextFrame,
     BotStartedSpeakingFrame,
@@ -408,6 +410,10 @@ class TTSService(AIService):
         # Whether the TTS process is currently yielding audio frames synchronously.
         self._is_yielding_frames_synchronously = False
 
+        # Reads the expression tags an LLM writes, across the units of a
+        # response, when the pipeline has expressive conversation on.
+        self._expression_parser: ExpressionParser | None = None
+
     @property
     def sample_rate(self) -> int:
         """Get the current sample rate for audio output.
@@ -543,6 +549,8 @@ class TTSService(AIService):
         """
         await super().setup(setup)
         self._sample_rate = self._init_sample_rate or setup.audio_out_sample_rate
+        if setup.enable_expressive_conversation:
+            self._expression_parser = self._create_expression_parser()
 
     async def start(self, frame: StartFrame):
         """Start the TTS service.
@@ -1215,6 +1223,13 @@ class TTSService(AIService):
         await self.stop_text_aggregation_metrics()
         if remaining:
             await self._handle_aggregated_text(self._aggregated_text_frame(remaining))
+        if self._expression_parser:
+            text_type = TextType.TOKEN if self._is_streaming_tokens else TextType.SENTENCE
+            await self._speak_expression(
+                AggregatedTextFrame("", text_type),
+                self._expression_parser.flush(),
+                self.create_context_id(),
+            )
 
         # Force-promote any sentence still pending in the sequencer (streaming
         # mode only; a no-op otherwise) — handles a response that ends with no
@@ -1289,7 +1304,13 @@ class TTSService(AIService):
         await self.on_turn_context_created(speak_context_id)
         text_frame = AggregatedTextFrame(frame.text, frame.text_type, raw_text=frame.text)
         text_frame.interruptible = frame.interruptible
-        await self._handle_aggregated_text(text_frame, speak_context_id)
+        if self._expression_parser and frame.text_type not in self._skip_text_types:
+            # Text of its own, apart from any response it is spoken in the middle of.
+            parser = self._create_expression_parser()
+            segments = parser.feed(frame.text) + parser.flush()
+            await self._speak_expression(text_frame, segments, speak_context_id)
+        else:
+            await self._handle_aggregated_text(text_frame, speak_context_id)
         # Force-promote the utterance's pending sentence into a real slot (streaming
         # mode only; a no-op otherwise). A TTSSpeakFrame is a self-contained sentence
         # with no following token to confirm its boundary, so without this it would
@@ -1334,6 +1355,8 @@ class TTSService(AIService):
 
         await self._text_aggregator.handle_interruption()
         await self._skipped_text_aggregator.handle_interruption()
+        if self._expression_parser:
+            self._expression_parser.reset()
         for filter in self._text_filters:
             await filter.handle_interruption()
 
@@ -1480,8 +1503,42 @@ class TTSService(AIService):
         text = self._trim_text(src_frame.text)
         if src_frame.text_type in self._skip_text_types:
             await self._push_skipped_text(src_frame, context_id)
+        elif self._expression_parser:
+            segments = self._expression_parser.feed(src_frame.text)
+            await self._speak_expression(src_frame, segments, context_id)
         elif text is not None:
             await self._speak_text([(src_frame, text)], context_id)
+
+    async def _speak_expression(
+        self, src_frame: AggregatedTextFrame, segments: list[Segment], context_id: str
+    ):
+        """Speak a unit of text whose expression tags have been read, as one request.
+
+        Its words, in their modes, and its events become pieces of their own,
+        in the order written.
+        """
+        pieces: list[tuple[AggregatedTextFrame, str]] = []
+        trim = not self._is_streaming_tokens
+        for frame, text in segment_frames(segments, src_frame.text_type, trim=trim):
+            frame.interruptible = src_frame.interruptible
+            if not frame.skip_tts:
+                trimmed = self._trim_text(text)
+                if trimmed is None:
+                    continue
+                text = trimmed
+            pieces.append((frame, text))
+        if pieces:
+            await self._speak_text(pieces, context_id)
+
+    def _create_expression_parser(self) -> ExpressionParser:
+        """Create a parser that knows the names this service declares."""
+        capabilities = self.expression_capabilities()
+        if not capabilities:
+            return ExpressionParser()
+        return ExpressionParser(
+            events=[term.name for term in capabilities.events],
+            modes=[term.name for term in capabilities.modes],
+        )
 
     async def _push_skipped_text(self, frame: AggregatedTextFrame, context_id: str):
         """Push text that isn't spoken, in order with the spoken text around it."""
@@ -1778,11 +1835,13 @@ class TTSService(AIService):
         # should carry.
         if not self._push_text_frames or self._is_streaming_tokens:
             return
+        # Trimmed like a sentence, as one piece of a unit keeps its spacing.
         frame = TTSTextFrame(
-            text,
+            text.strip(),
             text_type=src_frame.text_type,
             raw_text=src_frame.raw_text,
             segment_id=src_frame.id,
+            modes=src_frame.modes,
         )
         frame.will_be_spoken = True
         frame.context_id = context_id

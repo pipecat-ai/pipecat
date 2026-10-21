@@ -33,9 +33,16 @@ class TextType(StrEnum):
 
     ``BACKCHANNEL`` is a short acknowledgment the bot says while the user talks,
     such as "Mm-hmm.". Text can also have a type of its own, such as ``"code"``.
+
+    ``EXPRESSION_EVENT`` and ``EXPRESSION_PAUSE`` are part of expressive
+    conversation (alpha): a sound or a silence an LLM writes into its reply,
+    which isn't spoken as words. The text is the event's name, or the pause's
+    duration in milliseconds.
     """
 
     BACKCHANNEL = "backchannel"
+    EXPRESSION_EVENT = "expression_event"
+    EXPRESSION_PAUSE = "expression_pause"
     SENTENCE = "sentence"
     TOKEN = "token"
     WORD = "word"
