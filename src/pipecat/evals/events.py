@@ -636,7 +636,9 @@ class EvalEventStream:
 
         Only expressive conversation reports it: an event or pause segment, or
         spoken text carrying ``modes``. Spoken text is reported once per
-        segment, where its modes differ from those before it in the response.
+        segment, as it is spoken rather than announced, so it keeps its place
+        among the events, where its modes differ from those before it in the
+        response.
         """
         text_type = data.get("text_type")
         if text_type == "expression_event":
@@ -648,6 +650,7 @@ class EvalEventStream:
         if (
             modes is None
             or not data.get("will_be_spoken")
+            or data.get("spoken_status") == "new"
             or segment_id in self._expression_segments
         ):
             return None

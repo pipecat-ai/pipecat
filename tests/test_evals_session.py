@@ -273,7 +273,9 @@ class TestFramesToEvents(unittest.TestCase):
         # of the spoken text change, and each event and pause.
         s = _stream(bot_audio=True)
 
-        def bot_output(segment_id, text_type="sentence", text="words", modes=None, status="new"):
+        def bot_output(
+            segment_id, text_type="sentence", text="words", modes=None, status="in-progress"
+        ):
             data = {
                 "text": text,
                 "text_type": text_type,
@@ -292,8 +294,10 @@ class TestFramesToEvents(unittest.TestCase):
             return event and event["text"]
 
         s.frame_to_event(LLMFullResponseStartFrame())
+        # Spoken text counts as it is spoken, not when it is announced.
+        self.assertIsNone(expression(bot_output(1, modes=["excited"], status="new")))
         self.assertEqual(expression(bot_output(1, modes=["excited"])), "<<excited>>")
-        self.assertIsNone(expression(bot_output(1, modes=["excited"], status="in-progress")))
+        self.assertIsNone(expression(bot_output(1, modes=["excited"], status="completed")))
         self.assertEqual(
             expression(bot_output(2, modes=["excited", "emphasis"])), "<<excited emphasis>>"
         )

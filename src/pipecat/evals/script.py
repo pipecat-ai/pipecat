@@ -446,10 +446,11 @@ class EvalExpectation:
     def aggregates(self) -> bool:
         """Whether the check accumulates text across events rather than matching one.
 
-        A reply with a content check accumulates the bot's segments; a
+        A reply with a content check accumulates the bot's segments, and an
+        ``expression`` check the expression performed in the turn; a
         ``user_transcription`` with ``text_contains`` accumulates an STT's pieces.
         """
-        if self.event in ("response", "llm_response", "tts_response"):
+        if self.event in ("response", "llm_response", "tts_response", "expression"):
             return self.text_contains is not None or self.eval is not None
         if self.event == "user_transcription":
             return self.text_contains is not None and self.eval is None
