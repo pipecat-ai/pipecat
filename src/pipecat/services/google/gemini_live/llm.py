@@ -767,7 +767,6 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
 
         self._last_sent_time = 0
 
-        self._system_instruction_from_init = self._settings.system_instruction
         # Accept a plain list of standard tools as a convenience; normalize it to a
         # ToolsSchema so the rest of the service has a single form to handle.
         # Provider-native tool lists (dicts) pass through unchanged.
@@ -1195,10 +1194,10 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
             # chooses the init-provided value if there is one.
             adapter = self.get_llm_adapter()
             params = await adapter.get_llm_invocation_params(
-                self._context, system_instruction=assert_given(self._system_instruction_from_init)
+                self._context, system_instruction=assert_given(self._settings.system_instruction)
             )
             system_instruction = params["system_instruction"]
-            system_instruction_changed = system_instruction != self._system_instruction_from_init
+            system_instruction_changed = system_instruction != self._settings.system_instruction
             # The context bringing tools of its own warrants a reconnect, without
             # diffing them against the init-provided ones.
             context_has_tools = is_given(self._context.tools)
@@ -1221,14 +1220,14 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
             # to trigger a response).
             messages = params["messages"]
             if not messages and self._inference_on_context_initialization:
-                if self._system_instruction_from_init:
+                if self._settings.system_instruction:
                     logger.debug(
                         "No messages found in initial context; seeding with system instruction to trigger bot response."
                     )
                     self._context.add_message(
                         {
                             "role": "developer",
-                            "content": assert_given(self._system_instruction_from_init),
+                            "content": assert_given(self._settings.system_instruction),
                         }
                     )
                 else:
@@ -1540,7 +1539,7 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
             if self._context:
                 params = await adapter.get_llm_invocation_params(
                     self._context,
-                    system_instruction=assert_given(self._system_instruction_from_init),
+                    system_instruction=assert_given(self._settings.system_instruction),
                     service_tools=self._tools_from_init,
                 )
                 system_instruction = params["system_instruction"]
@@ -1549,7 +1548,7 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
                 # either way.
                 tools = params["tools"]
             else:
-                system_instruction = self._system_instruction_from_init
+                system_instruction = self._settings.system_instruction
                 # No context yet: the init-provided tools; built-in tools ride along.
                 tools = adapter.from_standard_tools(self._tools_from_init)
             if system_instruction:
