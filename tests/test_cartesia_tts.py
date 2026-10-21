@@ -16,7 +16,11 @@ from pipecat.frames.frames import (
     TextType,
     TTSTextFrame,
 )
-from pipecat.services.cartesia.tts import CartesiaHttpTTSService, CartesiaTTSService
+from pipecat.services.cartesia.tts import (
+    CartesiaHttpTTSService,
+    CartesiaTTSService,
+    language_to_cartesia_language,
+)
 from pipecat.services.settings import TTSSettings
 from pipecat.transcriptions.language import Language
 from pipecat.utils.context.aggregated_frame_sequencer import AggregatedFrameSequencer
@@ -31,36 +35,42 @@ def _service(language: str) -> CartesiaTTSService:
     return service
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("service_cls", [CartesiaTTSService, CartesiaHttpTTSService])
 @pytest.mark.parametrize(
-    "model, preserves_locale",
+    "language, expected",
     [
-        ("sonic-3.6", True),
-        ("sonic-3.6-2026-08-27", True),
-        ("sonic-3.10", True),
-        ("sonic-4", True),
-        ("sonic-3.5", False),
-        ("sonic-3.5-2026-07-01", False),
-        ("sonic-3", False),
-        ("sonic-preview", False),
-        ("other-4", False),
-        (None, False),
+        (Language.ES, "es"),
+        (Language.ES_MX, "es-MX"),
+        (Language.EN_GB, "en-GB"),
+        (Language.ES_AR, "es-AR"),
+        (Language.ZH_TW, "zh-TW"),
+        (Language.DE_CH, "de"),
+        (Language.NB, "no"),
+        (Language.NB_NO, "no-NO"),
+        (Language.FIL, "tl"),
+        (Language.FIL_PH, "tl-PH"),
     ],
 )
-@pytest.mark.parametrize("language", [Language.ES_MX, "en-GB", "ja-JP", "fr", None])
+def test_language_to_cartesia_language_keeps_supported_locales(language, expected):
+    assert language_to_cartesia_language(language) == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("service_cls", [CartesiaTTSService, CartesiaHttpTTSService])
+@pytest.mark.parametrize("model", ["sonic-3.6", "sonic-3"])
+@pytest.mark.parametrize(
+    "language, expected",
+    [(Language.ES_MX, "es-MX"), ("en-GB", "en-GB"), (Language.DE_CH, "de"), (None, None)],
+)
 @pytest.mark.parametrize("update", [False, True])
-async def test_language_wire_format(service_cls, model, preserves_locale, language, update):
+async def test_requests_send_the_mapped_language(service_cls, model, language, expected, update):
     service = service_cls(
         api_key="test",
         settings=service_cls.Settings(
-            model="sonic-3.5" if update else model,
-            voice="voice",
-            language="en" if update else language,
+            model=model, voice="voice", language="en" if update else language
         ),
     )
     if update:
-        await service._update_settings(service.Settings(model=model, language=language))
+        await service._update_settings(service.Settings(language=language))
     if service_cls is CartesiaTTSService:
         payload = json.loads(service._build_msg(text="Hello", context_id="ctx"))
     else:
@@ -70,9 +80,6 @@ async def test_language_wire_format(service_cls, model, preserves_locale, langua
         _ = [frame async for frame in service.run_tts("Hello", "ctx")]
         payload = service._session.post.call_args.kwargs["json"]
 
-    expected = str(language) if language is not None else None
-    if expected and not preserves_locale:
-        expected = expected.split("-")[0]
     assert payload.get("language") == expected
     assert "locale" not in payload
 
@@ -83,6 +90,7 @@ async def test_language_wire_format(service_cls, model, preserves_locale, langua
     [
         ("en-US", {"language": "en-GB"}, "en-GB", True),
         ("en-US", {"language": Language.ES_MX}, "es-MX", True),
+        ("en-US", {"language": Language.DE_CH}, "de", True),
         ("en-US", {"language": "en-US"}, "en-US", False),
     ],
 )
