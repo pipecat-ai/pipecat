@@ -15,7 +15,7 @@ https://docs.nvidia.com/nim/speech/latest/asr/
 import asyncio
 from collections.abc import AsyncGenerator, Mapping
 from concurrent.futures import CancelledError as FuturesCancelledError
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, ClassVar, cast
 
 from loguru import logger
@@ -35,10 +35,10 @@ from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import NVIDIA_TTFS_P99
 from pipecat.services.stt_service import SegmentedSTTService, STTService
 from pipecat.transcriptions.language import Language, resolve_language
-from pipecat.utils.deprecation import deprecated
+from pipecat.utils.deprecation import deprecated, warn_deprecated
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
-from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 
 try:
     import grpc
@@ -134,6 +134,11 @@ class _NvidiaBaseSTTSettings(STTSettings):
             A result with an untagged word, no word information, or words that
             can't be located in its transcript is emitted whole, with no label.
         max_speakers: Maximum number of speakers for diarization.
+        diarization_max_speakers: Maximum number of speakers for diarization.
+
+            .. deprecated:: 1.14.0
+                Use ``max_speakers`` instead. Will be removed in 2.0.0.
+
         speaker_format: Optional format string for diarized speaker runs. Use ``{speaker}`` for the
             speaker tag, ``{text}`` for the transcript text, and ``{speaker_number}`` for the
             speaker's order of first appearance in the session (``1``, ``2``, ...). If ``None``,
@@ -149,7 +154,29 @@ class _NvidiaBaseSTTSettings(STTSettings):
     word_time_offsets: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     speaker_diarization: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     max_speakers: int | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    diarization_max_speakers: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     speaker_format: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+
+def _migrate_diarization_max_speakers(settings: STTSettings) -> STTSettings:
+    """Move the deprecated ``diarization_max_speakers`` into ``max_speakers``.
+
+    An explicit ``max_speakers`` in the same settings takes precedence.
+    """
+    value = getattr(settings, "diarization_max_speakers", NOT_GIVEN)
+    if not is_given(value) or value is None:
+        return settings
+    warn_deprecated(
+        "`diarization_max_speakers` is deprecated since 1.14.0 and will be removed in 2.0.0. "
+        "Use `max_speakers` instead.",
+        stacklevel=3,
+    )
+    max_speakers = getattr(settings, "max_speakers", NOT_GIVEN)
+    return replace(
+        settings,
+        max_speakers=max_speakers if is_given(max_speakers) else value,
+        diarization_max_speakers=NOT_GIVEN,
+    )
 
 
 @dataclass
@@ -352,6 +379,7 @@ class NvidiaSTTService(STTService):
             word_time_offsets=False,
             speaker_diarization=False,
             max_speakers=0,
+            diarization_max_speakers=None,
             speaker_format=None,
         )
 
@@ -365,7 +393,7 @@ class NvidiaSTTService(STTService):
 
         # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
-            default_settings.apply_update(settings)
+            default_settings.apply_update(_migrate_diarization_max_speakers(settings))
 
         super().__init__(
             sample_rate=sample_rate,
@@ -468,7 +496,7 @@ class NvidiaSTTService(STTService):
         Returns:
             Dict mapping changed field names to their previous values.
         """
-        changed = await super()._update_settings(delta)
+        changed = await super()._update_settings(_migrate_diarization_max_speakers(delta))
 
         if not changed:
             return changed
@@ -839,6 +867,7 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
             word_time_offsets=False,
             speaker_diarization=False,
             max_speakers=0,
+            diarization_max_speakers=None,
             speaker_format=None,
         )
 
@@ -857,7 +886,7 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
 
         # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
-            default_settings.apply_update(settings)
+            default_settings.apply_update(_migrate_diarization_max_speakers(settings))
 
         super().__init__(
             sample_rate=sample_rate,
@@ -967,7 +996,7 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
         Returns:
             Dict mapping changed field names to their previous values.
         """
-        changed = await super()._update_settings(delta)
+        changed = await super()._update_settings(_migrate_diarization_max_speakers(delta))
 
         if changed:
             self._config = self._create_recognition_config()

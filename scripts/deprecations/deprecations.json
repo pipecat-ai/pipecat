@@ -3534,6 +3534,17 @@
       "location": "pipecat/services/nvidia/stt.py"
     },
     {
+      "subject": "_NvidiaBaseSTTSettings.diarization_max_speakers",
+      "module": "pipecat.services.nvidia.stt",
+      "kind": "parameter",
+      "deprecated_in": "1.14.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "max_speakers",
+      "message": "Use ``max_speakers`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/services/nvidia/stt.py"
+    },
+    {
       "subject": "NvidiaTTSService.InputParams",
       "module": "pipecat.services.nvidia.tts",
       "kind": "class",
