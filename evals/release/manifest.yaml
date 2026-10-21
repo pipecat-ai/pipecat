@@ -414,6 +414,8 @@ suite:
     scenarios: [scripted/expressive_conversation]
   - bot: expressive-conversation/expressive-conversation-elevenlabs.py
     scenarios: [scripted/expressive_conversation]
+  - bot: expressive-conversation/expressive-conversation-fish.py
+    scenarios: [scripted/expressive_conversation]
 
   #
   # Video avatar services

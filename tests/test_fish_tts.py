@@ -11,7 +11,8 @@ from unittest.mock import AsyncMock
 import ormsgpack
 import pytest
 
-from pipecat.services.fish.tts import FishAudioTTSService
+from pipecat.expressive.adapter import ExpressionAdapter
+from pipecat.services.fish.tts import FishAudioS2ExpressionAdapter, FishAudioTTSService
 from pipecat.utils.types import NOT_GIVEN
 
 
@@ -142,3 +143,48 @@ async def test_short_audio_chunks_are_kept():
     await service._receive_messages()
 
     assert appended == chunks
+
+
+class TestS2ExpressionAdapter:
+    def test_capabilities(self):
+        capabilities = FishAudioS2ExpressionAdapter().capabilities()
+        assert capabilities.free_text_modes and capabilities.free_text_events
+        assert capabilities.emphasis
+        assert "laughing" in [term.name for term in capabilities.events]
+        # A mode tag separates modes by spaces.
+        assert all(len(term.name.split()) == 1 for term in capabilities.modes)
+
+    def test_tags_where_modes_change(self):
+        adapter = FishAudioS2ExpressionAdapter()
+        assert adapter.render_text("Hi.", ["excited"], None) == "[excited] Hi."
+        assert adapter.render_text("Hi.", ["excited"], ["excited"]) == "Hi."
+        assert adapter.render_text("Hi.", ["sad", "whispering"], None) == "[sad][whispering] Hi."
+
+    def test_return_to_baseline_writes_no_tag(self):
+        # Fish reads a [neutral] tag as a delivery of its own.
+        assert FishAudioS2ExpressionAdapter().render_text("Hi.", [], ["excited"]) == "Hi."
+
+    def test_emphasis(self):
+        adapter = FishAudioS2ExpressionAdapter()
+        assert adapter.render_text("now", ["emphasis"], None) == "[emphasis] now"
+        assert adapter.render_text("now", ["excited", "emphasis"], ["excited"]) == "[emphasis] now"
+
+    def test_events_and_pauses(self):
+        adapter = FishAudioS2ExpressionAdapter()
+        assert adapter.render_event("clear throat") == "[clear throat]"
+        assert adapter.render_pause(600) == "[break]"
+        assert adapter.render_pause(1200) == "[long-break]"
+
+
+@pytest.mark.parametrize(
+    "model, adapter",
+    [
+        ("s2.1-pro", FishAudioS2ExpressionAdapter),
+        ("s2-pro", FishAudioS2ExpressionAdapter),
+        ("s1", ExpressionAdapter),
+        ("drama-3", ExpressionAdapter),
+    ],
+)
+def test_expression_adapter_follows_the_model(model, adapter):
+    service = FishAudioTTSService(api_key="key", settings=FishAudioTTSService.Settings(model=model))
+    assert type(service.get_expression_adapter()) is adapter
