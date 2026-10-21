@@ -94,12 +94,13 @@ class KrispVivaApiFilter(BaseAudioFilter):
             metadata: Optional object echoed in the server's ``ready`` message
                 (at most 4 KB JSON-encoded).
         """
-        self._api_key = api_key or os.getenv("KRISP_API_KEY")
-        if not self._api_key:
+        api_key = api_key or os.getenv("KRISP_API_KEY")
+        if not api_key:
             raise ValueError(
                 "Krisp API key is required. Pass api_key or set the KRISP_API_KEY "
                 "environment variable."
             )
+        self._api_key = api_key
         self._url = url or os.getenv("KRISP_VIVA_API_URL") or KRISP_VIVA_API_URL
         self._rest_base_url = (
             rest_base_url or os.getenv("KRISP_REST_BASE_URL") or KRISP_REST_BASE_URL
