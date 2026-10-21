@@ -10,6 +10,7 @@ from collections.abc import AsyncGenerator
 
 import pytest
 
+from pipecat.expressive.adapter import ExpressionAdapter
 from pipecat.expressive.expression import ExpressionCapabilities, ExpressionTerm, ModeScope
 from pipecat.frames.frames import Frame, TTSMetadataFrame
 from pipecat.services.tts_service import TTSService
@@ -24,15 +25,23 @@ CAPABILITIES = ExpressionCapabilities(
 )
 
 
+class DeclaringAdapter(ExpressionAdapter):
+    def __init__(self, capabilities: ExpressionCapabilities | None):
+        self._capabilities = capabilities
+
+    def capabilities(self) -> ExpressionCapabilities | None:
+        return self._capabilities
+
+
 class SilentTTSService(TTSService):
     """A TTS service that never speaks, declaring the given capabilities."""
 
     def __init__(self, capabilities: ExpressionCapabilities | None = None, **kwargs):
         super().__init__(sample_rate=16000, **kwargs)
-        self._capabilities = capabilities
+        self._declaring_adapter = DeclaringAdapter(capabilities)
 
-    def expression_capabilities(self) -> ExpressionCapabilities | None:
-        return self._capabilities
+    def get_expression_adapter(self) -> ExpressionAdapter:
+        return self._declaring_adapter
 
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         yield  # pragma: no cover

@@ -464,20 +464,13 @@ class TTSService(AIService):
         """
         return True
 
-    def expression_capabilities(self) -> ExpressionCapabilities | None:
-        """The expression tags this service can perform, or None.
-
-        Part of expressive conversation (alpha). The default returns the
-        expression adapter's; a service whose capabilities depend on its
-        settings, such as its voice, overrides this.
-        """
-        return self.get_expression_adapter().capabilities()
-
     def get_expression_adapter(self) -> ExpressionAdapter:
         """The adapter that renders this service's expression tags.
 
-        A service whose expression depends on its settings, such as its model,
-        overrides this to choose an adapter for them.
+        Part of expressive conversation (alpha). Its capabilities are what the
+        service can perform: what it broadcasts at start, and what it reads
+        and renders. A service whose expression depends on its settings, such
+        as its model, overrides this to choose an adapter for them.
 
         Returns:
             An instance of :attr:`expression_adapter_class`.
@@ -499,10 +492,12 @@ class TTSService(AIService):
         """Build the TTS metadata frame broadcast at start.
 
         Overrides :meth:`AIService.service_metadata_frame` to return a
-        :class:`~pipecat.frames.frames.TTSMetadataFrame` carrying the service's
-        :meth:`expression_capabilities`.
+        :class:`~pipecat.frames.frames.TTSMetadataFrame` carrying its expression
+        adapter's capabilities.
         """
-        return TTSMetadataFrame(service_name=self.name, expression=self.expression_capabilities())
+        return TTSMetadataFrame(
+            service_name=self.name, expression=self.get_expression_adapter().capabilities()
+        )
 
     async def start_tts_usage_metrics(self, text: str):
         """Record TTS usage metrics.

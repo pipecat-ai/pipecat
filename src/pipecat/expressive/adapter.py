@@ -21,9 +21,10 @@ from pipecat.expressive.expression import ExpressionCapabilities
 class ExpressionAdapter:
     """Renders expression for one TTS service. The base performs nothing.
 
-    The TTS service calls the adapter only with what its capabilities say it
-    supports: other modes are taken off the words first, and other events are
-    never rendered.
+    Its capabilities are what the service can perform: the service broadcasts
+    them at start, and reads and renders tags by them. The service calls the
+    adapter only with what they say it supports: other modes are taken off
+    the words first, and other events are never rendered.
     """
 
     def capabilities(self) -> ExpressionCapabilities | None:
