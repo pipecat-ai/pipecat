@@ -410,7 +410,9 @@ suite:
   # Expressive conversation: the LLM writes expression tags, and the TTS
   # performs them rather than speaking them.
   #
-  - bot: features/features-expressive-conversation.py
+  - bot: expressive-conversation/expressive-conversation-cartesia.py
+    scenarios: [scripted/expressive_conversation]
+  - bot: expressive-conversation/expressive-conversation-elevenlabs.py
     scenarios: [scripted/expressive_conversation]
 
   #

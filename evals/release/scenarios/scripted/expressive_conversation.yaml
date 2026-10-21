@@ -3,10 +3,14 @@ name: expressive_conversation
 # Expressive conversation, end to end: the LLM writes expression tags into
 # its replies, and the TTS performs them rather than speaking them. Each turn
 # checks the LLM's raw text for a tag, the text the TTS reports speaking for
-# markup, and the transcription of the bot's audio for tags read aloud.
+# markup, and the transcription of the bot's audio for tags read aloud. Markup
+# is checked by text_excludes. The evals judge only the reply's content: a
+# judge asked about markup finds it in the LLM's raw text and fails replies
+# that were spoken cleanly.
 #
 # For a bot with PipelineParams(enable_expressive_conversation=True) whose
-# prompt teaches the tags, such as features-expressive-conversation.py.
+# prompt teaches the tags, such as the examples in
+# examples/expressive-conversation/.
 
 user: !include ../user_audio.yaml
 
@@ -25,10 +29,10 @@ scenarios:
           - event: llm_response
             text_contains: "<<"
           - event: tts_response
-            eval: "the text is plain words, with no markup such as angle-bracket or square-bracket tags"
+            eval: "the bot congratulates the user"
             text_excludes: "<"
           - event: response
-            eval: "the bot congratulates the user, without reading out markup such as 'emotion value' or 'break time'"
+            eval: "the bot congratulates the user"
             text_excludes: "emotion"
 
       - user: "Thanks. But my dog has been sick all week and I'm really worried about him."
@@ -36,19 +40,20 @@ scenarios:
           - event: llm_response
             text_contains: "<<"
           - event: tts_response
-            eval: "the text is plain words, with no markup such as angle-bracket or square-bracket tags"
+            eval: "the bot responds with sympathy for the user's worry about their dog"
             text_excludes: "<"
           - event: response
-            eval: "the bot responds with sympathy for the user's worry about their dog, without reading out markup such as 'emotion value' or 'break time'"
+            eval: "the bot responds with sympathy for the user's worry about their dog"
             text_excludes: "emotion"
 
       - user: "Why did the scarecrow win an award? Because he was outstanding in his field."
         expect:
+          # Each TTS names its laugh its own way, as an event or a mode.
           - event: llm_response
-            text_contains: "[[laughter]]"
+            eval: "the reply laughs with a tag, such as [[laughter]], [[laughs]], [[chuckles]] or <<laughing>>"
           - event: tts_response
-            eval: "the text is plain words, with no markup such as angle-bracket or square-bracket tags"
+            eval: "the bot reacts to the user's joke"
             text_excludes: "["
           - event: response
-            eval: "the bot reacts to the user's joke, without reading out markup such as the word 'laughter' in brackets"
+            eval: "the bot reacts to the user's joke"
             text_excludes: "emotion"

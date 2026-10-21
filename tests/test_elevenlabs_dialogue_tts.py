@@ -15,9 +15,11 @@ from websockets.protocol import State
 
 from pipecat.services.elevenlabs.dialogue.tts import (
     _KEEPALIVE_CONTEXT_ID,
+    ElevenLabsDialogueExpressionAdapter,
     ElevenLabsDialogueTTSService,
     _DialogueContext,
     _normalize_ttd_alignment,
+    _strip_audio_tags,
 )
 from pipecat.services.elevenlabs.tts import calculate_word_times
 from pipecat.services.tts_service import TextAggregationMode
@@ -480,3 +482,99 @@ async def test_dialogue_drained_alignment_does_not_disturb_the_next_turn():
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def _alignment(text: str, start_ms: int = 0) -> dict:
+    """Alignment for text, one character every 10ms."""
+    return {
+        "chars": list(text),
+        "charStartTimesMs": [start_ms + 10 * i for i in range(len(text))],
+        "charDurationsMs": [10] * len(text),
+    }
+
+
+def test_audio_tags_are_stripped_from_alignment():
+    stripped, in_tag = _strip_audio_tags(_alignment("ancient. [laughs] Let"), False)
+
+    assert "".join(stripped["chars"]) == "ancient.  Let"
+    assert stripped["charStartTimesMs"][-3:] == [180, 190, 200]
+    assert not in_tag
+    word_times, partial, _ = calculate_word_times(stripped, 0.0)
+    assert [word for word, _ in word_times] == ["ancient."]
+    assert partial == "Let"
+
+
+def test_audio_tag_split_across_chunks_is_stripped():
+    first, in_tag = _strip_audio_tags(_alignment("[warm, re"), False)
+    second, in_tag = _strip_audio_tags(_alignment("assuring tone] It's"), in_tag)
+
+    assert first["chars"] == []
+    assert "".join(second["chars"]) == " It's"
+    assert not in_tag
+
+
+@pytest.mark.asyncio
+async def test_dialogue_word_timestamps_leave_out_audio_tags():
+    service = _make_dialogue_service()
+    ws = _FakeWebSocket()
+    await _open_dialogue_context(service, ws)
+    reported = []
+
+    async def _record(word_times, *args, **kwargs):
+        reported.extend(word for word, _ in word_times)
+
+    service.add_word_timestamps = _record
+
+    for chunk in ("[exci", "ted] Good news [laughs] it's ", "back."):
+        alignment = _alignment(chunk)
+        await service._handle_message(
+            {
+                "context_id": "ctx-1",
+                "alignment": {
+                    "chars": alignment["chars"],
+                    "char_start_times_ms": alignment["charStartTimesMs"],
+                    "char_durations_ms": alignment["charDurationsMs"],
+                },
+            }
+        )
+
+    assert reported == ["Good", "news", "it's"]
+    # The clock advances over the tags too: they take time in the audio.
+    assert service._cumulative_time == pytest.approx(0.05 + 0.29 + 0.05)
+
+
+class TestDialogueExpressionAdapter:
+    def test_capabilities(self):
+        capabilities = ElevenLabsDialogueExpressionAdapter().capabilities()
+        assert capabilities.free_text_modes
+        assert capabilities.free_text_events
+        assert capabilities.emphasis
+        assert capabilities.pause_range_ms == (100, 3000)
+
+    def test_modes_are_single_words(self):
+        # A mode tag separates modes by spaces.
+        capabilities = ElevenLabsDialogueExpressionAdapter().capabilities()
+        assert all(len(term.name.split()) == 1 for term in capabilities.modes)
+
+    def test_tags_rendered_where_modes_change(self):
+        adapter = ElevenLabsDialogueExpressionAdapter()
+        assert adapter.render_text("Hi.", ["excited"], None) == "[excited] Hi."
+        assert adapter.render_text("Hi.", ["excited"], ["excited"]) == "Hi."
+        assert adapter.render_text("Hi.", ["sad", "whispers"], None) == "[sad] [whispers] Hi."
+
+    def test_return_to_baseline_renders_nothing(self):
+        adapter = ElevenLabsDialogueExpressionAdapter()
+        assert adapter.render_text("Hi.", [], ["excited"]) == "Hi."
+
+    def test_emphasis_is_capitalized(self):
+        adapter = ElevenLabsDialogueExpressionAdapter()
+        assert adapter.render_text("back up", ["emphasis"], None) == "BACK UP"
+        assert adapter.render_text("back up", ["excited", "emphasis"], ["excited"]) == "BACK UP"
+
+    def test_events(self):
+        assert ElevenLabsDialogueExpressionAdapter().render_event("laughs") == "[laughs]"
+
+    def test_pauses_are_short_or_long(self):
+        adapter = ElevenLabsDialogueExpressionAdapter()
+        assert adapter.render_pause(500) == "[short pause]"
+        assert adapter.render_pause(1500) == "[long pause]"
