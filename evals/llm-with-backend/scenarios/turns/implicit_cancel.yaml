@@ -27,9 +27,10 @@
     # The acknowledgement and the cancellation land in either order: the
     # cascades acknowledge first, the speech-to-speech bots cancel first.
     - event: response
-      # Judged after the delegate call, with no check_from: a model that also
-      # speaks beside the call says a second sentence on the call's result, and
-      # the absence check below must find nothing after the one judged here.
+      # Judged from the turn's start: a model that confirms the stop beside its
+      # delegate call gets no run after the call, so that text is the reply. The
+      # absence check below must find nothing after the one judged here.
+      check_from: turn_start
       within_ms: 25000
       eval: "acknowledges the change of plan briefly, without reporting any test results and without promising further work; speaks as itself, without mentioning a backend or saying it passed the request along or handed it off (this reply is complete in itself: answer yes or no, never continue)"
       text_excludes: "backend"
