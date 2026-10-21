@@ -253,6 +253,42 @@ def test_max_speakers_reaches_recognition_config():
     assert config.config.diarization_config.max_speaker_count == 3
 
 
+def test_deprecated_diarization_max_speakers_sets_max_speakers():
+    """The old setting name still works, with a deprecation warning."""
+    with pytest.warns(DeprecationWarning, match="diarization_max_speakers"):
+        service = _make_service(
+            settings=NvidiaSTTService.Settings(speaker_diarization=True, diarization_max_speakers=3)
+        )
+
+    config = service._create_recognition_config()
+
+    assert service._settings.max_speakers == 3
+    assert config.config.diarization_config.max_speaker_count == 3
+
+
+def test_max_speakers_wins_over_deprecated_diarization_max_speakers():
+    with pytest.warns(DeprecationWarning, match="diarization_max_speakers"):
+        service = _make_service(
+            settings=NvidiaSTTService.Settings(max_speakers=2, diarization_max_speakers=5)
+        )
+
+    assert service._settings.max_speakers == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("service_class", [NvidiaSTTService, NvidiaSegmentedSTTService])
+async def test_deprecated_diarization_max_speakers_update(monkeypatch, service_class):
+    """A runtime update with the old name changes max_speakers."""
+    service = service_class(api_key="test-key")
+    monkeypatch.setattr(service, "_request_reconnect", AsyncMock(), raising=False)
+
+    with pytest.warns(DeprecationWarning, match="diarization_max_speakers"):
+        changed = await service._update_settings(service_class.Settings(diarization_max_speakers=4))
+
+    assert "max_speakers" in changed
+    assert service._settings.max_speakers == 4
+
+
 def test_diarization_does_not_change_word_time_offsets():
     """Diarization leaves the word time offset setting as configured."""
     service = _make_service(
