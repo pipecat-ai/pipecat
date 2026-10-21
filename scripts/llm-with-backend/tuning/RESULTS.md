@@ -70,12 +70,32 @@ Before the pairing instruction's rewrite around its one rule, the same replay ha
 
 ## Text evals
 
-The twelve text scenarios on the three bots with a text frontend, five runs each, without predictive delegation (2026-10-20, with this `AFTER DELEGATING` paragraph). The frontends run on their services' default models (`gpt-4.1`, `gemini-3.6-flash`, `claude-sonnet-4-6`), the backend on `claude-sonnet-4-6`, and the judge is the release suite's text judge. Each table comes from the run's `results.jsonl` through `results_table.py`:
+The twelve text scenarios on the three bots with a text frontend, five runs each, without predictive delegation (2026-10-21, with this `AFTER DELEGATING` paragraph). The frontends run on their services' default models (`gpt-4.1`, `gemini-3.6-flash`, `claude-sonnet-4-6`), the backend on `claude-sonnet-4-6`, and the judge is the release suite's text judge. Each table comes from the run's `results.jsonl` through `results_table.py`:
 
 ```bash
 uv run python -m pipecat.evals suite evals/llm-with-backend/manifest.yaml -s text --repeat 5
 uv run python scripts/llm-with-backend/tuning/results_table.py <runs-dir>/<run>/results.jsonl
 ```
+
+| scenario                      | anthropic-frontend | google-frontend | openai-responses-frontend |
+| ----------------------------- | ------------------ | --------------- | ------------------------- |
+| `accepted_offer/text`         | 5/5                | 5/5             | 5/5                       |
+| `aside_while_waiting/text`    | 5/5                | 5/5             | 4/5                       |
+| `cancel_and_replace/text`     | 5/5                | 5/5             | 5/5                       |
+| `cancel_delegation/text`      | 3/5                | 5/5             | 5/5                       |
+| `concurrent_delegations/text` | 1/5                | 1/5             | 0/5                       |
+| `delegate_ack/text`           | 5/5                | 5/5             | 5/5                       |
+| `delegate_with_aside/text`    | 5/5                | 5/5             | 5/5                       |
+| `frontend_only/text`          | 5/5                | 5/5             | 5/5                       |
+| `implicit_cancel/text`        | 5/5                | 5/5             | 5/5                       |
+| `partial_cancel/text`         | 5/5                | 5/5             | 4/5                       |
+| `progress_inquiry/text`       | 5/5                | 5/5             | 5/5                       |
+| `superseding_delegation/text` | 5/5                | 5/5             | 5/5                       |
+| **total**                     | **54/60**          | **56/60**       | **53/60**                 |
+
+`concurrent_delegations` fails on every frontend at every baseline. Claude's two `cancel_delegation` failures are one shape: it confirms the stop in the same response as its `delegate` call ("Got it, I'll leave the code as is.") and says nothing in the run after the call, and the scenario looks only after the call, having no `check_from: turn_start`; the day before, Claude confirmed again after the call ("No worries, standing down on that"), and that is what passed. gpt-4.1's two are a `partial_cancel` turn it answered without delegating, as at baseline, and an `aside_while_waiting` run whose final report never came.
+
+The same sweep on 2026-10-20, with "a few words of your own, one short sentence at most" and "On it" as the first example:
 
 | scenario                      | anthropic-frontend | google-frontend | openai-responses-frontend |
 | ----------------------------- | ------------------ | --------------- | ------------------------- |
