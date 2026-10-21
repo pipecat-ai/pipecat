@@ -250,3 +250,22 @@ async def test_segment_pushes_unlabelled_transcript_without_waiting(pushed_frame
 
     assert pushed_before_resume == [[transcript]]
     assert transcript.finalized
+
+
+def test_speaker_number_follows_order_of_first_appearance():
+    """Labels are numbered in the order speakers first appear, whatever the provider calls them."""
+    service = _make_capturing_service(
+        settings=_diarizing_settings("[Speaker {speaker_number}] {text}")
+    )
+
+    texts = [
+        service._apply_speaker_format(text, label)
+        for text, label in [("Hi.", "S7"), ("Hello.", "A"), ("Again.", "S7"), ("Bye.", "A")]
+    ]
+
+    assert texts == [
+        "[Speaker 1] Hi.",
+        "[Speaker 2] Hello.",
+        "[Speaker 1] Again.",
+        "[Speaker 2] Bye.",
+    ]

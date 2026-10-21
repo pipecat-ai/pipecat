@@ -201,10 +201,11 @@ class SpeechmaticsSTTSettings(STTSettings):
     Parameters:
         domain: Domain for Speechmatics API.
         turn_detection_mode: Endpoint handling mode.
-        speaker_format: Optional format string for diarized transcripts. Use
-            ``{speaker}`` for the speaker label and ``{text}`` for the transcript
-            text (e.g. ``"{speaker}: {text}"``). If None, transcript text is not
-            modified. Applied locally, so changing it does not reconnect.
+        speaker_format: Optional format string for diarized transcripts. Use ``{speaker}`` for the
+            speaker label, ``{text}`` for the transcript text, and ``{speaker_number}`` for the
+            speaker's order of first appearance in the session (``1``, ``2``, ...), e.g.
+            ``"{speaker}: {text}"``. If None, transcript text is not modified. Applied locally, so
+            changing it does not reconnect.
         speaker_active_format: Formatter for speaker ID, with the ``text``,
             ``speaker_id``, ``ts`` and ``lang`` attributes. Takes precedence over
             ``speaker_format``.

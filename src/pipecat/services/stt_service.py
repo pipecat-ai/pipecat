@@ -175,6 +175,8 @@ class STTService(AIService):
 
         self._muted: bool = False
         self._user_id: str = ""
+        # Speaker labels in the order they first appeared, for ``{speaker_number}``.
+        self._speaker_numbers: dict[str, int] = {}
         self._ttfs_p99_latency = ttfs_p99_latency
 
         # STT TTFB tracking state
@@ -379,9 +381,12 @@ class STTService(AIService):
     def _apply_speaker_format(self, text: str, speaker_label: str | None) -> str:
         """Apply the service's ``speaker_format`` setting to a diarized transcript.
 
-        ``speaker_format`` uses ``{speaker}`` for the speaker label and ``{text}``
-        for the transcript text (e.g. ``"{speaker}: {text}"``). Services without
-        that setting leave text unchanged.
+        ``speaker_format`` uses ``{speaker}`` for the speaker label, ``{text}`` for
+        the transcript text, and ``{speaker_number}`` for the speaker's place in
+        the order speakers first appeared in the session (``1``, ``2``, ...), which
+        stays the same whatever labels the provider uses (e.g.
+        ``"Speaker {speaker_number}: {text}"``). Services without that setting
+        leave text unchanged.
 
         Args:
             text: The transcript text.
@@ -393,7 +398,12 @@ class STTService(AIService):
         """
         speaker_format = getattr(self._settings, "speaker_format", None)
         if speaker_format and speaker_label is not None:
-            return speaker_format.format(speaker=speaker_label, text=text)
+            speaker_number = self._speaker_numbers.setdefault(
+                speaker_label, len(self._speaker_numbers) + 1
+            )
+            return speaker_format.format(
+                speaker=speaker_label, speaker_number=speaker_number, text=text
+            )
         return text
 
     def _diarized_runs(

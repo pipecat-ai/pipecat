@@ -143,10 +143,11 @@ class SmallestSTTSettings(STTSettings):
             next final so it normalizes whole. Set to ``True`` to emit every
             final as soon as it is ready instead. No effect unless
             ``itn_normalize`` is ``True``; text is never dropped either way.
-        speaker_format: Optional format string for diarized speaker runs. Use
-            ``{speaker}`` for the speaker label and ``{text}`` for the transcript
-            text (e.g. ``"{speaker}: {text}"``). If ``None``, transcript text is
-            not modified. Applied locally, so changing it does not reconnect.
+        speaker_format: Optional format string for diarized speaker runs. Use ``{speaker}`` for the
+            speaker label, ``{text}`` for the transcript text, and ``{speaker_number}`` for the
+            speaker's order of first appearance in the session (``1``, ``2``, ...), e.g.
+            ``"{speaker}: {text}"``. If ``None``, transcript text is not modified. Applied locally,
+            so changing it does not reconnect.
     """
 
     word_timestamps: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)

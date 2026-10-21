@@ -93,10 +93,11 @@ class XAISTTSettings(STTSettings):
             word identifying the detected speaker. Each contiguous speaker run of
             a final transcript is emitted as its own frame with that speaker in
             ``speaker_label``. Interim transcripts are not labelled.
-        speaker_format: Optional format string for diarized speaker runs. Use
-            ``{speaker}`` for the speaker label and ``{text}`` for the transcript
-            text (e.g. ``"{speaker}: {text}"``). If ``None``, transcript text is
-            not modified. Applied locally, so changing it does not reconnect.
+        speaker_format: Optional format string for diarized speaker runs. Use ``{speaker}`` for the
+            speaker label, ``{text}`` for the transcript text, and ``{speaker_number}`` for the
+            speaker's order of first appearance in the session (``1``, ``2``, ...), e.g.
+            ``"{speaker}: {text}"``. If ``None``, transcript text is not modified. Applied locally,
+            so changing it does not reconnect.
     """
 
     interim_results: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)

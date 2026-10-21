@@ -1,0 +1,57 @@
+name: speaker_diarization
+
+# Speaker diarization: one audio stream carries two people, and the bot's STT
+# has to tell them apart. Each person says two unrelated things, a favorite
+# fruit and how they get to work, so nothing in the words links one to the
+# other: only the speaker tags the STT writes into the transcript do. The lines
+# go A, B, B, A rather than alternating, so a guess that people take turns
+# pairs them wrongly, and no line refers back to another ("and", "instead").
+# With the short pauses between lines, a bot that ended the user's turn at every
+# pause would also reply before the conversation is over.
+#
+# The bot writes speakers as "[Speaker N]", numbered in the order they first
+# spoke, so the transcript reads the same whichever provider's labels are behind
+# it: each line has to start with the right speaker. The bot is also asked what
+# each person said, and its reply has to pair each fruit with the right way to
+# work, which it can only do from the tags.
+
+user:
+  modality: audio
+
+judge: !include ../judge_audio.yaml
+
+scenarios:
+  - name: speaker_diarization
+    turns:
+      # Wait for the bot's on-connect greeting before playing the conversation.
+      - expect:
+          - event: response
+            eval: "the bot introduces itself or says it is ready to listen"
+
+      - user: >-
+          My favorite fruit is the mango, and I try to eat a fresh one every single
+          morning.
+          Mine is the banana, because it is so easy to carry around in a bag all day.
+          To get to work, I ride my bicycle along the river, even when it rains in the
+          winter.
+          I take the train to the office, and the whole trip takes about forty minutes.
+        audio: ../../assets/two_speakers.wav
+        expect:
+          # Each line starts with its speaker. A speaker change always starts a new
+          # piece, so a line's first words follow its tag even when a service
+          # finalizes mid-phrase. Each check reads the turn's transcript from the start.
+          - event: user_transcription
+            text_contains: "[Speaker 1] My favorite"
+            check_from: turn_start
+          - event: user_transcription
+            text_contains: "[Speaker 2] Mine is"
+            check_from: turn_start
+          - event: user_transcription
+            text_contains: "[Speaker 1] I take"
+            check_from: turn_start
+          - event: response
+            # Only the pairing: a provider may tag a stray word as a third speaker,
+            # which changes the head count but not who said what.
+            eval: >-
+              the response says that the same person who likes mangoes takes the
+              train, while the person who likes bananas rides a bicycle

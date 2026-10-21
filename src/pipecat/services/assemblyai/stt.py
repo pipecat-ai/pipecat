@@ -252,10 +252,11 @@ class AssemblyAISTTSettings(STTSettings):
             interim transcripts, and turns whose speaker is not assigned yet, have
             none. Labels AssemblyAI later revises are not applied to frames
             already sent.
-        speaker_format: Optional format string for diarized transcripts. Use
-            ``{speaker}`` for the speaker label and ``{text}`` for the transcript
-            text (e.g. ``"{speaker}: {text}"``). If None, transcript text is not
-            modified. Applied locally, so changing it does not reconnect.
+        speaker_format: Optional format string for diarized transcripts. Use ``{speaker}`` for the
+            speaker label, ``{text}`` for the transcript text, and ``{speaker_number}`` for the
+            speaker's order of first appearance in the session (``1``, ``2``, ...), e.g.
+            ``"{speaker}: {text}"``. If None, transcript text is not modified. Applied locally, so
+            changing it does not reconnect.
         vad_threshold: VAD confidence threshold (0.0–1.0) for classifying
             audio frames as silence. Only applicable to U3 Pro models.
         domain: Optional domain for specialized recognition modes. For example,

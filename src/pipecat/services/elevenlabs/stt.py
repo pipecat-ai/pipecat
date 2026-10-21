@@ -183,10 +183,10 @@ class ElevenLabsSTTSettings(STTSettings):
         diarize: Whether to annotate which speaker is talking. Each contiguous
             speaker run of a segment is emitted as its own frame with ElevenLabs'
             speaker id (e.g. ``"speaker_0"``) in ``speaker_label``.
-        speaker_format: Optional format string for diarized speaker runs. Use
-            ``{speaker}`` for the speaker label and ``{text}`` for the transcript
-            text (e.g. ``"{speaker}: {text}"``). If ``None``, transcript text is
-            not modified.
+        speaker_format: Optional format string for diarized speaker runs. Use ``{speaker}`` for the
+            speaker label, ``{text}`` for the transcript text, and ``{speaker_number}`` for the
+            speaker's order of first appearance in the session (``1``, ``2``, ...), e.g.
+            ``"{speaker}: {text}"``. If ``None``, transcript text is not modified.
     """
 
     tag_audio_events: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)

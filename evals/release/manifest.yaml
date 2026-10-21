@@ -398,6 +398,52 @@ suite:
     scenarios: [scripted/dtmf_menu]
 
   #
+  # Speaker diarization: a recorded call between two people plays to the bot,
+  # whose STT labels each transcript with its speaker. One bot covers every
+  # streaming STT service that diarizes; the runner body picks the service.
+  #
+  - bot: features/features-speaker-diarization.py
+    name: speaker-diarization/assemblyai
+    runner_body:
+      data: {stt: assemblyai}
+    scenarios: [scripted/speaker_diarization]
+  - bot: features/features-speaker-diarization.py
+    name: speaker-diarization/aws
+    runner_body:
+      data: {stt: aws}
+    scenarios: [scripted/speaker_diarization]
+  - bot: features/features-speaker-diarization.py
+    name: speaker-diarization/deepgram
+    runner_body:
+      data: {stt: deepgram}
+    scenarios: [scripted/speaker_diarization]
+  - bot: features/features-speaker-diarization.py
+    name: speaker-diarization/nvidia
+    runner_body:
+      data: {stt: nvidia}
+    scenarios: [scripted/speaker_diarization]
+  - bot: features/features-speaker-diarization.py
+    name: speaker-diarization/smallest
+    runner_body:
+      data: {stt: smallest}
+    scenarios: [scripted/speaker_diarization]
+  - bot: features/features-speaker-diarization.py
+    name: speaker-diarization/soniox
+    runner_body:
+      data: {stt: soniox}
+    scenarios: [scripted/speaker_diarization]
+  - bot: features/features-speaker-diarization.py
+    name: speaker-diarization/speechmatics
+    runner_body:
+      data: {stt: speechmatics}
+    scenarios: [scripted/speaker_diarization]
+  - bot: features/features-speaker-diarization.py
+    name: speaker-diarization/xai
+    runner_body:
+      data: {stt: xai}
+    scenarios: [scripted/speaker_diarization]
+
+  #
   # Voicemail detection: the bot holds its speech until a classifier decides
   # whether a person or a voicemail answered the outbound call.
   #

@@ -204,10 +204,11 @@ class DeepgramSTTSettings(STTSettings):
         version: Model version to transcribe with, e.g. a dated standard-model
             version such as ``"2021-03-17.0"`` or a custom model's version id.
             ``None`` omits the parameter, leaving Deepgram on ``"latest"``.
-        speaker_format: Optional format string for diarized speaker runs. Use
-            ``{speaker}`` for the speaker label and ``{text}`` for the transcript
-            text (e.g. ``"{speaker}: {text}"``). If ``None``, transcript text is
-            not modified. Applied locally, so changing it does not reconnect.
+        speaker_format: Optional format string for diarized speaker runs. Use ``{speaker}`` for the
+            speaker label, ``{text}`` for the transcript text, and ``{speaker_number}`` for the
+            speaker's order of first appearance in the session (``1``, ``2``, ...), e.g.
+            ``"{speaker}: {text}"``. If ``None``, transcript text is not modified. Applied locally,
+            so changing it does not reconnect.
     """
 
     detect_entities: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)

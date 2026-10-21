@@ -245,10 +245,11 @@ class SonioxSTTSettings(STTSettings):
         endpoint_latency_adjustment_level: Reduces endpoint latency vs. the default (0-3); higher
             finalizes sooner but may reduce accuracy.
         client_reference_id: Client reference ID to use for transcription.
-        speaker_format: Optional format string for diarized speaker runs. Use
-            ``{speaker}`` for the speaker label and ``{text}`` for the transcript
-            text (e.g. ``"{speaker}: {text}"``). If ``None``, transcript text is
-            not modified. Applied locally, so changing it does not reconnect.
+        speaker_format: Optional format string for diarized speaker runs. Use ``{speaker}`` for the
+            speaker label, ``{text}`` for the transcript text, and ``{speaker_number}`` for the
+            speaker's order of first appearance in the session (``1``, ``2``, ...), e.g.
+            ``"{speaker}: {text}"``. If ``None``, transcript text is not modified. Applied locally,
+            so changing it does not reconnect.
 
     The ``max_endpoint_delay_ms``, ``endpoint_sensitivity`` and
     ``endpoint_latency_adjustment_level`` settings only take effect when
