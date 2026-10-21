@@ -1774,9 +1774,9 @@ class _RecordingHttpTTSService(MockHttpTTSService):
 async def test_filter_state_does_not_carry_into_next_reply():
     """A code block left open by one reply must not mute the next reply."""
     with pytest.warns(DeprecationWarning, match="text_filters"):
-      tts = _RecordingHttpTTSService(
-          text_filters=[MarkdownTextFilter(MarkdownTextFilter.InputParams(filter_code=True))]
-      )
+        tts = _RecordingHttpTTSService(
+            text_filters=[MarkdownTextFilter(MarkdownTextFilter.InputParams(filter_code=True))]
+        )
 
     frames_to_send = [
         LLMFullResponseStartFrame(),
