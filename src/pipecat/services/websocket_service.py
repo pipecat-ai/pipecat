@@ -9,6 +9,7 @@
 import asyncio
 import time
 from abc import ABC, abstractmethod
+from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Protocol
 
 import websockets
@@ -396,6 +397,48 @@ class WebsocketService(ABC):
             # the drop as terminal would close that path too.
             await report_error(ErrorFrame(error_message, exception=error))
             return False
+
+    async def _receive_until_confirmed(
+        self,
+        messages: AsyncIterator[str | bytes],
+        confirmed: asyncio.Event,
+        handle_message: Callable[[str | bytes], Awaitable[None]],
+        timeout: float,
+    ) -> bool:
+        """Handle messages until the server confirms the connection.
+
+        For services whose server confirms a connection with a message after
+        the handshake. ``handle_message`` sets ``confirmed`` when that message
+        arrives.
+
+        Args:
+            messages: The connection's message iterator, left positioned after
+                the confirmation for the caller to keep reading.
+            confirmed: Event set once the server confirms the connection.
+            handle_message: Handles one message.
+            timeout: Maximum time, in seconds, to wait for the confirmation.
+
+        Returns:
+            True once confirmed, False if the connection closed first.
+
+        Raises:
+            ConnectionError: If the confirmation doesn't arrive within ``timeout``.
+        """
+        try:
+            async with asyncio.timeout(timeout):
+                while not confirmed.is_set():
+                    await handle_message(await anext(messages))
+        except StopAsyncIteration:
+            return False
+        except TimeoutError:
+            # The connection never carried a session, so it counts as failing
+            # right after connecting, and the receive loop gives up after a
+            # few in a row rather than retrying forever.
+            self._last_connect_time = time.monotonic()
+            raise ConnectionError(
+                f"{self} did not confirm the connection within {timeout}s"
+            ) from None
+        return True
 
     async def _receive_task_handler(self, report_error: ReportErrorCallback):
         """Handle websocket message receiving with automatic retry logic.
