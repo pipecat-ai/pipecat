@@ -16,7 +16,8 @@ It masks three things:
 - The value of any ``name=value`` or ``name: value`` pair, quoted or not,
   whose name marks a credential (``api_key``, ``Authorization``,
   ``X-Amz-Signature``, ``apiKey``...). This covers query strings, printed
-  header dicts and plain prose alike.
+  header dicts and plain prose alike. An exception class name followed by
+  its message (``KeyError: ...``) is not a credential name.
 - A URL's password (``scheme://user:password@host``).
 - Tokens recognizable by their format alone: provider key prefixes, AWS
   access key IDs and JWTs.
@@ -93,6 +94,10 @@ _KNOWN_TOKENS = re.compile(
     r"""(?:[\s\S]*?-----END[ A-Z0-9_-]{0,100}PRIVATE KEY(?: BLOCK)?-----|[\s\S]*)"""
 )
 
+# An exception or warning class name, optionally module-qualified (`KeyError`,
+# `jwt.exceptions.InvalidTokenError`). It names what went wrong, so the text
+# after it is the explanation, not a credential.
+_EXCEPTION_NAME = re.compile(r"(?:[a-z_][a-z0-9_]*\.)*[A-Z][A-Za-z0-9]*(?:Error|Exception|Warning)")
 
 # How many pairs deep a value is searched for more pairs; deeper than that, the
 # rest of the value is masked. Real messages nest two or three
@@ -106,9 +111,18 @@ def _is_credential_name(name: str) -> bool:
     return "".join(parts) in _CREDENTIAL_WORDS or any(p in _CREDENTIAL_WORDS for p in parts)
 
 
+def _is_exception_name(match: re.Match) -> bool:
+    return (
+        not match["nq"]
+        and not match["scheme"]
+        and match["sep"].strip() == ":"
+        and _EXCEPTION_NAME.fullmatch(match["name"]) is not None
+    )
+
+
 def _redact_pair(match: re.Match, depth: int = 0) -> str:
     quote = match["vq"] or ""
-    if _is_credential_name(match["name"]):
+    if _is_credential_name(match["name"]) and not _is_exception_name(match):
         value = REDACTED
     else:
         value = match["quoted"] or match["bare"] or ""

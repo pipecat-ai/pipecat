@@ -172,6 +172,41 @@ class TestRedactSecrets(unittest.TestCase):
             "a:" * (_MAX_PAIR_DEPTH + 1) + REDACTED,
         )
 
+    def test_keeps_the_detail_after_an_exception_name_holding_a_credential_word(self):
+        for message in (
+            "KeyError: 'audio_content'",
+            "InvalidTokenError: signature has expired",
+            "ExpiredSignatureError: Signature has expired",
+            "TokenExpiredError: jwt expired",
+            "NoCredentialsError: Unable to locate credentials",
+            "jwt.exceptions.ExpiredSignatureError: Signature has expired",
+            "jwt.exceptions.InvalidTokenError: bad",
+            "SomeWarning: a warning",
+        ):
+            with self.subTest(message=message):
+                self.assertEqual(redact_secrets(message), message)
+
+    def test_still_masks_a_credential_after_an_exception_name(self):
+        self.assertEqual(
+            redact_secrets("KeyError: 'k' api_key=abc123"),
+            "KeyError: 'k' api_key=[REDACTED]",
+        )
+
+    def test_still_masks_what_only_looks_like_an_exception_name(self):
+        for message, expected in (
+            ("AuthError: Bearer abc123", "AuthError: Bearer [REDACTED]"),
+            ("TokenError: Basic dXNlcjpwYXNz", "TokenError: Basic [REDACTED]"),
+            ("credentials_error: hunter2", "credentials_error: [REDACTED]"),
+            ("secret_warning: hunter2", "secret_warning: [REDACTED]"),
+            ("X-Auth-Error: xyz789", "X-Auth-Error: [REDACTED]"),
+            ("{'api_key_error': 'abc'}", "{'api_key_error': '[REDACTED]'}"),
+            ("'TokenError': 'abc'", "'TokenError': '[REDACTED]'"),
+            ('"TokenError": "abc"', '"TokenError": "[REDACTED]"'),
+            ("TokenError=abc", "TokenError=[REDACTED]"),
+        ):
+            with self.subTest(message=message):
+                self.assertEqual(redact_secrets(message), expected)
+
 
 class TestErrorFrameRedaction(unittest.TestCase):
     def test_an_error_frame_masks_the_credentials_its_message_quotes(self):
