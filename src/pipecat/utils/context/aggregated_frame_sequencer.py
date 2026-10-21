@@ -929,6 +929,7 @@ class AggregatedFrameSequencer:
             text_type=slot.frame.text_type,
             accumulated_text=slot.tracker.get_accumulated_user_facing_text(),
             remaining_text=slot.tracker.get_remaining_user_facing_text(strip=False),
+            modes=slot.frame.modes,
         )
         frame.pts = pts
         return frame

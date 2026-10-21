@@ -555,6 +555,8 @@ class AggregatedTextProgressFrame(DataFrame):
         text_type: Text type of the source AggregatedTextFrame.
         accumulated_text: Text already spoken in this slot (including the current word).
         remaining_text: Text not yet spoken in this slot.
+        modes: The modes of the source AggregatedTextFrame. Part of expressive
+            conversation (alpha).
     """
 
     segment_id: int
@@ -563,6 +565,7 @@ class AggregatedTextProgressFrame(DataFrame):
     text_type: TextType | str
     accumulated_text: str
     remaining_text: str
+    modes: list[str] | None = field(default=None, kw_only=True)
 
     @property
     @deprecated(

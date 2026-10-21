@@ -1658,6 +1658,14 @@ class TestModes(unittest.IsolatedAsyncioTestCase):
         words = [f for f in seq.process_word("hello", pts=1, context_id="ctx1")]
         self.assertEqual([f.modes for f in words if isinstance(f, TTSTextFrame)], [["calm"]])
 
+    async def test_progress_carries_the_modes_of_its_segment(self):
+        seq = _seq()
+        frame = AggregatedTextFrame("hello world", TextType.SENTENCE, modes=["calm"])
+        await seq.register_spoken(frame, "ctx1", "hello world", append_to_context=True)
+        frames = seq.process_word("hello", pts=1, context_id="ctx1")
+        progress = [f for f in frames if isinstance(f, AggregatedTextProgressFrame)]
+        self.assertEqual([f.modes for f in progress], [["calm"]])
+
     async def test_a_streamed_sentence_carries_its_tokens_modes(self):
         seq = _seq(streaming=True)
         result = []

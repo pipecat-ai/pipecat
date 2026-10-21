@@ -920,6 +920,7 @@ class RTVIObserver(BaseObserver):
                         accumulated_text=accumulated,
                         remaining_text=remaining,
                     ),
+                    modes=frame.modes,
                 )
             )
             await self.send_rtvi_message(message)
@@ -1011,6 +1012,7 @@ class RTVIObserver(BaseObserver):
                 segment_id=segment_id,
                 spoken_status=spoken_status,
                 spoken_progress=progress,
+                modes=frame.modes,
             )
             message = RTVI.BotOutputMessage(data=data)
             await self.send_rtvi_message(message)

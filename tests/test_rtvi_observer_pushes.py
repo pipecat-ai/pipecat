@@ -354,6 +354,30 @@ class TestRTVIObserverSegments(unittest.IsolatedAsyncioTestCase):
             [("new", sentence.id), ("completed", sentence.id)],
         )
 
+    async def test_a_segment_reports_its_modes_as_it_is_spoken(self):
+        segment = self._segment("back up", TextType.SENTENCE)
+        segment.modes = ["calm", "emphasis"]
+        progress = self._progress(segment, "back up", "")
+        progress.modes = segment.modes
+        await self._push(segment)
+        await self._push(self._word("back up", segment))
+        await self._push(progress)
+
+        self.assertEqual(
+            [(data.spoken_status, data.modes) for data in self._sent_outputs()],
+            [("new", ["calm", "emphasis"]), ("completed", ["calm", "emphasis"])],
+        )
+
+    async def test_an_expression_event_is_sent_as_text_that_isnt_spoken(self):
+        laugh = AggregatedTextFrame("laugh", TextType.EXPRESSION_EVENT, raw_text="[[laugh]]")
+        laugh.skip_tts = True
+        await self._push(laugh)
+
+        self.assertEqual(
+            [(d.text, d.text_type, d.will_be_spoken, d.modes) for d in self._sent_outputs()],
+            [("laugh", TextType.EXPRESSION_EVENT, False, None)],
+        )
+
     async def test_a_skipped_segment_keeps_its_progress_and_words_from_the_client(self):
         status = self._segment("One moment, please.", "status")
         await self._push(status)
