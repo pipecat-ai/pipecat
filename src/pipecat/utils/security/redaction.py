@@ -94,21 +94,35 @@ _KNOWN_TOKENS = re.compile(
 )
 
 
+# How many pairs deep a value is searched for more pairs; deeper than that, the
+# rest of the value is masked. Real messages nest two or three
+# (`URL: https://...?token=...`); a longer chain is a pathological input.
+_MAX_PAIR_DEPTH = 16
+
+
 def _is_credential_name(name: str) -> bool:
     words = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", name.strip("\"'")).lower()
     parts = [p for p in re.split(r"[-_.]", words) if p]
     return "".join(parts) in _CREDENTIAL_WORDS or any(p in _CREDENTIAL_WORDS for p in parts)
 
 
-def _redact_pair(match: re.Match) -> str:
+def _redact_pair(match: re.Match, depth: int = 0) -> str:
     quote = match["vq"] or ""
     if _is_credential_name(match["name"]):
         value = REDACTED
     else:
-        # The value may itself hold pairs, as `URL: https://...?token=...` does.
-        value = _PAIR.sub(_redact_pair, match["quoted"] or match["bare"] or "")
+        value = match["quoted"] or match["bare"] or ""
+        if value and depth >= _MAX_PAIR_DEPTH:
+            value = REDACTED
+        elif value:
+            # The value may itself hold pairs, as `URL: https://...?token=...` does.
+            value = _redact_pairs(value, depth + 1)
     opening = match["oq"] or ""
     return f"{match['name']}{match['sep']}{match['scheme'] or ''}{quote or opening}{value}{quote}"
+
+
+def _redact_pairs(text: str, depth: int = 0) -> str:
+    return _PAIR.sub(lambda match: _redact_pair(match, depth), text)
 
 
 def redact_secrets(text: str) -> str:
@@ -123,5 +137,5 @@ def redact_secrets(text: str) -> str:
     # Known formats go first: a PEM key spans lines, and masking its first line
     # as a pair's value would leave the rest unrecognizable.
     text = _KNOWN_TOKENS.sub(REDACTED, text)
-    text = _PAIR.sub(_redact_pair, text)
+    text = _redact_pairs(text)
     return _URL_PASSWORD.sub(rf"\g<prefix>{REDACTED}", text)
