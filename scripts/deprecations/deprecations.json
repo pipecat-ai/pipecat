@@ -4777,6 +4777,17 @@
       "location": "pipecat/services/tts_service.py"
     },
     {
+      "subject": "WebsocketService.send_with_retry",
+      "module": "pipecat.services.websocket_service",
+      "kind": "method",
+      "deprecated_in": "1.14.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "`WebsocketService.send_with_retry` is deprecated since 1.14.0 and will be removed in 2.0.0. No replacement.",
+      "location": "pipecat/services/websocket_service.py"
+    },
+    {
       "subject": "BaseWhisperSTTService.language",
       "module": "pipecat.services.whisper.base_stt",
       "kind": "parameter",
