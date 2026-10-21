@@ -954,13 +954,13 @@ class PipelineWorker(BaseWorker):
     async def flush_pipeline(self, timeout: float = 5.0) -> bool:
         """Flush all in-flight frames from the pipeline and wait for it to drain.
 
-        Pushes a :class:`~pipecat.frames.frames.PipelineFlushFrame` downstream;
-        the sink bounces it back upstream, the source turns it around, and its
-        event is set when it reaches the sink a second time. By then every
-        frame queued ahead of it has been processed, along with anything a
-        processor started by pushing upstream. The probe goes on the worker's
-        push queue, behind whatever is already waiting there, and bypasses any
-        ``queue_frame`` override (e.g. tool-call deferral).
+        Pushes a :class:`~pipecat.frames.frames.PipelineFlushFrame` downstream
+        to the sink, then a new probe back up to the source and a third down to
+        the sink again, and waits for that last one to arrive. By then every
+        frame queued ahead of the flush has been processed, along with anything
+        a processor started by pushing upstream. The first probe goes on the
+        worker's push queue, behind whatever is already waiting there, and
+        bypasses any ``queue_frame`` override (e.g. tool-call deferral).
 
         Args:
             timeout: Seconds of no progress before giving up. Progress is a
