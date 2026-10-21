@@ -20,8 +20,9 @@ from loguru import logger
 from websockets.protocol import State
 
 from pipecat.audio.utils import create_stream_resampler
+from pipecat.expressive.adapter import ExpressionAdapter
 from pipecat.expressive.expression import ExpressionCapabilities
-from pipecat.expressive.parser import ExpressionParser, Segment
+from pipecat.expressive.parser import EMPHASIS_MODE, ExpressionParser, Segment
 from pipecat.expressive.segment_frames import segment_frames
 from pipecat.frames.frames import (
     AggregatedTextFrame,
@@ -152,6 +153,10 @@ class TTSService(AIService):
     """
 
     _settings: TTSSettings
+
+    # Renders expressive conversation's tags for this service (alpha). The base
+    # adapter performs nothing.
+    expression_adapter_class: type[ExpressionAdapter] = ExpressionAdapter
 
     def __init__(
         self,
@@ -413,6 +418,12 @@ class TTSService(AIService):
         # Reads the expression tags an LLM writes, across the units of a
         # response, when the pipeline has expressive conversation on.
         self._expression_parser: ExpressionParser | None = None
+        self._expression_adapter = self.expression_adapter_class()
+        # The modes of the words last rendered in the response, so the adapter
+        # can mark only where they change.
+        self._rendered_modes: list[str] | None = None
+        # Expression values the service can't perform, each warned about once.
+        self._unperformed_expression: set[str] = set()
 
     @property
     def sample_rate(self) -> int:
@@ -461,11 +472,19 @@ class TTSService(AIService):
     def expression_capabilities(self) -> ExpressionCapabilities | None:
         """The expression tags this service can perform, or None.
 
-        Part of expressive conversation (alpha). Override to declare the
-        events, modes, pauses and emphasis the service can perform. The
-        default, None, declares none.
+        Part of expressive conversation (alpha). The default returns the
+        expression adapter's; a service whose capabilities depend on its
+        settings, such as its voice, overrides this.
         """
-        return None
+        return self._expression_adapter.capabilities()
+
+    def get_expression_adapter(self) -> ExpressionAdapter:
+        """The adapter that renders this service's expression tags.
+
+        Returns:
+            An instance of :attr:`expression_adapter_class`.
+        """
+        return self._expression_adapter
 
     def service_metadata_frame(self) -> TTSMetadataFrame:
         """Build the TTS metadata frame broadcast at start.
@@ -1230,6 +1249,7 @@ class TTSService(AIService):
                 self._expression_parser.flush(),
                 self.create_context_id(),
             )
+            self._rendered_modes = None
 
         # Force-promote any sentence still pending in the sequencer (streaming
         # mode only; a no-op otherwise) — handles a response that ends with no
@@ -1357,6 +1377,7 @@ class TTSService(AIService):
         await self._skipped_text_aggregator.handle_interruption()
         if self._expression_parser:
             self._expression_parser.reset()
+            self._rendered_modes = None
         for filter in self._text_filters:
             await filter.handle_interruption()
 
@@ -1515,20 +1536,71 @@ class TTSService(AIService):
         """Speak a unit of text whose expression tags have been read, as one request.
 
         Its words, in their modes, and its events become pieces of their own,
-        in the order written.
+        in the order written. What the service can't perform is left out, so
+        the request and what clients see agree: unsupported modes are taken
+        off the words, and an unsupported event is dropped.
         """
+        capabilities = self.expression_capabilities()
         pieces: list[tuple[AggregatedTextFrame, str]] = []
         trim = not self._is_streaming_tokens
         for frame, text in segment_frames(segments, src_frame.text_type, trim=trim):
             frame.interruptible = src_frame.interruptible
-            if not frame.skip_tts:
-                trimmed = self._trim_text(text)
-                if trimmed is None:
-                    continue
-                text = trimmed
-            pieces.append((frame, text))
+            if frame.skip_tts:
+                rendered = self._render_expression_event(frame, capabilities)
+                if rendered is not None:
+                    pieces.append((frame, rendered))
+                continue
+            trimmed = self._trim_text(text)
+            if trimmed is None:
+                continue
+            frame.modes = self._performed_modes(frame.modes or [], capabilities)
+            pieces.append((frame, trimmed))
         if pieces:
             await self._speak_text(pieces, context_id)
+
+    def _performed_modes(
+        self, modes: list[str], capabilities: ExpressionCapabilities | None
+    ) -> list[str]:
+        """The modes the service can perform, warning once about each it can't."""
+        performed = []
+        for mode in modes:
+            if mode == EMPHASIS_MODE:
+                supported = bool(capabilities and capabilities.emphasis)
+            else:
+                supported = bool(
+                    capabilities
+                    and (
+                        capabilities.free_text_modes
+                        or any(term.name == mode for term in capabilities.modes)
+                    )
+                )
+            if supported:
+                performed.append(mode)
+            else:
+                self._warn_unperformed(f"<<{mode}>>")
+        return performed
+
+    def _render_expression_event(
+        self, frame: AggregatedTextFrame, capabilities: ExpressionCapabilities | None
+    ) -> str | None:
+        """Render an event or pause frame, or None if the service can't perform it."""
+        if frame.text_type == TextType.EXPRESSION_PAUSE:
+            if capabilities and capabilities.pause_range_ms:
+                shortest, longest = capabilities.pause_range_ms
+                duration_ms = min(max(int(frame.text), shortest), longest)
+                return self._expression_adapter.render_pause(duration_ms)
+        elif capabilities and (
+            capabilities.free_text_events
+            or any(term.name == frame.text for term in capabilities.events)
+        ):
+            return self._expression_adapter.render_event(frame.text)
+        self._warn_unperformed(frame.raw_text or frame.text)
+        return None
+
+    def _warn_unperformed(self, tag: str):
+        if tag not in self._unperformed_expression:
+            self._unperformed_expression.add(tag)
+            logger.warning(f"{self} can't perform {tag}, leaving it out of its speech")
 
     def _create_expression_parser(self) -> ExpressionParser:
         """Create a parser that knows the names this service declares."""
@@ -1590,6 +1662,12 @@ class TTSService(AIService):
             if prepared_text is None:
                 # Nothing is left to say, or a transform failed and said so.
                 continue
+            if frame.modes is not None:
+                # Last, so transforms never see the service's markup.
+                prepared_text = self._expression_adapter.render_text(
+                    prepared_text, frame.modes, self._rendered_modes
+                )
+                self._rendered_modes = frame.modes
             prepared.append((frame, text, prepared_text))
 
         request = "".join(prepared_text for _, _, prepared_text in prepared)
