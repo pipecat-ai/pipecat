@@ -1262,5 +1262,40 @@ def test_update_settings_speaker_format_does_not_reconnect():
     assert reconnects == []
 
 
+@pytest.mark.parametrize("placeholder", ["PENDING", "UNKNOWN"])
+def test_unassigned_speaker_is_not_a_label(placeholder):
+    service = AssemblyAISTTService(
+        api_key="test-key",
+        settings=AssemblyAISTTService.Settings(
+            speaker_labels=True, speaker_format="{speaker}: {text}"
+        ),
+    )
+
+    frames = _transcription_frames(service, _turn("Hello", end_of_turn=True, speaker=placeholder))
+
+    assert frames[0].speaker_label is None
+    assert frames[0].text == "Hello"
+
+
+def test_speaker_revision_is_not_an_error():
+    service = AssemblyAISTTService(
+        api_key="test-key", settings=AssemblyAISTTService.Settings(speaker_labels=True)
+    )
+    errors = []
+
+    async def fake_push_error(*args, **kwargs):
+        errors.append((args, kwargs))
+
+    service.push_error = fake_push_error
+    message = {
+        "type": "SpeakerRevision",
+        "revisions": [{"turn_order": 0, "speaker_label": "B", "words": []}],
+    }
+
+    asyncio.run(service._handle_message(message))
+
+    assert errors == []
+
+
 if __name__ == "__main__":
     unittest.main()
