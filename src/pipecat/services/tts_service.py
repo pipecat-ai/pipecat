@@ -1205,8 +1205,10 @@ class TTSService(AIService):
 
         # Reset aggregator state
         self._sent_non_whitespace_in_context = False
+        # A filter's state belongs to one reply, so it's cleared as an
+        # interruption clears it.
         for filter in self._text_filters:
-            await filter.reset()
+            await filter.handle_interruption()
         if isinstance(frame, LLMFullResponseEndFrame):
             # Queue behind the audio contexts so the frame follows the turn's
             # audio and text.
