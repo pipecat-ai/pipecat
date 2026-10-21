@@ -148,6 +148,20 @@ class TestRedactSecrets(unittest.TestCase):
         once = redact_secrets(message)
         self.assertEqual(redact_secrets(once), once)
 
+    def test_a_long_chain_of_pairs_does_not_exhaust_the_stack(self):
+        message = "a:" * 5000 + "a"
+        self.assertIsInstance(redact_secrets(message), str)
+
+    def test_a_credential_at_the_end_of_a_long_chain_is_still_masked(self):
+        result = redact_secrets("a:" * 5000 + "token=hunter2")
+        self.assertNotIn("hunter2", result)
+
+    def test_masks_a_credential_nested_a_few_pairs_deep(self):
+        self.assertEqual(
+            redact_secrets("a: b: c: https://x/p?token=abc&n=1"),
+            "a: b: c: https://x/p?token=[REDACTED]&n=1",
+        )
+
 
 class TestErrorFrameRedaction(unittest.TestCase):
     def test_an_error_frame_masks_the_credentials_its_message_quotes(self):
@@ -155,6 +169,10 @@ class TestErrorFrameRedaction(unittest.TestCase):
         self.assertEqual(
             frame.error, "Sarvam API error: headers: {'api-subscription-key': '[REDACTED]'}"
         )
+
+    def test_an_error_frame_accepts_a_long_chain_of_pairs(self):
+        frame = ErrorFrame(error="a:" * 5000 + "a")
+        self.assertIsInstance(frame.error, str)
 
 
 if __name__ == "__main__":
