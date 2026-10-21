@@ -54,7 +54,7 @@ dependencies = [
     "num2words>=0.5.14",
     # Required by LocalSmartTurnAnalyzerV3
     # Inlined here instead of using a self-referential extra for Poetry compatibility.
-    "onnxruntime~=1.24.3",
+    "onnxruntime>=1.24.3,<2",
 ]
 
 [project.urls]
