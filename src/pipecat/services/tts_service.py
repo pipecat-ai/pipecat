@@ -1556,6 +1556,10 @@ class TTSService(AIService):
         off the words, and an unsupported event is dropped.
         """
         capabilities = self.expression_capabilities()
+        if not self._is_streaming_tokens:
+            # A sentence's request states its modes from its start, since not
+            # every service keeps modes from one request to the next.
+            self._rendered_modes = None
         pieces: list[tuple[AggregatedTextFrame, str]] = []
         trim = not self._is_streaming_tokens
         for frame, text in segment_frames(segments, src_frame.text_type, trim=trim):

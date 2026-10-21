@@ -118,7 +118,7 @@ async def test_the_tts_is_sent_the_words_with_their_rendered_expression(service)
 
     assert requests == [
         "{cheerful}It's <laugh>{cheerful,emphasis}back up{cheerful} now.",
-        "<400ms>Bye!",
+        "<400ms>{cheerful}Bye!",
     ]
 
 
@@ -364,6 +364,33 @@ async def test_each_request_is_given_the_modes_it_is_spoken_in():
         ("Five.", "cheerful"),
         ("Six.", "plain"),
     ]
+
+
+@pytest.mark.asyncio
+async def test_each_sentence_states_its_modes():
+    # Not every service keeps modes from one request to the next.
+    tts = PushTextTTSService()
+    requests = record_requests(tts)
+    await run_test(
+        tts,
+        frames_to_send=response("<<calm>> One. Two. <<neutral>> Three."),
+        pipeline_params=EXPRESSIVE,
+    )
+
+    assert requests == ["{calm}One.", "{calm}Two.", "Three."]
+
+
+@pytest.mark.asyncio
+async def test_streamed_tokens_state_modes_only_where_they_change():
+    tts = PushTextTTSService(text_aggregation_mode=TextAggregationMode.TOKEN)
+    requests = record_requests(tts)
+    await run_test(
+        tts,
+        frames_to_send=response("<<calm>> One.", " Two."),
+        pipeline_params=EXPRESSIVE,
+    )
+
+    assert requests == ["{calm}One.", " Two."]
 
 
 @pytest.mark.asyncio
