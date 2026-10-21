@@ -13,7 +13,11 @@ import pytest
 pytest.importorskip("riva.client")
 
 from pipecat.frames.frames import InterimTranscriptionFrame, TranscriptionFrame
-from pipecat.services.nvidia.stt import AudioChunkIterator, NvidiaSTTService
+from pipecat.services.nvidia.stt import (
+    AudioChunkIterator,
+    NvidiaSegmentedSTTService,
+    NvidiaSTTService,
+)
 from pipecat.transcriptions.language import Language
 from pipecat.utils.string import TextPartForConcatenation, concatenate_aggregated_text
 
@@ -649,6 +653,42 @@ async def test_response_handler_reads_diarization_from_stream_config(
     await asyncio.wait_for(handled.wait(), timeout=1)
 
     assert received == [speaker_diarization]
+
+
+def test_segmented_diarization_reaches_recognition_config():
+    service = NvidiaSegmentedSTTService(
+        api_key="test-key",
+        settings=NvidiaSegmentedSTTService.Settings(speaker_diarization=True, max_speakers=2),
+    )
+
+    config = service._create_recognition_config()
+
+    assert config.diarization_config.enable_speaker_diarization
+    assert config.diarization_config.max_speaker_count == 2
+
+
+@pytest.mark.asyncio
+async def test_segmented_diarized_result_yields_one_frame_per_speaker_run():
+    service = NvidiaSegmentedSTTService(
+        api_key="test-key",
+        settings=NvidiaSegmentedSTTService.Settings(
+            speaker_diarization=True, speaker_format="Speaker {speaker}: {text}"
+        ),
+    )
+    service._user_id = "session-user"
+    service._config = service._create_recognition_config()
+    response = _streaming_response(
+        "Hi there hello", words=[_word("Hi", 1), _word("there", 1), _word("hello", 2)]
+    )
+    service._asr_service = SimpleNamespace(offline_recognize=lambda audio, config, future: response)
+
+    frames = [f async for f in service.run_stt(b"audio") if isinstance(f, TranscriptionFrame)]
+
+    assert [(f.speaker_label, f.text) for f in frames] == [
+        ("1", "Speaker 1: Hi there"),
+        ("2", "Speaker 2: hello"),
+    ]
+    assert all(f.user_id == "session-user" for f in frames)
 
 
 if __name__ == "__main__":

@@ -192,6 +192,75 @@ async def test_receive_messages_sets_final_transcription_language(monkeypatch):
     assert traced_transcriptions == [("Ik zoek computer", True, Language.NL)]
 
 
+async def _final_frames_for(service, tokens, monkeypatch) -> list[TranscriptionFrame]:
+    pushed_frames = []
+
+    async def fake_push_frame(frame):
+        pushed_frames.append(frame)
+
+    messages = [
+        json.dumps({"tokens": [*tokens, {"text": END_TOKEN, "is_final": True}]}),
+        json.dumps({"tokens": [], "finished": True}),
+    ]
+    service._websocket = _FakeWebsocket(messages)
+    monkeypatch.setattr(service, "push_frame", fake_push_frame)
+
+    await service._receive_messages()
+
+    return [frame for frame in pushed_frames if isinstance(frame, TranscriptionFrame)]
+
+
+@pytest.mark.asyncio
+async def test_diarized_transcript_emits_one_frame_per_speaker_run(monkeypatch):
+    service = SonioxSTTService(
+        api_key="test-key",
+        settings=SonioxSTTService.Settings(
+            enable_speaker_diarization=True, speaker_format="{speaker}: {text}"
+        ),
+    )
+    service._user_id = "session-user"
+    tokens = [
+        {"text": "Hel", "is_final": True, "speaker": "1"},
+        {"text": "lo.", "is_final": True, "speaker": "1"},
+        {"text": " Hi", "is_final": True, "speaker": "2"},
+        {"text": " there.", "is_final": True, "speaker": "2"},
+    ]
+
+    frames = await _final_frames_for(service, tokens, monkeypatch)
+
+    assert [(f.speaker_label, f.text, f.finalized) for f in frames] == [
+        ("1", "1: Hello.", False),
+        ("2", "2: Hi there.", True),
+    ]
+    assert all(f.user_id == "session-user" for f in frames)
+
+
+@pytest.mark.asyncio
+async def test_transcript_is_not_split_without_diarization(monkeypatch):
+    service = SonioxSTTService(api_key="test-key")
+    tokens = [
+        {"text": "Hello.", "is_final": True, "speaker": "1"},
+        {"text": " Hi.", "is_final": True, "speaker": "2"},
+    ]
+
+    frames = await _final_frames_for(service, tokens, monkeypatch)
+
+    assert [(f.speaker_label, f.text) for f in frames] == [(None, "Hello. Hi.")]
+
+
+@pytest.mark.asyncio
+async def test_speaker_format_update_does_not_reconnect():
+    service = SonioxSTTService(api_key="test-key")
+    service._request_reconnect = AsyncMock()
+
+    changed = await service._update_settings(
+        SonioxSTTService.Settings(speaker_format="{speaker}: {text}")
+    )
+
+    assert "speaker_format" in changed
+    service._request_reconnect.assert_not_awaited()
+
+
 def _instrumented_service(monkeypatch, events, **kwargs):
     """Create a service that records pushes, broadcasts, and interruptions in order."""
     service = SonioxSTTService(api_key="test-key", **kwargs)

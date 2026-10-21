@@ -16,7 +16,7 @@ import json
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any
+from typing import Any, ClassVar
 from urllib.parse import urlencode
 
 from loguru import logger
@@ -29,7 +29,6 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     InterimTranscriptionFrame,
-    TranscriptionFrame,
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
@@ -123,7 +122,10 @@ class SmallestSTTSettings(STTSettings):
         redact_pii: Redact personally identifiable information.
         redact_pci: Redact payment card information.
         numerals: Convert spoken numerals to digits.
-        diarize: Enable speaker diarization.
+        diarize: Enable speaker diarization. Each contiguous speaker run of a
+            final transcript is emitted as its own frame with Smallest's speaker
+            number in ``speaker_label``. Requests word timestamps, which carry the
+            speakers. Interim transcripts are not labelled.
         endpointing: Finalize promptly on trailing silence.
         keywords: Comma-separated ``KEYWORD:INTENSIFIER`` pairs to boost
             recognition of domain-specific words/phrases (e.g. ``"NVIDIA:2"``).
@@ -141,6 +143,10 @@ class SmallestSTTSettings(STTSettings):
             next final so it normalizes whole. Set to ``True`` to emit every
             final as soon as it is ready instead. No effect unless
             ``itn_normalize`` is ``True``; text is never dropped either way.
+        speaker_format: Optional format string for diarized speaker runs. Use
+            ``{speaker}`` for the speaker label and ``{text}`` for the transcript
+            text (e.g. ``"{speaker}: {text}"``). If ``None``, transcript text is
+            not modified. Applied locally, so changing it does not reconnect.
     """
 
     word_timestamps: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -157,6 +163,10 @@ class SmallestSTTSettings(STTSettings):
     gender_detection: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     itn_normalize: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     no_format_delay: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speaker_format: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+    #: Fields applied locally to transcripts — changing them needs no reconnect.
+    LOCAL_FIELDS: ClassVar[frozenset[str]] = frozenset({"speaker_format"})
 
 
 class SmallestSTTService(WebsocketSTTService):
@@ -233,6 +243,7 @@ class SmallestSTTService(WebsocketSTTService):
             gender_detection=True,
             itn_normalize=False,
             no_format_delay=False,
+            speaker_format=None,
         )
 
         if settings is not None:
@@ -329,7 +340,7 @@ class SmallestSTTService(WebsocketSTTService):
 
         changed = await super()._update_settings(delta)
 
-        if changed:
+        if changed.keys() - self.Settings.LOCAL_FIELDS:
             await self._disconnect()
             await self._connect()
 
@@ -366,7 +377,10 @@ class SmallestSTTService(WebsocketSTTService):
                 "language": self._settings.language,
                 "encoding": self._encoding,
                 "sample_rate": str(self.sample_rate),
-                "word_timestamps": str(self._settings.word_timestamps).lower(),
+                # Speakers are reported on the words, so diarization needs them.
+                "word_timestamps": str(
+                    bool(self._settings.word_timestamps or self._settings.diarize)
+                ).lower(),
                 "full_transcript": str(self._settings.full_transcript).lower(),
                 "sentence_timestamps": str(self._settings.sentence_timestamps).lower(),
                 "redact_pii": str(self._settings.redact_pii).lower(),
@@ -458,18 +472,16 @@ class SmallestSTTService(WebsocketSTTService):
         if is_final:
             logger.debug(f"Smallest final transcript: [{text}]")
             await self._handle_transcription(text, True, data.get("language"))
+            words = None
+            if self._settings.diarize:
+                words = [
+                    (word.get("word", ""), word.get("speaker")) for word in data.get("words") or []
+                ]
+            runs = self._diarized_runs(text, words)
             # Report usage before the transcription frame so tracing can
             # attach it to the STT span the frame closes.
             await self.emit_stt_usage_metrics()
-            await self.push_frame(
-                TranscriptionFrame(
-                    text,
-                    self._user_id,
-                    time_now_iso8601(),
-                    data.get("language"),
-                    result=data,
-                )
-            )
+            await self._push_transcription_runs(runs, language=data.get("language"), result=data)
         else:
             logger.trace(f"Smallest interim transcript: [{text}]")
             await self.push_frame(

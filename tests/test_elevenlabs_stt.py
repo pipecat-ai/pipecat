@@ -92,6 +92,62 @@ async def test_elevenlabs_stt_sends_keyterms_multipart_fields(aiohttp_client):
 
 
 @pytest.mark.asyncio
+async def test_elevenlabs_stt_diarized_segment_emits_one_frame_per_speaker_run(aiohttp_client):
+    captured_fields = []
+
+    async def handler(request):
+        reader = await request.multipart()
+        async for part in reader:
+            if part.name == "file":
+                await part.read()
+            else:
+                captured_fields.append((part.name, await part.text()))
+
+        return web.json_response(
+            {
+                "text": "Hi there. Hello.",
+                "language_code": "eng",
+                "words": [
+                    {"text": "Hi", "type": "word", "speaker_id": "speaker_0"},
+                    {"text": " ", "type": "spacing"},
+                    {"text": "there.", "type": "word", "speaker_id": "speaker_0"},
+                    {"text": " ", "type": "spacing"},
+                    {"text": "Hello.", "type": "word", "speaker_id": "speaker_1"},
+                ],
+            }
+        )
+
+    app = web.Application()
+    app.router.add_post("/v1/speech-to-text", handler)
+    client = await aiohttp_client(app)
+    base_url = str(client.make_url("/")).rstrip("/")
+
+    async with aiohttp.ClientSession() as session:
+        service = ElevenLabsSTTService(
+            api_key="test-key",
+            aiohttp_session=session,
+            base_url=base_url,
+            settings=ElevenLabsSTTService.Settings(
+                diarize=True, speaker_format="{speaker}: {text}"
+            ),
+        )
+        service._user_id = "session-user"
+
+        frames = [
+            frame
+            async for frame in service.run_stt(b"RIFF")
+            if isinstance(frame, TranscriptionFrame)
+        ]
+
+    assert ("diarize", "true") in captured_fields
+    assert [(f.speaker_label, f.text) for f in frames] == [
+        ("speaker_0", "speaker_0: Hi there."),
+        ("speaker_1", "speaker_1: Hello."),
+    ]
+    assert all(f.user_id == "session-user" for f in frames)
+
+
+@pytest.mark.asyncio
 async def test_elevenlabs_realtime_websocket_url_includes_keyterms(monkeypatch):
     captured = {}
 

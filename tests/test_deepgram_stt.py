@@ -305,7 +305,7 @@ async def test_connection_handler_backs_off_after_non_quick_failure(monkeypatch)
     assert sleep_calls == [4, 4]  # exponential_backoff_time's min_wait, not skipped
 
 
-def _results_message(transcript: str, is_final: bool):
+def _results_message(transcript: str, is_final: bool, words: list | None = None):
     from deepgram.listen.v1.types import ListenV1Results
 
     return ListenV1Results.model_validate(
@@ -317,7 +317,9 @@ def _results_message(transcript: str, is_final: bool):
             "is_final": is_final,
             "speech_final": is_final,
             "channel": {
-                "alternatives": [{"transcript": transcript, "confidence": 0.99, "words": []}]
+                "alternatives": [
+                    {"transcript": transcript, "confidence": 0.99, "words": words or []}
+                ]
             },
             "metadata": {
                 "request_id": "req-123",
@@ -467,3 +469,82 @@ async def test_connection_handler_does_not_reconnect_after_cancel():
         for task in remaining:
             task.cancel()
         await asyncio.gather(*remaining, return_exceptions=True)
+
+
+def _word(word: str, speaker: int, punctuated: str | None = None) -> dict:
+    return {
+        "word": word,
+        "punctuated_word": punctuated or word,
+        "start": 0.0,
+        "end": 0.1,
+        "confidence": 0.9,
+        "speaker": speaker,
+    }
+
+
+async def _final_transcription_frames(service: DeepgramSTTService, message) -> list:
+    from pipecat.frames.frames import TranscriptionFrame
+
+    pushed = []
+
+    async def fake_push_frame(frame, direction=None):
+        pushed.append(frame)
+
+    service.push_frame = fake_push_frame
+    await service._on_message(message)
+    return [f for f in pushed if isinstance(f, TranscriptionFrame)]
+
+
+@pytest.mark.asyncio
+async def test_diarized_final_result_emits_one_frame_per_speaker_run():
+    service = DeepgramSTTService(
+        api_key="test-key",
+        settings=DeepgramSTTService.Settings(diarize=True, speaker_format="{speaker}: {text}"),
+    )
+    service._user_id = "session-user"
+    message = _results_message(
+        "Hi there. Hello.",
+        is_final=True,
+        words=[_word("hi", 0, "Hi"), _word("there", 0, "there."), _word("hello", 1, "Hello.")],
+    )
+
+    frames = await _final_transcription_frames(service, message)
+
+    assert [(f.speaker_label, f.text) for f in frames] == [
+        ("0", "0: Hi there."),
+        ("1", "1: Hello."),
+    ]
+    assert all(f.user_id == "session-user" for f in frames)
+
+
+@pytest.mark.asyncio
+async def test_final_result_is_not_split_without_diarization():
+    service = DeepgramSTTService(api_key="test-key")
+    message = _results_message(
+        "Hi. Hello.", is_final=True, words=[_word("hi", 0, "Hi."), _word("hello", 1, "Hello.")]
+    )
+
+    frames = await _final_transcription_frames(service, message)
+
+    assert [(f.speaker_label, f.text) for f in frames] == [(None, "Hi. Hello.")]
+
+
+def test_speaker_format_is_not_sent_to_deepgram():
+    service = DeepgramSTTService(
+        api_key="test-key", settings=DeepgramSTTService.Settings(speaker_format="{speaker}: {text}")
+    )
+
+    assert "speaker_format" not in service._build_connect_kwargs()
+
+
+@pytest.mark.asyncio
+async def test_speaker_format_update_does_not_reconnect():
+    service = DeepgramSTTService(api_key="test-key")
+    service._request_reconnect = AsyncMock()
+
+    changed = await service._update_settings(
+        DeepgramSTTService.Settings(speaker_format="{speaker}: {text}")
+    )
+
+    assert "speaker_format" in changed
+    service._request_reconnect.assert_not_awaited()

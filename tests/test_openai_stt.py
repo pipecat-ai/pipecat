@@ -5,7 +5,7 @@
 #
 
 import pytest
-from openai.types.audio import Transcription
+from openai.types.audio import Transcription, TranscriptionDiarized
 
 from pipecat.frames.frames import (
     InputAudioRawFrame,
@@ -100,7 +100,7 @@ def test_openai_realtime_local_vad_mode_recommends_no_strategies():
     [
         ("gpt-transcribe", {"response_format": "json", "include": ["logprobs"]}),
         ("whisper-1", {"response_format": "verbose_json"}),
-        ("gpt-4o-transcribe-diarize", {}),
+        ("gpt-4o-transcribe-diarize", {"response_format": "diarized_json"}),
     ],
 )
 @pytest.mark.asyncio
@@ -124,3 +124,71 @@ async def test_prob_metrics_request_shape(model, expected):
 
     assert captured["model"] == model
     assert {k: captured[k] for k in ("response_format", "include") if k in captured} == expected
+
+
+@pytest.mark.asyncio
+async def test_diarization_model_requests_speaker_segments():
+    service = OpenAISTTService(
+        api_key="test-key", settings=OpenAISTTService.Settings(model="gpt-4o-transcribe-diarize")
+    )
+    captured = {}
+
+    async def fake_create(**kwargs):
+        captured.update(kwargs)
+        return Transcription(text="hello")
+
+    service._client.audio.transcriptions.create = fake_create
+
+    await service._transcribe(b"\x01\x02")
+
+    assert captured["response_format"] == "diarized_json"
+    assert captured["chunking_strategy"] == "auto"
+
+
+def _diarized(text: str, segments: list[tuple[str, str]]) -> TranscriptionDiarized:
+    return TranscriptionDiarized.model_validate(
+        {
+            "duration": 1.0,
+            "task": "transcribe",
+            "text": text,
+            "segments": [
+                {
+                    "id": str(index),
+                    "type": "transcript.text.segment",
+                    "start": 0.0,
+                    "end": 0.5,
+                    "text": segment_text,
+                    "speaker": speaker,
+                }
+                for index, (segment_text, speaker) in enumerate(segments)
+            ],
+        }
+    )
+
+
+@pytest.mark.asyncio
+async def test_diarized_response_emits_one_frame_per_speaker_run():
+    service = OpenAISTTService(
+        api_key="test-key",
+        settings=OpenAISTTService.Settings(
+            model="gpt-4o-transcribe-diarize", speaker_format="{speaker}: {text}"
+        ),
+    )
+    service._user_id = "session-user"
+    response = _diarized(
+        "Hi there. How are you? Fine.",
+        [(" Hi there.", "A"), (" How are you?", "A"), (" Fine.", "B")],
+    )
+
+    async def fake_transcribe(audio):
+        return response
+
+    service._transcribe = fake_transcribe
+
+    frames = [f async for f in service.run_stt(b"audio") if isinstance(f, TranscriptionFrame)]
+
+    assert [(f.speaker_label, f.text) for f in frames] == [
+        ("A", "A: Hi there. How are you?"),
+        ("B", "B: Fine."),
+    ]
+    assert all(f.user_id == "session-user" for f in frames)

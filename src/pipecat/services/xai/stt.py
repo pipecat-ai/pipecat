@@ -14,7 +14,7 @@ import asyncio
 import json
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, ClassVar
 from urllib.parse import urlencode
 
 from loguru import logger
@@ -26,7 +26,6 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     InterimTranscriptionFrame,
-    TranscriptionFrame,
 )
 from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.settings import STTSettings
@@ -91,7 +90,13 @@ class XAISTTSettings(STTSettings):
         channels: Number of interleaved channels (2-8). Required when
             ``multichannel`` is True.
         diarize: When True, the server attaches a ``speaker`` field to each
-            word identifying the detected speaker.
+            word identifying the detected speaker. Each contiguous speaker run of
+            a final transcript is emitted as its own frame with that speaker in
+            ``speaker_label``. Interim transcripts are not labelled.
+        speaker_format: Optional format string for diarized speaker runs. Use
+            ``{speaker}`` for the speaker label and ``{text}`` for the transcript
+            text (e.g. ``"{speaker}: {text}"``). If ``None``, transcript text is
+            not modified. Applied locally, so changing it does not reconnect.
     """
 
     interim_results: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -99,6 +104,10 @@ class XAISTTSettings(STTSettings):
     multichannel: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     channels: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     diarize: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speaker_format: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+    #: Fields applied locally to transcripts — changing them needs no reconnect.
+    LOCAL_FIELDS: ClassVar[frozenset[str]] = frozenset({"speaker_format"})
 
 
 class XAISTTService(WebsocketSTTService):
@@ -156,6 +165,7 @@ class XAISTTService(WebsocketSTTService):
             multichannel=None,
             channels=None,
             diarize=None,
+            speaker_format=None,
         )
         if settings is not None:
             default_settings.apply_update(settings)
@@ -193,7 +203,7 @@ class XAISTTService(WebsocketSTTService):
         change requires a fresh connection.
         """
         changed = await super()._update_settings(delta)
-        if not changed:
+        if not changed.keys() - self.Settings.LOCAL_FIELDS:
             return changed
         await self._disconnect()
         await self._connect()
@@ -385,19 +395,17 @@ class XAISTTService(WebsocketSTTService):
             return
         language = language if language is not None else self._language_for_frame()
 
+        words = None
+        if self._settings.diarize:
+            words = [
+                (word.get("text") or word.get("word", ""), word.get("speaker"))
+                for word in message.get("words") or []
+            ]
+        runs = self._diarized_runs(text, words)
         # Report usage before the transcription frame so tracing can attach
         # it to the STT span the frame closes.
         await self.emit_stt_usage_metrics()
-        await self.push_frame(
-            TranscriptionFrame(
-                text,
-                self._user_id,
-                time_now_iso8601(),
-                language,
-                result=message,
-                finalized=True,
-            )
-        )
+        await self._push_transcription_runs(runs, language=language, result=message, finalized=True)
         await self._trace_transcription(text, True, language)
 
     def _language_for_frame(self) -> Language:
