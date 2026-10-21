@@ -14,10 +14,12 @@ frontend as the example does, with the example's instruction and the pairing
 instruction and tool description as they are in the code, runs the model on
 the context several times, and reports the turns where the model's decision
 differs from the expected one. A turn the model delegates runs on, as in the
-bot: the ``delegate`` call settles and the model replies, so the acknowledgement
-the user would hear, what the model said with the call and in that reply, is
-reported too, with the words it took and how often it was said twice (with
-the call and again after it).
+bot: the ``delegate`` call settles through the connector, and the model replies
+to its result unless it generated a pre-delegation acknowledgement (text in the
+same response as the call), in which case that run is skipped. The
+acknowledgement the user would hear is reported too, with the words it took,
+how often the run was skipped, and how often the user would hear it twice (with
+the call and again after it), which the skip should keep at none.
 
 One of the tuning checks: see ``evals/llm-with-backend/tuning/README.md``.
 Needs the frontend's key in ``.env``::
@@ -42,11 +44,13 @@ sys.path.insert(0, str(HERE.parents[3] / "examples" / "multi-worker" / "llm-with
 
 from backend import FRONTEND_INSTRUCTIONS  # noqa: E402
 
-from pipecat.frames.frames import LLMContextFrame  # noqa: E402
+from pipecat.frames.frames import FunctionCallResultFrame, LLMContextFrame  # noqa: E402
+from pipecat.observers.base_observer import BaseObserver, FramePushed  # noqa: E402
 from pipecat.pipeline.llm_with_backend import (  # noqa: E402
     DELEGATE_TOOL_NAME,
     BackendConnector,
     ConnectorContext,
+    _FrontendInferenceHooks,
 )
 from pipecat.pipeline.pipeline import Pipeline  # noqa: E402
 from pipecat.processors.aggregators.llm_context import LLMContext, LLMContextMessage  # noqa: E402
@@ -86,26 +90,48 @@ def _frontend(name: str) -> LLMService[Any]:
     raise ValueError(f"unknown frontend {name!r}: expected openai, google or anthropic")
 
 
-async def _run_once(frontend: str, messages: list[dict]) -> tuple[bool, list[str]]:
-    """Run the frontend on a context once: whether it called delegate, and what it said.
+class _WorkingBackend:
+    """Stands in for the session with the backend: takes every request, always at work."""
 
-    The frontend runs ahead of an assistant aggregator, as in the bot, so a
-    delegate call settles and the model replies to its result. What it said is
-    read back from the context: the text it wrote with the call, if any, then
-    the reply.
+    async def send(self, request: str) -> str:
+        return "working"
+
+
+class _ResultRecorder(BaseObserver):
+    """Keeps the frames that settled the ``delegate`` calls, which say whether the model runs again."""
+
+    def __init__(self):
+        super().__init__()
+        self.results: list[FunctionCallResultFrame] = []
+
+    async def on_push_frame(self, data: FramePushed):
+        if isinstance(data.frame, FunctionCallResultFrame):
+            self.results.append(data.frame)
+
+
+async def _run_once(frontend: str, messages: list[dict]) -> tuple[bool, list[str], bool]:
+    """Run the frontend on a context once: whether it called delegate, what it said, and whether its acknowledgement run was skipped.
+
+    The frontend runs ahead of an assistant aggregator, as in the bot, with the
+    connector's ``delegate`` handler and hooks: a delegate call settles as it
+    would with a backend at work, and the model replies to its result unless it
+    generated a pre-delegation acknowledgement. What it said is read back from
+    the context: the text it wrote with the call, if any, then the reply.
     """
     llm = _frontend(frontend)
     connector = BackendConnector()
     connector.bind(ConnectorContext(backend_name="backend", frontend_is_realtime=False))
+    # The session a running LLMWithBackend opens with its backend worker.
+    connector._session = _WorkingBackend()  # type: ignore[assignment]
+    connector._session_open.set()
     if connector.frontend_instruction:
         llm.append_system_instruction(connector.frontend_instruction)
-
-    async def delegate(params):
-        await params.result_callback({"status": "delegated", "backend": "working"})
-
     for tool in connector.tools:
-        llm.register_function(tool.name, delegate, cancel_on_interruption=False)
+        llm.register_function(tool.name, tool.handler, cancel_on_interruption=False)
         llm.get_llm_adapter().builtin_tools[tool.name] = tool
+    llm._llm_with_backend_hooks = _FrontendInferenceHooks(
+        connector.acknowledgement_tracker, race=None
+    )
     # A service's own messages (a Google frontend's thought signatures) are
     # not replayed through another service.
     context = LLMContext(
@@ -115,10 +141,12 @@ async def _run_once(frontend: str, messages: list[dict]) -> tuple[bool, list[str
     )
     recorded = len(context.get_messages())
     aggregator = LLMContextAggregatorPair(context).assistant()
+    results = _ResultRecorder()
     await run_test(
         Pipeline([llm, aggregator]),
         frames_to_send=[LLMContextFrame(context), SleepFrame(sleep=REPLY_SECS)],
         start_timeout=5.0,
+        observers=[results],
     )
     added = [m for m in context.get_messages()[recorded:] if isinstance(m, dict)]
     called = any(
@@ -132,7 +160,11 @@ async def _run_once(frontend: str, messages: list[dict]) -> tuple[bool, list[str
         for m in added
         if m.get("role") == "assistant" and isinstance(content := m.get("content"), str) and content
     ]
-    return called, said
+    skipped = any(
+        result.properties is not None and result.properties.run_llm is False
+        for result in results.results
+    )
+    return called, said, skipped
 
 
 async def _replay(turns: list[dict], frontend: str, samples: int, concurrency: int) -> list[dict]:
@@ -165,13 +197,13 @@ def _words(said: list[str]) -> int:
 
 def _report(results: list[dict], show: bool):
     wrong_total = 0
-    acks: list[list[str]] = []
+    acks: list[tuple[list[str], bool]] = []
     for result in results:
         runs = result["runs"]
-        delegated = sum(1 for called, _ in runs if called)
+        delegated = sum(1 for called, _, _ in runs if called)
         wrong = len(runs) - delegated if result["needs_delegate"] else delegated
         wrong_total += wrong
-        acks.extend(said for called, said in runs if called)
+        acks.extend((said, skipped) for called, said, skipped in runs if called)
         user = [m for m in result["messages"] if m.get("role") == "user"][-1]["content"]
         expected = "delegate" if result["needs_delegate"] else "answer"
         mark = "!!" if wrong else "  "
@@ -180,15 +212,18 @@ def _report(results: list[dict], show: bool):
             f"{result['frontend']}/{result['kind']}: {user[:60]}"
         )
         if show:
-            for called, said in runs:
-                print(f"       [{'D' if called else '-'}] {' | '.join(said)[:150]!r}")
+            for called, said, skipped in runs:
+                mark = "D" if called else "-"
+                mark += "S" if skipped else " "
+                print(f"       [{mark}] {' | '.join(said)[:150]!r}")
     print(f"\nwrong decisions: {wrong_total} over {len(results)} turns")
     if acks:
-        words = sorted(_words(said) for said in acks)
-        twice = sum(1 for said in acks if len(said) > 1)
+        words = sorted(_words(said) for said, _ in acks)
+        skipped = sum(1 for _, skipped in acks if skipped)
+        twice = sum(1 for said, _ in acks if len(said) > 1)
         print(
             f"acknowledgements: {len(acks)}, words median {words[len(words) // 2]}, "
-            f"max {words[-1]}, said twice {twice}"
+            f"max {words[-1]}, pre-delegation (run skipped) {skipped}, said twice {twice}"
         )
 
 
@@ -203,7 +238,8 @@ def main():
     parser.add_argument(
         "--show",
         action="store_true",
-        help="Print what the model said each run, with the call and after it.",
+        help="Print what the model said each run, with the call and after it; "
+        "S marks a run whose acknowledgement run was skipped.",
     )
     parser.add_argument("--out", type=Path, help="Write each turn's runs to this JSON file.")
     args = parser.parse_args()

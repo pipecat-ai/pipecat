@@ -30,11 +30,21 @@ probability of a "yes" per utterance: median (min-max)
 
 ## Frontend replay
 
-The three frontend models on the recorded turns in `frontend_replay/`, five runs per turn (2026-10-21). A wrong decision is a turn the model should have delegated and answered itself, or the reverse; the turns from the eval scenarios include every stop and correction they make. The acknowledgement is what the user hears for a delegated turn: the text the model wrote with the `delegate` call, if any, and its reply after the call; it is said twice when both have text.
+The three frontend models on the recorded turns in `frontend_replay/`, five runs per turn (2026-10-21). A wrong decision is a turn the model should have delegated and answered itself, or the reverse; the turns from the eval scenarios include every stop and correction they make. The acknowledgement is what the user hears for a delegated turn: the text the model wrote in the same response as its `delegate` call, a pre-delegation acknowledgement, or else its reply in the run after the call. The connector skips that run after a pre-delegation acknowledgement, so the user hears one acknowledgement; "said twice" counts the delegations where both the response and the run had text, and should stay at none.
 
 ```bash
 uv run python evals/llm-with-backend/tuning/frontend_replay/replay.py --frontend <openai|google|anthropic> --samples 5
 ```
+
+| frontend                        | wrong decisions, 75 turns × 5 | where                                                                                                                                               | acknowledgement words, median | pre-delegation acknowledgement (run skipped) | said twice |
+| ------------------------------- | ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- | -------------------------------------------- | ---------- |
+| `openai` (gpt-4.1)              | 0                             |                                                                                                                                                     | 15                            | 4 of 275                                     | 0          |
+| `google` (gemini-3.6-flash)     | 0                             |                                                                                                                                                     | 14                            | 31 of 275                                    | 0          |
+| `anthropic` (claude-sonnet-4-6) | 1                             | a second request made while work is under way, recorded from the Gemini bot ("check whether CI is green on main as well"): 4/5, and 5/10 on a rerun | 14                            | 133 of 274                                   | 0          |
+
+Claude's acknowledgement is most often the text it wrote with the call ("Sure, I'm on both of those now!", "Got it, I'll leave the code as it is.", "Let me look that up for you!"), 133 of 274 delegations, and its median counts that text alone; gpt-4.1 wrote text with the call in 4 of 275. The 38 recorded turns with a delegation earlier in the conversation run on the shape a skipped run leaves, the call, its result, then the model's text, since the aggregator settles a result into the placeholder it added with the call.
+
+With the acknowledgement run after every delegation, the same wording and day:
 
 | frontend                        | wrong decisions, 75 turns × 5 | where                                                                                                                                                                                                                           | acknowledgement words, median | said twice |
 | ------------------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- | ---------- |
