@@ -501,8 +501,8 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
         # LLM completion
         response = await self._client.chat.completions.create(**params)
 
-        if response.choices[0].finish_reason:
-            self._handle_finish_reason(response.choices[0].finish_reason)
+        if finish_reason := getattr(response.choices[0], "finish_reason", None):
+            self._handle_finish_reason(finish_reason)
 
         return response.choices[0].message.content
 
@@ -600,8 +600,8 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
 
                     await self.stop_ttfb_metrics()
 
-                    if chunk.choices[0].finish_reason:
-                        self._handle_finish_reason(chunk.choices[0].finish_reason)
+                    if finish_reason := getattr(chunk.choices[0], "finish_reason", None):
+                        self._handle_finish_reason(finish_reason)
 
                     if not chunk.choices[0].delta:
                         continue
