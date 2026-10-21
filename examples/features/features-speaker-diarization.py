@@ -94,6 +94,9 @@ def create_stt(name: str) -> STTService:
 
         return AssemblyAISTTService(
             api_key=os.environ["ASSEMBLYAI_API_KEY"],
+            # Let AssemblyAI end turns itself: its longer turns give it more of
+            # each voice to label, where a turn per pause leaves it guessing.
+            vad_force_turn_endpoint=False,
             settings=AssemblyAISTTService.Settings(
                 speaker_labels=True, speaker_format=SPEAKER_FORMAT
             ),
