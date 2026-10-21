@@ -1671,26 +1671,28 @@ class TTSService(AIService):
         if self.supports_processing_metrics and not self._is_streaming_tokens:
             await self.start_processing_metrics()
 
-        # Each piece with the text spoken for it, None for one not spoken as
-        # words, and the text sent to the TTS for it.
-        prepared: list[tuple[AggregatedTextFrame, str | None, str]] = []
+        # Each piece with its text, None for one not spoken as words, the text
+        # the TTS speaks for it, and the text sent to the TTS for it. The last
+        # two differ by the expression markup, which is performed but not spoken.
+        prepared: list[tuple[AggregatedTextFrame, str | None, str, str]] = []
         for frame, text in pieces:
             if frame.skip_tts:
-                prepared.append((frame, None, text))
+                prepared.append((frame, None, text, text))
                 continue
             prepared_text = await self._transform_text(text, frame.text_type)
             if prepared_text is None:
                 # Nothing is left to say, or a transform failed and said so.
                 continue
+            rendered_text = prepared_text
             if frame.modes is not None:
                 # Last, so transforms never see the service's markup.
-                prepared_text = self._expression_adapter.render_text(
+                rendered_text = self._expression_adapter.render_text(
                     prepared_text, frame.modes, self._rendered_modes
                 )
                 self._rendered_modes = frame.modes
-            prepared.append((frame, text, prepared_text))
+            prepared.append((frame, text, prepared_text, rendered_text))
 
-        request = "".join(prepared_text for _, _, prepared_text in prepared)
+        request = "".join(rendered_text for _, _, _, rendered_text in prepared)
         append_to_context = False
         if request:
             # A TTSSpeakFrame sets up its context before its text gets here.
@@ -1698,27 +1700,25 @@ class TTSService(AIService):
                 context_id, TTSContext(interruptible=pieces[0][0].interruptible)
             )
             append_to_context = context.append_to_context
-            for frame, spoken_text, _ in prepared:
-                if spoken_text is not None:
+            for frame, piece_text, _, _ in prepared:
+                if piece_text is not None:
                     await self._announce_text(frame, context_id)
             await self._call_event_handler("on_tts_request", context_id, request)
             await self._start_audio_context(context_id)
 
         # In order, so the sequencer releases skipped pieces right after the
         # spoken pieces before them.
-        for frame, spoken_text, prepared_text in prepared:
-            if spoken_text is None:
+        for frame, piece_text, prepared_text, _ in prepared:
+            if piece_text is None:
                 await self._push_skipped_text(frame, context_id)
             else:
                 await self._register_spoken_text(frame, prepared_text, context_id)
 
         if request:
             await self._synthesize_text(request, context_id)
-            for frame, spoken_text, _ in prepared:
-                if spoken_text is not None:
-                    await self._push_spoken_text(
-                        frame, spoken_text, context_id, append_to_context
-                    )
+            for frame, piece_text, _, _ in prepared:
+                if piece_text is not None:
+                    await self._push_spoken_text(frame, piece_text, context_id, append_to_context)
 
         await self.stop_processing_metrics()
 

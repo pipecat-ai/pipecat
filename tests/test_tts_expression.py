@@ -150,6 +150,18 @@ async def test_words_carry_their_modes_and_events_come_in_the_order_written():
 
 
 @pytest.mark.asyncio
+async def test_word_timestamps_are_matched_to_the_words_without_their_markup():
+    down, _ = await run_test(
+        WordTimestampTTSService(),
+        frames_to_send=response(*REPLY),
+        pipeline_params=EXPRESSIVE,
+    )
+
+    words = [f.text for f in down if isinstance(f, TTSTextFrame)]
+    assert words == ["It's", "back", "up", "now.", "Bye!"]
+
+
+@pytest.mark.asyncio
 async def test_each_change_of_modes_is_a_segment_of_its_own():
     down, _ = await run_test(
         WordTimestampTTSService(),
