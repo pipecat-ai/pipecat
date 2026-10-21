@@ -129,5 +129,8 @@ class EvalFastAPIWebsocketTransport(FastAPIWebsocketTransport):
         """Configure the bot's output for the connection, then proceed (config before any greeting)."""
         skip_tts = self._flags.skip_tts
         logger.debug(f"{self}: configuring eval LLM output with {skip_tts=}")
-        await self._input.push_frame(LLMConfigureOutputFrame(skip_tts=skip_tts))
+        # Broadcast, so an RTVIProcessor ahead of the input transport (the one
+        # PipelineWorker prepends) knows the setting and restores it after a
+        # send-text instead of turning TTS back on.
+        await self._input.broadcast_frame(LLMConfigureOutputFrame, skip_tts=skip_tts)
         await super()._on_client_connected(websocket)

@@ -152,7 +152,9 @@ class EvalTransport(SingleClientWebsocketServerTransport):
         if self._input is not None:
             skip_tts = _query_flag(websocket, SKIP_TTS_QUERY_PARAM)
             logger.debug(f"{self}: configuring eval LLM output with {skip_tts=}")
-            await self._input.push_frame(LLMConfigureOutputFrame(skip_tts=skip_tts))
+            # Broadcast, so an RTVIProcessor ahead of the input transport knows
+            # the setting too (see EvalFastAPIWebsocketTransport).
+            await self._input.broadcast_frame(LLMConfigureOutputFrame, skip_tts=skip_tts)
 
         await super()._on_client_connected(websocket)
 
