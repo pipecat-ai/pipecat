@@ -100,9 +100,10 @@ class _RealtimeFrontend(_TextFrontend):
 class _DelegatingFrontend(_TextFrontend):
     """A text frontend that calls ``delegate`` on its first context frame."""
 
-    def __init__(self, arguments: dict | None = None, **kwargs):
+    def __init__(self, arguments: dict | None = None, say: str | None = None, **kwargs):
         super().__init__(**kwargs)
         self._arguments = arguments or {}
+        self._say = say
         self._delegated = False
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -110,6 +111,8 @@ class _DelegatingFrontend(_TextFrontend):
         if isinstance(frame, LLMContextFrame) and not self._delegated:
             self._delegated = True
             await self.push_frame(LLMFullResponseStartFrame())
+            if self._say:
+                await self.push_frame(LLMTextFrame(self._say))
             await self.run_function_calls(
                 [
                     FunctionCallFromLLM(
@@ -373,6 +376,50 @@ async def test_delegate_can_leave_the_frontend_quiet():
 
 
 @pytest.mark.asyncio
+async def test_delegate_skips_the_acknowledgement_run_after_a_pre_delegation_acknowledgement():
+    connector = _bound(session=_FakeSession())
+    connector.acknowledgement_tracker.note_push(LLMFullResponseStartFrame())
+    connector.acknowledgement_tracker.note_push(LLMTextFrame("Sure, checking on that now."))
+    params = _params(LLMContext([{"role": "user", "content": "do it"}]))
+
+    await connector.delegate(params)
+
+    (settled,) = params.result_callback.await_args_list  # type: ignore[attr-defined]
+    assert settled.kwargs["properties"] == FunctionCallResultProperties(run_llm=False)
+
+
+@pytest.mark.asyncio
+async def test_a_new_response_starts_with_no_pre_delegation_acknowledgement():
+    connector = _bound(session=_FakeSession())
+    for frame in (
+        LLMFullResponseStartFrame(),
+        LLMTextFrame("Hello there."),
+        LLMFullResponseEndFrame(),
+        LLMFullResponseStartFrame(),
+    ):
+        connector.acknowledgement_tracker.note_push(frame)
+    params = _params(LLMContext([{"role": "user", "content": "do it"}]))
+
+    await connector.delegate(params)
+
+    (settled,) = params.result_callback.await_args_list  # type: ignore[attr-defined]
+    assert settled.kwargs["properties"] == FunctionCallResultProperties(run_llm=True)
+
+
+@pytest.mark.asyncio
+async def test_a_speech_to_speech_frontend_runs_after_its_call_whatever_it_said_before_it():
+    connector = _bound(realtime=True, session=_FakeSession())
+    connector.acknowledgement_tracker.note_push(LLMFullResponseStartFrame())
+    connector.acknowledgement_tracker.note_push(LLMTextFrame("On it."))
+    params = _params(arguments={"request": "Fix the flaky test."})
+
+    await connector.delegate(params)
+
+    (settled,) = params.result_callback.await_args_list  # type: ignore[attr-defined]
+    assert settled.kwargs["properties"] == FunctionCallResultProperties(run_llm=True)
+
+
+@pytest.mark.asyncio
 async def test_delegate_fails_when_the_backend_never_attaches():
     connector = _bound(BackendConnector(timeout_secs=0.05))
     params = _params(LLMContext([{"role": "user", "content": "do it"}]))
@@ -605,6 +652,29 @@ async def test_a_local_backend_is_heard_through_the_frontends_conversation():
         (ExternalFunctionCallInProgressFrame, "get_weather"),
         (ExternalFunctionCallResultFrame, "get_weather"),
     ]
+
+
+@pytest.mark.asyncio
+async def test_a_frontend_that_acknowledges_before_its_call_is_not_run_again():
+    backend = BackendLLMWorker(
+        name="backend",
+        llm=_ScriptedLLM([[("text", ">> Done.")]]),
+        context=LLMContext(),
+    )
+    frontend = _DelegatingFrontend(say="Sure, checking on that now.")
+    service = LLMWithBackend(frontend=frontend, backend=backend)
+
+    down, _ = await run_test(
+        service,
+        frames_to_send=[
+            LLMContextFrame(LLMContext([{"role": "user", "content": "fix the flaky test"}])),
+            SleepFrame(sleep=1.0),
+        ],
+    )
+
+    (result,) = [f for f in down if isinstance(f, FunctionCallResultFrame)]
+    assert result.result["status"] == "delegated"
+    assert result.properties == FunctionCallResultProperties(run_llm=False)
 
 
 @pytest.mark.asyncio

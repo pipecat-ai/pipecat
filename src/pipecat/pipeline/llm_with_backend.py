@@ -41,6 +41,7 @@ from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesAppendFrame,
+    LLMTextFrame,
     MetricsFrame,
     SystemFrame,
     UserStartedSpeakingFrame,
@@ -245,6 +246,30 @@ class ConnectorContext:
 
     backend_name: str
     frontend_is_realtime: bool
+
+
+class _PreDelegationAckTracker:
+    """Tracks whether the frontend LLM generated a pre-delegation acknowledgement.
+
+    That is, an acknowledgement generated immediately before (i.e. in the same
+    generated response as) the ``delegate`` call. Tracked to avoid generating an
+    unnecessary second acknowledgement when the ``delegate`` call is settled.
+    """
+
+    def __init__(self):
+        """Initialize with nothing spoken."""
+        self.spoken = False
+
+    def note_push(self, frame: Frame) -> None:
+        """Note a frame the frontend is about to push.
+
+        Args:
+            frame: The frame.
+        """
+        if isinstance(frame, LLMFullResponseStartFrame):
+            self.spoken = False
+        elif isinstance(frame, LLMTextFrame):
+            self.spoken = True
 
 
 # ---------------------------------------------------------------------------
@@ -483,9 +508,9 @@ class BackendConnector:
                 :data:`STRATEGY_PLACEHOLDER` stands, or after the text when
                 it has none.
             respond_on_delegate: Whether the frontend runs again as soon as a
-                delegation is sent, which is where its acknowledgement comes
-                from: a text model's tool-call turn carries no prose. Off for
-                a frontend that announces a handoff itself.
+                delegation is sent, to generate an acknowledgement. Skipped
+                when it already generated a pre-delegation acknowledgement, in
+                the same response as its ``delegate`` call.
             timeout_secs: How long the backend may take to acknowledge a
                 message, including the wait for it to become ready.
             client_trace: Whether to send every exchange with the backend to
@@ -499,6 +524,7 @@ class BackendConnector:
         self._respond_on_delegate = respond_on_delegate
         self._timeout_secs = timeout_secs
         self._client_trace = client_trace
+        self._acknowledgement_tracker = _PreDelegationAckTracker()
         self._context: ConnectorContext | None = None
         self._tools: list[FunctionSchema] = []
         self._session: _BackendSession | None = None
@@ -620,13 +646,30 @@ class BackendConnector:
         assert self._session is not None
         return self._session
 
+    @property
+    def acknowledgement_tracker(self) -> _PreDelegationAckTracker:
+        """Tracks whether the frontend LLM generated a pre-delegation acknowledgement.
+
+        Fed by the :class:`LLMWithBackend` from the frontend's frames.
+        """
+        return self._acknowledgement_tracker
+
     async def delegate(self, params: FunctionCallParams) -> None:
         """Put the request a ``delegate`` call carries to the backend, and settle the call at once.
+
+        The frontend runs once the call is settled, to generate an
+        acknowledgement. Skipped if a pre-delegation acknowledgement was
+        already generated, in the same response as the delegate tool call. A
+        speech-to-speech frontend always runs here.
 
         Args:
             params: The ``delegate`` call.
         """
         assert self._context is not None, "connector not bound"
+        # Read before the first await: it describes the response making this call.
+        acknowledged = (
+            not self._context.frontend_is_realtime and self._acknowledgement_tracker.spoken
+        )
         request = await self.request_strategy.compose_request(params)
         if request is None:
             # No turns since the previous delegation: the backend already has
@@ -643,7 +686,9 @@ class BackendConnector:
         await self._trace(params.llm, event="request", text=request, backend=status)
         await params.result_callback(
             {"status": "delegated", "backend": status},
-            properties=FunctionCallResultProperties(run_llm=self._respond_on_delegate),
+            properties=FunctionCallResultProperties(
+                run_llm=self._respond_on_delegate and not acknowledged
+            ),
         )
 
     async def deliver(self, frontend: LLMService[Any], event: BackendEvent) -> None:
@@ -989,6 +1034,48 @@ class _PredictiveDelegationRace:
         await frontend._cancel_frame_in_progress(turn)
 
 
+class _FrontendInferenceHooks:
+    """What an ``LLMWithBackend`` watches of its frontend's inference.
+
+    Set on the frontend as its ``LLMWithBackendHooks``: the predictive
+    delegation race, when there is one, which may want a frame or the
+    inference's calls dropped after an early delegation, and the
+    pre-delegation acknowledgement tracker, fed the frames the race lets
+    through.
+    """
+
+    def __init__(
+        self,
+        acknowledgement_tracker: _PreDelegationAckTracker,
+        race: _PredictiveDelegationRace | None,
+    ):
+        """Initialize the hooks.
+
+        Args:
+            acknowledgement_tracker: The connector's pre-delegation
+                acknowledgement tracker.
+            race: The predictive delegation race, if the pipeline has one.
+        """
+        self._acknowledgement_tracker = acknowledgement_tracker
+        self._race = race
+
+    async def process_frame(self, frontend: LLMService[Any], frame: Frame) -> None:
+        """Follow the race, if any, through the frames the frontend processes."""
+        if self._race is not None:
+            await self._race.process_frame(frontend, frame)
+
+    def before_push(self, frame: Frame) -> bool:
+        """Feed the frame to the acknowledgement tracker and race; False if the race wants it dropped."""
+        if self._race is not None and not self._race.before_push(frame):
+            return False
+        self._acknowledgement_tracker.note_push(frame)
+        return True
+
+    def before_function_calls(self) -> bool:
+        """False if the race wants the inference's calls dropped."""
+        return self._race is None or self._race.before_function_calls()
+
+
 #: How likely a classifier "yes" must be for a turn to be delegated early.
 _DELEGATION_PREDICTION_THRESHOLD = 0.6
 
@@ -1045,9 +1132,8 @@ class PredictiveDelegation(FrameProcessor):
         self._warned: set[str] = set()
 
     def _bind(self, frontend: LLMService[Any], connector: BackendConnector) -> None:
-        """Attach the race to the frontend and build the classifier's question."""
+        """Remember the frontend and build the classifier's question."""
         self._frontend = frontend
-        frontend._llm_with_backend_predictive_delegation = self._race
         self._question = YesNoQuestion(
             instructions=(
                 "Does the user's latest message need to be handed to the assistant's backend "
@@ -1302,6 +1388,10 @@ class LLMWithBackend(Pipeline):
         for tool in self._connector.tools:
             frontend.register_function(tool.name, tool.handler, cancel_on_interruption=False)
             frontend.get_llm_adapter().builtin_tools[tool.name] = tool
+        frontend._llm_with_backend_hooks = _FrontendInferenceHooks(
+            self._connector.acknowledgement_tracker,
+            race=predictive_delegation._race if predictive_delegation is not None else None,
+        )
         self._predictive_delegation = predictive_delegation
         self._session_task: asyncio.Task | None = None
         if predictive_delegation is not None:

@@ -84,7 +84,6 @@ from pipecat.utils.log_config import _get_llm_context_log_mode, _LLMContextLogMo
 from pipecat.utils.types import assert_given
 
 if TYPE_CHECKING:
-    from pipecat.pipeline.llm_with_backend import _PredictiveDelegationRace
     from pipecat.pipeline.worker import PipelineWorker
     from pipecat.workers.runner import WorkerRunner
 
@@ -97,6 +96,45 @@ FunctionCallHandler = Callable[["FunctionCallParams"], Awaitable[None]]
 # `~pipecat.pipeline.llm_with_backend.LLMWithBackend`: the conversational
 # frontend, or the LLM inside the backend worker.
 LLMWithBackendRole = Literal["frontend", "backend"]
+
+
+class LLMWithBackendHooks(Protocol):
+    """How an ``LLMWithBackend`` watches what its frontend processes, pushes and runs.
+
+    Set on the frontend service alone, by
+    :class:`~pipecat.pipeline.llm_with_backend.LLMWithBackend`, whose
+    mechanisms need to see the frontend's frames as they pass, and to say
+    whether a frame is pushed or an inference's function calls are run, before
+    anything downstream does.
+    """
+
+    async def process_frame(self, frontend: LLMService[Any], frame: Frame) -> None:
+        """Called with each frame the frontend processes.
+
+        Args:
+            frontend: The frontend service.
+            frame: The frame it is processing.
+        """
+        ...
+
+    def before_push(self, frame: Frame) -> bool:
+        """Called before the frontend pushes a frame.
+
+        Args:
+            frame: The frame the frontend is about to push.
+
+        Returns:
+            Whether the frontend should push it.
+        """
+        ...
+
+    def before_function_calls(self) -> bool:
+        """Called before the frontend runs its inference's function calls.
+
+        Returns:
+            Whether the frontend should run them.
+        """
+        ...
 
 
 # Type alias for a callback function that handles the result of an LLM function call.
@@ -402,11 +440,9 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         # Holds a speculative response until its turn is confirmed. Frames are
         # routed through it on the way out, in `push_frame`.
         self._speculation_gate = SpeculationGate(name=f"{self}::SpeculationGate")
-        # Set only on the frontend of an `LLMWithBackend` with predictive
-        # delegation, which can delegate a user's turn early in place of this
-        # service's inference. See "Predictive delegation" in
-        # `pipecat.pipeline.llm_with_backend`.
-        self._llm_with_backend_predictive_delegation: _PredictiveDelegationRace | None = None
+        # Set only on the frontend of an `LLMWithBackend`, which watches what
+        # this service processes, pushes and runs. See `LLMWithBackendHooks`.
+        self._llm_with_backend_hooks: LLMWithBackendHooks | None = None
         self._warn_turn_completion_settings_are_strategy_owned()
         # The per-tool cancel tools currently advertised, by name.
         self._cancel_tool_names: set[str] = set()
@@ -901,8 +937,8 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         """
         await super().process_frame(frame, direction)
 
-        if self._llm_with_backend_predictive_delegation is not None:
-            await self._llm_with_backend_predictive_delegation.process_frame(self, frame)
+        if self._llm_with_backend_hooks is not None:
+            await self._llm_with_backend_hooks.process_frame(self, frame)
 
         if isinstance(frame, InterruptionFrame):
             await self._handle_interruptions(frame)
@@ -952,8 +988,8 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             frame: The frame to push.
             direction: The direction of frame pushing.
         """
-        race = self._llm_with_backend_predictive_delegation
-        if race is not None and not race.before_push(frame):
+        hooks = self._llm_with_backend_hooks
+        if hooks is not None and not hooks.before_push(frame):
             return
 
         if isinstance(frame, (LLMTextFrame, LLMFullResponseStartFrame, LLMFullResponseEndFrame)):
@@ -1755,8 +1791,8 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         if len(function_calls) == 0:
             return
 
-        race = self._llm_with_backend_predictive_delegation
-        if race is not None and not race.before_function_calls():
+        hooks = self._llm_with_backend_hooks
+        if hooks is not None and not hooks.before_function_calls():
             return
 
         if self._speculation_gate.is_speculating:
