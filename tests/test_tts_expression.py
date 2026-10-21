@@ -14,6 +14,8 @@ from loguru import logger
 
 from pipecat.expressive.adapter import ExpressionAdapter
 from pipecat.expressive.expression import ExpressionCapabilities, ExpressionTerm, ModeScope
+from pipecat.expressive.parser import Event, Text
+from pipecat.expressive.tts_expression import TTSExpression
 from pipecat.frames.frames import (
     AggregatedTextFrame,
     Frame,
@@ -394,6 +396,20 @@ async def test_streamed_tokens_state_modes_only_where_they_change():
 
 
 @pytest.mark.asyncio
+async def test_each_response_starts_from_the_baseline_when_streaming_tokens():
+    tts = PushTextTTSService(text_aggregation_mode=TextAggregationMode.TOKEN)
+    requests = record_requests(tts)
+    await run_test(
+        tts,
+        # The first response ends in text the parser holds until its end.
+        frames_to_send=[*response("<<calm>> One *two"), *response("<<calm>> Three.")],
+        pipeline_params=EXPRESSIVE,
+    )
+
+    assert requests[-1] == "{calm}Three."
+
+
+@pytest.mark.asyncio
 async def test_a_request_is_spoken_in_the_modes_its_words_start_in():
     tts = StyleTTSService()
     down, _ = await run_test(
@@ -409,3 +425,39 @@ async def test_a_request_is_spoken_in_the_modes_its_words_start_in():
         ("four two.", []),
         ("Anything else?", ["calm"]),
     ]
+
+
+class LearnedAdapter(ExpressionAdapter):
+    """An adapter whose vocabulary is learned after it is created, as at start."""
+
+    def __init__(self):
+        self.events: list[str] = []
+
+    def capabilities(self):
+        return ExpressionCapabilities(events=[ExpressionTerm(name) for name in self.events])
+
+
+def test_the_parser_knows_capabilities_learned_before_first_use():
+    adapter = LearnedAdapter()
+    expression = TTSExpression(lambda: adapter, owner="tts")
+    adapter.events = ["laugh"]
+
+    # A declared event keeps its kind in mode brackets.
+    segments = expression.feed("<<laugh>> Hi.") + expression.flush()
+
+    assert isinstance(segments[0], Event) and segments[0].name == "laugh"
+    assert isinstance(segments[1], Text)
+
+
+def test_pieces_leave_out_what_the_service_cant_perform():
+    expression = TTSExpression(LearnedAdapter, owner="tts")
+    segments = expression.read_whole("<<calm>> Hi. [[laugh]]")
+
+    pieces = expression.pieces(
+        AggregatedTextFrame("", TextType.SENTENCE),
+        segments,
+        streaming_tokens=False,
+        trim=lambda text: text.strip() or None,
+    )
+
+    assert [(frame.text, frame.modes, text) for frame, text in pieces] == [("Hi.", [], "Hi.")]
