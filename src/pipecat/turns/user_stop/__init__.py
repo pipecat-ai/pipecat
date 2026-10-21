@@ -6,13 +6,11 @@
 
 from .base_user_turn_stop_strategy import BaseUserTurnStopStrategy, UserTurnStoppedParams
 from .deferred_user_turn_stop_strategy import DeferredUserTurnStopStrategy, deferred
-from .eager_llm_turn_completion_user_turn_stop_strategy import (
-    EagerLLMTurnCompletionUserTurnStopStrategy,
-)
 from .eager_match_policy import EagerMatchPolicy, ExactMatch, NormalizedMatch
 from .eager_user_turn_stop_strategy import EagerUserTurnStopStrategy
 from .external_user_turn_completion_stop_strategy import ExternalUserTurnCompletionStopStrategy
 from .external_user_turn_stop_strategy import ExternalUserTurnStopStrategy
+from .llm_turn_completion_gate import LLMTurnCompletionGate
 from .llm_turn_completion_user_turn_stop_strategy import LLMTurnCompletionUserTurnStopStrategy
 from .speech_timeout_user_turn_stop_strategy import SpeechTimeoutUserTurnStopStrategy
 from .turn_analyzer_user_turn_stop_strategy import TurnAnalyzerUserTurnStopStrategy
@@ -20,12 +18,12 @@ from .turn_analyzer_user_turn_stop_strategy import TurnAnalyzerUserTurnStopStrat
 __all__ = [
     "BaseUserTurnStopStrategy",
     "DeferredUserTurnStopStrategy",
-    "EagerLLMTurnCompletionUserTurnStopStrategy",
     "EagerMatchPolicy",
     "EagerUserTurnStopStrategy",
     "ExactMatch",
     "ExternalUserTurnCompletionStopStrategy",
     "ExternalUserTurnStopStrategy",
+    "LLMTurnCompletionGate",
     "LLMTurnCompletionUserTurnStopStrategy",
     "NormalizedMatch",
     "SpeechTimeoutUserTurnStopStrategy",

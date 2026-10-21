@@ -949,12 +949,11 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(matched, "expected a DeprecationWarning")
 
     async def test_filter_incomplete_user_turns_installs_strategy(self):
-        """Legacy flag wraps existing stops with deferred() and appends the LLM strategy."""
+        """Legacy flag gates the existing stops on the LLM's turn completion."""
         import warnings
 
         from pipecat.turns.user_stop import (
-            DeferredUserTurnStopStrategy,
-            LLMTurnCompletionUserTurnStopStrategy,
+            LLMTurnCompletionGate,
             SpeechTimeoutUserTurnStopStrategy,
         )
 
@@ -970,10 +969,9 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
             aggregator = LLMUserAggregator(context, params=params)
 
         stop_strategies = aggregator._params.user_turn_strategies.stop
-        self.assertEqual(len(stop_strategies), 2)
-        self.assertIsInstance(stop_strategies[0], DeferredUserTurnStopStrategy)
+        self.assertEqual(len(stop_strategies), 1)
+        self.assertIsInstance(stop_strategies[0], LLMTurnCompletionGate)
         self.assertIs(stop_strategies[0].inner, existing)
-        self.assertIsInstance(stop_strategies[1], LLMTurnCompletionUserTurnStopStrategy)
 
     async def test_llm_completion_strategy_configures_inactive_llms(self):
         """The startup settings update reaches every LLM behind a switcher.

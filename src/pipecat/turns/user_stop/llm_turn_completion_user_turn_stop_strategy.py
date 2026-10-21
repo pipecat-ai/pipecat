@@ -40,9 +40,10 @@ class LLMTurnCompletionUserTurnStopStrategy(ExternalUserTurnCompletionStopStrate
 
     Install alongside one or more ``deferred(...)``-wrapped detector
     strategies that drive ``on_user_turn_inference_triggered`` but
-    leave finalization to this strategy. The aggregator's deprecation
-    path for ``filter_incomplete_user_turns`` does this rewiring
-    automatically.
+    leave finalization to this strategy.
+    :class:`~pipecat.turns.user_stop.LLMTurnCompletionGate` does the same
+    gating by wrapping a strategy instead, and also works with a strategy
+    that answers a predicted end of turn.
     """
 
     def __init__(

@@ -155,10 +155,7 @@ class EagerUserTurnStopStrategy(ExternalUserTurnStopStrategy):
         """Answer an eager end of turn, leaving the turn open."""
         # Segments committed earlier in this turn are part of what the LLM will
         # see, so they're part of what the committed transcript is compared to.
-        await self._start_speculation(f"{self._text} {frame.text}" if self._text else frame.text)
-
-    async def _start_speculation(self, text: str):
-        """Answer the turn's text speculatively, withdrawing it if it goes unresolved."""
+        text = f"{self._text} {frame.text}" if self._text else frame.text
         speculation = UserTurnSpeculation(text=text)
         self._speculation = speculation
         self._speculation_timeout_task = self.task_manager.create_task(

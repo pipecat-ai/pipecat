@@ -49,7 +49,7 @@ from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.livekit.transport import LiveKitParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
-from pipecat.turns.user_turn_strategies import FilterIncompleteEagerUserTurnStrategies
+from pipecat.turns.user_turn_strategies import EagerUserTurnStrategies, filter_incomplete
 from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
@@ -106,14 +106,14 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ),
     )
 
-    # These replace the eager strategies the STT service recommends: they
-    # answer its predictions the same way, and add the LLM's verdict on
-    # whether the turn is complete.
+    # The eager strategies the STT service recommends answer its predictions;
+    # filter_incomplete() adds the LLM's verdict on whether the turn is
+    # complete.
     context = LLMContext()
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
-            user_turn_strategies=FilterIncompleteEagerUserTurnStrategies(),
+            user_turn_strategies=filter_incomplete(EagerUserTurnStrategies()),
         ),
     )
 

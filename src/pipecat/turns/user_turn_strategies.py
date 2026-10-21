@@ -16,13 +16,11 @@ from pipecat.turns.user_start import (
 )
 from pipecat.turns.user_stop import (
     BaseUserTurnStopStrategy,
-    EagerLLMTurnCompletionUserTurnStopStrategy,
     EagerMatchPolicy,
     EagerUserTurnStopStrategy,
     ExternalUserTurnStopStrategy,
-    LLMTurnCompletionUserTurnStopStrategy,
+    LLMTurnCompletionGate,
     TurnAnalyzerUserTurnStopStrategy,
-    deferred,
 )
 from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionConfig
 
@@ -121,13 +119,11 @@ class FilterIncompleteUserTurnStrategies(UserTurnStrategies):
     finalizes the user turn; ◐ / ○ keep the turn open so the user can
     continue speaking and the LLM can re-evaluate later.
 
-    Configuring strategies this way preserves the existing detector
-    chain (defaults or user-supplied) for inference triggering and
-    appends :class:`~pipecat.turns.user_stop.LLMTurnCompletionUserTurnStopStrategy`
-    as the finalizer. The detector strategies are wrapped with
-    :func:`~pipecat.turns.user_stop.deferred` automatically so they fire
-    only ``on_user_turn_inference_triggered`` and leave finalization to
-    the LLM gate.
+    The detector chain (defaults or user-supplied) still decides when to run
+    inference and when the turn ends: each stop strategy is wrapped in
+    :class:`~pipecat.turns.user_stop.LLMTurnCompletionGate`, which holds its end
+    of turn until the LLM says ●. :func:`filter_incomplete` does the same for
+    any set of strategies.
 
     Parameters:
         config: Optional configuration applied to the LLM via the
@@ -159,11 +155,7 @@ class FilterIncompleteUserTurnStrategies(UserTurnStrategies):
 
     def __post_init__(self):
         super().__post_init__()
-        # Defer the detector chain so it only fires inference-triggered,
-        # then append the LLM gate as the sole finalizer.
-        gated: list[BaseUserTurnStopStrategy] = [deferred(s) for s in self.stop or []]
-        gated.append(LLMTurnCompletionUserTurnStopStrategy(config=self.config))
-        self.stop = gated
+        self.stop = _gate(self.stop or [], self.config)
 
 
 @dataclass
@@ -221,37 +213,46 @@ class EagerUserTurnStrategies(ExternalUserTurnStrategies):
         ]
 
 
-@dataclass
-class FilterIncompleteEagerUserTurnStrategies(EagerUserTurnStrategies):
-    """Eager strategies that end a turn only once the LLM says it's complete.
+def filter_incomplete(
+    strategies: UserTurnStrategies | None = None,
+    *,
+    config: UserTurnCompletionConfig | None = None,
+) -> UserTurnStrategies:
+    """Return strategies that end a user turn only once the LLM says it's complete.
 
-    Answers the service's prediction like
-    :class:`EagerUserTurnStrategies`, with the LLM beginning each response with
-    a turn-completion marker as in :class:`FilterIncompleteUserTurnStrategies`.
-    When the service commits to the end of the turn, the response is spoken
-    once its marker is ● (complete); a ◐ or ○ (incomplete) keeps the turn open
-    for the user to go on. See
-    :class:`~pipecat.turns.user_stop.EagerLLMTurnCompletionUserTurnStopStrategy`.
+    The LLM begins every response with a turn-completion marker: ● (complete),
+    ◐ (incomplete short) or ○ (incomplete long). The given strategies still
+    decide when to run inference and when the turn ends; each stop strategy is
+    wrapped in :class:`~pipecat.turns.user_stop.LLMTurnCompletionGate`, which
+    holds its end of turn until the LLM says ●. A ◐ or ○ keeps the turn open
+    for the user to go on.
 
-    Parameters:
+    Args:
+        strategies: The strategies to gate. Defaults to the default
+            :class:`UserTurnStrategies`.
         config: Optional configuration applied to the LLM via the
-            ``filter_incomplete_user_turns`` setting. If None, defaults from
+            ``filter_incomplete_user_turns`` setting. Customizes the
+            turn-completion instructions, incomplete-turn timeouts, and
+            re-prompts. If None, defaults from
             :class:`~pipecat.turns.user_turn_completion_mixin.UserTurnCompletionConfig`
             are used.
 
+    Returns:
+        Strategies with the same start strategies and the stop strategies gated.
+
     Example::
 
-        user_turn_strategies=FilterIncompleteEagerUserTurnStrategies()
+        user_turn_strategies=filter_incomplete()
+
+        # A service that owns turn detection and predicts the end of a turn,
+        # such as Deepgram Flux with `enable_eager_end_of_turn=True`:
+        user_turn_strategies=filter_incomplete(EagerUserTurnStrategies())
     """
+    strategies = strategies or UserTurnStrategies()
+    return UserTurnStrategies(start=strategies.start, stop=_gate(strategies.stop or [], config))
 
-    config: UserTurnCompletionConfig | None = None
 
-    def __post_init__(self):
-        super().__post_init__()
-        self.stop = [
-            EagerLLMTurnCompletionUserTurnStopStrategy(
-                match_policy=self.match_policy,
-                speculation_timeout=self.speculation_timeout,
-                config=self.config,
-            )
-        ]
+def _gate(
+    stop: list[BaseUserTurnStopStrategy], config: UserTurnCompletionConfig | None
+) -> list[BaseUserTurnStopStrategy]:
+    return [LLMTurnCompletionGate(s, config=config) for s in stop]

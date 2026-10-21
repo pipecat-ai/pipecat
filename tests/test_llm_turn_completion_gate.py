@@ -19,6 +19,8 @@ from pipecat.frames.frames import (
     ProposedUserStoppedSpeakingFrame,
     TranscriptionFrame,
     UserStoppedSpeakingFrame,
+    VADUserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -29,8 +31,14 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.services.llm_service import LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.tests.utils import SleepFrame, run_test
+from pipecat.turns.user_stop import LLMTurnCompletionGate, SpeechTimeoutUserTurnStopStrategy
 from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionConfig
-from pipecat.turns.user_turn_strategies import FilterIncompleteEagerUserTurnStrategies
+from pipecat.turns.user_turn_strategies import (
+    EagerUserTurnStrategies,
+    FilterIncompleteUserTurnStrategies,
+    UserTurnStrategies,
+    filter_incomplete,
+)
 
 
 class MarkerLLM(LLMService):
@@ -58,10 +66,10 @@ class MarkerLLM(LLMService):
 
 async def run_turn(
     frames,
+    strategies: UserTurnStrategies,
     *,
     delay: float = 0,
     user_turn_stop_timeout: float = 5.0,
-    **kwargs,
 ) -> tuple[list, LLMContext, MarkerLLM]:
     """Run the frames through a user aggregator and a marker LLM.
 
@@ -72,7 +80,7 @@ async def run_turn(
     aggregator = LLMUserAggregator(
         context,
         params=LLMUserAggregatorParams(
-            user_turn_strategies=FilterIncompleteEagerUserTurnStrategies(**kwargs),
+            user_turn_strategies=strategies,
             user_turn_stop_timeout=user_turn_stop_timeout,
         ),
     )
@@ -97,7 +105,80 @@ def speculative(llm: MarkerLLM) -> list[bool]:
     return [f.speculation for f in llm.inferences]
 
 
-class TestFilterIncompleteEagerUserTurnStrategies(unittest.IsolatedAsyncioTestCase):
+def stops(frames) -> int:
+    return len([f for f in frames if isinstance(f, UserStoppedSpeakingFrame)])
+
+
+class TestFilterIncomplete(unittest.TestCase):
+    def test_gates_every_stop_strategy_and_keeps_the_start_strategies(self):
+        detector = SpeechTimeoutUserTurnStopStrategy()
+        strategies = UserTurnStrategies(stop=[detector])
+
+        gated = filter_incomplete(strategies)
+
+        assert gated.start == strategies.start
+        assert len(gated.stop) == 1
+        assert isinstance(gated.stop[0], LLMTurnCompletionGate)
+        assert gated.stop[0].inner is detector
+
+    def test_defaults_to_the_default_strategies(self):
+        gated = filter_incomplete()
+
+        assert len(gated.stop) == 1
+        assert isinstance(gated.stop[0], LLMTurnCompletionGate)
+
+    def test_the_bundle_gates_its_stop_strategies(self):
+        detector = SpeechTimeoutUserTurnStopStrategy()
+
+        strategies = FilterIncompleteUserTurnStrategies(stop=[detector])
+
+        assert len(strategies.stop) == 1
+        assert isinstance(strategies.stop[0], LLMTurnCompletionGate)
+        assert strategies.stop[0].inner is detector
+
+
+class TestGateOverALocalDetector(unittest.IsolatedAsyncioTestCase):
+    async def test_the_user_going_on_lets_the_detector_answer_again(self):
+        aggregator = LLMUserAggregator(
+            LLMContext(),
+            params=LLMUserAggregatorParams(
+                user_turn_strategies=filter_incomplete(
+                    UserTurnStrategies(
+                        stop=[SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=0.1)]
+                    )
+                ),
+            ),
+        )
+        triggered = []
+
+        @aggregator.event_handler("on_user_turn_inference_triggered")
+        async def on_inference_triggered(aggregator, strategy):
+            triggered.append(strategy)
+
+        down, _ = await run_test(
+            Pipeline([aggregator, MarkerLLM()]),
+            frames_to_send=[
+                VADUserStartedSpeakingFrame(),
+                final("I went to"),
+                SleepFrame(),
+                VADUserStoppedSpeakingFrame(),
+                SleepFrame(sleep=0.4),
+                # The LLM said ◐: the user goes on.
+                VADUserStartedSpeakingFrame(),
+                final("Tokyo."),
+                SleepFrame(),
+                VADUserStoppedSpeakingFrame(),
+                SleepFrame(sleep=0.4),
+            ],
+        )
+
+        # The detector answered both segments, and the second one's ● ended the turn.
+        assert len(triggered) == 2
+        assert spoken(down) == ["ANSWER[Tokyo.]"]
+        assert stops(down) == 1
+
+
+class TestGateOverEagerEndOfTurn(unittest.IsolatedAsyncioTestCase):
     async def test_a_complete_turn_is_spoken_at_the_end_of_turn(self):
         down, context, llm = await run_turn(
             [
@@ -109,13 +190,14 @@ class TestFilterIncompleteEagerUserTurnStrategies(unittest.IsolatedAsyncioTestCa
                 SleepFrame(),
                 ProposedUserStoppedSpeakingFrame(),
                 SleepFrame(sleep=0.5),
-            ]
+            ],
+            filter_incomplete(EagerUserTurnStrategies()),
         )
 
         # One inference, the speculative one, released by the end of the turn.
         assert speculative(llm) == [True]
         assert spoken(down) == ["ANSWER[I went to Tokyo.]"]
-        assert len([f for f in down if isinstance(f, UserStoppedSpeakingFrame)]) == 1
+        assert stops(down) == 1
         assert context.messages == [{"role": "user", "content": "I went to Tokyo."}]
 
     async def test_an_incomplete_turn_stays_open_and_unspoken(self):
@@ -130,18 +212,21 @@ class TestFilterIncompleteEagerUserTurnStrategies(unittest.IsolatedAsyncioTestCa
                 ProposedUserStoppedSpeakingFrame(),
                 SleepFrame(sleep=0.5),
             ],
-            config=UserTurnCompletionConfig(incomplete_short_timeout=0.2),
+            filter_incomplete(
+                EagerUserTurnStrategies(),
+                config=UserTurnCompletionConfig(incomplete_short_timeout=0.2),
+            ),
         )
 
         # The turn never ends. (The session's end writes it to the context.)
         assert spoken(down) == []
-        assert not any(isinstance(f, UserStoppedSpeakingFrame) for f in down)
+        assert stops(down) == 0
         # The response is speculative, so its ◐ arms no re-prompt: the context
         # it would run against doesn't hold the turn yet.
         assert not any(isinstance(f, LLMMessagesAppendFrame) for f in down)
 
     async def test_the_user_going_on_withdraws_the_unspoken_response(self):
-        down, context, llm = await run_turn(
+        down, context, _ = await run_turn(
             [
                 ProposedUserStartedSpeakingFrame(),
                 SleepFrame(),
@@ -160,7 +245,8 @@ class TestFilterIncompleteEagerUserTurnStrategies(unittest.IsolatedAsyncioTestCa
                 SleepFrame(),
                 ProposedUserStoppedSpeakingFrame(),
                 SleepFrame(sleep=0.5),
-            ]
+            ],
+            filter_incomplete(EagerUserTurnStrategies()),
         )
 
         assert len([f for f in down if isinstance(f, EagerEndOfTurnCancelFrame)]) == 1
@@ -180,13 +266,14 @@ class TestFilterIncompleteEagerUserTurnStrategies(unittest.IsolatedAsyncioTestCa
                 ProposedUserStoppedSpeakingFrame(),
                 SleepFrame(sleep=0.8),
             ],
+            filter_incomplete(EagerUserTurnStrategies()),
             delay=0.3,
         )
 
         assert speculative(llm) == [True]
         assert spoken(down) == ["ANSWER[I went to Tokyo.]"]
 
-    async def test_a_turn_ended_without_a_prediction_is_answered_the_same_way(self):
+    async def test_a_turn_ended_without_a_prediction_is_answered_as_usual(self):
         down, _, llm = await run_turn(
             [
                 ProposedUserStartedSpeakingFrame(),
@@ -195,13 +282,14 @@ class TestFilterIncompleteEagerUserTurnStrategies(unittest.IsolatedAsyncioTestCa
                 SleepFrame(),
                 ProposedUserStoppedSpeakingFrame(),
                 SleepFrame(sleep=0.5),
-            ]
+            ],
+            filter_incomplete(EagerUserTurnStrategies()),
         )
 
-        # Answered speculatively, so its ◐ keeps the turn open.
-        assert speculative(llm)[0]
+        # An ordinary inference, whose ◐ still keeps the turn open.
+        assert speculative(llm)[0] is False
         assert spoken(down) == []
-        assert not any(isinstance(f, UserStoppedSpeakingFrame) for f in down)
+        assert stops(down) == 0
 
     async def test_a_turn_left_incomplete_is_answered_once_the_user_stays_quiet(self):
         _, context, llm = await run_turn(
@@ -215,10 +303,12 @@ class TestFilterIncompleteEagerUserTurnStrategies(unittest.IsolatedAsyncioTestCa
                 ProposedUserStoppedSpeakingFrame(),
                 SleepFrame(sleep=0.8),
             ],
+            filter_incomplete(EagerUserTurnStrategies()),
             user_turn_stop_timeout=0.3,
         )
 
-        # The turn ends, and the LLM answers it as usual.
+        # The turn ends, the unspoken response is withdrawn, and the LLM
+        # answers the turn as usual.
         assert speculative(llm) == [True, False]
         assert context.messages[0] == {"role": "user", "content": "I went to"}
 
@@ -238,7 +328,8 @@ class TestFilterIncompleteEagerUserTurnStrategies(unittest.IsolatedAsyncioTestCa
                 SleepFrame(),
                 ProposedUserStoppedSpeakingFrame(),
                 SleepFrame(sleep=0.5),
-            ]
+            ],
+            filter_incomplete(EagerUserTurnStrategies()),
         )
 
         assert spoken(down) == ["ANSWER[I went to Tokyo.]"]
@@ -254,9 +345,10 @@ class TestFilterIncompleteEagerUserTurnStrategies(unittest.IsolatedAsyncioTestCa
                 SleepFrame(),
                 ProposedUserStoppedSpeakingFrame(),
                 SleepFrame(sleep=0.5),
-            ]
+            ],
+            filter_incomplete(EagerUserTurnStrategies()),
         )
 
-        assert speculative(llm) == [True, True]
+        assert speculative(llm) == [True, False]
         assert spoken(down) == ["ANSWER[I went to Tokyo.]"]
         assert context.messages == [{"role": "user", "content": "I went to Tokyo."}]
