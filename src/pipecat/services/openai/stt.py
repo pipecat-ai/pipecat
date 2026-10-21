@@ -21,7 +21,6 @@ from dataclasses import dataclass, field
 from typing import Any, Literal, cast
 
 from loguru import logger
-from openai.types.audio import TranscriptionDiarized
 from websockets.asyncio.client import connect as websocket_connect
 from websockets.protocol import State
 
@@ -229,9 +228,13 @@ class OpenAISTTService(BaseWhisperSTTService):
 
     def _speaker_words(self, response: Transcription) -> list[tuple[str, Any]] | None:
         """Return a diarized response's ``(segment text, speaker)`` pairs."""
-        if not isinstance(response, TranscriptionDiarized):
+        # A diarized response's segments carry a speaker; Whisper's verbose
+        # segments don't. Read it by attribute so older openai releases, which
+        # lack the diarized response type, still work.
+        segments = getattr(response, "segments", None)
+        if not segments or getattr(segments[0], "speaker", None) is None:
             return None
-        return [(segment.text.strip(), segment.speaker) for segment in response.segments]
+        return [(segment.text.strip(), getattr(segment, "speaker", None)) for segment in segments]
 
 
 @dataclass
