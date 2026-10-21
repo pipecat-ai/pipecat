@@ -268,6 +268,52 @@ class TestFramesToEvents(unittest.TestCase):
             s.frame_to_event(msg("user-input", {"text": "hello", "input_type": "transcription"}))
         )
 
+    def test_expression_from_messages(self):
+        # Expressive conversation reports what the TTS performed: where the modes
+        # of the spoken text change, and each event and pause.
+        s = _stream(bot_audio=True)
+
+        def bot_output(segment_id, text_type="sentence", text="words", modes=None, status="new"):
+            data = {
+                "text": text,
+                "text_type": text_type,
+                "segment_id": segment_id,
+                "will_be_spoken": text_type == "sentence",
+                "spoken_status": status,
+            }
+            if modes is not None:
+                data["modes"] = modes
+            return InputTransportMessageFrame(
+                message={"label": RTVI.MESSAGE_LABEL, "type": "bot-output", "data": data}
+            )
+
+        def expression(frame):
+            event = s.frame_to_event(frame)
+            return event and event["text"]
+
+        s.frame_to_event(LLMFullResponseStartFrame())
+        self.assertEqual(expression(bot_output(1, modes=["excited"])), "<<excited>>")
+        self.assertIsNone(expression(bot_output(1, modes=["excited"], status="in-progress")))
+        self.assertEqual(
+            expression(bot_output(2, modes=["excited", "emphasis"])), "<<excited emphasis>>"
+        )
+        self.assertEqual(
+            expression(bot_output(3, "expression_event", "laughter", modes=["excited"])),
+            "[[laughter]]",
+        )
+        self.assertEqual(
+            expression(bot_output(4, "expression_pause", "600", modes=["excited"])),
+            "[[pause 600]]",
+        )
+        self.assertEqual(expression(bot_output(5, modes=["excited"])), "<<excited>>")
+        self.assertIsNone(expression(bot_output(6, modes=["excited"])))
+        self.assertEqual(expression(bot_output(7, modes=[])), "<<neutral>>")
+        # Without expressive conversation, spoken text carries no modes.
+        self.assertIsNone(expression(bot_output(8)))
+        # Each response starts from the baseline.
+        s.frame_to_event(LLMFullResponseStartFrame())
+        self.assertIsNone(expression(bot_output(9, modes=[])))
+
     def test_transcription_frame_is_ignored_by_the_sink(self):
         # The user aggregator consumes the STT's TranscriptionFrames to build the
         # bot's turn; the response is emitted from on_user_turn_stopped, not here.

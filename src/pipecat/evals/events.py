@@ -50,6 +50,13 @@ scenario ``event:``             RTVI server message(s)
                                 acknowledgment the user said while the bot
                                 talked, which neither interrupted it nor reached
                                 the LLM
+``expression``                  ``bot-output`` in expressive conversation (alpha):
+                                expression the bot's TTS performed, in the tags
+                                the LLM writes: ``<<excited>>`` where the modes of
+                                its spoken text change (``<<neutral>>`` back to
+                                the baseline), ``[[laughter]]`` for an event,
+                                ``[[pause 600]]`` for a pause. A tag the TTS can't
+                                perform is never reported
 ==========================      ==============================================
 """
 
@@ -130,6 +137,11 @@ class EvalEventStream:
         # buffers toward one (a bot token, a persona sentence).
         self.last_activity = self._t0
         self._llm_text_at: float | None = None
+        # The modes the bot last reported speaking in during the current response,
+        # and the spoken segments already reported, so an ``expression`` event
+        # marks only where the modes change.
+        self._expression_modes: list[str] = []
+        self._expression_segments: set = set()
         # The reply rule's flag: set by a send or an interruption, cleared at the
         # bot's next llm-started. While set, LLM text is dropped: an interrupted
         # response can still flush a trailing token after the interruption (it
@@ -439,6 +451,7 @@ class EvalEventStream:
             self._awaiting_reply = False
             self._text_buffer = []
             self._llm_text_at = None
+            self._expression_modes = []
             return {"type": "llm_started"}
         elif isinstance(frame, LLMTextFrame):
             if self._awaiting_reply:
@@ -587,7 +600,7 @@ class EvalEventStream:
         elif msg_type == "vad-user-stopped-speaking":
             return {"type": "vad_user_stopped_speaking"}
         elif msg_type == "bot-output":
-            return self._bot_backchannel_event(data)
+            return self._bot_backchannel_event(data) or self._expression_event(data)
         elif msg_type == "user-input":
             return self._user_input_event(data)
         elif msg_type == EVAL_BOT_IMAGE_TYPE:
@@ -617,6 +630,32 @@ class EvalEventStream:
             "type": "bot_backchannel",
             "text": progress.get("accumulated_text") or data.get("text", ""),
         }
+
+    def _expression_event(self, data: dict) -> dict | None:
+        """The expression the bot performed, from a ``bot-output``, written as the LLM writes it.
+
+        Only expressive conversation reports it: an event or pause segment, or
+        spoken text carrying ``modes``. Spoken text is reported once per
+        segment, where its modes differ from those before it in the response.
+        """
+        text_type = data.get("text_type")
+        if text_type == "expression_event":
+            return {"type": "expression", "text": f"[[{data.get('text', '')}]]"}
+        if text_type == "expression_pause":
+            return {"type": "expression", "text": f"[[pause {data.get('text', '')}]]"}
+        modes = data.get("modes")
+        segment_id = data.get("segment_id")
+        if (
+            modes is None
+            or not data.get("will_be_spoken")
+            or segment_id in self._expression_segments
+        ):
+            return None
+        self._expression_segments.add(segment_id)
+        if modes == self._expression_modes:
+            return None
+        self._expression_modes = modes
+        return {"type": "expression", "text": f"<<{' '.join(modes) or 'neutral'}>>"}
 
     def _segment_event(self, event_type: str, text: str) -> dict:
         """One response segment; the text may be empty, as after an interruption."""

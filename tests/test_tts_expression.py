@@ -10,6 +10,7 @@ import re
 from collections.abc import AsyncGenerator
 
 import pytest
+from loguru import logger
 
 from pipecat.expressive.adapter import ExpressionAdapter
 from pipecat.expressive.expression import ExpressionCapabilities, ExpressionTerm, ModeScope
@@ -276,6 +277,25 @@ async def test_a_mode_the_service_cant_perform_is_left_out():
 
     assert requests == ["{calm}Shh."]
     assert [f.modes for f in down if isinstance(f, TTSTextFrame)] == [["calm"]]
+
+
+@pytest.mark.asyncio
+async def test_each_unperformed_tag_is_warned_about_as_written():
+    warnings = []
+    sink = logger.add(lambda message: warnings.append(message.record["message"]), level="WARNING")
+    try:
+        await run_test(
+            MockHttpPushTextTTSService(),
+            frames_to_send=response(*REPLY),
+            pipeline_params=EXPRESSIVE,
+        )
+    finally:
+        logger.remove(sink)
+
+    unperformed = [
+        w.split("can't perform ")[1].split(",")[0] for w in warnings if "can't perform" in w
+    ]
+    assert unperformed == ["<<cheerful>>", "[[laugh]]", "*emphasis*", "[[pause 400]]"]
 
 
 @pytest.mark.asyncio

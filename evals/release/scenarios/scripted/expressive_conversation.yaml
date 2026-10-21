@@ -2,8 +2,9 @@ name: expressive_conversation
 
 # Expressive conversation, end to end: the LLM writes expression tags into
 # its replies, and the TTS performs them rather than speaking them. Each turn
-# checks the LLM's raw text for a tag, the text the TTS reports speaking for
-# markup, and the transcription of the bot's audio for tags read aloud. Markup
+# checks the LLM's raw text for a tag, the expression the TTS performed (a tag
+# the TTS can't perform is never reported), the text the TTS reports speaking
+# for markup, and the transcription of the bot's audio for tags read aloud. Markup
 # is checked by text_excludes. The evals judge only the reply's content: a
 # judge asked about markup finds it in the LLM's raw text and fails replies
 # that were spoken cleanly.
@@ -28,6 +29,9 @@ scenarios:
         expect:
           - event: llm_response
             text_contains: "<<"
+          - event: expression
+            check_from: turn_start
+            text_contains: "<<"
           - event: tts_response
             eval: "the bot congratulates the user"
             text_excludes: "<"
@@ -38,6 +42,9 @@ scenarios:
       - user: "Thanks. But my dog has been sick all week and I'm really worried about him."
         expect:
           - event: llm_response
+            text_contains: "<<"
+          - event: expression
+            check_from: turn_start
             text_contains: "<<"
           - event: tts_response
             eval: "the bot responds with sympathy for the user's worry about their dog"
@@ -51,6 +58,10 @@ scenarios:
           # Each TTS names its laugh its own way, as an event or a mode.
           - event: llm_response
             eval: "the reply laughs with a tag, such as [[laughter]], [[laughs]], [[chuckles]] or <<laughing>>"
+          # [[laughter]], [[laughs]] or <<laughing>>, as the TTS performed it.
+          - event: expression
+            check_from: turn_start
+            text_contains: "laugh"
           - event: tts_response
             eval: "the bot reacts to the user's joke"
             text_excludes: "["

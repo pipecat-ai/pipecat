@@ -32,9 +32,10 @@ Event names are the friendly names the harness maps RTVI server messages onto:
 ``vad_user_stopped_speaking``, ``user_transcription``, ``bot_started_speaking``,
 ``bot_stopped_speaking``, ``llm_started``, ``response``, ``llm_response``,
 ``llm_marker``, ``tts_response``, ``function_call``, ``function_call_stopped``,
-``image``, ``bot_backchannel``, ``user_backchannel``. The ``vad_*`` events are the raw
-VAD signal, useful as a timing anchor when a turn-detection strategy gates or defers the
-turn-level ``user_stopped_speaking`` (e.g. filtering incomplete turns).
+``image``, ``bot_backchannel``, ``user_backchannel``, ``expression``. The ``vad_*``
+events are the raw VAD signal, useful as a timing anchor when a turn-detection strategy
+gates or defers the turn-level ``user_stopped_speaking`` (e.g. filtering incomplete
+turns).
 
 ``image`` is an image the bot output, such as a generated one; the bot reports
 images only to a scenario that expects one::

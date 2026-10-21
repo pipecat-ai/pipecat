@@ -1600,7 +1600,7 @@ class TTSService(AIService):
             if supported:
                 performed.append(mode)
             else:
-                self._warn_unperformed(f"<<{mode}>>")
+                self._warn_unperformed("*emphasis*" if mode == EMPHASIS_MODE else f"<<{mode}>>")
         return performed
 
     def _render_expression_event(
