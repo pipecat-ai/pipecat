@@ -894,13 +894,16 @@ class InworldTTSService(WebsocketTTSService):
 
         return word_times
 
-    async def _close_context(self, context_id: str | None):
+    async def _close_context(self, context_id: str | None, *, cancel: bool = False):
         if not context_id:
             return
         if self._websocket:
-            logger.info(f"{self}: Closing context {context_id} due to interruption or completion")
+            logger.info(f"{self}: {'Cancelling' if cancel else 'Closing'} context {context_id}")
             try:
-                await self._send_close_context(context_id)
+                if cancel:
+                    await self._send_cancel_context(context_id)
+                else:
+                    await self._send_close_context(context_id)
             except Exception as e:
                 await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         self._sent_context_ids.discard(context_id)
@@ -918,7 +921,7 @@ class InworldTTSService(WebsocketTTSService):
     async def on_audio_context_interrupted(self, context_id: str):
         """Callback invoked when an audio context has been interrupted."""
         await self._maybe_push_fallback_text(context_id)
-        await self._close_context(context_id)
+        await self._close_context(context_id, cancel=True)
         await super().on_audio_context_interrupted(context_id)
 
     async def _maybe_push_fallback_text(self, context_id: str):
@@ -1038,7 +1041,7 @@ class InworldTTSService(WebsocketTTSService):
                 audio_contexts = self.get_audio_contexts()
                 if audio_contexts:
                     for ctx_id in audio_contexts:
-                        await self._send_close_context(ctx_id)
+                        await self._send_cancel_context(ctx_id)
                 await self._websocket.close()
                 logger.debug("Disconnected from Inworld WebSocket TTS")
         except Exception as e:
@@ -1233,6 +1236,15 @@ class InworldTTSService(WebsocketTTSService):
             context_id: The context ID.
         """
         msg = {"close_context": {}, "contextId": context_id}
+        await self.send_with_retry(json.dumps(msg), self._report_error)
+
+    async def _send_cancel_context(self, context_id: str):
+        """Stop a context, discarding text the server has not synthesized yet.
+
+        Args:
+            context_id: The context ID.
+        """
+        msg = {"cancel_context": {}, "contextId": context_id}
         await self.send_with_retry(json.dumps(msg), self._report_error)
 
     @traced_tts
