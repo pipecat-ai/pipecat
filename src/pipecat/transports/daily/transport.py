@@ -2721,6 +2721,10 @@ class DailyTransport(BaseTransport):
     async def send_dtmf(self, settings) -> CallClientError | None:
         """Send DTMF tones during a call.
 
+        Sends at once, ahead of audio still queued in the pipeline. To send the
+        tones after queued audio has played, push a :class:`DailyOutputDTMFFrame`
+        instead.
+
         Args:
             settings: DTMF settings including tones and target session.
 
@@ -2769,6 +2773,10 @@ class DailyTransport(BaseTransport):
     async def sip_call_transfer(self, settings) -> CallClientError | None:
         """Transfer a SIP call to another destination.
 
+        Transfers at once, ahead of audio still queued in the pipeline, so the
+        caller can miss the end of what the bot is saying. To transfer after
+        queued audio has played, push a :class:`DailySIPTransferFrame` instead.
+
         Args:
             settings: SIP call transfer settings.
 
@@ -2784,6 +2792,10 @@ class DailyTransport(BaseTransport):
 
     async def sip_refer(self, settings) -> CallClientError | None:
         """Send a SIP REFER request.
+
+        Sends at once, ahead of audio still queued in the pipeline, so the
+        caller can miss the end of what the bot is saying. To send it after
+        queued audio has played, push a :class:`DailySIPReferFrame` instead.
 
         Args:
             settings: SIP REFER settings.
@@ -2982,6 +2994,10 @@ class DailyTransport(BaseTransport):
         self, remote_participants: Mapping[str, Any]
     ) -> CallClientError | None:
         """Update settings for remote participants.
+
+        Applies at once, ahead of audio still queued in the pipeline. To apply
+        the update after queued audio has played, push a
+        :class:`DailyUpdateRemoteParticipantsFrame` instead.
 
         Args:
             remote_participants: Remote participant configuration settings.
