@@ -7,7 +7,7 @@
 """Tests for the frames a unit of text becomes once its expression tags are read."""
 
 from pipecat.expressive.parser import Event, Pause, Text
-from pipecat.expressive.segment_frames import segment_frames
+from pipecat.expressive.tts_expression import _segment_frames
 from pipecat.frames.frames import TextType
 
 SEGMENTS = [
@@ -19,7 +19,7 @@ SEGMENTS = [
 
 
 def test_words_carry_their_modes_and_events_have_text_types_of_their_own():
-    pieces = segment_frames(SEGMENTS, TextType.SENTENCE, trim=True)
+    pieces = _segment_frames(SEGMENTS, TextType.SENTENCE, trim=True)
 
     assert [(f.text_type, f.text, f.modes, bool(f.skip_tts)) for f, _ in pieces] == [
         (TextType.SENTENCE, "It's", ["calm"], False),
@@ -36,13 +36,13 @@ def test_words_carry_their_modes_and_events_have_text_types_of_their_own():
 
 
 def test_the_text_to_speak_keeps_the_spaces_between_the_words():
-    pieces = segment_frames(SEGMENTS, TextType.SENTENCE, trim=True)
+    pieces = _segment_frames(SEGMENTS, TextType.SENTENCE, trim=True)
 
     assert [text for _, text in pieces] == ["It's ", "", " fine.", ""]
 
 
 def test_tokens_are_left_as_they_are():
-    pieces = segment_frames(SEGMENTS, TextType.TOKEN, trim=False)
+    pieces = _segment_frames(SEGMENTS, TextType.TOKEN, trim=False)
 
     assert [(f.text, text) for f, text in pieces] == [
         (" It's ", " It's "),

@@ -20,9 +20,8 @@ from collections.abc import Callable
 from loguru import logger
 
 from pipecat.expressive.adapter import ExpressionAdapter
-from pipecat.expressive.expression import ExpressionCapabilities, ModeScope
-from pipecat.expressive.parser import EMPHASIS_MODE, ExpressionParser, Segment
-from pipecat.expressive.segment_frames import EXPRESSION_TEXT_TYPES, segment_frames
+from pipecat.expressive.expression import EXPRESSION_TEXT_TYPES, ExpressionCapabilities, ModeScope
+from pipecat.expressive.parser import EMPHASIS_MODE, Event, ExpressionParser, Pause, Segment, Text
 from pipecat.frames.frames import AggregatedTextFrame, TextType
 
 
@@ -134,7 +133,9 @@ class TTSExpression:
             # every service keeps modes from one request to the next.
             self._rendered_modes = None
         pieces: list[tuple[AggregatedTextFrame, str]] = []
-        for frame, text in segment_frames(segments, src_frame.text_type, trim=not streaming_tokens):
+        for frame, text in _segment_frames(
+            segments, src_frame.text_type, trim=not streaming_tokens
+        ):
             frame.interruptible = src_frame.interruptible
             if frame.text_type in EXPRESSION_TEXT_TYPES:
                 rendered = self._render_event(frame, capabilities)
@@ -228,3 +229,51 @@ class TTSExpression:
         if tag not in self._unperformed:
             self._unperformed.add(tag)
             logger.warning(f"{self._owner} can't perform {tag}, leaving it out of its speech")
+
+
+def _segment_frames(
+    segments: list[Segment], text_type: TextType | str, *, trim: bool
+) -> list[tuple[AggregatedTextFrame, str]]:
+    """Build the frame for each segment, with the text to send to the TTS for it.
+
+    Words become frames of ``text_type`` that carry their modes, and the text
+    to speak keeps the spaces between them. Events and pauses become frames of
+    their own text types, with no text to send until the TTS service renders
+    them.
+
+    Args:
+        segments: The segments of one unit of text, such as a sentence.
+        text_type: The text type of the unit's words.
+        trim: Whether to trim the unit as a sentence is trimmed: the frames'
+            text, and the text to speak at the ends of the unit.
+
+    Returns:
+        Each segment's frame, with the text to send to the TTS for it.
+    """
+    pieces: list[tuple[AggregatedTextFrame, str]] = []
+    for segment in segments:
+        if isinstance(segment, Text):
+            text, raw = (
+                (segment.text.strip(), segment.raw.strip()) if trim else (segment.text, segment.raw)
+            )
+            frame = AggregatedTextFrame(text, text_type, raw_text=raw, modes=list(segment.modes))
+            pieces.append((frame, segment.text))
+        else:
+            pieces.append((_event_frame(segment), ""))
+
+    words = [
+        i for i, (frame, _) in enumerate(pieces) if frame.text_type not in EXPRESSION_TEXT_TYPES
+    ]
+    if trim and words:
+        first, last = words[0], words[-1]
+        pieces[first] = (pieces[first][0], pieces[first][1].lstrip())
+        pieces[last] = (pieces[last][0], pieces[last][1].rstrip())
+    return pieces
+
+
+def _event_frame(segment: Event | Pause) -> AggregatedTextFrame:
+    if isinstance(segment, Pause):
+        return AggregatedTextFrame(
+            str(segment.duration_ms), TextType.EXPRESSION_PAUSE, raw_text=segment.raw
+        )
+    return AggregatedTextFrame(segment.name, TextType.EXPRESSION_EVENT, raw_text=segment.raw)

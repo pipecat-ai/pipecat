@@ -21,9 +21,8 @@ from websockets.protocol import State
 
 from pipecat.audio.utils import create_stream_resampler
 from pipecat.expressive.adapter import ExpressionAdapter
-from pipecat.expressive.expression import ExpressionCapabilities
+from pipecat.expressive.expression import EXPRESSION_TEXT_TYPES
 from pipecat.expressive.parser import Segment
-from pipecat.expressive.segment_frames import EXPRESSION_TEXT_TYPES
 from pipecat.expressive.tts_expression import TTSExpression
 from pipecat.frames.frames import (
     AggregatedTextFrame,
