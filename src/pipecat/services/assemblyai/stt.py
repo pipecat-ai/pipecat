@@ -51,6 +51,7 @@ from .models import (
     AssemblyAIConnectionParams,
     BaseMessage,
     BeginMessage,
+    SpeakerRevisionMessage,
     SpeechStartedMessage,
     TerminationMessage,
     TurnMessage,
@@ -75,6 +76,9 @@ HOT_UPDATABLE_SETTINGS = frozenset({"agent_context", "language_codes"})
 
 # Settings applied locally to the transcripts AssemblyAI returns; never sent.
 LOCAL_SETTINGS = frozenset({"speaker_format"})
+
+# Labels AssemblyAI gives a turn whose speaker is not assigned yet.
+UNASSIGNED_SPEAKER_LABELS = frozenset({"PENDING", "UNKNOWN"})
 
 # Longest declared-language list the streaming API accepts, on every U3 Pro model
 # including Universal-3.6 Pro. AssemblyAI's docs don't state it, but the server
@@ -247,7 +251,9 @@ class AssemblyAISTTSettings(STTSettings):
         format_turns: Whether to format transcript turns.
         speaker_labels: Enable speaker diarization. Final transcripts carry
             AssemblyAI's speaker label (e.g. ``"A"``, ``"B"``) in ``speaker_label``;
-            interim transcripts have none.
+            interim transcripts, and turns whose speaker is not assigned yet, have
+            none. Labels AssemblyAI later revises are not applied to frames
+            already sent.
         max_speakers: Hard cap on the number of speaker labels, an integer in
             [1, 10]. Once the cap is reached, further speakers are merged into
             the closest existing label rather than given a new one, so leave a
@@ -1128,6 +1134,8 @@ class AssemblyAISTTService(WebsocketSTTService):
             return SpeechStartedMessage.model_validate(message)
         elif msg_type == "Termination":
             return TerminationMessage.model_validate(message)
+        elif msg_type == "SpeakerRevision":
+            return SpeakerRevisionMessage.model_validate(message)
         else:
             raise ValueError(f"Unknown message type: {msg_type}")
 
@@ -1146,6 +1154,11 @@ class AssemblyAISTTService(WebsocketSTTService):
                 await self._handle_speech_started(parsed_message)
             elif isinstance(parsed_message, TerminationMessage):
                 await self._handle_termination(parsed_message)
+            elif isinstance(parsed_message, SpeakerRevisionMessage):
+                # The revised turns were already pushed, so their frames keep the
+                # labels they were sent with.
+                turns = [revision.get("turn_order") for revision in parsed_message.revisions]
+                logger.debug(f"{self} speaker labels revised for turns {turns}")
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
 
@@ -1204,6 +1217,8 @@ class AssemblyAISTTService(WebsocketSTTService):
                 )
 
         speaker_label = message.speaker or None
+        if speaker_label in UNASSIGNED_SPEAKER_LABELS:
+            speaker_label = None
         transcript_text = self._apply_speaker_format(message.transcript, speaker_label)
 
         # Determine if this is a final turn from AssemblyAI

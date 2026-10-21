@@ -741,6 +741,13 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
     By default, this service uses NVIDIA's Nemotron Speech Canary ASR API to perform speech-to-text
     transcription on audio segments. It inherits from SegmentedSTTService to handle
     audio buffering and speech detection.
+
+    Speaker diarization needs a model that returns word-level results. The
+    default ``canary-1b-asr`` returns none, so with it every segment is emitted
+    whole, with no ``speaker_label``. ``parakeet-ctc-1.1b-asr`` does: pass its
+    ``model_name`` and ``function_id`` (from
+    https://build.nvidia.com/nvidia/parakeet-ctc-1_1b-asr) in
+    ``model_function_map``.
     """
 
     Settings = NvidiaSegmentedSTTSettings

@@ -10,7 +10,7 @@ This module defines Pydantic models for handling AssemblyAI's real-time
 transcription WebSocket messages and connection configuration.
 """
 
-from typing import Literal
+from typing import Any, Literal
 
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -75,8 +75,9 @@ class TurnMessage(BaseMessage):
             complete utterances or when end_of_turn is True.
         language_confidence: Confidence score (0-1) for language detection. Only present
             with complete utterances or when end_of_turn is True.
-        speaker: Speaker label (e.g., "A", "B"). Only present when speaker_labels is
-            enabled and end_of_turn is True. Maps to 'speaker_label' in JSON response.
+        speaker: Speaker label (e.g., "A", "B"), or "PENDING" while the speaker is
+            not yet assigned. Only present when speaker_labels is enabled and
+            end_of_turn is True. Maps to 'speaker_label' in JSON response.
     """
 
     model_config = ConfigDict(populate_by_name=True)
@@ -119,8 +120,26 @@ class TerminationMessage(BaseMessage):
     session_duration_seconds: float
 
 
+class SpeakerRevisionMessage(BaseMessage):
+    """Message correcting the speaker labels of turns already sent.
+
+    Sent with speaker diarization enabled, at the end of the session and, when
+    configured, periodically during it.
+
+    Parameters:
+        type: Always "SpeakerRevision" for this message type.
+        revisions: The revised turns, each with its ``turn_order``, new
+            ``speaker_label`` and words.
+    """
+
+    type: Literal["SpeakerRevision"] = "SpeakerRevision"
+    revisions: list[dict[str, Any]] = Field(default_factory=list)
+
+
 # Union type for all possible message types
-AnyMessage = BeginMessage | TurnMessage | SpeechStartedMessage | TerminationMessage
+AnyMessage = (
+    BeginMessage | TurnMessage | SpeechStartedMessage | TerminationMessage | SpeakerRevisionMessage
+)
 
 
 @deprecated(
