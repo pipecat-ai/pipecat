@@ -257,7 +257,7 @@ class TTSService(AIService):
 
                 .. deprecated:: 1.14.0
                     Use ``text_transforms`` instead, with
-                    :func:`~pipecat.utils.text.transforms.strip_markdown` in place of
+                    :data:`~pipecat.utils.text.transforms.strip_markdown` in place of
                     :class:`~pipecat.utils.text.markdown_text_filter.MarkdownTextFilter`.
                     Will be removed in 2.0.0.
 

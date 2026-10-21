@@ -4520,7 +4520,7 @@
       "removed_in": "2.0.0",
       "relation": "use_existing",
       "replacement": "text_transforms",
-      "message": "Use ``text_transforms`` instead, with :func:`~pipecat.utils.text.transforms.strip_markdown` in place of :class:`~pipecat.utils.text.markdown_text_filter.MarkdownTextFilter`. Will be removed in 2.0.0.",
+      "message": "Use ``text_transforms`` instead, with :data:`~pipecat.utils.text.transforms.strip_markdown` in place of :class:`~pipecat.utils.text.markdown_text_filter.MarkdownTextFilter`. Will be removed in 2.0.0.",
       "location": "pipecat/services/tts_service.py"
     },
     {

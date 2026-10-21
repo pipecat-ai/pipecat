@@ -31,7 +31,7 @@ from pipecat.utils.text.transforms.numbers import expand_numbers
 from pipecat.utils.text.transforms.percentages import expand_percentages
 from pipecat.utils.text.transforms.phone import expand_phone_numbers
 from pipecat.utils.text.transforms.replacements import replace_text
-from pipecat.utils.text.transforms.strip_markdown import strip_markdown
+from pipecat.utils.text.transforms.strip_markdown import StripMarkdown, strip_markdown
 from pipecat.utils.text.transforms.text_transform import TextTransform
 from pipecat.utils.text.transforms.units import expand_units
 from pipecat.utils.text.transforms.voice_formatter import VoiceFormatter
@@ -46,6 +46,7 @@ __all__ = [
     "expand_percentages",
     "expand_phone_numbers",
     "replace_text",
+    "StripMarkdown",
     "strip_markdown",
     "expand_units",
     "VoiceFormatter",
