@@ -80,12 +80,32 @@ Before the pairing instruction's rewrite around its one rule, the same replay ha
 
 ## Text evals
 
-The twelve text scenarios on the three bots with a text frontend, five runs each, without predictive delegation (2026-10-21, with this `AFTER DELEGATING` paragraph). The frontends run on their services' default models (`gpt-4.1`, `gemini-3.6-flash`, `claude-sonnet-4-6`), the backend on `claude-sonnet-4-6`, and the judge is the release suite's text judge. Each table comes from the run's `results.jsonl` through `results_table.py`:
+The twelve text scenarios on the three bots with a text frontend, five runs each, without predictive delegation (2026-10-21, with this `AFTER DELEGATING` paragraph and the acknowledgement run skipped after a pre-delegation acknowledgement). The frontends run on their services' default models (`gpt-4.1`, `gemini-3.6-flash`, `claude-sonnet-4-6`), the backend on `claude-sonnet-4-6`, and the judge is the release suite's text judge. Each table comes from the run's `results.jsonl` through `results_table.py`:
 
 ```bash
 uv run python -m pipecat.evals suite evals/llm-with-backend/manifest.yaml -s text --repeat 5
 uv run python evals/llm-with-backend/tuning/results_table.py <runs-dir>/<run>/results.jsonl
 ```
+
+| scenario                      | anthropic-frontend | google-frontend | openai-responses-frontend |
+| ----------------------------- | ------------------ | --------------- | ------------------------- |
+| `accepted_offer/text`         | 5/5                | 5/5             | 5/5                       |
+| `aside_while_waiting/text`    | 5/5                | 5/5             | 4/5                       |
+| `cancel_and_replace/text`     | 5/5                | 5/5             | 5/5                       |
+| `cancel_delegation/text`      | 0/5                | 5/5             | 5/5                       |
+| `concurrent_delegations/text` | 2/5                | 1/5             | 0/5                       |
+| `delegate_ack/text`           | 5/5                | 5/5             | 5/5                       |
+| `delegate_with_aside/text`    | 5/5                | 5/5             | 5/5                       |
+| `frontend_only/text`          | 5/5                | 5/5             | 5/5                       |
+| `implicit_cancel/text`        | 0/5                | 5/5             | 5/5                       |
+| `partial_cancel/text`         | 5/5                | 5/5             | 2/5                       |
+| `progress_inquiry/text`       | 5/5                | 5/5             | 5/5                       |
+| `superseding_delegation/text` | 5/5                | 4/5             | 5/5                       |
+| **total**                     | **47/60**          | **55/60**       | **51/60**                 |
+
+Claude's ten stop failures are one shape: it confirms the stop in the same response as its `delegate` call ("Got it, I'll leave the code as it is.", "No problem, I'll call those off."), no run follows, and the two scenarios judged only the run after the call. `cancel_delegation` and `implicit_cancel` now judge the response from the turn's start, and with that change both pass 5 of 5 on all three frontends (30 of 30, same day). gpt-4.1's three `partial_cancel` failures are the turn it answers without delegating: in each of them, and in the one such failure in each earlier sweep, the backend had finished the runbook lookup and the bot was relaying its answer when the user said "forget the tests"; gpt-4.1 then answered the runbook from what it had and said it would skip the tests, with no `delegate` call. The backend's tool order decides whether the answer is there in time, and gpt-4.1's acknowledgement run was skipped in none of these runs. `concurrent_delegations` fails on every frontend at every baseline; the two single failures are the judge answering "continue" to an acknowledgement ("I'll look into fixing that flaky retry test", P(yes) 0.43–0.45) until the backend's report ran past the window.
+
+With the acknowledgement run after every delegation, the same wording and day:
 
 | scenario                      | anthropic-frontend | google-frontend | openai-responses-frontend |
 | ----------------------------- | ------------------ | --------------- | ------------------------- |
@@ -103,7 +123,7 @@ uv run python evals/llm-with-backend/tuning/results_table.py <runs-dir>/<run>/re
 | `superseding_delegation/text` | 5/5                | 5/5             | 5/5                       |
 | **total**                     | **54/60**          | **56/60**       | **53/60**                 |
 
-`concurrent_delegations` fails on every frontend at every baseline. Claude's two `cancel_delegation` failures are one shape: it confirms the stop in the same response as its `delegate` call ("Got it, I'll leave the code as is.") and says nothing in the run after the call, and the scenario looks only after the call, having no `check_from: turn_start`; the day before, Claude confirmed again after the call ("No worries, standing down on that"), and that is what passed. gpt-4.1's two are a `partial_cancel` turn it answered without delegating, as at baseline, and an `aside_while_waiting` run whose final report never came.
+`concurrent_delegations` fails on every frontend at every baseline. Claude's two `cancel_delegation` failures are one shape: it confirms the stop in the same response as its `delegate` call ("Got it, I'll leave the code as is.") and says nothing in the run after the call, and the scenario then judged only the run after the call; the day before, Claude confirmed again after the call ("No worries, standing down on that"), and that is what passed. gpt-4.1's two are a `partial_cancel` turn it answered without delegating, as at baseline, and an `aside_while_waiting` run whose final report never came.
 
 The same sweep on 2026-10-20, with "a few words of your own, one short sentence at most" and "On it" as the first example:
 
@@ -183,20 +203,43 @@ The classifier, live, from the bots' logs: every request and stop scored 0.88 or
 
 ### Stops
 
-The scenarios' stops and corrections (`cancel_delegation`, `implicit_cancel`, `partial_cancel` and `superseding_delegation`, 20 runs per frontend) with no `delegate` call: gpt-4.1 1, Claude 0 and Gemini 0 (2026-10-20), against 2, 0 and 0 on 2026-10-14 and 16, 1 and 0 before the rewrite. gpt-4.1's one is `partial_cancel`, "forget the tests" while a runbook lookup is also running.
+The scenarios' stops and corrections (`cancel_delegation`, `implicit_cancel`, `partial_cancel` and `superseding_delegation`, 20 runs per frontend) with no `delegate` call: gpt-4.1 3, Claude 0 and Gemini 0 (2026-10-21, acknowledgement run skipped), against 1, 0 and 0 with the run after every delegation (2026-10-20 and 2026-10-21), 2, 0 and 0 on 2026-10-14 and 16, 1 and 0 before the rewrite. gpt-4.1's are all `partial_cancel`, "forget the tests" once the runbook answer has arrived.
 
 ### Known failures
 
 - `concurrent_delegations` fails on every frontend most of the time: the judge rejects the reply that reports both results.
 - `implicit_cancel`'s acknowledgement is judged "no" at P(no) 0.56–0.68 while the judge's explainer finds nothing wrong with it; `aside_while_waiting`, `delegate_ack` and `progress_inquiry` lose a run each to the judge answering "continue" to a correct one-line acknowledgement.
+- A backend answer the bot is speaking when the user interrupts with a stop is not returned to: the bot acknowledges the stop and leaves the answer unsaid (`partial_cancel/audio` on Claude and Gemini Live).
+- OpenAI Realtime speaks before its `delegate` call and again in the acknowledgement run, which the speech-to-speech frontends keep; on a stop the absence check catches the second (`cancel_delegation/audio`).
 
 ## Audio evals
 
-The thirteen audio scenarios on all five bots, one run each, without predictive delegation (2026-10-20, with this `AFTER DELEGATING` paragraph). The user's voice is synthesized with Kokoro, the bot's speech transcribed with Moonshine, and the judge is the release suite's audio judge.
+The thirteen audio scenarios on all five bots, one run each, without predictive delegation (2026-10-21, with this `AFTER DELEGATING` paragraph and the acknowledgement run skipped after a pre-delegation acknowledgement on the text frontends; the speech-to-speech frontends run it after every delegation). The user's voice is synthesized with Kokoro, the bot's speech transcribed with Moonshine, and the judge is the release suite's audio judge.
 
 ```bash
 uv run python -m pipecat.evals suite evals/llm-with-backend/manifest.yaml -s audio
 ```
+
+| scenario                           | anthropic-frontend | gemini-live-frontend | google-frontend | openai-realtime-frontend | openai-responses-frontend |
+| ---------------------------------- | ------------------ | -------------------- | --------------- | ------------------------ | ------------------------- |
+| `accepted_offer/audio`             | 1/1                | 1/1                  | 1/1             | 1/1                      | 1/1                       |
+| `aside_while_waiting/audio`        | 0/1                | 1/1                  | 0/1             | 1/1                      | 1/1                       |
+| `cancel_and_replace/audio`         | 1/1                | 1/1                  | 1/1             | 1/1                      | 1/1                       |
+| `cancel_delegation/audio`          | 1/1                | 1/1                  | 1/1             | 0/1                      | 1/1                       |
+| `concurrent_delegations/audio`     | 1/1                | 0/1                  | 1/1             | 1/1                      | 0/1                       |
+| `delegate_ack/audio`               | 1/1                | 1/1                  | 1/1             | 1/1                      | 1/1                       |
+| `delegate_with_aside/audio`        | 1/1                | 1/1                  | 1/1             | 1/1                      | 1/1                       |
+| `frontend_only/audio`              | 1/1                | 1/1                  | 1/1             | 1/1                      | 1/1                       |
+| `implicit_cancel/audio`            | 1/1                | 1/1                  | 1/1             | 0/1                      | 0/1                       |
+| `partial_cancel/audio`             | 0/1                | 0/1                  | 1/1             | 1/1                      | 1/1                       |
+| `progress_inquiry/audio`           | 1/1                | 1/1                  | 1/1             | 1/1                      | 1/1                       |
+| `result_during_interruption/audio` | 1/1                | 1/1                  | 1/1             | 1/1                      | 1/1                       |
+| `superseding_delegation/audio`     | 1/1                | 1/1                  | 1/1             | 1/1                      | 1/1                       |
+| **total**                          | **11/13**          | **11/13**            | **12/13**       | **11/13**                | **11/13**                 |
+
+One run per scenario is noisy. Across the five bots, 56/65, against 50/65 on 2026-10-20 and 53/65 on 2026-10-14. The scenarios' stops and corrections with no `delegate` call: gpt-4.1 1 (`implicit_cancel`), the others 0. The failures: `concurrent_delegations` (2); `aside_while_waiting` on Claude and Gemini, where the backend's fix outran the scenario's window (2); OpenAI Realtime adding a line after a stop's acknowledgement, which the absence check catches (2: in `cancel_delegation` it said "Okay" before its `delegate` call and the acknowledgement run then said "I'll stop the work and leave everything as it is", the double acknowledgement the skip removes on the text frontends; in `implicit_cancel` it relayed the backend's cancellation after acknowledging the stop); and `partial_cancel` on Claude and Gemini Live (2), one shape: the backend had answered the runbook question and the bot was speaking that answer when the user said "forget the tests", the bot acknowledged the stop ("Got it, I'm dropping the tests", "I'm updating that request for you now") and did not return to the interrupted answer, and the judge waited for it until the window closed. Claude's run after the call was skipped there; Gemini Live's ran.
+
+The same pass on 2026-10-20, with "a few words of your own, one short sentence at most" and "On it" as the first example, and the acknowledgement run after every delegation:
 
 | scenario                           | anthropic-frontend | gemini-live-frontend | google-frontend | openai-realtime-frontend | openai-responses-frontend |
 | ---------------------------------- | ------------------ | -------------------- | --------------- | ------------------------ | ------------------------- |
