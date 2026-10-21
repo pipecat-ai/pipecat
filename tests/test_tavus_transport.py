@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from pipecat.frames.frames import OutputAudioRawFrame
+from pipecat.frames.frames import OutputAudioRawFrame, OutputTransportMessageUrgentFrame
 from pipecat.transports.tavus.transport import (
     TavusOutputTransport,
     TavusParams,
@@ -190,3 +190,30 @@ async def test_the_bot_name_reaches_the_daily_client(monkeypatch):
     await transport._client.setup(frame_processor_setup(TaskManager()))
 
     assert captured["bot_name"] == "Ada"
+
+
+@pytest.mark.asyncio
+async def test_set_emotion_sends_a_set_emotion_app_message():
+    """The replica reads the emotion from a conversation.set_emotion app message."""
+    client = TavusTransportClient(
+        bot_name="Pipecat",
+        callbacks=MagicMock(),
+        api_key="test-key",
+        replica_id="replica",
+        session=MagicMock(),
+    )
+    client._conversation_id = "conversation"
+    client._client = MagicMock()
+    client._client.send_message = AsyncMock()
+
+    await client.set_emotion("happiness")
+
+    client._client.send_message.assert_awaited_once()
+    frame = client._client.send_message.call_args.args[0]
+    assert isinstance(frame, OutputTransportMessageUrgentFrame)
+    assert frame.message == {
+        "message_type": "conversation",
+        "event_type": "conversation.set_emotion",
+        "conversation_id": "conversation",
+        "properties": {"emotion": "happiness"},
+    }
