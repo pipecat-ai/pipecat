@@ -7,7 +7,7 @@
 """Connection handling of Inworld WebSocket TTS against a local fake Inworld server.
 
 Each test speaks a few ``TTSSpeakFrame`` turns. The fake server can drop a
-connection after a turn and reject handshakes, and a send can be made to stall
+connection after a turn and delay handshakes, and a send can be made to stall
 the way one does once the peer stops reading, which ``ws_send_timeout`` turns
 into a dropped connection.
 """
@@ -17,12 +17,12 @@ import base64
 import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from http import HTTPStatus
+from unittest.mock import AsyncMock
 
 import pytest
 from websockets.asyncio.client import ClientConnection
 from websockets.asyncio.server import serve
-from websockets.exceptions import ConnectionClosed
+from websockets.exceptions import ConnectionClosed, ConnectionClosedError
 
 from pipecat.frames.frames import ErrorFrame, TTSAudioRawFrame, TTSSpeakFrame
 from pipecat.services.inworld.tts import InworldTTSService
@@ -35,16 +35,15 @@ TURNS = ["Hello there.", "How are you?", "Goodbye."]
 class _FakeInworld:
     # Abort the first connection once this many of its contexts have closed.
     drop_after_turns: int | None = None
-    # Reject every handshake after this many.
-    reject_after: int | None = None
+    # Delay every handshake after the first.
+    handshake_delay: float = 0.0
     handshakes: int = 0
     messages_per_connection: list[list[dict]] = field(default_factory=list)
 
     async def process_request(self, connection, request):
         self.handshakes += 1
-        if self.reject_after is not None and self.handshakes > self.reject_after:
-            return connection.respond(HTTPStatus.SERVICE_UNAVAILABLE, "unavailable\n")
-        return None
+        if self.handshakes > 1:
+            await asyncio.sleep(self.handshake_delay)
 
     async def handle(self, websocket):
         index = len(self.messages_per_connection)
@@ -153,31 +152,24 @@ async def test_a_dropped_connection_is_replaced_before_the_next_turn():
 
 
 @pytest.mark.asyncio
-async def test_the_turn_after_a_stalled_send_is_spoken(monkeypatch):
+async def test_a_stalled_send_fails_its_turn_and_the_next_turn_is_spoken(monkeypatch):
     _stall_sends(monkeypatch, _sends_text(TURNS[1]))
     server = _FakeInworld()
 
-    service, down, _ = await _run(server, TURNS, configure=_fast_failures)
+    service, down, up = await _run(server, TURNS, configure=_fast_failures)
 
-    assert server.texts_sent(0) == [TURNS[0]]
-    assert TURNS[2] in server.texts_sent(len(server.messages_per_connection) - 1)
+    assert server.handshakes == 2
+    assert server.texts_sent(1) == [TURNS[2]]
     assert _turns_with_audio(down) == 2
+    assert any(isinstance(f, ErrorFrame) for f in up)
     assert service.is_usable
 
 
 @pytest.mark.asyncio
-async def test_a_stalled_send_that_cannot_reconnect_reports_an_error(monkeypatch):
-    _stall_sends(monkeypatch, _sends_text(TURNS[1]))
-    server = _FakeInworld(reject_after=1)
-
-    _, _, up = await _run(server, TURNS[:2], configure=_fast_failures)
-
-    assert any(isinstance(f, ErrorFrame) for f in up)
-
-
-@pytest.mark.asyncio
-async def test_a_turn_whose_context_create_stalls_is_still_spoken(monkeypatch):
-    # The context is created eagerly, as soon as the turn starts.
+async def test_a_turn_starting_while_reconnecting_does_not_open_a_second_connection(
+    monkeypatch,
+):
+    # The second turn's context is created eagerly, as soon as the turn starts.
     sent_creates = []
 
     def second_create(message):
@@ -186,8 +178,25 @@ async def test_a_turn_whose_context_create_stalls_is_still_spoken(monkeypatch):
         return len(sent_creates) == 2
 
     _stall_sends(monkeypatch, second_create)
-    server = _FakeInworld()
+    server = _FakeInworld(handshake_delay=0.2)
 
-    _, down, _ = await _run(server, TURNS[:2], configure=_fast_failures)
+    _, down, up = await _run(server, TURNS, configure=_fast_failures)
 
+    assert server.handshakes == 2
+    assert server.texts_sent(1) == [TURNS[2]]
     assert _turns_with_audio(down) == 2
+    assert any(isinstance(f, ErrorFrame) and "reconnecting" in f.error for f in up)
+
+
+@pytest.mark.asyncio
+async def test_a_context_whose_create_failed_is_created_again():
+    service = InworldTTSService(api_key="test-key")
+    service._websocket = AsyncMock()
+    service._websocket.send.side_effect = [ConnectionClosedError(None, None), None]
+
+    with pytest.raises(ConnectionClosedError):
+        await service._send_context("context")
+    await service._send_context("context")
+    await service._send_context("context")
+
+    assert service._websocket.send.await_count == 2
