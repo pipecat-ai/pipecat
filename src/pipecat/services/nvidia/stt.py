@@ -16,7 +16,7 @@ import asyncio
 from collections.abc import AsyncGenerator, Mapping
 from concurrent.futures import CancelledError as FuturesCancelledError
 from dataclasses import dataclass, field, replace
-from typing import Any, ClassVar, cast
+from typing import Any, ClassVar, TypeVar, cast
 
 from loguru import logger
 from pydantic import BaseModel
@@ -158,7 +158,10 @@ class _NvidiaBaseSTTSettings(STTSettings):
     speaker_format: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
-def _migrate_diarization_max_speakers(settings: STTSettings) -> STTSettings:
+_STTSettingsT = TypeVar("_STTSettingsT", bound=STTSettings)
+
+
+def _migrate_diarization_max_speakers(settings: _STTSettingsT) -> _STTSettingsT:
     """Move the deprecated ``diarization_max_speakers`` into ``max_speakers``.
 
     An explicit ``max_speakers`` in the same settings takes precedence.
