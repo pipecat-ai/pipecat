@@ -6,7 +6,6 @@
 
 import locale
 import unittest
-from functools import partial
 
 from pipecat.utils.text.alnum_utils import alnum_only
 from pipecat.utils.text.transforms.acronyms import normalize_acronyms
@@ -17,7 +16,7 @@ from pipecat.utils.text.transforms.numbers import expand_numbers
 from pipecat.utils.text.transforms.percentages import expand_percentages
 from pipecat.utils.text.transforms.phone import expand_phone_numbers
 from pipecat.utils.text.transforms.replacements import replace_text
-from pipecat.utils.text.transforms.strip_markdown import strip_markdown
+from pipecat.utils.text.transforms.strip_markdown import StripMarkdown, strip_markdown
 from pipecat.utils.text.transforms.units import expand_units
 from pipecat.utils.text.transforms.voice_formatter import VoiceFormatter
 
@@ -102,7 +101,7 @@ class TestStripMarkdown(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await strip_markdown(text, "*"), expected, text)
 
     async def test_links_kept(self):
-        keep = partial(strip_markdown, strip_urls=False)
+        keep = StripMarkdown(strip_urls=False)
         text = "See [the docs](https://example.com/docs) here."
         self.assertEqual(await keep(text, "*"), text)
 
@@ -383,6 +382,13 @@ class TestVoiceFormatter(unittest.IsolatedAsyncioTestCase):
         formatter = VoiceFormatter(strip_markdown=False)
         result = await formatter("**Hello**", "*")
         self.assertIn("**", result)
+
+    async def test_strip_urls_passthrough(self):
+        text = "See [the docs](https://example.com/docs) here."
+        stripped = await VoiceFormatter()(text, "*")
+        kept = await VoiceFormatter(strip_urls=False)(text, "*")
+        self.assertEqual(stripped, "See the docs here.")
+        self.assertIn("https://example.com/docs", kept)
 
     async def test_custom_replacements_applied(self):
         formatter = VoiceFormatter(
