@@ -1016,6 +1016,10 @@ class TTSSpeakFrame(DataFrame):
     Set ``interruptible=False`` on the frame to preserve its synthesis and
     generated audio and text through interruptions.
 
+    While an :class:`LLMConfigureOutputFrame` has set ``skip_tts``, the TTS
+    service doesn't speak it either, and pushes it on as a reply that isn't
+    spoken, as it does LLM replies.
+
     Parameters:
         text: The text to be spoken.
         append_to_context: Whether the spoken text should be appended to the LLM

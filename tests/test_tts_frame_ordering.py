@@ -50,6 +50,7 @@ from pipecat.frames.frames import (
     Frame,
     InterruptionFrame,
     LLMAssistantPushAggregationFrame,
+    LLMConfigureOutputFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMTextFrame,
@@ -1161,6 +1162,86 @@ async def test_skip_tts_response_after_speech_reaches_the_context_once():
     )
 
     assert context.messages == [{"role": "assistant", "content": "Hello there. How are you?"}]
+
+
+@pytest.mark.asyncio
+async def test_tts_speak_isnt_spoken_while_llm_output_skips_tts():
+    """A TTSSpeakFrame comes out as a reply that isn't spoken, like an LLM reply marked skip_tts."""
+    down, _ = await run_test(
+        MockHttpTTSService(),
+        frames_to_send=[LLMConfigureOutputFrame(skip_tts=True), TTSSpeakFrame("One moment.")],
+    )
+
+    assert [type(f) for f in down] == [
+        LLMConfigureOutputFrame,
+        LLMFullResponseStartFrame,
+        LLMTextFrame,
+        AggregatedTextFrame,
+        LLMFullResponseEndFrame,
+    ]
+    assert all(f.skip_tts for f in down[1:])
+    assert [f.text for f in down if isinstance(f, TextFrame)] == ["One moment.", "One moment."]
+
+
+@pytest.mark.asyncio
+async def test_tts_speak_is_spoken_once_llm_output_stops_skipping_tts():
+    down, _ = await run_test(
+        MockHttpTTSService(),
+        frames_to_send=[
+            LLMConfigureOutputFrame(skip_tts=True),
+            LLMConfigureOutputFrame(skip_tts=False),
+            TTSSpeakFrame("One moment."),
+        ],
+    )
+
+    assert any(isinstance(f, TTSAudioRawFrame) for f in down)
+    assert not any(isinstance(f, LLMTextFrame) for f in down)
+
+
+@pytest.mark.parametrize("append_to_context", [True, False])
+@pytest.mark.asyncio
+async def test_tts_speak_that_isnt_spoken_reaches_the_context_once(append_to_context):
+    context = LLMContext()
+    pipeline = Pipeline([MockHttpTTSService(), LLMAssistantAggregator(context)])
+    await run_test(
+        pipeline,
+        frames_to_send=[
+            LLMConfigureOutputFrame(skip_tts=True),
+            TTSSpeakFrame("One moment.", append_to_context=append_to_context),
+        ],
+    )
+
+    expected = [{"role": "assistant", "content": "One moment."}] if append_to_context else []
+    assert context.messages == expected
+
+
+def _speak_inside_a_skipped_reply() -> list[Frame]:
+    reply = _skip_tts_response("Hello there.", " How are you?")
+    return [
+        LLMConfigureOutputFrame(skip_tts=True),
+        *reply[:2],
+        TTSSpeakFrame("One moment."),
+        *reply[2:],
+    ]
+
+
+@pytest.mark.asyncio
+async def test_tts_speak_inside_a_reply_that_isnt_spoken_joins_that_reply():
+    down, _ = await run_test(MockHttpTTSService(), frames_to_send=_speak_inside_a_skipped_reply())
+
+    assert sum(isinstance(f, LLMFullResponseStartFrame) for f in down) == 1
+    assert sum(isinstance(f, LLMFullResponseEndFrame) for f in down) == 1
+
+    context = LLMContext()
+    pipeline = Pipeline([MockHttpTTSService(), LLMAssistantAggregator(context)])
+    await run_test(pipeline, frames_to_send=_speak_inside_a_skipped_reply())
+
+    assert len(context.messages) == 1
+    assert sorted(context.messages[0]["content"].split(". ")) == [
+        "Hello there",
+        "How are you?",
+        "One moment",
+    ]
 
 
 # ---------------------------------------------------------------------------
