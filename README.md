@@ -203,10 +203,10 @@ claude plugin install pipecat-dev@pipecat-dev-skills
 
 ### Running tests
 
-To run all tests, from the root directory:
+To run all tests in parallel, from the root directory:
 
 ```bash
-uv run pytest
+uv run pytest -n auto
 ```
 
 Run a specific test suite:
