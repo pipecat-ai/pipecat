@@ -44,6 +44,11 @@ class KrispServiceError(Exception):
         self.code = code
         self.status_code = status_code
 
+    @property
+    def is_permanent(self) -> bool:
+        """Whether retrying can't help (rejected credentials or configuration)."""
+        return self.status_code in (400, 401, 403)
+
     @classmethod
     def from_message(cls, msg: dict[str, Any]) -> "KrispServiceError":
         """Build an error from a server ``error`` message.

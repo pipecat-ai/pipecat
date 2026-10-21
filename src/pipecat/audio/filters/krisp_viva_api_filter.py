@@ -17,7 +17,6 @@ import json
 import os
 from typing import Any
 
-import aiohttp
 from loguru import logger
 from websockets.asyncio.client import ClientConnection
 from websockets.asyncio.client import connect as websocket_connect
@@ -26,37 +25,20 @@ from websockets.protocol import State
 from pipecat.audio.filters.base_audio_filter import BaseAudioFilter
 from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import FilterControlFrame, FilterEnableFrame
+from pipecat.services.krisp.api import (
+    KRISP_REST_BASE_URL,
+    KrispServiceError,
+    create_session_token,
+    open_session,
+    session_headers,
+)
 
 KRISP_VIVA_API_URL = "wss://streaming.krisp.ai/voice-isolation"
-KRISP_REST_BASE_URL = "https://api.developers.krisp.ai"
-_SESSION_TOKEN_PATH = "/v2/sdk/tokens/session"
 
 # The API processes 16-bit mono PCM at 8 or 16 kHz in frames of exactly 30 ms.
 _FRAME_MS = 30
 
-_HANDSHAKE_TIMEOUT = 10.0
 _MAX_RECONNECT_DELAY = 10.0
-
-
-class KrispVivaApiError(Exception):
-    """An error reported by the Krisp VIVA API or its token endpoint."""
-
-    def __init__(self, message: str, *, code: str | None = None, status_code: int | None = None):
-        """Initialize the error.
-
-        Args:
-            message: Human-readable error message.
-            code: Krisp error code (e.g. ``invalid_client_hello``).
-            status_code: HTTP-style status code reported by the server.
-        """
-        super().__init__(message)
-        self.code = code
-        self.status_code = status_code
-
-    @property
-    def is_permanent(self) -> bool:
-        """Whether retrying can't help (rejected credentials or configuration)."""
-        return self.status_code in (400, 401, 403)
 
 
 class KrispVivaApiFilter(BaseAudioFilter):
@@ -139,6 +121,10 @@ class KrispVivaApiFilter(BaseAudioFilter):
         self._connection_task: asyncio.Task | None = None
         self._send_buffer = bytearray()
         self._received = bytearray()
+
+    def __str__(self) -> str:
+        """Name used in log messages."""
+        return self.__class__.__name__
 
     async def start(self, sample_rate: int):
         """Connect to the VIVA API for the transport's sample rate.
@@ -226,7 +212,7 @@ class KrispVivaApiFilter(BaseAudioFilter):
                 logger.warning(f"{self}: connection closed, reconnecting")
             except asyncio.CancelledError:
                 raise
-            except KrispVivaApiError as e:
+            except KrispServiceError as e:
                 if e.is_permanent:
                     logger.error(f"{self}: {e}; passing audio through unfiltered")
                     return
@@ -239,10 +225,9 @@ class KrispVivaApiFilter(BaseAudioFilter):
             delay = min(delay * 2, _MAX_RECONNECT_DELAY)
 
     async def _connect(self):
-        token = await self._create_session_token()
-        websocket = await websocket_connect(
-            self._url, additional_headers={"Authorization": f"api-key {token}"}
-        )
+        logger.debug(f"{self}: connecting to {self._url} (tokens: {self._rest_base_url})")
+        token = await create_session_token(self._api_key, "viva", base_url=self._rest_base_url)
+        websocket = await websocket_connect(self._url, additional_headers=session_headers(token))
         try:
             hello: dict[str, Any] = {
                 "model": self._model,
@@ -251,8 +236,7 @@ class KrispVivaApiFilter(BaseAudioFilter):
             }
             if self._metadata is not None:
                 hello["metadata"] = self._metadata
-            await websocket.send(json.dumps(hello))
-            ready = await self._wait_ready(websocket)
+            ready = await open_session(websocket, hello)
         except BaseException:
             await websocket.close()
             raise
@@ -262,17 +246,6 @@ class KrispVivaApiFilter(BaseAudioFilter):
             f"{self}: connected to Krisp VIVA API (request_id={ready.get('request_id')}, "
             f"{self._api_sample_rate} Hz)"
         )
-
-    async def _wait_ready(self, websocket: ClientConnection) -> dict[str, Any]:
-        while True:
-            message = await asyncio.wait_for(websocket.recv(), _HANDSHAKE_TIMEOUT)
-            if isinstance(message, bytes):
-                continue
-            msg = json.loads(message)
-            if msg.get("type") == "ready":
-                return msg
-            if msg.get("type") == "error":
-                raise _error_from_message(msg)
 
     async def _receive_audio(self):
         websocket = self._websocket
@@ -287,7 +260,7 @@ class KrispVivaApiFilter(BaseAudioFilter):
                 continue
             msg = json.loads(message)
             if msg.get("type") == "error":
-                raise _error_from_message(msg)
+                raise KrispServiceError.from_message(msg)
 
     async def _close_websocket(self):
         websocket, self._websocket = self._websocket, None
@@ -296,38 +269,3 @@ class KrispVivaApiFilter(BaseAudioFilter):
                 await websocket.close()
             except Exception as e:
                 logger.debug(f"{self}: error closing websocket: {e}")
-
-    async def _create_session_token(self) -> str:
-        url = f"{self._rest_base_url}{_SESSION_TOKEN_PATH}"
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                url,
-                headers={"Authorization": f"api-key {self._api_key}"},
-                json={"usage_type": "viva"},
-            ) as resp:
-                try:
-                    body = await resp.json(content_type=None)
-                except Exception:
-                    body = {}
-                body = body if isinstance(body, dict) else {}
-                if resp.status >= 400:
-                    code = body.get("error_code")
-                    raise KrispVivaApiError(
-                        f"session token request failed: {code or resp.status}: "
-                        f"{body.get('message') or resp.reason} (req_id={body.get('req_id')})",
-                        code=code,
-                        status_code=resp.status,
-                    )
-        token = (body.get("data") or {}).get("session_key")
-        if not token:
-            raise KrispVivaApiError(f"Unexpected session token response: {body!r}")
-        return token
-
-
-def _error_from_message(msg: dict[str, Any]) -> KrispVivaApiError:
-    error = msg.get("error") or {}
-    return KrispVivaApiError(
-        f"{error.get('code', 'error')}: {error.get('message') or 'Unknown error'}",
-        code=error.get("code"),
-        status_code=error.get("status_code"),
-    )
