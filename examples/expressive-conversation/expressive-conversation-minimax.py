@@ -12,6 +12,7 @@ from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.evals.transport import EvalTransportParams
+from pipecat.expressive.policy import ExpressionGuidance, ExpressionPolicy
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
@@ -74,21 +75,14 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             settings=MiniMaxHttpTTSService.Settings(voice="English_expressive_narrator"),
         )
 
-        # Teach the LLM the expression tags the TTS can perform. MiniMax's
-        # vocabulary is fixed, so the prompt lists all of it.
-        capabilities = tts.get_expression_adapter().capabilities()
-        emotions = ", ".join(term.name for term in capabilities.delivery)
-        sounds = ", ".join(f"[[{term.name}]]" for term in capabilities.sounds)
-        system_instruction = f"""You are a warm, expressive assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Keep your responses brief.
+        # With expressive conversation on, the LLM is taught the expression tags
+        # the TTS performs. MiniMax's vocabulary is small and fixed, so the LLM
+        # is offered all of it.
+        system_instruction = "You are a warm, expressive assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Keep your responses brief."
 
-    You can control how your words are spoken with tags:
-    - <<emotion>> at the start of a sentence speaks it, and the sentences after it, with that emotion, until the next emotion tag. <<neutral>> returns to your normal voice.
-    - [[sound]] makes a sound at that point.
-    - [[pause 500]] pauses for about that many milliseconds.
-
-    Your voice can perform only these emotions: {emotions}. And only these sounds: {sounds}. Write them exactly as they appear in these lists. Any other word in a tag is ignored.
-
-    Let your voice match the conversation: be happy for the user's good news, sad or calm with their bad news, and laugh when they say something funny. Most sentences need no tag."""
+        expression_policy = ExpressionPolicy(
+            guidance=[ExpressionGuidance.MATCH_STYLE, ExpressionGuidance.SLOW_FOR_DETAILS]
+        )
 
         llm = OpenAILLMService(
             api_key=os.environ["OPENAI_API_KEY"],
@@ -118,8 +112,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             params=PipelineParams(
                 enable_metrics=True,
                 enable_usage_metrics=True,
-                # The TTS reads the expression tags in the LLM's responses.
+                # The LLM writes expression tags into its responses, and the TTS
+                # performs them.
                 enable_expressive_conversation=True,
+                expression_policy=expression_policy,
             ),
             idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
             processor_unusable_policy=ProcessorUnusablePolicy.END,

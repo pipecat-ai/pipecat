@@ -11,6 +11,7 @@ from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.evals.transport import EvalTransportParams
+from pipecat.expressive.policy import ExpressionGuidance, ExpressionPolicy
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
@@ -76,12 +77,23 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ),
     )
 
-    # Teach the LLM the expression tags the TTS can perform. Cartesia has many
-    # more emotions (see CartesiaEmotion), but offered more than about 15, the
-    # LLM starts inventing names of its own as a conversation goes on, so the
-    # prompt names the ones this conversation calls for.
-    emotions = ", ".join(
-        [
+    # With expressive conversation on, the LLM is taught the expression tags the TTS
+    # performs. Cartesia has many more emotions (see CartesiaEmotion), but offered
+    # more than about 15, the LLM starts inventing names of its own as a
+    # conversation goes on, so the policy offers the ones this conversation calls
+    # for, and says which to use for feelings that have none.
+    system_instruction = "You are a warm, expressive assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Keep your responses brief."
+
+    expression_policy = ExpressionPolicy(
+        guidance=[
+            ExpressionGuidance.MATCH_STYLE,
+            ExpressionGuidance.SLOW_FOR_DETAILS,
+            "Some feelings have no tone of their own: for relief, use happy or content; "
+            "to reassure, comfort or encourage, use calm or sympathetic; for concern or "
+            "support, use sympathetic.",
+        ],
+        tones=[
+            "slow",
             "calm",
             "content",
             "sympathetic",
@@ -97,20 +109,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             "hesitant",
             "anxious",
             "proud",
-        ]
+        ],
     )
-    system_instruction = f"""You are a warm, expressive assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Keep your responses brief.
-
-You can control how your words are spoken with tags:
-- <<emotion>> at the start of a sentence speaks it, and the sentences after it, with that emotion, until the next emotion tag. <<neutral>> returns to your normal voice.
-- [[laughter]] laughs at that point.
-- [[pause 500]] pauses for that many milliseconds.
-
-Your voice can perform only these emotions: {emotions}. Write an emotion exactly as it appears in this list. Any other word in an emotion tag is ignored, so if no emotion in the list fits, write no tag.
-
-Let your voice match the conversation: be excited for the user's good news, sympathetic with their bad news, and laugh when they say something funny. Most sentences need no tag. Some feelings have no emotion of their own: for relief, use happy or content; to reassure, comfort or encourage, use calm or sympathetic; for concern or support, use sympathetic.
-
-Before writing an emotion tag, check that the emotion is in the list above."""
 
     llm = OpenAILLMService(
         api_key=os.environ["OPENAI_API_KEY"],
@@ -140,8 +140,10 @@ Before writing an emotion tag, check that the emotion is in the list above."""
         params=PipelineParams(
             enable_metrics=True,
             enable_usage_metrics=True,
-            # The TTS reads the expression tags in the LLM's responses.
+            # The LLM writes expression tags into its responses, and the TTS
+            # performs them.
             enable_expressive_conversation=True,
+            expression_policy=expression_policy,
         ),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
         processor_unusable_policy=ProcessorUnusablePolicy.END,

@@ -114,5 +114,5 @@ def _choices(
         return f"For example: {listed}. Others work too."
     return (
         f"Use only these {kind}, written exactly as listed: {listed}. "
-        "If none fits, use the closest one or none."
+        "Any other word in a tag is ignored, so if none fits, write no tag."
     )
