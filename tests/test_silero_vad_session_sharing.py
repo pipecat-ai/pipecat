@@ -30,16 +30,15 @@ class TestSileroVADSessionSharing(unittest.TestCase):
 
     def test_state_stays_per_analyzer(self):
         frame = _frame()
-        first, second = _analyzer(), _analyzer()
+        first, second, reference = _analyzer(), _analyzer(), _analyzer()
 
-        baseline = np.ravel(first.voice_confidence(frame))[0]
-        self.assertEqual(baseline, np.ravel(second.voice_confidence(frame))[0])
-
-        # Advancing one analyzer must not move the other
+        # Advancing one analyzer must not move another that shares its session
         for _ in range(5):
             second.voice_confidence(frame)
-        self.assertEqual(baseline, np.ravel(first.voice_confidence(frame))[0])
-        self.assertNotEqual(baseline, np.ravel(second.voice_confidence(frame))[0])
+        confidence = np.ravel(first.voice_confidence(frame))[0]
+        self.assertEqual(confidence, np.ravel(reference.voice_confidence(frame))[0])
+        # the frames do move the state, so the check above is not vacuous
+        self.assertNotEqual(confidence, np.ravel(second.voice_confidence(frame))[0])
 
 
 if __name__ == "__main__":
