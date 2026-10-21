@@ -120,6 +120,11 @@ class _AudioContextPlayback:
     stop_frame_due: bool = False
 
 
+# The text types an LLM writes its replies in, where expressive conversation
+# reads expression tags. Other text, such as a pattern's match, is spoken as is.
+_EXPRESSIVE_TEXT_TYPES = (TextType.SENTENCE, TextType.TOKEN)
+
+
 class TTSService(AIService):
     """Base class for text-to-speech services.
 
@@ -483,18 +488,26 @@ class TTSService(AIService):
 
         Part of expressive conversation (alpha). Set before each request, for
         a service that takes modes with the request, such as a style
-        instruction, rather than as markup in its text. Empty for the voice's
-        baseline.
+        instruction, rather than as markup in its text.
+
+        Returns:
+            The modes, empty for the voice's baseline.
         """
         return self._expression.modes if self._expression else []
 
-    def service_metadata_frame(self) -> TTSMetadataFrame:
+    def service_metadata_frame(self) -> TTSMetadataFrame | None:
         """Build the TTS metadata frame broadcast at start.
 
-        Overrides :meth:`AIService.service_metadata_frame` to return a
-        :class:`~pipecat.frames.frames.TTSMetadataFrame` carrying its expression
-        adapter's capabilities.
+        Overrides :meth:`AIService.service_metadata_frame`. With expressive
+        conversation on, a :class:`~pipecat.frames.frames.TTSMetadataFrame`
+        carries its expression adapter's capabilities; otherwise nothing is
+        broadcast.
+
+        Returns:
+            The metadata frame, or None when expressive conversation is off.
         """
+        if not self._expression:
+            return None
         return TTSMetadataFrame(
             service_name=self.name, expression=self.get_expression_adapter().capabilities()
         )
@@ -1253,7 +1266,7 @@ class TTSService(AIService):
                 self._expression.flush(),
                 self.create_context_id(),
             )
-            self._expression.end_response()
+            self._expression.restate_modes()
 
         # Force-promote any sentence still pending in the sequencer (streaming
         # mode only; a no-op otherwise) — handles a response that ends with no
@@ -1328,10 +1341,12 @@ class TTSService(AIService):
         await self.on_turn_context_created(speak_context_id)
         text_frame = AggregatedTextFrame(frame.text, frame.text_type, raw_text=frame.text)
         text_frame.interruptible = frame.interruptible
-        if self._expression and frame.text_type not in self._skip_text_types:
+        if self._expression and frame.text_type in _EXPRESSIVE_TEXT_TYPES:
             # Text of its own, apart from any response it is spoken in the middle of.
             segments = self._expression.read_whole(frame.text)
+            self._expression.restate_modes()
             await self._speak_expression(text_frame, segments, speak_context_id)
+            self._expression.restate_modes()
         else:
             await self._handle_aggregated_text(text_frame, speak_context_id)
         # Force-promote the utterance's pending sentence into a real slot (streaming
@@ -1526,7 +1541,7 @@ class TTSService(AIService):
         text = self._trim_text(src_frame.text)
         if src_frame.text_type in self._skip_text_types:
             await self._push_skipped_text(src_frame, context_id)
-        elif self._expression:
+        elif self._expression and src_frame.text_type in _EXPRESSIVE_TEXT_TYPES:
             segments = self._expression.feed(src_frame.text)
             await self._speak_expression(src_frame, segments, context_id)
         elif text is not None:

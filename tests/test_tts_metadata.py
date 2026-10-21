@@ -13,6 +13,7 @@ import pytest
 from pipecat.expressive.adapter import ExpressionAdapter
 from pipecat.expressive.expression import ExpressionCapabilities, ExpressionTerm, ModeScope
 from pipecat.frames.frames import Frame, TTSMetadataFrame
+from pipecat.pipeline.worker import PipelineParams
 from pipecat.services.tts_service import TTSService
 from pipecat.tests.utils import run_test
 
@@ -23,6 +24,9 @@ CAPABILITIES = ExpressionCapabilities(
     emphasis=True,
     mode_scope=ModeScope.SENTENCE,
 )
+
+
+EXPRESSIVE = PipelineParams(enable_expressive_conversation=True)
 
 
 class DeclaringAdapter(ExpressionAdapter):
@@ -56,6 +60,7 @@ async def test_metadata_is_broadcast_both_ways_at_start():
         frames_to_send=[],
         expected_down_frames=[TTSMetadataFrame],
         expected_up_frames=[TTSMetadataFrame],
+        pipeline_params=EXPRESSIVE,
     )
 
     assert down[0].service_name == tts.name
@@ -64,13 +69,22 @@ async def test_metadata_is_broadcast_both_ways_at_start():
 
 @pytest.mark.asyncio
 async def test_a_service_declares_no_expression_by_default():
-    down, _ = await run_test(SilentTTSService(), frames_to_send=[])
+    down, _ = await run_test(SilentTTSService(), frames_to_send=[], pipeline_params=EXPRESSIVE)
 
     assert down[0].expression is None
 
 
 @pytest.mark.asyncio
 async def test_a_service_broadcasts_the_expression_it_declares():
-    down, _ = await run_test(SilentTTSService(CAPABILITIES), frames_to_send=[])
+    down, _ = await run_test(
+        SilentTTSService(CAPABILITIES), frames_to_send=[], pipeline_params=EXPRESSIVE
+    )
 
     assert down[0].expression == CAPABILITIES
+
+
+@pytest.mark.asyncio
+async def test_nothing_is_broadcast_without_expressive_conversation():
+    down, up = await run_test(SilentTTSService(CAPABILITIES), frames_to_send=[])
+
+    assert not [f for f in down + up if isinstance(f, TTSMetadataFrame)]

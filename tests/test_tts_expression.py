@@ -14,8 +14,8 @@ from loguru import logger
 
 from pipecat.expressive.adapter import ExpressionAdapter
 from pipecat.expressive.expression import ExpressionCapabilities, ExpressionTerm, ModeScope
-from pipecat.expressive.parser import Event, Text
-from pipecat.expressive.tts_expression import TTSExpression
+from pipecat.expressive.parser import Event, Pause, Text
+from pipecat.expressive.tts_expression import TTSExpression, _segment_frames
 from pipecat.frames.frames import (
     AggregatedTextFrame,
     Frame,
@@ -119,7 +119,7 @@ async def test_the_tts_is_sent_the_words_with_their_rendered_expression(service)
     await run_test(tts, frames_to_send=response(*REPLY), pipeline_params=EXPRESSIVE)
 
     assert requests == [
-        "{cheerful}It's <laugh>{cheerful,emphasis}back up{cheerful} now.",
+        "{cheerful}It's <laugh> {cheerful,emphasis}back up {cheerful}now.",
         "<400ms>{cheerful}Bye!",
     ]
 
@@ -302,7 +302,7 @@ async def test_an_event_the_service_cant_perform_is_left_out():
     requests = record_requests(tts)
     context = await context_after(tts, response("Ha [[snort]] okay."))
 
-    assert requests == ["Ha  okay."]
+    assert requests == ["Ha okay."]
     assert context == "Ha okay."
 
 
@@ -415,7 +415,7 @@ async def test_a_request_is_spoken_in_the_modes_its_words_start_in():
     )
 
     # The change takes effect from the next request, as a mode lasts until the next tag.
-    assert tts.styles == [("The code is  four two.", "plain"), ("Anything else?", "calm")]
+    assert tts.styles == [("The code is four two.", "plain"), ("Anything else?", "calm")]
     assert [(f.text, f.modes) for f in down if isinstance(f, TTSTextFrame)] == [
         ("The code is", []),
         ("four two.", []),
@@ -528,3 +528,102 @@ async def test_an_unreported_pause_leaves_the_next_event_its_own_time():
     its, pause, laugh, back = (pts for _, pts in words)
     # The pause is completed by what comes after it, the laugh by its own markup.
     assert its < pause <= laugh < back
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("service", SERVICES)
+async def test_punctuation_after_emphasis_stays_with_it_in_the_context(service):
+    context = await context_after(service(), response("It's *back*! *Wow*, nice."))
+
+    assert context == "It's *back*! *Wow*, nice."
+
+
+@pytest.mark.asyncio
+async def test_spacing_between_pieces_is_sent_as_written():
+    tts = MockHttpPushTextTTSService()
+    requests = record_requests(tts)
+    await run_test(
+        tts, frames_to_send=response("That is *very* *good* news."), pipeline_params=EXPRESSIVE
+    )
+
+    assert requests == ["That is very good news."]
+
+
+@pytest.mark.asyncio
+async def test_spacing_between_pieces_is_sent_as_written_when_streaming_tokens():
+    tts = MockHttpPushTextTTSService(text_aggregation_mode=TextAggregationMode.TOKEN)
+    requests = record_requests(tts)
+    await run_test(tts, frames_to_send=response("*Wow* that's great."), pipeline_params=EXPRESSIVE)
+
+    assert "".join(requests) == "Wow that's great."
+
+
+@pytest.mark.asyncio
+async def test_a_response_after_a_tts_speak_frame_states_its_modes():
+    tts = PushTextTTSService(text_aggregation_mode=TextAggregationMode.TOKEN)
+    requests = record_requests(tts)
+    await run_test(
+        tts,
+        frames_to_send=[TTSSpeakFrame("<<calm>> Hi."), *response("<<calm>> Three.")],
+        pipeline_params=EXPRESSIVE,
+    )
+
+    assert requests == ["{calm}Hi.", "{calm}Three."]
+
+
+@pytest.mark.asyncio
+async def test_a_patterns_match_is_spoken_as_it_is():
+    """Tags are read in the text an LLM writes its reply in, not in a pattern's match."""
+    tts = PushTextTTSService()
+    requests = record_requests(tts)
+    spelled = AggregatedTextFrame("ABC", "spell", raw_text="<spell>ABC</spell>")
+    context = await context_after(
+        tts, [LLMFullResponseStartFrame(), spelled, LLMFullResponseEndFrame()]
+    )
+
+    assert requests == ["ABC"]
+    assert context == "<spell>ABC</spell>"
+
+
+# The frames a unit's segments become.
+
+SEGMENTS = [
+    Text(" It's ", ("calm",), "<<calm>> It's "),
+    Event("laugh", "[[laugh]]"),
+    Text(" fine. ", ("calm",), " fine. "),
+    Pause(400, "[[pause 400]]"),
+]
+
+
+def test_words_carry_their_modes_and_events_have_text_types_of_their_own():
+    pieces = _segment_frames(SEGMENTS, TextType.SENTENCE, trim=True)
+
+    assert [(f.text_type, f.text, f.modes, bool(f.skip_tts)) for f, _ in pieces] == [
+        (TextType.SENTENCE, "It's", ["calm"], False),
+        (TextType.EXPRESSION_EVENT, "laugh", None, False),
+        (TextType.SENTENCE, "fine.", ["calm"], False),
+        (TextType.EXPRESSION_PAUSE, "400", None, False),
+    ]
+    assert [f.raw_text for f, _ in pieces] == [
+        "<<calm>> It's",
+        "[[laugh]]",
+        "fine.",
+        "[[pause 400]]",
+    ]
+
+
+def test_the_text_to_speak_keeps_the_spaces_between_the_words():
+    pieces = _segment_frames(SEGMENTS, TextType.SENTENCE, trim=True)
+
+    assert [text for _, text in pieces] == ["It's ", "", " fine.", ""]
+
+
+def test_tokens_are_left_as_they_are():
+    pieces = _segment_frames(SEGMENTS, TextType.TOKEN, trim=False)
+
+    assert [(f.text, text) for f, text in pieces] == [
+        (" It's ", " It's "),
+        ("laugh", ""),
+        (" fine. ", " fine. "),
+        ("400", ""),
+    ]

@@ -17,6 +17,7 @@ from websockets.frames import Close
 from websockets.protocol import State
 
 from pipecat.expressive.adapter import ExpressionAdapter
+from pipecat.expressive.tts_expression import TTSExpression
 from pipecat.services.elevenlabs.tts import (
     ElevenLabsHttpTTSService,
     ElevenLabsTTSService,
@@ -611,8 +612,33 @@ async def test_http_word_timestamps_report_audio_tags_as_words():
         reported.extend(word for word, _ in word_times)
 
     service.add_word_timestamps = _record
+    service._expression = TTSExpression(service.get_expression_adapter, service)
 
     async for _ in service.run_tts("It's [excited] back [short pause] up.", "ctx-1"):
         pass
 
     assert reported[:4] == ["It's", "[excited]", "back", "[shortpause]"]
+
+
+@pytest.mark.asyncio
+async def test_http_alignment_is_left_as_is_without_expressive_conversation():
+    class _Session:
+        def post(self, url, json=None, headers=None, params=None):
+            return _StreamingHttpResponse([_http_chunk("Press [ to open the menu now.")])
+
+    service = ElevenLabsHttpTTSService(
+        api_key="test-key",
+        aiohttp_session=_Session(),
+        settings=ElevenLabsHttpTTSService.Settings(voice="test-voice", model="eleven_v3"),
+    )
+    reported = []
+
+    async def _record(word_times, *args, **kwargs):
+        reported.extend(word for word, _ in word_times)
+
+    service.add_word_timestamps = _record
+
+    async for _ in service.run_tts("Press [ to open the menu now.", "ctx-1"):
+        pass
+
+    assert reported == ["Press", "[", "to", "open", "the", "menu", "now."]

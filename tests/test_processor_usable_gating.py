@@ -18,7 +18,6 @@ from pipecat.frames.frames import (
     InputAudioRawFrame,
     TextFrame,
     TTSAudioRawFrame,
-    TTSMetadataFrame,
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.services.stt_service import SegmentedSTTService, STTService
@@ -185,10 +184,10 @@ class TestApplicationErrorClassification(unittest.IsolatedAsyncioTestCase):
             service,
             frames_to_send=[TextFrame("hello")],
             expected_down_frames=None,
-            expected_up_frames=[TTSMetadataFrame, ErrorFrame],
+            expected_up_frames=[ErrorFrame],
         )
 
-        self.assertEqual(up[1].category, ErrorCategory.APPLICATION)
+        self.assertEqual(up[0].category, ErrorCategory.APPLICATION)
         self.assertTrue(service.is_usable)
         # The turn produces no audio: a transformer may exist to remove
         # something, so speaking the untransformed text isn't safe.

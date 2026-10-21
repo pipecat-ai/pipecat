@@ -13,6 +13,7 @@ import unittest
 import pytest
 from websockets.protocol import State
 
+from pipecat.expressive.tts_expression import TTSExpression
 from pipecat.services.elevenlabs.dialogue.tts import (
     _KEEPALIVE_CONTEXT_ID,
     ElevenLabsDialogueTTSService,
@@ -527,8 +528,9 @@ async def test_dialogue_word_timestamps_report_audio_tags_as_words():
         reported.extend(word for word, _ in word_times)
 
     service.add_word_timestamps = _record
+    service._expression = TTSExpression(service.get_expression_adapter, service)
 
-    for chunk in ("[exci", "ted] Good news [lau", "ghs] it's ", "back."):
+    for chunk in ("[exci", "ted] Good news [clear th", "roat] it's ", "back."):
         alignment = _alignment(chunk)
         await service._handle_message(
             {
@@ -541,8 +543,8 @@ async def test_dialogue_word_timestamps_report_audio_tags_as_words():
             }
         )
 
-    assert reported == ["[excited]", "Good", "news", "[laughs]", "it's"]
-    assert service._cumulative_time == pytest.approx(0.05 + 0.19 + 0.10 + 0.05)
+    assert reported == ["[excited]", "Good", "news", "[clearthroat]", "it's"]
+    assert service._cumulative_time == pytest.approx(0.05 + 0.24 + 0.11 + 0.05)
 
 
 class TestAudioTagExpressionAdapter:

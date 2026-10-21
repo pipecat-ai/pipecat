@@ -1179,15 +1179,19 @@ class ElevenLabsHttpTTSService(TTSService):
                                 utterance_duration = max(utterance_duration, chunk_end_time)
 
                             # Calculate word timestamps
-                            joined, in_audio_tag = _join_audio_tags(
-                                alignment,
-                                (
-                                    "characters",
-                                    "character_start_times_seconds",
-                                    "character_end_times_seconds",
-                                ),
-                                in_audio_tag,
-                            )
+                            joined = alignment
+                            if self._expression:
+                                # The audio tags expressive conversation sends mark
+                                # when its events are performed.
+                                joined, in_audio_tag = _join_audio_tags(
+                                    alignment,
+                                    (
+                                        "characters",
+                                        "character_start_times_seconds",
+                                        "character_end_times_seconds",
+                                    ),
+                                    in_audio_tag,
+                                )
                             # A chunk can be only the spaces inside a tag, leaving nothing.
                             word_times = (
                                 self.calculate_word_times(joined) if joined["characters"] else []

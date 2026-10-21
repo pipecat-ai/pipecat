@@ -388,9 +388,15 @@ class ElevenLabsDialogueTTSService(ElevenLabsTTSBase):
                 not context.alignment_started,
             )
             context.alignment_started = True
-            joined, context.in_audio_tag = _join_audio_tags(
-                alignment, ("chars", "charStartTimesMs", "charDurationsMs"), context.in_audio_tag
-            )
+            joined = alignment
+            if self._expression:
+                # The audio tags expressive conversation sends mark when its events
+                # are performed.
+                joined, context.in_audio_tag = _join_audio_tags(
+                    alignment,
+                    ("chars", "charStartTimesMs", "charDurationsMs"),
+                    context.in_audio_tag,
+                )
             word_times, self._partial_word, self._partial_word_start_time = calculate_word_times(
                 joined,
                 self._cumulative_time,

@@ -55,7 +55,6 @@ from pipecat.frames.frames import (
     LLMTextFrame,
     TextFrame,
     TTSAudioRawFrame,
-    TTSMetadataFrame,
     TTSSpeakFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
@@ -1141,7 +1140,6 @@ async def test_skip_tts_llm_text_is_pushed_as_unspoken_sentences(mode):
     assert all(f.skip_tts and not f.will_be_spoken for f in sentences)
     assert not any(isinstance(f, (LLMTextFrame, TTSStartedFrame, TTSAudioRawFrame)) for f in down)
     assert [type(f) for f in down] == [
-        TTSMetadataFrame,
         LLMFullResponseStartFrame,
         AggregatedTextFrame,
         AggregatedTextFrame,
@@ -1154,11 +1152,7 @@ async def test_skip_tts_response_of_only_whitespace_has_no_sentences():
     """A response that isn't spoken and holds only whitespace pushes no text."""
     down, _ = await run_test(MockHttpTTSService(), frames_to_send=_skip_tts_response("\n"))
 
-    assert [type(f) for f in down] == [
-        TTSMetadataFrame,
-        LLMFullResponseStartFrame,
-        LLMFullResponseEndFrame,
-    ]
+    assert [type(f) for f in down] == [LLMFullResponseStartFrame, LLMFullResponseEndFrame]
 
 
 @pytest.mark.asyncio

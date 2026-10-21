@@ -15,6 +15,7 @@ the pieces it returns, one request per unit of text.
 **Alpha.** The tag syntax and these types are likely to change between releases.
 """
 
+import unicodedata
 from collections.abc import Callable
 
 from loguru import logger
@@ -58,7 +59,11 @@ class TTSExpression:
         return self._modes
 
     def capabilities(self) -> ExpressionCapabilities | None:
-        """The expression the service can perform now, or None."""
+        """The expression the service can perform now.
+
+        Returns:
+            The service's adapter's capabilities, or None when it performs none.
+        """
         return self._adapter().capabilities()
 
     def feed(self, text: str) -> list[Segment]:
@@ -80,8 +85,12 @@ class TTSExpression:
         """
         return self._response_parser().flush()
 
-    def end_response(self):
-        """Start the next response from the voice's baseline."""
+    def restate_modes(self):
+        """Have the next request state its modes from its start.
+
+        For the request after a response ends, and for text spoken in a
+        context of its own, such as a ``TTSSpeakFrame``'s.
+        """
         self._rendered_modes = None
 
     def reset(self):
@@ -121,8 +130,8 @@ class TTSExpression:
             segments: The unit's segments.
             streaming_tokens: Whether the unit is a streamed token rather than
                 a sentence.
-            trim: Trims a word piece's text, or returns None when nothing is
-                left to say.
+            trim: Trims the unit's first word piece, as the unit's own text
+                would be trimmed, or returns None when nothing is left to say.
 
         Returns:
             Each piece's frame and the text to send to the TTS for it.
@@ -133,6 +142,7 @@ class TTSExpression:
             # every service keeps modes from one request to the next.
             self._rendered_modes = None
         pieces: list[tuple[AggregatedTextFrame, str]] = []
+        trimmed_start = False
         for frame, text in _segment_frames(
             segments, src_frame.text_type, trim=not streaming_tokens
         ):
@@ -142,11 +152,19 @@ class TTSExpression:
                 if rendered is not None:
                     pieces.append((frame, rendered))
                 continue
-            trimmed = trim(text)
-            if trimmed is None:
-                continue
+            if not trimmed_start:
+                # The unit is trimmed at its start; between its pieces, spacing
+                # is kept as written.
+                trimmed = trim(text)
+                if trimmed is None:
+                    continue
+                text = trimmed
+                trimmed_start = True
+            elif pieces and pieces[-1][1][-1:].isspace() and text[:1].isspace():
+                # An event left out between two spaces leaves one.
+                text = text.lstrip()
             frame.modes = self._performed_modes(frame.modes or [], capabilities)
-            pieces.append((frame, trimmed))
+            pieces.append((frame, text))
         words = [frame for frame, _ in pieces if frame.text_type not in EXPRESSION_TEXT_TYPES]
         if words:
             self._modes = words[0].modes or []
@@ -167,9 +185,11 @@ class TTSExpression:
         Returns:
             The text with the service's markup.
         """
-        rendered = self._adapter().render_text(text, modes, self._rendered_modes)
+        # Leading spacing stays outside the markup, between the words.
+        words = text.lstrip()
+        rendered = self._adapter().render_text(words, modes, self._rendered_modes)
         self._rendered_modes = modes
-        return rendered
+        return text[: len(text) - len(words)] + rendered
 
     def _response_parser(self) -> ExpressionParser:
         if self._parser is None:
@@ -237,9 +257,11 @@ def _segment_frames(
     """Build the frame for each segment, with the text to send to the TTS for it.
 
     Words become frames of ``text_type`` that carry their modes, and the text
-    to speak keeps the spaces between them. Events and pauses become frames of
-    their own text types, with no text to send until the TTS service renders
-    them.
+    to speak keeps the spaces between them. Spacing alone, between two pieces,
+    goes with the piece after it, and punctuation written right after a word
+    piece goes with that word, so the context joins the pieces as written.
+    Events and pauses become frames of their own text types, with no text to
+    send until the TTS service renders them.
 
     Args:
         segments: The segments of one unit of text, such as a sentence.
@@ -251,15 +273,46 @@ def _segment_frames(
         Each segment's frame, with the text to send to the TTS for it.
     """
     pieces: list[tuple[AggregatedTextFrame, str]] = []
+    # Spacing alone, with the raw text around it, waiting for the next word piece.
+    carried_text = carried_raw = ""
+    carried_modes: tuple[str, ...] = ()
     for segment in segments:
-        if isinstance(segment, Text):
-            text, raw = (
-                (segment.text.strip(), segment.raw.strip()) if trim else (segment.text, segment.raw)
-            )
-            frame = AggregatedTextFrame(text, text_type, raw_text=raw, modes=list(segment.modes))
-            pieces.append((frame, segment.text))
-        else:
+        if not isinstance(segment, Text):
             pieces.append((_event_frame(segment), ""))
+            continue
+        text, raw = segment.text, segment.raw
+        previous = pieces[-1][0] if pieces else None
+        punctuation = _leading_punctuation(text)
+        if (
+            punctuation
+            and raw.startswith(punctuation)
+            and previous is not None
+            and previous.text_type not in EXPRESSION_TEXT_TYPES
+        ):
+            previous.text += punctuation
+            previous.raw_text = (previous.raw_text or "") + punctuation
+            pieces[-1] = (previous, pieces[-1][1] + punctuation)
+            text, raw = text[len(punctuation) :], raw[len(punctuation) :]
+        text, raw = carried_text + text, carried_raw + raw
+        if not text.strip():
+            carried_text, carried_raw, carried_modes = text, raw, segment.modes
+            continue
+        carried_text = carried_raw = ""
+        frame_text, frame_raw = (text.strip(), raw.strip()) if trim else (text, raw)
+        frame = AggregatedTextFrame(
+            frame_text, text_type, raw_text=frame_raw, modes=list(segment.modes)
+        )
+        pieces.append((frame, text))
+    if carried_text:
+        last = pieces[-1][0] if pieces else None
+        if last is not None and last.text_type not in EXPRESSION_TEXT_TYPES:
+            pieces[-1] = (last, pieces[-1][1] + carried_text)
+        elif not trim:
+            # A streamed token of spacing alone is sent as it is.
+            frame = AggregatedTextFrame(
+                carried_text, text_type, raw_text=carried_raw, modes=list(carried_modes)
+            )
+            pieces.append((frame, carried_text))
 
     words = [
         i for i, (frame, _) in enumerate(pieces) if frame.text_type not in EXPRESSION_TEXT_TYPES
@@ -269,6 +322,14 @@ def _segment_frames(
         pieces[first] = (pieces[first][0], pieces[first][1].lstrip())
         pieces[last] = (pieces[last][0], pieces[last][1].rstrip())
     return pieces
+
+
+def _leading_punctuation(text: str) -> str:
+    """The punctuation at the very start of ``text``."""
+    end = 0
+    while end < len(text) and unicodedata.category(text[end]).startswith("P"):
+        end += 1
+    return text[:end]
 
 
 def _event_frame(segment: Event | Pause) -> AggregatedTextFrame:

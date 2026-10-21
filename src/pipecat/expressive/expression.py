@@ -36,7 +36,9 @@ class ModeScope(Enum):
     Parameters:
         ANYWHERE: A mode takes effect where its tag appears.
         SENTENCE: A mode can change only between sentences, for a service
-            that takes modes with each request rather than as markup.
+            that takes modes with each request rather than as markup. When
+            the service streams tokens, a request is a token, so a change can
+            take effect within a sentence.
     """
 
     ANYWHERE = "anywhere"

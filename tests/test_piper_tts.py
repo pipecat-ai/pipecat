@@ -18,7 +18,6 @@ from pipecat.frames.frames import (
     ErrorFrame,
     LLMAssistantPushAggregationFrame,
     TTSAudioRawFrame,
-    TTSMetadataFrame,
     TTSSpeakFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
@@ -143,16 +142,10 @@ async def test_run_piper_tts_error(aiohttp_client):
             TTSSpeakFrame(text="Error case.", append_to_context=False),
         ]
 
-        expected_down_frames = [
-            TTSMetadataFrame,
-            AggregatedTextFrame,
-            TTSStartedFrame,
-            TTSStoppedFrame,
-            TTSTextFrame,
-        ]
+        expected_down_frames = [AggregatedTextFrame, TTSStartedFrame, TTSStoppedFrame, TTSTextFrame]
 
         # The 404, then the context completing with no audio.
-        expected_up_frames = [TTSMetadataFrame, ErrorFrame, ErrorFrame]
+        expected_up_frames = [ErrorFrame, ErrorFrame]
 
         frames_received = await run_test(
             tts_service,
@@ -162,8 +155,8 @@ async def test_run_piper_tts_error(aiohttp_client):
         )
         up_frames = frames_received[1]
 
-        assert isinstance(up_frames[1], ErrorFrame), "Must receive an ErrorFrame for 404"
-        assert "status: 404" in up_frames[1].error, (
+        assert isinstance(up_frames[0], ErrorFrame), "Must receive an ErrorFrame for 404"
+        assert "status: 404" in up_frames[0].error, (
             "ErrorFrame should contain details about the 404"
         )
 
