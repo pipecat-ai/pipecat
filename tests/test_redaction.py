@@ -9,7 +9,7 @@
 import unittest
 
 from pipecat.frames.frames import ErrorFrame
-from pipecat.utils.security.redaction import redact_secrets
+from pipecat.utils.security.redaction import _MAX_PAIR_DEPTH, REDACTED, redact_secrets
 
 
 class TestRedactSecrets(unittest.TestCase):
@@ -158,8 +158,18 @@ class TestRedactSecrets(unittest.TestCase):
 
     def test_masks_a_credential_nested_a_few_pairs_deep(self):
         self.assertEqual(
-            redact_secrets("a: b: c: https://x/p?token=abc&n=1"),
-            "a: b: c: https://x/p?token=[REDACTED]&n=1",
+            redact_secrets("a:b:c:https://x/p?token=abc&n=1"),
+            "a:b:c:https://x/p?token=[REDACTED]&n=1",
+        )
+
+    def test_keeps_a_chain_as_deep_as_the_limit(self):
+        message = "a:" * _MAX_PAIR_DEPTH + "z"
+        self.assertEqual(redact_secrets(message), message)
+
+    def test_masks_the_rest_of_a_chain_deeper_than_the_limit(self):
+        self.assertEqual(
+            redact_secrets("a:" * (_MAX_PAIR_DEPTH + 1) + "z"),
+            "a:" * (_MAX_PAIR_DEPTH + 1) + REDACTED,
         )
 
 

@@ -94,8 +94,9 @@ _KNOWN_TOKENS = re.compile(
 )
 
 
-# How many pairs deep a value is searched for more pairs. Real messages nest two or
-# three (`URL: https://...?token=...`); a longer chain is a pathological input.
+# How many pairs deep a value is searched for more pairs; deeper than that, the
+# rest of the value is masked. Real messages nest two or three
+# (`URL: https://...?token=...`); a longer chain is a pathological input.
 _MAX_PAIR_DEPTH = 16
 
 
@@ -112,8 +113,6 @@ def _redact_pair(match: re.Match, depth: int = 0) -> str:
     else:
         value = match["quoted"] or match["bare"] or ""
         if value and depth >= _MAX_PAIR_DEPTH:
-            # A longer chain than any real message nests; mask the rest rather than
-            # recurse until the interpreter's stack runs out.
             value = REDACTED
         elif value:
             # The value may itself hold pairs, as `URL: https://...?token=...` does.
