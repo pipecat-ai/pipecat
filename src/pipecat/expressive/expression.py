@@ -30,14 +30,12 @@ class ModeScope(Enum):
 
     Parameters:
         ANYWHERE: A mode takes effect where its tag appears.
-        SENTENCE: A mode can change only between sentences.
-        RESPONSE: A mode can be set only at the start of a response, and
-            lasts for all of it.
+        SENTENCE: A mode can change only between sentences, for a service
+            that takes modes with each request rather than as markup.
     """
 
     ANYWHERE = "anywhere"
     SENTENCE = "sentence"
-    RESPONSE = "response"
 
 
 @dataclass

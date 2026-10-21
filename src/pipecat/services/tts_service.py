@@ -21,7 +21,7 @@ from websockets.protocol import State
 
 from pipecat.audio.utils import create_stream_resampler
 from pipecat.expressive.adapter import ExpressionAdapter
-from pipecat.expressive.expression import ExpressionCapabilities
+from pipecat.expressive.expression import ExpressionCapabilities, ModeScope
 from pipecat.expressive.parser import EMPHASIS_MODE, ExpressionParser, Segment
 from pipecat.expressive.segment_frames import segment_frames
 from pipecat.frames.frames import (
@@ -424,6 +424,7 @@ class TTSService(AIService):
         self._rendered_modes: list[str] | None = None
         # Expression values the service can't perform, each warned about once.
         self._unperformed_expression: set[str] = set()
+        self._expression_modes: list[str] = []
 
     @property
     def sample_rate(self) -> int:
@@ -485,6 +486,17 @@ class TTSService(AIService):
             An instance of :attr:`expression_adapter_class`.
         """
         return self._expression_adapter
+
+    @property
+    def expression_modes(self) -> list[str]:
+        """The modes the request being synthesized is spoken in.
+
+        Part of expressive conversation (alpha). Set before each request, for
+        a service that takes modes with the request, such as a style
+        instruction, rather than as markup in its text. Empty for the voice's
+        baseline.
+        """
+        return self._expression_modes
 
     def service_metadata_frame(self) -> TTSMetadataFrame:
         """Build the TTS metadata frame broadcast at start.
@@ -1555,6 +1567,14 @@ class TTSService(AIService):
                 continue
             frame.modes = self._performed_modes(frame.modes or [], capabilities)
             pieces.append((frame, trimmed))
+        words = [frame for frame, _ in pieces if not frame.skip_tts]
+        if words:
+            self._expression_modes = words[0].modes or []
+            if capabilities and capabilities.mode_scope == ModeScope.SENTENCE:
+                # One request takes one set of modes: the ones its words start
+                # in. Clients see the modes that were requested.
+                for frame in words[1:]:
+                    frame.modes = list(self._expression_modes)
         if pieces:
             await self._speak_text(pieces, context_id)
 

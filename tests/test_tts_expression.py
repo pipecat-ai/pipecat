@@ -12,7 +12,7 @@ from collections.abc import AsyncGenerator
 import pytest
 
 from pipecat.expressive.adapter import ExpressionAdapter
-from pipecat.expressive.expression import ExpressionCapabilities, ExpressionTerm
+from pipecat.expressive.expression import ExpressionCapabilities, ExpressionTerm, ModeScope
 from pipecat.frames.frames import (
     AggregatedTextFrame,
     Frame,
@@ -285,3 +285,68 @@ async def test_a_pause_is_kept_within_the_services_range():
     )
 
     assert requests == ["One.", "<1000ms>Two."]
+
+
+class StyleAdapter(ExpressionAdapter):
+    """For a service that takes modes with each request."""
+
+    def capabilities(self):
+        return ExpressionCapabilities(
+            modes=[ExpressionTerm("calm"), ExpressionTerm("cheerful")],
+            mode_scope=ModeScope.SENTENCE,
+        )
+
+
+class StyleTTSService(MockHttpPushTextTTSService):
+    """Records the modes each request is spoken in, as a style."""
+
+    expression_adapter_class = StyleAdapter
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.styles: list[tuple[str, str]] = []
+
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
+        self.styles.append((text, " ".join(self.expression_modes) or "plain"))
+        async for frame in super().run_tts(text, context_id):
+            yield frame
+
+
+@pytest.mark.asyncio
+async def test_each_request_is_given_the_modes_it_is_spoken_in():
+    tts = StyleTTSService()
+    await run_test(
+        tts,
+        frames_to_send=[
+            *response("One. <<calm>> Two. Three. <<neutral>> Four. <<cheerful>> Five."),
+            *response("Six."),
+        ],
+        pipeline_params=EXPRESSIVE,
+    )
+
+    assert tts.styles == [
+        ("One.", "plain"),
+        ("Two.", "calm"),
+        ("Three.", "calm"),
+        ("Four.", "plain"),
+        ("Five.", "cheerful"),
+        ("Six.", "plain"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_request_is_spoken_in_the_modes_its_words_start_in():
+    tts = StyleTTSService()
+    down, _ = await run_test(
+        tts,
+        frames_to_send=response("The code is <<calm>> four two. Anything else?"),
+        pipeline_params=EXPRESSIVE,
+    )
+
+    # The change takes effect from the next request, as a mode lasts until the next tag.
+    assert tts.styles == [("The code is  four two.", "plain"), ("Anything else?", "calm")]
+    assert [(f.text, f.modes) for f in down if isinstance(f, TTSTextFrame)] == [
+        ("The code is", []),
+        ("four two.", []),
+        ("Anything else?", ["calm"]),
+    ]
