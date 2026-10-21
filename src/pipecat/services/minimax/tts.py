@@ -19,6 +19,8 @@ import aiohttp
 from loguru import logger
 from pydantic import BaseModel
 
+from pipecat.expressive.adapter import ExpressionAdapter
+from pipecat.expressive.expression import ExpressionCapabilities, ExpressionTerm, ModeScope
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
@@ -134,6 +136,43 @@ class MiniMaxTTSSettings(TTSSettings):
             flat.setdefault("latex_read", voice.get("latex_read"))
 
         return super().from_mapping(flat)
+
+
+class MiniMaxExpressionAdapter(ExpressionAdapter):
+    """Performs expression tags with MiniMax speech-2.8 models.
+
+    Part of expressive conversation (alpha). Modes are MiniMax's emotions, sent
+    with each request, so a mode can change only between sentences, and a
+    sentence written in several modes is spoken in the first. Events are its
+    interjections, such as ``(laughs)``, and pauses are ``<#s#>`` markers. Its
+    vocabulary is fixed: an interjection outside it is read aloud.
+    """
+
+    def capabilities(self) -> ExpressionCapabilities:
+        """MiniMax's emotions, interjections and pauses."""
+        return ExpressionCapabilities(
+            events=[
+                ExpressionTerm(name)
+                for name in (
+                    "laughs chuckle coughs clear-throat groans breath pant inhale exhale gasps "
+                    "sniffs sighs snorts burps lip-smacking humming hissing emm sneezes"
+                ).split()
+            ],
+            modes=[
+                ExpressionTerm(name)
+                for name in ("happy", "sad", "angry", "fearful", "disgusted", "surprised", "calm")
+            ],
+            pause_range_ms=(10, 99990),
+            mode_scope=ModeScope.SENTENCE,
+        )
+
+    def render_event(self, name: str) -> str:
+        """Render an interjection."""
+        return f"({name})"
+
+    def render_pause(self, duration_ms: int) -> str:
+        """Render a pause marker."""
+        return f"<#{duration_ms / 1000:g}#>"
 
 
 class MiniMaxHttpTTSService(TTSService):
@@ -319,6 +358,19 @@ class MiniMaxHttpTTSService(TTSService):
         self._audio_channel = 1
         self._audio_sample_rate = 0  # Set in start()
 
+        self._speech_28_expression_adapter = MiniMaxExpressionAdapter()
+
+    def get_expression_adapter(self) -> ExpressionAdapter:
+        """The adapter for the model: speech-2.8 models perform expression, others none.
+
+        Returns:
+            The expression adapter for the current model.
+        """
+        model = self._settings.model
+        if isinstance(model, str) and model.startswith("speech-2.8"):
+            return self._speech_28_expression_adapter
+        return super().get_expression_adapter()
+
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
 
@@ -372,8 +424,10 @@ class MiniMaxHttpTTSService(TTSService):
             "vol": self._settings.volume,
             "pitch": self._settings.pitch,
         }
-        if self._settings.emotion is not None:
-            voice_setting["emotion"] = self._settings.emotion
+        # In expressive conversation, the request's modes choose its emotion.
+        emotion = self.expression_modes[0] if self.expression_modes else self._settings.emotion
+        if emotion is not None:
+            voice_setting["emotion"] = emotion
         if self._settings.text_normalization is not None:
             voice_setting["text_normalization"] = self._settings.text_normalization
         if self._settings.latex_read is not None:
