@@ -27,6 +27,8 @@ class Word(BaseModel):
         text: The transcribed word text.
         confidence: Confidence score for the word (0.0 to 1.0).
         word_is_final: Whether this word is finalized and won't change.
+        speaker: Speaker label for the word (e.g., "A"), or "PENDING" while it is not
+            yet assigned. Only present on final words when speaker_labels is enabled.
     """
 
     start: int
@@ -34,6 +36,7 @@ class Word(BaseModel):
     text: str
     confidence: float
     word_is_final: bool = Field(..., alias="word_is_final")
+    speaker: str | None = None
 
 
 class BaseMessage(BaseModel):
