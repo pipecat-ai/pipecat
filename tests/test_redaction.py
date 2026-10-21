@@ -172,6 +172,23 @@ class TestRedactSecrets(unittest.TestCase):
             "a:" * (_MAX_PAIR_DEPTH + 1) + REDACTED,
         )
 
+    def test_keeps_the_detail_after_an_exception_name_holding_a_credential_word(self):
+        for message in (
+            "KeyError: 'audio_content'",
+            "InvalidTokenError: signature has expired",
+            "ExpiredSignatureError: Signature has expired",
+            "TokenExpiredError: jwt expired",
+            "SomeWarning: a warning",
+        ):
+            with self.subTest(message=message):
+                self.assertEqual(redact_secrets(message), message)
+
+    def test_still_masks_a_credential_after_an_exception_name(self):
+        self.assertEqual(
+            redact_secrets("KeyError: 'k' api_key=abc123"),
+            "KeyError: 'k' api_key=[REDACTED]",
+        )
+
 
 class TestErrorFrameRedaction(unittest.TestCase):
     def test_an_error_frame_masks_the_credentials_its_message_quotes(self):

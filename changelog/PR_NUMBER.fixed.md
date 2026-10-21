@@ -1,0 +1,1 @@
+- Fixed `redact_secrets()` (and so `ErrorFrame`) masking the detail of an exception message whose class name contains a credential word, such as `KeyError: 'audio_content'` or `InvalidTokenError: signature has expired`. A name ending in `error`, `exception` or `warning` is no longer treated as a credential name.

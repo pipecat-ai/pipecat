@@ -93,6 +93,9 @@ _KNOWN_TOKENS = re.compile(
     r"""(?:[\s\S]*?-----END[ A-Z0-9_-]{0,100}PRIVATE KEY(?: BLOCK)?-----|[\s\S]*)"""
 )
 
+# A name ending in one of these is an exception or warning class, whatever it holds.
+_EXCEPTION_WORDS = frozenset({"error", "exception", "warning"})
+
 
 # How many pairs deep a value is searched for more pairs; deeper than that, the
 # rest of the value is masked. Real messages nest two or three
@@ -103,6 +106,10 @@ _MAX_PAIR_DEPTH = 16
 def _is_credential_name(name: str) -> bool:
     words = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", name.strip("\"'")).lower()
     parts = [p for p in re.split(r"[-_.]", words) if p]
+    # An exception or warning name (`KeyError`, `InvalidTokenError`) names what went
+    # wrong, not a credential; the text after it is the explanation.
+    if parts and parts[-1] in _EXCEPTION_WORDS:
+        return False
     return "".join(parts) in _CREDENTIAL_WORDS or any(p in _CREDENTIAL_WORDS for p in parts)
 
 
