@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from pipecat.frames.frames import TranscriptionFrame
+from pipecat.frames.frames import TranscriptionFrame, TranscriptionSpeaker
 from pipecat.services.aws import stt as aws_stt
 from pipecat.services.aws.stt import AWSTranscribeSTTService
 
@@ -91,9 +91,9 @@ async def test_diarized_final_result_emits_one_frame_per_speaker_run(monkeypatch
 
     frames = await _final_frames(service, payload, monkeypatch)
 
-    assert [(f.speaker_label, f.text) for f in frames] == [
-        ("0", "0: Hi there."),
-        ("1", "1: Hello."),
+    assert [(f.speaker, f.text) for f in frames] == [
+        (TranscriptionSpeaker("0", 1), "0: Hi there."),
+        (TranscriptionSpeaker("1", 2), "1: Hello."),
     ]
     assert all(f.user_id == "session-user" for f in frames)
 
@@ -105,7 +105,7 @@ async def test_final_result_is_not_split_without_speaker_labels(monkeypatch):
 
     frames = await _final_frames(service, payload, monkeypatch)
 
-    assert [(f.speaker_label, f.text) for f in frames] == [(None, "Hi. Hello.")]
+    assert [(f.speaker, f.text) for f in frames] == [(None, "Hi. Hello.")]
 
 
 @pytest.mark.asyncio

@@ -299,13 +299,13 @@ class BaseWhisperSTTService(SegmentedSTTService):
                 logger.debug(f"Transcription: [{text}]")
                 timestamp = time_now_iso8601()
                 runs = self._diarized_runs(text, self._speaker_words(response))
-                for speaker_label, run_text in runs:
+                for speaker, run_text in runs:
                     yield TranscriptionFrame(
                         run_text,
                         self._user_id,
                         timestamp,
                         result=response,
-                        speaker_label=speaker_label,
+                        speaker=speaker,
                     )
 
         except Exception as e:

@@ -186,7 +186,7 @@ class DeepgramSTTSettings(STTSettings):
         detect_entities: Enable named entity detection.
         diarize: Enable speaker diarization. Each contiguous speaker run of a
             final result is emitted as its own frame with Deepgram's speaker number
-            (``"0"``, ``"1"``, ...) in ``speaker_label``. Interim results are not
+            (``"0"``, ``"1"``, ...) as ``speaker.label``. Interim results are not
             labelled.
         dictation: Enable dictation mode (converts commands to punctuation).
         endpointing: Endpointing sensitivity in ms, or ``False`` to disable.

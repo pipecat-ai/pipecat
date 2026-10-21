@@ -130,7 +130,7 @@ class _NvidiaBaseSTTSettings(STTSettings):
         word_time_offsets: Whether to include word-level time offsets.
         speaker_diarization: Whether to enable speaker diarization. Each
             contiguous speaker run of a final result is emitted as its own frame
-            with NVIDIA's speaker tag (numbered from ``1``) in ``speaker_label``.
+            with NVIDIA's speaker tag (numbered from ``1``) as ``speaker.label``.
             A result with an untagged word, no word information, or words that
             can't be located in its transcript is emitted whole, with no label.
         max_speakers: Maximum number of speakers for diarization.
@@ -256,7 +256,7 @@ class NvidiaSTTService(STTService):
     through streaming recognition. Supports interim results and continuous audio
     processing for low-latency applications. When speaker diarization is enabled, each
     contiguous speaker run of a final result is emitted as a separate frame with its speaker
-    tag in ``speaker_label``.
+    tag as ``speaker.label``.
     """
 
     Settings = NvidiaSTTSettings
@@ -745,7 +745,7 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
 
     Speaker diarization needs a model that returns word-level results. The
     default ``canary-1b-asr`` returns none, so with it every segment is emitted
-    whole, with no ``speaker_label``. ``parakeet-ctc-1.1b-asr`` does: pass its
+    whole, with no ``speaker``. ``parakeet-ctc-1.1b-asr`` does: pass its
     ``model_name`` and ``function_id`` (from
     https://build.nvidia.com/nvidia/parakeet-ctc-1_1b-asr) in
     ``model_function_map``.
@@ -1031,13 +1031,13 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
                             else None
                         )
                         timestamp = time_now_iso8601()
-                        for speaker_label, run_text in self._diarized_runs(text, words):
+                        for speaker, run_text in self._diarized_runs(text, words):
                             yield TranscriptionFrame(
                                 run_text,
                                 self._user_id,
                                 timestamp,
                                 language,
-                                speaker_label=speaker_label,
+                                speaker=speaker,
                             )
                         transcription_found = True
 

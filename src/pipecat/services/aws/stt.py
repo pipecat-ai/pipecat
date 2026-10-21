@@ -57,7 +57,7 @@ class AWSTranscribeSTTSettings(STTSettings):
             https://docs.aws.amazon.com/transcribe/latest/dg/streaming.html#streaming-partial-result-stabilization.
         show_speaker_label: Enable speaker diarization. Each contiguous speaker
             run of a final result is emitted as its own frame with AWS's speaker
-            label (``"0"``, ``"1"``, ...) in ``speaker_label``. Interim results
+            label (``"0"``, ``"1"``, ...) as ``speaker.label``. Interim results
             are not labelled. Updating it at runtime triggers a reconnect.
         speaker_format: Optional format string for diarized speaker runs. Use ``{speaker}`` for the
             speaker label, ``{text}`` for the transcript text, and ``{speaker_number}`` for the

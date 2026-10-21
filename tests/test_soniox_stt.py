@@ -23,6 +23,7 @@ from pipecat.frames.frames import (
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
     TranscriptionFrame,
+    TranscriptionSpeaker,
     TTSTextFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
@@ -244,9 +245,9 @@ async def test_diarized_transcript_emits_one_frame_per_speaker_run(monkeypatch):
 
     frames = await _final_frames_for(service, tokens, monkeypatch)
 
-    assert [(f.speaker_label, f.text, f.finalized) for f in frames] == [
-        ("1", "1: Hello.", False),
-        ("2", "2: Hi there.", True),
+    assert [(f.speaker, f.text, f.finalized) for f in frames] == [
+        (TranscriptionSpeaker("1", 1), "1: Hello.", False),
+        (TranscriptionSpeaker("2", 2), "2: Hi there.", True),
     ]
     assert all(f.user_id == "session-user" for f in frames)
 
@@ -261,7 +262,7 @@ async def test_transcript_is_not_split_without_diarization(monkeypatch):
 
     frames = await _final_frames_for(service, tokens, monkeypatch)
 
-    assert [(f.speaker_label, f.text) for f in frames] == [(None, "Hello. Hi.")]
+    assert [(f.speaker, f.text) for f in frames] == [(None, "Hello. Hi.")]
 
 
 @pytest.mark.asyncio
