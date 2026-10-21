@@ -1288,7 +1288,9 @@ class TTSService(AIService):
     async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
         """Apply a TTS settings delta.
 
-        Translates language to service-specific value before applying.
+        Translates language to service-specific value before applying. With
+        expressive conversation on, broadcasts the service's metadata again
+        when the change alters what it can perform.
 
         Args:
             delta: A TTS settings delta.
@@ -1301,11 +1303,18 @@ class TTSService(AIService):
         if is_given(delta.language) and isinstance(delta.language, str):
             delta.language = self._service_language(delta.language)
 
+        capabilities = (
+            self._expression_formatter.capabilities() if self._expression_formatter else None
+        )
         changed = await super()._update_settings(delta)
 
         if is_given(language):
             self._text_aggregator.set_language(language)
             self._skipped_text_aggregator.set_language(language)
+
+        # A setting such as the model can change what the service performs.
+        if self._expression_formatter and self._expression_formatter.capabilities() != capabilities:
+            await self.broadcast_service_metadata()
 
         return changed
 
