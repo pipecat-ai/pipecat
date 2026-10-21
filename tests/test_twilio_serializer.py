@@ -76,11 +76,20 @@ class TestConstructorCredentialValidation(unittest.TestCase):
         self.assertEqual(serializer._auth_token, AUTH_TOKEN)
 
     def test_api_key_pair_alone_is_accepted(self):
-        serializer = TwilioFrameSerializer(
-            STREAM_SID, api_key_sid=API_KEY_SID, api_key_secret=API_KEY_SECRET, **CREDS
-        )
-        self.assertEqual(serializer._api_key_sid, API_KEY_SID)
-        self.assertEqual(serializer._api_key_secret, API_KEY_SECRET)
+        for name, token_part in (
+            ("token_omitted", {}),
+            ("empty_token", {"auth_token": ""}),
+        ):
+            with self.subTest(name=name):
+                serializer = TwilioFrameSerializer(
+                    STREAM_SID,
+                    api_key_sid=API_KEY_SID,
+                    api_key_secret=API_KEY_SECRET,
+                    **token_part,
+                    **CREDS,
+                )
+                self.assertEqual(serializer._api_key_sid, API_KEY_SID)
+                self.assertEqual(serializer._api_key_secret, API_KEY_SECRET)
 
     def test_api_key_sid_without_secret_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "Missing: api_key_secret"):
