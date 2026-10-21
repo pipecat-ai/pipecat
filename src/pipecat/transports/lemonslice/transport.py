@@ -60,6 +60,9 @@ class LemonSliceNewSessionRequest(BaseModel):
         agent_prompt: A high-level system prompt that subtly influences the avatar's movements,
             expressions, and emotional demeanor.
         idle_timeout: Idle timeout in seconds.
+        audio_sample_rate: Sample rate the avatar captures your audio at and plays it back at.
+            One of 16000, 22050, 24000, 44100 or 48000.
+        model: The LemonSlice model to run the avatar on. Uses the default model when unset.
         daily_room_url: Daily room URL to use for the session.
         daily_token: Daily token for authenticating with the room.
         lemonslice_properties: Additional connection properties to pass to the session.
@@ -73,6 +76,8 @@ class LemonSliceNewSessionRequest(BaseModel):
     agent_image: Image.Image | None = None
     agent_prompt: str | None = None
     idle_timeout: int | None = None
+    audio_sample_rate: int = 24000
+    model: str | None = None
     daily_room_url: str | None = None
     daily_token: str | None = None
     lemonslice_properties: dict | None = None
@@ -177,6 +182,8 @@ class LemonSliceTransportClient:
             agent_image=self._session_request.agent_image,
             agent_prompt=self._session_request.agent_prompt,
             idle_timeout=self._session_request.idle_timeout,
+            audio_sample_rate=self._session_request.audio_sample_rate,
+            model=self._session_request.model,
             daily_room_url=self._session_request.daily_room_url,
             daily_token=self._session_request.daily_token,
             connection_properties=connection_properties if connection_properties else None,
