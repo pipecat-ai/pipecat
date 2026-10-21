@@ -134,9 +134,10 @@ class _NvidiaBaseSTTSettings(STTSettings):
             A result with an untagged word, no word information, or words that
             can't be located in its transcript is emitted whole, with no label.
         max_speakers: Maximum number of speakers for diarization.
-        speaker_format: Optional format string for diarized speaker runs. Use
-            ``{speaker}`` for the speaker tag and ``{text}`` for the transcript
-            text. If ``None``, transcript text is not modified.
+        speaker_format: Optional format string for diarized speaker runs. Use ``{speaker}`` for the
+            speaker tag, ``{text}`` for the transcript text, and ``{speaker_number}`` for the
+            speaker's order of first appearance in the session (``1``, ``2``, ...). If ``None``,
+            transcript text is not modified.
     """
 
     profanity_filter: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)

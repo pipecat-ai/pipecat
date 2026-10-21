@@ -59,10 +59,11 @@ class AWSTranscribeSTTSettings(STTSettings):
             run of a final result is emitted as its own frame with AWS's speaker
             label (``"0"``, ``"1"``, ...) in ``speaker_label``. Interim results
             are not labelled. Updating it at runtime triggers a reconnect.
-        speaker_format: Optional format string for diarized speaker runs. Use
-            ``{speaker}`` for the speaker label and ``{text}`` for the transcript
-            text (e.g. ``"{speaker}: {text}"``). If ``None``, transcript text is
-            not modified. Applied locally, so changing it does not reconnect.
+        speaker_format: Optional format string for diarized speaker runs. Use ``{speaker}`` for the
+            speaker label, ``{text}`` for the transcript text, and ``{speaker_number}`` for the
+            speaker's order of first appearance in the session (``1``, ``2``, ...), e.g.
+            ``"{speaker}: {text}"``. If ``None``, transcript text is not modified. Applied locally,
+            so changing it does not reconnect.
     """
 
     partial_results_stability: Literal["high", "medium", "low"] | NotGiven = field(

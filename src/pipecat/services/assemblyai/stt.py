@@ -260,10 +260,11 @@ class AssemblyAISTTSettings(STTSettings):
             little headroom above the number of speakers expected; a cap set too
             high can over-split a single speaker. Only used when
             ``speaker_labels`` is enabled. Defaults to None (not sent).
-        speaker_format: Optional format string for diarized transcripts. Use
-            ``{speaker}`` for the speaker label and ``{text}`` for the transcript
-            text (e.g. ``"{speaker}: {text}"``). If None, transcript text is not
-            modified. Applied locally, so changing it does not reconnect.
+        speaker_format: Optional format string for diarized transcripts. Use ``{speaker}`` for the
+            speaker label, ``{text}`` for the transcript text, and ``{speaker_number}`` for the
+            speaker's order of first appearance in the session (``1``, ``2``, ...), e.g.
+            ``"{speaker}: {text}"``. If None, transcript text is not modified. Applied locally, so
+            changing it does not reconnect.
         filter_profanity: Replace profanity in transcribed text with asterisks.
             Defaults to None (not sent; the server leaves text unfiltered).
         vad_threshold: VAD confidence threshold (0.0–1.0) for classifying
