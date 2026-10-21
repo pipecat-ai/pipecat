@@ -11,6 +11,7 @@ from pipecat.frames.frames import (
     InputAudioRawFrame,
     MetricsFrame,
     TranscriptionFrame,
+    TranscriptionSpeaker,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
@@ -187,8 +188,8 @@ async def test_diarized_response_emits_one_frame_per_speaker_run():
 
     frames = [f async for f in service.run_stt(b"audio") if isinstance(f, TranscriptionFrame)]
 
-    assert [(f.speaker_label, f.text) for f in frames] == [
-        ("A", "A: Hi there. How are you?"),
-        ("B", "B: Fine."),
+    assert [(f.speaker, f.text) for f in frames] == [
+        (TranscriptionSpeaker("A", 1), "A: Hi there. How are you?"),
+        (TranscriptionSpeaker("B", 2), "B: Fine."),
     ]
     assert all(f.user_id == "session-user" for f in frames)

@@ -1188,7 +1188,7 @@ def _transcription_frames(service: AssemblyAISTTService, message: TurnMessage) -
 
 
 @pytest.mark.parametrize("vad_force_turn_endpoint", [True, False])
-def test_final_turn_carries_speaker_label_and_keeps_user_id(vad_force_turn_endpoint):
+def test_final_turn_carries_speaker_and_keeps_user_id(vad_force_turn_endpoint):
     service = AssemblyAISTTService(
         api_key="test-key",
         vad_force_turn_endpoint=vad_force_turn_endpoint,
@@ -1201,7 +1201,7 @@ def test_final_turn_carries_speaker_label_and_keeps_user_id(vad_force_turn_endpo
     assert len(frames) == 1
     assert isinstance(frames[0], TranscriptionFrame)
     assert frames[0].text == "Hello"
-    assert frames[0].speaker_label == "A"
+    assert frames[0].speaker.label == "A"
     assert frames[0].user_id == "session-user"
 
 
@@ -1217,7 +1217,7 @@ def test_interim_turn_without_speaker_has_no_label():
 
     assert isinstance(frames[0], InterimTranscriptionFrame)
     assert frames[0].text == "Hel"
-    assert frames[0].speaker_label is None
+    assert frames[0].speaker is None
 
 
 def test_speaker_format_setting_labels_text():
@@ -1231,7 +1231,7 @@ def test_speaker_format_setting_labels_text():
     frames = _transcription_frames(service, _turn("Hello", end_of_turn=True, speaker="B"))
 
     assert frames[0].text == "B: Hello"
-    assert frames[0].speaker_label == "B"
+    assert frames[0].speaker.label == "B"
 
 
 def test_deprecated_speaker_format_arg_moves_to_settings():
@@ -1273,7 +1273,7 @@ def test_unassigned_speaker_is_not_a_label(placeholder):
 
     frames = _transcription_frames(service, _turn("Hello", end_of_turn=True, speaker=placeholder))
 
-    assert frames[0].speaker_label is None
+    assert frames[0].speaker is None
     assert frames[0].text == "Hello"
 
 

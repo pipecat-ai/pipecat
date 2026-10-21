@@ -7,7 +7,8 @@
 """A bot that tells apart several people talking on one audio stream.
 
 The STT service's speaker diarization labels every transcript with the speaker
-who said it: each frame carries the provider's label in ``speaker_label``, and
+who said it: each frame carries a ``speaker``, with the provider's label and a
+number that counts speakers in the order they first spoke, and
 ``speaker_format`` writes it into the text, so the LLM sees who said what. The
 bot listens until the conversation pauses, then says how many people spoke and
 what each of them said.
@@ -154,7 +155,7 @@ class SpeakerLogger(BaseObserver):
 
     async def on_push_frame(self, data: FramePushed):
         if isinstance(data.frame, TranscriptionFrame) and isinstance(data.source, STTService):
-            logger.info(f"Speaker {data.frame.speaker_label}: {data.frame.text}")
+            logger.info(f"Speaker {data.frame.speaker}: {data.frame.text}")
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):

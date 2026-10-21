@@ -237,7 +237,7 @@ class SonioxSTTSettings(STTSettings):
             :class:`SonioxContextObject` or a plain string of background text.
         enable_speaker_diarization: Whether to enable speaker diarization. Each
             contiguous speaker run of a final transcript is emitted as its own frame
-            with Soniox's speaker label in ``speaker_label``. Interim transcripts
+            with Soniox's speaker label as ``speaker.label``. Interim transcripts
             are not labelled.
         enable_language_identification: Whether to enable language identification.
         max_endpoint_delay_ms: Max ms before endpoint detection finalizes the turn (500-3000).

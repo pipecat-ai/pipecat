@@ -66,7 +66,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         api_key=os.environ["NVIDIA_API_KEY"],
         # To tell speakers apart, enable speaker diarization. Each run of words
         # from one speaker is pushed as its own transcription frame, with the
-        # NVIDIA speaker tag ("1", "2", ...) in the frame's `speaker_label`.
+        # NVIDIA speaker tag ("1", "2", ...) as the frame's `speaker.label`.
         # `speaker_format` optionally labels the text, so the LLM can see who said
         # what.
         #

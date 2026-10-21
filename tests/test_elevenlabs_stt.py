@@ -10,7 +10,7 @@ import aiohttp
 import pytest
 from aiohttp import web
 
-from pipecat.frames.frames import TranscriptionFrame
+from pipecat.frames.frames import TranscriptionFrame, TranscriptionSpeaker
 from pipecat.services.elevenlabs.stt import (
     CommitStrategy,
     ElevenLabsRealtimeSTTService,
@@ -140,9 +140,9 @@ async def test_elevenlabs_stt_diarized_segment_emits_one_frame_per_speaker_run(a
         ]
 
     assert ("diarize", "true") in captured_fields
-    assert [(f.speaker_label, f.text) for f in frames] == [
-        ("speaker_0", "speaker_0: Hi there."),
-        ("speaker_1", "speaker_1: Hello."),
+    assert [(f.speaker, f.text) for f in frames] == [
+        (TranscriptionSpeaker("speaker_0", 1), "speaker_0: Hi there."),
+        (TranscriptionSpeaker("speaker_1", 2), "speaker_1: Hello."),
     ]
     assert all(f.user_id == "session-user" for f in frames)
 

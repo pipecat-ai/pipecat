@@ -9,7 +9,7 @@
 import asyncio
 from urllib.parse import parse_qs, urlparse
 
-from pipecat.frames.frames import Frame, TranscriptionFrame
+from pipecat.frames.frames import Frame, TranscriptionFrame, TranscriptionSpeaker
 from pipecat.services.xai.stt import XAISTTService
 from pipecat.utils.asyncio.task_manager import TaskManager
 from tests.frame_processor_helpers import frame_processor_setup
@@ -196,9 +196,9 @@ def test_diarized_utterance_final_emits_one_frame_per_speaker_run():
     _feed(service, [message])
 
     frames = [f for f in pushed if isinstance(f, TranscriptionFrame)]
-    assert [(f.speaker_label, f.text, f.finalized) for f in frames] == [
-        ("0", "0: Hi there.", False),
-        ("1", "1: Hello.", True),
+    assert [(f.speaker, f.text, f.finalized) for f in frames] == [
+        (TranscriptionSpeaker("0", 1), "0: Hi there.", False),
+        (TranscriptionSpeaker("1", 2), "1: Hello.", True),
     ]
     assert all(f.user_id == "session-user" for f in frames)
 

@@ -248,7 +248,7 @@ class AssemblyAISTTSettings(STTSettings):
             model default. Defaults to None (not sent; no steering).
         format_turns: Whether to format transcript turns.
         speaker_labels: Enable speaker diarization. Final transcripts carry
-            AssemblyAI's speaker label (e.g. ``"A"``, ``"B"``) in ``speaker_label``;
+            AssemblyAI's speaker label (e.g. ``"A"``, ``"B"``) as ``speaker.label``;
             interim transcripts, and turns whose speaker is not assigned yet, have
             none. Labels AssemblyAI later revises are not applied to frames
             already sent.
@@ -1214,10 +1214,9 @@ class AssemblyAISTTService(WebsocketSTTService):
                     f"for language '{message.language_code}', falling back to English"
                 )
 
-        speaker_label = message.speaker or None
-        if speaker_label in UNASSIGNED_SPEAKER_LABELS:
-            speaker_label = None
-        transcript_text = self._apply_speaker_format(message.transcript, speaker_label)
+        label = message.speaker if message.speaker not in UNASSIGNED_SPEAKER_LABELS else None
+        speaker = self._speaker(label or None)
+        transcript_text = self._apply_speaker_format(message.transcript, speaker)
 
         # Determine if this is a final turn from AssemblyAI
         is_final_turn = message.end_of_turn and (
@@ -1242,7 +1241,7 @@ class AssemblyAISTTService(WebsocketSTTService):
                         time_now_iso8601(),
                         language,
                         message,
-                        speaker_label=speaker_label,
+                        speaker=speaker,
                     )
                 )
                 await self._trace_transcription(transcript_text, True, language)
@@ -1255,7 +1254,7 @@ class AssemblyAISTTService(WebsocketSTTService):
                         time_now_iso8601(),
                         language,
                         message,
-                        speaker_label=speaker_label,
+                        speaker=speaker,
                     )
                 )
         else:
@@ -1275,7 +1274,7 @@ class AssemblyAISTTService(WebsocketSTTService):
                         language,
                         message,
                         finalized=True,
-                        speaker_label=speaker_label,
+                        speaker=speaker,
                     )
                 )
                 await self._trace_transcription(transcript_text, True, language)
@@ -1293,7 +1292,7 @@ class AssemblyAISTTService(WebsocketSTTService):
                         time_now_iso8601(),
                         language,
                         message,
-                        speaker_label=speaker_label,
+                        speaker=speaker,
                     )
                 )
 

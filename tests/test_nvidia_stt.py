@@ -12,7 +12,11 @@ import pytest
 
 pytest.importorskip("riva.client")
 
-from pipecat.frames.frames import InterimTranscriptionFrame, TranscriptionFrame
+from pipecat.frames.frames import (
+    InterimTranscriptionFrame,
+    TranscriptionFrame,
+    TranscriptionSpeaker,
+)
 from pipecat.services.nvidia.stt import (
     AudioChunkIterator,
     NvidiaSegmentedSTTService,
@@ -279,11 +283,11 @@ async def test_diarization_off_emits_one_unlabelled_frame(monkeypatch):
     assert len(frames) == 1
     assert frames[0].text == "Hi there"
     assert frames[0].user_id == "session-user"
-    assert frames[0].speaker_label is None
+    assert frames[0].speaker is None
 
 
 @pytest.mark.asyncio
-async def test_tagged_final_result_carries_speaker_label(monkeypatch):
+async def test_tagged_final_result_carries_speaker(monkeypatch):
     """A single-speaker final result carries the speaker tag as its label."""
     service = _make_service(settings=NvidiaSTTService.Settings(speaker_diarization=True))
     service._user_id = "session-user"
@@ -297,7 +301,7 @@ async def test_tagged_final_result_carries_speaker_label(monkeypatch):
     assert len(frames) == 1
     assert isinstance(frames[0], TranscriptionFrame)
     assert frames[0].text == "Hello there"
-    assert frames[0].speaker_label == "1"
+    assert frames[0].speaker.label == "1"
     assert frames[0].user_id == "session-user"
     assert frames[0].result is response.results[0]
     assert frames[0].finalized
@@ -328,7 +332,7 @@ async def test_interim_results_are_not_split_by_speaker(monkeypatch, words):
     assert isinstance(frames[0], InterimTranscriptionFrame)
     assert frames[0].text == " Hi there hello"
     assert frames[0].user_id == "session-user"
-    assert frames[0].speaker_label is None
+    assert frames[0].speaker is None
 
 
 @pytest.mark.asyncio
@@ -349,7 +353,8 @@ async def test_mixed_speakers_emit_contiguous_run_frames(monkeypatch):
     frames = await _capture_response_frames(monkeypatch, service, response)
 
     assert [frame.text for frame in frames] == ["Hi there", "hello", "again"]
-    assert [frame.speaker_label for frame in frames] == ["1", "2", "1"]
+    assert [frame.speaker.label for frame in frames] == ["1", "2", "1"]
+    assert [frame.speaker.number for frame in frames] == [1, 2, 1]
     assert all(frame.user_id == "session-user" for frame in frames)
     assert len({frame.timestamp for frame in frames}) == 1
     assert all(isinstance(frame, TranscriptionFrame) for frame in frames)
@@ -496,7 +501,7 @@ async def test_speaker_format_labels_speaker_and_strips_whitespace(monkeypatch):
     frames = await _capture_response_frames(monkeypatch, service, response)
 
     assert frames[0].text == "Speaker 1: Hello"
-    assert frames[0].speaker_label == "1"
+    assert frames[0].speaker.label == "1"
 
 
 @pytest.mark.asyncio
@@ -534,7 +539,7 @@ async def test_speaker_format_is_not_applied_to_unsplit_fallback(monkeypatch):
 
     assert [frame.text for frame in frames] == ["No speaker"]
     assert frames[0].user_id == "session-user"
-    assert frames[0].speaker_label is None
+    assert frames[0].speaker is None
 
 
 @pytest.mark.asyncio
@@ -556,7 +561,7 @@ async def test_unsplittable_result_falls_back_to_full_transcript(monkeypatch, wo
     assert len(frames) == 1
     assert frames[0].text == "No speaker metadata"
     assert frames[0].user_id == "session-user"
-    assert frames[0].speaker_label is None
+    assert frames[0].speaker is None
 
 
 @pytest.mark.asyncio
@@ -582,7 +587,7 @@ async def test_untagged_words_are_not_labelled(monkeypatch, words):
 
     assert [frame.text for frame in frames] == ["No speaker tags"]
     assert frames[0].user_id == "session-user"
-    assert frames[0].speaker_label is None
+    assert frames[0].speaker is None
 
 
 @pytest.mark.asyncio
@@ -608,7 +613,7 @@ async def test_deferred_diarization_update_uses_active_stream_config(monkeypatch
         speaker_diarization=False,
     )
 
-    assert frames[0].speaker_label is None
+    assert frames[0].speaker is None
 
     frames = await _capture_response_frames(
         monkeypatch,
@@ -617,7 +622,7 @@ async def test_deferred_diarization_update_uses_active_stream_config(monkeypatch
         speaker_diarization=True,
     )
 
-    assert frames[0].speaker_label == "1"
+    assert frames[0].speaker.label == "1"
     assert frames[0].user_id == "session-user"
 
 
@@ -684,9 +689,9 @@ async def test_segmented_diarized_result_yields_one_frame_per_speaker_run():
 
     frames = [f async for f in service.run_stt(b"audio") if isinstance(f, TranscriptionFrame)]
 
-    assert [(f.speaker_label, f.text) for f in frames] == [
-        ("1", "Speaker 1: Hi there"),
-        ("2", "Speaker 2: hello"),
+    assert [(f.speaker, f.text) for f in frames] == [
+        (TranscriptionSpeaker("1", 1), "Speaker 1: Hi there"),
+        (TranscriptionSpeaker("2", 2), "Speaker 2: hello"),
     ]
     assert all(f.user_id == "session-user" for f in frames)
 

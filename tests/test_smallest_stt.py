@@ -11,7 +11,7 @@ from urllib.parse import parse_qs, urlparse
 
 import pytest
 
-from pipecat.frames.frames import TranscriptionFrame
+from pipecat.frames.frames import TranscriptionFrame, TranscriptionSpeaker
 from pipecat.services.smallest.stt import SmallestSTTModel, SmallestSTTService
 from pipecat.services.stt_service import STTSettings
 from pipecat.transcriptions.language import Language
@@ -144,9 +144,9 @@ async def test_diarized_final_emits_one_frame_per_speaker_run():
     )
 
     frames = [f for f in pushed if isinstance(f, TranscriptionFrame)]
-    assert [(f.speaker_label, f.text) for f in frames] == [
-        ("0", "0: Hello, there."),
-        ("1", "1: Hi."),
+    assert [(f.speaker, f.text) for f in frames] == [
+        (TranscriptionSpeaker("0", 1), "0: Hello, there."),
+        (TranscriptionSpeaker("1", 2), "1: Hi."),
     ]
     assert all(f.user_id == "session-user" for f in frames)
 

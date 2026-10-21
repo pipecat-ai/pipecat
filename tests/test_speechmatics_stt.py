@@ -349,15 +349,15 @@ def test_segment_to_frame_final_vs_interim_type():
     assert isinstance(interim, InterimTranscriptionFrame)
 
 
-def test_segment_to_frame_carries_speaker_label_and_keeps_user_id():
-    """The speaker goes in speaker_label; user_id stays the transport participant."""
+def test_segment_to_frame_carries_speaker_and_keeps_user_id():
+    """The speaker goes in speaker; user_id stays the transport participant."""
     service = _service(settings=SpeechmaticsSTTService.Settings(enable_diarization=True))
     service._user_id = "session-user"
 
     frame = service._segment_to_frame(Segment(transcript="hi", speaker="S1"), finalized=True)
 
     assert frame.text == "hi"
-    assert frame.speaker_label == "S1"
+    assert frame.speaker.label == "S1"
     assert frame.user_id == "session-user"
 
 
@@ -367,7 +367,7 @@ def test_segment_to_frame_without_speaker_has_no_label():
     frame = service._segment_to_frame(Segment(transcript="hi"), finalized=False)
 
     assert frame.text == "hi"
-    assert frame.speaker_label is None
+    assert frame.speaker is None
 
 
 def test_segment_to_frame_applies_speaker_format():
@@ -391,7 +391,7 @@ def test_deprecated_speaker_active_format_still_formats_and_warns():
     frame = service._segment_to_frame(Segment(transcript="hi", speaker="S1"), finalized=True)
 
     assert frame.text == "@S1: hi"
-    assert frame.speaker_label == "S1"
+    assert frame.speaker.label == "S1"
 
 
 @pytest.mark.asyncio

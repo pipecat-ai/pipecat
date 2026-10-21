@@ -582,6 +582,31 @@ class AggregatedTextProgressFrame(DataFrame):
         self.text_type = value
 
 
+@dataclass(frozen=True)
+class TranscriptionSpeaker:
+    """A speaker an STT service's diarization told apart in a transcription stream.
+
+    Labels are opaque and provider-specific. Numbers count speakers in the order
+    they first appeared in the STT service's session, so they read the same
+    whatever labels the provider uses. Both only hold within that session: a
+    provider that restarts its labels (e.g. after a reconnect) may give a known
+    label, and so its number, to a different person, and services that diarize
+    each speech segment separately don't keep labels across segments.
+
+    Parameters:
+        label: The provider's label for the speaker (e.g. ``"A"``, ``"S1"``,
+            ``"2"``).
+        number: The speaker's place in the order speakers first appeared,
+            starting at ``1``.
+    """
+
+    label: str
+    number: int
+
+    def __str__(self):
+        return f"{self.number} ({self.label})"
+
+
 @dataclass
 class TranscriptionFrame(TextFrame):
     """Text frame containing speech transcription data.
@@ -598,12 +623,11 @@ class TranscriptionFrame(TextFrame):
         result: Raw result from the STT service.
         finalized: Whether this is the final transcription for an utterance.
             Set by STT services that support commit/finalize signals.
-        speaker_label: Label the STT service's speaker diarization assigned to
-            this text (e.g. ``"A"``, ``"S1"``, ``"2"``), or ``None`` when
-            diarization is off or the service gave no label. Labels are opaque
-            and provider-specific, only distinguish speakers within one
-            transcription stream, and are not participant identities: several
-            speakers can share one ``user_id`` when they share an audio stream.
+        speaker: The speaker the STT service's diarization assigned to this
+            text, or ``None`` when diarization is off or the service gave no
+            label. Speakers only distinguish people within one transcription
+            stream and are not participant identities: several speakers can
+            share one ``user_id`` when they share an audio stream.
     """
 
     user_id: str
@@ -611,10 +635,10 @@ class TranscriptionFrame(TextFrame):
     language: Language | None = None
     result: Any | None = None
     finalized: bool = False
-    speaker_label: str | None = None
+    speaker: TranscriptionSpeaker | None = None
 
     def __str__(self):
-        return f"{self.name}(user: {self.user_id}, speaker: {self.speaker_label}, text: [{self.text}], language: {self.language}, timestamp: {self.timestamp})"
+        return f"{self.name}(user: {self.user_id}, speaker: {self.speaker}, text: [{self.text}], language: {self.language}, timestamp: {self.timestamp})"
 
 
 @dataclass
@@ -632,22 +656,21 @@ class InterimTranscriptionFrame(TextFrame):
         timestamp: When the interim transcription occurred.
         language: Detected or specified language of the speech.
         result: Raw result from the STT service.
-        speaker_label: Label the STT service's speaker diarization assigned to
-            this text (e.g. ``"A"``, ``"S1"``, ``"2"``), or ``None`` when
-            diarization is off or the service gave no label. Labels are opaque
-            and provider-specific, only distinguish speakers within one
-            transcription stream, and are not participant identities: several
-            speakers can share one ``user_id`` when they share an audio stream.
+        speaker: The speaker the STT service's diarization assigned to this
+            text, or ``None`` when diarization is off or the service gave no
+            label. Speakers only distinguish people within one transcription
+            stream and are not participant identities: several speakers can
+            share one ``user_id`` when they share an audio stream.
     """
 
     user_id: str
     timestamp: str
     language: Language | None = None
     result: Any | None = None
-    speaker_label: str | None = None
+    speaker: TranscriptionSpeaker | None = None
 
     def __str__(self):
-        return f"{self.name}(user: {self.user_id}, speaker: {self.speaker_label}, text: [{self.text}], language: {self.language}, timestamp: {self.timestamp})"
+        return f"{self.name}(user: {self.user_id}, speaker: {self.speaker}, text: [{self.text}], language: {self.language}, timestamp: {self.timestamp})"
 
 
 @dataclass
@@ -668,22 +691,21 @@ class EagerTranscriptionFrame(TextFrame):
         timestamp: When the eager end of turn occurred.
         language: Detected or specified language of the speech.
         result: Raw result from the STT service.
-        speaker_label: Label the STT service's speaker diarization assigned to
-            this text (e.g. ``"A"``, ``"S1"``, ``"2"``), or ``None`` when
-            diarization is off or the service gave no label. Labels are opaque
-            and provider-specific, only distinguish speakers within one
-            transcription stream, and are not participant identities: several
-            speakers can share one ``user_id`` when they share an audio stream.
+        speaker: The speaker the STT service's diarization assigned to this
+            text, or ``None`` when diarization is off or the service gave no
+            label. Speakers only distinguish people within one transcription
+            stream and are not participant identities: several speakers can
+            share one ``user_id`` when they share an audio stream.
     """
 
     user_id: str
     timestamp: str
     language: Language | None = None
     result: Any | None = None
-    speaker_label: str | None = None
+    speaker: TranscriptionSpeaker | None = None
 
     def __str__(self):
-        return f"{self.name}(user: {self.user_id}, speaker: {self.speaker_label}, text: [{self.text}], language: {self.language}, timestamp: {self.timestamp})"
+        return f"{self.name}(user: {self.user_id}, speaker: {self.speaker}, text: [{self.text}], language: {self.language}, timestamp: {self.timestamp})"
 
 
 @dataclass

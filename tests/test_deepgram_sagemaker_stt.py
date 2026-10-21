@@ -13,7 +13,10 @@ import pytest
 
 pytest.importorskip("pipecat.services.deepgram.sagemaker.stt", exc_type=ImportError)
 
-from pipecat.frames.frames import TranscriptionFrame  # noqa: E402
+from pipecat.frames.frames import (
+    TranscriptionFrame,  # noqa: E402
+    TranscriptionSpeaker,
+)
 from pipecat.services.deepgram.sagemaker.stt import DeepgramSageMakerSTTService  # noqa: E402
 
 
@@ -80,7 +83,7 @@ def test_diarized_final_response_emits_one_frame_per_speaker_run():
     asyncio.run(service._handle_transcript_response(response))
 
     frames = [f for f in pushed if isinstance(f, TranscriptionFrame)]
-    assert [(f.speaker_label, f.text, f.user_id) for f in frames] == [
-        ("0", "Hi.", "session-user"),
-        ("1", "Hello.", "session-user"),
+    assert [(f.speaker, f.text, f.user_id) for f in frames] == [
+        (TranscriptionSpeaker("0", 1), "Hi.", "session-user"),
+        (TranscriptionSpeaker("1", 2), "Hello.", "session-user"),
     ]

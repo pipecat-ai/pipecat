@@ -86,7 +86,7 @@ class OpenAISTTService(BaseWhisperSTTService):
 
     Diarization models (e.g. ``"gpt-4o-transcribe-diarize"``) label each speaker:
     every contiguous speaker run of a segment is emitted as its own frame with
-    OpenAI's speaker label (e.g. ``"A"``) in ``speaker_label``.
+    OpenAI's speaker label (e.g. ``"A"``) as ``speaker.label``.
     """
 
     Settings = OpenAISTTSettings

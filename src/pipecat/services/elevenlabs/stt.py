@@ -182,7 +182,7 @@ class ElevenLabsSTTSettings(STTSettings):
             sounds from the transcript. Supported by ``scribe_v2`` only.
         diarize: Whether to annotate which speaker is talking. Each contiguous
             speaker run of a segment is emitted as its own frame with ElevenLabs'
-            speaker id (e.g. ``"speaker_0"``) in ``speaker_label``.
+            speaker id (e.g. ``"speaker_0"``) as ``speaker.label``.
         speaker_format: Optional format string for diarized speaker runs. Use ``{speaker}`` for the
             speaker label, ``{text}`` for the transcript text, and ``{speaker_number}`` for the
             speaker's order of first appearance in the session (``1``, ``2``, ...), e.g.
@@ -442,14 +442,14 @@ class ElevenLabsSTTService(SegmentedSTTService):
                         if word.get("type") == "word"
                     ]
                 timestamp = time_now_iso8601()
-                for speaker_label, run_text in self._diarized_runs(text, words):
+                for speaker, run_text in self._diarized_runs(text, words):
                     yield TranscriptionFrame(
                         run_text,
                         self._user_id,
                         timestamp,
                         detected_language,
                         result=result,
-                        speaker_label=speaker_label,
+                        speaker=speaker,
                     )
 
         except Exception as e:

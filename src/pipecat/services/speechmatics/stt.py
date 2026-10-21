@@ -228,7 +228,7 @@ class SpeechmaticsSTTSettings(STTSettings):
         transcript_filtering_config: Post-processing applied to the transcript.
         enable_diarization: Enable speaker diarization. Transcripts carry the
             Speechmatics speaker label (e.g. ``"S1"``, or the label you assigned in
-            ``known_speakers``) in ``speaker_label``.
+            ``known_speakers``) as ``speaker.label``.
         speaker_sensitivity: Diarization sensitivity.
         max_speakers: Maximum number of speakers to detect.
         prefer_current_speaker: Prefer current speaker ID.
@@ -289,7 +289,7 @@ class SpeechmaticsSTTService(STTService):
     This service provides real-time speech-to-text transcription using the Speechmatics API.
     It supports partial and final transcriptions, multiple languages, various audio formats,
     and speaker diarization. With diarization enabled, each transcript carries its speaker
-    in ``speaker_label``; ``speaker_format`` optionally labels the text.
+    as ``speaker.label``; ``speaker_format`` optionally labels the text.
 
     Event handlers available (in addition to STTService events):
 
@@ -1124,7 +1124,7 @@ class SpeechmaticsSTTService(STTService):
         # The stored language may be a plain code rather than a Language; the frame
         # carries it as-is.
         language = cast(Language, assert_given(self._settings.language))
-        speaker_label = segment.speaker or None
+        speaker = self._speaker(segment.speaker or None)
         active_format = self._settings.speaker_active_format
         if isinstance(active_format, str):
             text = active_format.format(
@@ -1134,7 +1134,7 @@ class SpeechmaticsSTTService(STTService):
                 lang=language,
             )
         else:
-            text = self._apply_speaker_format(segment.transcript, speaker_label)
+            text = self._apply_speaker_format(segment.transcript, speaker)
 
         frame_cls = TranscriptionFrame if finalized else InterimTranscriptionFrame
         return frame_cls(
@@ -1142,7 +1142,7 @@ class SpeechmaticsSTTService(STTService):
             user_id=self._user_id,
             timestamp=time_now_iso8601(),
             language=language,
-            speaker_label=speaker_label,
+            speaker=speaker,
         )
 
     async def _send_frame(self, segment: Segment, *, finalized: bool) -> None:

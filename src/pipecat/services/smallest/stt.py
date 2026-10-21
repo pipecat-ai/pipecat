@@ -124,7 +124,7 @@ class SmallestSTTSettings(STTSettings):
         numerals: Convert spoken numerals to digits.
         diarize: Enable speaker diarization. Each contiguous speaker run of a
             final transcript is emitted as its own frame with Smallest's speaker
-            number in ``speaker_label``. Requests word timestamps, which carry the
+            number as ``speaker.label``. Requests word timestamps, which carry the
             speakers. Interim transcripts are not labelled.
         endpointing: Finalize promptly on trailing silence.
         keywords: Comma-separated ``KEYWORD:INTENSIFIER`` pairs to boost

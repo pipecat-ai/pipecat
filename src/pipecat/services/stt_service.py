@@ -29,6 +29,7 @@ from pipecat.frames.frames import (
     STTMuteFrame,
     STTUpdateSettingsFrame,
     TranscriptionFrame,
+    TranscriptionSpeaker,
     UserAudioRawFrame,
     UserStoppedSpeakingFrame,
     VADUserStartedSpeakingFrame,
@@ -73,8 +74,8 @@ class STTService(AIService):
     long the user talked. :class:`SegmentedSTTService` does issue a discrete
     request per utterance, so its subclasses time that call and report both.
 
-    Services that support speaker diarization put the provider's label for each
-    transcript in the frame's ``speaker_label``, splitting a final result into
+    Services that support speaker diarization put each transcript's speaker,
+    from :meth:`_speaker`, in the frame's ``speaker``, splitting a final result into
     one frame per contiguous speaker run with :meth:`_diarized_runs` and pushing
     them with :meth:`_push_transcription_runs`, so only the last run is
     finalized. They declare their own enable flag and a ``speaker_format`` field
@@ -175,8 +176,8 @@ class STTService(AIService):
 
         self._muted: bool = False
         self._user_id: str = ""
-        # Speaker labels in the order they first appeared, for ``{speaker_number}``.
-        self._speaker_numbers: dict[str, int] = {}
+        # Diarization speakers by provider label, numbered in order of first appearance.
+        self._speakers: dict[str, TranscriptionSpeaker] = {}
         self._ttfs_p99_latency = ttfs_p99_latency
 
         # STT TTFB tracking state
@@ -378,63 +379,82 @@ class STTService(AIService):
                 runs.append((speaker, text))
         return runs
 
-    def _apply_speaker_format(self, text: str, speaker_label: str | None) -> str:
+    def _speaker(self, label: Any) -> TranscriptionSpeaker | None:
+        """Return the speaker for a provider's diarization label.
+
+        A label seen for the first time is numbered after the speakers before it,
+        so numbers follow the order speakers first appeared in the session.
+
+        Args:
+            label: The provider's speaker label, of any type, or ``None``.
+
+        Returns:
+            The speaker, or ``None`` when there is no label.
+        """
+        if label is None:
+            return None
+        label = str(label)
+        speaker = self._speakers.get(label)
+        if speaker is None:
+            speaker = TranscriptionSpeaker(label=label, number=len(self._speakers) + 1)
+            self._speakers[label] = speaker
+        return speaker
+
+    def _apply_speaker_format(self, text: str, speaker: TranscriptionSpeaker | None) -> str:
         """Apply the service's ``speaker_format`` setting to a diarized transcript.
 
-        ``speaker_format`` uses ``{speaker}`` for the speaker label, ``{text}`` for
-        the transcript text, and ``{speaker_number}`` for the speaker's place in
-        the order speakers first appeared in the session (``1``, ``2``, ...), which
-        stays the same whatever labels the provider uses (e.g.
-        ``"Speaker {speaker_number}: {text}"``). Services without that setting
-        leave text unchanged.
+        ``speaker_format`` uses ``{speaker}`` for the provider's speaker label,
+        ``{speaker_number}`` for the speaker's number, which stays the same
+        whatever labels the provider uses, and ``{text}`` for the transcript text
+        (e.g. ``"Speaker {speaker_number}: {text}"``). Services without that
+        setting leave text unchanged.
 
         Args:
             text: The transcript text.
-            speaker_label: The provider's speaker label for ``text``, if any.
+            speaker: The speaker of ``text``, if any.
 
         Returns:
             The formatted text, or ``text`` unchanged when there is no format or
-            no speaker label.
+            no speaker.
         """
         speaker_format = getattr(self._settings, "speaker_format", None)
-        if speaker_format and speaker_label is not None:
-            speaker_number = self._speaker_numbers.setdefault(
-                speaker_label, len(self._speaker_numbers) + 1
-            )
+        if speaker_format and speaker is not None:
             return speaker_format.format(
-                speaker=speaker_label, speaker_number=speaker_number, text=text
+                speaker=speaker.label, speaker_number=speaker.number, text=text
             )
         return text
 
     def _diarized_runs(
         self, transcript: str, words: list[tuple[str, Any]] | None
-    ) -> list[tuple[str | None, str]]:
-        """Split a diarized result into labelled runs with formatted text.
+    ) -> list[tuple[TranscriptionSpeaker | None, str]]:
+        """Split a diarized result into runs by speaker, with formatted text.
 
         Args:
             transcript: The full transcript of one result.
-            words: ``(text, speaker)`` pairs in transcript order, or ``None`` when
-                the result has no speaker information.
+            words: ``(text, label)`` pairs in transcript order, with the provider's
+                speaker label for each word, or ``None`` when the result has no
+                speaker information.
 
         Returns:
-            One ``(speaker_label, text)`` pair per contiguous speaker run, with the
-            label as a string and the text formatted by ``speaker_format``. When
-            ``words`` is empty or can't be matched to the transcript (see
-            :meth:`_speaker_runs`), a single unlabelled ``(None, transcript)``.
+            One ``(speaker, text)`` pair per contiguous speaker run, with the text
+            formatted by ``speaker_format``. When ``words`` is empty or can't be
+            matched to the transcript (see :meth:`_speaker_runs`), a single
+            ``(None, transcript)``.
         """
         if words is not None:
             runs = self._speaker_runs(transcript, words)
             if runs:
+                speakers = [(self._speaker(label), text) for label, text in runs]
                 return [
-                    (str(speaker), self._apply_speaker_format(text, str(speaker)))
-                    for speaker, text in runs
+                    (speaker, self._apply_speaker_format(text, speaker))
+                    for speaker, text in speakers
                 ]
             logger.debug(f"{self} could not split result by speaker, emitting it unsplit")
         return [(None, transcript)]
 
     async def _push_transcription_runs(
         self,
-        runs: list[tuple[str | None, str]],
+        runs: list[tuple[TranscriptionSpeaker | None, str]],
         *,
         language: Language | None = None,
         result: Any | None = None,
@@ -447,7 +467,7 @@ class STTService(AIService):
         turn, which must not happen before every run has arrived.
 
         Args:
-            runs: ``(speaker_label, text)`` pairs, as from :meth:`_diarized_runs`.
+            runs: ``(speaker, text)`` pairs, as from :meth:`_diarized_runs`.
             language: Language of the transcript.
             result: Raw result from the STT service, attached to every frame.
             finalized: Whether the result closes the utterance.
@@ -455,7 +475,7 @@ class STTService(AIService):
         finalize_pending = self._finalize_pending
         self._finalize_pending = False
         timestamp = time_now_iso8601()
-        for index, (speaker_label, text) in enumerate(runs):
+        for index, (speaker, text) in enumerate(runs):
             last = index == len(runs) - 1
             if last:
                 self._finalize_pending = finalize_pending
@@ -467,7 +487,7 @@ class STTService(AIService):
                     language,
                     result=result,
                     finalized=finalized and last,
-                    speaker_label=speaker_label,
+                    speaker=speaker,
                 )
             )
 
@@ -1123,7 +1143,7 @@ class SegmentedSTTService(STTService):
     async def _push_segment_frames(self, audio: bytes):
         """Transcribe one segment and push the frames ``run_stt`` yields, in order.
 
-        A diarized transcription frame (one with a ``speaker_label``) is held
+        A diarized transcription frame (one with a ``speaker``) is held
         until the next frame arrives, so that only the last of a segment's
         speaker runs is finalized. Any other frame is pushed as soon as it is
         yielded.
@@ -1139,7 +1159,7 @@ class SegmentedSTTService(STTService):
                 finally:
                     self._segment_has_more_transcripts = False
                 held = None
-            if isinstance(frame, TranscriptionFrame) and frame.speaker_label is not None:
+            if isinstance(frame, TranscriptionFrame) and frame.speaker is not None:
                 held = frame
             elif isinstance(frame, ErrorFrame):
                 await self.push_error_frame(frame)
