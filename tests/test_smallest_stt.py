@@ -7,9 +7,11 @@
 """Tests for SmallestSTTService's Pulse 2.0 model support."""
 
 from unittest.mock import AsyncMock
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 
+from pipecat.frames.frames import TranscriptionFrame
 from pipecat.services.smallest.stt import SmallestSTTModel, SmallestSTTService
 from pipecat.services.stt_service import STTSettings
 from pipecat.transcriptions.language import Language
@@ -115,3 +117,81 @@ async def test_eou_timeout_ms_included_in_url_when_set():
 
     url = service._websocket_connect.call_args.args[0]
     assert "eou_timeout_ms=300" in url
+
+
+async def _connect_query(service: SmallestSTTService) -> dict[str, list[str]]:
+    """Return the query the service connects with, without opening a socket."""
+    urls = []
+
+    async def fake_websocket_connect(url, **kwargs):
+        urls.append(url)
+        raise ConnectionError("not connecting in tests")
+
+    service._websocket_connect = fake_websocket_connect
+    service.push_error = AsyncMock()
+    service._call_event_handler = AsyncMock()
+    service._sample_rate = 16000
+    await service._connect_websocket()
+    return parse_qs(urlparse(urls[0]).query)
+
+
+@pytest.mark.asyncio
+async def test_diarize_requests_word_timestamps():
+    service = SmallestSTTService(
+        api_key="test-key",
+        settings=SmallestSTTService.Settings(diarize=True, speaker_format="{speaker}: {text}"),
+    )
+
+    query = await _connect_query(service)
+
+    assert query["diarize"] == ["true"]
+    assert query["word_timestamps"] == ["true"]
+    assert "speaker_format" not in query
+
+
+@pytest.mark.asyncio
+async def test_diarized_final_emits_one_frame_per_speaker_run():
+    service = SmallestSTTService(
+        api_key="test-key",
+        settings=SmallestSTTService.Settings(diarize=True, speaker_format="{speaker}: {text}"),
+    )
+    service._user_id = "session-user"
+    pushed = []
+
+    async def fake_push_frame(frame, direction=None):
+        pushed.append(frame)
+
+    service.push_frame = fake_push_frame
+
+    await service._process_response(
+        {
+            "transcript": "Hello, there. Hi.",
+            "is_final": True,
+            "words": [
+                {"word": "Hello,", "speaker": 0},
+                {"word": "there.", "speaker": 0},
+                {"word": "Hi.", "speaker": 1},
+            ],
+        }
+    )
+
+    frames = [f for f in pushed if isinstance(f, TranscriptionFrame)]
+    assert [(f.speaker_label, f.text) for f in frames] == [
+        ("0", "0: Hello, there."),
+        ("1", "1: Hi."),
+    ]
+    assert all(f.user_id == "session-user" for f in frames)
+
+
+@pytest.mark.asyncio
+async def test_speaker_format_update_does_not_reconnect():
+    service = SmallestSTTService(api_key="test-key")
+    service._disconnect = AsyncMock()
+    service._connect = AsyncMock()
+
+    changed = await service._update_settings(
+        SmallestSTTService.Settings(speaker_format="{speaker}: {text}")
+    )
+
+    assert "speaker_format" in changed
+    service._disconnect.assert_not_awaited()

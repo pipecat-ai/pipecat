@@ -190,3 +190,45 @@ def test_keyterm_expands_into_one_parameter_per_term(monkeypatch):
     query = _query(service)
     assert query["keyterm"] == ["Pipecat", "xAI"]
     assert query["smart_turn"] == ["0.7"]
+
+
+def test_diarized_utterance_final_emits_one_frame_per_speaker_run():
+    service = XAISTTService(
+        api_key="test-key",
+        settings=XAISTTService.Settings(diarize=True, speaker_format="{speaker}: {text}"),
+    )
+    service._user_id = "session-user"
+    pushed = _collect_frames(service)
+    message = _partial("Hi there. Hello.", is_final=True, speech_final=True)
+    message["words"] = [
+        {"text": "Hi", "speaker": 0},
+        {"text": "there.", "speaker": 0},
+        {"text": "Hello.", "speaker": 1},
+    ]
+
+    _feed(service, [message])
+
+    frames = [f for f in pushed if isinstance(f, TranscriptionFrame)]
+    assert [(f.speaker_label, f.text, f.finalized) for f in frames] == [
+        ("0", "0: Hi there.", False),
+        ("1", "1: Hello.", True),
+    ]
+    assert all(f.user_id == "session-user" for f in frames)
+
+
+def test_speaker_format_update_does_not_reconnect():
+    service = XAISTTService(api_key="test-key")
+    reconnects = []
+
+    async def fake_disconnect():
+        reconnects.append("disconnect")
+
+    service._disconnect = fake_disconnect
+
+    changed = asyncio.run(
+        service._update_settings(XAISTTService.Settings(speaker_format="{speaker}: {text}"))
+    )
+
+    assert "speaker_format" in changed
+    assert reconnects == []
+    assert "speaker_format" not in _query(service)

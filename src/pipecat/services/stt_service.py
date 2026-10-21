@@ -43,6 +43,7 @@ from pipecat.services.stt_latency import DEFAULT_TTFS_P99
 from pipecat.services.websocket_service import WebsocketService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.deprecation import deprecated, warn_deprecated
+from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.types import is_given
 
 # Duration in seconds of silent audio sent for WebSocket keepalive (100ms).
@@ -79,11 +80,11 @@ class STTService(AIService):
 
     Services that support speaker diarization put the provider's label for each
     transcript in the frame's ``speaker_label``, splitting a final result into
-    one frame per contiguous speaker run (see :meth:`_speaker_runs`), and format
-    the text with :meth:`_apply_speaker_format`. They declare their own enable
-    flag and a ``speaker_format`` field in their ``Settings``, treated as local
-    (changing it does not reconnect). ``user_id`` always remains the transport
-    participant.
+    one frame per contiguous speaker run with :meth:`_diarized_runs` and pushing
+    them with :meth:`_push_transcription_runs`, so only the last run is
+    finalized. They declare their own enable flag and a ``speaker_format`` field
+    in their ``Settings``, treated as local (changing it does not reconnect).
+    ``user_id`` always remains the transport participant.
 
     Event handlers:
         on_connected: Called when connected to the STT service.
@@ -419,6 +420,71 @@ class STTService(AIService):
         if speaker_format and speaker_label is not None:
             return speaker_format.format(speaker=speaker_label, text=text)
         return text
+
+    def _diarized_runs(
+        self, transcript: str, words: list[tuple[str, Any]] | None
+    ) -> list[tuple[str | None, str]]:
+        """Split a diarized result into labelled runs with formatted text.
+
+        Args:
+            transcript: The full transcript of one result.
+            words: ``(text, speaker)`` pairs in transcript order, or ``None`` when
+                the result has no speaker information.
+
+        Returns:
+            One ``(speaker_label, text)`` pair per contiguous speaker run, with the
+            label as a string and the text formatted by ``speaker_format``. When
+            ``words`` is empty or can't be matched to the transcript (see
+            :meth:`_speaker_runs`), a single unlabelled ``(None, transcript)``.
+        """
+        if words is not None:
+            runs = self._speaker_runs(transcript, words)
+            if runs:
+                return [
+                    (str(speaker), self._apply_speaker_format(text, str(speaker)))
+                    for speaker, text in runs
+                ]
+            logger.debug(f"{self} could not split result by speaker, emitting it unsplit")
+        return [(None, transcript)]
+
+    async def _push_transcription_runs(
+        self,
+        runs: list[tuple[str | None, str]],
+        *,
+        language: Language | None = None,
+        result: Any | None = None,
+        finalized: bool = False,
+    ) -> None:
+        """Push one :class:`TranscriptionFrame` per run of a final result.
+
+        Only the last frame can be finalized, whether by ``finalized`` or by a
+        pending :meth:`confirm_finalize`: a finalized transcript ends the user's
+        turn, which must not happen before every run has arrived.
+
+        Args:
+            runs: ``(speaker_label, text)`` pairs, as from :meth:`_diarized_runs`.
+            language: Language of the transcript.
+            result: Raw result from the STT service, attached to every frame.
+            finalized: Whether the result closes the utterance.
+        """
+        finalize_pending = self._finalize_pending
+        self._finalize_pending = False
+        timestamp = time_now_iso8601()
+        for index, (speaker_label, text) in enumerate(runs):
+            last = index == len(runs) - 1
+            if last:
+                self._finalize_pending = finalize_pending
+            await self.push_frame(
+                TranscriptionFrame(
+                    text,
+                    self._user_id,
+                    timestamp,
+                    language,
+                    result=result,
+                    finalized=finalized and last,
+                    speaker_label=speaker_label,
+                )
+            )
 
     async def _process_assistant_turn(self, text: str) -> None:
         """Called when the assistant's turn completes with the aggregated reply text.
@@ -963,6 +1029,9 @@ class SegmentedSTTService(STTService):
         # by _segment_task; None tells the task to finish.
         self._segment_queue: asyncio.Queue[tuple[bytes, int] | None] = asyncio.Queue()
         self._segment_task: asyncio.Task | None = None
+        # Set while a segment's transcript has more frames to come, so the one
+        # being pushed is not finalized.
+        self._segment_has_more_transcripts = False
 
     async def setup(self, setup: FrameProcessorSetup):
         """Set up the service.
@@ -1034,14 +1103,18 @@ class SegmentedSTTService(STTService):
         Once the user speaks again, the transcript of an earlier segment covers
         only the words before they resumed, so it isn't finalized, the same way
         :class:`STTService` drops a pending finalize when the user starts
-        speaking.
+        speaking. When a segment's transcript arrives as several diarized
+        TranscriptionFrames (one per speaker run), only the last one can be.
 
         Args:
             frame: The frame to push.
             direction: The direction of frame flow in the pipeline.
         """
         if isinstance(frame, TranscriptionFrame):
-            frame.finalized = self._transcribing_segment == self._segment_count
+            frame.finalized = (
+                self._transcribing_segment == self._segment_count
+                and not self._segment_has_more_transcripts
+            )
         await super().push_frame(frame, direction)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -1094,9 +1167,37 @@ class SegmentedSTTService(STTService):
             if segment:
                 audio, self._transcribing_segment = segment
                 try:
-                    await self.process_generator(self.run_stt(audio))
+                    await self._push_segment_frames(audio)
                 except Exception as e:
                     await self.push_error(f"{self}: transcription failed: {e}", exception=e)
+
+    async def _push_segment_frames(self, audio: bytes):
+        """Transcribe one segment and push the frames ``run_stt`` yields, in order.
+
+        A diarized transcription frame (one with a ``speaker_label``) is held
+        until the next frame arrives, so that only the last of a segment's
+        speaker runs is finalized. Any other frame is pushed as soon as it is
+        yielded.
+        """
+        held: TranscriptionFrame | None = None
+        async for frame in self.run_stt(audio):
+            if not frame:
+                continue
+            if held is not None:
+                self._segment_has_more_transcripts = isinstance(frame, TranscriptionFrame)
+                try:
+                    await self.push_frame(held)
+                finally:
+                    self._segment_has_more_transcripts = False
+                held = None
+            if isinstance(frame, TranscriptionFrame) and frame.speaker_label is not None:
+                held = frame
+            elif isinstance(frame, ErrorFrame):
+                await self.push_error_frame(frame)
+            else:
+                await self.push_frame(frame)
+        if held is not None:
+            await self.push_frame(held)
 
     async def _cancel_segment_task(self):
         if self._segment_task is not None:

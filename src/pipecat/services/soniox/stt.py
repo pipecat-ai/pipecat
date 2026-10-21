@@ -13,7 +13,7 @@ import time
 from collections import Counter
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field, replace
-from typing import Any
+from typing import Any, ClassVar
 
 from loguru import logger
 from pydantic import BaseModel
@@ -248,7 +248,10 @@ class SonioxSTTSettings(STTSettings):
         language_hints_strict: If true, strictly enforce language hints.
         context: Customization for transcription. Either a
             :class:`SonioxContextObject` or a plain string of background text.
-        enable_speaker_diarization: Whether to enable speaker diarization.
+        enable_speaker_diarization: Whether to enable speaker diarization. Each
+            contiguous speaker run of a final transcript is emitted as its own frame
+            with Soniox's speaker label in ``speaker_label``. Interim transcripts
+            are not labelled.
         enable_language_identification: Whether to enable language identification.
         max_endpoint_delay_ms: Max ms after speech ends before endpoint detection returns
             an endpoint (500-3000).
@@ -273,6 +276,10 @@ class SonioxSTTSettings(STTSettings):
             500 to 1000 is the documented range. 0 sends each word as it starts
             playing. Only used with ``enable_echo_cancellation``, and only for a
             TTS service that reports word timestamps.
+        speaker_format: Optional format string for diarized speaker runs. Use
+            ``{speaker}`` for the speaker label and ``{text}`` for the transcript
+            text (e.g. ``"{speaker}: {text}"``). If ``None``, transcript text is
+            not modified. Applied locally, so changing it does not reconnect.
 
     Endpoint detection runs in both turn detection modes. With
     ``vad_force_turn_endpoint=True`` it only ends transcripts, so
@@ -296,6 +303,10 @@ class SonioxSTTSettings(STTSettings):
     enable_agent_text_input: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     enable_echo_cancellation: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     agent_text_lead_ms: int | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speaker_format: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+    #: Fields applied locally to transcripts — changing them needs no reconnect.
+    LOCAL_FIELDS: ClassVar[frozenset[str]] = frozenset({"speaker_format"})
 
 
 def _move_language_to_hints(delta: SonioxSTTSettings) -> None:
@@ -404,6 +415,7 @@ class SonioxSTTService(WebsocketSTTService):
             enable_agent_text_input=True,
             enable_echo_cancellation=False,
             agent_text_lead_ms=DEFAULT_AGENT_TEXT_LEAD_MS,
+            speaker_format=None,
         )
 
         # --- 2. Deprecated direct-arg overrides ---
@@ -543,6 +555,7 @@ class SonioxSTTService(WebsocketSTTService):
 
         if changed:
             await self._update_agent_text_observer()
+        if changed.keys() - self.Settings.LOCAL_FIELDS:
             await self._request_reconnect()
 
         return changed
@@ -923,22 +936,20 @@ class SonioxSTTService(WebsocketSTTService):
 
         async def send_endpoint_transcript():
             if self._final_transcription_buffer:
-                text = "".join(map(lambda token: token["text"], self._final_transcription_buffer))
-                language = _language_from_tokens(self._final_transcription_buffer)
+                tokens = self._final_transcription_buffer
+                text = "".join(map(lambda token: token["text"], tokens))
+                language = _language_from_tokens(tokens)
+                words = None
+                if self._settings.enable_speaker_diarization:
+                    words = [(token["text"], token.get("speaker")) for token in tokens]
+                runs = self._diarized_runs(text, words)
                 # Report usage before the transcription frame so tracing can
                 # attach it to the STT span the frame closes.
                 await self.emit_stt_usage_metrics()
                 # Soniox only pushes TranscriptionFrame when an end token is received,
                 # so every TranscriptionFrame is inherently finalized
-                await self.push_frame(
-                    TranscriptionFrame(
-                        text=text,
-                        user_id=self._user_id,
-                        timestamp=time_now_iso8601(),
-                        language=language,
-                        result=self._final_transcription_buffer,
-                        finalized=True,
-                    )
+                await self._push_transcription_runs(
+                    runs, language=language, result=tokens, finalized=True
                 )
                 await self._handle_transcription(text, is_final=True, language=language)
                 self._final_transcription_buffer = []

@@ -106,6 +106,16 @@ def language_to_nvidia_nemotron_speech_language(language: Language) -> str:
     return resolve_language(language, LANGUAGE_MAP, use_base_code=False)
 
 
+def _speaker_tagged_words(alternative) -> list[tuple[str, int | None]]:
+    """Return an alternative's ``(word, speaker_tag)`` pairs, ``None`` for untagged words."""
+    # NVIDIA numbers speakers from 1; 0 is the protobuf default for a word the
+    # server did not tag.
+    return [
+        (getattr(word, "word", ""), getattr(word, "speaker_tag", 0) or None)
+        for word in getattr(alternative, "words", None) or []
+    ]
+
+
 @dataclass
 class _NvidiaBaseSTTSettings(STTSettings):
     """Shared settings for NVIDIA Nemotron Speech STT services.
@@ -118,8 +128,15 @@ class _NvidiaBaseSTTSettings(STTSettings):
         boosted_lm_score: Score boost for specified words.
         max_alternatives: Maximum number of recognition alternatives.
         word_time_offsets: Whether to include word-level time offsets.
-        speaker_diarization: Whether to enable speaker diarization.
+        speaker_diarization: Whether to enable speaker diarization. Each
+            contiguous speaker run of a final result is emitted as its own frame
+            with NVIDIA's speaker tag (numbered from ``1``) in ``speaker_label``.
+            A result with an untagged word, no word information, or words that
+            can't be located in its transcript is emitted whole, with no label.
         max_speakers: Maximum number of speakers for diarization.
+        speaker_format: Optional format string for diarized speaker runs. Use
+            ``{speaker}`` for the speaker tag and ``{text}`` for the transcript
+            text. If ``None``, transcript text is not modified.
     """
 
     profanity_filter: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -131,6 +148,7 @@ class _NvidiaBaseSTTSettings(STTSettings):
     word_time_offsets: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     speaker_diarization: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     max_speakers: int | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speaker_format: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 @dataclass
@@ -138,18 +156,11 @@ class NvidiaSTTSettings(_NvidiaBaseSTTSettings):
     """Settings for NvidiaSTTService.
 
     Parameters:
-        interim_results: Whether to return interim (partial) results.
-        speaker_format: Optional format string for diarized speaker runs. Use
-            ``{speaker}`` for the speaker tag and ``{text}`` for the transcript text.
-            If ``None``, transcript text is not modified. NVIDIA numbers speakers
-            from ``1``. A result with an untagged word, no word information, or
-            words that can't be located in its transcript is emitted unsplit and
-            unformatted, with no ``speaker_label``. Interim results carry no word
-            information, so they are always emitted that way.
+        interim_results: Whether to return interim (partial) results. They
+            carry no word information, so they are never split by speaker.
     """
 
     interim_results: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    speaker_format: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
     #: Fields that are purely local (formatting templates) — no reconnect needed.
     LOCAL_FIELDS: ClassVar[frozenset[str]] = frozenset({"speaker_format"})
@@ -656,47 +667,25 @@ class NvidiaSTTService(STTService):
     ) -> None:
         """Push one frame per speaker run, or one frame for the full result."""
         alternative = result.alternatives[0]
-        transcripts: list[tuple[int | None, str]] = []
-        # NVIDIA sends word information, and so speaker tags, only on final results.
-        if speaker_diarization and result.is_final:
-            # NVIDIA numbers speakers from 1; 0 is the protobuf default for a
-            # word the server did not tag.
-            words = [
-                (getattr(word, "word", ""), getattr(word, "speaker_tag", 0) or None)
-                for word in getattr(alternative, "words", None) or []
-            ]
-            transcripts.extend(self._speaker_runs(alternative.transcript, words))
-            if not transcripts:
-                logger.debug(f"{self} could not split result by speaker, emitting it unsplit")
-        if not transcripts:
-            transcripts = [(None, alternative.transcript)]
+        if not alternative.transcript:
+            return
 
-        timestamp = time_now_iso8601()
-        for index, (speaker_tag, transcript) in enumerate(transcripts):
-            if not transcript:
-                continue
-            speaker_label = str(speaker_tag) if speaker_tag is not None else None
-            text = self._apply_speaker_format(transcript, speaker_label)
-            if result.is_final:
-                frame = TranscriptionFrame(
-                    text,
+        # NVIDIA sends word information, and so speaker tags, only on final results.
+        if not result.is_final:
+            await self.push_frame(
+                InterimTranscriptionFrame(
+                    alternative.transcript,
                     self._user_id,
-                    timestamp,
+                    time_now_iso8601(),
                     language,
                     result=result,
-                    finalized=index == len(transcripts) - 1,
-                    speaker_label=speaker_label,
                 )
-            else:
-                frame = InterimTranscriptionFrame(
-                    text,
-                    self._user_id,
-                    timestamp,
-                    language,
-                    result=result,
-                    speaker_label=speaker_label,
-                )
-            await self.push_frame(frame)
+            )
+            return
+
+        words = _speaker_tagged_words(alternative) if speaker_diarization else None
+        runs = self._diarized_runs(alternative.transcript, words)
+        await self._push_transcription_runs(runs, language=language, result=result, finalized=True)
 
     async def _handle_response(self, response, *, speaker_diarization: bool = False):
         for result in response.results:
@@ -842,6 +831,7 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
             word_time_offsets=False,
             speaker_diarization=False,
             max_speakers=0,
+            speaker_format=None,
         )
 
         # 2. (no deprecated direct args for this service)
@@ -933,6 +923,12 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
         if self._custom_configuration:
             riva.client.add_custom_configuration_to_config(config, self._custom_configuration)
 
+        speaker_diarization = assert_given(s.speaker_diarization)
+        if speaker_diarization:
+            riva.client.add_speaker_diarization_to_config(
+                config, speaker_diarization, assert_given(s.max_speakers)
+            )
+
         return config
 
     def can_generate_metrics(self) -> bool:
@@ -1020,15 +1016,22 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
                         # Technically `_settings.language` could be a raw string, but
                         # Language is a StrEnum so downstream handles either.
                         language = cast("Language | None", assert_given(self._settings.language))
-                        yield TranscriptionFrame(
-                            text,
-                            self._user_id,
-                            time_now_iso8601(),
-                            language,
-                        )
-                        transcription_found = True
-
                         await self._handle_transcription(text, True, language)
+                        words = (
+                            _speaker_tagged_words(alternatives[0])
+                            if self._settings.speaker_diarization
+                            else None
+                        )
+                        timestamp = time_now_iso8601()
+                        for speaker_label, run_text in self._diarized_runs(text, words):
+                            yield TranscriptionFrame(
+                                run_text,
+                                self._user_id,
+                                timestamp,
+                                language,
+                                speaker_label=speaker_label,
+                            )
+                        transcription_found = True
 
             if not transcription_found:
                 logger.debug(
