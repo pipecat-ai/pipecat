@@ -142,11 +142,32 @@ The scenarios' stops and corrections (`cancel_delegation`, `implicit_cancel`, `p
 
 ## Audio evals
 
-The thirteen audio scenarios on all five bots, one run each, without predictive delegation (2026-10-14). The user's voice is synthesized with Kokoro, the bot's speech transcribed with Moonshine, and the judge is the release suite's audio judge.
+The thirteen audio scenarios on all five bots, one run each, without predictive delegation (2026-10-20, with this `AFTER DELEGATING` paragraph). The user's voice is synthesized with Kokoro, the bot's speech transcribed with Moonshine, and the judge is the release suite's audio judge.
 
 ```bash
 uv run python -m pipecat.evals suite evals/llm-with-backend/manifest.yaml -s audio
 ```
+
+| scenario                           | anthropic-frontend | gemini-live-frontend | google-frontend | openai-realtime-frontend | openai-responses-frontend |
+| ---------------------------------- | ------------------ | -------------------- | --------------- | ------------------------ | ------------------------- |
+| `accepted_offer/audio`             | 1/1                | 1/1                  | 1/1             | 1/1                      | 1/1                       |
+| `aside_while_waiting/audio`        | 0/1                | 0/1                  | 0/1             | 0/1                      | 1/1                       |
+| `cancel_and_replace/audio`         | 1/1                | 1/1                  | 1/1             | 0/1                      | 1/1                       |
+| `cancel_delegation/audio`          | 0/1                | 1/1                  | 1/1             | 0/1                      | 1/1                       |
+| `concurrent_delegations/audio`     | 0/1                | 0/1                  | 0/1             | 0/1                      | 1/1                       |
+| `delegate_ack/audio`               | 1/1                | 1/1                  | 1/1             | 1/1                      | 1/1                       |
+| `delegate_with_aside/audio`        | 0/1                | 1/1                  | 1/1             | 1/1                      | 1/1                       |
+| `frontend_only/audio`              | 1/1                | 1/1                  | 1/1             | 1/1                      | 1/1                       |
+| `implicit_cancel/audio`            | 0/1                | 1/1                  | 1/1             | 1/1                      | 1/1                       |
+| `partial_cancel/audio`             | 1/1                | 1/1                  | 1/1             | 1/1                      | 1/1                       |
+| `progress_inquiry/audio`           | 1/1                | 0/1                  | 1/1             | 1/1                      | 1/1                       |
+| `result_during_interruption/audio` | 1/1                | 0/1                  | 1/1             | 1/1                      | 1/1                       |
+| `superseding_delegation/audio`     | 1/1                | 1/1                  | 1/1             | 1/1                      | 1/1                       |
+| **total**                          | **8/13**           | **9/13**             | **11/13**       | **9/13**                 | **13/13**                 |
+
+One run per scenario is noisy. Across the five bots, 50/65, against 53/65 on 2026-10-14 and 48/65 before the pairing instruction's rewrite. The scenarios' stops and corrections with no `delegate` call: none on any frontend. The failures: the judge answering "continue" to a correct acknowledgement (4), the Claude and OpenAI Realtime frontends adding a line after a stop's acknowledgement, which the absence check catches (3), `aside_while_waiting` on Claude, Gemini and OpenAI Realtime, where the backend's fix outran the scenario's window, `concurrent_delegations`, and `delegate_with_aside` on Claude, where the reply ran past the window. The two speech-to-speech frontends' acknowledgements stay long: Gemini Live's "I'll look into the HTTP client tests to see why that retry test is failing. I will keep you updated on my progress." and OpenAI Realtime's "I'm on it and will update you once I have something solid. If you want, I can also summarize any tradeoffs if the fix touches real retry behavior." The paragraph's examples and limits are tuned on the text frontends.
+
+The same pass on 2026-10-14, with the previous `AFTER DELEGATING` paragraph:
 
 | scenario                           | anthropic-frontend | gemini-live-frontend | google-frontend | openai-realtime-frontend | openai-responses-frontend |
 | ---------------------------------- | ------------------ | -------------------- | --------------- | ------------------------ | ------------------------- |
@@ -165,7 +186,7 @@ uv run python -m pipecat.evals suite evals/llm-with-backend/manifest.yaml -s aud
 | `superseding_delegation/audio`     | 1/1                | 1/1                  | 1/1             | 1/1                      | 1/1                       |
 | **total**                          | **10/13**          | **10/13**            | **12/13**       | **11/13**                | **10/13**                 |
 
-The same pass, run at the same time on the pairing instruction before this one:
+And the same pass on 2026-10-14 on the pairing instruction before this one:
 
 | scenario                           | anthropic-frontend | gemini-live-frontend | google-frontend | openai-realtime-frontend | openai-responses-frontend |
 | ---------------------------------- | ------------------ | -------------------- | --------------- | ------------------------ | ------------------------- |
@@ -184,4 +205,4 @@ The same pass, run at the same time on the pairing instruction before this one:
 | `superseding_delegation/audio`     | 1/1                | 1/1                  | 1/1             | 1/1                      | 0/1                       |
 | **total**                          | **7/13**           | **11/13**            | **12/13**       | **10/13**                | **8/13**                  |
 
-One run per scenario is noisy. Across the five example bots, 53/65 against 48/65 before. The scenarios' stops and corrections with no `delegate` call: gpt-4.1 0 of 4 (4 of 4 before), Gemini Live 1 (`partial_cancel`; 1 before, `cancel_delegation`), the others 0. The rest are the judge answering "continue" to a correct acknowledgement, the Claude and OpenAI Realtime frontends adding a line after a stop's acknowledgement, which the absence check catches, and `aside_while_waiting` on Claude, where the backend's fix outran the scenario's window. `delegate_with_aside/audio` on the gpt-4.1 bot, five more runs a side: the `delegate` call was made in 5 of 5 (4 of 5 before, the miss the fix promised with no call). The scenario itself passed 1 of 5 and 2 of 5: in audio the user's sentence splits into two turns, the second cutting the joke off mid-sentence, and the judge sees the truncated reply.
+On 2026-10-14, 53/65 against 48/65 before. The scenarios' stops and corrections with no `delegate` call: gpt-4.1 0 of 4 (4 of 4 before), Gemini Live 1 (`partial_cancel`; 1 before, `cancel_delegation`), the others 0. The rest are the judge answering "continue" to a correct acknowledgement, the Claude and OpenAI Realtime frontends adding a line after a stop's acknowledgement, which the absence check catches, and `aside_while_waiting` on Claude, where the backend's fix outran the scenario's window. `delegate_with_aside/audio` on the gpt-4.1 bot, five more runs a side: the `delegate` call was made in 5 of 5 (4 of 5 before, the miss the fix promised with no call). The scenario itself passed 1 of 5 and 2 of 5: in audio the user's sentence splits into two turns, the second cutting the joke off mid-sentence, and the judge sees the truncated reply.
