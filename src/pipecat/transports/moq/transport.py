@@ -99,14 +99,15 @@ _PEER_GONE_KINDS = _NORMAL_CLOSE_KINDS | frozenset(
     }
 )
 
-# ``Cancel`` and ``Dropped`` as moq-net's reason rather than a kind: moq-ffi
+# Normal-close reasons as moq-net renders them rather than a kind: moq-ffi
 # renders an ``Error.Audio`` to a string, so what ended the audio track
-# survives only as its message tail (``"moq: cancelled"``, ``"moq: dropped"``).
-# A relay cancels a subscription when the session publishing the broadcast
-# ends, which includes a reconnecting peer replacing it with a fresh one. Only
-# the whole reason is matched, so an error that merely mentions cancellation
-# still propagates.
-_NORMAL_CLOSE_REASONS = frozenset({"dropped", "cancelled"})
+# survives only as its message tail (``"moq: cancelled"``, ``"moq: dropped"``,
+# ``"moq: no error"``). A relay cancels a subscription when the session
+# publishing the broadcast ends, which includes a reconnecting peer replacing
+# it with a fresh one; "no error" is a close with code 0, graceful by moq-net
+# convention. Only the whole reason is matched, so an error that merely
+# mentions cancellation still propagates.
+_NORMAL_CLOSE_REASONS = frozenset({"dropped", "cancelled", "no error"})
 
 # Remote reset codes inside a subsystem error message. A 0.14 peer's
 # reset reaches moq-ffi 0.4 as an unregistered code, rendered "unknown
