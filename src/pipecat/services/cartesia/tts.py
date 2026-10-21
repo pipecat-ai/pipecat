@@ -19,6 +19,8 @@ from loguru import logger
 from pydantic import BaseModel
 from websockets.protocol import State
 
+from pipecat.expressive.adapter import ExpressionAdapter
+from pipecat.expressive.expression import ExpressionCapabilities, ExpressionTerm, ModeScope
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
@@ -292,6 +294,47 @@ class CartesiaEmotion(StrEnum):
     DETERMINED = "determined"
 
 
+class CartesiaExpressionAdapter(ExpressionAdapter):
+    """Renders expression tags as Cartesia's inline markup.
+
+    Part of expressive conversation (alpha). Modes are Cartesia's emotions,
+    rendered as ``<emotion>`` tags; Cartesia supports them in English only.
+    Cartesia changes emotion reliably only between generations, so a mode can
+    change only between sentences, and a sentence written in several modes is
+    spoken in the first. The one event is ``[laughter]``, and pauses are
+    ``<break>`` tags. Cartesia has no emphasis.
+    """
+
+    def capabilities(self) -> ExpressionCapabilities:
+        """Cartesia's emotions, laughter and pauses."""
+        return ExpressionCapabilities(
+            events=[ExpressionTerm("laughter")],
+            modes=[
+                ExpressionTerm(emotion.value)
+                for emotion in CartesiaEmotion
+                if emotion not in (CartesiaEmotion.NEUTRAL, CartesiaEmotion.JOKING_COMEDIC)
+            ],
+            pause_range_ms=(100, 5000),
+            mode_scope=ModeScope.SENTENCE,
+        )
+
+    def render_text(self, text: str, modes: list[str], previous_modes: list[str] | None) -> str:
+        """Prefix an emotion tag where the emotion changes."""
+        emotion = modes[0] if modes else None
+        previous = previous_modes[0] if previous_modes else None
+        if emotion == previous:
+            return text
+        return f'<emotion value="{emotion or CartesiaEmotion.NEUTRAL.value}"/>{text}'
+
+    def render_event(self, name: str) -> str:
+        """Render laughter."""
+        return f"[{name}]"
+
+    def render_pause(self, duration_ms: int) -> str:
+        """Render a break."""
+        return f'<break time="{duration_ms}ms"/>'
+
+
 @dataclass
 class CartesiaTTSSettings(TTSSettings):
     """Settings for CartesiaTTSService and CartesiaHttpTTSService.
@@ -317,6 +360,7 @@ class CartesiaTTSService(WebsocketTTSService):
 
     Settings = CartesiaTTSSettings
     _settings: Settings
+    expression_adapter_class = CartesiaExpressionAdapter
 
     class InputParams(BaseModel):
         """Input parameters for Cartesia TTS configuration.
@@ -560,10 +604,12 @@ class CartesiaTTSService(WebsocketTTSService):
         base_lang = language.split("-")[0].lower()
         return base_lang in {"zh", "ja"}
 
-    _CARTESIA_TAG_RE = re.compile(r"</?(?:spell|emotion|break|volume|speed)\b[^>]*>", re.IGNORECASE)
+    _CARTESIA_TAG_RE = re.compile(
+        r"</?(?:spell|emotion|break|volume|speed)\b[^>]*>|\[laughter\]", re.IGNORECASE
+    )
 
     def _strip_cartesia_tags(self, text: str) -> str:
-        """Remove Cartesia SSML tags from a word-timestamp token.
+        """Remove Cartesia SSML tags and ``[laughter]`` from a word-timestamp token.
 
         A tag standing between two alphanumeric characters is replaced by a space,
         since it is the only thing separating two words (``"to<spell>1234"``).
@@ -587,7 +633,8 @@ class CartesiaTTSService(WebsocketTTSService):
     ) -> list[tuple[str, float]]:
         """Normalize raw word timestamps from Cartesia before further processing.
 
-        Strips Cartesia SSML tags (spell, emotion, break, volume, speed) from each word
+        Strips Cartesia SSML tags (spell, emotion, break, volume, speed) and
+        ``[laughter]``, which comes back as a word of its own, from each word
         and drops entries that become empty after stripping. Each entry keeps its own
         start time, so one entry in is at most one token out, whatever the language.
 
@@ -881,6 +928,7 @@ class CartesiaHttpTTSService(TTSService):
 
     Settings = CartesiaTTSSettings
     _settings: Settings
+    expression_adapter_class = CartesiaExpressionAdapter
 
     class InputParams(BaseModel):
         """Input parameters for Cartesia HTTP TTS configuration.

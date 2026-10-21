@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from pipecat.expressive.expression import ModeScope
 from pipecat.frames.frames import (
     AggregatedTextFrame,
     AggregatedTextProgressFrame,
@@ -17,6 +18,7 @@ from pipecat.frames.frames import (
     TTSTextFrame,
 )
 from pipecat.services.cartesia.tts import (
+    CartesiaExpressionAdapter,
     CartesiaHttpTTSService,
     CartesiaTTSService,
     language_to_cartesia_language,
@@ -243,6 +245,46 @@ def test_cartesia_tag_only_token_is_dropped():
         )
         == []
     )
+
+
+def test_cartesia_laughter_token_is_dropped():
+    assert _process_word_timestamps(
+        words=["ancient.", "[laughter]", "Let"],
+        starts=[0.0, 0.5, 1.0],
+        language="en",
+    ) == [("ancient.", 0.0), ("Let", 1.0)]
+
+
+class TestCartesiaExpressionAdapter:
+    def test_capabilities(self):
+        capabilities = CartesiaExpressionAdapter().capabilities()
+        modes = [term.name for term in capabilities.modes]
+        assert "excited" in modes
+        assert "neutral" not in modes
+        assert [term.name for term in capabilities.events] == ["laughter"]
+        assert capabilities.mode_scope == ModeScope.SENTENCE
+        assert not capabilities.emphasis
+
+    def test_emotion_rendered_where_it_changes(self):
+        adapter = CartesiaExpressionAdapter()
+        assert adapter.render_text("Hi.", ["excited"], None) == '<emotion value="excited"/>Hi.'
+        assert adapter.render_text("Hi.", ["excited"], ["excited"]) == "Hi."
+        assert adapter.render_text("Hi.", ["sad"], ["excited"]) == '<emotion value="sad"/>Hi.'
+        assert adapter.render_text("Hi.", [], None) == "Hi."
+
+    def test_return_to_baseline_renders_neutral(self):
+        adapter = CartesiaExpressionAdapter()
+        assert adapter.render_text("Hi.", [], ["sad"]) == '<emotion value="neutral"/>Hi.'
+
+    def test_several_modes_render_the_first(self):
+        adapter = CartesiaExpressionAdapter()
+        assert adapter.render_text("Hi.", ["sad", "calm"], None) == '<emotion value="sad"/>Hi.'
+        assert adapter.render_text("Hi.", ["sad", "tired"], ["sad", "calm"]) == "Hi."
+
+    def test_events_and_pauses(self):
+        adapter = CartesiaExpressionAdapter()
+        assert adapter.render_event("laughter") == "[laughter]"
+        assert adapter.render_pause(600) == '<break time="600ms"/>'
 
 
 def test_cartesia_spell_token_matches_the_text_sent_for_synthesis():
