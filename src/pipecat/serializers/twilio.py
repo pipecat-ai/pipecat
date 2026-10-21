@@ -88,12 +88,13 @@ class TwilioFrameSerializer(FrameSerializer):
         call_sid: str | None = None,
         account_sid: str | None = None,
         auth_token: str | None = None,
-        api_key_sid: str | None = None,
-        api_key_secret: str | None = None,
         region: str | None = None,
         edge: str | None = None,
         base_url: str | None = None,
         params: InputParams | None = None,
+        *,
+        api_key_sid: str | None = None,
+        api_key_secret: str | None = None,
     ):
         """Initialize the TwilioFrameSerializer.
 
