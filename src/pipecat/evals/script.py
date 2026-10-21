@@ -337,12 +337,13 @@ from pipecat.evals.scenario_config import (
 from pipecat.utils.deprecation import deprecated
 
 # Events whose payloads carry bot-generated text the judge can sensibly
-# evaluate. Asserting ``eval:`` on anything else but a function call (user
-# transcripts, interruption signals) produces a parser warning — the test
-# controls user input deterministically, so judging it adds cost without
-# signal. ``response`` is the modality-agnostic alias, resolved to one of the
-# others after parsing (see _resolve_response_events).
-JUDGEABLE_EVENTS = frozenset({"response", "llm_response", "tts_response"})
+# evaluate, including the expression the bot's TTS performed. Asserting
+# ``eval:`` on anything else but a function call (user transcripts,
+# interruption signals) produces a parser warning — the test controls user
+# input deterministically, so judging it adds cost without signal.
+# ``response`` is the modality-agnostic alias, resolved to one of the others
+# after parsing (see _resolve_response_events).
+JUDGEABLE_EVENTS = frozenset({"response", "llm_response", "tts_response", "expression"})
 
 # Events carrying a function call, matched by name and arguments rather than by
 # text: ``function_call`` when one starts, ``function_call_stopped`` when it ends
@@ -406,9 +407,10 @@ class EvalExpectation:
             from the single ``name:``/``args:`` shorthand.
         eval: Optional natural-language criterion the event's text content
             must satisfy. Evaluated by a judge LLM. Meaningful on the
-            bot-generated text events (``response``, ``llm_response``, and
-            ``tts_response``) and on the function-call events, where it is
-            about each matched call's name and arguments rather than text.
+            bot-generated text events (``response``, ``llm_response``,
+            ``tts_response``, and the ``expression`` its TTS performed) and on
+            the function-call events, where it is about each matched call's
+            name and arguments rather than text.
         marker: For an ``llm_marker`` event, the meaning the marker must have:
             one of :data:`MARKER_KINDS`, where ``incomplete`` accepts ``short``
             or ``long``.

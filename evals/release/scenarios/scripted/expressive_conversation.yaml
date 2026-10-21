@@ -8,7 +8,9 @@ name: expressive_conversation
 # transcription of the bot's audio for tags read aloud. Markup
 # is checked by text_excludes. The evals judge only the reply's content: a
 # judge asked about markup finds it in the LLM's raw text and fails replies
-# that were spoken cleanly.
+# that were spoken cleanly. The checks of what the TTS performed and spoke
+# read from the turn's start: a service without word timestamps reports its
+# text before the LLM's reply is complete.
 #
 # For a bot with PipelineParams(enable_expressive_conversation=True) whose
 # prompt teaches the tags, such as the examples in
@@ -34,6 +36,7 @@ scenarios:
             check_from: turn_start
             text_contains: "<<"
           - event: tts_response
+            check_from: turn_start
             eval: "the bot congratulates the user"
             text_excludes: "<"
           - event: response
@@ -48,6 +51,7 @@ scenarios:
             check_from: turn_start
             text_contains: "<<"
           - event: tts_response
+            check_from: turn_start
             eval: "the bot responds with sympathy for the user's worry about their dog"
             text_excludes: "<"
           - event: response
@@ -59,11 +63,12 @@ scenarios:
           # Each TTS names its laugh its own way, as an event or a mode.
           - event: llm_response
             eval: "the reply laughs with a tag, such as [[laughter]], [[laughs]], [[chuckles]] or <<laughing>>"
-          # [[laughter]], [[laughs]] or <<laughing>>, as the TTS performed it.
+          # [[laughter]], [[chuckling]] or <<laughing>>, as the TTS performed it.
           - event: expression
             check_from: turn_start
-            text_contains: "laugh"
+            eval: "the bot laughs or chuckles, as an event or a mode"
           - event: tts_response
+            check_from: turn_start
             eval: "the bot reacts to the user's joke"
             text_excludes: "<"
           - event: response
