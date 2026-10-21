@@ -631,21 +631,17 @@ class ElevenLabsTTSService(ElevenLabsTTSBase):
                         ),
                     )
 
-                    # Calculate the actual end time of this audio chunk
-                    char_start_times_ms = alignment.get("charStartTimesMs", [])
-                    char_durations_ms = alignment.get("charDurationsMs", [])
+                # Alignment times restart at zero in every message, so the clock
+                # advances by each chunk's span, including chunks that complete no
+                # word, such as trailing punctuation arriving on its own.
+                char_start_times_ms = alignment.get("charStartTimesMs", [])
+                char_durations_ms = alignment.get("charDurationsMs", [])
 
-                    if char_start_times_ms and char_durations_ms:
-                        # End time = start time of last character + duration of last character
-                        chunk_end_time_ms = char_start_times_ms[-1] + char_durations_ms[-1]
-                        chunk_end_time_seconds = chunk_end_time_ms / 1000.0
-                        self._cumulative_time += chunk_end_time_seconds
-                    else:
-                        # Fallback: use the last word's start time (current behavior)
-                        self._cumulative_time = word_times[-1][1]
-                        logger.warning(
-                            "_receive_messages: using fallback timing method - consider investigating alignment data structure"
-                        )
+                if char_start_times_ms and char_durations_ms:
+                    chunk_end_time_ms = char_start_times_ms[-1] + char_durations_ms[-1]
+                    self._cumulative_time += chunk_end_time_ms / 1000.0
+                elif word_times:
+                    self._cumulative_time = word_times[-1][1]
 
     async def _send_keepalive(self):
         """Send a single keepalive message to keep the WebSocket connection alive.
