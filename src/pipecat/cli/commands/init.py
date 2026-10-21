@@ -726,8 +726,8 @@ def init_command(
     enable_eval: bool = typer.Option(
         False,
         "--eval/--no-eval",
-        help="Add an 'eval' transport so the bot is runnable with `-t eval` for "
-        "behavioral evals (see `pipecat eval`). Off by default.",
+        help="Add an 'eval' transport so `pipecat eval` can drive the bot for "
+        "behavioral evals. Off by default.",
         rich_help_panel=_PANEL_FEATURES,
     ),
     dry_run: bool = typer.Option(

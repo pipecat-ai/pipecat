@@ -54,7 +54,8 @@ from pipecat.frames.frames import (
 from pipecat.pipeline.capabilities import BotCapabilities
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 from pipecat.transports.base_transport import TransportParams
-from pipecat.utils.frame_queue import FrameQueue
+from pipecat.utils.deprecation import warn_deprecated
+from pipecat.utils.frame_queue import FramePriorityQueue, FrameQueue
 from pipecat.utils.time import nanoseconds_to_seconds
 
 BOT_VAD_STOP_SECS = 0.35
@@ -96,16 +97,11 @@ class BaseOutputTransport(FrameProcessor):
         self._media_senders: dict[Any, BaseOutputTransport.MediaSender] = {}
 
         if params.video_out_bitrate is not None:
-            import warnings
-
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    "Transport parameter `video_out_bitrate` is deprecated and will be removed in "
-                    "2.0.0. Use provider specific settings instead.",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
+            warn_deprecated(
+                "`TransportParams.video_out_bitrate` is deprecated since 1.1.0 and will be "
+                "removed in 2.0.0. Use provider-specific settings instead.",
+                stacklevel=2,
+            )
 
     @property
     def sample_rate(self) -> int:
@@ -509,6 +505,13 @@ class BaseOutputTransport(FrameProcessor):
             self._video_task: asyncio.Task | None = None
             self._clock_task: asyncio.Task | None = None
 
+            # Timed frames as (timestamp, counter, frame), ordered by presentation
+            # time. It outlives the clock task so an interruption can keep its
+            # uninterruptible frames.
+            self._clock_queue = FramePriorityQueue(frame_getter=lambda item: item[2])
+            # The frame the clock task is waiting to push.
+            self._clock_frame: Frame | None = None
+
             # If timestamps are equal, use this count to preserve the insertion order
             self._clock_queue_counter = itertools.count()
 
@@ -609,28 +612,33 @@ class BaseOutputTransport(FrameProcessor):
             Args:
                 _: The start interruption frame (unused).
             """
-            # Cancel tasks.
-            await self._cancel_clock_task()
-            await self._cancel_video_task()
+            # Keep the audio task running but drain all interruptible frames, so
+            # the frame being written and the pending uninterruptible ones are
+            # still delivered. With a mixer, cancelling the task would also stop
+            # mixer-only output during the restart, causing an audible gap in
+            # the background audio (made worse by telephony serializers that
+            # clear the playout buffer on interruptions).
+            self._audio_queue.reset()
+            # The same goes for the audio still waiting to fill a chunk.
+            self._audio_runs = deque((audio, flag) for audio, flag in self._audio_runs if flag)
 
-            if self._audio_queue.has_uninterruptible or self._mixer:
-                # Keep the audio task running but drain all interruptible frames
-                # so the pending uninterruptible ones are still delivered. With
-                # a mixer, cancelling the task would also stop mixer-only output
-                # during the restart, causing an audible gap in the background
-                # audio (made worse by telephony serializers that clear the
-                # playout buffer on interruptions).
-                self._audio_queue.reset()
-            else:
-                await self._cancel_audio_task()
-                self._create_audio_task()
+            # Likewise, keep the clock task running but drain its interruptible
+            # frames, and cancel it if it's waiting to push one.
+            self._clock_queue.reset()
+            if self._clock_frame and self._clock_frame.interruptible:
+                await self._cancel_clock_task()
+
+            await self._cancel_video_task()
 
             # Create tasks.
             self._create_video_task()
             self._create_clock_task()
 
-            # Let's send a bot stopped speaking if we have to.
-            await self._bot_stopped_speaking()
+            # Let's send a bot stopped speaking if we have to. The bot keeps
+            # speaking while there's uninterruptible audio still to play (after
+            # the reset, everything left in the queue is uninterruptible).
+            if not (self._audio_runs or self._audio_queue.has_frame(OutputAudioRawFrame)):
+                await self._bot_stopped_speaking()
 
         async def handle_audio_frame(self, frame: OutputAudioRawFrame):
             """Handle incoming audio frames by buffering and chunking.
@@ -1186,7 +1194,6 @@ class BaseOutputTransport(FrameProcessor):
         def _create_clock_task(self):
             """Create the clock/timing processing task."""
             if not self._clock_task:
-                self._clock_queue = asyncio.PriorityQueue()
                 self._clock_task = self._transport.create_task(self._clock_task_handler())
 
         async def _cancel_clock_task(self):
@@ -1194,6 +1201,7 @@ class BaseOutputTransport(FrameProcessor):
             if self._clock_task:
                 await self._transport.cancel_task(self._clock_task)
                 self._clock_task = None
+                self._clock_frame = None
 
         async def _clock_task_handler(self):
             """Main clock/timing task handler for timed frame delivery."""
@@ -1208,6 +1216,8 @@ class BaseOutputTransport(FrameProcessor):
                 # has already passed we process it, otherwise we wait until it's
                 # time to process it.
                 if running:
+                    self._clock_frame = frame
+
                     current_time = self._transport.get_clock().get_time()
                     if timestamp > current_time:
                         wait_time = nanoseconds_to_seconds(timestamp - current_time)
@@ -1215,5 +1225,7 @@ class BaseOutputTransport(FrameProcessor):
 
                     # Push frame downstream.
                     await self._transport.push_frame(frame)
+
+                    self._clock_frame = None
 
                 self._clock_queue.task_done()

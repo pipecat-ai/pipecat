@@ -32,7 +32,7 @@ Event names are the friendly names the harness maps RTVI server messages onto:
 ``vad_user_stopped_speaking``, ``user_transcription``, ``bot_started_speaking``,
 ``bot_stopped_speaking``, ``llm_started``, ``response``, ``llm_response``,
 ``llm_marker``, ``tts_response``, ``function_call``, ``function_call_stopped``,
-``image``. The ``vad_*`` events are the raw
+``image``, ``bot_backchannel``, ``user_backchannel``. The ``vad_*`` events are the raw
 VAD signal, useful as a timing anchor when a turn-detection strategy gates or defers the
 turn-level ``user_stopped_speaking`` (e.g. filtering incomplete turns).
 
@@ -178,6 +178,27 @@ Supported expectation fields (per event):
           absent: true
           within_ms: 30000
 
+``check_from: turn_start``
+    Expectations are met in order: each is looked for only once the one
+    above it has been met, and an event of another type that arrives in the
+    meantime is passed over. ``check_from: turn_start`` lets an expectation
+    run against events since the beginning of the turn that were not used by
+    the expectations above it. The default, ``previous``, looks only from
+    where the expectation above it was met. Use it for an event whose timing
+    the bot does not control, such as a call a backend makes at its own pace,
+    or a reply some models give before the tool call that others give after::
+
+        - event: function_call
+          calls:
+            - name: delegate
+        - event: response
+          eval: "tells a joke"
+          check_from: turn_start    # a model may say it before it delegates
+        - event: function_call
+          calls:
+            - name: check_ci_status
+          check_from: turn_start    # the backend makes it in its own time
+
 Instead of ``user:``, a turn may press DTMF keys with ``dtmf:`` (the two are
 mutually exclusive — you press keys or you talk)::
 
@@ -218,6 +239,16 @@ is sent at its own sample rate, so it need not match the bot's input rate, and
         expect:
           - event: response
             eval: "the response says the capital of Germany is Berlin"
+
+In audio modality a spoken turn may also pause, as a person does mid-thought:
+``user:`` is then a list of text and ``pause_ms:`` silences, played to the bot
+as one stretch of audio. The judge and ``text_contains`` see the text alone::
+
+    turns:
+      - user:
+          - "So last week I went to"
+          - pause_ms: 2000
+          - "Spain with my family."
 
 ``expect:`` is optional; omit it for a turn that only sends input or only waits.
 
@@ -296,7 +327,12 @@ from typing import Any
 from loguru import logger
 
 from pipecat.audio.dtmf.types import KeypadEntry
-from pipecat.evals.scenario_config import _DEFAULT_JUDGE, _parse_judge_block, _parse_user_block
+from pipecat.evals.scenario_config import (
+    _DEFAULT_JUDGE,
+    _parse_judge_block,
+    _parse_trigger_disconnect,
+    _parse_user_block,
+)
 from pipecat.utils.deprecation import deprecated
 
 # Events whose payloads carry bot-generated text the judge can sensibly
@@ -316,6 +352,10 @@ FUNCTION_CALL_EVENTS = ("function_call", "function_call_stopped")
 # are the kinds the turn-completion mixin stamps on its markers; ``incomplete``
 # accepts ``short`` or ``long``.
 MARKER_KINDS = ("complete", "short", "long", "incomplete")
+
+# Where an expectation checks for its event from: where the expectation above
+# it was met, or the beginning of the turn.
+CHECK_FROM = ("previous", "turn_start")
 
 
 @dataclass
@@ -377,6 +417,10 @@ class EvalExpectation:
             raw text must hold.
         text_after: For an ``llm_marker`` event, whether text must (True) or
             must not (False) follow the first marker in the raw text.
+        check_from: Where the expectation checks for its event from:
+            ``previous`` (the default), where the expectation above it was
+            met; or ``turn_start``, the beginning of the turn, at events the
+            expectations above it did not use.
         absent: When True, the expectation is inverted: it passes only when NO
             event of this type arrives before the ``within_ms`` budget expires,
             and fails as soon as one does. Matches on event type only;
@@ -394,6 +438,7 @@ class EvalExpectation:
     marker_first: bool | None = None
     markers: int | None = None
     text_after: bool | None = None
+    check_from: str = "previous"
     absent: bool = False
 
     @property
@@ -454,6 +499,9 @@ class EvalScriptTurn:
             ``send-text`` in text modality, or synthesized speech (``raw-audio``)
             in audio modality. If absent, the turn just waits for and asserts on
             expected events.
+        parts: The turn's text and pauses, in order, when it pauses: text to
+            speak, or the milliseconds of silence between texts. ``user`` then
+            holds the text alone. Requires ``user.modality: audio``.
         audio: Optional path to an audio file (resolved relative to the scenario
             file) played as this turn instead of synthesizing ``user``. Any
             format ``soundfile`` reads works (WAV, MP3, FLAC, OGG, ...);
@@ -484,6 +532,7 @@ class EvalScriptTurn:
 
     user: str | None
     expect: list[EvalExpectation] = field(default_factory=list)
+    parts: list[str | int] | None = None
     audio: str | None = None
     dtmf: str | None = None
     send_after: EvalSendAfter | None = None
@@ -542,12 +591,15 @@ class EvalScriptScenario:
             Mapping with ``service``, ``voice``, and optional ``model`` /
             ``language`` / ``speed`` / ``sample_rate`` / ``api_key``. Set ``language`` (a
             code like ``zh``) to synthesize non-English user turns.
-        trigger_disconnect: Whether the harness fires the bot's
+        trigger_disconnect: Whether a bot serving the server
+            :class:`~pipecat.evals.transport.EvalTransport` fires its
             ``on_client_disconnected`` handler when this scenario's connection
-            ends. Bots often cancel their pipeline there, so this is False by
-            default to avoid that between scenarios; set True to exercise the
-            bot's disconnect path. Independent of ``--stop-bot``, which tears the
-            bot down via ``eval-cancel`` regardless of the handler.
+            ends.
+
+            .. deprecated:: 1.13.0
+                No replacement. A bot fires ``on_client_disconnected`` whenever
+                the harness disconnects. Will be removed in 2.0.0.
+
         stop_on_failure: Whether the first failed turn ends the scenario
             (default True). A failed turn leaves the conversation in an unknown
             state, so continuing usually costs one timeout per remaining turn.
@@ -697,7 +749,7 @@ def _parse_script(data: dict, path: Path) -> EvalScriptScenario:
         transcriber=transcriber,
         user_audio=user_audio,
         user_speech=user_speech,
-        trigger_disconnect=bool(data.get("trigger_disconnect", False)),
+        trigger_disconnect=_parse_trigger_disconnect(data, path),
         stop_on_failure=bool(data.get("stop_on_failure", True)),
         source_path=path,
     )
@@ -725,6 +777,11 @@ def _check_user_audio(
             raise ValueError(
                 f"{path}: turn #{idx} has 'audio:' but the scenario is text modality — "
                 "set 'user.modality: audio' to play it to the bot"
+            )
+        if turn.parts is not None and not user_audio:
+            raise ValueError(
+                f"{path}: turn #{idx} pauses in 'user:' but the scenario is text modality — "
+                "set 'user.modality: audio' to speak it to the bot"
             )
 
     # A turn naming a file is played as-is; only the rest need a voice to speak them.
@@ -762,9 +819,7 @@ def _parse_turn(t: Any, path: Path, idx: int) -> EvalScriptTurn:
     if not isinstance(t, dict):
         raise ValueError(f"{path}: turn #{idx} must be a mapping")
 
-    user = t.get("user")
-    if user is not None and not isinstance(user, str):
-        raise ValueError(f"{path}: turn #{idx} 'user:' must be a string if present")
+    user, parts = _parse_user(t.get("user"), path, idx)
 
     dtmf = _parse_dtmf(t.get("dtmf"), path, idx)
     if user is not None and dtmf is not None:
@@ -801,6 +856,11 @@ def _parse_turn(t: Any, path: Path, idx: int) -> EvalScriptTurn:
                 f"{path}: turn #{idx} has 'audio:' but no 'user:' — give the text the "
                 "recording says, so the judge and 'text_contains' have the turn's input"
             )
+        if parts is not None:
+            raise ValueError(
+                f"{path}: turn #{idx} has both 'audio:' and pauses in 'user:' — "
+                "a recording has its own pauses"
+            )
         audio = str((path.parent / audio).resolve())
 
     # Image paths resolve relative to the scenario file, so a scenario is portable.
@@ -811,7 +871,41 @@ def _parse_turn(t: Any, path: Path, idx: int) -> EvalScriptTurn:
         image = str((path.parent / image).resolve())
 
     return EvalScriptTurn(
-        user=user, dtmf=dtmf, expect=expect, send_after=send_after, image=image, audio=audio
+        user=user,
+        parts=parts,
+        dtmf=dtmf,
+        expect=expect,
+        send_after=send_after,
+        image=image,
+        audio=audio,
+    )
+
+
+def _parse_user(user: Any, path: Path, turn_idx: int) -> tuple[str | None, list[str | int] | None]:
+    """Parse a turn's ``user:``: its text, and its text and pauses when it pauses."""
+    if user is None or isinstance(user, str):
+        return user, None
+    if not isinstance(user, list):
+        raise ValueError(
+            f"{path}: turn #{turn_idx} 'user:' must be a string, or a list of text and pauses"
+        )
+    parts = [_parse_user_part(part, path, turn_idx) for part in user]
+    texts = [part for part in parts if isinstance(part, str)]
+    if not texts:
+        raise ValueError(f"{path}: turn #{turn_idx} 'user:' has pauses but no text")
+    return " ".join(texts), parts
+
+
+def _parse_user_part(part: Any, path: Path, turn_idx: int) -> str | int:
+    """Parse one item of a pausing ``user:``: text, or a pause's milliseconds."""
+    if isinstance(part, str) and part.strip():
+        return part.strip()
+    if isinstance(part, dict) and set(part) == {"pause_ms"}:
+        pause_ms = part["pause_ms"]
+        if isinstance(pause_ms, int) and not isinstance(pause_ms, bool) and pause_ms > 0:
+            return pause_ms
+    raise ValueError(
+        f"{path}: turn #{turn_idx} 'user:' items must be text or 'pause_ms: <positive int>'"
     )
 
 
@@ -894,6 +988,19 @@ def _parse_expectation(e: Any, path: Path, turn_idx: int, exp_idx: int) -> EvalE
         raise ValueError(
             f"{path}: turn #{turn_idx} expectation #{exp_idx} 'absent:' must be a boolean"
         )
+    check_from = e.get("check_from", "previous")
+    if check_from not in CHECK_FROM:
+        raise ValueError(
+            f"{path}: turn #{turn_idx} expectation #{exp_idx} 'check_from:' must be one of "
+            f"{', '.join(CHECK_FROM)}, not {check_from!r}"
+        )
+    if absent and "check_from" in e:
+        # An absence is about what arrives after the expectations before it;
+        # looking back for it has no meaning.
+        raise ValueError(
+            f"{path}: turn #{turn_idx} expectation #{exp_idx} 'absent: true' "
+            f"cannot be combined with 'check_from'"
+        )
     if absent:
         # An absent expectation matches on event type only: content and call
         # checks describe an event that must arrive, which contradicts absence.
@@ -951,6 +1058,7 @@ def _parse_expectation(e: Any, path: Path, turn_idx: int, exp_idx: int) -> EvalE
         marker_first=e.get("marker_first"),
         markers=e.get("markers"),
         text_after=e.get("text_after"),
+        check_from=check_from,
         absent=absent,
     )
 

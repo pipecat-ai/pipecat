@@ -7,9 +7,9 @@
 """Selection of the incoming video frames an input transport passes on."""
 
 import time
-import warnings
 
 from pipecat.frames.frames import UserImageRequestFrame
+from pipecat.utils.deprecation import warn_deprecated
 
 # How early a frame may arrive and still count as due, at most half an interval.
 # It covers jitter in the incoming stream, which is about the same at any framerate.
@@ -25,10 +25,9 @@ def _capture_framerate(framerate: int | None, on_request_only: bool, method: str
     if on_request_only:
         return 0
     if framerate == 0:
-        warnings.warn(
-            f"`framerate=0` in `{method}` is deprecated since 1.13.0 and will be removed "
+        warn_deprecated(
+            f"`{method}(framerate=0)` is deprecated since 1.13.0 and will be removed "
             "in 2.0.0. Use `on_request_only=True` instead.",
-            DeprecationWarning,
             stacklevel=3,
         )
     return framerate

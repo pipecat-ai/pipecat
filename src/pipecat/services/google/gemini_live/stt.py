@@ -8,7 +8,8 @@
 
 ``GeminiSTTService`` streams audio to a Gemini Live transcription model (e.g.
 ``gemini-3.5-transcribe-live``) over the Gemini Live API, with automatic
-language detection, language hints, and adaptation phrases.
+language detection, language hints, adaptation phrases, and a choice of
+verbatim or smart transcription.
 """
 
 import asyncio
@@ -16,7 +17,7 @@ import time
 from collections.abc import AsyncGenerator
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 from loguru import logger
 
@@ -90,11 +91,18 @@ class GeminiSTTSettings(STTSettings):
             ``False`` to disable auto-detection without providing hints.
         adaptation_phrases: Phrases to bias recognition toward, improving
             accuracy for domain-specific terms (e.g. ``["oatmilk"]``).
+        mode: Transcription mode, ``"VERBATIM"`` (the model's default) or
+            ``"SMART"``, which removes disfluencies and applies light
+            grammatical cleanup and formatting. Requires
+            google-genai >= 2.20.0.
     """
 
     languages: list[Language] | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     language_auto: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     adaptation_phrases: list[str] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    mode: Literal["SMART", "VERBATIM"] | str | None | NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
 
 
 class GeminiSTTService(STTService):
@@ -103,7 +111,8 @@ class GeminiSTTService(STTService):
     Streams raw PCM audio to a Gemini Live transcription model (e.g.
     ``gemini-3.5-transcribe-live``) over the Gemini Live API and pushes
     interim and final transcription frames as results arrive. Supports
-    automatic language detection, language hints, and adaptation phrases.
+    automatic language detection, language hints, adaptation phrases, and a
+    choice of verbatim or smart transcription.
 
     The model detects utterance boundaries itself, and when the pipeline's VAD
     signals end of speech the service additionally sends an audio-stream-end
@@ -159,6 +168,7 @@ class GeminiSTTService(STTService):
             languages=[],
             language_auto=None,
             adaptation_phrases=None,
+            mode=None,
         )
 
         if settings is not None:
@@ -355,6 +365,10 @@ class GeminiSTTService(STTService):
         adaptation_phrases = self._settings.adaptation_phrases
         if is_given(adaptation_phrases) and adaptation_phrases:
             transcription_kwargs["adaptation_phrases"] = list(adaptation_phrases)
+
+        mode = self._settings.mode
+        if is_given(mode) and mode:
+            transcription_kwargs["mode"] = mode
 
         return LiveConnectConfig(
             response_modalities=[Modality.TEXT],

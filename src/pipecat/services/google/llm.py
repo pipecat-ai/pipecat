@@ -72,17 +72,57 @@ except ModuleNotFoundError as e:
     raise ImportError(f"Missing module: {e}") from e
 
 
-# The lowest thinking level each model accepts, keyed by model name prefix. A
-# model that isn't listed is assumed to accept "minimal", the fastest setting.
-_LOWEST_MODEL_THINKING_LEVELS = {
-    "gemini-3.7-flash": "low",
-    "gemini-3.8-flash": "low",
+# The lowest thinking setting Google documents for each model, sent when the
+# caller doesn't configure ``thinking``, keyed by model name. The 2.5 models
+# take a budget, where 0 turns thinking off and 2.5 Pro's minimum is 128; later
+# models take a level. 3.7 Flash, 3.8 Flash, 3.1 Pro and 4 Argon reject
+# "minimal", and the Flash-Lite models already default to it. Aliases such as
+# ``gemini-flash-latest`` are left out, since the model they name changes.
+_THINKING_DEFAULTS: dict[str, dict[str, Any]] = {
+    "gemini-2.5-flash": {"thinking_budget": 0},
+    "gemini-2.5-flash-lite": {"thinking_budget": 0},
+    "gemini-2.5-pro": {"thinking_budget": 128},
+    "gemini-3-flash-preview": {"thinking_level": "minimal"},
+    "gemini-3.1-flash-lite": {"thinking_level": "minimal"},
+    "gemini-3.1-pro-preview": {"thinking_level": "low"},
+    "gemini-3.1-pro-preview-customtools": {"thinking_level": "low"},
+    "gemini-3.5-flash": {"thinking_level": "minimal"},
+    "gemini-3.5-flash-lite": {"thinking_level": "minimal"},
+    "gemini-3.6-flash": {"thinking_level": "minimal"},
+    "gemini-3.7-flash": {"thinking_level": "low"},
+    "gemini-3.8-flash": {"thinking_level": "low"},
+    "gemini-4-argon": {"thinking_level": "low"},
+    "gemma-4-26b-a4b-it": {"thinking_level": "minimal"},
+    "gemma-4-31b-it": {"thinking_level": "minimal"},
 }
+
+
+def _model_name(model: str) -> str:
+    """The name a model id refers to, for looking the model up.
+
+    ``_THINKING_DEFAULTS`` and ``_MODELS_SUPPORTING_THINKING_LEVEL`` are keyed by
+    name. Ids can name a model by resource path (``models/gemini-3.6-flash``,
+    ``publishers/google/models/gemini-3.6-flash``) or by version
+    (``gemini-2.5-flash-001``).
+    """
+    return re.sub(r"-\d{3}$", "", model.lower().rsplit("/", 1)[-1])
+
 
 # Models that take their thinking configuration from thinking_level, keyed by
 # model name prefix. Whether one of these honors a thinking_budget set alongside
 # it varies by model and by backend, so such a budget can't be relied on.
-_MODELS_SUPPORTING_THINKING_LEVEL = ("gemini-3",)
+_MODELS_SUPPORTING_THINKING_LEVEL = ("gemini-3", "gemini-4", "gemma-4")
+
+
+def _can_think(name: str) -> bool:
+    """Whether a model name belongs to a Gemini or Gemma text model that can think.
+
+    Covers Gemini 2.5 and later, Gemma 4, and aliases such as
+    ``gemini-flash-latest``. Image, speech and embedding models are excluded.
+    """
+    if any(kind in name for kind in ("image", "tts", "audio", "live", "embedding")):
+        return False
+    return bool(re.match(r"gemini-(2\.5|[3-9])|gemma-4|gemini-[a-z-]+-latest$", name))
 
 
 class GoogleThinkingConfig(BaseModel):
@@ -103,7 +143,7 @@ class GoogleThinkingConfig(BaseModel):
             -1 for dynamic thinking (model decides), 0 to disable thinking,
             or a specific token count (e.g., 128-32768 for 2.5 Pro).
             If not provided, most models today default to dynamic thinking.
-            See https://ai.google.dev/gemini-api/docs/thinking#set-budget
+            See https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/thinking#gemini-2-5-and-earlier-models
             for default values and allowed ranges.
             Note: Gemini 3 models must use thinking_level instead.
         include_thoughts: Whether to include thought summaries in the response.
@@ -124,7 +164,11 @@ class GoogleLLMSettings(LLMSettings):
     """Settings for GoogleLLMService.
 
     Parameters:
-        thinking: Thinking configuration.
+        thinking: Thinking configuration. If this is not provided, Pipecat
+            sends the lowest thinking setting Google documents for the model,
+            for the fastest responses, and logs what it sent. Models Pipecat
+            doesn't list, and any model when ``use_provider_thinking_default`` is
+            set, run at Google's default.
         safety_settings: Content safety filters, as a list of
             :class:`~google.genai.types.SafetySetting`. Each entry pairs a harm
             category with the threshold at which content is blocked. Categories
@@ -195,9 +239,9 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
             thinking: Thinking configuration with thinking_budget, thinking_level, and include_thoughts.
                 Used to control the model's internal "thinking" process used before generating a response.
                 Gemini 2.5 series models use thinking_budget; Gemini 3 models use thinking_level.
-                If this is not provided, Pipecat disables thinking for all
-                models where that's possible (the 2.5 series, except 2.5 Pro),
-                to reduce latency.
+                If this is not provided, Pipecat sends the lowest thinking setting Google
+                documents for the model, for the fastest responses, and logs what it sent.
+                Models Pipecat doesn't list run at Google's default.
             extra: Additional parameters as a dictionary.
         """
 
@@ -421,6 +465,9 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
             config=generation_config,
         )
 
+        if response.candidates and response.candidates[0].finish_reason:
+            self._handle_finish_reason(response.candidates[0].finish_reason)
+
         # Extract text from response
         if response.candidates and response.candidates[0].content:
             for part in response.candidates[0].content.parts or []:
@@ -473,7 +520,7 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
 
         # Applied last, so an explicit thinking config from the settings or from
         # extra wins over the low-latency default.
-        self._maybe_unset_thinking_budget(generation_params)
+        self._maybe_apply_thinking_default(generation_params)
 
         return generation_params
 
@@ -506,7 +553,7 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
             return
 
         model = assert_given(self._settings.model)
-        if not model or not model.startswith(_MODELS_SUPPORTING_THINKING_LEVEL):
+        if not model or not _model_name(model).startswith(_MODELS_SUPPORTING_THINKING_LEVEL):
             return
 
         logger.warning(
@@ -514,32 +561,32 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
             "ignore it or reject the request outright. Use thinking_level instead."
         )
 
-    def _maybe_unset_thinking_budget(self, generation_params: dict[str, Any]):
-        try:
-            model = assert_given(self._settings.model)
-            # If we have an image model, we don't apply a thinking default.
-            if model is None or "image" in model:
-                return
-            # If thinking_config is already set, don't override it.
-            if "thinking_config" in generation_params:
-                return
-            # Apply model-aware low-latency thinking defaults.
-            # Gemini 2.5 Flash: disable thinking via thinking_budget.
-            # Gemini 3+ Flash: use the lowest thinking_level the model accepts.
-            if model.startswith("gemini-2.5-flash"):
-                generation_params["thinking_config"] = {"thinking_budget": 0}
-            elif model.startswith("gemini-3") and "flash" in model:
-                level = next(
-                    (
-                        lowest
-                        for prefix, lowest in _LOWEST_MODEL_THINKING_LEVELS.items()
-                        if model.startswith(prefix)
-                    ),
-                    "minimal",
-                )
-                generation_params["thinking_config"] = {"thinking_level": level}
-        except Exception as e:
-            logger.error(f"Failed to unset thinking budget: {e}")
+    def _maybe_apply_thinking_default(self, generation_params: dict[str, Any]):
+        """Send the model's lowest thinking setting when none is configured.
+
+        Applies the model's entry in ``_THINKING_DEFAULTS``, if it has one.
+        Generation params that already set ``thinking_config``, from the
+        settings or from ``extra``, are left as they are, and so are all
+        generation params when ``use_provider_thinking_default`` is set. The first
+        request for each model logs the setting sent, or that the model runs at
+        Google's default, warning for an unlisted model that can think.
+
+        Args:
+            generation_params: The generation params dict (modified in place).
+        """
+        if "thinking_config" in generation_params:
+            return
+        model = assert_given(self._settings.model) or ""
+        name = _model_name(model)
+        thinking = _THINKING_DEFAULTS.get(name)
+        self._apply_thinking_default(
+            generation_params,
+            model,
+            {"thinking_config": thinking} if thinking is not None else None,
+            can_think=_can_think(name),
+            provider="Google",
+            settings_fields="`thinking`",
+        )
 
     # Models known to accept a request whose contents end with a model turn,
     # continuing that turn as the start of the response. Newer models reject
@@ -707,7 +754,7 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
         Anything other than a normal stop leaves the turn short of what the model
         would otherwise have said: the response was withheld (safety, recitation,
         prohibited content), a tool call was rejected, or the output hit the token
-        limit. Whatever text did arrive is still passed downstream.
+        limit. Whatever text did arrive is still passed on.
         """
         if finish_reason in (FinishReason.STOP, FinishReason.FINISH_REASON_UNSPECIFIED):
             return

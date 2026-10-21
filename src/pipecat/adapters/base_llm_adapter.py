@@ -28,8 +28,10 @@ from pipecat.processors.aggregators.llm_context import (
     LLMSpecificMessage,
     NotGiven,
 )
+from pipecat.utils.deprecation import warn_deprecated
 from pipecat.utils.file_resolver import FileResolver
 from pipecat.utils.security.ssrf import UrlReachability
+from pipecat.utils.types import is_given
 
 # Should be a TypedDict
 TLLMInvocationParams = TypeVar("TLLMInvocationParams", bound=Mapping[str, Any])
@@ -86,15 +88,12 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
         if method is not None and not inspect.iscoroutinefunction(method):
             # stacklevel=3 steps past ABCMeta.__new__, which calls this hook,
             # so the warning points at the subclass's definition.
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    f"`{cls.__name__}` defines `get_llm_invocation_params` as a sync method, "
-                    "but it is async. Define it with `async def`, and `await` it where you "
-                    "call it.",
-                    DeprecationWarning,
-                    stacklevel=3,
-                )
+            warn_deprecated(
+                f"`def {cls.__name__}.get_llm_invocation_params` is deprecated since 1.13.0 "
+                "and will be removed in 2.0.0. Use `async def` instead. `await` the method "
+                "where you call it.",
+                stacklevel=3,
+            )
 
     @property
     def builtin_tools(self) -> dict[str, FunctionSchema]:
@@ -357,11 +356,37 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
             self.id_for_llm_specific_messages, truncate_large_values=truncate_large_values
         )
 
+    def _realtime_session_tools(self, context_tools: Any, service_tools: Any) -> list[Any] | None:
+        """The tools a realtime session carries, in provider format.
+
+        The context's own tools when it has any, else the init-provided ones.
+        Built-in tools ride along with whichever set is in use, and are the
+        set when there is neither.
+
+        Args:
+            context_tools: The context's tools (``NOT_GIVEN`` or ``None`` when it
+                has none).
+            service_tools: The service's init-provided tools, as
+                ``_service_tools()`` returns them: a ``ToolsSchema`` or a
+                provider-native tool list, or ``None``.
+
+        Returns:
+            The tools, or ``None`` when there are none at all.
+        """
+        own = (
+            context_tools
+            if context_tools is not None and is_given(context_tools)
+            else service_tools
+        )
+        converted = self.from_standard_tools(own)
+        return None if converted is None or not is_given(converted) else converted
+
     def from_standard_tools(self, tools: Any) -> list[Any] | NotGiven | None:
         """Convert tools from standard format to provider format.
 
         Built-in tools are automatically merged into the schema before conversion so that every
-        inference request receives them without the user having to declare them explicitly.
+        inference request receives them without the user having to declare them explicitly;
+        when there are no other tools, they are the tool set.
 
         Args:
             tools: Tools in standard format or provider-specific format.
@@ -376,6 +401,8 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
                     standard_tools=tools.standard_tools + list(self._builtin_tools.values()),
                     custom_tools=tools.custom_tools,
                 )
+            elif tools is None or not is_given(tools):
+                tools = ToolsSchema(standard_tools=list(self._builtin_tools.values()))
             else:
                 # User supplied tools in a legacy/provider-specific format.
                 # Built-in tools cannot be safely merged, so they will not be injected.
@@ -412,19 +439,12 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
         if self._warned_context_system_message:
             return
         self._warned_context_system_message = True
-        # Raised under an `always` filter so it survives the default
-        # `ignore::DeprecationWarning` that hides call sites outside
-        # `__main__` — every caller here is inside an LLM service. The flag
-        # above supplies the deduplication that filter would provide.
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                'Passing the system prompt as an initial "system" message in `LLMContext` is'
-                " deprecated since 1.9.0 and will be removed in 2.0.0. Set `system_instruction`"
-                " on the LLM service instead.",
-                DeprecationWarning,
-                stacklevel=3,
-            )
+        warn_deprecated(
+            '`LLMContext(messages=[{"role": "system", ...}, ...])` is deprecated since 1.9.0'
+            " and will be removed in 2.0.0. Use `system_instruction` on the LLM service"
+            " instead.",
+            stacklevel=3,
+        )
 
     def _extract_initial_system(
         self,

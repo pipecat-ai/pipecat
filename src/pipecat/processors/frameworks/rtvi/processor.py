@@ -38,6 +38,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.frameworks.rtvi.frames import (
     RTVIClientMessageFrame,
+    RTVISendTextFrame,
     RTVIUICancelJobGroupFrame,
     RTVIUIEventFrame,
     RTVIUISnapshotFrame,
@@ -47,6 +48,7 @@ from pipecat.services.llm_service import (
     FunctionCallParams,  # TODO(aleix): we shouldn't import `services` from `processors`
 )
 from pipecat.transports.base_transport import BaseTransport
+from pipecat.utils.deprecation import warn_deprecated
 
 
 class RTVIProcessor(FrameProcessor):
@@ -91,13 +93,11 @@ class RTVIProcessor(FrameProcessor):
         self._message_task: asyncio.Task | None = None
 
         if transport is not None:
-            import warnings
-
-            warnings.warn(
-                "Passing 'transport' to RTVIProcessor is deprecated since 1.4.0 and is "
-                "ignored. Audio input and audio-streaming start are driven by frames; for "
-                "client-ready audio gating set audio_in_stream_on_start=False on the transport.",
-                DeprecationWarning,
+            warn_deprecated(
+                "`RTVIProcessor(transport=...)` is deprecated since 1.4.0 and will be removed "
+                "in 2.0.0. No replacement. The argument is ignored: audio input and "
+                "audio-streaming start are driven by frames. For client-ready audio gating, "
+                "set `audio_in_stream_on_start=False` on the transport.",
                 stacklevel=2,
             )
 
@@ -143,7 +143,7 @@ class RTVIProcessor(FrameProcessor):
         await self._send_bot_ready(about=about)
 
     async def interrupt_bot(self):
-        """Send a bot interruption frame upstream."""
+        """Interrupt the bot, as :meth:`broadcast_interruption` does."""
         await self.broadcast_interruption()
 
     async def send_server_message(self, data: Any):
@@ -177,13 +177,14 @@ class RTVIProcessor(FrameProcessor):
         )
         await self.push_frame(frame)
 
-    async def handle_message(self, message: RTVI.Message):
+    async def handle_message(self, message: RTVI.Message, user_id: str | None = None):
         """Handle an incoming RTVI message.
 
         Args:
             message: The RTVI message to handle.
+            user_id: Identifier for the user who sent it, if known.
         """
-        await self._message_queue.put(message)
+        await self._message_queue.put((message, user_id))
 
     async def handle_function_call(self, params: FunctionCallParams):
         """Handle a function call from the LLM.
@@ -197,12 +198,10 @@ class RTVIProcessor(FrameProcessor):
             Configure reporting level via ``RTVIObserverParams.function_call_report_level``.
             Will be removed in 2.0.0.
         """
-        import warnings
-
-        warnings.warn(
-            "handle_function_call is deprecated. Function call events are now "
-            "automatically sent by RTVIObserver using llm-function-call-in-progress.",
-            DeprecationWarning,
+        warn_deprecated(
+            "`RTVIProcessor.handle_function_call` is deprecated since 0.0.102 and will be "
+            "removed in 2.0.0. Use `RTVIObserver` instead. It sends function call events as "
+            "`llm-function-call-in-progress`.",
             stacklevel=2,
         )
         fn = RTVI.LLMFunctionCallMessageData(
@@ -282,8 +281,8 @@ class RTVIProcessor(FrameProcessor):
     async def _message_task_handler(self):
         """Handle incoming transport messages."""
         while True:
-            message = await self._message_queue.get()
-            await self._handle_message(message)
+            message, user_id = await self._message_queue.get()
+            await self._handle_message(message, user_id)
             self._message_queue.task_done()
 
     async def _handle_transport_message(self, frame: InputTransportMessageFrame):
@@ -294,12 +293,15 @@ class RTVIProcessor(FrameProcessor):
                 logger.warning(f"Ignoring not RTVI message: {transport_message}")
                 return
             message = RTVI.Message.model_validate(transport_message)
-            await self._message_queue.put(message)
+            # Transports that know the sender, such as Daily and LiveKit, set it
+            # as ``participant_id`` on their subclass of the frame.
+            user_id = getattr(frame, "participant_id", None)
+            await self._message_queue.put((message, user_id))
         except ValidationError as e:
             await self.send_error(f"Invalid RTVI transport message: {e}")
             logger.warning(f"Invalid RTVI transport message: {e}")
 
-    async def _handle_message(self, message: RTVI.Message):
+    async def _handle_message(self, message: RTVI.Message, user_id: str | None = None):
         """Handle a parsed RTVI message."""
         try:
             match message.type:
@@ -364,7 +366,7 @@ class RTVIProcessor(FrameProcessor):
                     await self._handle_function_call_result(data)
                 case "send-text":
                     data = RTVI.SendTextData.model_validate(message.data)
-                    await self._handle_send_text(data)
+                    await self._handle_send_text(data, message.id, user_id)
                 case "send-file":
                     data = RTVI.SendFileData.model_validate(message.data)
                     await self._handle_send_file(data, message.id)
@@ -470,7 +472,9 @@ class RTVIProcessor(FrameProcessor):
         for button in data.buttons:
             await self.push_frame(InputDTMFFrame(button=button))
 
-    async def _handle_send_text(self, data: RTVI.SendTextData):
+    async def _handle_send_text(
+        self, data: RTVI.SendTextData, message_id: str, user_id: str | None = None
+    ):
         """Handle a send-text message from the client."""
         opts = data.options if data.options is not None else RTVI.SendTextOptions()
         if opts.run_immediately:
@@ -494,6 +498,9 @@ class RTVIProcessor(FrameProcessor):
             run_llm=opts.run_immediately,
         )
         await self.push_frame(text_frame)
+        await self.push_frame(
+            RTVISendTextFrame(msg_id=message_id, text=data.content, user_id=user_id)
+        )
         if toggle_skip_tts:
             output_frame = LLMConfigureOutputFrame(skip_tts=cur_llm_skip_tts)
             await self.push_frame(output_frame)

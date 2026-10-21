@@ -17,7 +17,6 @@ service-specific adapter.
 import asyncio
 import base64
 import copy
-import io
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import (
@@ -30,13 +29,13 @@ from typing import (
 )
 
 from loguru import logger
-from PIL import Image
 
 from pipecat.adapters.schemas.direct_function import DirectFunction
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.utils import pcm_to_wav
 from pipecat.frames.frames import AudioRawFrame, FileSourceType
+from pipecat.utils.image import encode_image
 
 # The sentinel is part of LLMContext's public surface — tools and tool_choice
 # default to it — so it is re-exported here for callers. The redundant aliases
@@ -85,6 +84,30 @@ class LLMSpecificMessage:
 
 
 LLMContextMessage: TypeAlias = LLMStandardMessage | LLMSpecificMessage
+
+
+def standard_message_text(message: LLMContextMessage) -> str:
+    """Return the text of a standard context message, joining the text parts of list content.
+
+    Args:
+        message: A context message.
+
+    Returns:
+        The text, or ``""`` for a message in a service's own format or one
+        that carries no text.
+    """
+    if isinstance(message, LLMSpecificMessage):
+        return ""
+    content = message.get("content")  # type: ignore[attr-defined]
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return " ".join(
+            part.get("text", "")
+            for part in content
+            if isinstance(part, dict) and part.get("type") == "text" and part.get("text")
+        )
+    return ""
 
 
 class LLMContext:
@@ -162,23 +185,10 @@ class LLMContext:
             image: Raw image bytes.
             text: Optional text to include with the image.
         """
-        # Format is a mime type: image is already encoded
-        image_already_encoded = format.startswith("image/")
+        data, content_type = await encode_image(image, size, format)
+        encoded_image = base64.b64encode(data).decode("utf-8")
 
-        def encode_image():
-            if image_already_encoded:
-                bytes = image
-            else:
-                # Encode to JPEG
-                buffer = io.BytesIO()
-                Image.frombytes(format, size, image).save(buffer, format="JPEG")
-                bytes = buffer.getvalue()
-            encoded_image = base64.b64encode(bytes).decode("utf-8")
-            return encoded_image
-
-        encoded_image = await asyncio.to_thread(encode_image)
-
-        url = f"data:{format if image_already_encoded else 'image/jpeg'};base64,{encoded_image}"
+        url = f"data:{content_type};base64,{encoded_image}"
 
         return LLMContext.create_image_url_message(role=role, url=url, text=text)
 

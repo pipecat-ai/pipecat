@@ -35,6 +35,7 @@ from openai.types.responses import (
     ResponseReasoningSummaryTextDeltaEvent,
     ResponseStreamEvent,
     ResponseTextDeltaEvent,
+    ResponseUsage,
 )
 from pydantic import BaseModel
 from websockets.exceptions import ConnectionClosed
@@ -149,10 +150,11 @@ class OpenAIResponsesLLMSettings(LLMSettings):
     Parameters:
         max_completion_tokens: Maximum completion tokens to generate.
         reasoning: Reasoning configuration for reasoning-capable models. ``None``
-            (the default) leaves reasoning unconfigured — the service then disables
-            reasoning by default for whatever models possible, to keep latency low
-            for real-time voice. Note that the default model, ``gpt-4.1``, does
-            not reason.
+            (the default) leaves reasoning unconfigured: the service then sends
+            the lowest effort OpenAI documents for the model, for the fastest
+            responses, and logs what it sent. Models Pipecat doesn't list, and
+            any model when ``use_provider_thinking_default`` is set, run at
+            OpenAI's default. The default model, ``gpt-4.1``, does not reason.
     """
 
     # Override inherited LLMSettings fields to also accept the OpenAI SDK's
@@ -178,35 +180,45 @@ def _is_o_series(model: str) -> bool:
     return bool(re.match(r"o\d", model.lower()))
 
 
-def _default_reasoning_effort(model: str) -> str | None:
-    """The effort to request for a model when ``reasoning`` isn't configured.
+# The lowest reasoning effort OpenAI documents for each model, sent when the
+# caller doesn't configure ``reasoning``, keyed by model name. The pro models
+# accept nothing below "medium", and gpt-5-pro only "high".
+_THINKING_DEFAULTS: dict[str, str] = {
+    "gpt-5": "minimal",
+    "gpt-5-mini": "minimal",
+    "gpt-5-nano": "minimal",
+    "gpt-5-pro": "high",
+    "gpt-5.1": "none",
+    "gpt-5.2": "none",
+    "gpt-5.2-pro": "medium",
+    "gpt-5.4": "none",
+    "gpt-5.4-mini": "none",
+    "gpt-5.4-nano": "none",
+    "gpt-5.4-pro": "medium",
+    "gpt-5.5": "none",
+    "gpt-5.5-pro": "medium",
+    "gpt-5.6-luna": "none",
+    "gpt-5.6-sol": "none",
+    "gpt-5.6-terra": "none",
+    "gpt-6-astra": "low",
+    "gpt-6-luna": "none",
+    "gpt-6-sol": "none",
+    "gpt-6.1-sol": "low",
+    "o1": "low",
+    "o1-pro": "low",
+    "o3": "low",
+    "o3-mini": "low",
+    "o3-pro": "low",
+    "o4-mini": "low",
+}
 
-    ``"none"`` switches reasoning off on the mainline gpt series from gpt-5.1
-    onward. The original ``gpt-5``, ``gpt-5-mini`` and ``gpt-5-nano`` reject
-    ``"none"``, so they get their lowest effort, ``"minimal"``. Models that
-    accept neither are left at the provider default: the o-series, the ``-pro``
-    models, ``gpt-6-astra`` and ``gpt-6.1-sol``.
 
-    Args:
-        model: The model name, optionally with a snapshot date
-            (e.g. ``"gpt-5.4"``, ``"gpt-5-2025-08-07"``, ``"o3"``).
+def _model_name(model: str) -> str:
+    """The name a model id refers to, the key it's looked up by in ``_THINKING_DEFAULTS``.
 
-    Returns:
-        The effort level, or ``None`` to leave the provider default, which is
-        also the case for models that don't reason or aren't recognized (see
-        :func:`_model_supports_reasoning`).
+    A dated snapshot (``gpt-5-2025-08-07``) gets its model's entry.
     """
-    if not _model_supports_reasoning(model):
-        return None
-    model = model.lower()
-    if _is_o_series(model) or model.startswith(("gpt-6-astra", "gpt-6.1-sol")):
-        return None
-    name = re.sub(r"-\d{4}-\d{2}-\d{2}$", "", model)
-    if name.endswith("-pro"):
-        return None
-    if name in ("gpt-5", "gpt-5-mini", "gpt-5-nano"):
-        return "minimal"
-    return "none"
+    return re.sub(r"-\d{4}-\d{2}-\d{2}$", "", model.lower())
 
 
 def _model_supports_reasoning(model: str) -> bool | None:
@@ -281,9 +293,11 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
             project: OpenAI project ID.
             default_headers: Additional HTTP headers to include in requests.
             service_tier: Service tier to use: "auto", "default", "flex",
-                "scale", "fast" or "priority". "fast" is OpenAI's low-latency
-                tier, the name that replaced "priority"; both values are
-                accepted.
+                "scale", "fast", "priority" or "ultrafast". "fast" is OpenAI's
+                low-latency tier, the name that replaced "priority"; both values
+                are accepted. "ultrafast" is the access-controlled Ultrafast
+                Processing tier, which shortens the time between output tokens
+                on the models that offer it.
             settings: Runtime-updatable settings.
             retry_timeout_secs: How long an inference may go without producing
                 output before it is abandoned and re-issued, when
@@ -427,13 +441,13 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
             # turns, preserving reasoning context across the conversation.
             params["include"] = ["reasoning.encrypted_content"]
             self._warn_if_reasoning_unsupported()
-        else:
-            # No reasoning configured: disable it by default on the mainline gpt
-            # series from gpt-5 onward, for real-time latency (see the helper).
-            self._maybe_disable_reasoning(params)
 
         # Extra settings
         params.update(self._settings.extra)
+
+        # Applied last, so reasoning configured in the settings or in extra wins
+        # over the low-latency default.
+        self._maybe_apply_thinking_default(params)
 
         return params
 
@@ -537,25 +551,31 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
 
     # -- reasoning ------------------------------------------------------------
 
-    def _maybe_disable_reasoning(self, params: dict):
-        """Disable reasoning by default on the mainline gpt series for real-time voice.
+    def _maybe_apply_thinking_default(self, params: dict):
+        """Send the model's lowest reasoning effort when no reasoning is configured.
 
-        When the caller hasn't configured ``reasoning``, request ``effort="none"``
-        for whatever models possible, or ``"minimal"`` for models whose lowest
-        effort it is (see :func:`_default_reasoning_effort`). Note that this is a
-        no-op for models like ``gpt-5.4`` that already default to ``none``. Models
-        that accept neither are left at the provider default, as are gpt-4.x and
-        earlier, which don't reason at all. Mirrors Gemini's
-        ``_maybe_unset_thinking_budget``, which disables or minimizes thinking on
-        its latency-sensitive models.
+        Applies the model's entry in ``_THINKING_DEFAULTS``, if it has one. A
+        request that already sets ``reasoning``, from the settings or from
+        ``extra``, is left as it is. So is every request when
+        ``use_provider_thinking_default`` is set. The first request for each model
+        logs the effort sent, or that the model runs at OpenAI's default,
+        warning for an unlisted reasoning model.
 
         Args:
             params: The response params dict (modified in place).
         """
-        model = assert_given(self._settings.model)
-        effort = _default_reasoning_effort(model) if model else None
-        if effort:
-            params["reasoning"] = {"effort": effort}
+        if "reasoning" in params:
+            return
+        model = assert_given(self._settings.model) or ""
+        effort = _THINKING_DEFAULTS.get(_model_name(model))
+        self._apply_thinking_default(
+            params,
+            model,
+            {"reasoning": {"effort": effort}} if effort is not None else None,
+            can_think=bool(_model_supports_reasoning(model)),
+            provider="OpenAI",
+            settings_fields="`reasoning`",
+        )
 
     def _warn_if_reasoning_unsupported(self):
         """Log a clear error when reasoning is configured on a model that can't use it.
@@ -1102,6 +1122,22 @@ class OpenAIResponsesLLMService(
             await cleanup()
             raise
 
+    async def _report_event_usage(self, usage: dict | None):
+        """Report the token usage of a response received over the WebSocket."""
+        if not usage:
+            return
+        input_details = usage.get("input_tokens_details") or {}
+        output_details = usage.get("output_tokens_details") or {}
+        tokens = LLMTokenUsage(
+            prompt_tokens=usage.get("input_tokens", 0),
+            completion_tokens=usage.get("output_tokens", 0),
+            total_tokens=usage.get("total_tokens", 0),
+            cache_read_input_tokens=input_details.get("cached_tokens", 0),
+            cache_creation_input_tokens=input_details.get("cache_write_tokens", 0),
+            reasoning_tokens=output_details.get("reasoning_tokens", 0),
+        )
+        await self.start_llm_usage_metrics(tokens)
+
     async def _receive_response_events(
         self, context: LLMContext, full_input: list, output_timeout_secs: float | None = None
     ):
@@ -1213,19 +1249,7 @@ class OpenAIResponsesLLMService(
 
             elif event_type == "response.completed":
                 response = event.get("response", {})
-                usage = response.get("usage")
-                if usage:
-                    input_details = usage.get("input_tokens_details") or {}
-                    output_details = usage.get("output_tokens_details") or {}
-                    tokens = LLMTokenUsage(
-                        prompt_tokens=usage.get("input_tokens", 0),
-                        completion_tokens=usage.get("output_tokens", 0),
-                        total_tokens=usage.get("total_tokens", 0),
-                        cache_read_input_tokens=input_details.get("cached_tokens", 0),
-                        cache_creation_input_tokens=input_details.get("cache_write_tokens", 0),
-                        reasoning_tokens=output_details.get("reasoning_tokens", 0),
-                    )
-                    await self.start_llm_usage_metrics(tokens)
+                await self._report_event_usage(response.get("usage"))
 
                 self._full_model_name = response.get("model")
 
@@ -1241,9 +1265,13 @@ class OpenAIResponsesLLMService(
 
             elif event_type in ("response.failed", "response.incomplete"):
                 response = event.get("response", {})
-                status_details = response.get("status_details") or {}
-                error_info = status_details.get("error") or {}
-                error_msg = error_info.get("message", f"Response {event_type.split('.')[-1]}")
+                # A response cut short or failed is still billed for its tokens.
+                await self._report_event_usage(response.get("usage"))
+                error_msg = (
+                    (response.get("error") or {}).get("message")
+                    or (response.get("incomplete_details") or {}).get("reason")
+                    or f"Response {event_type.split('.')[-1]}"
+                )
                 await self.push_error(error_msg=f"LLM response error: {error_msg}")
                 break
 
@@ -1320,6 +1348,31 @@ class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
                 await self.push_frame(LLMFullResponseEndFrame())
         else:
             await self.push_frame(frame, direction)
+
+    async def _report_usage(self, usage: ResponseUsage | None):
+        """Report a response's token usage, if it carries any."""
+        if not usage:
+            return
+        # Third-party Responses API servers may omit fields the
+        # OpenAI SDK treats as required. The SDK's lenient
+        # streaming decoder leaves anything omitted as None — at
+        # the top level (token counts), as a missing detail
+        # sub-object, or as a missing field inside one. Coalesce
+        # each to 0 so a partial usage payload can't raise or
+        # leak None into metrics.
+        input_details = usage.input_tokens_details
+        output_details = usage.output_tokens_details
+        tokens = LLMTokenUsage(
+            prompt_tokens=usage.input_tokens or 0,
+            completion_tokens=usage.output_tokens or 0,
+            total_tokens=usage.total_tokens or 0,
+            cache_read_input_tokens=(input_details.cached_tokens or 0) if input_details else 0,
+            cache_creation_input_tokens=(getattr(input_details, "cache_write_tokens", None) or 0)
+            if input_details
+            else 0,
+            reasoning_tokens=(output_details.reasoning_tokens or 0) if output_details else 0,
+        )
+        await self.start_llm_usage_metrics(tokens)
 
     async def _create_stream(self, params: dict) -> AsyncStream[ResponseStreamEvent]:
         """Open a streaming Responses API request, retrying once on timeout.
@@ -1447,41 +1500,15 @@ class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
 
                 elif isinstance(event, ResponseCompletedEvent):
                     response = event.response
-                    if response.usage:
-                        usage = response.usage
-                        # Third-party Responses API servers may omit fields the
-                        # OpenAI SDK treats as required. The SDK's lenient
-                        # streaming decoder leaves anything omitted as None — at
-                        # the top level (token counts), as a missing detail
-                        # sub-object, or as a missing field inside one. Coalesce
-                        # each to 0 so a partial usage payload can't raise or
-                        # leak None into metrics.
-                        input_details = usage.input_tokens_details
-                        output_details = usage.output_tokens_details
-                        tokens = LLMTokenUsage(
-                            prompt_tokens=usage.input_tokens or 0,
-                            completion_tokens=usage.output_tokens or 0,
-                            total_tokens=usage.total_tokens or 0,
-                            cache_read_input_tokens=(input_details.cached_tokens or 0)
-                            if input_details
-                            else 0,
-                            cache_creation_input_tokens=(
-                                getattr(input_details, "cache_write_tokens", None) or 0
-                            )
-                            if input_details
-                            else 0,
-                            reasoning_tokens=(output_details.reasoning_tokens or 0)
-                            if output_details
-                            else 0,
-                        )
-                        await self.start_llm_usage_metrics(tokens)
+                    await self._report_usage(response.usage)
 
                     # This field is used by @traced_llm for more detailed
                     # model name in tracing spans
                     self._full_model_name = response.model
 
                 elif isinstance(event, ResponseFailedEvent):
-                    # As with usage above, the detail objects and their fields
+                    await self._report_usage(event.response.usage)
+                    # As with usage, the detail objects and their fields
                     # are only as reliable as the server; coalesce to a generic
                     # message so a sparse payload still reports something.
                     error = event.response.error
@@ -1493,6 +1520,7 @@ class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
                     break
 
                 elif isinstance(event, ResponseIncompleteEvent):
+                    await self._report_usage(event.response.usage)
                     details = event.response.incomplete_details
                     reason = details.reason if details else None
                     await self.push_error(

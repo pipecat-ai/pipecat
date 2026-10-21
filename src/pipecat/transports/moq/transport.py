@@ -19,7 +19,6 @@ import asyncio
 import re
 import secrets
 import time
-import warnings
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from enum import IntEnum
@@ -47,6 +46,7 @@ from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
+from pipecat.utils.deprecation import warn_deprecated
 from pipecat.utils.errors import ErrorCategory
 
 try:
@@ -99,14 +99,15 @@ _PEER_GONE_KINDS = _NORMAL_CLOSE_KINDS | frozenset(
     }
 )
 
-# ``Cancel`` and ``Dropped`` as moq-net's reason rather than a kind: moq-ffi
+# Normal-close reasons as moq-net renders them rather than a kind: moq-ffi
 # renders an ``Error.Audio`` to a string, so what ended the audio track
-# survives only as its message tail (``"moq: cancelled"``, ``"moq: dropped"``).
-# A relay cancels a subscription when the session publishing the broadcast
-# ends, which includes a reconnecting peer replacing it with a fresh one. Only
-# the whole reason is matched, so an error that merely mentions cancellation
-# still propagates.
-_NORMAL_CLOSE_REASONS = frozenset({"dropped", "cancelled"})
+# survives only as its message tail (``"moq: cancelled"``, ``"moq: dropped"``,
+# ``"moq: no error"``). A relay cancels a subscription when the session
+# publishing the broadcast ends, which includes a reconnecting peer replacing
+# it with a fresh one; "no error" is a close with code 0, graceful by moq-net
+# convention. Only the whole reason is matched, so an error that merely
+# mentions cancellation still propagates.
+_NORMAL_CLOSE_REASONS = frozenset({"dropped", "cancelled", "no error"})
 
 # Remote reset codes inside a subsystem error message. A 0.14 peer's
 # reset reaches moq-ffi 0.4 as an unregistered code, rendered "unknown
@@ -522,10 +523,9 @@ class MOQParams(TransportParams):
         listen address rather than fail.
         """
         if isinstance(data, dict) and data.get("serve_bind") is not None:
-            warnings.warn(
+            warn_deprecated(
                 "`MOQParams.serve_bind` is deprecated since 1.8.0 and will be removed in "
                 "2.0.0. Use `MOQParams.bind` instead.",
-                DeprecationWarning,
                 stacklevel=4,
             )
             if data.get("bind") is None:

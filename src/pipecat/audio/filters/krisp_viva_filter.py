@@ -10,7 +10,6 @@ This module provides an audio filter implementation using Krisp VIVA SDK.
 """
 
 import os
-import warnings
 
 import numpy as np
 from loguru import logger
@@ -23,6 +22,7 @@ from pipecat.audio.krisp_instance import (
     krisp_sdk_uses_nanobind_bindings,
 )
 from pipecat.frames.frames import FilterControlFrame, FilterEnableFrame
+from pipecat.utils.deprecation import warn_deprecated
 
 try:
     import krisp_audio
@@ -96,14 +96,11 @@ class KrispVivaFilter(BaseAudioFilter):
             if not self._model_path:
                 self._model_path = os.getenv("KRISP_VIVA_MODEL_PATH")
                 if self._model_path:
-                    with warnings.catch_warnings():
-                        warnings.simplefilter("always")
-                        warnings.warn(
-                            "`KRISP_VIVA_MODEL_PATH` is deprecated since 0.0.99 and will be "
-                            "removed in 2.0.0. Use `KRISP_VIVA_FILTER_MODEL_PATH` instead.",
-                            DeprecationWarning,
-                            stacklevel=2,
-                        )
+                    warn_deprecated(
+                        "`KRISP_VIVA_MODEL_PATH` is deprecated since 0.0.99 and will be "
+                        "removed in 2.0.0. Use `KRISP_VIVA_FILTER_MODEL_PATH` instead.",
+                        stacklevel=2,
+                    )
         if not self._model_path:
             logger.error("Model path is not provided and KRISP_VIVA_FILTER_MODEL_PATH is not set.")
             raise ValueError("Model path for KrispAudioProcessor must be provided.")

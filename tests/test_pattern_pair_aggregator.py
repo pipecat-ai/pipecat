@@ -375,9 +375,9 @@ class TestPatternPairAggregator(unittest.IsolatedAsyncioTestCase):
 
 class TestPatternPairAggregatorTokenMode(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
-        from pipecat.utils.text.base_text_aggregator import AggregationType
+        from pipecat.utils.text.base_text_aggregator import TextType
 
-        self.aggregator = PatternPairAggregator(aggregation_type=AggregationType.TOKEN)
+        self.aggregator = PatternPairAggregator(aggregation_type=TextType.TOKEN)
         self.handler = AsyncMock()
         self.aggregator.add_pattern(
             type="think",
@@ -566,3 +566,70 @@ class TestPatternPairAggregatorTokenMode(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestPatternPairAggregatorSameDelimiter(unittest.IsolatedAsyncioTestCase):
+    """A pattern whose start and end delimiters are the same string, like a Markdown code fence."""
+
+    def setUp(self):
+        self.aggregator = PatternPairAggregator()
+        self.aggregator.add_pattern(
+            type="code",
+            start_pattern="```",
+            end_pattern="```",
+            action=MatchAction.AGGREGATE,
+        )
+
+    async def _run(self, chunks: list[str]) -> list[tuple[str, str]]:
+        results = []
+        for chunk in chunks:
+            async for aggregation in self.aggregator.aggregate(chunk):
+                results.append((str(aggregation.type), aggregation.text))
+        remaining = await self.aggregator.flush()
+        if remaining:
+            results.append(("flush", remaining.text))
+        return results
+
+    async def test_text_before_fence_is_yielded(self):
+        results = await self._run(["Here is the code:\n```python\nprint(1)\n```\nDone."])
+        self.assertEqual(
+            results,
+            [("sentence", "Here is the code:"), ("code", "python\nprint(1)"), ("flush", "Done.")],
+        )
+
+    async def test_sentence_before_fence_is_not_split_inside_it(self):
+        results = await self._run(["Here is the code.\n```python\nprint(1)\n```\nDone."])
+        self.assertEqual(
+            results,
+            [("sentence", "Here is the code."), ("code", "python\nprint(1)"), ("flush", "Done.")],
+        )
+
+    async def test_fence_split_across_chunks(self):
+        results = await self._run(
+            ["Here is", " the code.\n", "``", "`python\nprint(1)\n", "``", "`\nDone."]
+        )
+        self.assertEqual(
+            results,
+            [("sentence", "Here is the code."), ("code", "python\nprint(1)"), ("flush", "Done.")],
+        )
+
+    async def test_two_blocks_pair_in_order(self):
+        results = await self._run(["A.\n```\none\n```\nB.\n```\ntwo\n```\nC."])
+        self.assertEqual(
+            results,
+            [
+                ("sentence", "A."),
+                ("code", "one"),
+                ("sentence", "B."),
+                ("code", "two"),
+                ("flush", "C."),
+            ],
+        )
+
+    async def test_unclosed_fence_is_dropped_at_flush(self):
+        results = await self._run(["Type ``` to start a block."])
+        self.assertEqual(results, [("sentence", "Type")])
+        # The next reply starts clean.
+        self.assertEqual(
+            await self._run(["How else can I help?"]), [("flush", "How else can I help?")]
+        )

@@ -84,7 +84,7 @@ class GoogleVertexLLMService(GoogleLLMService):
         Args:
             credentials: JSON string of service account credentials.
             credentials_path: Path to the service account JSON file.
-            model: Model identifier (e.g., "gemini-3.6-flash").
+            model: Model identifier (e.g., "gemini-3.8-flash").
 
                 .. deprecated:: 0.0.105
                     Use ``settings=GoogleVertexLLMService.Settings(model=...)`` instead.
@@ -133,7 +133,7 @@ class GoogleVertexLLMService(GoogleLLMService):
 
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
-            model="gemini-3.6-flash",
+            model="gemini-3.8-flash",
             system_instruction=None,
             max_tokens=4096,
             temperature=None,

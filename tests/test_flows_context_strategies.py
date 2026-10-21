@@ -108,7 +108,9 @@ class TestContextStrategies(unittest.IsolatedAsyncioTestCase):
 
             deprecation_warnings = [x for x in w if issubclass(x.category, DeprecationWarning)]
             self.assertTrue(len(deprecation_warnings) >= 1)
-            self.assertIn("RESET_WITH_SUMMARY is deprecated", str(deprecation_warnings[0].message))
+            self.assertIn(
+                "`RESET_WITH_SUMMARY` is deprecated", str(deprecation_warnings[0].message)
+            )
 
         # Second node should NOT trigger a second warning (once-only)
         self.mock_worker.queue_frames.reset_mock()

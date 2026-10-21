@@ -266,8 +266,10 @@ class NvidiaSageMakerSTTService(STTService):
     async def _send_session_config(self):
         """Send transcription_session.update to configure audio format and params.
 
-        Specifies ``"model": "nemotron-asr-streaming"`` in ``input_audio_transcription`` so
-        NIM selects the correct Nemotron ASR Streaming model.
+        ``input_audio_transcription.model`` carries ``Settings.model``, which NIM matches
+        against its served model names — what ``--list-models`` returns, not the container
+        name. The default, ``cache-aware-parakeet-rnnt-en-US-asr-streaming-sortformer``, is
+        the served name of the ``nemotron-asr-streaming`` container.
         """
         logger.debug(
             f"{self}: sending session config,"

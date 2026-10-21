@@ -11,13 +11,13 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
-import warnings
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import (
     TYPE_CHECKING,
     Any,
     Generic,
+    Literal,
     Protocol,
     cast,
 )
@@ -77,7 +77,7 @@ from pipecat.utils.context.llm_context_summarization import (
     DEFAULT_SUMMARIZATION_TIMEOUT,
     LLMContextSummarizationUtil,
 )
-from pipecat.utils.deprecation import deprecated
+from pipecat.utils.deprecation import deprecated, warn_deprecated
 from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.file_resolver import FileResolver
 from pipecat.utils.log_config import _get_llm_context_log_mode, _LLMContextLogMode
@@ -90,6 +90,12 @@ if TYPE_CHECKING:
 
 # Type alias for a callable that handles LLM function calls.
 FunctionCallHandler = Callable[["FunctionCallParams"], Awaitable[None]]
+
+
+# The two roles a service can fill in an
+# `~pipecat.pipeline.llm_with_backend.LLMWithBackend`: the conversational
+# frontend, or the LLM inside the backend worker.
+LLMWithBackendRole = Literal["frontend", "backend"]
 
 
 # Type alias for a callback function that handles the result of an LLM function call.
@@ -368,6 +374,10 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             or LLMSettings(),
             **kwargs,
         )
+        # Filled in here rather than in every service's default settings, since
+        # only the services with thinking defaults read it.
+        if not is_given(self._settings.use_provider_thinking_default):
+            self._settings.use_provider_thinking_default = False
         # Validated here so a bad value stops the bot at startup; otherwise it
         # would surface on the first inference, and only with DEBUG enabled.
         _get_llm_context_log_mode()
@@ -376,11 +386,10 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         self._function_call_timeout_secs = function_call_timeout_secs
         self._file_resolver = file_resolver or FileResolver()
         if enable_async_tool_cancellation:
-            warnings.warn(
+            warn_deprecated(
                 "`enable_async_tool_cancellation` is deprecated since 1.8.0 and will be "
-                "removed in 2.0.0. Set `cancellable_by_llm=True` on the tools that should be "
+                "removed in 2.0.0. Use `cancellable_by_llm=True` on the tools that should be "
                 "cancellable instead.",
-                DeprecationWarning,
                 stacklevel=3,
             )
         self._enable_async_tool_cancellation: bool = enable_async_tool_cancellation
@@ -388,6 +397,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         # Turn completion is owned by LLMTurnCompletionUserTurnStopStrategy, which
         # enables it over an LLMUpdateSettingsFrame once the pipeline starts.
         self._filter_incomplete_user_turns: bool = False
+        self._logged_thinking_default_model: str | None = None
         # Holds a speculative response until its turn is confirmed. Frames are
         # routed through it on the way out, in `push_frame`.
         self._speculation_gate = SpeculationGate(name=f"{self}::SpeculationGate")
@@ -578,6 +588,95 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             self._reports_ttfat = not self.service_metadata_frame().is_realtime_service
         return self._reports_ttfat
 
+    @property
+    def accepts_intermediate_function_call_results(self) -> bool:
+        """Whether this service delivers a tool's intermediate results to the model.
+
+        An intermediate result is one reported with
+        ``FunctionCallResultProperties(is_final=False)`` while the call keeps
+        running. A text service passes them on as context messages. A
+        speech-to-speech service has to map them onto whatever second channel
+        its provider offers, and not all of them have one.
+
+        Returns:
+            True if intermediate results reach the model.
+        """
+        return True
+
+    def llm_with_backend_role_objection(self, role: LLMWithBackendRole) -> str | None:
+        """Why this service can't take the given role in an ``LLMWithBackend``, if it can't.
+
+        The composite raises with what this returns, so the objection says what
+        to do instead. Services that work in both roles, which is nearly all of
+        them, say nothing.
+
+        Args:
+            role: The role the service is being asked to take.
+
+        Returns:
+            The reason, or None when the service can take the role.
+        """
+        return None
+
+    def _apply_thinking_default(
+        self,
+        params: dict[str, Any],
+        model: str,
+        default: dict[str, dict[str, Any]] | None,
+        *,
+        can_think: bool,
+        provider: str,
+        settings_fields: str,
+    ):
+        """Send a model the thinking default its service lists, and log it once per model.
+
+        Services that send each model its lowest thinking setting call this when
+        the request configures no thinking of its own. With
+        ``use_provider_thinking_default`` set, the service sends no default. The
+        first request for each model logs the setting sent, or that the model
+        runs at the provider's default, warning when it has no default.
+
+        Args:
+            params: The request params, updated in place. Each field of
+                ``default`` is merged into the dict already there, if any.
+            model: The model the request is for.
+            default: The request fields to send, or None if the service lists no
+                default for the model.
+            can_think: Whether the model can think, which decides whether a
+                model with no default is warned about.
+            provider: The provider's name, for the log lines.
+            settings_fields: The settings fields that configure thinking, as the
+                log lines name them, such as ``"`thinking`"``.
+        """
+        provider_default = assert_given(self._settings.use_provider_thinking_default)
+        if default is not None and not provider_default:
+            for field, value in default.items():
+                params[field] = {**params.get(field, {}), **value}
+        if model == self._logged_thinking_default_model:
+            return
+        self._logged_thinking_default_model = model
+        settings_class = f"{type(self).__name__}.Settings"
+        if provider_default:
+            if can_think:
+                logger.debug(
+                    f"{self}: use_provider_thinking_default is set, so {model} runs at {provider}'s "
+                    f"default thinking. To change it, set {settings_fields} in {settings_class}."
+                )
+        elif default is not None:
+            setting = ", ".join(f"{field}={value!r}" for field, value in default.items())
+            logger.info(
+                f"{self}: sending {setting} to {model}, its lowest thinking setting, for the "
+                "fastest responses. If your bot needs multistep reasoning, set "
+                f"{settings_fields} in {settings_class}."
+            )
+        elif can_think:
+            logger.warning(
+                f"{self}: Pipecat has no thinking default for {model}, so it runs at "
+                f"{provider}'s default, which can think before replying and slow responses. "
+                f"For the fastest responses, set {settings_fields} in {settings_class} to the "
+                f"lowest setting {model} supports."
+            )
+
     def service_metadata_frame(self) -> LLMServiceMetadataFrame:
         """The metadata frame this LLM service broadcasts at start.
 
@@ -684,15 +783,12 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         for name, replacement in replacements.items():
             if not getattr(self._settings, name, None):
                 continue
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    f"`{type(self._settings).__name__}.{name}` is deprecated since 1.7.0 and "
-                    f"will be removed in 2.0.0. It has no effect here. "
-                    f"Use {replacement} instead.",
-                    DeprecationWarning,
-                    stacklevel=4,
-                )
+            warn_deprecated(
+                f"`{type(self._settings).__name__}.{name}` is deprecated since 1.7.0 and "
+                f"will be removed in 2.0.0. Use {replacement} instead. "
+                "It has no effect here.",
+                stacklevel=4,
+            )
 
     def append_system_instruction(self, instruction: str) -> None:
         """Append durable text to the system instruction, preserving the user's prompt.
@@ -812,14 +908,12 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 await self._update_settings(frame.delta)
             elif frame.settings:
                 # Backward-compatible path: convert legacy dict to settings object.
-                with warnings.catch_warnings():
-                    warnings.simplefilter("always")
-                    warnings.warn(
-                        "Passing a dict via LLMUpdateSettingsFrame(settings={...}) is deprecated "
-                        "since 0.0.104, use LLMUpdateSettingsFrame(delta=LLMSettings(...)) instead.",
-                        DeprecationWarning,
-                        stacklevel=2,
-                    )
+                warn_deprecated(
+                    "`LLMUpdateSettingsFrame(settings={...})` is deprecated since 0.0.104 and "
+                    "will be removed in 2.0.0. Use "
+                    "`LLMUpdateSettingsFrame(delta=LLMSettings(...))` instead.",
+                    stacklevel=2,
+                )
                 delta = type(self._settings).from_mapping(frame.settings)
                 await self._update_settings(delta)
         elif isinstance(frame, LLMContextSummaryRequestFrame):
@@ -1043,12 +1137,12 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 asynchronous: the LLM continues the conversation immediately
                 without waiting for the result, and the result is injected later
                 via a developer message. Defaults to ``None`` (fall back to the
-                ``@tool_options`` decorator value, then to True). Note: realtime
-                LLM services deliver only the final result to the provider;
-                intermediate streamed results (reported via
-                ``FunctionCallResultProperties(is_final=False)``) are
-                dropped and an error is raised. Use a non-realtime LLM
-                service if your tool needs to stream intermediate results.
+                ``@tool_options`` decorator value, then to True). A speech-to-speech
+                service takes intermediate results (reported via
+                ``FunctionCallResultProperties(is_final=False)``) on whatever
+                second channel its provider offers; one that can't says so with
+                ``accepts_intermediate_function_call_results`` and drops them
+                with a warning.
             timeout_secs: Optional per-tool timeout in seconds, overriding the
                 global ``function_call_timeout_secs``. A call that runs past it is
                 cancelled: the handler is thrown an ``asyncio.CancelledError``, the
@@ -1157,12 +1251,12 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 asynchronous: the LLM continues the conversation immediately
                 without waiting for the result, and the result is injected later
                 via a developer message. Defaults to ``None`` (fall back to the
-                ``@tool_options`` decorator value, then to True).
-                Note: realtime LLM services deliver only the final result to the
-                provider; intermediate streamed results (reported via
-                ``FunctionCallResultProperties(is_final=False)``) are
-                dropped and an error is raised. Use a non-realtime LLM
-                service if your tool needs to stream intermediate results.
+                ``@tool_options`` decorator value, then to True). A speech-to-speech
+                service takes intermediate results (reported via
+                ``FunctionCallResultProperties(is_final=False)``) on whatever
+                second channel its provider offers; one that can't says so with
+                ``accepts_intermediate_function_call_results`` and drops them
+                with a warning.
             timeout_secs: Optional per-tool timeout in seconds, overriding the
                 global ``function_call_timeout_secs``. A call that runs past it is
                 cancelled: the handler is thrown an ``asyncio.CancelledError``, the
@@ -1560,9 +1654,13 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
 
         Note:
             This removes the handler but does not stop advertising the tool to
-            the LLM. To remove a tool cleanly, prefer an ``LLMSetToolsFrame`` with
-            the updated tool set — that both stops advertising it and avoids the
-            LLM trying to call a tool that's no longer there.
+            the LLM. To remove a tool, push an ``LLMSetToolsFrame`` without it.
+            That also drops a handler that came with the tool definition (a
+            direct function, or a ``FunctionSchema`` with a ``handler``). A
+            handler added with :meth:`register_function` needs this call too,
+            made after the updated tool set takes effect, since removing the
+            handler of a still-advertised tool leaves the LLM able to call a
+            handler that's gone.
 
         Args:
             function_name: The name of the function handler to remove.
@@ -2221,6 +2319,23 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
 
         item = await self._broadcast_function_call_cancelled(runner_item, run_llm=True)
         await self._call_event_handler("on_function_calls_cancelled", [item])
+
+    async def cancel_function_calls(
+        self, *, reason: str = "cancelled"
+    ) -> list[FunctionCallFromLLM]:
+        """Cancel every function call in flight, whether or not it survives interruptions.
+
+        Each handler is thrown ``asyncio.CancelledError``, the call is settled
+        downstream as cancelled, and ``on_function_calls_cancelled`` fires. No
+        inference runs for the cancellations.
+
+        Args:
+            reason: What triggered the cancellation, for the logs.
+
+        Returns:
+            The calls that were cancelled.
+        """
+        return await self._cancel_function_call_tasks(lambda item: True, reason=reason)
 
     async def _cancel_function_calls_by_tool_call_id(self, tool_call_id: str):
         """Cancel in-progress function call tasks by their tool_call_id.

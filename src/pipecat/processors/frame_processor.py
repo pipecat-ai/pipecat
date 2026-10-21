@@ -16,7 +16,6 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import traceback
-import warnings
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from enum import Enum
@@ -46,7 +45,7 @@ from pipecat.observers.base_observer import BaseObserver, FrameProcessed, FrameP
 from pipecat.processors.metrics.frame_processor_metrics import FrameProcessorMetrics
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
 from pipecat.utils.base_object import BaseObject
-from pipecat.utils.deprecation import deprecated, warn_deprecated_read
+from pipecat.utils.deprecation import deprecated, warn_deprecated
 from pipecat.utils.errors import ErrorCategory, classify_http_exception
 from pipecat.utils.frame_queue import FrameQueue
 
@@ -120,9 +119,10 @@ class FrameProcessorSetup:
         if name == "tool_resources":
             value = object.__getattribute__(self, "tool_resources")
             if value is not None:
-                warn_deprecated_read(
-                    "`FrameProcessorSetup.tool_resources` is deprecated since 1.2.0; "
-                    "read `setup.pipeline_worker.app_resources` instead."
+                warn_deprecated(
+                    "`FrameProcessorSetup.tool_resources` is deprecated since 1.2.0 and will "
+                    "be removed in 2.0.0. Use `setup.pipeline_worker.app_resources` instead.",
+                    stacklevel=2,
                 )
             return value
         return object.__getattribute__(self, name)
@@ -273,6 +273,12 @@ class FrameProcessor(BaseObject):
         # Watches the readiness condition passed to
         # pause_processing_all_frames_until() and lifts the pause it took.
         self.__pause_watcher_task: asyncio.Task | None = None
+        # Clear while a pipeline is setting this processor up. The StartFrame
+        # is held until it is set, so a processor never starts before its own
+        # setup is done, while the ones ahead of it in the pipeline can.
+        self.__setup_done = asyncio.Event()
+        self.__setup_done.set()
+        self.__start_received = False
 
         # The process task processes non-system frames.  Non-system frames will
         # be processed as soon as they are received by the processing task
@@ -651,6 +657,18 @@ class FrameProcessor(BaseObject):
         if self._metrics is not None:
             await self._metrics.setup(self.task_manager)
 
+    def _setup_started(self):
+        """Hold the StartFrame until :meth:`_setup_finished` is called.
+
+        Called by the pipeline before setting this processor up.
+        """
+        self.__setup_done.clear()
+
+    def _setup_finished(self):
+        """Let this processor start, once its own setup() has returned."""
+        self.__setup_done.set()
+        self.__maybe_create_input_task()
+
     async def cleanup(self):
         """Release this processor's resources at teardown.
 
@@ -714,17 +732,20 @@ class FrameProcessor(BaseObject):
             return
 
         if self._enable_direct_mode:
+            if isinstance(frame, StartFrame):
+                await self.__setup_done.wait()
             await self.__process_frame(frame, direction, callback)
             return
 
         await self.__input_queue.put((frame, direction, callback))
 
-        # Nothing drains the queue until the StartFrame arrives, so a processor
-        # never acts on a frame before it has been started. Frames pushed
-        # between setup and the StartFrame simply wait, and the StartFrame is
-        # dequeued ahead of them.
+        # Nothing drains the queue until the StartFrame arrives and this
+        # processor is set up, so a processor never acts on a frame before it
+        # has been started. Frames pushed before that simply wait, and the
+        # StartFrame is dequeued ahead of them.
         if isinstance(frame, StartFrame):
-            self.__create_input_task()
+            self.__start_received = True
+            self.__maybe_create_input_task()
 
     async def pause_processing_frames(self):
         """Pause processing of queued frames."""
@@ -925,19 +946,17 @@ class FrameProcessor(BaseObject):
             ```
         """
         if fatal:
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    "`push_error(fatal=True)` is deprecated since 1.8.0 and will be removed "
-                    "in 2.0.0. If the error leaves its originating processor unable to do "
-                    "its job, pass `force_treat_as_permanent=True` instead: that marks the "
-                    "processor unusable, and the PipelineWorker acts on it according to its "
-                    "`processor_unusable_policy` (`ProcessorUnusablePolicy.CANCEL` does what "
-                    "`fatal=True` did). Otherwise, drop `fatal` and push an "
-                    "`EndWorkerFrame` after the error to end the pipeline.",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
+            warn_deprecated(
+                "`push_error(fatal=True)` is deprecated since 1.8.0 and will be removed "
+                "in 2.0.0. Use `force_treat_as_permanent=True` or an `EndWorkerFrame` "
+                "instead. If the error leaves its originating processor unable to do its "
+                "job, `force_treat_as_permanent=True` marks the processor unusable, and the "
+                "PipelineWorker acts on it according to its "
+                "`processor_unusable_policy` (`ProcessorUnusablePolicy.CANCEL` does what "
+                "`fatal=True` did). Otherwise, drop `fatal` and push an "
+                "`EndWorkerFrame` after the error to end the pipeline.",
+                stacklevel=2,
+            )
 
         error_frame = ErrorFrame(
             error=error_msg,
@@ -1202,6 +1221,20 @@ class FrameProcessor(BaseObject):
                 exception=e,
                 category=ErrorCategory.UNKNOWN,
             )
+
+    def __maybe_create_input_task(self):
+        """Create the input task once the StartFrame is here and setup is done."""
+        if not self.__start_received or not self.__setup_done.is_set():
+            return
+        if not self._task_manager:
+            # Setting up was cut short before FrameProcessor.setup() ran, so
+            # there is no task manager to start processing frames with.
+            logger.error(
+                f"{self}: can't start, setup ended before FrameProcessor.setup() was "
+                "called (call super().setup() before anything that can block)"
+            )
+            return
+        self.__create_input_task()
 
     def __create_input_task(self):
         """Create the frame input processing task."""

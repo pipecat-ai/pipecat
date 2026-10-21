@@ -431,6 +431,59 @@ class TestForeignFlushProbes(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(flushed)
         self.assertEqual(bystander_probes, {})
 
+    async def test_the_worker_answering_a_probe_lets_go_of_it_once_settled(self):
+        """Each leg of the trip is a new frame, all of them under one flush id.
+
+        A holder that kept the probe would go on reporting progress on a flush
+        that is over.
+        """
+        # Leaves the probe for the holder to answer.
+        origin = PipelineWorker(
+            Pipeline([IdentityFilter()]), name="origin", bridged=(), cancel_on_idle_timeout=False
+        )
+        holder = PipelineWorker(
+            Pipeline([BusBridgeProcessor(bus=self.bus, worker_name="holder"), IdentityFilter()]),
+            name="holder",
+            cancel_on_idle_timeout=False,
+        )
+
+        tracked = []
+        track_flush_probe = holder.track_flush_probe
+
+        def track_and_record(frame):
+            tracked.append(frame.flush_id)
+            track_flush_probe(frame)
+
+        holder.track_flush_probe = track_and_record  # type: ignore[method-assign]
+
+        workers = (origin, holder)
+        runner = WorkerRunner(bus=self.bus, handle_sigint=False)
+        await runner.add_workers(*workers)
+
+        running = [asyncio.Event() for _ in workers]
+
+        for worker, event in zip(workers, running):
+            worker.event_handler("on_pipeline_started")(
+                lambda _worker, _frame, event=event: event.set()
+            )
+
+        flushed = None
+        holder_probes = None
+
+        async def drive():
+            nonlocal flushed, holder_probes
+            await asyncio.gather(*(event.wait() for event in running))
+            flushed = await origin.flush_pipeline(timeout=1.0)
+            holder_probes = dict(holder._foreign_probes)
+            for worker in workers:
+                await worker.queue_frame(EndFrame())
+
+        await asyncio.wait_for(asyncio.gather(runner.run(), drive()), timeout=10.0)
+
+        self.assertTrue(flushed)
+        self.assertEqual(len(set(tracked)), 1)
+        self.assertEqual(holder_probes, {})
+
 
 class TestPipelineWorkerLifecycle(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
@@ -1486,6 +1539,26 @@ class TestJobLifecycle(unittest.IsolatedAsyncioTestCase):
         # Yield to let the cancel coroutine complete its work.
         await asyncio.sleep(0.05)
         self.assertNotIn("t1", worker.active_jobs)
+
+    async def test_stop_cancels_a_job_handler_still_running(self):
+        """A handler holding a long-lived job open does not outlive the worker."""
+
+        class Holder(BaseWorker):
+            @job(name="hold")
+            async def hold(self, message):
+                await asyncio.Event().wait()
+
+        worker = await self._attach(Holder("worker"))
+        await worker.on_bus_message(
+            BusJobRequestMessage(source="parent", target="worker", job_id="t1", job_name="hold")
+        )
+        await asyncio.sleep(0.05)
+        (task,) = list(worker._job_handler_tasks.values())
+
+        await worker.stop()
+
+        self.assertTrue(task.done())
+        self.assertEqual(worker._job_handler_tasks, {})
 
     async def test_on_job_cancelled_fires(self):
         """BusJobCancelMessage triggers on_job_cancelled with the message."""

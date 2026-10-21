@@ -70,6 +70,7 @@ class TavusVideoService(AIService):
         replica_id: str,
         persona_id: str = "pipecat0",
         session: aiohttp.ClientSession,
+        initial_receive_bitrate: int | None = None,
         settings: Settings | None = None,
         **kwargs,
     ) -> None:
@@ -83,6 +84,10 @@ class TavusVideoService(AIService):
                 of a Tavus persona voice, and to expect audio over the
                 `conversation.echo` app message API.
             session: Async HTTP session used for communication with Tavus.
+            initial_receive_bitrate: Expected download bandwidth from the Tavus
+                room, in bits per second. The SFU starts its estimate of what it
+                can send the bot from this value, so the replica's video reaches
+                full quality sooner. ``None`` keeps Daily's default of 1 Mbps.
             settings: Runtime-updatable settings. Tavus has no model concept, so this
                 is primarily used for the ``extra`` dict.
             **kwargs: Additional arguments passed to the parent AIService class.
@@ -96,6 +101,7 @@ class TavusVideoService(AIService):
         self._session = session
         self._replica_id = replica_id
         self._persona_id = persona_id
+        self._initial_receive_bitrate = initial_receive_bitrate
 
         self._other_participant_has_joined = False
         self._client: TavusTransportClient | None = None
@@ -124,6 +130,7 @@ class TavusVideoService(AIService):
                 audio_in_enabled=True,
                 video_in_enabled=True,
                 audio_out_faster_than_realtime=True,
+                initial_receive_bitrate=self._initial_receive_bitrate,
             ),
         )
         await self._client.setup(setup)

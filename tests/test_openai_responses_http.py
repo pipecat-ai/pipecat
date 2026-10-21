@@ -103,19 +103,21 @@ async def _run(service, *events):
     await service._process_context(MagicMock(spec=LLMContext))
 
 
-def _failed_event(error):
+def _failed_event(error, usage=None):
     """Build a ResponseFailedEvent whose response carries the given error object."""
     response = MagicMock()
     response.error = error
+    response.usage = usage
     event = MagicMock(spec=ResponseFailedEvent)
     event.response = response
     return event
 
 
-def _incomplete_event(incomplete_details):
+def _incomplete_event(incomplete_details, usage=None):
     """Build a ResponseIncompleteEvent carrying the given incomplete_details."""
     response = MagicMock()
     response.incomplete_details = incomplete_details
+    response.usage = usage
     event = MagicMock(spec=ResponseIncompleteEvent)
     event.response = response
     return event
@@ -355,6 +357,48 @@ class TestHttpStreamErrorEvents:
 
         service.push_error.assert_called_once()
         assert "max_output_tokens" in service.push_error.call_args.kwargs["error_msg"]
+
+    @pytest.mark.asyncio
+    async def test_response_incomplete_reports_token_usage(self):
+        """A response cut short is billed for the tokens it used."""
+        service = _make_service()
+        service.push_error = AsyncMock()
+
+        details = MagicMock()
+        details.reason = "max_output_tokens"
+        usage = ResponseUsage.construct(
+            input_tokens=12,
+            output_tokens=50,
+            total_tokens=62,
+            input_tokens_details=None,
+            output_tokens_details=None,
+        )
+        await _run(service, _incomplete_event(details, usage))
+
+        tokens = service.start_llm_usage_metrics.call_args[0][0]
+        assert tokens.prompt_tokens == 12
+        assert tokens.completion_tokens == 50
+        assert tokens.total_tokens == 62
+
+    @pytest.mark.asyncio
+    async def test_response_failed_reports_token_usage(self):
+        service = _make_service()
+        service.push_error = AsyncMock()
+
+        error = MagicMock()
+        error.message = "server_error"
+        usage = ResponseUsage.construct(
+            input_tokens=12,
+            output_tokens=3,
+            total_tokens=15,
+            input_tokens_details=None,
+            output_tokens_details=None,
+        )
+        await _run(service, _failed_event(error, usage))
+
+        tokens = service.start_llm_usage_metrics.call_args[0][0]
+        assert tokens.prompt_tokens == 12
+        assert tokens.completion_tokens == 3
 
     @pytest.mark.asyncio
     async def test_response_incomplete_without_details(self):
@@ -631,15 +675,13 @@ class TestHttpReasoningParams:
             )
         return service._build_response_params({"input": []})
 
-    def test_mainline_gpt_disabled_by_default(self):
-        """Mainline gpt models from gpt-5 onward default to effort="none"."""
-        assert self._params("gpt-5.5")["reasoning"] == {"effort": "none"}
-
-    def test_original_gpt_5_gets_minimal(self):
-        """The original gpt-5 models reject effort="none", so they get "minimal"."""
+    def test_listed_models_get_their_effort(self):
+        """Models listed in the reasoning defaults get their lowest effort."""
         assert self._params("gpt-5-mini")["reasoning"] == {"effort": "minimal"}
+        assert self._params("gpt-5.5")["reasoning"] == {"effort": "none"}
+        assert self._params("o3")["reasoning"] == {"effort": "low"}
 
-    def test_models_rejecting_effort_none_left_untouched(self):
-        """Models that reject effort="none" are left at the provider default."""
-        for model in ("o3", "gpt-6-astra", "gpt-6.1-sol", "gpt-5.5-pro"):
+    def test_unlisted_models_run_at_openais_default(self):
+        """Every other model is left at the provider default."""
+        for model in ("gpt-6.2", "gpt-4.1"):
             assert "reasoning" not in self._params(model), model

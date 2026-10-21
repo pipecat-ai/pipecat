@@ -308,7 +308,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     conversation_llm = GoogleLLMService(
         name="Conversation",
         settings=GoogleLLMService.Settings(
-            model="gemini-2.5-flash",
+            model="gemini-3.6-flash",
             system_instruction=conversation_system_message,
         ),
         api_key=os.environ["GOOGLE_API_KEY"],
@@ -320,7 +320,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     input_transcription_llm = GoogleLLMService(
         name="Transcription",
         settings=GoogleLLMService.Settings(
-            model="gemini-2.5-flash",
+            model="gemini-3.6-flash",
             system_instruction=transcriber_system_message,
         ),
         api_key=os.environ["GOOGLE_API_KEY"],

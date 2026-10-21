@@ -273,6 +273,12 @@ class TestIsPeerGone(unittest.TestCase):
         self.assertTrue(_is_peer_gone(moq.Error.Cancelled()))
         self.assertTrue(_is_peer_gone(moq.Error.Closed()))
 
+    def test_gracefully_closed_track_is_peer_gone(self):
+        """A peer that finishes its session cleanly closes with code 0 —
+        "no error" by moq-net convention — which the audio reader renders
+        as the message tail."""
+        self.assertTrue(_is_peer_gone(moq.Error.Audio("moq: no error")))
+
     def test_cancelled_track_is_peer_gone(self):
         """A relay cancels the subscription when the peer's publishing session
         ends. The transcript and catalog readers report a ``CANCEL`` kind; the
@@ -853,6 +859,11 @@ class TestIsNormalClose(unittest.TestCase):
     def test_cancelled_reason_is_normal(self):
         """The reason form of ``Cancel``, as the audio reader reports it."""
         self.assertTrue(_is_normal_close(self._audio_error("moq: cancelled")))
+
+    def test_no_error_reason_is_normal(self):
+        """The reason form of a code-0 graceful close (``close(0)``, "no
+        error" by moq-net convention), as the audio reader reports it."""
+        self.assertTrue(_is_normal_close(self._audio_error("moq: no error")))
 
     def test_cancel_and_closed_are_normal(self):
         for code in (0, 25):

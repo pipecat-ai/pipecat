@@ -17,6 +17,7 @@ import json
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, fields
 from typing import Any
+from urllib.parse import urlencode
 
 from loguru import logger
 
@@ -53,6 +54,15 @@ from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 from pipecat.utils.types import is_given
+
+
+def _query_value(value: Any) -> str | list[str]:
+    """Format a setting for the query string: lowercase booleans, one entry per list item."""
+    if isinstance(value, bool):
+        return str(value).lower()
+    if isinstance(value, (list, tuple)):
+        return [str(item) for item in value]
+    return str(value)
 
 
 @dataclass
@@ -321,7 +331,7 @@ class DeepgramSageMakerSTTService(STTService):
             value = getattr(s, f.name)
             if not is_given(value) or value is None:
                 continue
-            params[f.name] = str(value).lower() if isinstance(value, bool) else str(value)
+            params[f.name] = _query_value(value)
 
         # model and language
         if is_given(s.model) and s.model is not None:
@@ -342,9 +352,10 @@ class DeepgramSageMakerSTTService(STTService):
         if s.extra:
             for key, value in s.extra.items():
                 if value is not None:
-                    params[key] = str(value).lower() if isinstance(value, bool) else str(value)
+                    params[key] = _query_value(value)
 
-        return "&".join(f"{k}={v}" for k, v in params.items())
+        # A list becomes one parameter per item (keyterm=a&keyterm=b).
+        return urlencode(params, doseq=True)
 
     async def _connect(self):
         """Launch the SageMaker connection in the background.

@@ -12,7 +12,6 @@ configurations and event-driven processing.
 """
 
 import time
-import warnings
 from dataclasses import dataclass
 
 from loguru import logger
@@ -33,6 +32,7 @@ from pipecat.frames.frames import (
     UserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
+from pipecat.utils.deprecation import warn_deprecated
 
 # Events superseded by on_user_turn_audio and on_bot_turn_audio.
 _DEPRECATED_TURN_AUDIO_EVENTS = {
@@ -167,10 +167,9 @@ class AudioBufferProcessor(FrameProcessor):
         """
         replacement = _DEPRECATED_TURN_AUDIO_EVENTS.get(event_name)
         if replacement:
-            warnings.warn(
+            warn_deprecated(
                 f"`{event_name}` is deprecated since 1.8.0 and will be removed in 2.0.0. "
                 f"Use `{replacement}` instead.",
-                DeprecationWarning,
                 stacklevel=2,
             )
         super().add_event_handler(event_name, handler)
@@ -250,6 +249,10 @@ class AudioBufferProcessor(FrameProcessor):
         Calls audio handlers with any remaining buffered audio before stopping,
         then triggers the ``on_recording_stopped`` event. Does nothing when
         recording is not active.
+
+        Stops at once, so bot audio still queued in the pipeline isn't recorded.
+        To stop after queued audio has played, push an
+        ``AudioBufferStopRecordingFrame`` instead.
         """
         if not self._recording:
             return

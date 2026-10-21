@@ -4,12 +4,13 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import json
 import unittest
 
 from pipecat.frames.frames import (
     AggregatedTextFrame,
     AggregatedTextProgressFrame,
-    AggregationType,
+    TextType,
     TTSTextFrame,
 )
 from pipecat.services.cartesia.tts import CartesiaTTSService
@@ -17,6 +18,7 @@ from pipecat.services.settings import TTSSettings
 from pipecat.transcriptions.language import Language
 from pipecat.utils.context.aggregated_frame_sequencer import AggregatedFrameSequencer
 from pipecat.utils.context.word_completion_tracker import WordCompletionTracker
+from pipecat.utils.context.word_timestamp_tracker import WordTimestamp
 from pipecat.utils.string import TextPartForConcatenation, concatenate_aggregated_text
 
 
@@ -201,7 +203,7 @@ class TestCartesiaUpdateSettingsFinalizesOldContext(unittest.IsolatedAsyncioTest
         service._aggregated_frame_sequencer = seq
         service._turn_context_id = old_ctx
         for token in ("Hi", " there"):
-            frame = AggregatedTextFrame(token, AggregationType.SENTENCE, raw_text=token)
+            frame = AggregatedTextFrame(token, TextType.SENTENCE, raw_text=token)
             await seq.register_spoken(frame, old_ctx, token, append_to_context=True)
         assert seq._slots == []  # nothing promoted — sentence has no boundary yet
 
@@ -260,3 +262,67 @@ class TestCartesiaUpdateSettingsFinalizesOldContext(unittest.IsolatedAsyncioTest
         self.assertEqual(pushed, [])
         self.assertIsNone(service._flushed)
         self.assertEqual(service._turn_context_id, old_ctx)
+
+
+class TestCartesiaCJKPunctuationTokens(unittest.IsolatedAsyncioTestCase):
+    """Cartesia reports a Japanese sentence's final mark as its own token. Each mark
+    must reach the conversation context exactly once, whether it arrives with the
+    character before it or opens the next timestamps message.
+    """
+
+    async def _queued_words(self, batches: list[list[str]]) -> list[WordTimestamp]:
+        service = _service("ja")
+        queued: list[WordTimestamp] = []
+
+        async def messages():
+            for words in batches:
+                yield json.dumps(
+                    {
+                        "type": "timestamps",
+                        "context_id": "ctx1",
+                        "word_timestamps": {"words": words, "start": [0.0] * len(words)},
+                    }
+                )
+
+        async def append(context_id, frame):
+            queued.append(frame)
+
+        service._websocket = messages()
+        service.audio_context_available = lambda context_id: True
+        service.append_to_audio_context = append
+        await service._process_messages()
+        return queued
+
+    async def test_marks_attach_to_the_preceding_character(self):
+        queued = await self._queued_words([["で", "す", "。"], ["歯", "科"]])
+        self.assertEqual([w.word for w in queued], ["で", "す。", "歯", "科"])
+        self.assertTrue(all(w.includes_inter_frame_spaces for w in queued))
+
+    async def test_context_matches_llm_text(self):
+        sentences = ["です。", "歯科ですか？"]
+        queued = await self._queued_words(
+            [["で", "す", "。"], ["歯", "科"], ["で", "す"], ["か"], ["？"]]
+        )
+
+        seq = AggregatedFrameSequencer()
+        for sentence in sentences:
+            frame = AggregatedTextFrame(sentence, TextType.SENTENCE, raw_text=sentence)
+            await seq.register_spoken(
+                frame, "ctx1", sentence, append_to_context=True, includes_inter_frame_spaces=True
+            )
+        frames = []
+        for i, w in enumerate(queued):
+            frames.extend(
+                seq.process_word(w.word, (i + 1) * 10, w.context_id, w.includes_inter_frame_spaces)
+            )
+
+        context_text = concatenate_aggregated_text(
+            [
+                TextPartForConcatenation(
+                    f.raw_text or f.text, includes_inter_part_spaces=f.includes_inter_frame_spaces
+                )
+                for f in frames
+                if isinstance(f, TTSTextFrame) and f.append_to_context
+            ]
+        )
+        self.assertEqual(context_text, "".join(sentences))

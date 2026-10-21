@@ -257,9 +257,10 @@ class AssemblyAISTTSettings(STTSettings):
             reply, used to improve transcription of the user's next turn (short
             answers, spelled-out entities, disambiguation). Only applicable to
             U3 Pro models; clipped to ~1500 characters and reset on reconnect. Set this
-            for a known opening line, or call
-            :meth:`AssemblyAISTTService.update_agent_context` to update it
-            mid-session. Defaults to None (not sent).
+            for a known opening line; the service sends each of the agent's replies
+            as context on its own. To replace it mid-session, push an
+            ``STTUpdateSettingsFrame`` with ``agent_context``. Defaults to None
+            (not sent).
         previous_context_n_turns: Maximum number of prior conversation entries
             (user transcripts and any ``agent_context`` values) carried forward as
             context for each transcription. Integer in [0, 100]; set to 0 to disable
@@ -589,7 +590,6 @@ class AssemblyAISTTService(WebsocketSTTService):
         self._encoding = encoding
 
         self._termination_event = asyncio.Event()
-        self._received_termination = False
         self._connected = False
 
         self._receive_task = None
@@ -983,7 +983,9 @@ class AssemblyAISTTService(WebsocketSTTService):
 
         await self._connect_websocket()
 
-        if self._websocket and not self._receive_task:
+        # Started even when the connection failed: with no socket the receive
+        # loop goes straight to its reconnect path, which retries the connect.
+        if not self._receive_task:
             self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
     async def _disconnect(self):
@@ -998,7 +1000,6 @@ class AssemblyAISTTService(WebsocketSTTService):
 
         try:
             self._termination_event.clear()
-            self._received_termination = False
 
             if self._websocket.state is State.OPEN:
                 # Send any remaining audio
@@ -1146,14 +1147,12 @@ class AssemblyAISTTService(WebsocketSTTService):
 
     async def _handle_termination(self, message: TerminationMessage):
         """Handle termination message."""
-        self._received_termination = True
         self._termination_event.set()
 
         logger.info(
             f"Session Terminated: Audio Duration={message.audio_duration_seconds}s, "
             f"Session Duration={message.session_duration_seconds}s"
         )
-        await self.push_frame(EndFrame())
 
     async def _handle_transcription(self, message: TurnMessage):
         """Handle transcription results with two turn detection modes.
@@ -1394,7 +1393,7 @@ class AssemblyAISyncSTTService(SegmentedSTTService):
             **kwargs: Additional arguments passed to SegmentedSTTService.
         """
         default_settings = self.Settings(
-            model="universal-3-5-pro",
+            model="universal-3-6-pro",
             language=Language.EN,
             prompt=None,
             keyterms_prompt=None,

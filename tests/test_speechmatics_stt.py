@@ -44,7 +44,10 @@ def _clear_env(monkeypatch):
 
 
 def _service(**kwargs) -> SpeechmaticsSTTService:
-    return SpeechmaticsSTTService(api_key="test-key", sample_rate=16000, **kwargs)
+    service = SpeechmaticsSTTService(api_key="test-key", sample_rate=16000, **kwargs)
+    # setup() resolves the sample rate; these tests never run it, so mirror what it does.
+    service._sample_rate = 16000
+    return service
 
 
 # ---------------------------------------------------------------------------
@@ -247,6 +250,14 @@ def test_punctuation_overrides_reach_the_wire_config():
     service = _service(settings=SpeechmaticsSTTService.Settings(punctuation_overrides=overrides))
     assert service._config.punctuation_overrides == overrides
     assert _service()._config.punctuation_overrides is None
+
+
+def test_emit_sentences_reaches_the_wire_config_only_when_set():
+    """Unset means the service default (turn-level segments), so the key stays off the wire."""
+    assert "emit_sentences" not in _service()._config.to_dict()
+
+    service = _service(settings=SpeechmaticsSTTService.Settings(emit_sentences=True))
+    assert service._config.to_dict()["emit_sentences"] is True
 
 
 def test_no_diarization_leaves_config_empty():
@@ -668,6 +679,41 @@ async def test_open_connection_auth_rejection_is_permanent(monkeypatch):
     service.push_error.assert_awaited_once()
     assert service.push_error.call_args.kwargs.get("force_treat_as_permanent") is True
     assert service.push_error.call_args.kwargs.get("fatal") is None
+
+
+@pytest.mark.asyncio
+async def test_open_connection_unsupported_sample_rate_is_permanent(monkeypatch):
+    """A pipeline rate the service does not accept fails every attempt the same way, so it
+    must stop the session with a permanent error before a client is built, not raise the
+    client's ValueError out of start()."""
+    service = _service()
+    service._sample_rate = 24000
+    service.push_error = AsyncMock()
+    client = Mock()
+    monkeypatch.setattr("pipecat.services.speechmatics.stt.AgentSttAsyncClient", client)
+
+    ok = await service._open_connection(report_error=True)
+
+    assert ok is False
+    assert service._closed is True
+    client.assert_not_called()
+    assert service.push_error.call_args.kwargs.get("force_treat_as_permanent") is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("rate", [8000, 16000])
+async def test_open_connection_supported_sample_rate_connects(monkeypatch, rate):
+    """Both rates the service accepts must reach the client's AudioFormat unchanged."""
+    service = _service()
+    service._sample_rate = rate
+    client = Mock(return_value=Mock(connect=AsyncMock()))
+    monkeypatch.setattr("pipecat.services.speechmatics.stt.AgentSttAsyncClient", client)
+    service.create_task = Mock()
+
+    ok = await service._open_connection(report_error=True)
+
+    assert ok is True
+    assert client.call_args.kwargs["audio_format"].sample_rate == rate
 
 
 @pytest.mark.asyncio

@@ -48,6 +48,7 @@ class InceptionLLMService(OpenAILLMService):
 
     Settings = InceptionLLMSettings
     _settings: Settings
+    _requires_api_key = True
 
     def __init__(
         self,

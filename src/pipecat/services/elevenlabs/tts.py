@@ -13,7 +13,6 @@ with support for streaming audio, word timestamps, and voice customization.
 import base64
 import html
 import json
-import warnings
 from collections.abc import AsyncGenerator, Mapping
 from dataclasses import dataclass, field
 from typing import (
@@ -55,7 +54,7 @@ from pipecat.services.tts_service import (
     TTSService,
 )
 from pipecat.transcriptions.language import Language
-from pipecat.utils.deprecation import deprecated
+from pipecat.utils.deprecation import deprecated, warn_deprecated
 from pipecat.utils.text.phonemes import normalize_ipa
 from pipecat.utils.tracing.service_decorators import traced_tts
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
@@ -454,14 +453,13 @@ class ElevenLabsTTSService(ElevenLabsTTSBase):
         self._enable_ssml_parsing = enable_ssml_parsing
 
         if _pronunciation_dictionary_locators is not None:
-            warnings.warn(
+            warn_deprecated(
                 "`pronunciation_dictionary_locators` is deprecated since 1.6.0 and will be "
                 "removed in 2.0.0. Use `text_transforms` -> `replace_text` instead. "
                 "Pronunciation dictionary substitutions can rewrite the spoken words in "
                 "ways that no longer match the text sent to synthesis, which breaks the "
                 "alignment-based word-completion tracking used to attribute spoken text "
                 "back to the conversation context.",
-                DeprecationWarning,
                 stacklevel=2,
             )
         self._pronunciation_dictionary_locators = _pronunciation_dictionary_locators
@@ -633,21 +631,17 @@ class ElevenLabsTTSService(ElevenLabsTTSBase):
                         ),
                     )
 
-                    # Calculate the actual end time of this audio chunk
-                    char_start_times_ms = alignment.get("charStartTimesMs", [])
-                    char_durations_ms = alignment.get("charDurationsMs", [])
+                # Alignment times restart at zero in every message, so the clock
+                # advances by each chunk's span, including chunks that complete no
+                # word, such as trailing punctuation arriving on its own.
+                char_start_times_ms = alignment.get("charStartTimesMs", [])
+                char_durations_ms = alignment.get("charDurationsMs", [])
 
-                    if char_start_times_ms and char_durations_ms:
-                        # End time = start time of last character + duration of last character
-                        chunk_end_time_ms = char_start_times_ms[-1] + char_durations_ms[-1]
-                        chunk_end_time_seconds = chunk_end_time_ms / 1000.0
-                        self._cumulative_time += chunk_end_time_seconds
-                    else:
-                        # Fallback: use the last word's start time (current behavior)
-                        self._cumulative_time = word_times[-1][1]
-                        logger.warning(
-                            "_receive_messages: using fallback timing method - consider investigating alignment data structure"
-                        )
+                if char_start_times_ms and char_durations_ms:
+                    chunk_end_time_ms = char_start_times_ms[-1] + char_durations_ms[-1]
+                    self._cumulative_time += chunk_end_time_ms / 1000.0
+                elif word_times:
+                    self._cumulative_time = word_times[-1][1]
 
     async def _send_keepalive(self):
         """Send a single keepalive message to keep the WebSocket connection alive.
@@ -876,14 +870,13 @@ class ElevenLabsHttpTTSService(TTSService):
         self._output_format = ""  # initialized in start()
         self._voice_settings = self._set_voice_settings()
         if _pronunciation_dictionary_locators is not None:
-            warnings.warn(
+            warn_deprecated(
                 "`pronunciation_dictionary_locators` is deprecated since 1.6.0 and will be "
                 "removed in 2.0.0. Use `text_transforms` -> `replace_text` instead. "
                 "Pronunciation dictionary substitutions can rewrite the spoken words in "
                 "ways that no longer match the text sent to synthesis, which breaks the "
                 "alignment-based word-completion tracking used to attribute spoken text "
                 "back to the conversation context.",
-                DeprecationWarning,
                 stacklevel=2,
             )
         self._pronunciation_dictionary_locators = _pronunciation_dictionary_locators
