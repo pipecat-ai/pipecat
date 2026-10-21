@@ -89,8 +89,6 @@ def language_to_cartesia_language(language: Language) -> str:
     """
     LANGUAGE_MAP = {
         Language.AR: "ar",
-        Language.AR_AE: "ar-AE",
-        Language.AR_SA: "ar-SA",
         Language.BG: "bg",
         Language.BG_BG: "bg-BG",
         Language.BN: "bn",
@@ -116,7 +114,6 @@ def language_to_cartesia_language(language: Language) -> str:
         Language.EN_ZA: "en-ZA",
         Language.ES: "es",
         Language.ES_AR: "es-AR",
-        Language.ES_BO: "es-BO",
         Language.ES_CL: "es-CL",
         Language.ES_CO: "es-CO",
         Language.ES_DO: "es-DO",
@@ -202,7 +199,6 @@ def language_to_cartesia_language(language: Language) -> str:
         Language.VI_VN: "vi-VN",
         Language.ZH: "zh",
         Language.ZH_CN: "zh-CN",
-        Language.ZH_TW: "zh-TW",
     }
 
     return resolve_language(language, LANGUAGE_MAP, use_base_code=True)
