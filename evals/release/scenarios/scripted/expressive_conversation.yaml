@@ -1,0 +1,54 @@
+name: expressive_conversation
+
+# Expressive conversation, end to end: the LLM writes expression tags into
+# its replies, and the TTS performs them rather than speaking them. Each turn
+# checks the LLM's raw text for a tag, the text the TTS reports speaking for
+# markup, and the transcription of the bot's audio for tags read aloud.
+#
+# For a bot with PipelineParams(enable_expressive_conversation=True) whose
+# prompt teaches the tags, such as features-expressive-conversation.py.
+
+user: !include ../user_audio.yaml
+
+judge: !include ../judge_audio.yaml
+
+scenarios:
+  - name: expressive_conversation
+    turns:
+      # Wait for the bot's on-connect greeting before speaking (avoids barging into it).
+      - expect:
+          - event: response
+            eval: "the bot opens the conversation in some way (a greeting, an introduction, an offer to help, or a question to get the user started)"
+
+      - user: "I just found out I got the job I interviewed for last month!"
+        expect:
+          - event: llm_response
+            text_contains: "<<"
+          - event: tts_response
+            eval: "the text is plain words, with no markup such as angle-bracket or square-bracket tags"
+            text_excludes: "<"
+          - event: response
+            eval: "the bot congratulates the user, without reading out markup such as 'emotion value' or 'break time'"
+            text_excludes: "emotion"
+
+      - user: "Thanks. But my dog has been sick all week and I'm really worried about him."
+        expect:
+          - event: llm_response
+            text_contains: "<<"
+          - event: tts_response
+            eval: "the text is plain words, with no markup such as angle-bracket or square-bracket tags"
+            text_excludes: "<"
+          - event: response
+            eval: "the bot responds with sympathy for the user's worry about their dog, without reading out markup such as 'emotion value' or 'break time'"
+            text_excludes: "emotion"
+
+      - user: "Why did the scarecrow win an award? Because he was outstanding in his field."
+        expect:
+          - event: llm_response
+            text_contains: "[[laughter]]"
+          - event: tts_response
+            eval: "the text is plain words, with no markup such as angle-bracket or square-bracket tags"
+            text_excludes: "["
+          - event: response
+            eval: "the bot reacts to the user's joke, without reading out markup such as the word 'laughter' in brackets"
+            text_excludes: "emotion"

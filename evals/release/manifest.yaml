@@ -407,6 +407,13 @@ suite:
     scenarios: [scripted/voicemail_detection]
 
   #
+  # Expressive conversation: the LLM writes expression tags, and the TTS
+  # performs them rather than speaking them.
+  #
+  - bot: features/features-expressive-conversation.py
+    scenarios: [scripted/expressive_conversation]
+
+  #
   # Video avatar services
   #
   - bot: video-avatar/video-avatar-tavus-video-service.py
