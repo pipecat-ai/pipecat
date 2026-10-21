@@ -408,14 +408,16 @@ def _select_alignment(
     return msg.get(alignment_key) or msg.get(normalized_key)
 
 
-def _strip_audio_tags(
+def _join_audio_tags(
     alignment: Mapping[str, Any], keys: tuple[str, str, str], in_tag: bool
 ) -> tuple[dict[str, Any], bool]:
-    """Remove bracketed audio tags, such as ``[laughs]``, from character alignment.
+    """Join each bracketed audio tag, such as ``[short pause]``, into one word of the alignment.
 
     Eleven v3 and v4 return the tags they perform as characters in the
-    alignment, though they aren't spoken words. A tag can span alignment
-    chunks, so whether one is still open is carried from chunk to chunk.
+    alignment. Without the spaces inside it, a tag reaches the word timestamps
+    as a word of its own, which completes the event or pause it performs. A
+    tag can span alignment chunks, so whether one is still open is carried
+    from chunk to chunk.
 
     Args:
         alignment: Alignment dict from the API.
@@ -424,8 +426,8 @@ def _strip_audio_tags(
         in_tag: Whether a tag was still open at the end of the previous chunk.
 
     Returns:
-        The alignment without the tags' characters, and whether a tag is still
-        open at its end.
+        The alignment without the spaces inside tags, and whether a tag is
+        still open at its end.
     """
     chars_key, starts_key, tail_key = keys
     chars = alignment.get(chars_key) or []
@@ -435,15 +437,16 @@ def _strip_audio_tags(
     for i, char in enumerate(chars):
         if char == "[":
             in_tag = True
-        elif char == "]" and in_tag:
+        elif char == "]":
             in_tag = False
-        elif not in_tag:
-            kept.append(i)
-    stripped = dict(alignment)
-    stripped[chars_key] = [chars[i] for i in kept]
-    stripped[starts_key] = [starts[i] for i in kept]
-    stripped[tail_key] = [tails[i] for i in kept] if tails else []
-    return stripped, in_tag
+        elif char == " " and in_tag:
+            continue
+        kept.append(i)
+    joined = dict(alignment)
+    joined[chars_key] = [chars[i] for i in kept]
+    joined[starts_key] = [starts[i] for i in kept]
+    joined[tail_key] = [tails[i] for i in kept] if tails else []
+    return joined, in_tag
 
 
 # The audio tags in ElevenLabs' prompting guide for Eleven v3 and v4, sorted
@@ -548,12 +551,12 @@ class ElevenLabsAudioTagExpressionAdapter(ExpressionAdapter):
         return text
 
     def render_event(self, name: str) -> str:
-        """Render an audio tag."""
-        return f"[{name}]"
+        """Render an audio tag, set apart so its alignment times it as a word of its own."""
+        return f" [{name}] "
 
     def render_pause(self, duration_ms: int) -> str:
-        """Render a short pause under a second, otherwise a long one."""
-        return "[short pause]" if duration_ms < 1000 else "[long pause]"
+        """Render a short pause under a second, otherwise a long one, set apart like an event."""
+        return " [short pause] " if duration_ms < 1000 else " [long pause] "
 
 
 def _strip_utterance_leading_spaces(

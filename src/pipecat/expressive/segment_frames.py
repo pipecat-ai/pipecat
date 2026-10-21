@@ -18,6 +18,9 @@ to the TTS for it.
 from pipecat.expressive.parser import Event, Pause, Segment, Text
 from pipecat.frames.frames import AggregatedTextFrame, TextType
 
+# The text types of what a TTS performs rather than says: events and pauses.
+EXPRESSION_TEXT_TYPES = (TextType.EXPRESSION_EVENT, TextType.EXPRESSION_PAUSE)
+
 
 def segment_frames(
     segments: list[Segment], text_type: TextType | str, *, trim: bool
@@ -26,8 +29,8 @@ def segment_frames(
 
     Words become frames of ``text_type`` that carry their modes, and the text
     to speak keeps the spaces between them. Events and pauses become frames of
-    their own text types, marked ``skip_tts`` since they aren't spoken as words,
-    with no text to send until the TTS service renders them.
+    their own text types, with no text to send until the TTS service renders
+    them.
 
     Args:
         segments: The segments of one unit of text, such as a sentence.
@@ -47,11 +50,11 @@ def segment_frames(
             frame = AggregatedTextFrame(text, text_type, raw_text=raw, modes=list(segment.modes))
             pieces.append((frame, segment.text))
         else:
-            frame = _event_frame(segment)
-            frame.skip_tts = True
-            pieces.append((frame, ""))
+            pieces.append((_event_frame(segment), ""))
 
-    words = [i for i, (frame, _) in enumerate(pieces) if not frame.skip_tts]
+    words = [
+        i for i, (frame, _) in enumerate(pieces) if frame.text_type not in EXPRESSION_TEXT_TYPES
+    ]
     if trim and words:
         first, last = words[0], words[-1]
         pieces[first] = (pieces[first][0], pieces[first][1].lstrip())

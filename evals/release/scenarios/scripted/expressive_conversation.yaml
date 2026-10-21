@@ -4,7 +4,8 @@ name: expressive_conversation
 # its replies, and the TTS performs them rather than speaking them. Each turn
 # checks the LLM's raw text for a tag, the expression the TTS performed (a tag
 # the TTS can't perform is never reported), the text the TTS reports speaking
-# for markup, and the transcription of the bot's audio for tags read aloud. Markup
+# for mode markup (events are reported there as they are performed), and the
+# transcription of the bot's audio for tags read aloud. Markup
 # is checked by text_excludes. The evals judge only the reply's content: a
 # judge asked about markup finds it in the LLM's raw text and fails replies
 # that were spoken cleanly.
@@ -64,7 +65,7 @@ scenarios:
             text_contains: "laugh"
           - event: tts_response
             eval: "the bot reacts to the user's joke"
-            text_excludes: "["
+            text_excludes: "<"
           - event: response
             eval: "the bot reacts to the user's joke"
             text_excludes: "emotion"

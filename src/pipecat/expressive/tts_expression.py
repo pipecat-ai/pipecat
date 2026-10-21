@@ -22,7 +22,7 @@ from loguru import logger
 from pipecat.expressive.adapter import ExpressionAdapter
 from pipecat.expressive.expression import ExpressionCapabilities, ModeScope
 from pipecat.expressive.parser import EMPHASIS_MODE, ExpressionParser, Segment
-from pipecat.expressive.segment_frames import segment_frames
+from pipecat.expressive.segment_frames import EXPRESSION_TEXT_TYPES, segment_frames
 from pipecat.frames.frames import AggregatedTextFrame, TextType
 
 
@@ -136,7 +136,7 @@ class TTSExpression:
         pieces: list[tuple[AggregatedTextFrame, str]] = []
         for frame, text in segment_frames(segments, src_frame.text_type, trim=not streaming_tokens):
             frame.interruptible = src_frame.interruptible
-            if frame.skip_tts:
+            if frame.text_type in EXPRESSION_TEXT_TYPES:
                 rendered = self._render_event(frame, capabilities)
                 if rendered is not None:
                     pieces.append((frame, rendered))
@@ -146,7 +146,7 @@ class TTSExpression:
                 continue
             frame.modes = self._performed_modes(frame.modes or [], capabilities)
             pieces.append((frame, trimmed))
-        words = [frame for frame, _ in pieces if not frame.skip_tts]
+        words = [frame for frame, _ in pieces if frame.text_type not in EXPRESSION_TEXT_TYPES]
         if words:
             self._modes = words[0].modes or []
             if capabilities and capabilities.mode_scope == ModeScope.SENTENCE:

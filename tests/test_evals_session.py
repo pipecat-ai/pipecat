@@ -280,7 +280,7 @@ class TestFramesToEvents(unittest.TestCase):
                 "text": text,
                 "text_type": text_type,
                 "segment_id": segment_id,
-                "will_be_spoken": text_type == "sentence",
+                "will_be_spoken": True,
                 "spoken_status": status,
             }
             if modes is not None:
@@ -301,12 +301,17 @@ class TestFramesToEvents(unittest.TestCase):
         self.assertEqual(
             expression(bot_output(2, modes=["excited", "emphasis"])), "<<excited emphasis>>"
         )
+        # An event counts when it is heard, once.
+        self.assertIsNone(expression(bot_output(3, "expression_event", "laughter", status="new")))
         self.assertEqual(
-            expression(bot_output(3, "expression_event", "laughter", modes=["excited"])),
+            expression(bot_output(3, "expression_event", "laughter", status="completed")),
             "[[laughter]]",
         )
+        self.assertIsNone(
+            expression(bot_output(3, "expression_event", "laughter", status="completed"))
+        )
         self.assertEqual(
-            expression(bot_output(4, "expression_pause", "600", modes=["excited"])),
+            expression(bot_output(4, "expression_pause", "600", status="completed")),
             "[[pause 600]]",
         )
         self.assertEqual(expression(bot_output(5, modes=["excited"])), "<<excited>>")

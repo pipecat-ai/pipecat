@@ -22,7 +22,7 @@ from pipecat.services.elevenlabs.dialogue.tts import (
 from pipecat.services.elevenlabs.tts import calculate_word_times
 from pipecat.services.elevenlabs.tts_base import (
     ElevenLabsAudioTagExpressionAdapter,
-    _strip_audio_tags,
+    _join_audio_tags,
 )
 from pipecat.services.tts_service import TextAggregationMode
 
@@ -495,32 +495,29 @@ def _alignment(text: str, start_ms: int = 0) -> dict:
     }
 
 
-def test_audio_tags_are_stripped_from_alignment():
-    stripped, in_tag = _strip_audio_tags(
-        _alignment("ancient. [laughs] Let"), _WS_ALIGNMENT_KEYS, False
+def test_audio_tags_are_joined_into_words_of_their_own():
+    joined, in_tag = _join_audio_tags(
+        _alignment("four, [short pause] two"), _WS_ALIGNMENT_KEYS, False
     )
 
-    assert "".join(stripped["chars"]) == "ancient.  Let"
-    assert stripped["charStartTimesMs"][-3:] == [180, 190, 200]
+    assert "".join(joined["chars"]) == "four, [shortpause] two"
     assert not in_tag
-    word_times, partial, _ = calculate_word_times(stripped, 0.0)
-    assert [word for word, _ in word_times] == ["ancient."]
-    assert partial == "Let"
+    word_times, partial, _ = calculate_word_times(joined, 0.0)
+    assert [word for word, _ in word_times] == ["four,", "[shortpause]"]
+    assert partial == "two"
 
 
-def test_audio_tag_split_across_chunks_is_stripped():
-    first, in_tag = _strip_audio_tags(_alignment("[warm, re"), _WS_ALIGNMENT_KEYS, False)
-    second, in_tag = _strip_audio_tags(
-        _alignment("assuring tone] It's"), _WS_ALIGNMENT_KEYS, in_tag
-    )
+def test_audio_tag_split_across_chunks_is_joined():
+    first, in_tag = _join_audio_tags(_alignment("[clear th"), _WS_ALIGNMENT_KEYS, False)
+    second, in_tag = _join_audio_tags(_alignment("roat] It's"), _WS_ALIGNMENT_KEYS, in_tag)
 
-    assert first["chars"] == []
-    assert "".join(second["chars"]) == " It's"
+    assert "".join(first["chars"]) == "[clearth"
+    assert "".join(second["chars"]) == "roat] It's"
     assert not in_tag
 
 
 @pytest.mark.asyncio
-async def test_dialogue_word_timestamps_leave_out_audio_tags():
+async def test_dialogue_word_timestamps_report_audio_tags_as_words():
     service = _make_dialogue_service()
     ws = _FakeWebSocket()
     await _open_dialogue_context(service, ws)
@@ -531,7 +528,7 @@ async def test_dialogue_word_timestamps_leave_out_audio_tags():
 
     service.add_word_timestamps = _record
 
-    for chunk in ("[exci", "ted] Good news [laughs] it's ", "back."):
+    for chunk in ("[exci", "ted] Good news [lau", "ghs] it's ", "back."):
         alignment = _alignment(chunk)
         await service._handle_message(
             {
@@ -544,9 +541,8 @@ async def test_dialogue_word_timestamps_leave_out_audio_tags():
             }
         )
 
-    assert reported == ["Good", "news", "it's"]
-    # The clock advances over the tags too: they take time in the audio.
-    assert service._cumulative_time == pytest.approx(0.05 + 0.29 + 0.05)
+    assert reported == ["[excited]", "Good", "news", "[laughs]", "it's"]
+    assert service._cumulative_time == pytest.approx(0.05 + 0.19 + 0.10 + 0.05)
 
 
 class TestAudioTagExpressionAdapter:
@@ -578,9 +574,9 @@ class TestAudioTagExpressionAdapter:
         assert adapter.render_text("back up", ["excited", "emphasis"], ["excited"]) == "BACK UP"
 
     def test_events(self):
-        assert ElevenLabsAudioTagExpressionAdapter().render_event("laughs") == "[laughs]"
+        assert ElevenLabsAudioTagExpressionAdapter().render_event("laughs") == " [laughs] "
 
     def test_pauses_are_short_or_long(self):
         adapter = ElevenLabsAudioTagExpressionAdapter()
-        assert adapter.render_pause(500) == "[short pause]"
-        assert adapter.render_pause(1500) == "[long pause]"
+        assert adapter.render_pause(500) == " [short pause] "
+        assert adapter.render_pause(1500) == " [long pause] "

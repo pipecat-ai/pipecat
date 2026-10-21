@@ -289,8 +289,11 @@ class WordCompletionTracker:
 
         A False answer means the provider dropped an event. Callers ask this
         before adding a word so they can offer it to the next frame instead;
-        adding it anyway force-completes this one.
+        adding it anyway force-completes this one. A frame that is only markup,
+        such as a pause tag, is never reported, so no word belongs to it.
         """
+        if not strip_complete_markup(self._tts_text).strip():
+            return False
         return self._segment_map.word_belongs_current_segment(word)
 
     def suppress_in_context(self) -> bool:

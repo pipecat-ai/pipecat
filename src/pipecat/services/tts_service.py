@@ -23,6 +23,7 @@ from pipecat.audio.utils import create_stream_resampler
 from pipecat.expressive.adapter import ExpressionAdapter
 from pipecat.expressive.expression import ExpressionCapabilities
 from pipecat.expressive.parser import Segment
+from pipecat.expressive.segment_frames import EXPRESSION_TEXT_TYPES
 from pipecat.expressive.tts_expression import TTSExpression
 from pipecat.frames.frames import (
     AggregatedTextFrame,
@@ -1562,10 +1563,8 @@ class TTSService(AIService):
 
         The pieces are synthesized together as one request, in order, but each
         keeps its own frame: its own segment for clients and its own part of the
-        context. A piece whose frame is marked ``skip_tts`` isn't spoken as
-        words: it is pushed on as skipped text at its place among the others,
-        and its text, if any, is sent to the TTS as it is, for something the TTS
-        performs rather than says.
+        context. An event or pause is spoken as a piece of its own, and its text,
+        the service's markup for it, is sent to the TTS as it is.
 
         Args:
             pieces: Each piece's frame and the text to send to the TTS for it.
@@ -1573,7 +1572,7 @@ class TTSService(AIService):
         """
         # Accumulate text for a single debug log at flush time when streaming tokens.
         if self._is_streaming_tokens:
-            self._streamed_text += "".join(text for frame, text in pieces if not frame.skip_tts)
+            self._streamed_text += "".join(text for _, text in pieces)
 
         # Two things disqualify the measurement. A service that hands text off
         # for synthesis elsewhere would time only the handoff, and a token is
@@ -1583,13 +1582,13 @@ class TTSService(AIService):
         if self.supports_processing_metrics and not self._is_streaming_tokens:
             await self.start_processing_metrics()
 
-        # Each piece with its text, None for one not spoken as words, the text
-        # the TTS speaks for it, and the text sent to the TTS for it. The last
-        # two differ by the expression markup, which is performed but not spoken.
-        prepared: list[tuple[AggregatedTextFrame, str | None, str, str]] = []
+        # Each piece with its text, the text the TTS speaks for it, and the text
+        # sent to the TTS for it. The last two differ by the expression markup,
+        # which is performed but not spoken as words.
+        prepared: list[tuple[AggregatedTextFrame, str, str, str]] = []
         for frame, text in pieces:
-            if frame.skip_tts:
-                prepared.append((frame, None, text, text))
+            if frame.text_type in EXPRESSION_TEXT_TYPES:
+                prepared.append((frame, frame.text, text, text))
                 continue
             prepared_text = await self._transform_text(text, frame.text_type)
             if prepared_text is None:
@@ -1609,25 +1608,18 @@ class TTSService(AIService):
                 context_id, TTSContext(interruptible=pieces[0][0].interruptible)
             )
             append_to_context = context.append_to_context
-            for frame, piece_text, _, _ in prepared:
-                if piece_text is not None:
-                    await self._announce_text(frame, context_id)
+            for frame, _, _, _ in prepared:
+                await self._announce_text(frame, context_id)
             await self._call_event_handler("on_tts_request", context_id, request)
             await self._start_audio_context(context_id)
 
-        # In order, so the sequencer releases skipped pieces right after the
-        # spoken pieces before them.
-        for frame, piece_text, prepared_text, _ in prepared:
-            if piece_text is None:
-                await self._push_skipped_text(frame, context_id)
-            else:
-                await self._register_spoken_text(frame, prepared_text, context_id)
+        for frame, _, prepared_text, _ in prepared:
+            await self._register_spoken_text(frame, prepared_text, context_id)
 
         if request:
             await self._synthesize_text(request, context_id)
             for frame, piece_text, _, _ in prepared:
-                if piece_text is not None:
-                    await self._push_spoken_text(frame, piece_text, context_id, append_to_context)
+                await self._push_spoken_text(frame, piece_text, context_id, append_to_context)
 
         await self.stop_processing_metrics()
 

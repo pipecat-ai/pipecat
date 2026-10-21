@@ -327,8 +327,8 @@ class CartesiaExpressionAdapter(ExpressionAdapter):
         return f'<emotion value="{emotion or CartesiaEmotion.NEUTRAL.value}"/>{text}'
 
     def render_event(self, name: str) -> str:
-        """Render laughter."""
-        return f"[{name}]"
+        """Render laughter, set apart so Cartesia times it as a word of its own."""
+        return f" [{name}] "
 
     def render_pause(self, duration_ms: int) -> str:
         """Render a break."""
@@ -604,12 +604,10 @@ class CartesiaTTSService(WebsocketTTSService):
         base_lang = language.split("-")[0].lower()
         return base_lang in {"zh", "ja"}
 
-    _CARTESIA_TAG_RE = re.compile(
-        r"</?(?:spell|emotion|break|volume|speed)\b[^>]*>|\[laughter\]", re.IGNORECASE
-    )
+    _CARTESIA_TAG_RE = re.compile(r"</?(?:spell|emotion|break|volume|speed)\b[^>]*>", re.IGNORECASE)
 
     def _strip_cartesia_tags(self, text: str) -> str:
-        """Remove Cartesia SSML tags and ``[laughter]`` from a word-timestamp token.
+        """Remove Cartesia SSML tags from a word-timestamp token.
 
         A tag standing between two alphanumeric characters is replaced by a space,
         since it is the only thing separating two words (``"to<spell>1234"``).
@@ -633,8 +631,7 @@ class CartesiaTTSService(WebsocketTTSService):
     ) -> list[tuple[str, float]]:
         """Normalize raw word timestamps from Cartesia before further processing.
 
-        Strips Cartesia SSML tags (spell, emotion, break, volume, speed) and
-        ``[laughter]``, which comes back as a word of its own, from each word
+        Strips Cartesia SSML tags (spell, emotion, break, volume, speed) from each word
         and drops entries that become empty after stripping. Each entry keeps its own
         start time, so one entry in is at most one token out, whatever the language.
 

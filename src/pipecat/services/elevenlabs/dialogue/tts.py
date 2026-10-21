@@ -27,8 +27,8 @@ from pipecat.services.elevenlabs.tts_base import (
     ElevenLabsAudioTagExpressionAdapter,
     ElevenLabsTTSBase,
     ElevenLabsTTSSettingsBase,
+    _join_audio_tags,
     _select_alignment,
-    _strip_audio_tags,
     _strip_utterance_leading_spaces,
     _word_timestamps_include_inter_frame_spaces,
     calculate_word_times,
@@ -145,8 +145,9 @@ class ElevenLabsDialogueTTSService(ElevenLabsTTSBase):
     Turbo v2.5, and Multilingual models — it has a fuller set of voice controls.
 
     Eleven v3 and v4 perform inline audio tags such as ``[laughs]`` and
-    ``[excited]``. They come back as characters in the alignment and are left
-    out of the word timestamps, since they aren't spoken words.
+    ``[excited]``. They come back as characters in the alignment, and reach
+    the word timestamps as words of their own: an event's or a pause's marks
+    when it is performed, and other markup isn't spoken.
     """
 
     Settings = ElevenLabsDialogueTTSSettings
@@ -387,11 +388,11 @@ class ElevenLabsDialogueTTSService(ElevenLabsTTSBase):
                 not context.alignment_started,
             )
             context.alignment_started = True
-            spoken, context.in_audio_tag = _strip_audio_tags(
+            joined, context.in_audio_tag = _join_audio_tags(
                 alignment, ("chars", "charStartTimesMs", "charDurationsMs"), context.in_audio_tag
             )
             word_times, self._partial_word, self._partial_word_start_time = calculate_word_times(
-                spoken,
+                joined,
                 self._cumulative_time,
                 self._partial_word,
                 self._partial_word_start_time,

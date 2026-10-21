@@ -532,6 +532,9 @@ class AggregatedFrameSequencer:
                     and next_slot.tracker.word_belongs_here(word)
                 )
                 if not word_fits_next:
+                    if _is_markup(word):
+                        # Markup the provider echoed, such as a mode tag, isn't spoken.
+                        return []
                     if self._streaming:
                         self._buffered_words.append(
                             _BufferedWord(word, pts, context_id, includes_inter_frame_spaces)
@@ -963,3 +966,11 @@ class AggregatedFrameSequencer:
         frame.raw_text = raw_text
         frame.includes_inter_frame_spaces = includes_inter_frame_spaces
         return frame
+
+
+def _is_markup(word: str) -> bool:
+    """Whether a reported word is bracketed markup the provider echoed, not a spoken word."""
+    word = word.strip()
+    return (word.startswith("[") and word.endswith("]")) or (
+        word.startswith("<") and word.endswith(">")
+    )

@@ -18,14 +18,14 @@ SEGMENTS = [
 ]
 
 
-def test_words_carry_their_modes_and_events_are_not_spoken_as_words():
+def test_words_carry_their_modes_and_events_have_text_types_of_their_own():
     pieces = segment_frames(SEGMENTS, TextType.SENTENCE, trim=True)
 
     assert [(f.text_type, f.text, f.modes, bool(f.skip_tts)) for f, _ in pieces] == [
         (TextType.SENTENCE, "It's", ["calm"], False),
-        (TextType.EXPRESSION_EVENT, "laugh", None, True),
+        (TextType.EXPRESSION_EVENT, "laugh", None, False),
         (TextType.SENTENCE, "fine.", ["calm"], False),
-        (TextType.EXPRESSION_PAUSE, "400", None, True),
+        (TextType.EXPRESSION_PAUSE, "400", None, False),
     ]
     assert [f.raw_text for f, _ in pieces] == [
         "<<calm>> It's",

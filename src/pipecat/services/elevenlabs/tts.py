@@ -42,8 +42,8 @@ from pipecat.services.elevenlabs.tts_base import (
     ElevenLabsAudioTagExpressionAdapter,
     ElevenLabsTTSBase,
     ElevenLabsTTSSettingsBase,
+    _join_audio_tags,
     _select_alignment,
-    _strip_audio_tags,
     _strip_utterance_leading_spaces,
     _word_timestamps_include_inter_frame_spaces,
     calculate_word_times,
@@ -1179,7 +1179,7 @@ class ElevenLabsHttpTTSService(TTSService):
                                 utterance_duration = max(utterance_duration, chunk_end_time)
 
                             # Calculate word timestamps
-                            spoken, in_audio_tag = _strip_audio_tags(
+                            joined, in_audio_tag = _join_audio_tags(
                                 alignment,
                                 (
                                     "characters",
@@ -1188,9 +1188,9 @@ class ElevenLabsHttpTTSService(TTSService):
                                 ),
                                 in_audio_tag,
                             )
-                            # A chunk can be all audio tags, leaving nothing spoken.
+                            # A chunk can be only the spaces inside a tag, leaving nothing.
                             word_times = (
-                                self.calculate_word_times(spoken) if spoken["characters"] else []
+                                self.calculate_word_times(joined) if joined["characters"] else []
                             )
                             if word_times:
                                 await self.add_word_timestamps(

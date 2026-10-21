@@ -594,7 +594,7 @@ def _http_chunk(text: str) -> dict:
 
 
 @pytest.mark.asyncio
-async def test_http_word_timestamps_leave_out_markup():
+async def test_http_word_timestamps_report_audio_tags_as_words():
     class _Session:
         def post(self, url, json=None, headers=None, params=None):
             chunks = ["It's ", "[excited]", " back [sh", "ort pause] up."]
@@ -611,11 +611,8 @@ async def test_http_word_timestamps_leave_out_markup():
         reported.extend(word for word, _ in word_times)
 
     service.add_word_timestamps = _record
-    service.calculate_word_times = unittest.mock.Mock(wraps=service.calculate_word_times)
 
     async for _ in service.run_tts("It's [excited] back [short pause] up.", "ctx-1"):
         pass
 
-    assert reported[:2] == ["It's", "back"]
-    # The all-markup chunk is never timed as words.
-    assert service.calculate_word_times.call_count == 3
+    assert reported[:4] == ["It's", "[excited]", "back", "[shortpause]"]

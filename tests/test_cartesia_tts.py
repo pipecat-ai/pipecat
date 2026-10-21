@@ -247,12 +247,13 @@ def test_cartesia_tag_only_token_is_dropped():
     )
 
 
-def test_cartesia_laughter_token_is_dropped():
+def test_cartesia_laughter_token_is_kept():
+    """It marks when the laughter event is performed."""
     assert _process_word_timestamps(
         words=["ancient.", "[laughter]", "Let"],
         starts=[0.0, 0.5, 1.0],
         language="en",
-    ) == [("ancient.", 0.0), ("Let", 1.0)]
+    ) == [("ancient.", 0.0), ("[laughter]", 0.5), ("Let", 1.0)]
 
 
 class TestCartesiaExpressionAdapter:
@@ -283,7 +284,7 @@ class TestCartesiaExpressionAdapter:
 
     def test_events_and_pauses(self):
         adapter = CartesiaExpressionAdapter()
-        assert adapter.render_event("laughter") == "[laughter]"
+        assert adapter.render_event("laughter") == " [laughter] "
         assert adapter.render_pause(600) == '<break time="600ms"/>'
 
 

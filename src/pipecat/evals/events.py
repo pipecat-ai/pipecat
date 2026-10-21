@@ -635,24 +635,27 @@ class EvalEventStream:
         """The expression the bot performed, from a ``bot-output``, written as the LLM writes it.
 
         Only expressive conversation reports it: an event or pause segment, or
-        spoken text carrying ``modes``. Spoken text is reported once per
-        segment, as it is spoken rather than announced, so it keeps its place
-        among the events, where its modes differ from those before it in the
-        response.
+        spoken text carrying ``modes``. Each is reported once per segment, as it
+        is spoken rather than announced, so they keep the order they were
+        performed in; spoken text only where its modes differ from those before
+        it in the response.
         """
         text_type = data.get("text_type")
-        if text_type == "expression_event":
-            return {"type": "expression", "text": f"[[{data.get('text', '')}]]"}
-        if text_type == "expression_pause":
-            return {"type": "expression", "text": f"[[pause {data.get('text', '')}]]"}
-        modes = data.get("modes")
         segment_id = data.get("segment_id")
         if (
-            modes is None
-            or not data.get("will_be_spoken")
+            not data.get("will_be_spoken")
             or data.get("spoken_status") == "new"
             or segment_id in self._expression_segments
         ):
+            return None
+        if text_type == "expression_event":
+            self._expression_segments.add(segment_id)
+            return {"type": "expression", "text": f"[[{data.get('text', '')}]]"}
+        if text_type == "expression_pause":
+            self._expression_segments.add(segment_id)
+            return {"type": "expression", "text": f"[[pause {data.get('text', '')}]]"}
+        modes = data.get("modes")
+        if modes is None:
             return None
         self._expression_segments.add(segment_id)
         if modes == self._expression_modes:
