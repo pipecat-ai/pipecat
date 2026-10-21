@@ -477,10 +477,13 @@ class TTSService(AIService):
         expression adapter's; a service whose capabilities depend on its
         settings, such as its voice, overrides this.
         """
-        return self._expression_adapter.capabilities()
+        return self.get_expression_adapter().capabilities()
 
     def get_expression_adapter(self) -> ExpressionAdapter:
         """The adapter that renders this service's expression tags.
+
+        A service whose expression depends on its settings, such as its model,
+        overrides this to choose an adapter for them.
 
         Returns:
             An instance of :attr:`expression_adapter_class`.
@@ -1608,12 +1611,12 @@ class TTSService(AIService):
             if capabilities and capabilities.pause_range_ms:
                 shortest, longest = capabilities.pause_range_ms
                 duration_ms = min(max(int(frame.text), shortest), longest)
-                return self._expression_adapter.render_pause(duration_ms)
+                return self.get_expression_adapter().render_pause(duration_ms)
         elif capabilities and (
             capabilities.free_text_events
             or any(term.name == frame.text for term in capabilities.events)
         ):
-            return self._expression_adapter.render_event(frame.text)
+            return self.get_expression_adapter().render_event(frame.text)
         self._warn_unperformed(frame.raw_text or frame.text)
         return None
 
@@ -1686,7 +1689,7 @@ class TTSService(AIService):
             rendered_text = prepared_text
             if frame.modes is not None:
                 # Last, so transforms never see the service's markup.
-                rendered_text = self._expression_adapter.render_text(
+                rendered_text = self.get_expression_adapter().render_text(
                     prepared_text, frame.modes, self._rendered_modes
                 )
                 self._rendered_modes = frame.modes

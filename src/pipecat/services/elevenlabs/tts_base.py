@@ -23,6 +23,9 @@ import websockets
 from loguru import logger
 from websockets.protocol import State
 
+from pipecat.expressive.adapter import ExpressionAdapter
+from pipecat.expressive.expression import ExpressionCapabilities, ExpressionTerm
+from pipecat.expressive.parser import EMPHASIS_MODE
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
@@ -403,6 +406,154 @@ def _select_alignment(
     if prefer_normalized:
         return msg.get(normalized_key) or msg.get(alignment_key)
     return msg.get(alignment_key) or msg.get(normalized_key)
+
+
+def _strip_audio_tags(
+    alignment: Mapping[str, Any], keys: tuple[str, str, str], in_tag: bool
+) -> tuple[dict[str, Any], bool]:
+    """Remove bracketed audio tags, such as ``[laughs]``, from character alignment.
+
+    Eleven v3 and v4 return the tags they perform as characters in the
+    alignment, though they aren't spoken words. A tag can span alignment
+    chunks, so whether one is still open is carried from chunk to chunk.
+
+    Args:
+        alignment: Alignment dict from the API.
+        keys: Tuple of (chars_key, start_times_key, durations_or_end_times_key)
+            naming the three parallel arrays.
+        in_tag: Whether a tag was still open at the end of the previous chunk.
+
+    Returns:
+        The alignment without the tags' characters, and whether a tag is still
+        open at its end.
+    """
+    chars_key, starts_key, tail_key = keys
+    chars = alignment.get(chars_key) or []
+    starts = alignment.get(starts_key) or []
+    tails = alignment.get(tail_key) or []
+    kept = []
+    for i, char in enumerate(chars):
+        if char == "[":
+            in_tag = True
+        elif char == "]" and in_tag:
+            in_tag = False
+        elif not in_tag:
+            kept.append(i)
+    stripped = dict(alignment)
+    stripped[chars_key] = [chars[i] for i in kept]
+    stripped[starts_key] = [starts[i] for i in kept]
+    stripped[tail_key] = [tails[i] for i in kept] if tails else []
+    return stripped, in_tag
+
+
+# The audio tags in ElevenLabs' prompting guide for Eleven v3 and v4, sorted
+# into sounds made at one point and deliveries that last. Their guide doesn't
+# draw that line. Modes are single words, since a mode tag separates modes by
+# spaces, so multi-word deliveries such as accents aren't listed.
+_AUDIO_TAG_EVENTS = [
+    ExpressionTerm("laughs"),
+    ExpressionTerm("laughs harder"),
+    ExpressionTerm("starts laughing"),
+    ExpressionTerm("wheezing", "a wheezing laugh"),
+    ExpressionTerm("giggles"),
+    ExpressionTerm("chuckles"),
+    ExpressionTerm("snorts"),
+    ExpressionTerm("sighs"),
+    ExpressionTerm("exhales"),
+    ExpressionTerm("exhales sharply"),
+    ExpressionTerm("inhales deeply"),
+    ExpressionTerm("clears throat"),
+    ExpressionTerm("gulps"),
+    ExpressionTerm("swallows"),
+    ExpressionTerm("woo", "an excited whoop"),
+    ExpressionTerm("applause", "sound effect"),
+    ExpressionTerm("clapping", "sound effect"),
+    ExpressionTerm("gunshot", "sound effect"),
+    ExpressionTerm("explosion", "sound effect"),
+    ExpressionTerm("fart", "sound effect"),
+]
+
+_AUDIO_TAG_MODES = [
+    ExpressionTerm("happy"),
+    ExpressionTerm("excited"),
+    ExpressionTerm("delighted"),
+    ExpressionTerm("amazed"),
+    ExpressionTerm("impressed"),
+    ExpressionTerm("surprised"),
+    ExpressionTerm("curious"),
+    ExpressionTerm("questioning"),
+    ExpressionTerm("thoughtful"),
+    ExpressionTerm("warmly"),
+    ExpressionTerm("sympathetic"),
+    ExpressionTerm("reassuring"),
+    ExpressionTerm("professional"),
+    ExpressionTerm("cautiously"),
+    ExpressionTerm("nervously"),
+    ExpressionTerm("sheepishly"),
+    ExpressionTerm("sad"),
+    ExpressionTerm("crying", "speaking while crying"),
+    ExpressionTerm("desperately"),
+    ExpressionTerm("panicking"),
+    ExpressionTerm("frustrated"),
+    ExpressionTerm("annoyed"),
+    ExpressionTerm("angry"),
+    ExpressionTerm("appalled"),
+    ExpressionTerm("dismissive"),
+    ExpressionTerm("sarcastic"),
+    ExpressionTerm("deadpan"),
+    ExpressionTerm("mischievously"),
+    ExpressionTerm("dramatically"),
+    ExpressionTerm("cute"),
+    ExpressionTerm("whispers", "speaking in a whisper"),
+    ExpressionTerm("muttering", "speaking under one's breath"),
+    ExpressionTerm("singing"),
+    ExpressionTerm("laughing", "speaking while laughing"),
+    ExpressionTerm("giggling", "speaking while giggling"),
+    ExpressionTerm("sighing", "speaking with a sigh"),
+]
+
+
+class ElevenLabsAudioTagExpressionAdapter(ExpressionAdapter):
+    """Renders expression tags as Eleven v3 and v4 audio tags.
+
+    Part of expressive conversation (alpha). Modes and events are both audio
+    tags, such as ``[excited]`` or ``[laughs]``, written in free text: the
+    terms listed are the ones in ElevenLabs' prompting guide, and others
+    described in a few words work too. Emphasis is written in capitals. A mode
+    tag is written where the modes change; Eleven v3 and v4 have no tag for
+    the voice's baseline, so a return to it writes none. They don't support
+    ``<break>``, so a pause is written as a short or long pause cue, which is
+    approximate.
+    """
+
+    def capabilities(self) -> ExpressionCapabilities:
+        """Free-text audio tags, emphasis and approximate pauses."""
+        return ExpressionCapabilities(
+            events=list(_AUDIO_TAG_EVENTS),
+            modes=list(_AUDIO_TAG_MODES),
+            free_text_events=True,
+            free_text_modes=True,
+            pause_range_ms=(100, 3000),
+            emphasis=True,
+        )
+
+    def render_text(self, text: str, modes: list[str], previous_modes: list[str] | None) -> str:
+        """Prefix audio tags where the modes change, and capitalize emphasis."""
+        if EMPHASIS_MODE in modes:
+            text = text.upper()
+        tags = [mode for mode in modes if mode != EMPHASIS_MODE]
+        previous = [mode for mode in previous_modes or [] if mode != EMPHASIS_MODE]
+        if tags and tags != previous:
+            text = " ".join(f"[{tag}]" for tag in tags) + " " + text
+        return text
+
+    def render_event(self, name: str) -> str:
+        """Render an audio tag."""
+        return f"[{name}]"
+
+    def render_pause(self, duration_ms: int) -> str:
+        """Render a short pause under a second, otherwise a long one."""
+        return "[short pause]" if duration_ms < 1000 else "[long pause]"
 
 
 def _strip_utterance_leading_spaces(

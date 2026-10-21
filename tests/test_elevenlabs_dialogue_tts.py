@@ -15,13 +15,15 @@ from websockets.protocol import State
 
 from pipecat.services.elevenlabs.dialogue.tts import (
     _KEEPALIVE_CONTEXT_ID,
-    ElevenLabsDialogueExpressionAdapter,
     ElevenLabsDialogueTTSService,
     _DialogueContext,
     _normalize_ttd_alignment,
-    _strip_audio_tags,
 )
 from pipecat.services.elevenlabs.tts import calculate_word_times
+from pipecat.services.elevenlabs.tts_base import (
+    ElevenLabsAudioTagExpressionAdapter,
+    _strip_audio_tags,
+)
 from pipecat.services.tts_service import TextAggregationMode
 
 _WS_ALIGNMENT_KEYS = ("chars", "charStartTimesMs", "charDurationsMs")
@@ -494,7 +496,9 @@ def _alignment(text: str, start_ms: int = 0) -> dict:
 
 
 def test_audio_tags_are_stripped_from_alignment():
-    stripped, in_tag = _strip_audio_tags(_alignment("ancient. [laughs] Let"), False)
+    stripped, in_tag = _strip_audio_tags(
+        _alignment("ancient. [laughs] Let"), _WS_ALIGNMENT_KEYS, False
+    )
 
     assert "".join(stripped["chars"]) == "ancient.  Let"
     assert stripped["charStartTimesMs"][-3:] == [180, 190, 200]
@@ -505,8 +509,10 @@ def test_audio_tags_are_stripped_from_alignment():
 
 
 def test_audio_tag_split_across_chunks_is_stripped():
-    first, in_tag = _strip_audio_tags(_alignment("[warm, re"), False)
-    second, in_tag = _strip_audio_tags(_alignment("assuring tone] It's"), in_tag)
+    first, in_tag = _strip_audio_tags(_alignment("[warm, re"), _WS_ALIGNMENT_KEYS, False)
+    second, in_tag = _strip_audio_tags(
+        _alignment("assuring tone] It's"), _WS_ALIGNMENT_KEYS, in_tag
+    )
 
     assert first["chars"] == []
     assert "".join(second["chars"]) == " It's"
@@ -543,9 +549,9 @@ async def test_dialogue_word_timestamps_leave_out_audio_tags():
     assert service._cumulative_time == pytest.approx(0.05 + 0.29 + 0.05)
 
 
-class TestDialogueExpressionAdapter:
+class TestAudioTagExpressionAdapter:
     def test_capabilities(self):
-        capabilities = ElevenLabsDialogueExpressionAdapter().capabilities()
+        capabilities = ElevenLabsAudioTagExpressionAdapter().capabilities()
         assert capabilities.free_text_modes
         assert capabilities.free_text_events
         assert capabilities.emphasis
@@ -553,28 +559,28 @@ class TestDialogueExpressionAdapter:
 
     def test_modes_are_single_words(self):
         # A mode tag separates modes by spaces.
-        capabilities = ElevenLabsDialogueExpressionAdapter().capabilities()
+        capabilities = ElevenLabsAudioTagExpressionAdapter().capabilities()
         assert all(len(term.name.split()) == 1 for term in capabilities.modes)
 
     def test_tags_rendered_where_modes_change(self):
-        adapter = ElevenLabsDialogueExpressionAdapter()
+        adapter = ElevenLabsAudioTagExpressionAdapter()
         assert adapter.render_text("Hi.", ["excited"], None) == "[excited] Hi."
         assert adapter.render_text("Hi.", ["excited"], ["excited"]) == "Hi."
         assert adapter.render_text("Hi.", ["sad", "whispers"], None) == "[sad] [whispers] Hi."
 
     def test_return_to_baseline_renders_nothing(self):
-        adapter = ElevenLabsDialogueExpressionAdapter()
+        adapter = ElevenLabsAudioTagExpressionAdapter()
         assert adapter.render_text("Hi.", [], ["excited"]) == "Hi."
 
     def test_emphasis_is_capitalized(self):
-        adapter = ElevenLabsDialogueExpressionAdapter()
+        adapter = ElevenLabsAudioTagExpressionAdapter()
         assert adapter.render_text("back up", ["emphasis"], None) == "BACK UP"
         assert adapter.render_text("back up", ["excited", "emphasis"], ["excited"]) == "BACK UP"
 
     def test_events(self):
-        assert ElevenLabsDialogueExpressionAdapter().render_event("laughs") == "[laughs]"
+        assert ElevenLabsAudioTagExpressionAdapter().render_event("laughs") == "[laughs]"
 
     def test_pauses_are_short_or_long(self):
-        adapter = ElevenLabsDialogueExpressionAdapter()
+        adapter = ElevenLabsAudioTagExpressionAdapter()
         assert adapter.render_pause(500) == "[short pause]"
         assert adapter.render_pause(1500) == "[long pause]"

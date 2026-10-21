@@ -27,6 +27,7 @@ from loguru import logger
 from pydantic import BaseModel
 from websockets.protocol import State
 
+from pipecat.expressive.adapter import ExpressionAdapter
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
@@ -38,9 +39,11 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.elevenlabs.tts_base import (
     ELEVENLABS_MODEL_LANGUAGES,
+    ElevenLabsAudioTagExpressionAdapter,
     ElevenLabsTTSBase,
     ElevenLabsTTSSettingsBase,
     _select_alignment,
+    _strip_audio_tags,
     _strip_utterance_leading_spaces,
     _word_timestamps_include_inter_frame_spaces,
     calculate_word_times,
@@ -891,6 +894,19 @@ class ElevenLabsHttpTTSService(TTSService):
         self._partial_word = ""
         self._partial_word_start_time = 0.0
 
+        self._audio_tag_expression_adapter = ElevenLabsAudioTagExpressionAdapter()
+
+    def get_expression_adapter(self) -> ExpressionAdapter:
+        """The adapter for the model: audio tags on Eleven v3 and v4, otherwise none.
+
+        Returns:
+            The expression adapter for the current model.
+        """
+        model = self._settings.model
+        if isinstance(model, str) and model.startswith(("eleven_v3", "eleven_v4")):
+            return self._audio_tag_expression_adapter
+        return super().get_expression_adapter()
+
     def language_to_service_language(self, language: Language) -> str | None:
         """Convert pipecat Language to ElevenLabs language code.
 
@@ -1120,6 +1136,7 @@ class ElevenLabsHttpTTSService(TTSService):
                 # Track the duration of this utterance based on the last character's end time
                 utterance_duration = 0
                 alignment_started = False
+                in_audio_tag = False
                 async for line in response.content:
                     line_str = line.decode("utf-8").strip()
                     if not line_str:
@@ -1162,7 +1179,19 @@ class ElevenLabsHttpTTSService(TTSService):
                                 utterance_duration = max(utterance_duration, chunk_end_time)
 
                             # Calculate word timestamps
-                            word_times = self.calculate_word_times(alignment)
+                            spoken, in_audio_tag = _strip_audio_tags(
+                                alignment,
+                                (
+                                    "characters",
+                                    "character_start_times_seconds",
+                                    "character_end_times_seconds",
+                                ),
+                                in_audio_tag,
+                            )
+                            # A chunk can be all audio tags, leaving nothing spoken.
+                            word_times = (
+                                self.calculate_word_times(spoken) if spoken["characters"] else []
+                            )
                             if word_times:
                                 await self.add_word_timestamps(
                                     word_times,
