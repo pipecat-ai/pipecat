@@ -127,9 +127,8 @@ class NvidiaOmniInferenceResult:
 class NvidiaOmniLLMService(NvidiaLLMService):
     """NVIDIA Nemotron Omni LLM service with text and speech input.
 
-    ``audio_input`` decides the pipeline architecture, so it is fixed at
-    construction. In audio input mode (the default), Omni hears the user
-    directly, replacing the STT stage::
+    ``audio_input`` decides the pipeline architecture. In audio input mode
+    (the default), Omni hears the user directly, replacing the STT stage::
 
         transport.input() -> user_aggregator -> llm
         -> tts -> transport.output() -> assistant_aggregator
