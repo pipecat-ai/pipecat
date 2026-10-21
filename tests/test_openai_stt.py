@@ -4,6 +4,8 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+from types import SimpleNamespace
+
 import pytest
 from openai.types.audio import Transcription, TranscriptionDiarized
 
@@ -193,3 +195,24 @@ async def test_diarized_response_emits_one_frame_per_speaker_run():
         (TranscriptionSpeaker("B", 2), "B: Fine."),
     ]
     assert all(f.user_id == "session-user" for f in frames)
+
+
+@pytest.mark.asyncio
+async def test_segments_without_speakers_are_not_split():
+    """Whisper's verbose segments carry no speaker, so the result is one unlabelled frame."""
+    service = OpenAISTTService(
+        api_key="test-key", settings=OpenAISTTService.Settings(model="whisper-1")
+    )
+    response = SimpleNamespace(
+        text="Hi there. Hello.",
+        segments=[SimpleNamespace(text="Hi there."), SimpleNamespace(text="Hello.")],
+    )
+
+    async def fake_transcribe(audio):
+        return response
+
+    service._transcribe = fake_transcribe
+
+    frames = [f async for f in service.run_stt(b"audio") if isinstance(f, TranscriptionFrame)]
+
+    assert [(f.speaker, f.text) for f in frames] == [(None, "Hi there. Hello.")]
