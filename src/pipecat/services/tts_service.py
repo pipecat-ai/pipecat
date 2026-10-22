@@ -113,8 +113,8 @@ class _AudioContextPlayback:
 
     received_audio: bool = False
     stop_frame_due: bool = False
-    # Spoken text that arrived before any audio, held until audio shows the
-    # text was actually spoken, along with every frame queued behind it.
+    # TTSTextFrames, and any frames queued behind them that arrived before audio,
+    # are held until the audio confirms that the text was actually spoken.
     held_frames: list[Frame] = field(default_factory=list)
 
 
