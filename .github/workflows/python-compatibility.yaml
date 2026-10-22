@@ -7,6 +7,12 @@ on:
   pull_request:
     branches: [main, develop]
     paths: ['pyproject.toml']
+  # Scheduled and manual runs ignore uv.lock and install the newest allowed
+  # versions, as a user's fresh install would, so upstream releases that break
+  # an install show up without any change here.
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
 
 jobs:
   test-compatibility:
@@ -50,7 +56,7 @@ jobs:
 
       - name: Test uv sync with all extras
         run: |
-          uv sync --group dev --all-extras
+          uv sync --group dev --all-extras ${{ github.event_name != 'push' && github.event_name != 'pull_request' && '--upgrade' || '' }}
 
       - name: Verify installation
         run: |
