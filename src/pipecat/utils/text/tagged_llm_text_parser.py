@@ -4,19 +4,20 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Split a leading tagged thought, such as ``<think>...</think>``, off streamed LLM text.
+"""Parse tagged thoughts, such as ``<think>...</think>``, out of streamed LLM text.
 
 Some models write their reasoning into the answer text, wrapped in tags, ahead
-of the answer itself. :class:`LeadingThoughtSplitter` separates that reasoning
+of the answer itself. :class:`TaggedLLMTextParser` separates that reasoning
 from the text that follows so a service can emit it as thoughts rather than as
 text to speak.
 """
 
+from dataclasses import dataclass
 from enum import Enum
 
 
-class LeadingThoughtEvent(Enum):
-    """The kind of a piece of text produced by :class:`LeadingThoughtSplitter`.
+class TaggedLLMTextParsedOutputChunkKind(Enum):
+    """The kind of a :class:`TaggedLLMTextParsedOutputChunk`.
 
     Parameters:
         TEXT: Text outside the thought.
@@ -31,6 +32,26 @@ class LeadingThoughtEvent(Enum):
     THOUGHT_END = "thought_end"
 
 
+@dataclass
+class TaggedLLMTextParsedOutputChunk:
+    """A categorized piece of text produced by :class:`TaggedLLMTextParser`.
+
+    Parameters:
+        kind: What the piece is.
+        text: The piece's text; empty for ``THOUGHT_START`` and ``THOUGHT_END``.
+    """
+
+    kind: TaggedLLMTextParsedOutputChunkKind
+    text: str = ""
+
+
+_Kind = TaggedLLMTextParsedOutputChunkKind
+
+
+def _chunk(kind: _Kind, text: str = "") -> TaggedLLMTextParsedOutputChunk:
+    return TaggedLLMTextParsedOutputChunk(kind, text)
+
+
 class _State(Enum):
     DETECTING = "detecting"
     IN_THOUGHT = "in_thought"
@@ -38,11 +59,15 @@ class _State(Enum):
     CONTENT = "content"
 
 
-class LeadingThoughtSplitter:
-    """Split a tagged thought at the start of streamed text from the rest of it.
+class TaggedLLMTextParser:
+    """Parse a tagged thought out of streamed LLM text.
 
-    Only a thought that opens the text is recognized, optionally after
-    whitespace; tags anywhere later are left in the text. Tags may be split
+    Feed the text chunk by chunk to :meth:`parse_next_chunk`, which returns the
+    categorized pieces each chunk completes: answer text, or a thought's start,
+    text and end.
+
+    A thought is recognized only at the start of the text, optionally after
+    whitespace; tags later in the text are passed on as text. Tags may be split
     across chunks, so the start of the text is held back until it is clear
     whether it opens a thought, and inside a thought, a possible start of the
     closing tag is held back. Text that doesn't open with a thought passes
@@ -50,54 +75,54 @@ class LeadingThoughtSplitter:
     thought and the text after it is dropped.
 
     Call :meth:`flush` when the text ends, or :meth:`reset` when it is cut
-    short. Either readies the splitter for the next text.
+    short. Either readies the parser for the next text.
 
     Example::
 
-        splitter = LeadingThoughtSplitter("<think>", "</think>")
-        for chunk in ["<thi", "nk>Hmm.</th", "ink> ", "Hello!"]:
-            for kind, text in splitter.split(chunk):
+        parser = TaggedLLMTextParser("<think>", "</think>")
+        for text in ["<thi", "nk>Hmm.</th", "ink> ", "Hello!"]:
+            for chunk in parser.parse_next_chunk(text):
                 ...
-        for kind, text in splitter.flush():
+        for chunk in parser.flush():
             ...
     """
 
-    def __init__(self, open_tag: str, close_tag: str):
-        """Initialize the splitter.
+    def __init__(self, thought_open_tag: str, thought_close_tag: str):
+        """Initialize the parser.
 
         Args:
-            open_tag: The tag that opens a thought, e.g. ``"<think>"``.
-            close_tag: The tag that closes a thought, e.g. ``"</think>"``.
+            thought_open_tag: The tag that opens a thought, e.g. ``"<think>"``.
+            thought_close_tag: The tag that closes a thought, e.g. ``"</think>"``.
         """
-        self._open_tag = open_tag
-        self._close_tag = close_tag
+        self._open_tag = thought_open_tag
+        self._close_tag = thought_close_tag
         self._state = _State.DETECTING
         self._buffer = ""
 
-    def split(self, text: str) -> list[tuple[LeadingThoughtEvent, str]]:
-        """Split the next chunk of text.
+    def parse_next_chunk(self, text: str) -> list[TaggedLLMTextParsedOutputChunk]:
+        """Parse the next chunk of streamed text.
 
         Args:
             text: The next chunk of streamed text.
 
         Returns:
-            The ``(kind, text)`` pieces this chunk completes, in order.
+            The pieces this chunk completes, in order.
         """
         if self._state == _State.CONTENT:
-            return [(LeadingThoughtEvent.TEXT, text)]
+            return [_chunk(_Kind.TEXT, text)]
 
-        events: list[tuple[LeadingThoughtEvent, str]] = []
+        output: list[TaggedLLMTextParsedOutputChunk] = []
 
         if self._state == _State.DETECTING:
             self._buffer += text
             head = self._buffer.lstrip()
             if len(head) < len(self._open_tag) and self._open_tag.startswith(head):
-                return events
+                return output
             if not head.startswith(self._open_tag):
                 passthrough, self._buffer = self._buffer, ""
                 self._state = _State.CONTENT
-                return [(LeadingThoughtEvent.TEXT, passthrough)]
-            events.append((LeadingThoughtEvent.THOUGHT_START, ""))
+                return [_chunk(_Kind.TEXT, passthrough)]
+            output.append(_chunk(_Kind.THOUGHT_START))
             self._buffer = ""
             self._state = _State.IN_THOUGHT
             text = head[len(self._open_tag) :]
@@ -109,12 +134,12 @@ class LeadingThoughtSplitter:
                 # Hold back what could be the start of the closing tag.
                 safe_end = len(self._buffer) - len(self._close_tag) + 1
                 if safe_end > 0:
-                    events.append((LeadingThoughtEvent.THOUGHT_TEXT, self._buffer[:safe_end]))
+                    output.append(_chunk(_Kind.THOUGHT_TEXT, self._buffer[:safe_end]))
                     self._buffer = self._buffer[safe_end:]
-                return events
+                return output
             if thought := self._buffer[:idx]:
-                events.append((LeadingThoughtEvent.THOUGHT_TEXT, thought))
-            events.append((LeadingThoughtEvent.THOUGHT_END, ""))
+                output.append(_chunk(_Kind.THOUGHT_TEXT, thought))
+            output.append(_chunk(_Kind.THOUGHT_END))
             text = self._buffer[idx + len(self._close_tag) :]
             self._buffer = ""
             self._state = _State.AFTER_THOUGHT
@@ -122,36 +147,36 @@ class LeadingThoughtSplitter:
         # After the thought: drop whitespace until the text resumes.
         if text := text.lstrip():
             self._state = _State.CONTENT
-            events.append((LeadingThoughtEvent.TEXT, text))
-        return events
+            output.append(_chunk(_Kind.TEXT, text))
+        return output
 
-    def flush(self) -> list[tuple[LeadingThoughtEvent, str]]:
+    def flush(self) -> list[TaggedLLMTextParsedOutputChunk]:
         """End the text, releasing what was held back and closing an open thought.
 
         Returns:
-            The remaining ``(kind, text)`` pieces, in order.
+            The remaining pieces, in order.
         """
         return self._end(release=True)
 
-    def reset(self) -> list[tuple[LeadingThoughtEvent, str]]:
+    def reset(self) -> list[TaggedLLMTextParsedOutputChunk]:
         """End text that was cut short, e.g. by an interruption or an error.
 
         Text still held back is discarded.
 
         Returns:
-            ``THOUGHT_END`` if a thought was open, so the caller can close it;
-            otherwise nothing.
+            A ``THOUGHT_END`` piece if a thought was open, so the caller can
+            close it; otherwise nothing.
         """
         return self._end(release=False)
 
-    def _end(self, *, release: bool) -> list[tuple[LeadingThoughtEvent, str]]:
-        events: list[tuple[LeadingThoughtEvent, str]] = []
+    def _end(self, *, release: bool) -> list[TaggedLLMTextParsedOutputChunk]:
+        output: list[TaggedLLMTextParsedOutputChunk] = []
         if self._state == _State.IN_THOUGHT:
             if self._buffer and release:
-                events.append((LeadingThoughtEvent.THOUGHT_TEXT, self._buffer))
-            events.append((LeadingThoughtEvent.THOUGHT_END, ""))
+                output.append(_chunk(_Kind.THOUGHT_TEXT, self._buffer))
+            output.append(_chunk(_Kind.THOUGHT_END))
         elif self._state == _State.DETECTING and self._buffer and release:
-            events.append((LeadingThoughtEvent.TEXT, self._buffer))
+            output.append(_chunk(_Kind.TEXT, self._buffer))
         self._buffer = ""
         self._state = _State.DETECTING
-        return events
+        return output

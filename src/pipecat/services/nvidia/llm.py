@@ -29,9 +29,10 @@ from pipecat.frames.frames import (
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.utils.text.leading_thought_splitter import (
-    LeadingThoughtEvent,
-    LeadingThoughtSplitter,
+from pipecat.utils.text.tagged_llm_text_parser import (
+    TaggedLLMTextParsedOutputChunk,
+    TaggedLLMTextParsedOutputChunkKind,
+    TaggedLLMTextParser,
 )
 
 
@@ -124,7 +125,7 @@ class NvidiaLLMService(OpenAILLMService):
         Resets leading-think-tag detection state and reasoning-content field
         tracking.
         """
-        self._think_splitter = LeadingThoughtSplitter("<think>", "</think>")
+        self._think_parser = TaggedLLMTextParser("<think>", "</think>")
 
         # reasoning_content field tracking
         self._has_reasoning_field = False
@@ -146,11 +147,11 @@ class NvidiaLLMService(OpenAILLMService):
             normal content.
         """
         visible = ""
-        for kind, value in self._think_splitter.split(text):
-            if kind == LeadingThoughtEvent.TEXT:
-                visible += value
+        for chunk in self._think_parser.parse_next_chunk(text):
+            if chunk.kind == TaggedLLMTextParsedOutputChunkKind.TEXT:
+                visible += chunk.text
             else:
-                await self._push_thought_event(kind, value)
+                await self._push_thought_chunk(chunk)
         return visible or None
 
     async def _finalize_reasoning_state(self, *, flush_buffered_text: bool):
@@ -163,27 +164,25 @@ class NvidiaLLMService(OpenAILLMService):
                 when the stream ends early due to interruption or
                 cancellation.
         """
-        events = (
-            self._think_splitter.flush() if flush_buffered_text else self._think_splitter.reset()
-        )
-        for kind, value in events:
-            if kind == LeadingThoughtEvent.TEXT:
-                await super()._push_llm_text(value)
+        chunks = self._think_parser.flush() if flush_buffered_text else self._think_parser.reset()
+        for chunk in chunks:
+            if chunk.kind == TaggedLLMTextParsedOutputChunkKind.TEXT:
+                await super()._push_llm_text(chunk.text)
             else:
-                await self._push_thought_event(kind, value)
+                await self._push_thought_chunk(chunk)
 
         if self._has_reasoning_field:
             await self.push_frame(LLMThoughtEndFrame())
             self._has_reasoning_field = False
 
-    async def _push_thought_event(self, kind: LeadingThoughtEvent, text: str):
-        """Push a ``<think>`` block event as a thought frame."""
-        if kind == LeadingThoughtEvent.THOUGHT_START:
+    async def _push_thought_chunk(self, chunk: TaggedLLMTextParsedOutputChunk):
+        """Push a piece of a ``<think>`` block as a thought frame."""
+        if chunk.kind == TaggedLLMTextParsedOutputChunkKind.THOUGHT_START:
             await self.stop_ttfb_metrics()
             await self.push_frame(LLMThoughtStartFrame())
-        elif kind == LeadingThoughtEvent.THOUGHT_TEXT:
-            await self.push_frame(LLMThoughtTextFrame(text=text))
-        elif kind == LeadingThoughtEvent.THOUGHT_END:
+        elif chunk.kind == TaggedLLMTextParsedOutputChunkKind.THOUGHT_TEXT:
+            await self.push_frame(LLMThoughtTextFrame(text=chunk.text))
+        elif chunk.kind == TaggedLLMTextParsedOutputChunkKind.THOUGHT_END:
             await self.push_frame(LLMThoughtEndFrame())
 
     async def get_chat_completions(self, context: LLMContext) -> AsyncIterator[ChatCompletionChunk]:
