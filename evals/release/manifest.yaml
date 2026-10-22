@@ -27,6 +27,8 @@ suite:
     scenarios: [scripted/capital_question]
   - bot: voice/voice-assemblyai-turn-detection.py
     scenarios: [scripted/capital_question]
+  - bot: voice/voice-assemblyai-tts.py
+    scenarios: [scripted/capital_question]
   - bot: voice/voice-asyncai.py
     scenarios: [scripted/capital_question]
   - bot: voice/voice-asyncai-http.py
