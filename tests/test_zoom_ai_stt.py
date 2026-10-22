@@ -726,7 +726,7 @@ async def test_empty_transcript_ends_the_turn_without_a_transcription(monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_processing_metrics_span_end_of_speech_to_final(monkeypatch):
+async def test_live_reports_no_processing_metrics(monkeypatch):
     service = _live()
     service._websocket = _FakeWebsocket(
         [
@@ -736,17 +736,14 @@ async def test_processing_metrics_span_end_of_speech_to_final(monkeypatch):
         ]
     )
     _record_frames(monkeypatch, service)
-    calls = []
-    monkeypatch.setattr(
-        service, "start_processing_metrics", AsyncMock(side_effect=lambda: calls.append("start"))
-    )
-    monkeypatch.setattr(
-        service, "stop_processing_metrics", AsyncMock(side_effect=lambda: calls.append("stop"))
-    )
+    start, stop = AsyncMock(), AsyncMock()
+    monkeypatch.setattr(service, "start_processing_metrics", start)
+    monkeypatch.setattr(service, "stop_processing_metrics", stop)
 
     await service._receive_messages()
 
-    assert calls == ["start", "stop"]
+    start.assert_not_awaited()
+    stop.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -813,21 +810,6 @@ async def test_settings_change_reconnects_with_the_new_config(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_processing_metrics_only_stop_after_they_started(monkeypatch):
-    service = _live()
-    service._websocket = _FakeWebsocket(
-        [_event("transcription.completed", item_id="item_1", transcript="Hi.")]
-    )
-    _record_frames(monkeypatch, service)
-    stop = AsyncMock()
-    monkeypatch.setattr(service, "stop_processing_metrics", stop)
-
-    await service._receive_messages()  # no speech_stopped, e.g. lost in a reconnect
-
-    stop.assert_not_awaited()
-
-
-@pytest.mark.asyncio
 async def test_cancel_does_not_close_the_session_gracefully(monkeypatch):
     service = _live()
     websocket = _FakeWebsocket()
@@ -872,6 +854,23 @@ async def test_failed_first_connect_still_starts_the_receive_loop(monkeypatch):
     assert service._websocket is None
     # The receive loop owns reconnecting, so it must run even without a socket.
     assert "receive" in started
+
+
+@pytest.mark.asyncio
+async def test_connect_clears_a_previous_disconnect_before_connecting(monkeypatch):
+    service = _live()
+    service._disconnecting = True  # left set by the disconnect half of a reconnect
+    disconnecting_while_connecting = []
+
+    async def connect_websocket():
+        disconnecting_while_connecting.append(service._disconnecting)
+
+    monkeypatch.setattr(service, "_connect_websocket", connect_websocket)
+    monkeypatch.setattr(service, "create_task", lambda coro, name=None: coro.close())
+
+    await service._connect()
+
+    assert disconnecting_while_connecting == [False]
 
 
 @pytest.mark.asyncio

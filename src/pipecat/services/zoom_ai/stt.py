@@ -405,7 +405,6 @@ class ZoomAISTTService(WebsocketSTTService):
         self._session_closed = asyncio.Event()
         self._session_updated = False  # Scribe accepted this session's settings
         self._tracking_id: str | None = None  # the current session's x-zm-trackingid
-        self._awaiting_final = False
         self._input_gap_task = None
         self._last_input_time = time.monotonic()
         self._gap_filled = False  # silence already sent for the current input gap
@@ -576,8 +575,8 @@ class ZoomAISTTService(WebsocketSTTService):
         return update
 
     async def _connect(self):
-        await self._connect_websocket()
         await super()._connect()
+        await self._connect_websocket()
         # Started even when the connection failed: with no socket the receive
         # loop goes straight to its reconnect path, which retries the connect.
         if not self._receive_task:
@@ -635,7 +634,6 @@ class ZoomAISTTService(WebsocketSTTService):
         finally:
             self._websocket = None
             self._send_buffer.clear()
-            self._awaiting_final = False
             self._can_reconnect = True
             await self._end_open_turn()
             await self._call_event_handler("on_disconnected")
@@ -669,14 +667,7 @@ class ZoomAISTTService(WebsocketSTTService):
             if not self._user_turn_open:
                 self._user_turn_open = True
                 await self.broadcast_frame(ProposedUserStartedSpeakingFrame)
-        elif kind == "input_audio_buffer.speech_stopped":
-            # Processing time: from Scribe's end of speech to its final transcript.
-            self._awaiting_final = True
-            await self.start_processing_metrics()
         elif kind == "transcription.completed":
-            if self._awaiting_final:
-                self._awaiting_final = False
-                await self.stop_processing_metrics()
             await self._push_final_transcript(event)
         elif kind == "session.updated":
             self._session_updated = True
