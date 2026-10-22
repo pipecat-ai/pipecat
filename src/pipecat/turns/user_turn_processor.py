@@ -29,7 +29,7 @@ from pipecat.turns.user_idle_controller import UserIdleController
 from pipecat.turns.user_start import BaseUserTurnStartStrategy, UserTurnStartedParams
 from pipecat.turns.user_stop import BaseUserTurnStopStrategy, UserTurnStoppedParams
 from pipecat.turns.user_turn_controller import UserTurnController
-from pipecat.turns.user_turn_strategies import UserTurnStrategies
+from pipecat.turns.user_turn_strategies import UserTurnStrategies, UserTurnStrategiesParams
 
 
 class UserTurnProcessor(FrameProcessor):
@@ -79,6 +79,7 @@ class UserTurnProcessor(FrameProcessor):
         self,
         *,
         user_turn_strategies: UserTurnStrategies | None = None,
+        user_turn_strategies_params: UserTurnStrategiesParams | None = None,
         user_turn_stop_timeout: float = 5.0,
         user_idle_timeout: float = 0,
         **kwargs,
@@ -87,6 +88,8 @@ class UserTurnProcessor(FrameProcessor):
 
         Args:
             user_turn_strategies: Configured strategies for starting and stopping user turns.
+            user_turn_strategies_params: How the strategies decide. Defaults to
+                :class:`~pipecat.turns.user_turn_strategies.UserTurnStrategiesParams`.
             user_turn_stop_timeout: Timeout in seconds to automatically stop a user turn
                 if no activity is detected.
             user_idle_timeout: Timeout in seconds for detecting user idle state.
@@ -105,6 +108,7 @@ class UserTurnProcessor(FrameProcessor):
 
         self._user_turn_controller = UserTurnController(
             user_turn_strategies=user_turn_strategies or UserTurnStrategies(),
+            user_turn_strategies_params=user_turn_strategies_params,
             user_turn_stop_timeout=user_turn_stop_timeout,
         )
         self._user_turn_controller.add_event_handler("on_push_frame", self._on_push_frame)

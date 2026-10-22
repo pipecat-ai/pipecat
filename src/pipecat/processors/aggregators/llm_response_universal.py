@@ -114,6 +114,7 @@ from pipecat.turns.user_turn_strategies import (
     ExternalUserTurnStrategies,
     FilterIncompleteUserTurnStrategies,
     UserTurnStrategies,
+    UserTurnStrategiesParams,
 )
 from pipecat.utils.context.llm_context_summarization import (
     LLMAutoContextSummarizationConfig,
@@ -146,6 +147,7 @@ class LLMUserAggregatorParams:
             no audio frames are received while in SPEAKING state (e.g. user mutes
             mic mid-speech). Set to 0 to disable. Defaults to 1.0.
         user_turn_strategies: User turn start and stop strategies.
+        user_turn_strategies_params: How the user turn strategies decide.
         user_mute_strategies: List of user mute strategies.
         user_turn_stop_timeout: Time in seconds to wait before considering the
             user's turn finished.
@@ -183,6 +185,9 @@ class LLMUserAggregatorParams:
     add_tool_change_messages: bool = False
     audio_idle_timeout: float = 1.0
     user_turn_strategies: UserTurnStrategies | None = None
+    user_turn_strategies_params: UserTurnStrategiesParams = field(
+        default_factory=UserTurnStrategiesParams
+    )
     user_mute_strategies: list[BaseUserMuteStrategy] = field(default_factory=list)
     user_turn_stop_timeout: float = 5.0
     user_idle_timeout: float = 0
@@ -781,6 +786,7 @@ class LLMUserAggregator(LLMContextAggregator):
 
         self._user_turn_controller = UserTurnController(
             user_turn_strategies=user_turn_strategies,
+            user_turn_strategies_params=self._params.user_turn_strategies_params,
             user_turn_stop_timeout=self._params.user_turn_stop_timeout,
         )
         self._user_turn_controller.add_event_handler("on_push_frame", self._on_push_frame)
