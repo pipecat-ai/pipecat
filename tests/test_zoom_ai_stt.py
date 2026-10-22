@@ -11,6 +11,9 @@ import json
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from websockets.datastructures import Headers
+from websockets.exceptions import InvalidStatus
+from websockets.http11 import Response
 from websockets.protocol import State
 
 from pipecat.frames.frames import (
@@ -106,7 +109,8 @@ async def test_connect_sends_the_session_update(monkeypatch):
     headers = calls[0]["kwargs"]["additional_headers"]
     assert headers["Authorization"] == "Bearer test-key"
     assert headers["User-Agent"].startswith("pipecat/")
-    assert headers["x-zm-trackingid"].startswith("zoom_ai_community_integration_pipecat_")
+    assert headers["x-zm-trackingid"].startswith("zoom_ai_community_pipecat_")
+    assert headers["x-zm-trackingid"] == service._tracking_id
     assert json.loads(websocket.sent[0]) == {
         "type": "session.update",
         "language": "en-US",
@@ -287,42 +291,56 @@ async def test_disconnect_closes_an_open_turn(monkeypatch):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "code, fatal, category",
-    [
-        ("invalid_config", True, ErrorCategory.INVALID_REQUEST),
-        ("UNSUPPORTED_LANGUAGE", True, ErrorCategory.INVALID_REQUEST),
-        ("internal", True, ErrorCategory.UNKNOWN),
-        # Scribe sends this one as non-fatal, but it didn't apply the session.update.
-        ("invalid_config", False, ErrorCategory.INVALID_REQUEST),
-    ],
-)
-async def test_fatal_error_event_is_reported(monkeypatch, code, fatal, category):
+async def test_rejected_session_settings_are_a_permanent_error(monkeypatch):
     service = _live()
     service._websocket = _FakeWebsocket(
-        [_event("error", error={"code": code, "message": "bad things", "fatal": fatal})]
+        [
+            _event("session.created"),
+            _event(
+                "error",
+                error={"code": "invalid_config", "message": "no polishing", "fatal": False},
+            ),
+            _event(
+                "error",
+                error={"code": "missing_config", "message": "send config", "fatal": True},
+            ),
+        ]
     )
+    service._tracking_id = "track_1"
     push_error = AsyncMock()
     monkeypatch.setattr(service, "push_error", push_error)
 
     await service._receive_messages()
 
-    assert "bad things" in push_error.await_args.kwargs["error_msg"]
-    assert push_error.await_args.kwargs["category"] == category
+    [non_fatal, fatal] = push_error.await_args_list
+    assert non_fatal.kwargs == {
+        "error_msg": "Zoom Scribe Live error invalid_config: no polishing (tracking_id=track_1)"
+    }
+    assert fatal.kwargs == {
+        "error_msg": "Zoom Scribe Live error missing_config: send config (tracking_id=track_1)",
+        "category": ErrorCategory.INVALID_REQUEST,
+    }
 
 
 @pytest.mark.asyncio
-async def test_non_fatal_error_event_is_only_logged(monkeypatch):
+@pytest.mark.parametrize("fatal", [True, False])
+async def test_errors_after_the_session_starts_are_reported(monkeypatch, fatal):
     service = _live()
     service._websocket = _FakeWebsocket(
-        [_event("error", error={"code": "audio_gap", "message": "late audio", "fatal": False})]
+        [
+            _event("session.updated"),
+            _event("error", error={"code": "internal", "message": "bad things", "fatal": fatal}),
+        ]
     )
+    service._tracking_id = "track_1"
     push_error = AsyncMock()
     monkeypatch.setattr(service, "push_error", push_error)
 
     await service._receive_messages()
 
-    push_error.assert_not_awaited()
+    push_error.assert_awaited_once_with(
+        error_msg="Zoom Scribe Live error internal: bad things (tracking_id=track_1)"
+    )
 
 
 @pytest.mark.asyncio
@@ -854,3 +872,41 @@ async def test_failed_first_connect_still_starts_the_receive_loop(monkeypatch):
     assert service._websocket is None
     # The receive loop owns reconnecting, so it must run even without a socket.
     assert "receive" in started
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("body", "expected"),
+    [
+        (
+            b'{"code":124, "message":"Invalid Access token"}',
+            "Zoom refused the connection (HTTP 401): Invalid Access token",
+        ),
+        (
+            b"",
+            "Unable to connect to Zoom Scribe Live: server rejected WebSocket connection: HTTP 401",
+        ),
+    ],
+)
+async def test_refused_handshake_reports_zoom_reason(monkeypatch, body, expected):
+    refusal = InvalidStatus(Response(401, "Unauthorized", Headers(), body))
+
+    async def refuse(*args, **kwargs):
+        raise refusal
+
+    monkeypatch.setattr("pipecat.services.websocket_service.websocket_connect", refuse)
+    service = _live()
+    push_error = AsyncMock()
+    monkeypatch.setattr(service, "push_error", push_error)
+    connection_errors = []
+
+    @service.event_handler("on_connection_error")
+    async def on_connection_error(service, error):
+        connection_errors.append(error)
+
+    await service._connect_websocket()
+    # Event handlers run as background tasks; let it finish.
+    await asyncio.sleep(0)
+
+    push_error.assert_awaited_once_with(error_msg=expected, exception=refusal)
+    assert connection_errors == [expected.removeprefix("Unable to connect to Zoom Scribe Live: ")]

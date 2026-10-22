@@ -26,6 +26,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from loguru import logger
+from websockets.exceptions import InvalidStatus
 from websockets.protocol import State
 
 from pipecat import version as pipecat_version
@@ -59,7 +60,6 @@ SEND_CHUNK_BYTES = SCRIBE_SAMPLE_RATE * 2 // 20
 DEFAULT_SILENCE_DURATION_MS = 350
 # How long stop() waits for Scribe to send the last transcript and session.closed.
 SESSION_CLOSE_TIMEOUT_SECS = 2.0
-TRACKING_ID_PREFIX = "zoom_ai_community_integration_pipecat_"
 # When input stops mid-turn (e.g. the user muted), Scribe's VAD hears no silence and
 # the turn stays open. After this long without input, send enough silence to end it.
 INPUT_GAP_SECS = 1.0
@@ -73,12 +73,34 @@ def _clean(text: str | None) -> str:
     return _SPEAKER_TAG.sub("", text or "").strip()
 
 
-def _headers(api_key: str) -> dict[str, str]:
+def _tracking_id() -> str:
+    """A new ``x-zm-trackingid``, which Zoom support uses to find a session."""
+    return f"zoom_ai_community_pipecat_{uuid.uuid4()}"
+
+
+def _headers(api_key: str, tracking_id: str) -> dict[str, str]:
     return {
         "Authorization": f"Bearer {api_key}",
         "User-Agent": f"pipecat/{pipecat_version()}",
-        "x-zm-trackingid": f"{TRACKING_ID_PREFIX}{uuid.uuid4()}",
+        "x-zm-trackingid": tracking_id,
     }
+
+
+def _describe_refusal(exception: Exception) -> str | None:
+    """Describe Zoom refusing the handshake, if that is what failed.
+
+    Zoom explains a refusal (a bad API key, say) in the JSON response body,
+    which the exception's own message leaves out.
+    """
+    if isinstance(exception, InvalidStatus):
+        response = exception.response
+        try:
+            reason = json.loads(response.body).get("message")
+        except (TypeError, ValueError, AttributeError):  # no body, or not a JSON object
+            reason = None
+        if reason:
+            return f"Zoom refused the connection (HTTP {response.status_code}): {reason}"
+    return None
 
 
 def _check_url(url: str) -> str:
@@ -381,6 +403,8 @@ class ZoomAISTTService(WebsocketSTTService):
         self._user_turn_open = False
         self._receive_task = None
         self._session_closed = asyncio.Event()
+        self._session_updated = False  # Scribe accepted this session's settings
+        self._tracking_id: str | None = None  # the current session's x-zm-trackingid
         self._awaiting_final = False
         self._input_gap_task = None
         self._last_input_time = time.monotonic()
@@ -577,23 +601,28 @@ class ZoomAISTTService(WebsocketSTTService):
         try:
             if self._websocket and self._websocket.state is State.OPEN:
                 return
-            logger.debug("Connecting to Zoom Scribe Live")
+            self._tracking_id = _tracking_id()
+            logger.debug(f"Connecting to Zoom Scribe Live (tracking_id={self._tracking_id})")
             websocket = await self._websocket_connect(
                 self._url,
                 subprotocols=["live-asr"],
-                additional_headers=_headers(self._api_key),
+                additional_headers=_headers(self._api_key, self._tracking_id),
             )
             self._websocket = websocket
             self._session_closed.clear()
+            self._session_updated = False
             update = self._session_update()
             self._view = _RequestView.of(update)
             await websocket.send(json.dumps(update))
+            logger.info(f"{self} connected to Zoom Scribe Live (tracking_id={self._tracking_id})")
             await self._call_event_handler("on_connected")
         except Exception as e:
             self._websocket = None
+            refusal = _describe_refusal(e)
             await self.push_error(
-                error_msg=f"Unable to connect to Zoom Scribe Live: {e}", exception=e
+                error_msg=refusal or f"Unable to connect to Zoom Scribe Live: {e}", exception=e
             )
+            await self._call_event_handler("on_connection_error", refusal or f"{e}")
 
     async def _disconnect_websocket(self):
         if not self._websocket:
@@ -650,6 +679,7 @@ class ZoomAISTTService(WebsocketSTTService):
                 await self.stop_processing_metrics()
             await self._push_final_transcript(event)
         elif kind == "session.updated":
+            self._session_updated = True
             # Scribe never rejects diarization; it reports whether labels will come.
             if self._view.diarization and event.get("diarization_enabled") is False:
                 logger.warning(f"{self} Scribe can't label speakers for this session")
@@ -661,18 +691,16 @@ class ZoomAISTTService(WebsocketSTTService):
             self._session_closed.set()
 
     async def _handle_error_event(self, error: dict[str, Any]):
-        message = f"Zoom Scribe Live error {error.get('code')}: {error.get('message')}"
-        # invalid_config means Scribe didn't apply the session.update (e.g. text polishing
-        # for an unsupported locale), so the session can't work, though Scribe marks it
-        # non-fatal.
-        if not error.get("fatal") and str(error.get("code")).lower() != "invalid_config":
-            logger.warning(f"{self} {message}")
-            return
-        # A config error (e.g. UNSUPPORTED_LANGUAGE) would fail again, so it isn't retried.
-        code = str(error.get("code") or "").upper()
-        is_config_error = "INVALID" in code or "UNSUPPORTED" in code
-        category = ErrorCategory.INVALID_REQUEST if is_config_error else ErrorCategory.UNKNOWN
-        await self.push_error(error_msg=message, category=category)
+        message = (
+            f"Zoom Scribe Live error {error.get('code')}: {error.get('message')} "
+            f"(tracking_id={self._tracking_id})"
+        )
+        if error.get("fatal") and not self._session_updated:
+            # Scribe rejects a session's settings with a fatal error in place of
+            # session.updated, then closes; a new session would be rejected the same way.
+            await self.push_error(error_msg=message, category=ErrorCategory.INVALID_REQUEST)
+        else:
+            await self.push_error(error_msg=message)
 
     async def _push_final_transcript(self, event: dict[str, Any]):
         text = _clean(event.get("transcript"))
