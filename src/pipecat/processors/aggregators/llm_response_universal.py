@@ -110,6 +110,7 @@ from pipecat.turns.user_stop import (
 )
 from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionConfig
 from pipecat.turns.user_turn_controller import UserTurnController
+from pipecat.turns.user_turn_filter import BaseUserTurnFilter
 from pipecat.turns.user_turn_strategies import (
     ExternalUserTurnStrategies,
     FilterIncompleteUserTurnStrategies,
@@ -146,6 +147,9 @@ class LLMUserAggregatorParams:
             no audio frames are received while in SPEAKING state (e.g. user mutes
             mic mid-speech). Set to 0 to disable. Defaults to 1.0.
         user_turn_strategies: User turn start and stop strategies.
+        user_turn_filter: Decides whether a stop strategy's turn end stands,
+            holding the answer until it does. Applies on top of the strategies
+            a service recommends. Ignored with a realtime LLM service.
         user_mute_strategies: List of user mute strategies.
         user_turn_stop_timeout: Time in seconds to wait before considering the
             user's turn finished.
@@ -183,6 +187,7 @@ class LLMUserAggregatorParams:
     add_tool_change_messages: bool = False
     audio_idle_timeout: float = 1.0
     user_turn_strategies: UserTurnStrategies | None = None
+    user_turn_filter: BaseUserTurnFilter | None = None
     user_mute_strategies: list[BaseUserMuteStrategy] = field(default_factory=list)
     user_turn_stop_timeout: float = 5.0
     user_idle_timeout: float = 0
@@ -733,6 +738,8 @@ class LLMUserAggregator(LLMContextAggregator):
             )
             self._params.user_turn_strategies = user_turn_strategies
 
+        self._user_turn_filter = self._params.user_turn_filter
+
         # Realtime-mode strategy mutation: drop the transcription-based start
         # strategy and flip wait_for_transcript on stop strategies that expose
         # it, so turn-stop fires as soon as VAD / the turn analyzer / external
@@ -749,6 +756,7 @@ class LLMUserAggregator(LLMContextAggregator):
                 are_user_provided_custom_strategies=self._params.user_turn_strategies is not None,
             )
             self._disable_empty_user_turn_recovery()
+            self._warn_user_turn_filter_ignored()
 
         self._user_is_muted = False
         self._user_turn_start_timestamp = ""
@@ -782,11 +790,15 @@ class LLMUserAggregator(LLMContextAggregator):
         self._user_turn_controller = UserTurnController(
             user_turn_strategies=user_turn_strategies,
             user_turn_stop_timeout=self._params.user_turn_stop_timeout,
+            user_turn_filter=self._user_turn_filter,
         )
         self._user_turn_controller.add_event_handler("on_push_frame", self._on_push_frame)
         self._user_turn_controller.add_event_handler("on_broadcast_frame", self._on_broadcast_frame)
         self._user_turn_controller.add_event_handler(
             "on_user_turn_speculation_cancelled", self._on_user_turn_speculation_cancelled
+        )
+        self._user_turn_controller.add_event_handler(
+            "on_user_turn_stop_rejected", self._on_user_turn_stop_rejected
         )
         self._user_turn_controller.add_event_handler(
             "on_user_turn_started", self._on_user_turn_started
@@ -973,7 +985,7 @@ class LLMUserAggregator(LLMContextAggregator):
             LLMContextUserTurnFrame, text=aggregation, timestamp=self._user_turn_start_timestamp
         )
         if run_llm:
-            await self.push_context_frame()
+            await self._push_turn_inference()
 
         message = UserTurnMessageAddedMessage(
             content=aggregation, timestamp=self._user_turn_start_timestamp
@@ -1064,6 +1076,18 @@ class LLMUserAggregator(LLMContextAggregator):
             f"{self}: realtime mode — empty user turn recovery disabled; the realtime "
             "LLM service hears the user's audio directly."
         )
+
+    def _warn_user_turn_filter_ignored(self):
+        """Warn that a user turn filter has nothing to judge in realtime mode.
+
+        A realtime LLM service answers on its own, so no inference is run for a
+        turn end and the filter is never asked.
+        """
+        if self._user_turn_filter:
+            logger.warning(
+                f"{self}: realtime mode — `user_turn_filter` is ignored; a realtime LLM "
+                "service answers without a per-turn inference to judge."
+            )
 
     async def _handle_service_metadata(self, frame: ServiceMetadataFrame):
         """Dispatch a service metadata frame.
@@ -1181,6 +1205,7 @@ class LLMUserAggregator(LLMContextAggregator):
                     f"{self}: detected realtime service `{frame.service_name}`; "
                     "auto-enabled realtime_service_mode."
                 )
+                self._warn_user_turn_filter_ignored()
 
         if not self._realtime_service_mode:
             # Explicitly disabled — honor it silently; the user opted out.
@@ -1377,6 +1402,23 @@ class LLMUserAggregator(LLMContextAggregator):
         # the turn end that follows it. Queued, it would arrive after, and the
         # gate would release the response this withdraws.
         await self.broadcast_frame(UserTurnResponseCancelFrame)
+
+    async def _on_user_turn_stop_rejected(self, controller):
+        # The filter judged the user not done, so the answer held for the
+        # proposed turn end is dropped, the same way as a withdrawn speculation.
+        await self.broadcast_frame(UserTurnResponseCancelFrame)
+
+    async def _push_turn_inference(self):
+        """Run inference on the context, held for the filter while a turn is open."""
+        controller = self._user_turn_controller
+        if not controller.user_turn_filter or not controller.user_turn_in_progress:
+            await self.push_context_frame()
+            return
+
+        frame = self._get_context_frame()
+        frame.held = True
+        await self.push_frame(frame)
+        await controller.handle_inference_started(frame.id)
 
     async def _on_vad_speech_started(self, controller):
         await self._queued_broadcast_frame(

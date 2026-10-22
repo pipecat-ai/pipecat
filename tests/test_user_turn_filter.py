@@ -8,17 +8,28 @@ import asyncio
 import unittest
 
 from pipecat.frames.frames import (
+    LLMContextFrame,
     TranscriptionFrame,
+    UserStoppedSpeakingFrame,
+    UserTurnResponseCancelFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMUserAggregator,
+    LLMUserAggregatorParams,
+)
+from pipecat.tests.utils import SleepFrame, run_test
 from pipecat.turns.user_start import VADUserTurnStartStrategy
-from pipecat.turns.user_stop import BaseUserTurnStopStrategy
+from pipecat.turns.user_stop import BaseUserTurnStopStrategy, SpeechTimeoutUserTurnStopStrategy
 from pipecat.turns.user_turn_controller import UserTurnController
 from pipecat.turns.user_turn_filter import BaseUserTurnFilter
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
 from pipecat.utils.asyncio.task_manager import TaskManager
 from tests.frame_processor_helpers import frame_processor_setup
+
+SPEECH_TIMEOUT = 0.1
 
 
 class RecordingFilter(BaseUserTurnFilter):
@@ -149,6 +160,76 @@ class TestUserTurnFilterController(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn(frame, self.filter.frames)
         self.assertEqual(self.filter.turns, ["started", "stopped"])
+
+
+class ScriptedFilter(RecordingFilter):
+    """Answers every proposal at once with the verdict it was given, if any."""
+
+    def __init__(self, verdict: str | None, **kwargs):
+        super().__init__(**kwargs)
+        self._verdict = verdict
+
+    async def handle_turn_end_proposed(self, context_frame_id: int):
+        await super().handle_turn_end_proposed(context_frame_id)
+        if self._verdict == "accept":
+            await self.accept()
+        elif self._verdict == "reject":
+            await self.reject()
+
+
+class TestUserAggregatorWithFilter(unittest.IsolatedAsyncioTestCase):
+    """The user aggregator holds each turn's answer for the filter's verdict."""
+
+    async def _run_turn(self, user_turn_filter: BaseUserTurnFilter | None):
+        # Whether the turn ended is told by the UserStoppedSpeakingFrame: the
+        # session ending also emits on_user_turn_stopped for an open turn.
+        aggregator = LLMUserAggregator(
+            LLMContext(),
+            params=LLMUserAggregatorParams(
+                user_turn_strategies=UserTurnStrategies(
+                    stop=[SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=SPEECH_TIMEOUT)]
+                ),
+                user_turn_filter=user_turn_filter,
+            ),
+        )
+        down, _ = await run_test(
+            aggregator,
+            frames_to_send=[
+                VADUserStartedSpeakingFrame(),
+                TranscriptionFrame(text="Hi", user_id="", timestamp="now"),
+                SleepFrame(),
+                VADUserStoppedSpeakingFrame(),
+                SleepFrame(sleep=SPEECH_TIMEOUT + 0.1),
+            ],
+        )
+        return down
+
+    async def test_the_answer_is_held_and_judged_by_its_context_frame(self):
+        user_turn_filter = ScriptedFilter(None)
+        down = await self._run_turn(user_turn_filter)
+
+        (context_frame,) = [f for f in down if isinstance(f, LLMContextFrame)]
+        self.assertTrue(context_frame.held)
+        self.assertEqual(user_turn_filter.proposals, [context_frame.id])
+        self.assertFalse(any(isinstance(f, UserStoppedSpeakingFrame) for f in down))
+
+    async def test_an_accepted_turn_ends(self):
+        down = await self._run_turn(ScriptedFilter("accept"))
+
+        self.assertTrue(any(isinstance(f, UserStoppedSpeakingFrame) for f in down))
+
+    async def test_a_rejected_turn_drops_the_answer_and_stays_open(self):
+        down = await self._run_turn(ScriptedFilter("reject"))
+
+        self.assertTrue(any(isinstance(f, UserTurnResponseCancelFrame) for f in down))
+        self.assertFalse(any(isinstance(f, UserStoppedSpeakingFrame) for f in down))
+
+    async def test_without_a_filter_the_answer_is_not_held(self):
+        down = await self._run_turn(None)
+
+        (context_frame,) = [f for f in down if isinstance(f, LLMContextFrame)]
+        self.assertFalse(context_frame.held)
+        self.assertTrue(any(isinstance(f, UserStoppedSpeakingFrame) for f in down))
 
 
 if __name__ == "__main__":

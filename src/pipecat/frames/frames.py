@@ -762,10 +762,14 @@ class LLMContextFrame(Frame):
             provisional context that is not part of the conversation. Its
             response must not reach the user or the context until the turn is
             confirmed, and the service must not execute tool calls for it.
+        held: Whether the response must wait for the user turn to end while a
+            user turn filter judges it. Unlike a speculation, the inference runs
+            on the conversation itself and its tool calls go ahead.
     """
 
     context: LLMContext
     speculation: bool = False
+    held: bool = False
 
 
 @dataclass
@@ -1423,9 +1427,9 @@ class UserTurnResponseCancelFrame(SystemFrame):
     """Frame cancelling the response held for the current user turn.
 
     Emitted when an eager end of turn is withdrawn (the user resumed speaking,
-    or the committed transcript doesn't match the eager one). The LLM service
-    stops generating, and its
-    :class:`~pipecat.turns.speculation_gate.SpeculationGate` discards
+    or the committed transcript doesn't match the eager one) and when a user
+    turn filter rejects a proposed turn end. The LLM service stops generating,
+    and its :class:`~pipecat.turns.speculation_gate.SpeculationGate` discards
     what it was holding — which is everything the response produced, so nothing
     further down the pipeline has anything to undo. A response the gate has
     already released is left alone; stopping it is what

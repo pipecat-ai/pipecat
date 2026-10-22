@@ -922,7 +922,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         if isinstance(frame, LLMContextFrame):
             # Runs before the subclass starts the completion, so the gate knows
             # what this inference answers before any of its frames arrive.
-            self._speculation_gate.begin_speculation(frame.speculation)
+            self._speculation_gate.begin_speculation(frame.speculation, held=frame.held)
 
             # Sync the registered handlers with the tools advertised in the
             # context: register any newly advertised handler, drop the ones we

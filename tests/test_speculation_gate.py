@@ -174,6 +174,38 @@ class TestSpeculationGate(unittest.IsolatedAsyncioTestCase):
         assert types(emit(gate, EndFrame())) == [FunctionCallResultFrame, EndFrame]
 
 
+class TestHeldResponses(unittest.IsolatedAsyncioTestCase):
+    """A response a user turn filter is judging: held, but not speculative."""
+
+    def _hold(self, gate: SpeculationGate, *frames: Frame) -> list[Frame]:
+        gate.begin_speculation(False, held=True)
+        return emit(gate, *frames)
+
+    async def test_a_held_response_waits_for_the_turn_to_end(self):
+        gate = SpeculationGate()
+
+        assert self._hold(gate, *response("Sure.")) == []
+        assert types(emit(gate, UserStoppedSpeakingFrame())) == [
+            UserStoppedSpeakingFrame,
+            LLMFullResponseStartFrame,
+            LLMTextFrame,
+            LLMFullResponseEndFrame,
+        ]
+
+    async def test_a_rejected_response_is_dropped(self):
+        gate = SpeculationGate()
+
+        self._hold(gate, *response("Sure."))
+        assert types(emit(gate, UserTurnResponseCancelFrame())) == [UserTurnResponseCancelFrame]
+        assert types(emit(gate, UserStoppedSpeakingFrame())) == [UserStoppedSpeakingFrame]
+
+    async def test_a_held_response_is_not_speculative(self):
+        gate = SpeculationGate()
+
+        gate.begin_speculation(False, held=True)
+        assert not gate.is_speculating
+
+
 class TestPendingSpeculation(unittest.IsolatedAsyncioTestCase):
     """What the gate reports about the inference in flight.
 

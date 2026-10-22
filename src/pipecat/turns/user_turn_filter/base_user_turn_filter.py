@@ -17,7 +17,8 @@ class BaseUserTurnFilter(BaseObject):
     A stop strategy proposes that the user is done. With a filter set, the
     :class:`~pipecat.turns.user_turn_controller.UserTurnController` ends the
     turn only once the filter accepts that proposal. A rejection keeps the turn
-    open.
+    open and drops the answer generated for it. The answer is held until the
+    verdict, so it is never spoken for a turn the filter rejects.
 
     Every proposal is judged against the inference generated for it, named by
     the id of the :class:`~pipecat.frames.frames.LLMContextFrame` that started
