@@ -27,6 +27,11 @@ class BaseUserTurnFilter(BaseObject):
     filter that never answers leaves the turn to the controller's turn stop
     timeout, which ends it.
 
+    An eager end of turn is judged as soon as its speculative inference
+    starts, while the stop strategy that made it waits for the committed
+    transcript. The turn ends once both agree, and a strategy that withdraws
+    its eager end of turn withdraws the proposal too.
+
     Events triggered by filters:
 
       - `on_push_frame`: Indicates the filter wants to push a frame.
@@ -75,6 +80,14 @@ class BaseUserTurnFilter(BaseObject):
         Args:
             context_frame_id: The id of the ``LLMContextFrame`` that started the
                 inference generated for this proposal.
+        """
+        pass
+
+    async def handle_turn_end_withdrawn(self):
+        """Notify the filter that the proposed turn end it was judging was withdrawn.
+
+        A verdict on it no longer matters: the turn stays open, and a later
+        proposal brings its own inference.
         """
         pass
 

@@ -1562,7 +1562,10 @@ class LLMUserAggregator(LLMContextAggregator):
             tools=self._context.tools,
             tool_choice=self._context.tool_choice,
         )
-        await self.push_frame(LLMContextFrame(context=provisional, speculation=True))
+        frame = LLMContextFrame(context=provisional, speculation=True)
+        await self.push_frame(frame)
+        if self._user_turn_controller.user_turn_filter:
+            await self._user_turn_controller.handle_inference_started(frame.id, speculative=True)
 
     async def _on_user_turn_stopped(
         self,

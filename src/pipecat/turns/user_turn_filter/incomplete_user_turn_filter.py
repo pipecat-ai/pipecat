@@ -99,6 +99,10 @@ class IncompleteUserTurnFilter(BaseUserTurnFilter):
         if report:
             await self._judge(report)
 
+    async def handle_turn_end_withdrawn(self):
+        """Stop waiting for the marker of a withdrawn proposal."""
+        self._awaited_id = None
+
     async def process_frame(self, frame: Frame):
         """Configure the LLM on start and follow its reports and the user's speech.
 

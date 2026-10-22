@@ -8,12 +8,15 @@ import asyncio
 import unittest
 
 from pipecat.frames.frames import (
+    EagerTranscriptionFrame,
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMarkerResponseFrame,
     LLMMessagesAppendFrame,
     LLMTextFrame,
+    ProposedUserStartedSpeakingFrame,
+    ProposedUserStoppedSpeakingFrame,
     StartFrame,
     TranscriptionFrame,
     UserStoppedSpeakingFrame,
@@ -33,12 +36,13 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.llm_service import LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.tests.utils import SleepFrame, run_test
+from pipecat.turns.types import UserTurnSpeculation
 from pipecat.turns.user_start import VADUserTurnStartStrategy
 from pipecat.turns.user_stop import BaseUserTurnStopStrategy, SpeechTimeoutUserTurnStopStrategy
 from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionConfig
 from pipecat.turns.user_turn_controller import UserTurnController
 from pipecat.turns.user_turn_filter import BaseUserTurnFilter, IncompleteUserTurnFilter
-from pipecat.turns.user_turn_strategies import UserTurnStrategies
+from pipecat.turns.user_turn_strategies import EagerUserTurnStrategies, UserTurnStrategies
 from pipecat.utils.asyncio.task_manager import TaskManager
 from tests.frame_processor_helpers import frame_processor_setup
 
@@ -51,6 +55,7 @@ class RecordingFilter(BaseUserTurnFilter):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.proposals: list[int] = []
+        self.withdrawn = 0
         self.frames = []
         self.turns: list[str] = []
 
@@ -63,8 +68,23 @@ class RecordingFilter(BaseUserTurnFilter):
     async def handle_turn_end_proposed(self, context_frame_id: int):
         self.proposals.append(context_frame_id)
 
+    async def handle_turn_end_withdrawn(self):
+        self.withdrawn += 1
+
     async def process_frame(self, frame):
         self.frames.append(frame)
+
+
+class RecordingStopStrategy(BaseUserTurnStopStrategy):
+    """Records the frames it sees; tests trigger its events."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.frames = []
+
+    async def process_frame(self, frame):
+        self.frames.append(frame)
+        return await super().process_frame(frame)
 
 
 class TestUserTurnFilterController(unittest.IsolatedAsyncioTestCase):
@@ -72,7 +92,7 @@ class TestUserTurnFilterController(unittest.IsolatedAsyncioTestCase):
 
     async def asyncSetUp(self):
         self.filter = RecordingFilter()
-        self.stop = BaseUserTurnStopStrategy()
+        self.stop = RecordingStopStrategy()
         self.controller = UserTurnController(
             user_turn_strategies=UserTurnStrategies(
                 start=[VADUserTurnStartStrategy()], stop=[self.stop]
@@ -99,7 +119,9 @@ class TestUserTurnFilterController(unittest.IsolatedAsyncioTestCase):
         async def on_user_turn_inference_triggered(controller, strategy, speculation):
             context_frame_id = self.next_inference.pop(0) if self.next_inference else None
             if context_frame_id is not None:
-                await controller.handle_inference_started(context_frame_id)
+                await controller.handle_inference_started(
+                    context_frame_id, speculative=speculation is not None
+                )
 
     async def asyncTearDown(self):
         await self.controller.cleanup()
@@ -111,6 +133,15 @@ class TestUserTurnFilterController(unittest.IsolatedAsyncioTestCase):
     async def _propose(self, inference: int | None):
         self.next_inference.append(inference)
         await self.stop.trigger_user_turn_stopped()
+
+    async def _speculate(self, inference: int):
+        self.next_inference.append(inference)
+        await self.stop.trigger_user_turn_inference_triggered(
+            speculation=UserTurnSpeculation(text="book a flight")
+        )
+
+    async def _confirm(self):
+        await self.stop.trigger_user_turn_finalized(confirms_speculation=True)
 
     async def test_a_turn_end_waits_for_the_filter(self):
         await self._speak()
@@ -173,6 +204,55 @@ class TestUserTurnFilterController(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn(frame, self.filter.frames)
         self.assertEqual(self.filter.turns, ["started", "stopped"])
+
+    async def test_an_eager_end_of_turn_is_judged_at_once(self):
+        await self._speak()
+        await self._speculate(201)
+        self.assertEqual(self.filter.proposals, [201])
+        self.assertEqual(self.stopped, 0)
+
+    async def test_an_accepted_eager_end_of_turn_ends_the_turn_once_confirmed(self):
+        await self._speak()
+        await self._speculate(201)
+        await self.filter.accept()
+        self.assertEqual(self.stopped, 0)
+
+        await self._confirm()
+        self.assertEqual(self.stopped, 1)
+
+    async def test_a_confirmed_eager_end_of_turn_ends_the_turn_once_accepted(self):
+        await self._speak()
+        await self._speculate(201)
+        await self._confirm()
+        self.assertEqual(self.stopped, 0)
+
+        await self.filter.accept()
+        self.assertEqual(self.stopped, 1)
+
+    async def test_a_rejected_eager_end_of_turn_is_withdrawn_from_its_stop_strategy(self):
+        await self._speak()
+        await self._speculate(201)
+        await self.filter.reject()
+
+        self.assertEqual((self.rejected, self.stopped), (1, 0))
+        self.assertTrue(any(isinstance(f, UserTurnResponseCancelFrame) for f in self.stop.frames))
+
+    async def test_a_withdrawn_eager_end_of_turn_is_withdrawn_from_the_filter(self):
+        await self._speak()
+        await self._speculate(201)
+        await self.stop.trigger_user_turn_speculation_cancelled()
+        self.assertEqual(self.filter.withdrawn, 1)
+
+    async def test_an_eager_end_of_turn_replaces_a_rejected_proposal(self):
+        await self._speak()
+        await self._propose(101)
+        await self.filter.reject()
+
+        # The user goes on, and the eager end of turn waits for its own confirmation.
+        await self._speak()
+        await self._speculate(201)
+        await self.filter.accept()
+        self.assertEqual(self.stopped, 0)
 
 
 class ScriptedFilter(RecordingFilter):
@@ -302,6 +382,12 @@ class TestIncompleteUserTurnFilter(unittest.IsolatedAsyncioTestCase):
         await self._report("complete")
         await self.filter.handle_turn_end_proposed(101)
         self.assertEqual(self.verdicts, ["accept"])
+
+    async def test_a_withdrawn_proposal_ignores_its_report(self):
+        await self.filter.handle_turn_end_proposed(101)
+        await self.filter.handle_turn_end_withdrawn()
+        await self._report("complete")
+        self.assertEqual(self.verdicts, [])
 
     async def test_a_report_for_another_inference_is_ignored(self):
         await self.filter.handle_turn_end_proposed(102)
@@ -458,6 +544,72 @@ class TestIncompleteUserTurnFilterPipeline(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(recorder.marker_kinds, ["short", "complete"])
+
+
+class TestIncompleteUserTurnFilterWithEagerEndOfTurn(unittest.IsolatedAsyncioTestCase):
+    """The marker filter judges an eager end of turn while its answer is generated."""
+
+    async def _run(
+        self, replies: list[str], frames_to_send: list
+    ) -> tuple[OutputRecorder, LLMContext]:
+        context = LLMContext()
+        user_aggregator = LLMUserAggregator(
+            context,
+            params=LLMUserAggregatorParams(
+                user_turn_strategies=EagerUserTurnStrategies(),
+                user_turn_filter=IncompleteUserTurnFilter(),
+            ),
+        )
+        recorder = OutputRecorder()
+
+        await run_test(
+            Pipeline(
+                [
+                    user_aggregator,
+                    ScriptedMarkerLLM(replies),
+                    recorder,
+                    LLMAssistantAggregator(context),
+                ]
+            ),
+            frames_to_send=frames_to_send,
+        )
+        return recorder, context
+
+    def _turn(self, text: str) -> list:
+        return [
+            ProposedUserStartedSpeakingFrame(),
+            SleepFrame(),
+            EagerTranscriptionFrame(text, "user", "now"),
+            SleepFrame(sleep=0.1),
+            TranscriptionFrame(text, "user", "now"),
+            SleepFrame(),
+            ProposedUserStoppedSpeakingFrame(),
+            SleepFrame(sleep=0.3),
+        ]
+
+    async def test_a_complete_eager_answer_is_spoken_once_the_turn_commits(self):
+        recorder, context = await self._run(
+            ["● Sure, Boston it is."], self._turn("Book a flight to Boston")
+        )
+
+        self.assertEqual(recorder.spoken, ["Sure, Boston it is."])
+        self.assertEqual(
+            [(m["role"], m["content"][:1]) for m in context.get_messages()],
+            [("user", "B"), ("assistant", "●")],
+        )
+
+    async def test_an_incomplete_eager_answer_is_dropped_and_the_committed_turn_answered(self):
+        # The speculation's ◐ is dropped with it, and the committed turn runs a
+        # normal inference whose marker decides.
+        recorder, context = await self._run(
+            ["◐", "● Sure, Boston it is."], self._turn("Book a flight to Boston")
+        )
+
+        self.assertEqual(recorder.spoken, ["Sure, Boston it is."])
+        self.assertEqual(
+            [(m["role"], m["content"][:1]) for m in context.get_messages()],
+            [("user", "B"), ("assistant", "●")],
+        )
 
 
 if __name__ == "__main__":

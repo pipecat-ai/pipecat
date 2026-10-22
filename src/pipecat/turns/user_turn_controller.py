@@ -16,6 +16,7 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
+    UserTurnResponseCancelFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
@@ -119,10 +120,14 @@ class UserTurnController(BaseObject):
         # The latest turn end a stop strategy proposed, ended once the filter
         # accepts it. Kept after a rejection, so a later accept still has one.
         self._proposal: tuple[BaseUserTurnStopStrategy, UserTurnStoppedParams] | None = None
-        # The latest inference generated in this turn, and the one the filter
-        # was last asked to judge.
+        # The latest inference generated in this turn, the one the filter was
+        # last asked to judge, and the last one it accepted.
         self._inference_id: int | None = None
         self._judged_inference_id: int | None = None
+        self._accepted_inference_id: int | None = None
+        # Whether the inference being judged answers an eager end of turn its
+        # stop strategy has yet to confirm.
+        self._judging_speculation = False
 
         self._register_event_handler("on_push_frame", sync=True)
         self._register_event_handler("on_broadcast_frame", sync=True)
@@ -226,7 +231,7 @@ class UserTurnController(BaseObject):
             s.resolves_proposed_turn_stop_frames for s in self._user_turn_strategies.stop or []
         )
 
-    async def handle_inference_started(self, context_frame_id: int):
+    async def handle_inference_started(self, context_frame_id: int, *, speculative: bool = False):
         """Note the inference generated for the turn now in progress.
 
         The user turn filter judges a proposed turn end against it, so the host
@@ -234,9 +239,17 @@ class UserTurnController(BaseObject):
 
         Args:
             context_frame_id: The id of the ``LLMContextFrame`` that started it.
+            speculative: Whether the inference answers an eager end of turn.
+                The eager end of turn is itself the proposal, so the filter
+                judges it right away, while its stop strategy waits for the
+                committed transcript.
         """
-        if self._user_turn:
-            self._inference_id = context_frame_id
+        if not self._user_turn:
+            return
+
+        self._inference_id = context_frame_id
+        if speculative and self._user_turn_filter:
+            await self._propose_speculation(context_frame_id)
 
     async def process_frame(self, frame: Frame):
         """Process an incoming frame to detect user turn start or stop.
@@ -259,6 +272,8 @@ class UserTurnController(BaseObject):
             await self._handle_vad_user_stopped_speaking(frame)
         elif isinstance(frame, (TranscriptionFrame, InterimTranscriptionFrame)):
             await self._handle_transcription(frame)
+        elif isinstance(frame, UserTurnResponseCancelFrame):
+            await self._withdraw_speculation()
 
         for strategy in self._user_turn_strategies.start or []:
             result = await strategy.process_frame(frame)
@@ -386,6 +401,7 @@ class UserTurnController(BaseObject):
         await self._call_event_handler("on_broadcast_frame", frame_cls, **kwargs)
 
     async def _on_user_turn_speculation_cancelled(self, strategy: BaseUserTurnStopStrategy):
+        await self._withdraw_speculation()
         await self._call_event_handler("on_user_turn_speculation_cancelled")
 
     async def _on_user_turn_started(
@@ -403,20 +419,27 @@ class UserTurnController(BaseObject):
     async def _on_user_turn_stopped(
         self, strategy: BaseUserTurnStopStrategy, params: UserTurnStoppedParams
     ):
-        if self._user_turn_filter and not params.confirms_speculation:
-            await self._propose_user_turn_stop(strategy, params)
-        else:
+        if not self._user_turn_filter:
             await self._trigger_user_turn_stop(strategy, params)
+        elif params.confirms_speculation:
+            await self._confirm_user_turn_stop(strategy, params)
+        else:
+            await self._propose_user_turn_stop(strategy, params)
 
     async def _on_reset_aggregation(self, strategy: BaseUserTurnStartStrategy):
         await self._call_event_handler("on_reset_aggregation", strategy)
 
     async def _on_filter_accept(self, user_turn_filter: BaseUserTurnFilter):
+        self._accepted_inference_id = self._judged_inference_id
         if self._proposal:
             strategy, params = self._proposal
             await self._trigger_user_turn_stop(strategy, params)
 
     async def _on_filter_reject(self, user_turn_filter: BaseUserTurnFilter):
+        self._accepted_inference_id = None
+        if self._judging_speculation:
+            self._judging_speculation = False
+            await self._withdraw_from_stop_strategies()
         await self._call_event_handler("on_user_turn_stop_rejected")
 
     async def _propose_user_turn_stop(
@@ -439,13 +462,57 @@ class UserTurnController(BaseObject):
             return
 
         self._judged_inference_id = self._inference_id
+        self._judging_speculation = False
         await self._user_turn_filter.handle_turn_end_proposed(self._inference_id)
+
+    async def _propose_speculation(self, context_frame_id: int):
+        """Ask the filter about an eager end of turn while its answer is generated."""
+        if not self._user_turn_filter:
+            return
+
+        # The eager end of turn supersedes any earlier proposal: the turn now
+        # waits for its own confirmation.
+        self._proposal = None
+        self._judged_inference_id = context_frame_id
+        self._judging_speculation = True
+        await self._user_turn_filter.handle_turn_end_proposed(context_frame_id)
+
+    async def _confirm_user_turn_stop(
+        self, strategy: BaseUserTurnStopStrategy, params: UserTurnStoppedParams
+    ):
+        """End a confirmed eager turn, once the filter accepts its speculation."""
+        accepted = self._accepted_inference_id is not None and (
+            self._accepted_inference_id == self._inference_id
+        )
+        if accepted or self._inference_id is None:
+            await self._trigger_user_turn_stop(strategy, params)
+        else:
+            self._proposal = (strategy, params)
+
+    async def _withdraw_speculation(self):
+        """Tell the filter that the eager end of turn it was judging is withdrawn."""
+        if not self._judging_speculation or not self._user_turn_filter:
+            return
+
+        self._judging_speculation = False
+        self._judged_inference_id = None
+        self._accepted_inference_id = None
+        await self._user_turn_filter.handle_turn_end_withdrawn()
+
+    async def _withdraw_from_stop_strategies(self):
+        """Withdraw a rejected speculation from its stop strategy, as its service would."""
+        frame = UserTurnResponseCancelFrame()
+        for strategy in self._user_turn_strategies.stop or []:
+            if await strategy.process_frame(frame) == ProcessFrameResult.STOP:
+                break
 
     async def _reset_filter_state(self):
         """Forget the proposals and inferences of the turn that just ended or started."""
         self._proposal = None
         self._inference_id = None
         self._judged_inference_id = None
+        self._accepted_inference_id = None
+        self._judging_speculation = False
 
     async def _trigger_user_turn_start(
         self, strategy: BaseUserTurnStartStrategy | None, params: UserTurnStartedParams
