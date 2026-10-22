@@ -394,9 +394,6 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             )
         self._enable_async_tool_cancellation: bool = enable_async_tool_cancellation
         self._reports_ttfat: bool | None = None
-        # Turn completion is owned by LLMTurnCompletionUserTurnStopStrategy, which
-        # enables it over an LLMUpdateSettingsFrame once the pipeline starts.
-        self._filter_incomplete_user_turns: bool = False
         self._logged_thinking_default_model: str | None = None
         # Holds a speculative response until its turn is confirmed. Frames are
         # routed through it on the way out, in `push_frame`.

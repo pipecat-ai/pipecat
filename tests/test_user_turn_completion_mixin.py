@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock
 
 from pipecat.frames.frames import (
     FunctionCallsStartedFrame,
+    LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMarkerFrame,
@@ -17,10 +18,12 @@ from pipecat.frames.frames import (
     LLMMessagesAppendFrame,
     LLMTextFrame,
     UserStartedSpeakingFrame,
+    UserTurnCompletionFrame,
     UserTurnInferenceCompletedFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
+from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.llm_service import LLMService
 from pipecat.services.settings import LLMSettings
@@ -807,6 +810,111 @@ class TestConfigurableMarkers(unittest.IsolatedAsyncioTestCase):
 
         marker_frames = [f for f in pushed_frames if isinstance(f, LLMMarkerFrame)]
         self.assertEqual([f.marker for f in marker_frames], ["Y"])
+
+
+class TestUserTurnCompletionReports(unittest.IsolatedAsyncioTestCase):
+    """The turn-completion judgment pushed upstream as UserTurnCompletionFrame."""
+
+    def _processor(self, *, filtering: bool = True) -> MockProcessor:
+        processor = MockProcessor()
+        processor._filter_incomplete_user_turns = filtering
+        processor._start_incomplete_timeout = AsyncMock()
+        return processor
+
+    def _recorder(self, pushed: list) -> AsyncMock:
+        return AsyncMock(
+            side_effect=lambda f, direction=FrameDirection.DOWNSTREAM: pushed.append((f, direction))
+        )
+
+    def _reports(self, pushed: list) -> list[UserTurnCompletionFrame]:
+        return [f for f, _ in pushed if isinstance(f, UserTurnCompletionFrame)]
+
+    async def test_each_marker_is_reported_upstream(self):
+        for marker, kind in [
+            (USER_TURN_COMPLETE_MARKER, "complete"),
+            (USER_TURN_INCOMPLETE_SHORT_MARKER, "short"),
+            (USER_TURN_INCOMPLETE_LONG_MARKER, "long"),
+        ]:
+            with self.subTest(kind=kind):
+                processor = self._processor()
+                pushed = []
+                processor.push_frame = self._recorder(pushed)
+
+                await processor._push_turn_text(f"{marker} Hello")
+
+                reports = [(f, d) for f, d in pushed if isinstance(f, UserTurnCompletionFrame)]
+                self.assertEqual(len(reports), 1)
+                report, direction = reports[0]
+                self.assertEqual((report.kind, report.marker), (kind, marker))
+                self.assertEqual(direction, FrameDirection.UPSTREAM)
+
+    async def test_reports_carry_the_context_frame_id(self):
+        processor = self._processor()
+        context_frame = LLMContextFrame(context=LLMContext())
+        with unittest.mock.patch.object(FrameProcessor, "process_frame", AsyncMock()):
+            await processor.process_frame(context_frame, FrameDirection.DOWNSTREAM)
+        pushed = []
+        processor.push_frame = self._recorder(pushed)
+
+        await processor._push_turn_text(f"{USER_TURN_COMPLETE_MARKER} Hello")
+
+        (report,) = self._reports(pushed)
+        self.assertEqual(report.context_frame_id, context_frame.id)
+
+    async def test_a_tool_call_is_reported_as_complete(self):
+        processor = self._processor()
+        pushed = []
+        with unittest.mock.patch.object(FrameProcessor, "push_frame", self._recorder(pushed)):
+            await processor.push_frame(FunctionCallsStartedFrame(function_calls=[]))
+
+        (report,) = self._reports(pushed)
+        self.assertEqual((report.kind, report.marker), ("complete", None))
+
+    async def test_a_response_without_a_marker_is_reported_with_no_kind(self):
+        processor = self._processor()
+        pushed = []
+        with unittest.mock.patch.object(FrameProcessor, "push_frame", self._recorder(pushed)):
+            await processor.push_frame(LLMFullResponseStartFrame())
+            await processor._push_turn_text("Hello there")
+            await processor.push_frame(LLMFullResponseEndFrame())
+
+        (report,) = self._reports(pushed)
+        self.assertEqual((report.kind, report.marker), (None, None))
+
+    async def test_each_inference_is_reported_once(self):
+        processor = self._processor()
+        pushed = []
+        with (
+            unittest.mock.patch.object(FrameProcessor, "process_frame", AsyncMock()),
+            unittest.mock.patch.object(FrameProcessor, "push_frame", self._recorder(pushed)),
+        ):
+            await processor.process_frame(
+                LLMContextFrame(context=LLMContext()), FrameDirection.DOWNSTREAM
+            )
+            await processor.push_frame(LLMFullResponseStartFrame())
+            await processor._push_turn_text(f"{USER_TURN_COMPLETE_MARKER} Let me check")
+            await processor.push_frame(FunctionCallsStartedFrame(function_calls=[]))
+            await processor.push_frame(LLMFullResponseEndFrame())
+
+            # The next inference is reported afresh.
+            await processor.process_frame(
+                LLMContextFrame(context=LLMContext()), FrameDirection.DOWNSTREAM
+            )
+            await processor.push_frame(LLMFullResponseStartFrame())
+            await processor._push_turn_text(USER_TURN_INCOMPLETE_SHORT_MARKER)
+            await processor.push_frame(LLMFullResponseEndFrame())
+
+        self.assertEqual([r.kind for r in self._reports(pushed)], ["complete", "short"])
+
+    async def test_nothing_is_reported_while_filtering_is_off(self):
+        processor = self._processor(filtering=False)
+        pushed = []
+        with unittest.mock.patch.object(FrameProcessor, "push_frame", self._recorder(pushed)):
+            await processor.push_frame(LLMFullResponseStartFrame())
+            await processor.push_frame(FunctionCallsStartedFrame(function_calls=[]))
+            await processor.push_frame(LLMFullResponseEndFrame())
+
+        self.assertEqual(self._reports(pushed), [])
 
 
 if __name__ == "__main__":

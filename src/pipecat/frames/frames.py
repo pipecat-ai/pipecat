@@ -1503,6 +1503,30 @@ class UserTurnInferenceCompletedFrame(SystemFrame):
 
 
 @dataclass
+class UserTurnCompletionFrame(SystemFrame):
+    """The LLM's judgment of whether the user's turn is complete.
+
+    Pushed upstream by an LLM service that uses turn-completion markers, once
+    per inference and as soon as the judgment is known: when the response's
+    marker is read, when the response calls a tool before writing a marker
+    (``"complete"``), or when the response ends without one (``None``). The
+    marker itself reaches the context as an :class:`LLMMarkerFrame`.
+
+    Parameters:
+        kind: ``"complete"``, ``"short"`` (the user will continue shortly) or
+            ``"long"`` (the user needs more time), or ``None`` when the
+            response carried no marker.
+        marker: The marker read, or ``None`` for a tool call or no marker.
+        context_frame_id: The id of the :class:`LLMContextFrame` that started
+            the inference, or ``None`` when it isn't known.
+    """
+
+    kind: str | None
+    marker: str | None = None
+    context_frame_id: int | None = None
+
+
+@dataclass
 class VADUserStartedSpeakingFrame(SystemFrame):
     """Frame emitted when VAD definitively detects user started speaking.
 

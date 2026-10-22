@@ -22,6 +22,7 @@ from pipecat.frames.frames import (
     Frame,
     FunctionCallsStartedFrame,
     InterruptionFrame,
+    LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMarkerFrame,
@@ -30,6 +31,7 @@ from pipecat.frames.frames import (
     LLMRunFrame,
     LLMTextFrame,
     UserStartedSpeakingFrame,
+    UserTurnCompletionFrame,
     UserTurnInferenceCompletedFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
@@ -249,6 +251,10 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
     When incomplete timeouts expire, the mixin automatically prompts the LLM
     with a contextual follow-up message to re-engage the user.
 
+    The mixin also reports the LLM's judgment upstream as a
+    ``UserTurnCompletionFrame``, once per inference and tagged with the id of
+    the ``LLMContextFrame`` that started it.
+
     Usage example::
 
         # With turn completion:
@@ -272,6 +278,9 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
             **kwargs: Keyword arguments passed to parent class.
         """
         super().__init__(*args, **kwargs)
+        # Turn completion is owned by LLMTurnCompletionUserTurnStopStrategy, which
+        # enables it over an LLMUpdateSettingsFrame once the pipeline starts.
+        self._filter_incomplete_user_turns: bool = False
         self._turn_text_buffer = ""
         # The current response as the LLM produced it, and the marker read
         # from it, reported together when the response ends.
@@ -300,6 +309,9 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
         # permanently silence the turn.
         self._user_turn_completion_voiced = False
         self._user_speaking = False
+        # The inference being answered, and whether its judgment was reported.
+        self._context_frame_id: int | None = None
+        self._turn_completion_reported = False
 
         # Timeout handling
         self._user_turn_completion_config = UserTurnCompletionConfig()
@@ -334,6 +346,18 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
             return
         self._turn_completion_broadcasted = True
         await self.broadcast_frame(UserTurnInferenceCompletedFrame)
+
+    async def _report_turn_completion(self, kind: str | None, marker: str | None):
+        """Push the turn-completion judgment upstream, once per inference."""
+        if self._turn_completion_reported:
+            return
+        self._turn_completion_reported = True
+        await self.push_frame(
+            UserTurnCompletionFrame(
+                kind=kind, marker=marker, context_frame_id=self._context_frame_id
+            ),
+            FrameDirection.UPSTREAM,
+        )
 
     async def _start_incomplete_timeout(self, incomplete_type: IncompleteType):
         """Start a timeout task for incomplete turn handling.
@@ -458,6 +482,9 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
             self._user_turn_completion_voiced = False
         elif isinstance(frame, VADUserStoppedSpeakingFrame):
             self._user_speaking = False
+        elif isinstance(frame, LLMContextFrame):
+            self._context_frame_id = frame.id
+            self._turn_completion_reported = False
 
         # Pass frame to parent
         await super().process_frame(frame, direction)
@@ -473,6 +500,9 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
             direction: The direction of frame flow. Defaults to downstream.
         """
         if isinstance(frame, FunctionCallsStartedFrame):
+            # A tool call is the LLM judging the turn complete.
+            if self._filter_incomplete_user_turns:
+                await self._report_turn_completion("complete", None)
             # Broadcast turn completion now, before the function dispatches
             # — gives ``UserStoppedSpeakingFrame`` maximum time to propagate
             # so the assistant aggregator's ``_user_speaking`` is False by
@@ -498,6 +528,8 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
             self._response_raw = ""
             self._response_marker = None
         elif isinstance(frame, LLMFullResponseEndFrame):
+            if self._filter_incomplete_user_turns:
+                await self._report_turn_completion(None, None)
             await self._report_response()
             await self._turn_reset()
 
@@ -506,8 +538,9 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
     async def _push_marker(
         self, marker: str, kind: str, append_to_context_immediately: bool = True
     ):
-        """Push the marker read from the response, and remember it for the response's report."""
+        """Report the marker read from the response, and push it for the context."""
         self._response_marker = (marker, kind)
+        await self._report_turn_completion(kind, marker)
         await self.push_frame(
             LLMMarkerFrame(marker, append_to_context_immediately=append_to_context_immediately)
         )
