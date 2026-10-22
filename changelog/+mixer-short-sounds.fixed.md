@@ -1,0 +1,1 @@
+- Fixed SoundfileMixer playback across chunk boundaries, including clips shorter than an output chunk and final audio in non-looping clips.
