@@ -18,6 +18,17 @@ class OpenAILLMService(BaseOpenAILLMService):
     Provides a complete OpenAI LLM service with context aggregation support.
     Uses the BaseOpenAILLMService for core functionality and adds OpenAI-specific
     context aggregator creation.
+
+    Any OpenAI-compatible Chat Completions API can be used by setting
+    ``base_url`` and ``api_key``. For example, AWS Bedrock Mantle exposes such
+    an API for supported Bedrock models, so it needs no separate AWS Bedrock
+    service or AWS credentials::
+
+        OpenAILLMService(
+            api_key=os.getenv("AWS_BEDROCK_API_KEY"),
+            base_url="https://bedrock-mantle.us-east-1.api.aws/v1",
+            settings=OpenAILLMService.Settings(model=os.getenv("AWS_BEDROCK_MANTLE_MODEL")),
+        )
     """
 
     Settings = BaseOpenAILLMService.Settings
