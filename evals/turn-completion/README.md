@@ -16,7 +16,7 @@ question of the LLM's marker and reply.
 ## How it works
 
 `bot.py` is a text-only bot around one LLM service: eval transport, the user
-aggregator with `FilterIncompleteUserTurnStrategies`, the LLM, the assistant
+aggregator with `IncompleteUserTurnFilter`, the LLM, the assistant
 aggregator. No STT or TTS. The manifest entry's `runner_body` names the service
 class, its constructor arguments, the model and its settings (the fields are in
 the bot's docstring), and the bot advertises the weather and appointment tools

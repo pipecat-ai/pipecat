@@ -42,7 +42,7 @@ from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.livekit.transport import LiveKitParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
-from pipecat.turns.user_turn_strategies import FilterIncompleteUserTurnStrategies
+from pipecat.turns.user_turn_filter import IncompleteUserTurnFilter
 from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
@@ -94,19 +94,17 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     )
 
     context = LLMContext()
-    # `FilterIncompleteUserTurnStrategies` pairs the default detector
-    # chain with `LLMTurnCompletionUserTurnStopStrategy`: detectors
-    # trigger LLM inference but the public `on_user_turn_stopped` event
-    # fires only when the LLM confirms ●. The LLM marks each response
-    # with one of:
-    # ● = complete (respond normally)
-    # ◐ = incomplete short (wait 5s, then prompt)
-    # ○ = incomplete long (wait 10s, then prompt)
+    # `IncompleteUserTurnFilter` lets the LLM judge whether the user is done.
+    # The stop strategies still propose a turn end, and the LLM marks each
+    # response with one of:
+    # ● = complete (the turn ends and the bot answers)
+    # ◐ = incomplete short (the turn stays open; prompt after 5s of silence)
+    # ○ = incomplete long (the turn stays open; prompt after 10s of silence)
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
             vad_analyzer=SileroVADAnalyzer(),
-            user_turn_strategies=FilterIncompleteUserTurnStrategies(
+            user_turn_filter=IncompleteUserTurnFilter(
                 # Optional: customize turn completion behavior
                 # config=UserTurnCompletionConfig(
                 #     incomplete_short_timeout=5.0,
