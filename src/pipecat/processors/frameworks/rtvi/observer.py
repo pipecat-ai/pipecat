@@ -24,6 +24,7 @@ from pydantic import BaseModel
 
 import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.audio.volume import AudioVolumeTracker
+from pipecat.expressive.perception import PerceptionSignal
 from pipecat.frames.frames import (
     AggregatedTextFrame,
     AggregatedTextProgressFrame,
@@ -1076,6 +1077,7 @@ class RTVIObserver(BaseObserver):
                 timestamp=frame.timestamp,
                 final=final,
                 user_id=frame.user_id,
+                perception=frame.perception,
             )
         if self._params.stt_raw_text_enabled and self._client_supports_raw_text:
             await self.send_rtvi_message(
@@ -1105,8 +1107,24 @@ class RTVIObserver(BaseObserver):
         final: bool,
         user_id: str | None = None,
         msg_id: str | None = None,
+        perception: list[PerceptionSignal] | None = None,
     ):
         """Send a user input message."""
+        signals = (
+            [
+                RTVI.UserPerceptionSignal(
+                    name=signal.name,
+                    labels=[
+                        RTVI.UserPerceptionLabel(label=label, confidence=confidence)
+                        for label, confidence in signal.labels
+                    ],
+                    value=signal.value,
+                )
+                for signal in perception
+            ]
+            if perception
+            else None
+        )
         message = RTVI.UserInputMessage(
             data=RTVI.UserInputMessageData(
                 text=text,
@@ -1115,6 +1133,7 @@ class RTVIObserver(BaseObserver):
                 final=final,
                 user_id=user_id,
                 msg_id=msg_id,
+                perception=signals,
             )
         )
         await self.send_rtvi_message(message)
