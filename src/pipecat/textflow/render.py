@@ -170,6 +170,14 @@ def render_trace(
         steps: Whether to list every step of the run, in order.
     """
     console = console or Console()
+    if trace.bot is not None:
+        pipeline = Text()
+        for i, name in enumerate(trace.bot.pipeline):
+            if i:
+                pipeline.append(" → ", style="dim")
+            pipeline.append(name, style="bold green" if i in trace.bot.traced else "")
+        body = Group(pipeline, *(Text(f"note: {n}", style="yellow") for n in trace.bot.notes))
+        console.print(Panel(body, title=f"Bot: {trace.bot.path}"))
     console.print(Panel(Text(trace.text), title=f"LLM response · setup: {trace.setup.name}"))
     chunks = Text(" | ".join(repr(c) for c in trace.chunks), style="dim")
     console.print(Panel(chunks, title=f"Streamed as {len(trace.chunks)} chunks"))

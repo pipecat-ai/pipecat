@@ -20,6 +20,7 @@ from loguru import logger
 from rich.console import Console
 from rich.table import Table
 
+from pipecat.textflow.capture import TextFlowCaptureError
 from pipecat.textflow.render import render_trace
 from pipecat.textflow.setup import TextFlowSetup, presets
 from pipecat.textflow.trace import run_textflow
@@ -34,7 +35,11 @@ textflow_app = typer.Typer(
 _console = Console()
 
 
-def _load_setup(setup_path: Path | None, preset: str | None) -> TextFlowSetup:
+def _load_setup(
+    setup_path: Path | None, preset: str | None, bot: Path | None = None
+) -> TextFlowSetup:
+    if bot is not None:
+        return TextFlowSetup(name=bot.stem, bot=str(bot))
     if setup_path is not None:
         return TextFlowSetup.load(str(setup_path))
     try:
@@ -48,6 +53,15 @@ def _load_setup(setup_path: Path | None, preset: str | None) -> TextFlowSetup:
 def run(
     text: str | None = typer.Argument(
         None, help="The LLM response to trace. The setup's sample text when omitted."
+    ),
+    text_file: Path | None = typer.Option(
+        None, "--text-file", "-t", help="A file holding the LLM response to trace."
+    ),
+    bot: Path | None = typer.Option(
+        None,
+        "--bot",
+        "-b",
+        help="A bot file whose own processors to run. Overrides --setup and --preset.",
     ),
     setup_path: Path | None = typer.Option(
         None, "--setup", "-s", help="A setup YAML file. Overrides --preset."
@@ -66,8 +80,17 @@ def run(
     if quiet:
         logger.remove()
         logger.add(sys.stderr, level="ERROR")
-    setup = _load_setup(setup_path, preset)
-    trace = asyncio.run(run_textflow(setup, text))
+    setup = _load_setup(setup_path, preset, bot)
+    if text_file is not None:
+        if text is not None:
+            _console.print("[red]Give the response as text or as --text-file, not both.[/red]")
+            raise typer.Exit(2)
+        text = text_file.read_text(encoding="utf-8").rstrip("\n")
+    try:
+        trace = asyncio.run(run_textflow(setup, text))
+    except TextFlowCaptureError as e:
+        _console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1) from e
     if json_output:
         print(json.dumps(trace.model_dump(mode="json"), indent=2))
     else:
@@ -78,6 +101,9 @@ def run(
 def serve(
     host: str = typer.Option("127.0.0.1", "--host", help="Interface to listen on."),
     port: int = typer.Option(7865, "--port", help="Port to listen on."),
+    bot: Path | None = typer.Option(
+        None, "--bot", "-b", help="A bot file the page opens with, instead of a preset."
+    ),
 ):
     """Serve the interactive page."""
     try:
@@ -86,7 +112,7 @@ def serve(
         _console.print(f"[red]{e}[/red]")
         raise typer.Exit(1) from e
     _console.print(f"Serving the text flow page at http://{host}:{port}")
-    serve_page(host=host, port=port)
+    serve_page(host=host, port=port, bot=str(bot.resolve()) if bot is not None else None)
 
 
 @textflow_app.command("presets")

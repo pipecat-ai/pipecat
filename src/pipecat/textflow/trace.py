@@ -57,7 +57,7 @@ from pipecat.processors.frameworks.rtvi.models import (
 from pipecat.processors.frameworks.rtvi.observer import RTVIObserver, RTVIObserverParams
 from pipecat.processors.frameworks.rtvi.processor import RTVIProcessor
 from pipecat.services.settings import TTSSettings
-from pipecat.services.tts_service import TextAggregationMode
+from pipecat.services.tts_service import TextAggregationMode, TTSService
 from pipecat.tests.utils import run_test
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import TransportParams
@@ -66,6 +66,7 @@ from pipecat.utils.text.base_text_aggregator import Aggregation, BaseTextAggrega
 from pipecat.utils.text.base_text_filter import BaseTextFilter
 from pipecat.utils.text.transforms.text_transform import TextTransform
 
+from .capture import BotSummary, callable_label, capture_bot, mirror_setup
 from .mocks import SAMPLE_RATE, ProviderRequest, TextFlowTTSService, llm_response_frames
 from .setup import (
     TextFlowSetup,
@@ -194,9 +195,11 @@ class TextFlowTrace(BaseModel):
         provider_requests: Every synthesis request, in order.
         timeline: Everything that happened, in order.
         errors: Errors pushed during the run.
+        bot: What was found in the bot file, when the setup names one.
     """
 
     setup: TextFlowSetup
+    bot: BotSummary | None = None
     text: str
     chunks: list[str]
     segments: list[TextFlowSegment]
@@ -473,13 +476,32 @@ class _RecordingFilter(BaseTextFilter):
         await self._inner.reset_interruption()
 
 
-def _recording_transforms(specs: list[TransformSpec], record) -> list[tuple[str, TextTransform]]:
-    """Build the specs' transforms, each wrapped to record what it did."""
-    built = build_transforms(specs)
-    wrapped: list[tuple[str, TextTransform]] = []
-    for spec, (text_type, transform) in zip(specs, built):
+Transforms = list[tuple[str, TextTransform, str]]
+"""``(text_type, transform, label)`` triples: the transforms a stage runs, with
+the name each is reported under."""
 
-        async def recording(text: str, tt: TextType | str, *, _t=transform, _n=spec.name) -> str:
+
+def _spec_transforms(specs: list[TransformSpec]) -> Transforms:
+    """The registered transforms the specs name."""
+    return [
+        (text_type, transform, spec.name)
+        for spec, (text_type, transform) in zip(specs, build_transforms(specs))
+    ]
+
+
+def _bot_transforms(pairs: list[tuple[Any, Any]]) -> Transforms:
+    """A bot's own ``(text_type, transform)`` pairs, labelled by callable name."""
+    return [
+        (str(text_type), transform, callable_label(transform)) for text_type, transform in pairs
+    ]
+
+
+def _recording_transforms(transforms: Transforms, record) -> list[tuple[str, TextTransform]]:
+    """Wrap each transform to record what it did."""
+    wrapped: list[tuple[str, TextTransform]] = []
+    for text_type, transform, label in transforms:
+
+        async def recording(text: str, tt: TextType | str, *, _t=transform, _n=label) -> str:
             result = await _t(text, tt)
             record(_n, text, result)
             return result
@@ -494,14 +516,14 @@ class _TracingLLMTextProcessor(LLMTextProcessor):
     def __init__(
         self,
         tracer: _Tracer,
-        specs: list[TransformSpec],
+        transforms: Transforms,
         text_aggregator: BaseTextAggregator,
         **kwargs,
     ):
         self._tracer = tracer
         self._pending: list[tuple[StageEvent, TimelineEntry]] = []
         super().__init__(
-            text_transforms=_recording_transforms(specs, self._step),
+            text_transforms=_recording_transforms(transforms, self._step),
             text_aggregator=_RecordingAggregator(text_aggregator, tracer, "llm_text_processor"),
             **kwargs,
         )
@@ -545,10 +567,13 @@ class _TracingLLMTextProcessor(LLMTextProcessor):
 class _TracingTTSService(TextFlowTTSService):
     """A stand-in TTS that attributes filters, transforms, skips and requests to segments."""
 
-    def __init__(self, tracer: _Tracer, specs: list[TransformSpec], **kwargs):
+    def __init__(self, tracer: _Tracer, transforms: Transforms, **kwargs):
         self._tracer = tracer
         self._current: int | None = None
-        super().__init__(text_transforms=_recording_transforms(specs, self._step), **kwargs)
+        aggregator = kwargs.pop("text_aggregator", None)
+        super().__init__(text_transforms=_recording_transforms(transforms, self._step), **kwargs)
+        if aggregator is not None:
+            self._text_aggregator = aggregator
         self._text_filters = [
             _RecordingFilter(f, self._filter_step) for f in list(self._text_filters)
         ]
@@ -807,28 +832,44 @@ def _rtvi_transforms(specs: list[TransformSpec]) -> list[tuple[str, Any]] | None
     return built or None
 
 
-def _build_tts(setup: TextFlowSetup, tracer: _Tracer) -> _TracingTTSService:
+def _build_tts(
+    setup: TextFlowSetup, tracer: _Tracer, bot_tts: TTSService | None = None
+) -> _TracingTTSService:
+    """The stand-in TTS: the setup's knobs, with the bot's processing parts when given."""
     tts = setup.tts
     kwargs: dict[str, Any] = dict(
         word_timestamps=tts.word_timestamps,
         delivery=tts.delivery,
         tokenization=tts.tokenization,
-        text_aggregation_mode=TextAggregationMode(tts.aggregation_mode),
-        skip_text_types=list(tts.skip_text_types),
-        append_trailing_space=tts.append_trailing_space,
         settings=TTSSettings(model=None, voice=None, language=None),
     )
-    if tts.aggregator is not None:
-        kwargs["text_aggregator"] = build_aggregator(tts.aggregator)
-    if tts.markdown_filter:
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", DeprecationWarning)
-            from pipecat.utils.text.markdown_text_filter import MarkdownTextFilter
+    if bot_tts is not None:
+        kwargs.update(
+            text_aggregation_mode=bot_tts._text_aggregation_mode,
+            text_aggregator=bot_tts._text_aggregator,
+            skip_text_types=list(bot_tts._skip_text_types),
+            text_filters=list(bot_tts._text_filters),
+            append_trailing_space=bot_tts._append_trailing_space,
+        )
+        transforms = _bot_transforms(list(bot_tts._text_transforms))
+    else:
+        kwargs.update(
+            text_aggregation_mode=TextAggregationMode(tts.aggregation_mode),
+            skip_text_types=list(tts.skip_text_types),
+            append_trailing_space=tts.append_trailing_space,
+        )
+        if tts.aggregator is not None:
+            kwargs["text_aggregator"] = build_aggregator(tts.aggregator)
+        if tts.markdown_filter:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", DeprecationWarning)
+                from pipecat.utils.text.markdown_text_filter import MarkdownTextFilter
 
-            kwargs["text_filters"] = [MarkdownTextFilter()]
+                kwargs["text_filters"] = [MarkdownTextFilter()]
+        transforms = _spec_transforms(tts.transforms)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", DeprecationWarning)
-        return _TracingTTSService(tracer, tts.transforms, **kwargs)
+        return _TracingTTSService(tracer, transforms, **kwargs)
 
 
 async def run_textflow(setup: TextFlowSetup, text: str | None = None) -> TextFlowTrace:
@@ -844,17 +885,31 @@ async def run_textflow(setup: TextFlowSetup, text: str | None = None) -> TextFlo
     text = setup.sample_text if text is None else text
     tracer = _Tracer()
 
+    captured = None
+    if setup.bot is not None:
+        # The bot is imported afresh each run, so edits to it show up.
+        captured = await capture_bot(setup.bot)
+        setup = mirror_setup(captured, setup)
+
     processors: list[FrameProcessor] = []
     names: dict[int, str] = {}
-    if setup.llm_text_processor is not None:
+    processor = None
+    if captured is not None:
+        if captured.llm_text_processor is not None:
+            bot_ltp = captured.llm_text_processor
+            processor = _TracingLLMTextProcessor(
+                tracer, _bot_transforms(list(bot_ltp._text_transforms)), bot_ltp._text_aggregator
+            )
+    elif setup.llm_text_processor is not None:
         spec = setup.llm_text_processor
         processor = _TracingLLMTextProcessor(
-            tracer, spec.transforms, build_aggregator(spec.aggregator)
+            tracer, _spec_transforms(spec.transforms), build_aggregator(spec.aggregator)
         )
+    if processor is not None:
         names[id(processor)] = "llm_text_processor"
         processors.append(processor)
 
-    tts = _build_tts(setup, tracer)
+    tts = _build_tts(setup, tracer, captured.tts if captured is not None else None)
     names[id(tts)] = "tts"
     processors.append(tts)
 
@@ -868,23 +923,23 @@ async def run_textflow(setup: TextFlowSetup, text: str | None = None) -> TextFlo
     processors.append(assistant)
 
     observers: list[BaseObserver] = [_Recorder(tracer, names, assistant)]
-    if setup.rtvi.enabled:
+    if captured is not None and captured.rtvi_params is not None and setup.rtvi.enabled:
+        rtvi_params = dataclasses.replace(captured.rtvi_params)
+    elif captured is None and setup.rtvi.enabled:
+        rtvi_params = RTVIObserverParams(
+            bot_llm_enabled=setup.rtvi.bot_llm,
+            bot_tts_enabled=setup.rtvi.bot_tts,
+            skip_text_types=list(setup.rtvi.skip_text_types) or None,
+            bot_output_transforms=_rtvi_transforms(setup.rtvi.transforms),
+        )
+    else:
+        rtvi_params = None
+    if rtvi_params is not None:
         # The processor only passes frames through here; it is not named so
         # its hops are left out and the frames it forwards come "from the LLM".
         rtvi = _ClientRTVIProcessor()
         processors.insert(0, rtvi)
-        observers.append(
-            _RecordingRTVIObserver(
-                tracer,
-                rtvi=rtvi,
-                params=RTVIObserverParams(
-                    bot_llm_enabled=setup.rtvi.bot_llm,
-                    bot_tts_enabled=setup.rtvi.bot_tts,
-                    skip_text_types=list(setup.rtvi.skip_text_types) or None,
-                    bot_output_transforms=_rtvi_transforms(setup.rtvi.transforms),
-                ),
-            )
-        )
+        observers.append(_RecordingRTVIObserver(tracer, rtvi=rtvi, params=rtvi_params))
 
     chunks, frames = llm_response_frames(text, setup.chunking)
     pipeline = Pipeline(processors)
@@ -892,6 +947,7 @@ async def run_textflow(setup: TextFlowSetup, text: str | None = None) -> TextFlo
 
     return TextFlowTrace(
         setup=setup,
+        bot=captured.summary if captured is not None else None,
         text=text,
         chunks=chunks,
         segments=_segments(tracer),

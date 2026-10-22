@@ -6,6 +6,8 @@
 
 """Tests for the text flow tracer: the real processors, traced over a response."""
 
+from pathlib import Path
+
 import pytest
 import yaml
 
@@ -20,6 +22,7 @@ from pipecat.textflow import (
     TTSSpec,
     run_textflow,
 )
+from pipecat.textflow.capture import TextFlowCaptureError, capture_bot, mirror_setup
 from pipecat.textflow.mocks import chunk_text, tokenize
 from pipecat.textflow.setup import TokenizationSpec, presets
 from pipecat.textflow.transforms import build_transform, registered_transforms
@@ -27,6 +30,7 @@ from pipecat.textflow.transforms import build_transform, registered_transforms
 CODE_HELPER_TEXT = (
     "Your card is <card>1234-5678-9012-3456</card>. Run <code>npm install</code> to start."
 )
+BOT_PATH = Path(__file__).parent / "textflow_bot.py"
 
 
 def _rows(trace):
@@ -313,3 +317,68 @@ async def test_steps_place_stage_actions_and_releases_in_order():
     assert commit.source == "context"
     assert sum(e.label == "LLMContextAssistantTurnFrame" for e in steps) == 1
     assert sum(e.label == "BotStartedSpeakingFrame" for e in steps) == 1
+
+
+@pytest.mark.asyncio
+async def test_capture_bot_finds_the_text_path():
+    """The bot's own processors come back, with what the trace will not run noted."""
+    captured = await capture_bot(BOT_PATH)
+
+    assert captured.summary.pipeline == [
+        "RTVIProcessor",
+        "FrameProcessor",
+        "LLMUserAggregator",
+        "OpenAILLMService",
+        "LLMTextProcessor",
+        "PassThrough",
+        "SilentTTS",
+        "FrameProcessor",
+        "LLMAssistantAggregator",
+    ]
+    assert captured.llm_text_processor is not None
+    assert captured.tts is not None and type(captured.tts).__name__ == "SilentTTS"
+    assert captured.rtvi_params is not None and captured.rtvi_params.skip_text_types == ["code"]
+    assert any("PassThrough" in note for note in captured.summary.notes)
+
+    setup = mirror_setup(captured)
+    assert setup.bot == str(BOT_PATH.resolve())
+    assert setup.name == "textflow_bot"
+    assert setup.llm_text_processor is not None
+    assert setup.llm_text_processor.aggregator.kind == "pattern_pair"
+    assert [p.type for p in setup.llm_text_processor.aggregator.patterns] == ["code"]
+    assert [t.name for t in setup.llm_text_processor.transforms] == ["replace_text"]
+    assert setup.tts.skip_text_types == ["code"]
+    assert [t.name for t in setup.tts.transforms] == ["shout"]
+    assert setup.tts.word_timestamps is False
+    assert setup.rtvi.enabled and setup.rtvi.skip_text_types == ["code"]
+
+
+@pytest.mark.asyncio
+async def test_bot_setup_runs_the_bots_own_objects():
+    """A run with ``bot`` set uses the bot's aggregator, transforms and RTVI parameters."""
+    setup = TextFlowSetup(bot=str(BOT_PATH), tts=TTSSpec(word_timestamps=True))
+    trace = await run_textflow(setup, "Dr. Smith wrote <code>x = 1</code>. Bye.")
+
+    assert trace.bot is not None and "PassThrough" in trace.bot.pipeline
+    assert trace.setup.bot == str(BOT_PATH.resolve())
+    assert trace.setup.tts.word_timestamps is True
+
+    first = trace.segments[0]
+    assert first.events[0].stage == "llm_text_processor" and first.events[0].name == "replace_text"
+    assert first.llm_text == "Doctor Smith wrote "
+    assert trace.provider_requests[0]["text"] == "DOCTOR SMITH WROTE"
+    assert "Doctor Smith" in trace.context_messages[0]["content"]
+
+    code = next(s for s in trace.segments if s.text_type == "code")
+    assert code.outcome == "skipped"
+    assert code.rtvi_messages == []
+
+
+@pytest.mark.asyncio
+async def test_capture_reports_a_file_without_a_bot(tmp_path):
+    path = tmp_path / "nobot.py"
+    path.write_text("x = 1\n")
+    with pytest.raises(TextFlowCaptureError, match="no bot"):
+        await capture_bot(path)
+    with pytest.raises(TextFlowCaptureError, match="does not exist"):
+        await capture_bot(tmp_path / "missing.py")

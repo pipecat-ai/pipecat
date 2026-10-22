@@ -195,10 +195,17 @@ class TextFlowSetup(BaseModel):
         rtvi: The RTVI observer.
         chunking: How the response streams from the LLM.
         sample_text: A response that shows the setup off.
+        bot: A bot file whose own processors the run uses. When set, the
+            ``LLMTextProcessor``, the TTS service's aggregator, skipped text types,
+            filters and transforms, and the RTVI observer's parameters are the bot's,
+            and the matching fields here only describe them. The stand-in knobs
+            still apply: ``tts.word_timestamps``, ``tts.delivery``,
+            ``tts.tokenization``, ``rtvi.enabled`` and ``chunking``.
     """
 
     name: str = "custom"
     description: str = ""
+    bot: str | None = None
     llm_text_processor: LLMTextProcessorSpec | None = Field(default_factory=LLMTextProcessorSpec)
     tts: TTSSpec = Field(default_factory=TTSSpec)
     rtvi: RTVISpec = Field(default_factory=RTVISpec)

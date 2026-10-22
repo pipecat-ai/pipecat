@@ -286,6 +286,11 @@
       <select id="preset"></select>
       <div class="hint" id="preset-desc"></div>
     </div>
+    <div class="field">
+      <label for="bot-path">Bot file <span class="help" data-tip="Trace a bot’s own text path. The file is imported and its bot(runner_args) is called with a stub transport and a runner that never starts, so its LLMTextProcessor, TTS service and RTVIObserver are captured as it builds them. The bot’s environment applies: the variables it reads must be set." tabindex="0">?</span></label>
+      <div class="row"><input type="text" id="bot-path" placeholder="path/to/bot.py" spellcheck="false"><button class="btn small" id="bot-load">Load</button></div>
+      <div class="hint" id="bot-desc"></div>
+    </div>
     <div id="form"></div>
   </aside>
   <main class="main">
@@ -293,6 +298,8 @@
       <textarea id="text" spellcheck="false" placeholder="What the LLM would say…"></textarea>
       <div class="controls">
         <button class="btn primary" id="run">Run</button>
+        <button class="btn" id="text-load" data-tip="Load the LLM response from a text file on this computer">Open file</button>
+        <input type="file" id="text-file" accept=".txt,.md,text/*" style="display:none">
         <button class="btn" id="share">Share</button>
         <div class="status" id="status"></div>
       </div>
@@ -361,7 +368,7 @@
 (() => {
   // ---------- state ----------
   const state = {
-    presets: [], catalog: [], setup: null, text: "", trace: null,
+    presets: [], catalog: [], setup: null, text: "", trace: null, bot: null,
     kinds: { frame: true, aggregate: true, stage: true, provider: true, rtvi: true }, segFilter: "", pos: -1, runId: 0,
   };
   const $ = (id) => document.getElementById(id);
@@ -477,6 +484,11 @@
       const trace = await api("/api/trace", { setup: state.setup, text: state.text });
       if (id !== state.runId) return;
       state.trace = trace; state.pos = -1; pause();
+      if (trace.bot) {
+        state.bot = trace.bot;
+        // The bot is imported again on every run; if it changed, so does what the form shows.
+        if (JSON.stringify(trace.setup) !== JSON.stringify(state.setup)) { state.setup = trace.setup; renderForm(); }
+      }
       showError(trace.errors && trace.errors.length ? "Errors during the run:\n" + trace.errors.join("\n") : "");
       render();
       setStatus(`${trace.segments.length} segments · ${trace.timeline.length} events`);
@@ -487,8 +499,38 @@
     }
   }
 
+  // ---------- bot ----------
+  async function loadBot(path) {
+    if (!path) return;
+    setStatus("Loading bot…");
+    try {
+      const res = await api("/api/bot", { path });
+      state.bot = res.bot;
+      $("preset").value = "";
+      $("preset-desc").textContent = "";
+      $("bot-desc").textContent = `${res.bot.pipeline.length} processors captured.`;
+      replaceSetup(res.setup, state.text || res.setup.sample_text);
+    } catch (e) {
+      showError("Could not load the bot: " + String(e.message || e));
+      setStatus("Failed");
+    }
+  }
+
   // ---------- form ----------
   function catalogEntry(name) { return state.catalog.find((t) => t.name === name); }
+  // Read-only lines for the parts a bot provides.
+  function ro(label, value) {
+    const text = value == null || value === "" || (Array.isArray(value) && !value.length) ? "none" : Array.isArray(value) ? value.join(", ") : value;
+    return el("div", { class: "field" }, el("label", { text: label }), el("div", { class: "mono", style: "font-size:12px;white-space:pre-wrap;word-break:break-word", text }));
+  }
+  function aggDesc(a) {
+    if (!a) return "simple → sentence";
+    let d = `${a.kind} → ${a.aggregation_type}`;
+    if (a.kind === "pattern_pair") d += "\n" + (a.patterns || []).map((p) => `${p.type}: ${p.start} … ${p.end} (${p.action})`).join("\n");
+    if (a.kind === "skip_tags") d += "\n" + (a.skip_tags || []).map((t) => `${t[0]} … ${t[1]}`).join("\n");
+    return d;
+  }
+  const tfDesc = (list) => (list || []).length ? list.map((t) => `${t.text_type}: ${t.name}`).join("\n") : "none";
 
   function field(label, control, hint) {
     return el("div", { class: "field" }, el("label", { text: label }), control, hint ? el("div", { class: "hint", text: hint }) : null);
@@ -627,12 +669,26 @@
     const form = $("form");
     form.replaceChildren();
     form.append(field("Setup name", textInput(s, "name")));
+    const fromBot = !!s.bot;
+
+    if (fromBot) {
+      const b = state.bot || { pipeline: [], traced: [], notes: [] };
+      const chips = el("div", { class: "wchips" });
+      b.pipeline.forEach((n, i) => chips.append(el("span", { class: "wc" + ((b.traced || []).includes(i) ? " hot" : ""), text: n, "data-tip": (b.traced || []).includes(i) ? "Run by the trace as the bot built it" : "In the bot’s pipeline; the trace stands in for it or leaves it out" })));
+      form.append(section("Bot", el("div", {},
+        el("div", { class: "hint", style: "word-break:break-all", text: s.bot }),
+        chips,
+        ...(b.notes || []).map((n) => el("div", { class: "hint", style: "color:var(--skipped)", text: n })),
+        el("div", { class: "hint", style: "margin-top:6px", text: "The sections below describe what the bot built. The file is imported again on every run, so edits to it show up here." })),
+        { tip: "The bot’s pipeline, in order. Highlighted processors are the bot’s own objects, traced as they are; the LLM, the TTS provider and the transport are stand-ins." }));
+    }
 
     // LLMTextProcessor
     const ltp = el("div");
     const drawLtp = () => {
       ltp.replaceChildren();
       if (!s.llm_text_processor) { ltp.append(el("div", { class: "hint", text: "Off: the TTS service aggregates the LLM text itself." })); return; }
+      if (fromBot) { ltp.append(ro("aggregator", aggDesc(s.llm_text_processor.aggregator)), ro("transforms (reach every consumer)", tfDesc(s.llm_text_processor.transforms))); return; }
       ltp.append(aggregatorEditor(s.llm_text_processor.aggregator));
       ltp.append(transformsEditor(s.llm_text_processor.transforms = s.llm_text_processor.transforms || [], "transforms (reach every consumer)"));
     };
@@ -640,7 +696,7 @@
     const ltpToggle = el("input", { type: "checkbox", checked: !!s.llm_text_processor, "data-tip": "Enable the LLMTextProcessor; off, the TTS service aggregates the LLM text itself",
       onclick: (e) => e.stopPropagation(),
       onchange: (e) => { s.llm_text_processor = e.target.checked ? { aggregator: { kind: "simple", aggregation_type: "sentence", patterns: [], skip_tags: [] }, transforms: [] } : null; drawLtp(); scheduleRun(); } });
-    form.append(section("LLMTextProcessor", ltp, { toggle: ltpToggle, tip: "The processor after the LLM that aggregates its text into segments and transforms them before anyone else sees them. Turn it off to let the TTS service aggregate instead." }));
+    form.append(section("LLMTextProcessor", ltp, { toggle: fromBot ? null : ltpToggle, tip: "The processor after the LLM that aggregates its text into segments and transforms them before anyone else sees them. Turn it off to let the TTS service aggregate instead." }));
 
     // TTS
     const t = s.tts;
@@ -649,11 +705,11 @@
       checkbox(t, "word_timestamps", "provider reports word timestamps"),
       el("div", { class: "row" },
         field("delivery", selectInput(t, "delivery", ["http", "websocket"])),
-        field("aggregation", selectInput(t, "aggregation_mode", ["sentence", "token"]))),
-      listInput(t, "skip_text_types", "skip text types", "Comma-separated. Never spoken, e.g. code."),
-      transformsEditor(t.transforms = t.transforms || [], "transforms (speech only)"),
-      checkbox(t, "markdown_filter", "deprecated MarkdownTextFilter"),
-      checkbox(t, "append_trailing_space", "append trailing space"),
+        fromBot ? ro("aggregation", t.aggregation_mode) : field("aggregation", selectInput(t, "aggregation_mode", ["sentence", "token"]))),
+      fromBot ? ro("skip text types", t.skip_text_types) : listInput(t, "skip_text_types", "skip text types", "Comma-separated. Never spoken, e.g. code."),
+      fromBot ? ro("transforms (speech only)", tfDesc(t.transforms)) : transformsEditor(t.transforms = t.transforms || [], "transforms (speech only)"),
+      fromBot ? ro("filters", t.markdown_filter ? "MarkdownTextFilter" : null) : checkbox(t, "markdown_filter", "deprecated MarkdownTextFilter"),
+      fromBot ? ro("append trailing space", String(!!t.append_trailing_space)) : checkbox(t, "append_trailing_space", "append trailing space"),
       el("div", { class: "hint", text: "Stand-in provider tokenization" }),
       el("div", { class: "row" },
         field("style", selectInput(t.tokenization, "style", ["words", "split_punctuation", "characters"])),
@@ -664,6 +720,7 @@
     // Own aggregator when no LLMTextProcessor
     const ownAgg = el("div");
     const drawOwn = () => {
+      if (fromBot) { ownAgg.replaceChildren(s.llm_text_processor ? el("span") : ro("aggregator", aggDesc(t.aggregator))); return; }
       ownAgg.replaceChildren(checkbox({ get v() { return !!t.aggregator; }, set v(x) { t.aggregator = x ? { kind: "simple", aggregation_type: "sentence", patterns: [], skip_tags: [] } : null; } }, "v", "custom TTS aggregator", () => { drawOwn(); scheduleRun(); }));
       if (t.aggregator) ownAgg.append(aggregatorEditor(t.aggregator));
     };
@@ -673,12 +730,18 @@
 
     // RTVI
     const r = s.rtvi;
-    form.append(section("RTVI observer", el("div", {},
-      checkbox(r, "enabled", "enabled"),
-      checkbox(r, "bot_llm", "bot-llm messages: started/stopped and the deprecated bot-llm-text tokens"),
-      checkbox(r, "bot_tts", "bot-tts messages: started/stopped and the deprecated bot-tts-text words"),
-      listInput(r, "skip_text_types", "skip text types", "Never sent to the client."),
-      transformsEditor(r.transforms = r.transforms || [], "bot output transforms (client only)")),
+    form.append(section("RTVI observer", fromBot
+      ? el("div", {},
+        checkbox(r, "enabled", "enabled"),
+        ro("bot-llm / bot-tts messages", `${r.bot_llm ? "on" : "off"} / ${r.bot_tts ? "on" : "off"}`),
+        ro("skip text types", r.skip_text_types),
+        ro("bot output transforms (client only)", tfDesc(r.transforms)))
+      : el("div", {},
+        checkbox(r, "enabled", "enabled"),
+        checkbox(r, "bot_llm", "bot-llm messages: started/stopped and the deprecated bot-llm-text tokens"),
+        checkbox(r, "bot_tts", "bot-tts messages: started/stopped and the deprecated bot-tts-text words"),
+        listInput(r, "skip_text_types", "skip text types", "Never sent to the client."),
+        transformsEditor(r.transforms = r.transforms || [], "bot output transforms (client only)")),
       { tip: "The RTVIObserver that turns pipeline frames into client messages. Choose which messages it sends and what it never shows the client." }));
 
     // Chunking
@@ -1373,6 +1436,18 @@
     $("text").addEventListener("input", (e) => { state.text = e.target.value; scheduleRun(); });
     initPlayer();
     $("run").addEventListener("click", run);
+    $("text-load").addEventListener("click", () => $("text-file").click());
+    $("text-file").addEventListener("change", async (e) => {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      try {
+        state.text = (await file.text()).replace(/\r\n/g, "\n").replace(/\n+$/, "");
+        $("text").value = state.text;
+        setStatus(`Loaded ${file.name}`);
+        run();
+      } catch (err) { showError("Could not read the file: " + String(err.message || err)); }
+      e.target.value = "";
+    });
     $("share").addEventListener("click", async () => {
       const url = location.origin + location.pathname + "#" + encodeShare();
       history.replaceState(null, "", "#" + encodeShare());
@@ -1387,14 +1462,22 @@
     sel.addEventListener("change", () => {
       const p = state.presets.find((x) => x.name === sel.value);
       if (!p) return;
+      state.bot = null; $("bot-desc").textContent = "";
       $("preset-desc").textContent = p.description || "";
       replaceSetup(clone(p), p.sample_text || "");
     });
+    $("bot-load").addEventListener("click", () => loadBot($("bot-path").value.trim()));
+    $("bot-path").addEventListener("keydown", (e) => { if (e.key === "Enter") loadBot($("bot-path").value.trim()); });
+    const config = await api("/api/config").catch(() => ({}));
     const shared = location.hash.length > 1 ? decodeShare(location.hash.slice(1)) : null;
     if (shared && shared.setup) {
       sel.value = state.presets.some((p) => p.name === shared.setup.name) ? shared.setup.name : "";
       $("preset-desc").textContent = "Restored from the shared link.";
       replaceSetup(shared.setup, shared.text || "");
+    } else if (config.bot) {
+      $("bot-path").value = config.bot;
+      sel.value = "";
+      await loadBot(config.bot);
     } else {
       const p = state.presets.find((x) => x.name === "code-helper") || state.presets[0];
       if (!p) { showError("No presets available."); return; }

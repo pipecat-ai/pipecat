@@ -27,10 +27,14 @@ Example::
     for segment in trace.segments:
         print(segment.text_type, segment.llm_text, segment.tts_text)
 
+A setup can also name a bot file, in which case the run captures the bot's own
+processors and traces them as they are (see :func:`capture_bot`).
+
 The ``pipecat textflow`` command renders a trace in the terminal or serves the
 interactive page.
 """
 
+from pipecat.textflow.capture import BotSummary, TextFlowCaptureError, capture_bot
 from pipecat.textflow.setup import (
     AggregatorSpec,
     ChunkingSpec,
@@ -54,12 +58,14 @@ from pipecat.textflow.transforms import register_transform
 
 __all__ = [
     "AggregatorSpec",
+    "BotSummary",
     "ChunkingSpec",
     "LLMTextProcessorSpec",
     "PatternSpec",
     "RTVISpec",
     "StageEvent",
     "TTSSpec",
+    "TextFlowCaptureError",
     "TextFlowSegment",
     "TextFlowSetup",
     "TextFlowTrace",
@@ -67,6 +73,7 @@ __all__ = [
     "TokenizationSpec",
     "TransformSpec",
     "WordEvent",
+    "capture_bot",
     "register_transform",
     "run_textflow",
 ]
