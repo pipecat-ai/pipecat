@@ -27,6 +27,7 @@ from pipecat.audio.krisp_instance import (
     int_to_krisp_sample_rate,
 )
 from pipecat.frames.frames import (
+    BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     Frame,
     InputAudioRawFrame,
@@ -121,6 +122,7 @@ class KrispVivaIPUserTurnStartStrategy(BaseUserTurnStartStrategy):
 
         # State tracking
         self._speech_active = False
+        self._bot_speaking = False
         self._audio_buffer = bytearray()
         self._decision_made = False
 
@@ -181,8 +183,9 @@ class KrispVivaIPUserTurnStartStrategy(BaseUserTurnStartStrategy):
         On ``InputAudioRawFrame``, feeds audio through the IP model and
         triggers a user turn if the interruption probability exceeds the
         threshold.
-        On ``VADUserStoppedSpeakingFrame`` or ``BotStoppedSpeakingFrame``,
-        resets the candidate state.
+        On ``BotStartedSpeakingFrame`` and ``BotStoppedSpeakingFrame``,
+        tracks whether the bot is speaking. On ``VADUserStoppedSpeakingFrame``
+        or ``BotStoppedSpeakingFrame``, resets the candidate state.
 
         Args:
             frame: The incoming frame.
@@ -194,7 +197,12 @@ class KrispVivaIPUserTurnStartStrategy(BaseUserTurnStartStrategy):
             return await self._handle_vad_started(frame)
         elif isinstance(frame, InputAudioRawFrame):
             return await self._handle_audio(frame)
-        elif isinstance(frame, (VADUserStoppedSpeakingFrame, BotStoppedSpeakingFrame)):
+        elif isinstance(frame, BotStartedSpeakingFrame):
+            self._bot_speaking = True
+        elif isinstance(frame, BotStoppedSpeakingFrame):
+            self._bot_speaking = False
+            return await self._handle_reset(frame)
+        elif isinstance(frame, VADUserStoppedSpeakingFrame):
             return await self._handle_reset(frame)
 
         return ProcessFrameResult.CONTINUE
@@ -218,9 +226,10 @@ class KrispVivaIPUserTurnStartStrategy(BaseUserTurnStartStrategy):
 
         Every frame is passed to the IP model regardless of speech state so
         that the model maintains continuous internal state (matching the
-        standalone Krisp SDK behaviour). ``_speech_active`` is forwarded as
-        the per-frame VAD input to the model and also gates the threshold
-        evaluation.
+        standalone Krisp SDK behaviour). ``_speech_active`` and
+        ``_bot_speaking`` are forwarded as the per-frame VAD and bot-speaking
+        inputs to the model; the model only predicts while the bot is speaking.
+        ``_speech_active`` also gates the threshold evaluation.
 
         Args:
             frame: Raw audio input frame.
@@ -253,7 +262,7 @@ class KrispVivaIPUserTurnStartStrategy(BaseUserTurnStartStrategy):
         frames = audio_float32.reshape(-1, self._samples_per_frame)
 
         for ip_frame in frames:
-            ip_prob = self._ip_session.process(ip_frame, self._speech_active)
+            ip_prob = self._ip_session.process(ip_frame, self._speech_active, self._bot_speaking)
 
             if self._speech_active and not self._decision_made and ip_prob >= self._threshold:
                 logger.debug(

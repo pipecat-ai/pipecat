@@ -211,6 +211,24 @@ class TestKrispVivaIPUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         finally:
             await strategy.cleanup()
 
+    async def test_bot_speaking_flag_is_forwarded_to_model(self):
+        self.mock_ip_session.process = MagicMock(return_value=0.1)
+
+        strategy = self._make_strategy()
+        try:
+            await strategy.process_frame(self._audio_frame())
+            self.assertFalse(self.mock_ip_session.process.call_args[0][2])
+
+            await strategy.process_frame(BotStartedSpeakingFrame())
+            await strategy.process_frame(self._audio_frame())
+            self.assertTrue(self.mock_ip_session.process.call_args[0][2])
+
+            await strategy.process_frame(BotStoppedSpeakingFrame())
+            await strategy.process_frame(self._audio_frame())
+            self.assertFalse(self.mock_ip_session.process.call_args[0][2])
+        finally:
+            await strategy.cleanup()
+
     async def test_decision_sticks_no_double_trigger(self):
         self.mock_ip_session.process = MagicMock(return_value=0.9)
 
