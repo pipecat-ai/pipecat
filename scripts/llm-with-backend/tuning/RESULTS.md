@@ -30,11 +30,23 @@ probability of a "yes" per utterance: median (min-max)
 
 ## Frontend replay
 
-The three frontend models on the recorded turns in `frontend_replay/`, five runs per turn (2026-10-21). A wrong decision is a turn the model should have delegated and answered itself, or the reverse; the turns from the eval scenarios include every stop and correction they make. The acknowledgement is what the user hears for a delegated turn: the text the model wrote with the `delegate` call, if any, and its reply after the call; it is said twice when both have text.
+The three frontend models on the recorded turns in `frontend_replay/`, five runs per turn (2026-10-22). A wrong decision is a turn the model should have delegated and answered itself, or the reverse; the turns from the eval scenarios include every stop and correction they make. The acknowledgement is what the user hears for a delegated turn: the text the model wrote with the `delegate` call, if any, and its reply after the call; it is said twice when both have text. When the model acknowledges in the same response as the call, which it sometimes does, the `AFTER DELEGATING` paragraph has the reply after the call complete that thought rather than acknowledge again, or add nothing when the first part said it all.
 
 ```bash
 uv run python scripts/llm-with-backend/tuning/frontend_replay/replay.py --frontend <openai|google|anthropic> --samples 5
 ```
+
+| frontend                        | wrong decisions, 75 turns × 5 | where                                                                             | text with the call | said twice | words heard, median |
+| ------------------------------- | ----------------------------- | --------------------------------------------------------------------------------- | ------------------ | ---------- | ------------------- |
+| `openai` (gpt-4.1)              | 0                             |                                                                                   | 2 of 275           | 2          | 16                  |
+| `google` (gemini-3.6-flash)     | 1                             | a status question recorded from the Claude bot ("How's it going with that?"), 1/5 | 22 of 276          | 9          | 14                  |
+| `anthropic` (claude-sonnet-4-6) | 0                             |                                                                                   | 195 of 275         | 94         | 16                  |
+
+The stops and corrections are where the acknowledgement was said twice. With the paragraph below, Claude confirmed a stop with the call and again after it: "Got it, I'll leave the code as is." then "No changes will be made to the retry test or the HTTP client."; on the stop that also asks for a CI check, "On it, I'll check CI on main right now." then "I'll check CI on main for you right now, and I've dropped the retry test work". Now the reply after the call is empty on every run of the plain stop, the "never mind" and the two corrections (said twice in 1, 3 and 2 of 15 runs with the paragraph below, rerun the same day), and the stop with a CI check is said twice in 7 of 15 against 13, the two parts splitting the request: "Stopping the retry test fix, I'll leave that alone for you." then "Checking CI on main for you now!". Gemini says it twice in 9 delegations against 25. Claude's count barely moves because it now writes its sentence with the call on fix requests too (27 of 60 on "Fix the flaky retry test in the HTTP client", against 4) and leaves the reply after it empty (101 of its 275 replies after the call, against 38), and on "run the integration tests and tell me what you find" it splits its usual sentence in two: "Sure, I'll kick off those integration tests now!" with the call, "I'll let you know as soon as I have the results." after it, in 9 of 15. Heard in all, the acknowledgement is shorter: Claude's runs past 25 words in 31 delegations against 67, the longest is 56 words against 154, and acknowledgements with a promise or an offer in them ("I'll let you know", "get back to you", "anything else", "would you like") are 30, 7 and 24 of 275 against 30, 18 and 41. The judge below accepts 101 of gpt-4.1's 105 fix-request acknowledgements and every one of Claude's and Gemini's, as before.
+
+The rule holds only where it is, after the paragraph's examples. Put ahead of them, or phrased as a reply that says nothing when the call carried an acknowledgement, it had gpt-4.1 answer a stop without the `delegate` call (19 of 90 runs) and Gemini give a result the backend never sent ("CI is green on main", 7 of 60).
+
+With the paragraph before that rule, on 2026-10-21:
 
 | frontend                        | wrong decisions, 75 turns × 5 | where                                                                                                                                                                                                                           | acknowledgement words, median | said twice |
 | ------------------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- | ---------- |
@@ -70,7 +82,7 @@ Before the pairing instruction's rewrite around its one rule, the same replay ha
 
 ## Text evals
 
-The twelve text scenarios on the three bots with a text frontend, five runs each, without predictive delegation (2026-10-21, with this `AFTER DELEGATING` paragraph). The frontends run on their services' default models (`gpt-4.1`, `gemini-3.6-flash`, `claude-sonnet-4-6`), the backend on `claude-sonnet-4-6`, and the judge is the release suite's text judge. Each table comes from the run's `results.jsonl` through `results_table.py`:
+The twelve text scenarios on the three bots with a text frontend, five runs each, without predictive delegation (2026-10-21, with the `AFTER DELEGATING` paragraph before its rule for a reply that follows an acknowledgement made with the call). The frontends run on their services' default models (`gpt-4.1`, `gemini-3.6-flash`, `claude-sonnet-4-6`), the backend on `claude-sonnet-4-6`, and the judge is the release suite's text judge. Each table comes from the run's `results.jsonl` through `results_table.py`:
 
 ```bash
 uv run python -m pipecat.evals suite evals/llm-with-backend/manifest.yaml -s text --repeat 5
@@ -182,7 +194,7 @@ The scenarios' stops and corrections (`cancel_delegation`, `implicit_cancel`, `p
 
 ## Audio evals
 
-The thirteen audio scenarios on all five bots, one run each, without predictive delegation (2026-10-20, with this `AFTER DELEGATING` paragraph). The user's voice is synthesized with Kokoro, the bot's speech transcribed with Moonshine, and the judge is the release suite's audio judge.
+The thirteen audio scenarios on all five bots, one run each, without predictive delegation (2026-10-20, with the `AFTER DELEGATING` paragraph before its rule for a reply that follows an acknowledgement made with the call). The user's voice is synthesized with Kokoro, the bot's speech transcribed with Moonshine, and the judge is the release suite's audio judge.
 
 ```bash
 uv run python -m pipecat.evals suite evals/llm-with-backend/manifest.yaml -s audio

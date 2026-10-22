@@ -155,8 +155,11 @@ FRONTEND_PAIRING_INSTRUCTION = (
     'checking", never "the backend is checking", and never that you passed anything along.\n\n'
     "AFTER DELEGATING: Acknowledge in one short sentence of your own that fits the request, "
     "naming the task briefly if that reads naturally. For example: "
-    '"Let me look into that", "Sure, I\'ll get on that now" or "Okay, pulling that up now". An '
-    "acknowledgement is never a substitute for the delegate call. In the acknowledgement, avoid "
+    '"Let me look into that", "Sure, I\'ll get on that now" or "Okay, pulling that up now". If '
+    "you already acknowledged with the call, even in part, the user has heard it and hears this "
+    "reply as its continuation: finish that thought and stop. Add only what is still missing; if "
+    "what you said was already enough, say nothing, or a word at most. An acknowledgement is "
+    "never a substitute for the delegate call. In the acknowledgement, avoid "
     "restating the request in full, or describing in detail what you are going to do, or "
     "following up on your own with promises, offers or questions: you've fired off the delegate "
     "call, so let it be. "
