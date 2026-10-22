@@ -3184,9 +3184,16 @@ class DailyTransport(BaseTransport):
         logger.debug(f"{self} DTMF event: {data}")
         await self._call_event_handler("on_dtmf_event", data)
 
-        if self._input:
-            frame = InputDTMFFrame(button=KeypadEntry(data["tone"]))
-            await self._input.push_frame(frame)
+        if not self._input:
+            return
+
+        try:
+            button = KeypadEntry(data["tone"])
+        except ValueError:
+            logger.warning(f"{self} Ignoring unsupported DTMF tone: {data['tone']!r}")
+            return
+
+        await self._input.push_frame(InputDTMFFrame(button=button))
 
     async def _on_participant_joined(self, participant):
         """Handle participant joined events."""
