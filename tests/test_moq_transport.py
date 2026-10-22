@@ -1035,8 +1035,8 @@ class TestEpochReanchor(unittest.IsolatedAsyncioTestCase):
     and publishes a discontinuity, so a mid-utterance delivery stall must
     not trip it; only the first write and a real idle gap re-anchor."""
 
-    def _client_with_audio(self):
-        client, _stream = _client_with_fake_moq()
+    def _client_with_audio(self, params: MOQParams | None = None):
+        client, _stream = _client_with_fake_moq(params)
         client._audio_out = MagicMock(name="audio_out")
         client._audio_out_sample_rate = 24000
         return client
@@ -1057,6 +1057,67 @@ class TestEpochReanchor(unittest.IsolatedAsyncioTestCase):
         client._publish_audio_clock = time.monotonic() - 1.0
         await client.publish_audio(b"\x00" * 480)
         client._audio_out.reset_epoch.assert_called_once()
+
+    async def test_a_pacing_reset_mid_sleep_re_anchors(self):
+        """``reset_audio_pacing`` (interruption) can land while a paced
+        write sleeps. The write must complete — re-anchored like a fresh
+        write — with the frame written and the clock advanced."""
+        client = self._client_with_audio()
+        budget = client._params.audio_out_max_buffer_ms / 1000.0
+        client._publish_audio_clock = time.monotonic() + budget + 0.2
+        write = asyncio.ensure_future(client.publish_audio(b"\x00" * 480))
+        await asyncio.sleep(0.05)
+        client.reset_audio_pacing()
+        await write
+        client._audio_out.reset_epoch.assert_called_once()
+        client._audio_out.write.assert_called_once()
+        duration_s = 480 / (client._audio_out_sample_rate * 2)
+        self.assertAlmostEqual(
+            client._publish_audio_clock, time.monotonic() + duration_s, delta=0.1
+        )
+
+    async def test_a_late_wake_keeps_the_clock_on_schedule(self):
+        """With a budget at or below the event loop's wake-up delay the
+        pacing sleep always ends past the clock. The clock must stay on
+        schedule; absorbing the wake-up delay each write publishes slower
+        than real time and runs the player's buffer dry."""
+        client = self._client_with_audio(
+            MOQParams(audio_in_enabled=True, audio_out_enabled=True, audio_out_max_buffer_ms=0)
+        )
+        clock = time.monotonic() + 0.05
+        client._publish_audio_clock = clock
+        await client.publish_audio(b"\x00" * 480)
+        duration_s = 480 / (client._audio_out_sample_rate * 2)
+        self.assertEqual(client._publish_audio_clock, clock + duration_s)
+
+    async def test_a_teardown_mid_sleep_drops_the_write(self):
+        """``_run``'s finally clears ``_audio_out`` while a paced write
+        sleeps (peer left with a full buffer). The write must return
+        without raising and without touching the closed producer."""
+        client = self._client_with_audio()
+        producer = client._audio_out
+        budget = client._params.audio_out_max_buffer_ms / 1000.0
+        client._publish_audio_clock = time.monotonic() + budget + 0.2
+        write = asyncio.ensure_future(client.publish_audio(b"\x00" * 480))
+        await asyncio.sleep(0.05)
+        client._audio_out = None
+        await write
+        producer.write.assert_not_called()
+
+    async def test_a_teardown_and_reset_mid_sleep_drops_the_write(self):
+        """A teardown and a pacing reset landing in the same sleep must
+        not re-anchor the closed producer's epoch."""
+        client = self._client_with_audio()
+        producer = client._audio_out
+        budget = client._params.audio_out_max_buffer_ms / 1000.0
+        client._publish_audio_clock = time.monotonic() + budget + 0.2
+        write = asyncio.ensure_future(client.publish_audio(b"\x00" * 480))
+        await asyncio.sleep(0.05)
+        client.reset_audio_pacing()
+        client._audio_out = None
+        await write
+        producer.reset_epoch.assert_not_called()
+        producer.write.assert_not_called()
 
 
 # ----------------------------------------------------------------------
