@@ -37,10 +37,12 @@ from deprecations import scan as dscan  # noqa: E402
 
 from pipecat.frames.frames import (  # noqa: E402
     CancelTaskFrame,
+    EagerEndOfTurnCancelFrame,
     EndTaskFrame,
     InterruptionTaskFrame,
     StartFrame,
     StopTaskFrame,
+    UserTurnResponseCancelFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline  # noqa: E402
 from pipecat.pipeline.runner import PipelineRunner  # noqa: E402
@@ -247,6 +249,12 @@ async def test_pipeline_runner_warns():
 def test_task_frame_aliases_warn(frame_cls):
     with pytest.warns(DeprecationWarning, match=f"`{frame_cls.__name__}` is deprecated"):
         frame_cls()
+
+
+def test_eager_end_of_turn_cancel_frame_warns():
+    with pytest.warns(DeprecationWarning, match="`EagerEndOfTurnCancelFrame` is deprecated"):
+        frame = EagerEndOfTurnCancelFrame()
+    assert isinstance(frame, UserTurnResponseCancelFrame)
 
 
 def test_no_deprecation_warnings_at_import_time():
