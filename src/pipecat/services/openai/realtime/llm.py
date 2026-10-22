@@ -783,6 +783,9 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
         """
         await self._ws_send(event.model_dump(exclude_none=True))
 
+    async def _auth_headers(self) -> dict[str, str]:
+        return {"Authorization": f"Bearer {self.api_key}"}
+
     async def _connect(self):
         try:
             if self._websocket:
@@ -791,9 +794,7 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
                 return
             self._websocket = await websocket_connect(
                 uri=self.base_url,
-                additional_headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                },
+                additional_headers=await self._auth_headers(),
             )
             self._receive_task = self.create_task(self._receive_task_handler())
         except Exception as e:
