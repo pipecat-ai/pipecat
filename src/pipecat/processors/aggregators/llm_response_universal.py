@@ -23,6 +23,7 @@ from loguru import logger
 from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer
 from pipecat.audio.vad.vad_controller import VADController
+from pipecat.expressive.perception import PerceptionSignal, format_perception
 from pipecat.frames.frames import (
     AggregatedTextFrame,
     AssistantImageRawFrame,
@@ -775,6 +776,11 @@ class LLMUserAggregator(LLMContextAggregator):
         # inferences fire before finalization.
         self._full_user_turn_aggregation: str | None = None
 
+        # With expressive conversation on, the turn's latest final reading of
+        # how the user spoke, written at the head of the user message.
+        self._expressive = False
+        self._perception: list[PerceptionSignal] | None = None
+
         # Whether the current user turn interrupted the bot.
         self._user_turn_interrupted_bot = False
         self._consecutive_empty_user_turn_recoveries = 0
@@ -831,6 +837,7 @@ class LLMUserAggregator(LLMContextAggregator):
             setup: Configuration object containing setup parameters.
         """
         await super().setup(setup)
+        self._expressive = setup.enable_expressive_conversation
         if self._vad_controller:
             await self._vad_controller.setup(setup)
 
@@ -880,6 +887,8 @@ class LLMUserAggregator(LLMContextAggregator):
             await self._cancel(frame)
             await self.push_frame(frame, direction)
         elif isinstance(frame, TranscriptionFrame):
+            if self._expressive and frame.perception:
+                self._perception = frame.perception
             await self._handle_transcription(frame)
         elif isinstance(
             frame,
@@ -945,6 +954,11 @@ class LLMUserAggregator(LLMContextAggregator):
 
         await self._user_idle_controller.process_frame(frame)
 
+    async def reset(self):
+        """Reset the aggregation state, with the turn's reading of how the user spoke."""
+        await super().reset()
+        self._perception = None
+
     async def push_aggregation(self) -> str:
         """Push the current aggregation."""
         return await self._push_aggregation()
@@ -965,10 +979,13 @@ class LLMUserAggregator(LLMContextAggregator):
             return ""
 
         aggregation = self.aggregation_string()
-        await self.reset()
-        self._context.add_message(
-            cast(LLMContextMessage, {"role": self.role, "content": aggregation})
+        content = (
+            f"{format_perception(self._perception)} {aggregation}"
+            if self._perception
+            else aggregation
         )
+        await self.reset()
+        self._context.add_message(cast(LLMContextMessage, {"role": self.role, "content": content}))
         await self.broadcast_frame(
             LLMContextUserTurnFrame, text=aggregation, timestamp=self._user_turn_start_timestamp
         )
