@@ -25,6 +25,7 @@ from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMUserAggregator,
     LLMUserAggregatorParams,
+    UserTurnStoppedMessage,
 )
 from pipecat.tests.utils import SleepFrame, run_test
 from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
@@ -94,15 +95,18 @@ async def test_the_reading_is_written_at_the_head_of_the_user_message():
     assert messages == ["([tone frustrated=0.86, neutral=0.10]) Can you tell me where my order is?"]
     turn_frames = [f for f in down if isinstance(f, LLMContextUserTurnFrame)]
     assert turn_frames[0].text == "Can you tell me where my order is?"
+    assert turn_frames[0].perception == FRUSTRATED
 
 
 @pytest.mark.asyncio
 async def test_nothing_is_written_without_expressive_conversation():
-    messages, _ = await _user_messages(
+    messages, down = await _user_messages(
         _turn("Can you tell me where my order is?", FRUSTRATED), params=None
     )
 
     assert messages == ["Can you tell me where my order is?"]
+    turn_frames = [f for f in down if isinstance(f, LLMContextUserTurnFrame)]
+    assert turn_frames[0].perception is None
 
 
 @pytest.mark.asyncio
@@ -180,3 +184,45 @@ async def test_a_reading_belongs_to_its_own_turn():
         "([tone frustrated=0.86, neutral=0.10]) Can you tell me where my order is?",
         "Thanks.",
     ]
+
+
+async def _stopped(*turns: list[Frame], params=EXPRESSIVE) -> list[UserTurnStoppedMessage]:
+    aggregator = _aggregator(LLMContext())
+    stopped: list[UserTurnStoppedMessage] = []
+
+    @aggregator.event_handler("on_user_turn_stopped")
+    async def on_user_turn_stopped(aggregator, strategy, message):
+        stopped.append(message)
+
+    await run_test(
+        aggregator,
+        frames_to_send=[frame for turn in turns for frame in turn],
+        pipeline_params=params,
+    )
+    return stopped
+
+
+@pytest.mark.asyncio
+async def test_the_turn_stops_with_its_final_reading():
+    stopped = await _stopped(
+        _turn("Can you tell me where my order is?", FRUSTRATED),
+        _turn("Thanks."),
+    )
+
+    assert [m.perception for m in stopped] == [FRUSTRATED, None]
+
+
+@pytest.mark.asyncio
+async def test_a_provisional_reading_is_not_reported_with_the_turn():
+    stopped = await _stopped(
+        _turn("Can you tell me where my order is?", before=[_interim("Can you tell me", NEUTRAL)])
+    )
+
+    assert stopped[0].perception is None
+
+
+@pytest.mark.asyncio
+async def test_nothing_is_reported_without_expressive_conversation():
+    stopped = await _stopped(_turn("Can you tell me where my order is?", FRUSTRATED), params=None)
+
+    assert stopped[0].perception is None
