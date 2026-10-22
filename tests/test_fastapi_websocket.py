@@ -209,6 +209,26 @@ class TestSendDisconnectRace(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(client.is_closing)
 
+    async def test_disconnect_skips_close_after_send_disconnect(self):
+        """disconnect() does not close a socket Starlette already marked DISCONNECTED.
+
+        When the input transport stops first, the receive loop never reads the
+        peer's disconnect, so client_state stays CONNECTED while a failed send has
+        already set application_state to DISCONNECTED. Starlette refuses a close
+        in that state with "Cannot call "send" once a close message has been sent".
+        """
+        mock_ws = AsyncMock()
+        type(mock_ws).client_state = PropertyMock(return_value=WebSocketState.CONNECTED)
+        type(mock_ws).application_state = PropertyMock(return_value=WebSocketState.DISCONNECTED)
+        mock_ws.close = AsyncMock()
+
+        client, _ = self._make_client(mock_ws)
+        client._leave_counter = 1
+
+        await client.disconnect()
+
+        mock_ws.close.assert_not_called()
+
 
 class TestDisconnectCloseTimeout(unittest.IsolatedAsyncioTestCase):
     """Tests for issue #4528.
