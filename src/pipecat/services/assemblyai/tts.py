@@ -89,9 +89,9 @@ def _ssl_context() -> ssl.SSLContext:
 class AssemblyAITTSSettings(TTSSettings):
     """Settings for AssemblyAITTSService.
 
-    ``voice`` is the API's ``voice_id``: an AssemblyAI voice by its library
-    slug, such as ``aai-jane``, or a cloned voice by the ID or slug the
-    AssemblyAI dashboard shows. ``language`` is the language the session
+    ``voice`` is the API's ``voice_id``: any voice by its ID, an AssemblyAI
+    voice by its library slug, such as ``aai-jane``, or a cloned voice by the
+    slug the AssemblyAI dashboard shows. ``language`` is the language the session
     speaks, and ``model`` names the model, such as ``assemblyai-tts-1``.
     Unset, the server uses its default voice, the voice's own language (else
     English) and the default model of that language.
@@ -136,7 +136,8 @@ class AssemblyAITTSService(WebsocketTTSService):
 
         tts = AssemblyAITTSService(
             api_key=os.getenv("ASSEMBLYAI_API_KEY"),
-            settings=AssemblyAITTSService.Settings(voice="aai-jane"),
+            # Keegan, a male voice from AssemblyAI's public voice library.
+            settings=AssemblyAITTSService.Settings(voice="987db62e-a2c2-569a-9c4d-82460cdea1bd"),
         )
     """
 
