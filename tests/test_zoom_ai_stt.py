@@ -24,10 +24,7 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
 )
 from pipecat.services.zoom_ai import stt as zoom_ai_stt
-from pipecat.services.zoom_ai.stt import (
-    SEND_CHUNK_BYTES,
-    ZoomAISTTService,
-)
+from pipecat.services.zoom_ai.stt import ZoomAISTTService
 from pipecat.transcriptions.language import Language
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.errors import ErrorCategory
@@ -166,6 +163,39 @@ async def test_input_gap_mid_turn_sends_silence_to_end_it(monkeypatch, turn_open
     sent = [m for m in websocket.sent if isinstance(m, bytes)]
     # silence_duration_ms (350) plus 100 ms, once per gap; nothing without an open turn
     assert sent == ([bytes(16000 * 2 * 450 // 1000)] if turn_open else [])
+    assert service._stt_usage_pending_seconds == pytest.approx(0.45 if turn_open else 0)
+
+
+@pytest.mark.asyncio
+async def test_input_gap_silence_is_resampled_and_counted_at_the_pipeline_rate(monkeypatch):
+    monkeypatch.setattr(zoom_ai_stt, "INPUT_GAP_SECS", 0.02)
+    service = _live(sample_rate=8000)
+    websocket = _FakeWebsocket()
+    service._websocket = websocket
+    service._user_turn_open = True
+    service._last_input_time = 0
+
+    task = asyncio.create_task(service._input_gap_handler())
+    await asyncio.sleep(0.1)
+    task.cancel()
+
+    sent = b"".join(m for m in websocket.sent if isinstance(m, bytes))
+    # Up to 450 ms at 16 kHz; the resampler holds back the rest.
+    assert 0 < len(sent) <= 16000 * 2 * 450 // 1000
+    assert service._stt_usage_pending_seconds == pytest.approx(0.45)
+
+
+@pytest.mark.asyncio
+async def test_keepalive_silence_is_resampled_and_counted(monkeypatch):
+    service = _live(sample_rate=24000)
+    websocket = _FakeWebsocket()
+    service._websocket = websocket
+
+    await service._send_keepalive(bytes(24000 * 2 // 10))  # 100 ms at 24 kHz
+
+    sent = b"".join(m for m in websocket.sent if isinstance(m, bytes))
+    assert 0 < len(sent) <= 16000 * 2 // 10
+    assert service._stt_usage_pending_seconds == pytest.approx(0.1)
 
 
 def test_plaintext_urls_warn_except_for_localhost(monkeypatch):
@@ -180,17 +210,16 @@ def test_plaintext_urls_warn_except_for_localhost(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_audio_is_sent_in_chunks(monkeypatch):
+async def test_audio_is_sent_as_it_arrives(monkeypatch):
     service = _live()
     service._websocket = _FakeWebsocket()
 
-    async for _ in service.run_stt(b"\x01" * (SEND_CHUNK_BYTES - 2)):
+    async for _ in service.run_stt(b"\x01" * 640):
         pass
-    assert service._websocket.sent == []
+    async for _ in service.run_stt(b"\x02" * 640):
+        pass
 
-    async for _ in service.run_stt(b"\x01" * 2):
-        pass
-    assert service._websocket.sent == [b"\x01" * SEND_CHUNK_BYTES]
+    assert service._websocket.sent == [b"\x01" * 640, b"\x02" * 640]
 
 
 @pytest.mark.asyncio
@@ -202,7 +231,7 @@ async def test_off_rate_audio_is_resampled_to_16_khz(monkeypatch):
         async for _ in service.run_stt(b"\x00" * 1600):
             pass
 
-    audio_sent = b"".join(service._websocket.sent) + bytes(service._send_buffer)
+    audio_sent = b"".join(service._websocket.sent)
     # 8 kHz in, 16 kHz out: twice the bytes, less what the resampler still holds.
     assert 0.9 < len(audio_sent) / (2 * 10 * 1600) <= 1.0
 
@@ -634,11 +663,10 @@ def test_unlisted_languages_resolve_through_their_base_language(language, locale
 
 
 @pytest.mark.asyncio
-async def test_stop_flushes_audio_and_closes_the_session(monkeypatch):
+async def test_stop_closes_the_session(monkeypatch):
     service = _live()
     websocket = _FakeWebsocket()
     service._websocket = websocket
-    service._send_buffer.extend(b"\x02" * 10)
     monkeypatch.setattr("pipecat.services.zoom_ai.stt.SESSION_CLOSE_TIMEOUT_SECS", 0.01)
     monkeypatch.setattr(
         "pipecat.services.stt_service.WebsocketSTTService.stop", AsyncMock(return_value=None)
@@ -647,7 +675,7 @@ async def test_stop_flushes_audio_and_closes_the_session(monkeypatch):
     await service.stop(EndFrame())
 
     assert service._disconnecting
-    assert websocket.sent == [b"\x02" * 10, json.dumps({"type": "session.close"})]
+    assert websocket.sent == [json.dumps({"type": "session.close"})]
 
 
 @pytest.mark.asyncio

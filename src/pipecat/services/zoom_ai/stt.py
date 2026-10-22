@@ -53,9 +53,6 @@ LIVE_URL = "wss://api.zoom.us/v2/aiservices/scribe/live"
 
 # Scribe Live accepts 16 kHz mono PCM16 only.
 SCRIBE_SAMPLE_RATE = 16000
-# 50 ms of audio per WebSocket message. The docs suggest about 100 ms; smaller
-# messages keep Scribe's end-of-speech detection, and so each turn, a little faster.
-SEND_CHUNK_BYTES = SCRIBE_SAMPLE_RATE * 2 // 20
 # Silence that ends a Scribe Live turn, tuned for voice agents.
 DEFAULT_SILENCE_DURATION_MS = 350
 # How long stop() waits for Scribe to send the last transcript and session.closed.
@@ -399,7 +396,6 @@ class ZoomAISTTService(WebsocketSTTService):
         self._url = _check_url(url)
         self._should_interrupt = should_interrupt
         self._resampler = create_stream_resampler()
-        self._send_buffer = bytearray()
         self._user_turn_open = False
         self._receive_task = None
         self._session_closed = asyncio.Event()
@@ -473,7 +469,6 @@ class ZoomAISTTService(WebsocketSTTService):
         # Scribe answers session.close by closing the socket; mark the shutdown first so
         # the receive loop doesn't treat that as a dropped connection and reconnect.
         self._disconnecting = True
-        await self._flush_audio()
         if self._websocket and self._websocket.state is State.OPEN:
             await self._send_json({"type": "session.close"})
             # As the Live docs describe: keep reading until Scribe sends the remaining
@@ -495,14 +490,17 @@ class ZoomAISTTService(WebsocketSTTService):
         Yields:
             None.
         """
-        if self.sample_rate != SCRIBE_SAMPLE_RATE:
-            audio = await self._resampler.resample(audio, self.sample_rate, SCRIBE_SAMPLE_RATE)
-        self._send_buffer.extend(audio)
         self._last_input_time = time.monotonic()
         self._gap_filled = False
-        if len(self._send_buffer) >= SEND_CHUNK_BYTES:
-            await self._flush_audio()
+        await self._send_audio(audio)
         yield None
+
+    async def _send_keepalive(self, silence: bytes):
+        """Send keepalive silence at Scribe's sample rate."""
+        await self._send_audio(silence)
+        # Keepalive silence is real audio submitted to the service, so it
+        # counts toward usage.
+        self._record_stt_audio_usage(silence)
 
     async def _input_gap_handler(self):
         """End a Scribe turn that input stopped in the middle of (e.g. the user muted).
@@ -520,18 +518,19 @@ class ZoomAISTTService(WebsocketSTTService):
             ):
                 continue
             self._gap_filled = True
-            await self._flush_audio()
             window_ms = self._view.silence_duration_ms or 1000
-            self._send_buffer.extend(bytes(SCRIBE_SAMPLE_RATE * 2 * (window_ms + 100) // 1000))
-            await self._flush_audio()
+            silence = bytes(self.sample_rate * (window_ms + 100) // 1000 * 2)
+            await self._send_audio(silence)
+            # Gap silence is real audio submitted to the service, so it counts toward usage.
+            self._record_stt_audio_usage(silence)
 
-    async def _flush_audio(self):
-        if not self._send_buffer:
-            return
-        chunk, self._send_buffer = bytes(self._send_buffer), bytearray()
-        if self._websocket and self._websocket.state is State.OPEN:
+    async def _send_audio(self, audio: bytes):
+        """Send pipeline-rate audio to Scribe, resampled to 16 kHz."""
+        if self.sample_rate != SCRIBE_SAMPLE_RATE:
+            audio = await self._resampler.resample(audio, self.sample_rate, SCRIBE_SAMPLE_RATE)
+        if audio and self._websocket and self._websocket.state is State.OPEN:
             try:
-                await self._websocket.send(chunk)
+                await self._websocket.send(audio)
             except Exception as e:
                 logger.warning(f"{self} failed to send audio: {e}")
 
@@ -633,7 +632,6 @@ class ZoomAISTTService(WebsocketSTTService):
             logger.warning(f"{self} error closing websocket: {e}")
         finally:
             self._websocket = None
-            self._send_buffer.clear()
             self._can_reconnect = True
             await self._end_open_turn()
             await self._call_event_handler("on_disconnected")
