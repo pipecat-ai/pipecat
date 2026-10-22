@@ -11,9 +11,9 @@ import asyncio
 from loguru import logger
 
 from pipecat.frames.frames import (
-    EagerEndOfTurnCancelFrame,
     EagerTranscriptionFrame,
     Frame,
+    UserTurnResponseCancelFrame,
 )
 from pipecat.turns.types import ProcessFrameResult, UserTurnSpeculation
 from pipecat.turns.user_stop.eager_match_policy import EagerMatchPolicy, NormalizedMatch
@@ -34,8 +34,8 @@ class EagerUserTurnStopStrategy(ExternalUserTurnStopStrategy):
     - the committed transcript differs from the eager one, per ``match_policy``
     - the turn never commits within ``speculation_timeout``
 
-    Every one of those leaves as an
-    :class:`~pipecat.frames.frames.EagerEndOfTurnCancelFrame` from here, so a
+    Every one of those leaves as a
+    :class:`~pipecat.frames.frames.UserTurnResponseCancelFrame` from here, so a
     response is never dropped somewhere the rest of the pipeline cannot see.
 
     Nothing the speculation produces reaches the user or the context. The
@@ -95,7 +95,7 @@ class EagerUserTurnStopStrategy(ExternalUserTurnStopStrategy):
         """
         if isinstance(frame, EagerTranscriptionFrame):
             await self._speculate(frame)
-        elif isinstance(frame, EagerEndOfTurnCancelFrame):
+        elif isinstance(frame, UserTurnResponseCancelFrame):
             # The service withdrew its prediction, and its frame reaches every
             # consumer on its own. Only our own state is left to clear.
             await self._forget()

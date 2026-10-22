@@ -10,7 +10,6 @@ from loguru import logger
 
 from pipecat.frames.frames import (
     CancelFrame,
-    EagerEndOfTurnCancelFrame,
     EndFrame,
     Frame,
     ProposedUserStartedSpeakingFrame,
@@ -18,6 +17,7 @@ from pipecat.frames.frames import (
     StartFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
+    UserTurnResponseCancelFrame,
 )
 from pipecat.processors.frame_processor import (
     FrameDirection,
@@ -209,7 +209,7 @@ class UserTurnProcessor(FrameProcessor):
         await self.broadcast_frame(frame_cls, **kwargs)
 
     async def _on_user_turn_speculation_cancelled(self, controller):
-        await self.broadcast_frame(EagerEndOfTurnCancelFrame)
+        await self.broadcast_frame(UserTurnResponseCancelFrame)
 
     async def _on_user_turn_started(
         self,
