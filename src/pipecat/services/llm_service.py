@@ -32,6 +32,7 @@ from pipecat.adapters.llm.schemas.direct_function import DirectFunction, DirectF
 from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
 from pipecat.expressive.expression import ExpressionCapabilities
 from pipecat.expressive.instructions import expression_instructions, unperformable_tags
+from pipecat.expressive.perception import PerceptionCapabilities
 from pipecat.expressive.policy import ExpressionPolicy
 from pipecat.frames.frames import (
     CancelFrame,
@@ -55,6 +56,7 @@ from pipecat.frames.frames import (
     LLMServiceMetadataFrame,
     LLMTextFrame,
     LLMUpdateSettingsFrame,
+    PerceptionMetadataFrame,
     StartFrame,
     TTSMetadataFrame,
 )
@@ -422,9 +424,12 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         self._composed_system_instruction: str | None = None
         # With expressive conversation on, the expression the TTS service
         # downstream performs, from its latest TTSMetadataFrame, and the
-        # pipeline's policy on which tags to offer and when.
+        # signals perceived of how the user spoke, from the latest
+        # PerceptionMetadataFrame, and the pipeline's policy on which tags to
+        # offer and when.
         self._expressive = False
         self._tts_expression: ExpressionCapabilities | None = None
+        self._perception: PerceptionCapabilities | None = None
         self._expression_policy: ExpressionPolicy | None = None
         # `adapter_class` is typed as `type[BaseLLMAdapter]` so subclasses
         # don't need to spell out the generic parameter just to subclass
@@ -861,8 +866,8 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         Joins the user's base system instruction (the single source of truth,
         captured at construction and refreshed on runtime ``system_instruction``
         updates) with any appended instructions (e.g. the ``UIWorker`` prompt
-        guide), the expression tags the TTS service performs (with expressive
-        conversation on), turn completion instructions (when enabled), and async tool
+        guide), how to read perception and the expression tags the TTS service
+        performs (with expressive conversation on), turn completion instructions (when enabled), and async tool
         cancellation instructions (when enabled). Safe to call repeatedly — it
         always rebuilds from the base, so it never compounds, and it logs the
         result only when it differs from the previous composition.
@@ -870,7 +875,9 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         base = self._base_system_instruction
         parts = [base] if base else []
         parts.extend(self._appended_system_instructions)
-        expression = expression_instructions(self._tts_expression, self._expression_policy)
+        expression = expression_instructions(
+            self._tts_expression, self._expression_policy, perception=self._perception
+        )
         if expression:
             parts.append(expression)
         if self._filter_incomplete_user_turns:
@@ -960,6 +967,9 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             await self._handle_summary_request(frame)
         elif isinstance(frame, TTSMetadataFrame) and self._expressive:
             self._handle_tts_metadata(frame)
+        elif isinstance(frame, PerceptionMetadataFrame) and self._expressive:
+            self._perception = frame.perception
+            self._compose_system_instruction()
 
         if isinstance(frame, LLMContextFrame):
             # Runs before the subclass starts the completion, so the gate knows
