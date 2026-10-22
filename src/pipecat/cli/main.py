@@ -75,6 +75,7 @@ def _build_app():
 
     from pipecat.cli.commands.eval import eval_app
     from pipecat.cli.commands.init import init_command
+    from pipecat.cli.commands.textflow import textflow_app
 
     app = typer.Typer(
         name="pipecat",
@@ -113,8 +114,9 @@ def _build_app():
         context_settings={"ignore_unknown_options": True, "allow_extra_args": True},
     )(_removed_create)
 
-    # `eval` is a first-party sub-Typer group, built in (not a plugin extension).
+    # `eval` and `textflow` are first-party sub-Typer groups, built in (not plugin extensions).
     app.add_typer(eval_app, name="eval")
+    app.add_typer(textflow_app, name="textflow")
 
     # Discover CLI extensions (e.g. `cloud` from pipecatcloud). The entry-point group
     # is intentionally still named "pipecat_cli.extensions" for backward compatibility
