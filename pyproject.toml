@@ -229,7 +229,7 @@ where = ["src"]
 ]
 
 [tool.pytest.ini_options]
-addopts = "--verbose"
+addopts = "--verbose -n auto"
 testpaths = ["tests"]
 pythonpath = ["src"]
 asyncio_default_fixture_loop_scope = "function"

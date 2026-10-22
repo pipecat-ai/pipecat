@@ -203,11 +203,13 @@ claude plugin install pipecat-dev@pipecat-dev-skills
 
 ### Running tests
 
-To run all tests in parallel, from the root directory:
+To run all tests, from the root directory:
 
 ```bash
-uv run pytest -n auto
+uv run pytest
 ```
+
+Tests run in parallel, one worker per CPU core. Pass `-n 0` to run them in a single process.
 
 Run a specific test suite:
 
