@@ -41,7 +41,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.settings import STTSettings
 from pipecat.services.stt_service import WebsocketSTTService
-from pipecat.transcriptions.language import Language
+from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.time import time_now_iso8601
@@ -162,10 +162,8 @@ def _frame_language(value: object) -> Language | None:
         return None
 
 
-SUPPORTED_LANGUAGES_URL = "https://developers.zoom.us/docs/ai-services/scribe/#supported-languages"
-
-# Scribe's supported locales, as in its docs (SUPPORTED_LANGUAGES_URL).
 _LANGUAGE_MAP = {
+    # zoom-scribe-multilingual (and whisper)
     Language.AR: "ar-SA",
     Language.AR_AE: "ar-AE",
     Language.AR_SA: "ar-SA",
@@ -181,34 +179,85 @@ _LANGUAGE_MAP = {
     Language.IT_IT: "it-IT",
     Language.JA: "ja-JP",
     Language.JA_JP: "ja-JP",
+    Language.KO: "ko-KR",
+    Language.KO_KR: "ko-KR",
     Language.PT: "pt-BR",
     Language.PT_BR: "pt-BR",
     Language.PT_PT: "pt-PT",
     Language.ZH: "zh-CN",
     Language.ZH_CN: "zh-CN",
+    # whisper only
+    Language.BN: "bn-IN",
+    Language.BN_IN: "bn-IN",
+    Language.CA: "ca-ES",
+    Language.CA_ES: "ca-ES",
+    Language.CS: "cs-CZ",
+    Language.CS_CZ: "cs-CZ",
+    Language.DA: "da-DK",
+    Language.DA_DK: "da-DK",
+    Language.EL: "el-GR",
+    Language.EL_GR: "el-GR",
+    Language.ET: "et-EE",
+    Language.ET_EE: "et-EE",
+    Language.FA: "fa-IR",
+    Language.FA_IR: "fa-IR",
+    Language.FI: "fi-FI",
+    Language.FI_FI: "fi-FI",
+    Language.FIL: "tl-PH",
+    Language.FIL_PH: "tl-PH",
+    Language.HE: "he-IL",
+    Language.HE_IL: "he-IL",
+    Language.HI: "hi-IN",
+    Language.HI_IN: "hi-IN",
+    Language.HU: "hu-HU",
+    Language.HU_HU: "hu-HU",
+    Language.ID: "id-ID",
+    Language.ID_ID: "id-ID",
+    Language.MS: "ms-MY",
+    Language.MS_MY: "ms-MY",
+    Language.NL: "nl-NL",
+    Language.NL_NL: "nl-NL",
+    Language.PL: "pl-PL",
+    Language.PL_PL: "pl-PL",
+    Language.RO: "ro-RO",
+    Language.RO_RO: "ro-RO",
+    Language.RU: "ru-RU",
+    Language.RU_RU: "ru-RU",
+    Language.SV: "sv-SE",
+    Language.SV_SE: "sv-SE",
+    Language.TA: "ta-IN",
+    Language.TA_IN: "ta-IN",
+    Language.TE: "te-IN",
+    Language.TE_IN: "te-IN",
+    Language.TH: "th-TH",
+    Language.TH_TH: "th-TH",
+    Language.TL: "tl-PH",
+    Language.TR: "tr-TR",
+    Language.TR_TR: "tr-TR",
+    Language.UK: "uk-UA",
+    Language.UK_UA: "uk-UA",
+    Language.VI: "vi-VN",
+    Language.VI_VN: "vi-VN",
+    Language.YUE: "zh-HK",
+    Language.ZH_HK: "zh-HK",
 }
 
 
 def language_to_zoom_ai_language(language: Language) -> str:
     """Convert a Language to a Scribe locale, e.g. ``Language.EN`` to ``"en-US"``.
 
+    A regional variant Scribe doesn't list resolves to the locale of its base
+    language, e.g. ``Language.EN_GB`` to ``"en-US"``. For the supported
+    languages of each model, see
+    https://developers.zoom.us/docs/ai-services/scribe/speech-understanding/
+
     Args:
         language: The language to convert.
 
     Returns:
         The Scribe locale.
-
-    Raises:
-        ValueError: If this version of the service doesn't support the language;
-            see https://developers.zoom.us/docs/ai-services/scribe/#supported-languages
     """
-    locale = _LANGUAGE_MAP.get(language)
-    if locale is None:
-        raise ValueError(
-            f"Language {language.value!r} isn't supported by this version of the Zoom Scribe "
-            f"service. See Scribe's supported languages: {SUPPORTED_LANGUAGES_URL}"
-        )
-    return locale
+    return resolve_language(language, _LANGUAGE_MAP, use_base_code=True)
 
 
 @dataclass

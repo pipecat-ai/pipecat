@@ -587,7 +587,13 @@ def test_metadata_recommends_external_turn_strategies(should_interrupt):
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("language", "locale"),
-    [(Language.EN, "en-US"), (Language.PT, "pt-BR"), (Language.PT_PT, "pt-PT")],
+    [
+        (Language.EN, "en-US"),
+        (Language.PT, "pt-BR"),
+        (Language.PT_PT, "pt-PT"),
+        (Language.KO, "ko-KR"),
+        (Language.NL_NL, "nl-NL"),
+    ],
 )
 async def test_base_languages_map_to_a_scribe_locale(monkeypatch, language, locale):
     websocket = _FakeWebsocket()
@@ -599,10 +605,14 @@ async def test_base_languages_map_to_a_scribe_locale(monkeypatch, language, loca
     assert json.loads(websocket.sent[0])["language"] == locale
 
 
-@pytest.mark.parametrize("language", [Language.EN_GB, Language.KO_KR, Language.XH])
-def test_unsupported_language_points_to_the_docs(language):
-    with pytest.raises(ValueError, match="supported-languages"):
-        _live(settings=ZoomAISTTService.Settings(language=language))
+@pytest.mark.parametrize(
+    ("language", "locale"),
+    [(Language.EN_GB, "en-US"), (Language.ES_MX, "es-ES"), ("en-GB", "en-US"), (Language.XH, "xh")],
+)
+def test_unlisted_languages_resolve_through_their_base_language(language, locale):
+    service = _live(settings=ZoomAISTTService.Settings(language=language))
+
+    assert service._settings.language == locale
 
 
 @pytest.mark.asyncio
