@@ -11,6 +11,7 @@ from pydantic import ValidationError
 
 from pipecat.expressive.expression import SPEED_DELIVERY, ExpressionCapabilities, ExpressionTerm
 from pipecat.expressive.instructions import expression_instructions, expression_policy_warning
+from pipecat.expressive.perception import PerceptionCapabilities, PerceptionTerm
 from pipecat.expressive.policy import ExpressionGuidance, ExpressionPolicy
 
 FIXED = ExpressionCapabilities(
@@ -171,6 +172,50 @@ def test_a_policy_list_given_as_a_bare_string_is_rejected(field):
         ExpressionPolicy(**{field: "calm"})
 
 
+PERCEPTION = PerceptionCapabilities(
+    signals=[
+        PerceptionTerm("tone", labels=["positive", "neutral", "sad", "frustrated"]),
+        PerceptionTerm("speech_rate", "Words per second."),
+    ]
+)
+
+
+def test_perception_is_taught_with_an_example_and_its_signals():
+    instructions = expression_instructions(None, perception=PERCEPTION)
+
+    assert "in parentheses, such as ([tone positive=0.86, neutral=0.10]), each" in instructions
+    assert "A reading below 0.5 is a guess: don't act on it." in instructions
+    assert instructions.endswith(
+        "- tone: positive, neutral, sad, frustrated.\n- speech_rate: Words per second."
+    )
+
+
+def test_perception_comes_before_the_tags_and_the_guidance_last():
+    policy = ExpressionPolicy(guidance=[ExpressionGuidance.MATCH_STYLE])
+
+    instructions = expression_instructions(FIXED, policy, perception=PERCEPTION)
+
+    reading = instructions.index("([tone")
+    tags = instructions.index("You can direct how your words are spoken")
+    assert reading < tags < instructions.index(ExpressionGuidance.MATCH_STYLE)
+
+
+def test_only_the_developer_guidance_is_kept_for_perception_without_tags():
+    policy = ExpressionPolicy(
+        guidance=[
+            ExpressionGuidance.MATCH_STYLE,
+            "If the user sounds frustrated, apologize once.",
+            ExpressionGuidance.SLOW_FOR_DETAILS,
+        ]
+    )
+
+    instructions = expression_instructions(None, policy, perception=PERCEPTION)
+
+    assert instructions.endswith("\n\nIf the user sounds frustrated, apologize once.")
+    assert ExpressionGuidance.MATCH_STYLE not in instructions
+    assert "<<slow" not in instructions
+
+
 def test_no_warning_without_a_policy_or_when_every_tag_is_performable():
     assert expression_policy_warning(FIXED, None) is None
     assert expression_policy_warning(None, None) is None
@@ -194,8 +239,8 @@ def test_a_warning_names_the_policy_tags_the_service_cant_perform():
 def test_a_warning_says_when_the_service_performs_none_of_the_policy():
     capabilities = ExpressionCapabilities(delivery=[ExpressionTerm("calm")])
     expected = (
-        "the TTS service performs none of the expression policy's tags, so the "
-        "policy and its guidance aren't taught"
+        "the TTS service performs none of the expression policy's tags, so they "
+        "and its guidance presets aren't taught"
     )
 
     assert expression_policy_warning(capabilities, ExpressionPolicy(delivery=["relieved"])) == (
