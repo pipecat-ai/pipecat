@@ -24,7 +24,7 @@ from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.services.zoom_ai.stt import ZoomScribeLiveSTTService
+from pipecat.services.zoom_ai.stt import ZoomAISTTService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.livekit.transport import LiveKitParams
@@ -65,7 +65,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     Scribe's voice activity detection decides when the user starts and stops
     speaking (by default after 350 ms of silence; see
-    `ZoomScribeLiveSTTService.Settings(silence_duration_ms=...)`). The service
+    `ZoomAISTTService.Settings(silence_duration_ms=...)`). The service
     proposes those turn boundaries and recommends `ExternalUserTurnStrategies`,
     so the user aggregator resolves them into turns and interruptions without
     any extra configuration.
@@ -76,7 +76,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     """
     logger.info("Starting bot")
 
-    stt = ZoomScribeLiveSTTService(api_key=os.environ["ZOOM_SCRIBE_API_KEY"])
+    stt = ZoomAISTTService(api_key=os.environ["ZOOM_AI_API_KEY"])
 
     tts = CartesiaTTSService(
         api_key=os.environ["CARTESIA_API_KEY"],

@@ -4,15 +4,10 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Zoom Scribe speech-to-text services.
+"""Zoom Scribe speech-to-text service.
 
-Two services, matching the two Scribe processing modes:
-
-- :class:`ZoomScribeLiveSTTService` (Scribe Live): streaming recognition over a
-  WebSocket. Scribe's own voice activity detection ends each turn and returns
-  its final transcript.
-- :class:`ZoomScribeFastSTTService` (Scribe Fast): one HTTP request per
-  utterance, segmented by the pipeline's VAD.
+:class:`ZoomAISTTService` streams audio to Scribe Live over a WebSocket. Scribe's
+own voice activity detection ends each turn and returns its final transcript.
 
 Settings map to the Scribe API fields of the same name. For what each feature
 does, and its availability, pricing and enablement, see
@@ -30,7 +25,6 @@ from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlparse
 
-import aiohttp
 from loguru import logger
 from websockets.protocol import State
 
@@ -38,7 +32,6 @@ from pipecat import version as pipecat_version
 from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
     EndFrame,
-    ErrorFrame,
     Frame,
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
@@ -47,16 +40,15 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.settings import STTSettings
-from pipecat.services.stt_service import SegmentedSTTService, WebsocketSTTService
+from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
-from pipecat.utils.errors import ErrorCategory, classify_http_status_code
+from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 from pipecat.utils.types import NOT_GIVEN, NotGiven
 
 LIVE_URL = "wss://api.zoom.us/v2/aiservices/scribe/live"
-FAST_URL = "https://api.zoom.us/v2/aiservices/scribe/transcribe"
 
 # Scribe Live accepts 16 kHz mono PCM16 only.
 SCRIBE_SAMPLE_RATE = 16000
@@ -89,29 +81,14 @@ def _headers(api_key: str) -> dict[str, str]:
     }
 
 
-def _check_url(url: str, name: str) -> str:
+def _check_url(url: str) -> str:
     """Return ``url``, warning if it sends the API key and audio unencrypted to a remote host."""
     parsed = urlparse(url)
-    if parsed.scheme.lower() in ("http", "ws") and parsed.hostname not in _LOOPBACK_HOSTS:
+    if parsed.scheme.lower() == "ws" and parsed.hostname not in _LOOPBACK_HOSTS:
         logger.warning(
-            f"Zoom Scribe {name} is not encrypted ({parsed.scheme}://); "
-            "the API key and audio are sent in plaintext"
+            "Zoom Scribe url is not encrypted (ws://); the API key and audio are sent in plaintext"
         )
     return url
-
-
-def _recognition_config(settings: Any) -> dict[str, Any]:
-    """The optional ``config`` fields shared by Scribe Live and Fast."""
-    config: dict[str, Any] = {}
-    if settings.model:
-        config["model"] = settings.model
-    if settings.language_detection:
-        config["language_detection"] = {"mode": settings.language_detection}
-    if settings.diarization:
-        config["diarization"] = True
-    if settings.vocabulary:
-        config["vocabulary"] = {"phrases": list(settings.vocabulary)}
-    return config
 
 
 def _merge(base: dict[str, Any], extra: dict[str, Any]) -> dict[str, Any]:
@@ -212,7 +189,7 @@ _LANGUAGE_MAP = {
 }
 
 
-def language_to_zoom_scribe_language(language: Language) -> str:
+def language_to_zoom_ai_language(language: Language) -> str:
     """Convert a Language to a Scribe locale, e.g. ``Language.EN`` to ``"en-US"``.
 
     Args:
@@ -235,8 +212,8 @@ def language_to_zoom_scribe_language(language: Language) -> str:
 
 
 @dataclass
-class ZoomScribeLiveSTTSettings(STTSettings):
-    """Settings for :class:`ZoomScribeLiveSTTService`.
+class ZoomAISTTSettings(STTSettings):
+    """Settings for :class:`ZoomAISTTService`.
 
     Changing a setting reconnects with a new Scribe session.
 
@@ -278,7 +255,7 @@ class ZoomScribeLiveSTTSettings(STTSettings):
     text_polishing: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
-class ZoomScribeLiveSTTService(WebsocketSTTService):
+class ZoomAISTTService(WebsocketSTTService):
     """Zoom Scribe Live streaming speech-to-text service.
 
     Streams 16 kHz PCM16 audio to Scribe Live over a WebSocket. Scribe's own
@@ -296,13 +273,13 @@ class ZoomScribeLiveSTTService(WebsocketSTTService):
 
     Example::
 
-        stt = ZoomScribeLiveSTTService(
-            api_key=os.getenv("ZOOM_SCRIBE_API_KEY"),
-            settings=ZoomScribeLiveSTTService.Settings(language=Language.EN_US),
+        stt = ZoomAISTTService(
+            api_key=os.getenv("ZOOM_AI_API_KEY"),
+            settings=ZoomAISTTService.Settings(language=Language.EN_US),
         )
     """
 
-    Settings = ZoomScribeLiveSTTSettings
+    Settings = ZoomAISTTSettings
     _settings: Settings
 
     def __init__(
@@ -348,7 +325,7 @@ class ZoomScribeLiveSTTService(WebsocketSTTService):
             **kwargs,
         )
         self._api_key = api_key
-        self._url = _check_url(url, "url")
+        self._url = _check_url(url)
         self._should_interrupt = should_interrupt
         self._resampler = create_stream_resampler()
         self._send_buffer = bytearray()
@@ -380,7 +357,7 @@ class ZoomScribeLiveSTTService(WebsocketSTTService):
             The Scribe locale. Regional variants Scribe doesn't list resolve to
             the locale of their base language.
         """
-        return language_to_zoom_scribe_language(language)
+        return language_to_zoom_ai_language(language)
 
     @property
     def supports_ttfs(self) -> bool:
@@ -499,7 +476,15 @@ class ZoomScribeLiveSTTService(WebsocketSTTService):
             "language": self._settings.language or "en-US",
             "audio": {"format": "pcm16"},
         }
-        config = _recognition_config(self._settings)
+        config: dict[str, Any] = {}
+        if self._settings.model:
+            config["model"] = self._settings.model
+        if self._settings.language_detection:
+            config["language_detection"] = {"mode": self._settings.language_detection}
+        if self._settings.diarization:
+            config["diarization"] = True
+        if self._settings.vocabulary:
+            config["vocabulary"] = {"phrases": list(self._settings.vocabulary)}
         if config:
             update["config"] = config
         if self._settings.silence_duration_ms is not None:
@@ -678,222 +663,3 @@ class ZoomScribeLiveSTTService(WebsocketSTTService):
         if self._user_turn_open:
             self._user_turn_open = False
             await self.broadcast_frame(ProposedUserStoppedSpeakingFrame)
-
-
-@dataclass
-class ZoomScribeFastSTTSettings(STTSettings):
-    """Settings for :class:`ZoomScribeFastSTTService`.
-
-    Parameters:
-        model: Scribe speech recognition model (``config.model``). ``None``
-            uses Scribe's default model.
-        language_detection: Scribe language detection mode
-            (``config.language_detection.mode``). ``None`` turns it off. A
-            detected language Scribe reports is in ``TranscriptionFrame.language``;
-            when Scribe reports none, it is ``None``.
-        diarization: Whether Scribe labels each transcript segment with a
-            speaker. Off by default. The labels are in the segments of the
-            Scribe response attached as ``TranscriptionFrame.result``. Scribe's
-            speaker tags are removed from the transcript text.
-        word_time_offsets: Word timings (``config.word_time_offsets``). Off by
-            default. The words are in the segments of ``TranscriptionFrame.result``.
-        channel_separation: Recognize each channel of stereo audio separately
-            (``config.channel_separation``). Off by default. Each segment of
-            ``TranscriptionFrame.result`` has its ``channel``. The service uploads
-            the pipeline's audio as mono, so every segment is channel 0.
-        vocabulary: Words and phrases that customize recognition
-            (``config.vocabulary.phrases``).
-        text_polishing: Scribe's text polishing (``outputs.text_polishing``).
-            The polished text is the transcript, and the recognized text is in
-            ``TranscriptionFrame.result`` (``result.text_display``); if polishing
-            fails, the recognized text is used. Off by default.
-        extra: Scribe request fields to add or override, shaped like the
-            request, e.g. ``{"config": {"profanity_filter": True}}`` or
-            ``{"outputs": {...}}``. Merged into the request over the settings
-            above, so Scribe fields this service has no setting for can be used.
-    """
-
-    diarization: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    word_time_offsets: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    channel_separation: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    language_detection: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    vocabulary: list[str] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    text_polishing: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
-
-
-class ZoomScribeFastSTTService(SegmentedSTTService):
-    """Zoom Scribe Fast speech-to-text service.
-
-    Transcribes one utterance per HTTP request. The pipeline's VAD cuts the
-    audio into utterances, and each one is uploaded to Scribe Fast as a WAV
-    file, so a VAD is required.
-
-    Example::
-
-        stt = ZoomScribeFastSTTService(api_key=os.getenv("ZOOM_SCRIBE_API_KEY"))
-    """
-
-    Settings = ZoomScribeFastSTTSettings
-    _settings: Settings
-
-    def __init__(
-        self,
-        *,
-        api_key: str,
-        url: str = FAST_URL,
-        aiohttp_session: aiohttp.ClientSession | None = None,
-        timeout_secs: float = 10.0,
-        settings: Settings | None = None,
-        ttfs_p99_latency: float | None = None,
-        **kwargs,
-    ):
-        """Initialize the Zoom Scribe Fast STT service.
-
-        Args:
-            api_key: Zoom AI Services API key or JWT. It is sent with every request, so it
-                must stay valid for as long as the service runs.
-            url: Scribe Fast transcription URL. A plaintext ``http://`` URL to a host
-                other than localhost logs a warning.
-            aiohttp_session: Optional session to reuse. One is created and owned
-                by the service otherwise.
-            timeout_secs: Request timeout in seconds.
-            settings: Runtime-updatable settings.
-            ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
-                ``None`` uses Pipecat's default. Measure it for your deployment with
-                https://github.com/pipecat-ai/stt-benchmark
-            **kwargs: Additional arguments passed to the parent SegmentedSTTService.
-        """
-        default_settings = self.Settings(
-            model=None,
-            language=Language.EN_US,
-            diarization=False,
-            word_time_offsets=False,
-            channel_separation=False,
-            language_detection=None,
-            vocabulary=None,
-            text_polishing=False,
-        )
-        if settings is not None:
-            default_settings.apply_update(settings)
-
-        super().__init__(
-            settings=default_settings,
-            ttfs_p99_latency=ttfs_p99_latency,
-            **kwargs,
-        )
-        self._api_key = api_key
-        self._url = _check_url(url, "url")
-        self._session = aiohttp_session
-        self._owns_session = aiohttp_session is None
-        self._timeout = aiohttp.ClientTimeout(total=timeout_secs)
-
-    def can_generate_metrics(self) -> bool:
-        """Check if this service can generate processing metrics.
-
-        Returns:
-            True, as this service supports metrics.
-        """
-        return True
-
-    def language_to_service_language(self, language: Language) -> str | None:
-        """Convert a Language to a Scribe locale.
-
-        Args:
-            language: The language to convert.
-
-        Returns:
-            The Scribe locale. Regional variants Scribe doesn't list resolve to
-            the locale of their base language.
-        """
-        return language_to_zoom_scribe_language(language)
-
-    async def cleanup(self):
-        """Close the HTTP session if the service created it."""
-        await super().cleanup()
-        if self._owns_session and self._session:
-            await self._session.close()
-            self._session = None
-
-    @traced_stt
-    async def _handle_transcription(
-        self, transcript: str, is_final: bool, language: Language | None = None
-    ):
-        """Handle a transcription result with tracing."""
-        pass
-
-    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
-        """Transcribe one utterance with Scribe Fast.
-
-        Args:
-            audio: The utterance as WAV bytes.
-
-        Yields:
-            A TranscriptionFrame, or an ErrorFrame if the request fails.
-        """
-        config: dict[str, Any] = {
-            "language": self._settings.language or "en-US",
-            **_recognition_config(self._settings),
-        }
-        if self._settings.word_time_offsets:
-            config["word_time_offsets"] = True
-        if self._settings.channel_separation:
-            config["channel_separation"] = True
-        request: dict[str, Any] = {"config": config}
-        if self._settings.text_polishing:
-            request["outputs"] = {"text_polishing": {"enabled": True}}
-        request = _merge(request, self._settings.extra)
-        request.pop("file", None)  # the service uploads the audio
-        view = _RequestView.of(request)
-        # Upload the utterance as multipart form data: `file`, then one JSON field per
-        # top-level request field (`config`, `outputs`, ...).
-        form = aiohttp.FormData()
-        form.add_field("file", audio, filename="utterance.wav", content_type="audio/wav")
-        for name, value in request.items():
-            form.add_field(name, json.dumps(value))
-
-        if self._session is None:
-            self._session = aiohttp.ClientSession()
-        await self.start_processing_metrics()
-        try:
-            async with self._session.post(
-                self._url, data=form, headers=_headers(self._api_key), timeout=self._timeout
-            ) as response:
-                body = await response.text()
-                status = response.status
-            result = json.loads(body) if status == 200 else None
-        except Exception as e:
-            yield ErrorFrame(error=f"Zoom Scribe Fast request failed: {e}", exception=e)
-            return
-        finally:
-            await self.stop_processing_metrics()
-
-        if result is None:
-            yield ErrorFrame(
-                error=f"Zoom Scribe Fast error {status}: {body[:500]}",
-                category=classify_http_status_code(status),
-            )
-            return
-
-        text = _clean((result.get("result") or {}).get("text_display"))
-        if view.text_polishing:
-            polished = _polished_text(result)
-            if polished is not None:
-                text = polished
-        if text:
-            # The detected language: the result's (one-time detection) or the first
-            # segment's (continuous detection), when Scribe reports one.
-            segments = (result.get("result") or {}).get("segments") or []
-            detected = (result.get("result") or {}).get("language") or next(
-                (s["language"] for s in segments if s.get("language")), None
-            )
-            language = _reported_language(
-                detected, view.language_detection, self._settings.language
-            )
-            await self._handle_transcription(text, True, language)
-            yield TranscriptionFrame(
-                text=text,
-                user_id=self._user_id,
-                timestamp=time_now_iso8601(),
-                language=language,
-                result=result,
-            )

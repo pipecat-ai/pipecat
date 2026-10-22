@@ -497,19 +497,11 @@ class ServiceRegistry:
             include_params=["api_key"],
         ),
         ServiceDefinition(
-            value="zoom_scribe_live_stt",
-            label="Zoom Scribe Live",
+            value="zoom_ai_stt",
+            label="Zoom AI",
             package="pipecat-ai[zoom-ai]",
-            class_name=["ZoomScribeLiveSTTService"],
-            env_prefix="ZOOM_SCRIBE",
-            include_params=["api_key"],
-        ),
-        ServiceDefinition(
-            value="zoom_scribe_fast_stt",
-            label="Zoom Scribe Fast",
-            package="pipecat-ai[zoom-ai]",
-            class_name=["ZoomScribeFastSTTService"],
-            env_prefix="ZOOM_SCRIBE",
+            class_name=["ZoomAISTTService"],
+            env_prefix="ZOOM_AI",
             include_params=["api_key"],
         ),
     ]
