@@ -77,7 +77,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 You can control how your words are spoken with tags:
 - <<tone>> at the start of a sentence speaks it, and the sentences after it, in that tone, until the next tone tag. <<neutral>> returns to your normal voice. Write a tone as one word, such as happy, excited, delighted, curious, calm, empathetic, sympathetic, hopeful, nervous, sad, disappointed, frustrated, sarcastic or whispering. Other one-word tones work too.
 - [[sound]] makes a sound at that point, such as [[laughing]], [[chuckling]], [[sighing]], [[gasping]] or [[clear throat]].
-- *word* stresses a word.
+- ^word^ stresses a word.
 - [[pause 500]] pauses for about that many milliseconds.
 
 Let your voice match the conversation: be excited for the user's good news, sympathetic with their bad news, and laugh when they say something funny. Most sentences need no tag."""

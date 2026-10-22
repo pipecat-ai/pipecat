@@ -38,7 +38,7 @@ def parse_in_pieces(pieces: list[str], **kwargs) -> list[Segment]:
 
 REPLY = (
     "<<apologetic>> I'm so sorry about the outage. <<enunciate>> Your ticket is 2, 3, 8, 7. "
-    "[[pause 600]] <<cheerful>> The good news is it's *back up* now. [[laugh]] Finally!"
+    "[[pause 600]] <<cheerful>> The good news is it's ^back up^ now. [[laugh]] Finally!"
 )
 
 
@@ -57,7 +57,7 @@ def test_a_reply_splits_into_words_with_their_modes_and_events():
         Pause(600, "[[pause 600]]"),
         Text(" ", ("enunciate",), " "),
         Text(" The good news is it's ", ("cheerful",), "<<cheerful>> The good news is it's "),
-        Text("back up", ("cheerful", "emphasis"), "*back up*"),
+        Text("back up", ("cheerful", "emphasis"), "^back up^"),
         Text(" now. ", ("cheerful",), " now. "),
         Event("laugh", "[[laugh]]"),
         Text(" Finally!", ("cheerful",), " Finally!"),
@@ -71,7 +71,7 @@ def test_the_raw_text_joins_up_to_what_the_llm_wrote():
 STREAMED = [
     REPLY,
     "I'm sorry [about] that. <cheerful> Bye [[laugh]] a < b.",
-    "It's **fixed**, *really*. * item 3 * 4 a*b*c <</warm>> [[ Pause  300 ]]",
+    "It's ^fixed^, ^really^. 2^10 ^_^ a^b^c ^^ *note* <</warm>> [[ Pause  300 ]]",
 ]
 
 
@@ -112,9 +112,9 @@ def test_neutral_returns_to_the_baseline():
 
 
 def test_emphasis_is_added_to_the_active_modes():
-    assert parse("<<calm>>It's *fixed* now.") == [
+    assert parse("<<calm>>It's ^fixed^ now.") == [
         Text("It's ", ("calm",), "<<calm>>It's "),
-        Text("fixed", ("calm", "emphasis"), "*fixed*"),
+        Text("fixed", ("calm", "emphasis"), "^fixed^"),
         Text(" now.", ("calm",), " now."),
     ]
 
@@ -203,9 +203,9 @@ def test_text_that_only_looks_like_a_tag_is_spoken(text):
 @pytest.mark.parametrize(
     "text,emphasis",
     [
-        ("It's *fixed* now.", Text("fixed", ("emphasis",), "*fixed*")),
-        ("It's **fixed** now.", Text("fixed", ("emphasis",), "**fixed**")),
-        ("It's *back up*.", Text("back up", ("emphasis",), "*back up*")),
+        ("It's ^fixed^ now.", Text("fixed", ("emphasis",), "^fixed^")),
+        ("It's ^back up^.", Text("back up", ("emphasis",), "^back up^")),
+        ("The code is ^8492^.", Text("8492", ("emphasis",), "^8492^")),
     ],
 )
 def test_emphasis(text, emphasis):
@@ -215,22 +215,23 @@ def test_emphasis(text, emphasis):
 @pytest.mark.parametrize(
     "text",
     [
-        "* first item",
-        "Three * four is twelve.",
-        "2*3*4 is twenty-four.",
-        "An *unclosed span",
-        "A * spaced * span",
-        "Snake_case and *.txt files",
+        "Two to the tenth is 2^10.",
+        "^2^10 is a classic.",
+        "a^b^c",
+        "Thanks ^_^ and ^^",
+        "An ^unclosed span",
+        "A ^ spaced ^ span",
+        "It's *fixed* and **done**.",
     ],
 )
-def test_asterisks_that_are_not_emphasis_are_text(text):
+def test_carets_that_are_not_emphasis_and_asterisks_are_text(text):
     assert parse(text) == [Text(text, (), text)]
 
 
 def test_emphasis_is_held_until_it_closes():
     parser = ExpressionParser()
-    assert parser.feed("It's *back") == [Text("It's ", (), "It's ")]
-    assert parser.feed(" up* now") == [
-        Text("back up", ("emphasis",), "*back up*"),
+    assert parser.feed("It's ^back") == [Text("It's ", (), "It's ")]
+    assert parser.feed(" up^ now") == [
+        Text("back up", ("emphasis",), "^back up^"),
         Text(" now", (), " now"),
     ]

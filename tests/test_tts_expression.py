@@ -31,8 +31,10 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import LLMAssistantAggregator
+from pipecat.processors.aggregators.llm_text_processor import LLMTextProcessor
 from pipecat.services.tts_service import TextAggregationMode, TTSService
 from pipecat.tests.utils import SleepFrame, run_test
+from pipecat.utils.text.transforms.strip_markdown import strip_markdown
 from tests.test_tts_frame_ordering import (
     MockHttpPushTextTTSService,
     _MockWordTimestampHttpTTSService,
@@ -40,8 +42,8 @@ from tests.test_tts_frame_ordering import (
 
 EXPRESSIVE = PipelineParams(enable_expressive_conversation=True)
 
-REPLY = ["<<cheerful>> It's [[la", "ugh]] *back up* now. [[pause 400]] Bye!"]
-WRITTEN = "<<cheerful>> It's [[laugh]] *back up* now. [[pause 400]] Bye!"
+REPLY = ["<<cheerful>> It's [[la", "ugh]] ^back up^ now. [[pause 400]] Bye!"]
+WRITTEN = "<<cheerful>> It's [[laugh]] ^back up^ now. [[pause 400]] Bye!"
 
 
 class BracketAdapter(ExpressionAdapter):
@@ -164,7 +166,7 @@ async def test_word_timestamps_report_words_and_events_in_order():
 async def test_each_change_of_modes_is_a_segment_of_its_own():
     down, _ = await run_test(
         WordTimestampTTSService(),
-        frames_to_send=response("<<calm>> It's *back up* now."),
+        frames_to_send=response("<<calm>> It's ^back up^ now."),
         pipeline_params=EXPRESSIVE,
     )
 
@@ -175,7 +177,7 @@ async def test_each_change_of_modes_is_a_segment_of_its_own():
     ]
     assert segments == [
         ("It's", ["calm"], "<<calm>> It's"),
-        ("back up", ["calm", "emphasis"], "*back up*"),
+        ("back up", ["calm", "emphasis"], "^back up^"),
         ("now.", ["calm"], "now."),
     ]
 
@@ -262,7 +264,7 @@ async def test_a_service_without_an_adapter_speaks_only_the_words():
         for f in down
     )
     context = await context_after(MockHttpPushTextTTSService(), response(*REPLY))
-    assert context == "<<cheerful>> It's *back up* now. Bye!"
+    assert context == "<<cheerful>> It's ^back up^ now. Bye!"
 
 
 @pytest.mark.asyncio
@@ -293,7 +295,7 @@ async def test_each_unperformed_tag_is_warned_about_as_written():
     unperformed = [
         w.split("can't perform ")[1].split(",")[0] for w in warnings if "can't perform" in w
     ]
-    assert unperformed == ["<<cheerful>>", "[[laugh]]", "*emphasis*", "[[pause 400]]"]
+    assert unperformed == ["<<cheerful>>", "[[laugh]]", "^emphasis^", "[[pause 400]]"]
 
 
 @pytest.mark.asyncio
@@ -398,7 +400,7 @@ async def test_each_response_starts_from_the_baseline_when_streaming_tokens():
     await run_test(
         tts,
         # The first response ends in text the parser holds until its end.
-        frames_to_send=[*response("<<calm>> One *two"), *response("<<calm>> Three.")],
+        frames_to_send=[*response("<<calm>> One ^two"), *response("<<calm>> Three.")],
         pipeline_params=EXPRESSIVE,
     )
 
@@ -533,9 +535,24 @@ async def test_an_unreported_pause_leaves_the_next_event_its_own_time():
 @pytest.mark.asyncio
 @pytest.mark.parametrize("service", SERVICES)
 async def test_punctuation_after_emphasis_stays_with_it_in_the_context(service):
-    context = await context_after(service(), response("It's *back*! *Wow*, nice."))
+    context = await context_after(service(), response("It's ^back^! ^Wow^, nice."))
 
-    assert context == "It's *back*! *Wow*, nice."
+    assert context == "It's ^back^! ^Wow^, nice."
+
+
+@pytest.mark.asyncio
+async def test_expression_survives_markdown_stripped_before_the_tts():
+    tts = PushTextTTSService()
+    requests = record_requests(tts)
+    await run_test(
+        Pipeline([LLMTextProcessor(text_transforms=[("*", strip_markdown)]), tts]),
+        frames_to_send=response(WRITTEN),
+        pipeline_params=EXPRESSIVE,
+    )
+
+    assert "".join(requests) == (
+        "{cheerful}It's <laugh> {cheerful,emphasis}back up {cheerful}now.<400ms>{cheerful}Bye!"
+    )
 
 
 @pytest.mark.asyncio
@@ -543,7 +560,7 @@ async def test_spacing_between_pieces_is_sent_as_written():
     tts = MockHttpPushTextTTSService()
     requests = record_requests(tts)
     await run_test(
-        tts, frames_to_send=response("That is *very* *good* news."), pipeline_params=EXPRESSIVE
+        tts, frames_to_send=response("That is ^very^ ^good^ news."), pipeline_params=EXPRESSIVE
     )
 
     assert requests == ["That is very good news."]
@@ -553,7 +570,7 @@ async def test_spacing_between_pieces_is_sent_as_written():
 async def test_spacing_between_pieces_is_sent_as_written_when_streaming_tokens():
     tts = MockHttpPushTextTTSService(text_aggregation_mode=TextAggregationMode.TOKEN)
     requests = record_requests(tts)
-    await run_test(tts, frames_to_send=response("*Wow* that's great."), pipeline_params=EXPRESSIVE)
+    await run_test(tts, frames_to_send=response("^Wow^ that's great."), pipeline_params=EXPRESSIVE)
 
     assert "".join(requests) == "Wow that's great."
 

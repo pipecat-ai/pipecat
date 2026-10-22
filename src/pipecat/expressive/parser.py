@@ -15,9 +15,11 @@ events between them:
   separated by spaces, ``<<cheerful calm>>``. ``<<neutral>>`` returns to the
   voice's baseline. Mode tags aren't segments of their own; the modes travel
   with the :class:`Text` they apply to.
-- ``*words*`` and ``**words**`` stress words, following CommonMark's rules, so
-  bullets (``* item``) and arithmetic (``3 * 4``) stay text. Stress is a mode
-  too: the words are :class:`Text` with ``emphasis`` added to the modes.
+- ``^words^`` stresses words. The carets hug the words, with a space or
+  punctuation outside them, so an exponent (``2^10``) or a face (``^_^``)
+  stays text. Stress is a mode too: the words are :class:`Text` with
+  ``emphasis`` added to the modes. Asterisks are left to Markdown, which apps
+  often strip before the text reaches the TTS service.
 - ``[[name]]`` is an :class:`Event`, a sound at one point (``[[laugh]]``), or a
   :class:`Pause`, ``[[pause N]]`` for N milliseconds.
 
@@ -48,7 +50,7 @@ from loguru import logger
 # a mode whatever a service declares.
 NEUTRAL_MODE = "neutral"
 
-# The mode of stressed words, written *words*.
+# The mode of stressed words, written ^words^.
 EMPHASIS_MODE = "emphasis"
 
 # Longest tag or emphasis span, in characters between the delimiters. Text
@@ -68,7 +70,7 @@ class Text:
         text: The words.
         modes: The modes the words are spoken in, empty for the voice's
             baseline.
-        raw: The text as written, tags and asterisks included.
+        raw: The text as written, tags and carets included.
     """
 
     text: str
@@ -134,9 +136,9 @@ class ExpressionParser:
     Example::
 
         parser = ExpressionParser(events=["laugh"])
-        parser.feed("<<cheerful>> It's *back* [[la")
+        parser.feed("<<cheerful>> It's ^back^ [[la")
         # [Text(" It's ", ("cheerful",), "<<cheerful>> It's "),
-        #  Text("back", ("cheerful", "emphasis"), "*back*"),
+        #  Text("back", ("cheerful", "emphasis"), "^back^"),
         #  Text(" ", ("cheerful",), " ")]
         parser.feed("ugh]]!")
         # [Event("laugh", "[[laugh]]"), Text("!", ("cheerful",), "!")]
@@ -154,7 +156,7 @@ class ExpressionParser:
         self._events = set(events)
         self._modes = {NEUTRAL_MODE, *modes}
         self._buffer = ""
-        # The character before the buffer, for emphasis: an opening asterisk
+        # The character before the buffer, for emphasis: an opening caret
         # needs a space or punctuation before it.
         self._previous_char = ""
         # The modes the next words are spoken in.
@@ -205,7 +207,7 @@ class ExpressionParser:
         i = 0
         while i < len(buffer):
             char = buffer[i]
-            if char in "[<*":
+            if char in "[<^":
                 result = self._match(buffer, i, final)
                 if result is None:
                     break  # Possibly the start of something; wait for more text.
@@ -222,7 +224,7 @@ class ExpressionParser:
                         segments.append(self._text(match.text, modes, match.raw))
                     elif match is not None:
                         segments.append(self._with_pending_raw(match))
-                    self._previous_char = "*" if isinstance(match, _Emphasis) else " "
+                    self._previous_char = "^" if isinstance(match, _Emphasis) else " "
                     i = end
                     continue
             text.append(char)
@@ -262,7 +264,7 @@ class ExpressionParser:
         """
         if buffer.startswith("[[", i) or buffer.startswith("<<", i):
             return self._match_tag(buffer, i, final)
-        if buffer[i] == "*":
+        if buffer[i] == "^":
             return self._match_emphasis(buffer, i, final)
         if not final and len(buffer) - i < 2:
             return None  # A single bracket that may become a double one.
@@ -297,37 +299,36 @@ class ExpressionParser:
     def _match_emphasis(
         self, buffer: str, i: int, final: bool
     ) -> tuple[int, _Emphasis | None] | None:
-        run = 2 if buffer.startswith("**", i) else 1
-        if not final and len(buffer) - i <= run:
-            return None  # Can't yet tell how long the run is or what follows it.
-        after = buffer[i + run] if i + run < len(buffer) else ""
+        if not final and len(buffer) - i <= 1:
+            return None  # Can't yet tell what follows the caret.
+        after = buffer[i + 1] if i + 1 < len(buffer) else ""
         if (
-            after in ("", "*")
+            after in ("", "^")
             or after.isspace()
             or (self._previous_char and self._previous_char not in _EMPHASIS_BOUNDARY)
         ):
             return i, None
-        start = i + run
-        delimiter = "*" * run
+        start = i + 1
         j = start
         while True:
-            end = buffer.find(delimiter, j, start + _MAX_SPAN_LENGTH + run)
+            end = buffer.find("^", j, start + _MAX_SPAN_LENGTH + 1)
             if end < 0:
                 break
             content = buffer[start:end]
-            if "*" in content or "\n" in content:
+            if "^" in content or "\n" in content:
                 return i, None
-            following = buffer[end + run] if end + run < len(buffer) else ""
-            if following == "*":
+            following = buffer[end + 1] if end + 1 < len(buffer) else ""
+            if following == "^":
                 return i, None
             if not following and not final:
                 return None  # The next character decides whether this closes the span.
             if not buffer[end - 1].isspace() and (not following or following in _EMPHASIS_BOUNDARY):
-                return end + run, _Emphasis(content, buffer[i : end + run])
+                if not any(c.isalnum() for c in content):
+                    return i, None  # A face such as ^_^.
+                return end + 1, _Emphasis(content, buffer[i : end + 1])
             j = end + 1
-        # The text may end halfway through the closing asterisks.
-        rest = buffer[start:].rstrip("*")
-        if not final and "\n" not in rest and "*" not in rest and len(rest) <= _MAX_SPAN_LENGTH:
+        rest = buffer[start:]
+        if not final and "\n" not in rest and "^" not in rest and len(rest) <= _MAX_SPAN_LENGTH:
             return None
         return i, None
 
