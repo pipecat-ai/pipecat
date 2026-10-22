@@ -19,6 +19,7 @@ from pipecat.frames.frames import (
     SystemFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
+    UserTurnCompletionFrame,
     UserTurnResponseCancelFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
@@ -176,7 +177,10 @@ class SpeculationGate:
             held behind it.
         """
         if direction != FrameDirection.DOWNSTREAM:
-            return [(frame, direction)]
+            # A turn completion that keeps the turn open releases the held
+            # response before the frame goes upstream, so the filter's
+            # rejection finds nothing left to drop.
+            return self._release_on_turn_completion(frame) + [(frame, direction)]
 
         if isinstance(frame, SystemFrame):
             # Emitted before the verdict is applied, so a released response
@@ -290,6 +294,30 @@ class SpeculationGate:
         self._held = False
 
         return self._drop_held("withdrawn", keep_dropping=True)
+
+    def _release_on_turn_completion(self, frame: Frame) -> list[GatedFrame]:
+        """Release a held response the LLM judged to leave the turn open.
+
+        Such a response has nothing left to hold: the LLM service mutes
+        everything after ◐ or ○. Letting it through, as it would go without a hold,
+        writes the marker to the context, so the LLM keeps seeing its own
+        markers, and gives observers the whole response. Only a speculation
+        waits, since its turn may never be confirmed.
+
+        Returns:
+            The frames the release lets through, in arrival order.
+        """
+        if not (
+            isinstance(frame, UserTurnCompletionFrame)
+            and frame.kind in ("short", "long")
+            and self._state == SpeculationState.HOLDING
+            and not self._speculating
+        ):
+            return []
+
+        self._held = False
+        self._end_hold(SpeculationState.OPEN)
+        return self._flush()
 
     def _drop_held(self, reason: str, *, keep_dropping: bool) -> list[GatedFrame]:
         """Drop the held response.

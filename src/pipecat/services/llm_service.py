@@ -394,9 +394,6 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             )
         self._enable_async_tool_cancellation: bool = enable_async_tool_cancellation
         self._reports_ttfat: bool | None = None
-        # Turn completion is owned by LLMTurnCompletionUserTurnStopStrategy, which
-        # enables it over an LLMUpdateSettingsFrame once the pipeline starts.
-        self._filter_incomplete_user_turns: bool = False
         self._logged_thinking_default_model: str | None = None
         # Holds a speculative response until its turn is confirmed. Frames are
         # routed through it on the way out, in `push_frame`.
@@ -946,6 +943,8 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         if isinstance(frame, (LLMTextFrame, LLMFullResponseStartFrame, LLMFullResponseEndFrame)):
             if self._skip_tts is not None:
                 frame.skip_tts = self._skip_tts
+
+        await self._track_pushed_frame(frame)
 
         # The gate decides synchronously, so its verdict can't be torn by
         # another task pushing at the same time. Everything it hands back is

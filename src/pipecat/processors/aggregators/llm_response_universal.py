@@ -106,11 +106,13 @@ from pipecat.turns.user_start import (
 )
 from pipecat.turns.user_stop import (
     BaseUserTurnStopStrategy,
+    DeferredUserTurnStopStrategy,
+    LLMTurnCompletionUserTurnStopStrategy,
     UserTurnStoppedParams,
 )
 from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionConfig
 from pipecat.turns.user_turn_controller import UserTurnController
-from pipecat.turns.user_turn_filter import BaseUserTurnFilter
+from pipecat.turns.user_turn_filter import BaseUserTurnFilter, IncompleteUserTurnFilter
 from pipecat.turns.user_turn_strategies import (
     ExternalUserTurnStrategies,
     FilterIncompleteUserTurnStrategies,
@@ -738,7 +740,12 @@ class LLMUserAggregator(LLMContextAggregator):
             )
             self._params.user_turn_strategies = user_turn_strategies
 
-        self._user_turn_filter = self._params.user_turn_filter
+        # Strategies that gate the turn on LLMTurnCompletionUserTurnStopStrategy
+        # get the same behavior from an IncompleteUserTurnFilter.
+        user_turn_strategies, completion_filter = self._turn_completion_filter(user_turn_strategies)
+        if completion_filter and self._params.user_turn_strategies is not None:
+            self._params.user_turn_strategies = user_turn_strategies
+        self._user_turn_filter = self._params.user_turn_filter or completion_filter
 
         # Realtime-mode strategy mutation: drop the transcription-based start
         # strategy and flip wait_for_transcript on stop strategies that expose
@@ -1076,6 +1083,33 @@ class LLMUserAggregator(LLMContextAggregator):
             f"{self}: realtime mode — empty user turn recovery disabled; the realtime "
             "LLM service hears the user's audio directly."
         )
+
+    def _turn_completion_filter(
+        self, strategies: UserTurnStrategies
+    ) -> tuple[UserTurnStrategies, IncompleteUserTurnFilter | None]:
+        """Turn an LLMTurnCompletionUserTurnStopStrategy setup into a filter.
+
+        Such a setup defers its detectors with ``deferred()`` so that only the
+        LLM's ● ends the turn. The detectors are unwrapped to propose turn ends,
+        and an IncompleteUserTurnFilter with the same configuration judges them.
+
+        Returns:
+            The strategies to use, and the filter they need, if any.
+        """
+        stop = strategies.stop or []
+        completion = next(
+            (s for s in stop if isinstance(s, LLMTurnCompletionUserTurnStopStrategy)), None
+        )
+        if not completion:
+            return strategies, None
+
+        detectors = [
+            s.inner if isinstance(s, DeferredUserTurnStopStrategy) else s
+            for s in stop
+            if not isinstance(s, LLMTurnCompletionUserTurnStopStrategy)
+        ]
+        completion_filter = IncompleteUserTurnFilter(config=completion.config)
+        return UserTurnStrategies(start=strategies.start, stop=detectors), completion_filter
 
     def _warn_user_turn_filter_ignored(self):
         """Warn that a user turn filter has nothing to judge in realtime mode.

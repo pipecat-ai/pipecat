@@ -16,12 +16,14 @@ from pipecat.frames.frames import (
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
+    LLMMarkerFrame,
     LLMTextFrame,
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
     UserStoppedSpeakingFrame,
+    UserTurnCompletionFrame,
     UserTurnResponseCancelFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
@@ -204,6 +206,39 @@ class TestHeldResponses(unittest.IsolatedAsyncioTestCase):
 
         gate.begin_speculation(False, held=True)
         assert not gate.is_speculating
+
+    def _complete(self, gate: SpeculationGate, kind: str, marker: str) -> list[Frame]:
+        completion = UserTurnCompletionFrame(kind=kind, marker=marker)
+        return [f for f, _ in gate.process(completion, FrameDirection.UPSTREAM)]
+
+    async def test_an_incomplete_turn_completion_lets_its_response_through(self):
+        gate = SpeculationGate()
+
+        assert self._hold(gate, LLMFullResponseStartFrame()) == []
+        assert types(self._complete(gate, "short", "◐")) == [
+            LLMFullResponseStartFrame,
+            UserTurnCompletionFrame,
+        ]
+        assert types(emit(gate, LLMMarkerFrame("◐"))) == [LLMMarkerFrame]
+        # The rejection that follows finds nothing held.
+        assert types(emit(gate, UserTurnResponseCancelFrame())) == [UserTurnResponseCancelFrame]
+        assert types(emit(gate, LLMFullResponseEndFrame())) == [LLMFullResponseEndFrame]
+
+    async def test_a_complete_turn_completion_leaves_its_response_held(self):
+        gate = SpeculationGate()
+
+        self._hold(gate, LLMFullResponseStartFrame())
+        assert types(self._complete(gate, "complete", "●")) == [UserTurnCompletionFrame]
+        marker = LLMMarkerFrame("●", append_to_context_immediately=False)
+        assert emit(gate, marker, LLMTextFrame("Sure.")) == []
+
+    async def test_a_speculation_holds_its_incomplete_marker(self):
+        gate = SpeculationGate()
+
+        gate.begin_speculation(True)
+        assert emit(gate, LLMFullResponseStartFrame()) == []
+        assert types(self._complete(gate, "short", "◐")) == [UserTurnCompletionFrame]
+        assert emit(gate, LLMMarkerFrame("◐")) == []
 
 
 class TestPendingSpeculation(unittest.IsolatedAsyncioTestCase):
