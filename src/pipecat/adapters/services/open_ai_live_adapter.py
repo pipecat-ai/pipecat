@@ -107,7 +107,9 @@ class OpenAILiveLLMAdapter(BaseLLMAdapter[OpenAILiveLLMInvocationParams]):
         """Convert tool schemas to the Responses API tool format used by the backend model.
 
         The Live session schema rejects the Responses-only ``strict`` field, so
-        it is dropped from function tools.
+        it is dropped from function tools. Float literals are normalized for a
+        similar reason: the session refuses to start if one appears anywhere in
+        a tool schema (see :func:`_normalize_floats`).
 
         Args:
             tools_schema: The tools schema containing functions to convert.
@@ -120,7 +122,7 @@ class OpenAILiveLLMAdapter(BaseLLMAdapter[OpenAILiveLLMInvocationParams]):
             tool = dict(tool)
             if tool.get("type") == "function":
                 tool.pop("strict", None)
-            tools.append(tool)
+            tools.append(_normalize_floats(tool, tool.get("name")))
         return tools
 
     def _to_input_items(self, messages: list[dict[str, Any]]) -> list[events.InputItem]:
@@ -191,3 +193,52 @@ class OpenAILiveLLMAdapter(BaseLLMAdapter[OpenAILiveLLMInvocationParams]):
         if isinstance(tool_choice, dict) and isinstance(tool_choice.get("function"), dict):
             return {"type": "function", "name": tool_choice["function"].get("name")}
         return tool_choice
+
+
+def _normalize_floats(node: Any, tool_name: Any = None) -> Any:
+    """Return ``node`` with float literals replaced, recursively.
+
+    ``session.start`` fails outright when a tool schema contains a float. The
+    API answers ``Invalid AVAS session_data: Type is not JSON serializable:
+    decimal.Decimal``, which names neither the offending tool nor the field, so
+    the only obvious way to find it is to bisect the tool list. One tool
+    carrying ``{"type": "number", "minimum": 0.5}`` is enough to take the whole
+    session down; the same tool with ``minimum: 1`` starts normally.
+
+    Tool schemas are frequently generated rather than hand-written, and
+    generators emit floats freely, so this normalizes rather than failing: a
+    whole float becomes the equivalent int, which is lossless, and a genuinely
+    fractional value is dropped with a warning, since losing one bound on an
+    argument costs less than a session that cannot start at all.
+    """
+    if isinstance(node, dict):
+        normalized: dict[str, Any] = {}
+        for key, value in node.items():
+            if isinstance(value, float) and not isinstance(value, bool):
+                if value.is_integer():
+                    normalized[key] = int(value)
+                else:
+                    logger.warning(
+                        f"Dropping fractional {key}={value} from tool "
+                        f"{tool_name or '<unnamed>'}: the Live session schema "
+                        "rejects float literals."
+                    )
+                continue
+            normalized[key] = _normalize_floats(value, tool_name)
+        return normalized
+    if isinstance(node, list):
+        items: list[Any] = []
+        for value in node:
+            if isinstance(value, float) and not isinstance(value, bool):
+                if value.is_integer():
+                    items.append(int(value))
+                else:
+                    logger.warning(
+                        f"Dropping fractional list value {value} from tool "
+                        f"{tool_name or '<unnamed>'}: the Live session schema "
+                        "rejects float literals."
+                    )
+                continue
+            items.append(_normalize_floats(value, tool_name))
+        return items
+    return node
