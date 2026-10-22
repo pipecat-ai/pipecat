@@ -1,0 +1,1 @@
+- Fixed `TavusVideoService` not passing `BotStartedSpeakingFrame` on. Processors before it in the pipeline, such as the user aggregator's user mute and user turn start strategies and `UserIdleController`, never saw the bot start speaking, so a user mute strategy did not mute the user while the Tavus avatar spoke.
