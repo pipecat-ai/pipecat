@@ -22,6 +22,10 @@ class DeferredUserTurnStopStrategy(BaseUserTurnStopStrategy):
     unchanged; finalization is left to another strategy in the chain
     such as ``LLMTurnCompletionUserTurnStopStrategy``.
 
+    This only matters when the first stop strategy to decide ends the turn
+    (``StrategyMode.FIRST``). By default every stop strategy decides, and a
+    deferred one decides as the strategy it wraps.
+
     Use the :func:`deferred` helper for ergonomic construction::
 
         stop=[

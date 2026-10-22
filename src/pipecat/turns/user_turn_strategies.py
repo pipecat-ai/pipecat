@@ -7,6 +7,9 @@
 """Turn start strategy configuration."""
 
 from dataclasses import dataclass
+from enum import Enum
+
+from pydantic import BaseModel
 
 from pipecat.turns.user_start import (
     BaseUserTurnStartStrategy,
@@ -51,6 +54,31 @@ def default_user_turn_stop_strategies() -> list[BaseUserTurnStopStrategy]:
     from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 
     return [TurnAnalyzerUserTurnStopStrategy(turn_analyzer=LocalSmartTurnAnalyzerV3())]
+
+
+class StrategyMode(Enum):
+    """How a list of user turn strategies reaches a decision.
+
+    Parameters:
+        ALL: Every strategy has to agree, and each one sees every frame.
+        FIRST: The first strategy to decide wins.
+    """
+
+    ALL = "all"
+    FIRST = "first"
+
+
+class UserTurnStrategiesParams(BaseModel):
+    """How the user turn strategies decide.
+
+    Parameters:
+        stop_mode: Whether the turn ends once every stop strategy has decided the
+            user is done, or on the first one that does. With
+            ``StrategyMode.ALL``, the user speaking again clears the decisions
+            made so far. Defaults to ``StrategyMode.ALL``.
+    """
+
+    stop_mode: StrategyMode = StrategyMode.ALL
 
 
 @dataclass
