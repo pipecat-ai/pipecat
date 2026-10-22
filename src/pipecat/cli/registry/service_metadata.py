@@ -496,6 +496,14 @@ class ServiceRegistry:
             env_prefix="XAI",
             include_params=["api_key"],
         ),
+        ServiceDefinition(
+            value="zoom_ai_stt",
+            label="Zoom AI",
+            package="pipecat-ai[zoom-ai]",
+            class_name=["ZoomAISTTService"],
+            env_prefix="ZOOM_AI",
+            include_params=["api_key"],
+        ),
     ]
 
     # Large Language Model Services

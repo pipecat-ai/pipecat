@@ -87,6 +87,7 @@ IMPORTS = {
     "moonshine_stt": ["from pipecat.services.moonshine.stt import MoonshineSTTService"],
     "whisper_stt": ["from pipecat.services.whisper.stt import WhisperSTTService"],
     "xai_stt": ["from pipecat.services.xai.stt import XAISTTService"],
+    "zoom_ai_stt": ["from pipecat.services.zoom_ai.stt import ZoomAISTTService"],
     # LLM Services
     "anthropic_llm": ["from pipecat.services.anthropic.llm import AnthropicLLMService"],
     "aws_bedrock_llm": ["from pipecat.services.aws.llm import AWSBedrockLLMService"],

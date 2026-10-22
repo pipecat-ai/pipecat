@@ -158,6 +158,8 @@ suite:
     scenarios: [scripted/capital_question]
   - bot: voice/voice-xai-http.py
     scenarios: [scripted/capital_question]
+  - bot: voice/voice-zoom-ai.py
+    scenarios: [scripted/capital_question]
 
   #
   # Realtime (speech-to-speech): one bot per provider, each exercising a

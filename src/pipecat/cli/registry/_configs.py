@@ -93,6 +93,7 @@ SERVICE_CONFIGS = {
         "    )\n"
     ),
     "xai_stt": 'XAISTTService(api_key=os.getenv("XAI_API_KEY"))',
+    "zoom_ai_stt": 'ZoomAISTTService(api_key=os.getenv("ZOOM_AI_API_KEY"))',
     # LLM Services
     "anthropic_llm": (
         "AnthropicLLMService(\n"
