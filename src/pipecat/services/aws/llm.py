@@ -97,10 +97,6 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
     Provides inference capabilities for AWS Bedrock models including Amazon Nova
     and Anthropic Claude. Supports streaming responses, function calling, and
     vision capabilities.
-
-    Reasoning a model returns as ``reasoningContent`` is emitted as
-    ``LLMThought*Frame`` objects, and signed reasoning is kept in the context so
-    it can be passed back to the model.
     """
 
     Settings = AWSBedrockLLMSettings
