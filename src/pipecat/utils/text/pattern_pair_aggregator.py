@@ -351,7 +351,7 @@ class PatternPairAggregator(SimpleTextAggregator):
                 # Use parent's lookahead logic for sentence detection, ignoring
                 # boundaries inside KEEP patterns that are still in the buffer.
                 aggregation = await super()._check_sentence_with_lookahead(
-                    char, protected_end=self._kept_patterns_end()
+                    char, protected_end=self._kept_patterns_offset()
                 )
                 if aggregation:
                     # Convert to PatternMatch for consistency with return type
@@ -382,13 +382,18 @@ class PatternPairAggregator(SimpleTextAggregator):
                         full_match=content,
                     )
 
-    def _kept_patterns_end(self) -> int:
+    def _kept_patterns_offset(self) -> int:
         """Return the buffer offset just past the last closed KEEP pattern, or 0 if none."""
+        end_patterns = [
+            pattern["end"]
+            for pattern in self._patterns.values()
+            if pattern["action"] == MatchAction.KEEP
+        ]
         return max(
             (
-                self._text.rfind(pattern["end"]) + len(pattern["end"])
-                for pattern in self._patterns.values()
-                if pattern["action"] == MatchAction.KEEP and pattern["end"] in self._text
+                self._text.rfind(end_pattern) + len(end_pattern)
+                for end_pattern in end_patterns
+                if end_pattern in self._text
             ),
             default=0,
         )
