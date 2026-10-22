@@ -11,6 +11,7 @@ from typing import Any, Required, TypedDict, cast
 
 from openai._types import NotGiven as OpenAINotGiven
 from openai.types.responses import FunctionToolParam, ResponseInputItemParam, ToolParam
+from openai.types.responses.response_create_params import ToolChoice
 
 from pipecat.adapters.base_llm_adapter import BaseLLMAdapter, LLMContextConversionError
 from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
@@ -18,8 +19,10 @@ from pipecat.adapters.services.open_ai_adapter import openai_from_llm_context_to
 from pipecat.processors.aggregators.llm_context import (
     LLMContext,
     LLMContextMessage,
+    LLMContextToolChoice,
     LLMSpecificMessage,
 )
+from pipecat.utils.types import NotGiven, is_given
 
 
 class OpenAIResponsesLLMInvocationParams(TypedDict, total=False):
@@ -27,9 +30,11 @@ class OpenAIResponsesLLMInvocationParams(TypedDict, total=False):
 
     # `input` and `tools` are always populated by `get_llm_invocation_params`;
     # `instructions` is only set when a system instruction is present.
+    # `tool_choice` is only set when the context specifies one.
     input: Required[list[ResponseInputItemParam]]
     tools: Required[list[ToolParam] | OpenAINotGiven]
     instructions: str
+    tool_choice: ToolChoice
 
 
 class OpenAIResponsesLLMAdapter(BaseLLMAdapter[OpenAIResponsesLLMInvocationParams]):
@@ -87,6 +92,10 @@ class OpenAIResponsesLLMAdapter(BaseLLMAdapter[OpenAIResponsesLLMInvocationParam
             # NOTE: LLMContext's tools are guaranteed to be a ToolsSchema (or NOT_GIVEN)
             "tools": openai_from_llm_context_tools(self.from_standard_tools(context.tools)),
         }
+
+        tool_choice = self._to_tool_choice(context.tool_choice)
+        if tool_choice is not None:
+            params["tool_choice"] = tool_choice
 
         if system_instruction:
             # Compatibility: The Responses API requires at least one input
@@ -264,6 +273,31 @@ class OpenAIResponsesLLMAdapter(BaseLLMAdapter[OpenAIResponsesLLMInvocationParam
                 item["encrypted_content"] = encrypted
             return cast(ResponseInputItemParam, item)
         return cast(ResponseInputItemParam, payload)
+
+    @staticmethod
+    def _to_tool_choice(tool_choice: LLMContextToolChoice | NotGiven) -> ToolChoice | None:
+        """Convert a context tool choice to the Responses API shape.
+
+        The context stores the Chat Completions form, whose object variants nest
+        their fields under the key their ``type`` names (``{"type": "function",
+        "function": {"name": ...}}``, and likewise ``custom`` and ``allowed_tools``,
+        whose tool references nest the same way). The Responses API takes them
+        flat (``{"type": "function", "name": ...}``).
+        """
+        if not is_given(tool_choice):
+            return None
+        if not isinstance(tool_choice, dict):
+            return cast(ToolChoice, tool_choice)
+        choice_type = tool_choice.get("type")
+        nested = tool_choice.get(choice_type)
+        if not isinstance(nested, dict):
+            return cast(ToolChoice, tool_choice)
+        flat = {**nested, "type": choice_type}
+        if choice_type == "allowed_tools":
+            flat["tools"] = [
+                OpenAIResponsesLLMAdapter._to_tool_choice(tool) for tool in nested.get("tools", [])
+            ]
+        return cast(ToolChoice, flat)
 
     def supports_file_url(self, url: str, mime_type: str) -> bool:
         """The Responses API fetches image and file URLs itself."""
