@@ -1049,6 +1049,7 @@ class BaseWorker(BaseObject, BusSubscriber):
         worker_names: list[str],
         *,
         params: JobGroupParams | None = None,
+        collect_events: bool = False,
         name: str | None = None,
         payload: dict | None = None,
         timeout: float | None = None,
@@ -1064,6 +1065,10 @@ class BaseWorker(BaseObject, BusSubscriber):
         Args:
             worker_names: Names of the workers to send the job to.
             params: How to run the group. See :class:`JobGroupParams`.
+            collect_events: Whether to give the group a queue holding the
+                events its workers send. Callers that iterate the group's
+                events need it; the rest would only fill a queue nobody
+                drains.
             name: Job name.
 
                 .. deprecated:: 1.8.0
@@ -1105,7 +1110,9 @@ class BaseWorker(BaseObject, BusSubscriber):
         except TimeoutError:
             raise JobGroupError("workers not ready within timeout")
 
-        group = self._create_job_group(worker_names, params=group_params)
+        group = self._create_job_group(
+            worker_names, params=group_params, collect_events=collect_events
+        )
 
         for worker_name in worker_names:
             await self._send_job_request(
@@ -1527,6 +1534,7 @@ class BaseWorker(BaseObject, BusSubscriber):
         worker_names: list[str],
         *,
         params: JobGroupParams,
+        collect_events: bool = False,
     ) -> JobGroup:
         job_id = str(uuid.uuid4())
         group = JobGroup(
@@ -1535,6 +1543,9 @@ class BaseWorker(BaseObject, BusSubscriber):
             cancel_on_error=params.cancel_on_error,
             label=params.label,
             cancellable=params.cancellable,
+            # The group starts receiving worker events the moment it is
+            # registered, so a consumer's queue has to exist by then.
+            event_queue=asyncio.Queue() if collect_events else None,
         )
         self._job_groups[job_id] = group
 
