@@ -883,15 +883,19 @@ class MOQTransportClient:
         if self._audio_out is None or not self._audio_out_sample_rate:
             return
 
+        # Set `now` pre-sleep unless a reset lands mid-sleep, so late wake
+        # leaves pacing clock on schedule.
         budget = self._params.audio_out_max_buffer_ms / 1000.0
+        now = time.monotonic()
         if self._publish_audio_clock is not None:
-            wait = self._publish_audio_clock - time.monotonic() - budget
+            wait = self._publish_audio_clock - now - budget
             if wait > 0:
                 await asyncio.sleep(wait)
                 if self._audio_out is None:
                     return
+                if self._publish_audio_clock is None:
+                    now = time.monotonic()
 
-        now = time.monotonic()
         if self._publish_audio_clock is None or self._publish_audio_clock < now:
             # Writes resumed after idle (turn gap, interruption re-anchor).
             # Re-anchor encoder timeline: an un-anchored gap is measured as
