@@ -68,3 +68,27 @@ class PerceptionCapabilities:
     """
 
     signals: list[PerceptionTerm] = field(default_factory=list)
+
+
+def format_perception(signals: list[PerceptionSignal]) -> str:
+    """Format a reading as written at the head of the user's message to the LLM.
+
+    Each signal is a category in brackets: its labels with their confidences,
+    so the LLM can tell a clear reading from a guess, or its measure as a
+    value. ``([tone frustrated=0.86, neutral=0.10],[speech_rate value=4.1])``.
+
+    Args:
+        signals: The signals read.
+
+    Returns:
+        The formatted reading.
+    """
+
+    def category(signal: PerceptionSignal) -> str:
+        if signal.labels:
+            pairs = ", ".join(f"{label}={confidence:.2f}" for label, confidence in signal.labels)
+        else:
+            pairs = f"value={signal.value:g}"
+        return f"[{signal.name} {pairs}]"
+
+    return f"({','.join(category(signal) for signal in signals)})"
