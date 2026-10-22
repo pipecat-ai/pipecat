@@ -766,10 +766,15 @@ class LLMContextUserTurnFrame(DataFrame):
     Parameters:
         text: The user's aggregated transcript for this turn.
         timestamp: ISO-8601 timestamp of when the user turn started.
+        perception: The reading of how the user spoke that is written at the
+            head of the user message, with expressive conversation on and a
+            perception producer in the pipeline, or None. Part of expressive
+            conversation (alpha).
     """
 
     text: str
     timestamp: str
+    perception: list[PerceptionSignal] | None = None
 
 
 @dataclass

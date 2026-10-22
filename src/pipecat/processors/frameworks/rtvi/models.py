@@ -696,6 +696,32 @@ class UserTranscriptionMessage(BaseModel):
 UserInputType = Literal["transcription", "chat", "backchannel"]
 
 
+class UserPerceptionLabel(BaseModel):
+    """A label of a perception signal, with how sure the reading is.
+
+    Parameters:
+        label: The label, such as ``"frustrated"``.
+        confidence: How sure the reading is, from 0 to 1.
+    """
+
+    label: str
+    confidence: float
+
+
+class UserPerceptionSignal(BaseModel):
+    """One signal of a reading of how the user spoke.
+
+    Parameters:
+        name: What is read, such as ``"tone"``.
+        labels: The likeliest labels, likeliest first, for a signal read as labels.
+        value: The measure, for a signal read as a value.
+    """
+
+    name: str
+    labels: list[UserPerceptionLabel] = []
+    value: float | None = None
+
+
 class UserInputMessageData(BaseModel):
     """Data for user input messages.
 
@@ -710,6 +736,9 @@ class UserInputMessageData(BaseModel):
         user_id: Identifier for the user who spoke or typed. For chat, set only
             when the transport knows the sender, such as Daily and LiveKit.
         msg_id: For chat, the id of the client's ``send-text`` message.
+        perception: For a transcription, how the user said it, when the STT
+            service reports a reading with it. Part of expressive conversation
+            (alpha).
     """
 
     text: str
@@ -718,6 +747,7 @@ class UserInputMessageData(BaseModel):
     final: bool
     user_id: str | None = None
     msg_id: str | None = None
+    perception: list[UserPerceptionSignal] | None = None
 
 
 class UserInputMessage(BaseModel):
