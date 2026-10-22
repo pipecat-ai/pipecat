@@ -457,11 +457,14 @@ _AUDIO_TAG_EVENTS = [
     ExpressionTerm("laughs"),
     ExpressionTerm("laughs harder"),
     ExpressionTerm("starts laughing"),
+    ExpressionTerm("laughing"),
     ExpressionTerm("wheezing", "a wheezing laugh"),
     ExpressionTerm("giggles"),
+    ExpressionTerm("giggling"),
     ExpressionTerm("chuckles"),
     ExpressionTerm("snorts"),
     ExpressionTerm("sighs"),
+    ExpressionTerm("sighing"),
     ExpressionTerm("exhales"),
     ExpressionTerm("exhales sharply"),
     ExpressionTerm("inhales deeply"),
@@ -510,9 +513,6 @@ _AUDIO_TAG_MODES = [
     ExpressionTerm("whispers", "speaking in a whisper"),
     ExpressionTerm("muttering", "speaking under one's breath"),
     ExpressionTerm("singing"),
-    ExpressionTerm("laughing", "speaking while laughing"),
-    ExpressionTerm("giggling", "speaking while giggling"),
-    ExpressionTerm("sighing", "speaking with a sigh"),
 ]
 
 
