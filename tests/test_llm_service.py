@@ -1410,23 +1410,23 @@ class TestProcessFrameToolWiring(unittest.IsolatedAsyncioTestCase):
 
 
 class TestTurnCompletionSettingsDeprecation(unittest.IsolatedAsyncioTestCase):
-    """The turn-completion settings belong to the user turn strategy.
+    """The turn-completion settings belong to the user turn filter.
 
-    ``LLMTurnCompletionUserTurnStopStrategy`` enables them over an
-    ``LLMUpdateSettingsFrame`` and is also what finalizes the user turn from the
-    resulting verdict, so an application that sets them on the service directly
-    gets the marker protocol with nothing waiting on it.
+    ``IncompleteUserTurnFilter`` enables them over an ``LLMUpdateSettingsFrame``
+    and is also what judges the resulting markers, so an application that sets
+    them on the service directly gets the marker protocol with nothing waiting
+    on it.
     """
 
     def test_filter_incomplete_user_turns_at_construction_warns(self):
         with self.assertWarns(DeprecationWarning) as ctx:
             MockLLMService(filter_incomplete_user_turns=True)
-        self.assertIn("FilterIncompleteUserTurnStrategies", str(ctx.warning))
+        self.assertIn("IncompleteUserTurnFilter()", str(ctx.warning))
 
     def test_user_turn_completion_config_at_construction_warns(self):
         with self.assertWarns(DeprecationWarning) as ctx:
             MockLLMService(user_turn_completion_config=UserTurnCompletionConfig())
-        self.assertIn("FilterIncompleteUserTurnStrategies(config=...)", str(ctx.warning))
+        self.assertIn("IncompleteUserTurnFilter(config=...)", str(ctx.warning))
 
     def test_construction_without_the_settings_is_silent(self):
         with warnings.catch_warnings():

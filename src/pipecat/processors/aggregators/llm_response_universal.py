@@ -171,19 +171,16 @@ class LLMUserAggregatorParams:
             responses are suppressed and timeouts trigger re-prompting.
 
             .. deprecated:: 1.2.0
-                Use ``user_turn_strategies=FilterIncompleteUserTurnStrategies()``
-                instead. Will be removed in 2.0.0.
+                Use ``user_turn_filter=IncompleteUserTurnFilter()`` instead. Will
+                be removed in 2.0.0.
 
         user_turn_completion_config: Configuration for turn
             completion behavior including custom instructions, timeouts, and
-            prompts. Only used when filter_incomplete_user_turns is True
-            (deprecated path) — for the new strategy-based API, pass the config
-            directly to ``FilterIncompleteUserTurnStrategies(config=...)``.
+            prompts. Only used when filter_incomplete_user_turns is True.
 
             .. deprecated:: 1.2.0
-                Pass the config directly to
-                ``FilterIncompleteUserTurnStrategies(config=...)`` instead.
-                Will be removed in 2.0.0.
+                Pass the config to ``IncompleteUserTurnFilter(config=...)``
+                instead. Will be removed in 2.0.0.
     """
 
     add_tool_change_messages: bool = False
@@ -203,22 +200,14 @@ class LLMUserAggregatorParams:
             warn_deprecated(
                 "`LLMUserAggregatorParams.filter_incomplete_user_turns` is deprecated since "
                 "1.2.0 and will be removed in 2.0.0. Use "
-                "`user_turn_strategies=FilterIncompleteUserTurnStrategies()` instead.",
+                "`user_turn_filter=IncompleteUserTurnFilter()` instead.",
                 stacklevel=2,
             )
-        if self.user_turn_completion_config:
-            warn_deprecated(
-                "`LLMUserAggregatorParams.user_turn_completion_config` is deprecated since "
-                "1.2.0 and will be removed in 2.0.0. Use "
-                "`user_turn_strategies=FilterIncompleteUserTurnStrategies()` instead.",
-                stacklevel=2,
-            )
-
         if self.user_turn_completion_config is not None:
             warn_deprecated(
                 "`LLMUserAggregatorParams.user_turn_completion_config` is deprecated since "
                 "1.2.0 and will be removed in 2.0.0. Use "
-                "`FilterIncompleteUserTurnStrategies(config=...)` instead.",
+                "`IncompleteUserTurnFilter(config=...)` instead.",
                 stacklevel=2,
             )
 

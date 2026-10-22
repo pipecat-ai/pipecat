@@ -398,7 +398,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         # Holds a speculative response until its turn is confirmed. Frames are
         # routed through it on the way out, in `push_frame`.
         self._speculation_gate = SpeculationGate(name=f"{self}::SpeculationGate")
-        self._warn_turn_completion_settings_are_strategy_owned()
+        self._warn_turn_completion_settings_are_filter_owned()
         # The per-tool cancel tools currently advertised, by name.
         self._cancel_tool_names: set[str] = set()
         # Cancel-tool names that collide with a user's own tool, warned about once.
@@ -764,18 +764,16 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         await self._cancel_all_function_call_tasks()
         await self._run_tool_cleanups()
 
-    def _warn_turn_completion_settings_are_strategy_owned(self):
-        """Warn that the turn-completion settings belong to the user turn strategy.
+    def _warn_turn_completion_settings_are_filter_owned(self):
+        """Warn that the turn-completion settings belong to the user turn filter.
 
         Construction is the one place these settings can only have come from
-        application code: the strategy configures the service over an
+        application code: the filter configures the service over an
         ``LLMUpdateSettingsFrame`` once the pipeline is running.
         """
         replacements = {
-            "filter_incomplete_user_turns": (
-                "`user_turn_strategies=FilterIncompleteUserTurnStrategies()`"
-            ),
-            "user_turn_completion_config": "`FilterIncompleteUserTurnStrategies(config=...)`",
+            "filter_incomplete_user_turns": "`user_turn_filter=IncompleteUserTurnFilter()`",
+            "user_turn_completion_config": "`IncompleteUserTurnFilter(config=...)`",
         }
         for name, replacement in replacements.items():
             if not getattr(self._settings, name, None):

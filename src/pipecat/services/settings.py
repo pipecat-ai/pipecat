@@ -313,13 +313,11 @@ class LLMSettings(ServiceSettings):
         seed: Random seed for reproducibility.
         filter_incomplete_user_turns: Enable LLM-based turn completion detection
             to suppress bot responses when the user was cut off mid-thought.
-            Set by
-            :class:`~pipecat.turns.user_stop.LLMTurnCompletionUserTurnStopStrategy`,
-            which is also what waits on the resulting verdict.
+            Set by :class:`~pipecat.turns.user_turn_filter.IncompleteUserTurnFilter`,
+            which also judges the resulting markers.
 
             .. deprecated:: 1.7.0
-                Use
-                ``user_turn_strategies=FilterIncompleteUserTurnStrategies()`` on
+                Use ``user_turn_filter=IncompleteUserTurnFilter()`` on
                 :class:`~pipecat.processors.aggregators.llm_response_universal.LLMUserAggregatorParams`
                 instead. Will be removed in 2.0.0.
 
@@ -328,9 +326,8 @@ class LLMSettings(ServiceSettings):
             and prompts for incomplete turns.
 
             .. deprecated:: 1.7.0
-                Pass the config to
-                ``FilterIncompleteUserTurnStrategies(config=...)`` instead. Will
-                be removed in 2.0.0.
+                Pass the config to ``IncompleteUserTurnFilter(config=...)``
+                instead. Will be removed in 2.0.0.
 
         use_provider_thinking_default: Whether a model with no thinking configured
             runs at its provider's default. Services that otherwise send each
