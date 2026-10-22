@@ -21,7 +21,13 @@ _CURRENCY_MAP: dict[str, tuple[str, str, str | None, str | None]] = {
     "₹": ("rupee", "rupees", "paisa", "paise"),
 }
 
-_CURRENCY_RE = re.compile(r"([€£¥₹\$])\s*(\d{1,3}(?:,\d{3})*|\d+)\b(?:\.(\d+))?")
+# An amount may be followed by a scale word ("$2.5 billion"), which multiplies the
+# whole amount, so the fraction is part of the number rather than a subunit.
+_CURRENCY_RE = re.compile(
+    r"([€£¥₹\$])\s*(\d{1,3}(?:,\d{3})*|\d+)\b(?:\.(\d+))?"
+    r"(?:\s+(thousand|million|billion|trillion)\b)?",
+    re.IGNORECASE,
+)
 
 
 def _amount_to_words(n: float, singular: str, plural: str) -> str:
@@ -39,6 +45,16 @@ def _currency_match(match: re.Match) -> str:
     singular, plural, c_singular, c_plural = currency
 
     whole = int(whole_str)
+
+    scale = match.group(4)
+    if scale:
+        # "$2.5 billion" reads "two point five billion dollars": the fraction
+        # belongs to the scaled number, and the unit is always plural.
+        number = num2words(whole, lang="en")
+        if frac_str:
+            number += " point " + " ".join(num2words(int(d), lang="en") for d in frac_str)
+        return f"{number} {scale.lower()} {plural}"
+
     result = _amount_to_words(whole, singular, plural)
 
     if frac_str and c_singular and c_plural:
