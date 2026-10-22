@@ -638,7 +638,7 @@ class EagerTranscriptionFrame(TextFrame):
 
     Some STT services emit a provisional end of turn ahead of the real one, so a
     response can be generated during the gap. The prediction may be withdrawn
-    (:class:`EagerEndOfTurnCancelFrame`) and the committed transcript may differ
+    (:class:`UserTurnResponseCancelFrame`) and the committed transcript may differ
     from this one, so nothing produced from it may reach the user or the context
     until it is confirmed. See
     :class:`~pipecat.turns.user_stop.EagerUserTurnStopStrategy`.
@@ -1419,17 +1419,34 @@ class UserStoppedSpeakingFrame(SystemFrame):
 
 
 @dataclass
-class EagerEndOfTurnCancelFrame(SystemFrame):
-    """Frame withdrawing an eager end of turn.
+class UserTurnResponseCancelFrame(SystemFrame):
+    """Frame cancelling the response held for the current user turn.
 
-    Emitted when a service reports the user resumed speaking after an eager end
-    of turn, or when the committed transcript doesn't match the eager one. The
-    LLM service stops generating, and its
-    :class:`~pipecat.turns.speculation_gate.SpeculationGate` discards what it
-    was holding — which is everything the response produced, so nothing further
-    down the pipeline has anything to undo.
+    Emitted when an eager end of turn is withdrawn (the user resumed speaking,
+    or the committed transcript doesn't match the eager one). The LLM service
+    stops generating, and its
+    :class:`~pipecat.turns.speculation_gate.SpeculationGate` discards
+    what it was holding — which is everything the response produced, so nothing
+    further down the pipeline has anything to undo. A response the gate has
+    already released is left alone; stopping it is what
+    :class:`InterruptionFrame` does.
 
-    A system frame so it overtakes the speculative output it cancels.
+    A system frame so it overtakes the held output it cancels.
+    """
+
+    pass
+
+
+@deprecated(
+    "`EagerEndOfTurnCancelFrame` is deprecated since 1.14.0 and will be removed in 2.0.0. "
+    "Use `UserTurnResponseCancelFrame` instead."
+)
+@dataclass
+class EagerEndOfTurnCancelFrame(UserTurnResponseCancelFrame):
+    """Deprecated alias for :class:`UserTurnResponseCancelFrame`.
+
+    .. deprecated:: 1.14.0
+        Use :class:`UserTurnResponseCancelFrame` instead. Will be removed in 2.0.0.
     """
 
     pass

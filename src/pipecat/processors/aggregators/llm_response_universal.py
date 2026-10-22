@@ -29,7 +29,6 @@ from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     CancelFrame,
-    EagerEndOfTurnCancelFrame,
     EagerTranscriptionFrame,
     EndFrame,
     Frame,
@@ -77,6 +76,7 @@ from pipecat.frames.frames import (
     UserSpeakingFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
+    UserTurnResponseCancelFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
@@ -1376,7 +1376,7 @@ class LLMUserAggregator(LLMContextAggregator):
         # Broadcast rather than queued, so it reaches a downstream gate ahead of
         # the turn end that follows it. Queued, it would arrive after, and the
         # gate would release the response this withdraws.
-        await self.broadcast_frame(EagerEndOfTurnCancelFrame)
+        await self.broadcast_frame(UserTurnResponseCancelFrame)
 
     async def _on_vad_speech_started(self, controller):
         await self._queued_broadcast_frame(

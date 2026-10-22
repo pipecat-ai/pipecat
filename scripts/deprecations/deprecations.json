@@ -729,6 +729,17 @@
       "location": "pipecat/frames/frames.py"
     },
     {
+      "subject": "EagerEndOfTurnCancelFrame",
+      "module": "pipecat.frames.frames",
+      "kind": "class",
+      "deprecated_in": "1.14.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "UserTurnResponseCancelFrame",
+      "message": "`EagerEndOfTurnCancelFrame` is deprecated since 1.14.0 and will be removed in 2.0.0. Use `UserTurnResponseCancelFrame` instead.",
+      "location": "pipecat/frames/frames.py"
+    },
+    {
       "subject": "EndTaskFrame",
       "module": "pipecat.frames.frames",
       "kind": "class",
