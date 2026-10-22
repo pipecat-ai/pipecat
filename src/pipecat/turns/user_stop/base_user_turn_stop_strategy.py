@@ -54,14 +54,12 @@ class BaseUserTurnStopStrategy(BaseObject):
         exists to start LLM inference for the current user turn, carrying a
         :class:`~pipecat.turns.types.UserTurnSpeculation` when the turn it
         answers hasn't ended yet. In most cases this fires together with
-        `on_user_turn_stopped`. Strategies
-        that gate finalization on the LLM (e.g.
-        ``LLMTurnCompletionUserTurnStopStrategy``) fire only this event
-        upstream and a separate strategy fires `on_user_turn_stopped` once
-        the LLM confirms the turn is complete.
+        `on_user_turn_stopped`.
       - `on_user_turn_stopped`: Signals that the user turn is semantically
         final. Observers, transcript appenders, and UI indicators should
-        bind this event.
+        bind this event. With a
+        :class:`~pipecat.turns.user_turn_filter.BaseUserTurnFilter` set, the turn
+        ends only once the filter accepts it.
 
     """
 
