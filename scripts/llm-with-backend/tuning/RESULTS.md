@@ -82,12 +82,32 @@ Before the pairing instruction's rewrite around its one rule, the same replay ha
 
 ## Text evals
 
-The twelve text scenarios on the three bots with a text frontend, five runs each, without predictive delegation (2026-10-21, with the `AFTER DELEGATING` paragraph before its rule for a reply that follows an acknowledgement made with the call). The frontends run on their services' default models (`gpt-4.1`, `gemini-3.6-flash`, `claude-sonnet-4-6`), the backend on `claude-sonnet-4-6`, and the judge is the release suite's text judge. Each table comes from the run's `results.jsonl` through `results_table.py`:
+The twelve text scenarios on the three bots with a text frontend, five runs each, without predictive delegation (2026-10-22, with this `AFTER DELEGATING` paragraph). The frontends run on their services' default models (`gpt-4.1`, `gemini-3.6-flash`, `claude-sonnet-4-6`), the backend on `claude-sonnet-4-6`, and the judge is the release suite's text judge. Each table comes from the run's `results.jsonl` through `results_table.py`:
 
 ```bash
 uv run python -m pipecat.evals suite evals/llm-with-backend/manifest.yaml -s text --repeat 5
 uv run python scripts/llm-with-backend/tuning/results_table.py <runs-dir>/<run>/results.jsonl
 ```
+
+| scenario                      | anthropic-frontend | google-frontend | openai-responses-frontend |
+| ----------------------------- | ------------------ | --------------- | ------------------------- |
+| `accepted_offer/text`         | 5/5                | 5/5             | 5/5                       |
+| `aside_while_waiting/text`    | 5/5                | 5/5             | 5/5                       |
+| `cancel_and_replace/text`     | 5/5                | 5/5             | 5/5                       |
+| `cancel_delegation/text`      | 4/5                | 5/5             | 5/5                       |
+| `concurrent_delegations/text` | 0/5                | 1/5             | 0/5                       |
+| `delegate_ack/text`           | 5/5                | 5/5             | 5/5                       |
+| `delegate_with_aside/text`    | 5/5                | 5/5             | 5/5                       |
+| `frontend_only/text`          | 5/5                | 5/5             | 5/5                       |
+| `implicit_cancel/text`        | 4/5                | 4/5             | 5/5                       |
+| `partial_cancel/text`         | 5/5                | 5/5             | 5/5                       |
+| `progress_inquiry/text`       | 5/5                | 5/5             | 5/5                       |
+| `superseding_delegation/text` | 5/5                | 5/5             | 5/5                       |
+| **total**                     | **53/60**          | **55/60**       | **55/60**                 |
+
+`concurrent_delegations` fails on every frontend at every baseline. Claude's `cancel_delegation` and `implicit_cancel` failures are one shape: it confirms the stop in the same response as its `delegate` call ("Got it, I'll leave the code as is."; "Good to know, thanks for the heads up! I'll call off the test run since Sam already confirmed they're passing.") and says nothing in the run after the call, as the paragraph asks, while the scenario judges only after the call, having no `check_from: turn_start`. Gemini's `implicit_cancel` failure closed its acknowledgement with an offer ("anything else I can help with"), which the judge rejects.
+
+The same sweep on 2026-10-21, with the paragraph before its rule for a reply that follows an acknowledgement made with the call:
 
 | scenario                      | anthropic-frontend | google-frontend | openai-responses-frontend |
 | ----------------------------- | ------------------ | --------------- | ------------------------- |
@@ -163,7 +183,7 @@ And the same sweep on 2026-10-14 on the pairing instruction before this one:
 
 ### With predictive delegation
 
-The same twelve scenarios with `predictive_delegation=PredictiveDelegation(JevClassifier(...))` added to each bot's `LLMWithBackend`, five runs each, run after the sweeps above:
+The same twelve scenarios with `predictive_delegation=PredictiveDelegation(JevClassifier(...))` added to each bot's `LLMWithBackend`, five runs each, on 2026-10-14 with the `AFTER DELEGATING` paragraph of that day:
 
 | scenario                      | anthropic-frontend | google-frontend | openai-responses-frontend |
 | ----------------------------- | ------------------ | --------------- | ------------------------- |
@@ -185,7 +205,7 @@ The classifier, live, from the bots' logs: every request and stop scored 0.88 or
 
 ### Stops
 
-The scenarios' stops and corrections (`cancel_delegation`, `implicit_cancel`, `partial_cancel` and `superseding_delegation`, 20 runs per frontend) with no `delegate` call: gpt-4.1 1, Claude 0 and Gemini 0 (2026-10-20), against 2, 0 and 0 on 2026-10-14 and 16, 1 and 0 before the rewrite. gpt-4.1's one is `partial_cancel`, "forget the tests" while a runbook lookup is also running.
+The scenarios' stops and corrections (`cancel_delegation`, `implicit_cancel`, `partial_cancel` and `superseding_delegation`, 20 runs per frontend) with no `delegate` call: gpt-4.1 0, Claude 0 and Gemini 0 (2026-10-22), against 1, 0 and 0 on 2026-10-20 (gpt-4.1's one was `partial_cancel`, "forget the tests" while a runbook lookup is also running), 2, 0 and 0 on 2026-10-14 and 16, 1 and 0 before the rewrite.
 
 ### Known failures
 
@@ -194,11 +214,32 @@ The scenarios' stops and corrections (`cancel_delegation`, `implicit_cancel`, `p
 
 ## Audio evals
 
-The thirteen audio scenarios on all five bots, one run each, without predictive delegation (2026-10-20, with the `AFTER DELEGATING` paragraph before its rule for a reply that follows an acknowledgement made with the call). The user's voice is synthesized with Kokoro, the bot's speech transcribed with Moonshine, and the judge is the release suite's audio judge.
+The thirteen audio scenarios on all five bots, one run each, without predictive delegation (2026-10-22, with this `AFTER DELEGATING` paragraph). The user's voice is synthesized with Kokoro, the bot's speech transcribed with Moonshine, and the judge is the release suite's audio judge.
 
 ```bash
 uv run python -m pipecat.evals suite evals/llm-with-backend/manifest.yaml -s audio
 ```
+
+| scenario                           | anthropic-frontend | gemini-live-frontend | google-frontend | openai-realtime-frontend | openai-responses-frontend |
+| ---------------------------------- | ------------------ | -------------------- | --------------- | ------------------------ | ------------------------- |
+| `accepted_offer/audio`             | 1/1                | 1/1                  | 1/1             | 1/1                      | 1/1                       |
+| `aside_while_waiting/audio`        | 0/1                | 0/1                  | 0/1             | 1/1                      | 0/1                       |
+| `cancel_and_replace/audio`         | 0/1                | 1/1                  | 1/1             | 1/1                      | 1/1                       |
+| `cancel_delegation/audio`          | 0/1                | 1/1                  | 1/1             | 0/1                      | 1/1                       |
+| `concurrent_delegations/audio`     | 1/1                | 0/1                  | 0/1             | 0/1                      | 0/1                       |
+| `delegate_ack/audio`               | 1/1                | 1/1                  | 1/1             | 1/1                      | 1/1                       |
+| `delegate_with_aside/audio`        | 0/1                | 1/1                  | 1/1             | 1/1                      | 1/1                       |
+| `frontend_only/audio`              | 1/1                | 1/1                  | 1/1             | 1/1                      | 1/1                       |
+| `implicit_cancel/audio`            | 0/1                | 1/1                  | 1/1             | 0/1                      | 0/1                       |
+| `partial_cancel/audio`             | 1/1                | 1/1                  | 1/1             | 1/1                      | 1/1                       |
+| `progress_inquiry/audio`           | 1/1                | 0/1                  | 1/1             | 1/1                      | 1/1                       |
+| `result_during_interruption/audio` | 1/1                | 1/1                  | 1/1             | 1/1                      | 1/1                       |
+| `superseding_delegation/audio`     | 1/1                | 1/1                  | 1/1             | 1/1                      | 1/1                       |
+| **total**                          | **8/13**           | **10/13**            | **11/13**       | **10/13**                | **10/13**                 |
+
+One run per scenario is noisy. Across the five bots, 49/65, against 50/65 on 2026-10-20. The scenarios' stops and corrections with no `delegate` call: one, gpt-4.1 on `implicit_cancel`, where the transcription split the stop in two ("Oh, wait. Actually, don't bother." then "Sam already ran them on his branch this morning, and they were fine.") and the model answered the pair without the call; rerun five times, it did so in 1 of 5 with this paragraph and 2 of 5 with the paragraph before it, so the split is what trips it, not the wording. The other failures: the judge answering "continue" to a correct acknowledgement (gpt-4.1's `aside_while_waiting`, Gemini Live's `progress_inquiry`), the Claude and OpenAI Realtime frontends adding a line after a stop's acknowledgement, which the absence check catches (4: Claude's `implicit_cancel` is the double acknowledgement itself, "Got it, I'll stop that." then "I've called those off — Sam already ran them on his branch this morning and they came back clean, so you're all set.", the one stop the frontend replay also shows unchanged; its `cancel_delegation` adds "No update yet — I'll let you know as soon as I have something."), `aside_while_waiting` on Claude and Google, where the backend's fix outran the scenario's window, and on Gemini Live, which transcribed Canberra as "Kambara", `concurrent_delegations`, and on Claude `cancel_and_replace`, where the replacement's result missed the window, and `delegate_with_aside`, where the joke never came.
+
+The same pass on 2026-10-20, with the paragraph before its rule for a reply that follows an acknowledgement made with the call:
 
 | scenario                           | anthropic-frontend | gemini-live-frontend | google-frontend | openai-realtime-frontend | openai-responses-frontend |
 | ---------------------------------- | ------------------ | -------------------- | --------------- | ------------------------ | ------------------------- |
