@@ -105,6 +105,26 @@ uv run python scripts/llm-with-backend/tuning/results_table.py <runs-dir>/<run>/
 | `aside_while_waiting/text`    | 5/5                | 5/5             | 5/5                       |
 | `cancel_and_replace/text`     | 5/5                | 5/5             | 5/5                       |
 | `cancel_delegation/text`      | 4/5                | 5/5             | 5/5                       |
+| `concurrent_delegations/text` | 1/5                | 0/5             | 1/5                       |
+| `delegate_ack/text`           | 5/5                | 5/5             | 5/5                       |
+| `delegate_with_aside/text`    | 5/5                | 5/5             | 5/5                       |
+| `frontend_only/text`          | 5/5                | 5/5             | 5/5                       |
+| `implicit_cancel/text`        | 3/5                | 5/5             | 5/5                       |
+| `partial_cancel/text`         | 5/5                | 5/5             | 4/5                       |
+| `progress_inquiry/text`       | 5/5                | 5/5             | 5/5                       |
+| `superseding_delegation/text` | 5/5                | 5/5             | 5/5                       |
+| **total**                     | **53/60**          | **55/60**       | **55/60**                 |
+
+`concurrent_delegations` fails on every frontend at every baseline. Claude's two stop failures are one shape: it confirms the stop alongside its `delegate` call and says nothing in the run after it, as the paragraph asks, while the scenario judges only after the call, having no `check_from: turn_start`. Its third, on `implicit_cancel`, is the "don't bother" turn the frontend replay shows said twice with every paragraph: the reply after the call offered a fresh test run later, which the judge rejects as promising further work. gpt-4.1 answered one `partial_cancel` stop without the `delegate` call, the scenario it has missed before.
+
+The same sweep earlier on 2026-10-22, with the rule phrased as "finish that thought and stop":
+
+| scenario                      | anthropic-frontend | google-frontend | openai-responses-frontend |
+| ----------------------------- | ------------------ | --------------- | ------------------------- |
+| `accepted_offer/text`         | 5/5                | 5/5             | 5/5                       |
+| `aside_while_waiting/text`    | 5/5                | 5/5             | 5/5                       |
+| `cancel_and_replace/text`     | 5/5                | 5/5             | 5/5                       |
+| `cancel_delegation/text`      | 4/5                | 5/5             | 5/5                       |
 | `concurrent_delegations/text` | 0/5                | 1/5             | 0/5                       |
 | `delegate_ack/text`           | 5/5                | 5/5             | 5/5                       |
 | `delegate_with_aside/text`    | 5/5                | 5/5             | 5/5                       |
@@ -215,7 +235,7 @@ The classifier, live, from the bots' logs: every request and stop scored 0.88 or
 
 ### Stops
 
-The scenarios' stops and corrections (`cancel_delegation`, `implicit_cancel`, `partial_cancel` and `superseding_delegation`, 20 runs per frontend) with no `delegate` call: gpt-4.1 0, Claude 0 and Gemini 0 (2026-10-22), against 1, 0 and 0 on 2026-10-20 (gpt-4.1's one was `partial_cancel`, "forget the tests" while a runbook lookup is also running), 2, 0 and 0 on 2026-10-14 and 16, 1 and 0 before the rewrite.
+The scenarios' stops and corrections (`cancel_delegation`, `implicit_cancel`, `partial_cancel` and `superseding_delegation`, 20 runs per frontend) with no `delegate` call: gpt-4.1 1, Claude 0 and Gemini 0 (2026-10-22; gpt-4.1's one was `partial_cancel`), against 0, 0 and 0 earlier that day, 1, 0 and 0 on 2026-10-20 (gpt-4.1's one was `partial_cancel`, "forget the tests" while a runbook lookup is also running), 2, 0 and 0 on 2026-10-14 and 16, 1 and 0 before the rewrite.
 
 ### Known failures
 
@@ -229,6 +249,27 @@ The thirteen audio scenarios on all five bots, one run each, without predictive 
 ```bash
 uv run python -m pipecat.evals suite evals/llm-with-backend/manifest.yaml -s audio
 ```
+
+| scenario                           | anthropic-frontend | gemini-live-frontend | google-frontend | openai-realtime-frontend | openai-responses-frontend |
+| ---------------------------------- | ------------------ | -------------------- | --------------- | ------------------------ | ------------------------- |
+| `accepted_offer/audio`             | 1/1                | 1/1                  | 1/1             | 1/1                      | 1/1                       |
+| `aside_while_waiting/audio`        | 0/1                | 1/1                  | 0/1             | 1/1                      | 0/1                       |
+| `cancel_and_replace/audio`         | 1/1                | 1/1                  | 1/1             | 1/1                      | 1/1                       |
+| `cancel_delegation/audio`          | 1/1                | 1/1                  | 1/1             | 0/1                      | 1/1                       |
+| `concurrent_delegations/audio`     | 0/1                | 0/1                  | 1/1             | 0/1                      | 1/1                       |
+| `delegate_ack/audio`               | 1/1                | 1/1                  | 1/1             | 1/1                      | 1/1                       |
+| `delegate_with_aside/audio`        | 1/1                | 1/1                  | 1/1             | 1/1                      | 1/1                       |
+| `frontend_only/audio`              | 1/1                | 1/1                  | 1/1             | 1/1                      | 1/1                       |
+| `implicit_cancel/audio`            | 0/1                | 1/1                  | 0/1             | 1/1                      | 0/1                       |
+| `partial_cancel/audio`             | 1/1                | 1/1                  | 0/1             | 1/1                      | 1/1                       |
+| `progress_inquiry/audio`           | 1/1                | 1/1                  | 1/1             | 1/1                      | 1/1                       |
+| `result_during_interruption/audio` | 1/1                | 1/1                  | 1/1             | 0/1                      | 1/1                       |
+| `superseding_delegation/audio`     | 1/1                | 1/1                  | 1/1             | 1/1                      | 1/1                       |
+| **total**                          | **10/13**          | **12/13**            | **10/13**       | **10/13**                | **11/13**                 |
+
+One run per scenario is noisy. Across the five bots, 53/65, against 49/65 earlier the same day and 50/65 on 2026-10-20. The scenarios' stops and corrections with no `delegate` call: one, gpt-4.1 on `implicit_cancel`, the transcription split described below. The Claude and OpenAI Realtime frontends each added a line after a stop's acknowledgement, which the absence check catches: Claude's `implicit_cancel` is the "don't bother" turn again, "Sounds like those are called off. let me know if there's anything else you need." after the confirmation with the call; OpenAI Realtime's `cancel_delegation` is "All set. I've stopped the effort to fix the retry test, and no changes will be made." Gemini closed its `implicit_cancel` acknowledgement with an offer, and the judge answered "continue" to its `partial_cancel` acknowledgement. OpenAI Realtime's `result_during_interruption` left the interrupted runbook answer unsaid. `aside_while_waiting` failed on three bots at the backend, which did not apply its patch within the turn's 150 s, and `concurrent_delegations` on three, as in every pass.
+
+The same pass earlier on 2026-10-22, with the rule phrased as "finish that thought and stop":
 
 | scenario                           | anthropic-frontend | gemini-live-frontend | google-frontend | openai-realtime-frontend | openai-responses-frontend |
 | ---------------------------------- | ------------------ | -------------------- | --------------- | ------------------------ | ------------------------- |
