@@ -14,13 +14,13 @@ and both open a session with a JSON handshake that the server answers with
 
 import asyncio
 import json
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import aiohttp
 
 KRISP_REST_BASE_URL = "https://api.developers.krisp.ai"
 SESSION_TOKEN_PATH = "/v2/sdk/tokens/session"
-TTS_VOICES_PATH = "/v2/sdk/tts/voices"
 
 HANDSHAKE_TIMEOUT = 10.0
 
@@ -114,98 +114,6 @@ async def create_session_token(
     return token
 
 
-async def list_tts_voices(
-    api_key: str,
-    *,
-    model_name: str = "krisp-tts-v1",
-    gender: str | None = None,
-    language: str | None = None,
-    search: str | None = None,
-    base_url: str = KRISP_REST_BASE_URL,
-    session: aiohttp.ClientSession | None = None,
-) -> list[dict[str, Any]]:
-    """Fetch the Krisp TTS voice catalog.
-
-    Each voice's ``name`` is the value to use as the TTS ``voice`` setting.
-
-    Args:
-        api_key: Krisp master API key.
-        model_name: TTS model to list voices for.
-        gender: Optional filter: ``female``, ``male`` or ``neutral``.
-        language: Optional filter to voices that can speak this language.
-        search: Optional case-insensitive substring match on the voice name.
-        base_url: Krisp REST API base URL.
-        session: Optional aiohttp session to reuse.
-
-    Returns:
-        The catalog entries.
-    """
-    params = {"model_name": model_name, "gender": gender, "language": language, "search": search}
-    body = await _request_json(
-        "GET",
-        f"{base_url}{TTS_VOICES_PATH}",
-        api_key,
-        params={k: v for k, v in params.items() if v is not None},
-        session=session,
-    )
-    return body.get("data") or []
-
-
-async def select_tts_voice(
-    api_key: str,
-    language: str,
-    *,
-    voice: str | None = None,
-    gender: str | None = None,
-    model_name: str = "krisp-tts-v1",
-    base_url: str = KRISP_REST_BASE_URL,
-    session: aiohttp.ClientSession | None = None,
-) -> str:
-    """Pick a catalog voice that can speak ``language``.
-
-    Call it before creating :class:`~pipecat.services.krisp.tts.KrispTTSService`
-    and pass the result as the ``voice`` setting together with the same
-    ``language``, so the session handshake isn't rejected with
-    ``invalid_voice`` or ``invalid_language``.
-
-    Args:
-        api_key: Krisp master API key.
-        language: Language the bot will speak, e.g. ``de-DE``.
-        voice: Preferred voice name. It is validated against the catalog and
-            returned in its canonical spelling.
-        gender: Optional filter used when no ``voice`` is given.
-        model_name: TTS model to select a voice for.
-        base_url: Krisp REST API base URL.
-        session: Optional aiohttp session to reuse.
-
-    Returns:
-        The voice name to pass as the ``voice`` setting.
-
-    Raises:
-        KrispServiceError: If no voice (or not the preferred one) speaks
-            ``language``.
-    """
-    voices = await list_tts_voices(
-        api_key,
-        model_name=model_name,
-        language=language,
-        gender=None if voice else gender,
-        base_url=base_url,
-        session=session,
-    )
-    names = [v["name"] for v in voices if v.get("name")]
-    if voice:
-        for name in names:
-            if name.lower() == voice.lower():
-                return name
-        raise KrispServiceError(
-            f"Voice {voice!r} does not speak {language}; available: {', '.join(names) or 'none'}"
-        )
-    if not names:
-        raise KrispServiceError(f"No {model_name} voice speaks {language}")
-    return names[0]
-
-
 async def _request_json(
     method: str,
     url: str,
@@ -255,14 +163,51 @@ async def open_session(websocket, handshake: dict[str, Any]) -> dict[str, Any]:
 
     Raises:
         KrispServiceError: If the server answers with an ``error`` message.
+        TimeoutError: If ``ready`` doesn't arrive within ``HANDSHAKE_TIMEOUT``.
     """
     await websocket.send(json.dumps(handshake))
-    while True:
-        raw = await asyncio.wait_for(websocket.recv(), HANDSHAKE_TIMEOUT)
-        if isinstance(raw, bytes):
-            continue
-        msg = json.loads(raw)
-        if msg.get("type") == "ready":
-            return msg
-        if msg.get("type") == "error":
-            raise KrispServiceError.from_message(msg)
+    # One deadline for the whole handshake, so other messages can't extend it.
+    async with asyncio.timeout(HANDSHAKE_TIMEOUT):
+        while True:
+            raw = await websocket.recv()
+            if isinstance(raw, bytes):
+                continue
+            msg = json.loads(raw)
+            if msg.get("type") == "ready":
+                return msg
+            if msg.get("type") == "error":
+                raise KrispServiceError.from_message(msg)
+
+
+async def connect_session(
+    connect: Callable[..., Awaitable[Any]],
+    url: str,
+    *,
+    api_key: str,
+    usage_type: str,
+    rest_base_url: str,
+    handshake: dict[str, Any],
+) -> tuple[Any, dict[str, Any]]:
+    """Create a session token, open the WebSocket and complete the handshake.
+
+    Args:
+        connect: Coroutine function opening the WebSocket, called as
+            ``connect(url, additional_headers=...)``.
+        url: WebSocket endpoint.
+        api_key: Krisp API key used to create the session token.
+        usage_type: Product the token is scoped to (``stt``, ``tts``, ``viva``).
+        rest_base_url: Krisp REST API base URL.
+        handshake: The handshake message.
+
+    Returns:
+        The WebSocket, ready for streaming, and the server's ``ready`` message.
+        The WebSocket is closed if the handshake fails.
+    """
+    token = await create_session_token(api_key, usage_type, base_url=rest_base_url)
+    websocket = await connect(url, additional_headers=session_headers(token))
+    try:
+        ready = await open_session(websocket, handshake)
+    except BaseException:
+        await websocket.close()
+        raise
+    return websocket, ready

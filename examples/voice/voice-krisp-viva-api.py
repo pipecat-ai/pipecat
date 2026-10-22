@@ -11,23 +11,11 @@ This example demonstrates a conversational bot with:
   from incoming audio, in Krisp's cloud instead of the local ``KrispVivaFilter``
 - Krisp STT, whose end-of-turn prediction ends user turns
 - Silero VAD starting user turns (and interrupting the bot)
-- Krisp TTS, with a catalog voice for KRISP_TTS_LANGUAGE
+- Krisp TTS
 
 Required environment variables:
-- KRISP_API_KEY: Krisp master API key (session tokens are created from it)
+- KRISP_API_KEY: Krisp API key (session tokens are created from it)
 - OPENAI_API_KEY: OpenAI API key for LLM
-
-Optional environment variables:
-- KRISP_NOISE_SUPPRESSION_LEVEL: Noise suppression level 0-100 (default: 100)
-- KRISP_TTS_LANGUAGE: language the bot speaks, e.g. de-DE (default: en-US). It
-  is also the STT language hint and the language the LLM is asked to reply in.
-- KRISP_TTS_VOICE: Krisp TTS voice name. Validated against the voice catalog for
-  KRISP_TTS_LANGUAGE; when unset, a catalog voice for that language is used.
-- KRISP_TTS_GENDER: female, male or neutral; narrows the automatic voice choice.
-- KRISP_REST_BASE_URL, KRISP_STT_URL, KRISP_TTS_URL, KRISP_VIVA_API_URL:
-  endpoint overrides, e.g. for staging: https://stage-api.developers.krisp.ai,
-  wss://stage.streaming.krisp.ai/stt, wss://stage.streaming.krisp.ai/tts and
-  wss://stage.streaming.krisp.ai/voice-isolation
 """
 
 import os
@@ -50,7 +38,6 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.krisp.api import KRISP_REST_BASE_URL, select_tts_voice
 from pipecat.services.krisp.stt import KrispSTTService
 from pipecat.services.krisp.tts import KrispTTSService
 from pipecat.services.openai.llm import OpenAILLMService
@@ -63,37 +50,31 @@ from pipecat.workers.runner import WorkerRunner
 load_dotenv(override=True)
 
 
-def _viva_api_filter() -> KrispVivaApiFilter:
-    return KrispVivaApiFilter(
-        suppression_level=float(os.getenv("KRISP_NOISE_SUPPRESSION_LEVEL", "100")),
-    )
-
-
 transport_params = {
     "eval": lambda: EvalTransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        audio_in_filter=_viva_api_filter(),
+        audio_in_filter=KrispVivaApiFilter(),
     ),
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        audio_in_filter=_viva_api_filter(),
+        audio_in_filter=KrispVivaApiFilter(),
     ),
     "livekit": lambda: LiveKitParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        audio_in_filter=_viva_api_filter(),
+        audio_in_filter=KrispVivaApiFilter(),
     ),
     "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        audio_in_filter=_viva_api_filter(),
+        audio_in_filter=KrispVivaApiFilter(),
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        audio_in_filter=_viva_api_filter(),
+        audio_in_filter=KrispVivaApiFilter(),
     ),
 }
 
@@ -101,44 +82,17 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info("Starting bot")
 
-    rest = (
-        {"rest_base_url": os.environ["KRISP_REST_BASE_URL"]}
-        if "KRISP_REST_BASE_URL" in os.environ
-        else {}
-    )
-    stt_url = {"url": os.environ["KRISP_STT_URL"]} if "KRISP_STT_URL" in os.environ else {}
-    tts_url = {"url": os.environ["KRISP_TTS_URL"]} if "KRISP_TTS_URL" in os.environ else {}
-
-    # Pick the voice from the catalog before creating the TTS service, so the
-    # voice and language passed to its handshake are a valid combination.
-    language = os.getenv("KRISP_TTS_LANGUAGE", "en-US")
-    voice = await select_tts_voice(
-        os.environ["KRISP_API_KEY"],
-        language,
-        voice=os.getenv("KRISP_TTS_VOICE"),
-        gender=os.getenv("KRISP_TTS_GENDER"),
-        base_url=rest.get("rest_base_url", KRISP_REST_BASE_URL),
-    )
-    logger.info(f"Krisp TTS voice: {voice} ({language})")
-
-    stt = KrispSTTService(
-        api_key=os.environ["KRISP_API_KEY"],
-        settings=KrispSTTService.Settings(language=language),
-        **rest,
-        **stt_url,
-    )
+    stt = KrispSTTService(api_key=os.environ["KRISP_API_KEY"])
 
     tts = KrispTTSService(
         api_key=os.environ["KRISP_API_KEY"],
-        settings=KrispTTSService.Settings(voice=voice, language=language),
-        **rest,
-        **tts_url,
+        settings=KrispTTSService.Settings(voice="Amy", language="en-US"),
     )
 
     llm = OpenAILLMService(
         api_key=os.environ["OPENAI_API_KEY"],
         settings=OpenAILLMService.Settings(
-            system_instruction=f"You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way. Always reply in the language {language}.",
+            system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
         ),
     )
 

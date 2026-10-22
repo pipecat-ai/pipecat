@@ -11,7 +11,6 @@ each user turn ends; finals for a turn are accumulated and pushed as one
 ``TranscriptionFrame`` when the server sends its ``turn`` message.
 """
 
-import asyncio
 import json
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
@@ -22,7 +21,6 @@ from websockets.protocol import State
 
 from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
-    EndFrame,
     Frame,
     InterimTranscriptionFrame,
     ProposedUserStoppedSpeakingFrame,
@@ -31,12 +29,10 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
-from pipecat.services.krisp.api import (
+from pipecat.services.krisp.common import (
     KRISP_REST_BASE_URL,
     KrispServiceError,
-    create_session_token,
-    open_session,
-    session_headers,
+    connect_session,
 )
 from pipecat.services.settings import STTSettings
 from pipecat.services.stt_service import WebsocketSTTService
@@ -52,16 +48,8 @@ from pipecat.utils.types import NOT_GIVEN, NotGiven
 
 KRISP_STT_URL = "wss://streaming.krisp.ai/stt"
 
-# The API accepts 16 kHz mono PCM only, ideally in 80 ms chunks.
+# The API accepts 16 kHz mono PCM only.
 KRISP_STT_SAMPLE_RATE = 16000
-_CHUNK_BYTES = KRISP_STT_SAMPLE_RATE * 2 * 80 // 1000
-
-# Audio that can't be sent yet (e.g. during a reconnect) is kept and sent once
-# the connection is ready; only the newest 5 seconds are kept.
-_MAX_PENDING_AUDIO_BYTES = KRISP_STT_SAMPLE_RATE * 2 * 5
-
-# How long to wait for the server's ``end`` message after ``end_of_audio``.
-_END_OF_STREAM_TIMEOUT = 3.0
 
 
 @dataclass
@@ -149,11 +137,6 @@ class KrispSTTService(WebsocketSTTService):
 
         self._receive_task = None
         self._input_resampler = create_stream_resampler()
-        self._audio_buffer = bytearray()
-        self._send_lock = asyncio.Lock()
-        # Set once end_of_audio is sent; no audio may follow it.
-        self._audio_ended = False
-        self._end_received = asyncio.Event()
 
         # Transcript state for the current user turn.
         self._final_text = ""
@@ -207,18 +190,6 @@ class KrispSTTService(WebsocketSTTService):
         await super().setup(setup)
         await self._connect()
 
-    async def stop(self, frame: EndFrame):
-        """End the audio stream gracefully, then disconnect.
-
-        Sends ``end_of_audio`` and waits for the server's ``end`` message so the
-        last turn's transcript is delivered before the pipeline ends.
-
-        Args:
-            frame: The end frame.
-        """
-        await self._end_audio_stream()
-        await super().stop(frame)
-
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames, finalizing on VAD stop when turn prediction is off.
 
@@ -240,36 +211,16 @@ class KrispSTTService(WebsocketSTTService):
         Yields:
             None, since transcriptions arrive on the receive task.
         """
-        await self._send_audio(audio)
-        yield None
-
-    async def _send_keepalive(self, silence: bytes):
-        await self._send_audio(silence)
-        self._record_stt_audio_usage(silence)
-
-    async def _send_audio(self, audio: bytes):
         if self.sample_rate != KRISP_STT_SAMPLE_RATE:
             audio = await self._input_resampler.resample(
                 audio, self.sample_rate, KRISP_STT_SAMPLE_RATE
             )
-        # run_stt and the keepalive task both send; the lock keeps a chunk from
-        # being sent twice.
-        async with self._send_lock:
-            if self._audio_ended:
-                return
-            self._audio_buffer.extend(audio)
-            excess = len(self._audio_buffer) - _MAX_PENDING_AUDIO_BYTES
-            if excess > 0:
-                del self._audio_buffer[: excess + excess % 2]
-            while len(self._audio_buffer) >= _CHUNK_BYTES:
-                if not self._websocket or self._websocket.state is not State.OPEN:
-                    break
-                try:
-                    await self._websocket.send(bytes(self._audio_buffer[:_CHUNK_BYTES]))
-                except Exception as e:
-                    logger.warning(f"{self}: send failed: {e}")
-                    break
-                del self._audio_buffer[:_CHUNK_BYTES]
+        if audio and self._websocket and self._websocket.state is State.OPEN:
+            try:
+                await self._websocket.send(audio)
+            except Exception as e:
+                logger.warning(f"{self}: send failed: {e}")
+        yield None
 
     async def _send_json(self, msg: dict):
         if not self._websocket or self._websocket.state is not State.OPEN:
@@ -278,26 +229,6 @@ class KrispSTTService(WebsocketSTTService):
             await self._websocket.send(json.dumps(msg))
         except Exception as e:
             logger.warning(f"{self}: failed to send {msg.get('type')}: {e}")
-
-    async def _end_audio_stream(self):
-        websocket = self._websocket
-        if not websocket or websocket.state is not State.OPEN:
-            return
-        # The server closes the socket after "end"; that close is expected.
-        self._disconnecting = True
-        self._end_received.clear()
-        try:
-            async with self._send_lock:
-                self._audio_ended = True
-                while self._audio_buffer:
-                    await websocket.send(bytes(self._audio_buffer[:_CHUNK_BYTES]))
-                    del self._audio_buffer[:_CHUNK_BYTES]
-                await websocket.send(json.dumps({"type": "end_of_audio"}))
-            await asyncio.wait_for(self._end_received.wait(), _END_OF_STREAM_TIMEOUT)
-        except TimeoutError:
-            logger.warning(f"{self}: no 'end' message within {_END_OF_STREAM_TIMEOUT}s")
-        except Exception as e:
-            logger.warning(f"{self}: failed to end the audio stream: {e}")
 
     def _build_handshake(self) -> dict[str, Any]:
         turn: dict[str, Any] = {"prediction": self._settings.turn_prediction}
@@ -326,11 +257,6 @@ class KrispSTTService(WebsocketSTTService):
 
         await self._connect_websocket()
 
-        # A receive loop that ended (e.g. the server closed the socket) can't
-        # serve the new connection.
-        if self._receive_task and self._receive_task.done():
-            await self.cancel_task(self._receive_task)
-            self._receive_task = None
         if self._websocket and not self._receive_task:
             self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
@@ -349,8 +275,7 @@ class KrispSTTService(WebsocketSTTService):
 
         The server's transcript state goes with the connection, so the turn's
         finals received so far are pushed as a transcription. An open turn
-        stays open for the new connection's turn event to end, and unsent audio
-        stays buffered until the new connection is ready.
+        stays open for the new connection's turn event to end.
 
         Args:
             attempt_number: Current retry attempt number for logging.
@@ -370,17 +295,15 @@ class KrispSTTService(WebsocketSTTService):
                 return
 
             logger.debug(f"Connecting to Krisp STT ({self._url}, tokens: {self._rest_base_url})")
-            token = await create_session_token(self._api_key, "stt", base_url=self._rest_base_url)
-            websocket = await self._websocket_connect(
-                self._url, additional_headers=session_headers(token)
+            websocket, ready = await connect_session(
+                self._websocket_connect,
+                self._url,
+                api_key=self._api_key,
+                usage_type="stt",
+                rest_base_url=self._rest_base_url,
+                handshake=self._build_handshake(),
             )
-            try:
-                ready = await open_session(websocket, self._build_handshake())
-            except Exception:
-                await websocket.close()
-                raise
             # Exposed only once ready: no audio may be sent before that.
-            self._audio_ended = False
             self._websocket = websocket
             logger.debug(f"Connected to Krisp STT (request_id={ready.get('request_id')})")
             await self._call_event_handler("on_connected")
@@ -393,6 +316,7 @@ class KrispSTTService(WebsocketSTTService):
         try:
             if ws and ws.state is State.OPEN:
                 logger.debug("Disconnecting from Krisp STT")
+                await ws.send(json.dumps({"type": "end_of_audio"}))
                 await ws.close()
         except Exception as e:
             await self.push_error(error_msg=f"Error closing websocket: {e}", exception=e)
@@ -402,7 +326,6 @@ class KrispSTTService(WebsocketSTTService):
             await self._call_event_handler("on_disconnected")
 
     def _reset_stream_state(self):
-        self._audio_buffer.clear()
         self._final_text = ""
         self._partial_text = ""
         self._detected_language = None
@@ -430,7 +353,6 @@ class KrispSTTService(WebsocketSTTService):
                 await self._on_turn(msg)
             elif msg_type == "end":
                 await self._push_turn_transcription(msg)
-                self._end_received.set()
             elif msg_type == "error":
                 error = KrispServiceError.from_message(msg)
                 await self.push_error(error_msg=f"Krisp STT error: {error}", exception=error)
@@ -476,6 +398,7 @@ class KrispSTTService(WebsocketSTTService):
         language = self._language()
         self._final_text = ""
         self._partial_text = ""
+        self._detected_language = None
         self._in_turn = False
         if not text:
             return
@@ -494,7 +417,9 @@ class KrispSTTService(WebsocketSTTService):
         if self._detected_language:
             return self._detected_language
         language = self._settings.language
-        return language if isinstance(language, Language) else None
+        if isinstance(language, Language):
+            return language
+        return _parse_language(language if isinstance(language, str) else None)
 
     @traced_stt
     async def _handle_transcription(

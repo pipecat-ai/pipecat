@@ -14,22 +14,27 @@ from aiohttp.test_utils import TestServer
 from websockets.protocol import State
 
 from pipecat.frames.frames import (
+    BotStoppedSpeakingFrame,
+    ErrorFrame,
     InterimTranscriptionFrame,
     ProposedUserStoppedSpeakingFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
     TTSStoppedFrame,
 )
+from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.krisp import common as krisp_common
 from pipecat.services.krisp import stt as krisp_stt
 from pipecat.services.krisp import tts as krisp_tts
-from pipecat.services.krisp.api import (
+from pipecat.services.krisp.common import (
     KrispServiceError,
+    connect_session,
     create_session_token,
     open_session,
-    select_tts_voice,
 )
 from pipecat.services.krisp.stt import KrispSTTService
-from pipecat.services.krisp.tts import KrispTTSService, _spread_words
+from pipecat.services.krisp.tts import KrispTTSService
+from pipecat.services.tts_service import InterruptibleTTSService
 from pipecat.transcriptions.language import Language
 from pipecat.turns.user_start import TranscriptionUserTurnStartStrategy, VADUserTurnStartStrategy
 from pipecat.turns.user_stop import ExternalUserTurnStopStrategy
@@ -120,7 +125,7 @@ async def test_rejected_handshake_makes_the_service_unusable(monkeypatch):
         "type": "error",
         "error": {"code": "invalid_api_key", "status_code": 401, "message": "bad"},
     }
-    monkeypatch.setattr(krisp_stt, "create_session_token", AsyncMock(return_value="tok"))
+    monkeypatch.setattr(krisp_common, "create_session_token", AsyncMock(return_value="tok"))
 
     async def fake_connect(url, **kwargs):
         return _FakeWebsocket([rejection])
@@ -183,48 +188,37 @@ async def test_create_session_token_raises_classified_error():
     assert classify_http_exception(exc_info.value) == ErrorCategory.AUTHORIZATION
 
 
-_CATALOG = [
-    {"name": "Gero", "gender": "male", "languages": ["de-DE"]},
-    {"name": "Amy", "gender": "female", "languages": ["en-US", "de-DE"]},
-]
+@pytest.mark.asyncio
+async def test_handshake_deadline_covers_the_whole_handshake(monkeypatch):
+    monkeypatch.setattr(krisp_common, "HANDSHAKE_TIMEOUT", 0.2)
 
+    class _ChattyWebsocket(_FakeWebsocket):
+        async def recv(self):
+            await asyncio.sleep(0.05)  # each message well within a per-message timeout
+            return json.dumps({"type": "info"})
 
-async def _voices_server(queries: list) -> TestServer:
-    async def handler(request):
-        queries.append(dict(request.query))
-        return web.json_response({"success": True, "data": _CATALOG})
-
-    app = web.Application()
-    app.router.add_get("/v2/sdk/tts/voices", handler)
-    server = TestServer(app)
-    await server.start_server()
-    return server
+    with pytest.raises(TimeoutError):
+        await open_session(_ChattyWebsocket(), {"model": "m"})
 
 
 @pytest.mark.asyncio
-async def test_select_tts_voice_picks_a_voice_for_the_language():
-    queries = []
-    server = await _voices_server(queries)
-    try:
-        base_url = str(server.make_url("")).rstrip("/")
-        voice = await select_tts_voice("master", "de-DE", gender="male", base_url=base_url)
-    finally:
-        await server.close()
+async def test_connect_session_closes_the_socket_when_the_handshake_fails(monkeypatch):
+    monkeypatch.setattr(krisp_common, "create_session_token", AsyncMock(return_value="tok"))
+    ws = _FakeWebsocket([{"type": "error", "error": {"code": "x", "status_code": 400}}])
+    connect = AsyncMock(return_value=ws)
 
-    assert voice == "Gero"
-    assert queries == [{"model_name": "krisp-tts-v1", "language": "de-DE", "gender": "male"}]
+    with pytest.raises(KrispServiceError):
+        await connect_session(
+            connect,
+            "wss://x",
+            api_key="k",
+            usage_type="stt",
+            rest_base_url="https://r",
+            handshake={},
+        )
 
-
-@pytest.mark.asyncio
-async def test_select_tts_voice_validates_the_preferred_voice():
-    server = await _voices_server([])
-    try:
-        base_url = str(server.make_url("")).rstrip("/")
-        assert await select_tts_voice("master", "de-DE", voice="amy", base_url=base_url) == "Amy"
-        with pytest.raises(KrispServiceError, match="'Clara' does not speak de-DE"):
-            await select_tts_voice("master", "de-DE", voice="Clara", base_url=base_url)
-    finally:
-        await server.close()
+    assert connect.call_args.kwargs["additional_headers"] == {"Authorization": "api-key tok"}
+    ws.close.assert_awaited_once()
 
 
 # --- STT --------------------------------------------------------------------
@@ -233,7 +227,7 @@ async def test_select_tts_voice_validates_the_preferred_voice():
 @pytest.mark.asyncio
 async def test_stt_connect_creates_stt_token_and_sends_handshake(monkeypatch):
     create_token = AsyncMock(return_value="tok")
-    monkeypatch.setattr(krisp_stt, "create_session_token", create_token)
+    monkeypatch.setattr(krisp_common, "create_session_token", create_token)
     captured = {}
 
     async def fake_connect(url, **kwargs):
@@ -315,7 +309,6 @@ async def test_stt_end_message_flushes_pending_finals():
 
     (frame,) = _pushed(service)
     assert isinstance(frame, TranscriptionFrame) and frame.text == "bye"
-    assert service._end_received.is_set()
 
 
 @pytest.mark.asyncio
@@ -343,52 +336,6 @@ async def test_stt_recommends_krisp_turn_stop_with_default_turn_start():
 
 
 @pytest.mark.asyncio
-async def test_stt_sends_80ms_chunks():
-    service = _stt()
-    service._sample_rate = 16000
-
-    async for _ in service.run_stt(b"\x01" * 3000):
-        pass
-
-    (call,) = service._websocket.send.call_args_list
-    assert len(call.args[0]) == 2560
-    assert len(service._audio_buffer) == 440
-
-
-@pytest.mark.asyncio
-async def test_stt_keeps_audio_while_disconnected_and_sends_it_once_open():
-    service = _stt()
-    service._sample_rate = 16000
-    service._websocket.state = State.CLOSED
-
-    async for _ in service.run_stt(b"\x01" * 2560 * 2):
-        pass
-
-    service._websocket.send.assert_not_called()
-    assert len(service._audio_buffer) == 2560 * 2
-
-    service._websocket.state = State.OPEN
-    async for _ in service.run_stt(b"\x02" * 2560):
-        pass
-
-    sent = [c.args[0] for c in service._websocket.send.call_args_list]
-    assert sent == [b"\x01" * 2560, b"\x01" * 2560, b"\x02" * 2560]
-    assert not service._audio_buffer
-
-
-@pytest.mark.asyncio
-async def test_stt_keeps_only_the_newest_pending_audio():
-    service = _stt()
-    service._sample_rate = 16000
-    service._websocket.state = State.CLOSED
-
-    async for _ in service.run_stt(b"\x00" * 2 * 16000 * 6):
-        pass
-
-    assert len(service._audio_buffer) == 2 * 16000 * 5
-
-
-@pytest.mark.asyncio
 async def test_stt_reconnect_pushes_pending_finals_and_keeps_the_turn_open(monkeypatch):
     service = _stt([_final(" hello")])
     await service._receive_messages()
@@ -406,7 +353,7 @@ async def test_stt_reconnect_pushes_pending_finals_and_keeps_the_turn_open(monke
 
 @pytest.mark.asyncio
 async def test_stt_websocket_is_exposed_only_after_ready(monkeypatch):
-    monkeypatch.setattr(krisp_stt, "create_session_token", AsyncMock(return_value="tok"))
+    monkeypatch.setattr(krisp_common, "create_session_token", AsyncMock(return_value="tok"))
     service = KrispSTTService(api_key="k")
     seen_during_handshake = []
 
@@ -426,45 +373,69 @@ async def test_stt_websocket_is_exposed_only_after_ready(monkeypatch):
     assert service._websocket is not None
 
 
-def _stt_ending_stream() -> KrispSTTService:
-    """An STT service whose fake server answers end_of_audio with end."""
+@pytest.mark.asyncio
+async def test_stt_sends_each_audio_frame_as_is():
     service = _stt()
     service._sample_rate = 16000
 
-    async def send(message):
-        if isinstance(message, str) and json.loads(message)["type"] == "end_of_audio":
-            service._end_received.set()
-
-    service._websocket.send = AsyncMock(side_effect=send)
-    return service
-
-
-@pytest.mark.asyncio
-async def test_stt_end_of_stream_flushes_in_chunks_then_blocks_audio():
-    service = _stt_ending_stream()
-    service._audio_buffer.extend(b"\x01" * (2560 * 2 + 100))
-
-    await service._end_audio_stream()
-    async for _ in service.run_stt(b"\x02" * 2560):
-        pass
-    await service._send_keepalive(b"\x00" * 3200)
+    for chunk in (b"\x01" * 320, b"\x02" * 640):
+        async for _ in service.run_stt(chunk):
+            pass
 
     sent = [c.args[0] for c in service._websocket.send.call_args_list]
-    assert [len(m) for m in sent[:3]] == [2560, 2560, 100]
-    assert [json.loads(m) for m in sent[3:]] == [{"type": "end_of_audio"}]
+    assert sent == [b"\x01" * 320, b"\x02" * 640]
 
 
 @pytest.mark.asyncio
-async def test_stt_end_of_stream_waits_for_an_in_flight_send():
-    service = _stt_ending_stream()
+async def test_stt_drops_audio_while_disconnected():
+    service = _stt()
+    service._sample_rate = 16000
+    service._websocket.state = State.CLOSED
 
-    async with service._send_lock:
-        end_task = asyncio.create_task(service._end_audio_stream())
-        await asyncio.sleep(0.01)
-        service._websocket.send.assert_not_called()
-    await end_task
+    async for _ in service.run_stt(b"\x01" * 320):
+        pass
 
-    assert service._websocket.send.await_count == 1
+    service._websocket.send.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_stt_disconnect_sends_end_of_audio_then_closes():
+    service = _stt()
+    ws = service._websocket
+
+    await service._disconnect_websocket()
+
+    assert _sent_json(ws) == [{"type": "end_of_audio"}]
+    ws.close.assert_awaited_once()
+    assert service._websocket is None
+
+
+@pytest.mark.asyncio
+async def test_stt_detected_language_does_not_carry_over_to_the_next_turn():
+    service = _stt(
+        [
+            _final(" bonjour", language="fr"),
+            {"type": "turn"},
+            _final(" hello"),
+            {"type": "turn"},
+        ]
+    )
+
+    await service._receive_messages()
+
+    first, second = [f for f in _pushed(service) if isinstance(f, TranscriptionFrame)]
+    assert first.language == Language.FR
+    assert second.language is None
+
+
+@pytest.mark.asyncio
+async def test_stt_string_language_setting_labels_frames():
+    service = _stt([_final(" hello"), {"type": "turn"}], language="en-US")
+
+    await service._receive_messages()
+
+    (frame,) = [f for f in _pushed(service) if isinstance(f, TranscriptionFrame)]
+    assert frame.language == Language.EN_US
 
 
 # --- TTS --------------------------------------------------------------------
@@ -478,9 +449,9 @@ def _tts(messages=()) -> KrispTTSService:
     service.stop_ttfb_metrics = AsyncMock()
     service.stop_all_metrics = AsyncMock()
     service.append_to_audio_context = AsyncMock()
-    service.add_word_timestamps = AsyncMock()
     service.remove_audio_context = AsyncMock()
     service.audio_context_available = lambda ctx: True
+    service.get_active_audio_context_id = lambda: "ctx"
     return service
 
 
@@ -495,7 +466,7 @@ def _appended(service) -> list:
 @pytest.mark.asyncio
 async def test_tts_handshake_uses_voice_language_and_speed(monkeypatch):
     create_token = AsyncMock(return_value="tok")
-    monkeypatch.setattr(krisp_tts, "create_session_token", create_token)
+    monkeypatch.setattr(krisp_common, "create_session_token", create_token)
     captured = {}
 
     async def fake_connect(url, **kwargs):
@@ -515,98 +486,119 @@ async def test_tts_handshake_uses_voice_language_and_speed(monkeypatch):
     assert handshake == {
         "model": "krisp-tts-v1",
         "voice": "Gero",
-        "word_label_exporting": False,
         "language": "de-DE",
         "speed": 1.05,
     }
 
 
 @pytest.mark.asyncio
-async def test_tts_sends_text_then_end_of_sentence():
+async def test_tts_is_interruptible():
+    assert isinstance(KrispTTSService(api_key="k"), InterruptibleTTSService)
+
+
+@pytest.mark.asyncio
+async def test_tts_run_tts_sends_only_text():
     service = _tts()
 
     assert await _run_tts(service, "Hello there.", "ctx") == [None]
 
-    assert _sent_json(service._websocket) == [
-        {"type": "text", "text": "Hello there."},
-        {"type": "end_of_sentence"},
-    ]
+    assert _sent_json(service._websocket) == [{"type": "text", "text": "Hello there."}]
 
 
 @pytest.mark.asyncio
-async def test_tts_routes_audio_and_finishes_flushed_context():
-    one_second = b"\x00\x00" * 24000
-    service = _tts(
-        [
-            one_second,
-            {"type": "end_of_sentence", "spoken_text": "Hi there."},
-            one_second,
-            {"type": "end_of_sentence", "spoken_text": "Bye."},
-        ]
-    )
-    await _run_tts(service, "Hi there.", "ctx")
-    await _run_tts(service, "Bye.", "ctx")
-    await service.flush_audio("ctx")
+async def test_tts_routes_audio_to_the_active_context():
+    service = _tts([b"\x00\x00" * 240])
 
     await service._receive_messages()
 
-    appended = _appended(service)
-    assert [type(f) for _, f in appended] == [TTSAudioRawFrame, TTSAudioRawFrame, TTSStoppedFrame]
-    assert all(ctx == "ctx" for ctx, _ in appended)
-    words = [c.args[0] for c in service.add_word_timestamps.call_args_list]
-    assert words == [[("Hi", 0.0), ("there.", 0.25)], [("Bye.", 1.0)]]
+    ((ctx, frame),) = _appended(service)
+    assert ctx == "ctx" and isinstance(frame, TTSAudioRawFrame)
+    assert frame.audio == b"\x00\x00" * 240
+
+
+@pytest.mark.asyncio
+async def test_tts_ends_the_context_after_flush_and_every_text_answered():
+    service = _tts()
+    await _run_tts(service, "Hello there.", "ctx")
+    await _run_tts(service, "How are you?", "ctx")
+    await service.flush_audio("ctx")
+    service._websocket._messages = [json.dumps({"type": "end_of_sentence"})]
+
+    await service._receive_messages()  # first sentence answered: not done yet
+    assert _appended(service) == []
+
+    service._websocket._messages = [
+        json.dumps({"type": "end_of_sentence"}),
+        json.dumps({"type": "all_processed"}),
+    ]
+    await service._receive_messages()
+
+    ((ctx, frame),) = _appended(service)
+    assert ctx == "ctx" and isinstance(frame, TTSStoppedFrame)
     service.remove_audio_context.assert_awaited_once_with("ctx")
 
 
 @pytest.mark.asyncio
-async def test_tts_interrupt_discards_stale_audio_until_acknowledged():
-    service = _tts()
-    await _run_tts(service, "A long sentence.", "old")
-
-    await service.on_audio_context_interrupted("old")
-    await _run_tts(service, "New turn.", "new")
-    service._websocket._messages = [
-        json.dumps(m) if isinstance(m, dict) else m
-        for m in [
-            b"\x00\x00" * 100,  # in flight before the interrupt: discarded
-            {"type": "end_of_sentence", "spoken_text": "A long"},  # interrupt ack
-            b"\x00\x00" * 100,
-        ]
-    ]
-
+async def test_tts_flush_after_every_text_answered_ends_the_context_at_once():
+    service = _tts([{"type": "end_of_sentence"}])
+    await _run_tts(service, "Hello there.", "ctx")
     await service._receive_messages()
+    assert _appended(service) == []
 
-    assert {"type": "interrupt"} in _sent_json(service._websocket)
+    await service.flush_audio("ctx")
+
     ((ctx, frame),) = _appended(service)
-    assert ctx == "new" and isinstance(frame, TTSAudioRawFrame)
+    assert ctx == "ctx" and isinstance(frame, TTSStoppedFrame)
 
 
 @pytest.mark.asyncio
-async def test_tts_interrupt_when_idle_sends_nothing():
+async def test_tts_disconnect_sends_end_then_closes():
     service = _tts()
+    service.remove_active_audio_context = AsyncMock()
+    ws = service._websocket
 
-    await service.on_audio_context_interrupted("ctx")
+    await service._disconnect_websocket()
 
-    service._websocket.send.assert_not_called()
-
-
-def test_spread_words_by_length():
-    assert _spread_words("ab cd", 1.0, 2.0) == [("ab", 1.0), ("cd", 1.5)]
-    assert _spread_words("   ", 0.0, 1.0) == []
+    assert _sent_json(ws) == [{"type": "end"}]
+    ws.close.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_tts_connect_replaces_a_finished_receive_task(monkeypatch):
-    service = KrispTTSService(api_key="k")
-    finished = AsyncMock()
-    finished.done = lambda: True
-    service._receive_task = finished
-    service.cancel_task = AsyncMock()
-    service._websocket = _FakeWebsocket()
-    new_task = object()
-    service.create_task = lambda coro, *a, **kw: (coro.close(), new_task)[1]
+async def test_tts_settings_change_while_speaking_waits_for_the_bot_to_stop():
+    service = _tts()
+    service._disconnect = AsyncMock()
+    service._connect = AsyncMock()
+    service._bot_speaking = True
 
-    await service._connect()
+    await service._update_settings(KrispTTSService.Settings(voice="Clara"))
+    service._disconnect.assert_not_called()
 
-    service.cancel_task.assert_awaited_once_with(finished)
-    assert service._receive_task is new_task
+    service._bot_speaking = False
+    await service.process_frame(BotStoppedSpeakingFrame(), FrameDirection.UPSTREAM)
+
+    service._disconnect.assert_awaited_once()
+    service._connect.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_tts_settings_change_when_idle_reconnects_at_once():
+    service = _tts()
+    service._disconnect = AsyncMock()
+    service._connect = AsyncMock()
+
+    await service._update_settings(KrispTTSService.Settings(voice="Clara"))
+
+    service._disconnect.assert_awaited_once()
+    service._connect.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_tts_failed_send_undoes_its_count_and_keeps_the_context():
+    service = _tts()
+    service.send_with_retry = AsyncMock(side_effect=ConnectionError("down"))
+
+    frames = await _run_tts(service, "Hello.", "ctx")
+
+    assert [type(f) for f in frames] == [ErrorFrame, TTSStoppedFrame]
+    assert service._pending_texts == 0
+    service.remove_audio_context.assert_not_called()

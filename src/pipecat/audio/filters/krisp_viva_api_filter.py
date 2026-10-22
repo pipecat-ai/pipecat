@@ -25,12 +25,10 @@ from websockets.protocol import State
 from pipecat.audio.filters.base_audio_filter import BaseAudioFilter
 from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import FilterControlFrame, FilterEnableFrame
-from pipecat.services.krisp.api import (
+from pipecat.services.krisp.common import (
     KRISP_REST_BASE_URL,
     KrispServiceError,
-    create_session_token,
-    open_session,
-    session_headers,
+    connect_session,
 )
 
 KRISP_VIVA_API_URL = "wss://streaming.krisp.ai/voice-isolation"
@@ -73,8 +71,8 @@ class KrispVivaApiFilter(BaseAudioFilter):
         self,
         *,
         api_key: str | None = None,
-        url: str | None = None,
-        rest_base_url: str | None = None,
+        url: str = KRISP_VIVA_API_URL,
+        rest_base_url: str = KRISP_REST_BASE_URL,
         suppression_level: float = 100.0,
         model: str = "VIVA-tel",
         metadata: dict[str, Any] | None = None,
@@ -85,10 +83,9 @@ class KrispVivaApiFilter(BaseAudioFilter):
             api_key: Krisp master API key. Defaults to ``KRISP_API_KEY``. It is
                 only used to create session tokens and is never sent on the
                 WebSocket.
-            url: VIVA API WebSocket endpoint. Defaults to
-                ``KRISP_VIVA_API_URL`` or production.
+            url: VIVA API WebSocket endpoint.
             rest_base_url: Krisp REST API base URL used to create session
-                tokens. Defaults to ``KRISP_REST_BASE_URL`` or production.
+                tokens.
             suppression_level: Noise suppression level, 0-100.
             model: VIVA model.
             metadata: Optional object echoed in the server's ``ready`` message
@@ -101,10 +98,8 @@ class KrispVivaApiFilter(BaseAudioFilter):
                 "environment variable."
             )
         self._api_key = api_key
-        self._url = url or os.getenv("KRISP_VIVA_API_URL") or KRISP_VIVA_API_URL
-        self._rest_base_url = (
-            rest_base_url or os.getenv("KRISP_REST_BASE_URL") or KRISP_REST_BASE_URL
-        )
+        self._url = url
+        self._rest_base_url = rest_base_url
         self._suppression_level = suppression_level
         self._model = model
         self._metadata = metadata
@@ -227,20 +222,21 @@ class KrispVivaApiFilter(BaseAudioFilter):
 
     async def _connect(self):
         logger.debug(f"{self}: connecting to {self._url} (tokens: {self._rest_base_url})")
-        token = await create_session_token(self._api_key, "viva", base_url=self._rest_base_url)
-        websocket = await websocket_connect(self._url, additional_headers=session_headers(token))
-        try:
-            hello: dict[str, Any] = {
-                "model": self._model,
-                "sample_rate": self._api_sample_rate,
-                "suppression_level": self._suppression_level,
-            }
-            if self._metadata is not None:
-                hello["metadata"] = self._metadata
-            ready = await open_session(websocket, hello)
-        except BaseException:
-            await websocket.close()
-            raise
+        hello: dict[str, Any] = {
+            "model": self._model,
+            "sample_rate": self._api_sample_rate,
+            "suppression_level": self._suppression_level,
+        }
+        if self._metadata is not None:
+            hello["metadata"] = self._metadata
+        websocket, ready = await connect_session(
+            websocket_connect,
+            self._url,
+            api_key=self._api_key,
+            usage_type="viva",
+            rest_base_url=self._rest_base_url,
+            handshake=hello,
+        )
         # Exposed only once ready: no audio may be sent before that.
         self._websocket = websocket
         logger.debug(
