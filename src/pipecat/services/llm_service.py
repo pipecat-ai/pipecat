@@ -84,6 +84,7 @@ from pipecat.utils.log_config import _get_llm_context_log_mode, _LLMContextLogMo
 from pipecat.utils.types import assert_given
 
 if TYPE_CHECKING:
+    from pipecat.pipeline.llm_with_backend import _PredictiveDelegationRace
     from pipecat.pipeline.worker import PipelineWorker
     from pipecat.workers.runner import WorkerRunner
 
@@ -401,6 +402,11 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         # Holds a speculative response until its turn is confirmed. Frames are
         # routed through it on the way out, in `push_frame`.
         self._speculation_gate = SpeculationGate(name=f"{self}::SpeculationGate")
+        # Set only on the frontend of an `LLMWithBackend` with predictive
+        # delegation, which can delegate a user's turn early in place of this
+        # service's inference. See "Predictive delegation" in
+        # `pipecat.pipeline.llm_with_backend`.
+        self._llm_with_backend_predictive_delegation: _PredictiveDelegationRace | None = None
         self._warn_turn_completion_settings_are_strategy_owned()
         # The per-tool cancel tools currently advertised, by name.
         self._cancel_tool_names: set[str] = set()
@@ -895,6 +901,9 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         """
         await super().process_frame(frame, direction)
 
+        if self._llm_with_backend_predictive_delegation is not None:
+            await self._llm_with_backend_predictive_delegation.process_frame(self, frame)
+
         if isinstance(frame, InterruptionFrame):
             await self._handle_interruptions(frame)
         elif isinstance(frame, EagerEndOfTurnCancelFrame):
@@ -943,6 +952,10 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             frame: The frame to push.
             direction: The direction of frame pushing.
         """
+        race = self._llm_with_backend_predictive_delegation
+        if race is not None and not race.before_push(frame):
+            return
+
         if isinstance(frame, (LLMTextFrame, LLMFullResponseStartFrame, LLMFullResponseEndFrame)):
             if self._skip_tts is not None:
                 frame.skip_tts = self._skip_tts
@@ -1744,6 +1757,10 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             function_calls: The function calls to execute.
         """
         if len(function_calls) == 0:
+            return
+
+        race = self._llm_with_backend_predictive_delegation
+        if race is not None and not race.before_function_calls():
             return
 
         if self._speculation_gate.is_speculating:
