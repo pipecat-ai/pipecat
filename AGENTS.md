@@ -15,7 +15,7 @@ uv sync --group dev --all-extras --no-extra gstreamer --no-extra local
 # Install pre-commit hooks
 uv run pre-commit install
 
-# Run all tests
+# Run all tests (in parallel, one worker per CPU core; `-n 0` runs them in one process)
 uv run pytest
 
 # Run a single test file

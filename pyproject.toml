@@ -196,6 +196,8 @@ dev = [
     "pytest>=9.0.0,<10",
     "pytest-asyncio>=1.0.0,<2",
     "pytest-aiohttp>=1.0.0,<2",
+    "pytest-cov>=7.0.0,<8",
+    "pytest-xdist>=3.8.0,<4",
     "ruff>=0.12.11,<1",
     "setuptools~=83.0.0",
     "setuptools_scm~=8.3.1",
@@ -228,7 +230,7 @@ where = ["src"]
 ]
 
 [tool.pytest.ini_options]
-addopts = "--verbose"
+addopts = "--verbose -n auto"
 testpaths = ["tests"]
 pythonpath = ["src"]
 asyncio_default_fixture_loop_scope = "function"

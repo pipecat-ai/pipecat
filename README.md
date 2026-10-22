@@ -209,6 +209,8 @@ To run all tests, from the root directory:
 uv run pytest
 ```
 
+Tests run in parallel, one worker per CPU core. Pass `-n 0` to run them in a single process.
+
 Run a specific test suite:
 
 ```bash
