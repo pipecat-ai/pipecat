@@ -366,7 +366,7 @@ class STTService(AIService):
             tagged_spans.append((speaker, start))
             cursor = start + len(text)
 
-        boundaries: list[tuple[_SpeakerT, int]] = [tagged_spans[0]]
+        boundaries: list[tuple[_SpeakerT, int]] = [(tagged_spans[0][0], 0)]
         for speaker, start in tagged_spans[1:]:
             if speaker != boundaries[-1][0]:
                 boundaries.append((speaker, start))
