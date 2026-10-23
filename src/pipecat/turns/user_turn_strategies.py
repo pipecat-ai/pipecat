@@ -32,33 +32,6 @@ from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionConfig
 _S = TypeVar("_S")
 
 
-def default_user_turn_start_strategies() -> list[BaseUserTurnStartStrategy]:
-    """Return the default user turn start strategies.
-
-    Returns ``[VADUserTurnStartStrategy, TranscriptionUserTurnStartStrategy]``.
-    Useful when building a custom strategy list that extends the defaults.
-
-    Example::
-
-        start_strategies = [
-            WakePhraseUserTurnStartStrategy(phrases=["hey pipecat"]),
-            *default_user_turn_start_strategies(),
-        ]
-    """
-    return [VADUserTurnStartStrategy(), TranscriptionUserTurnStartStrategy()]
-
-
-def default_user_turn_stop_strategies() -> list[BaseUserTurnStopStrategy]:
-    """Return the default user turn stop strategies.
-
-    Returns ``[TurnAnalyzerUserTurnStopStrategy(LocalSmartTurnAnalyzerV3)]``.
-    Useful when building a custom strategy list that extends the defaults.
-    """
-    from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
-
-    return [TurnAnalyzerUserTurnStopStrategy(turn_analyzer=LocalSmartTurnAnalyzerV3())]
-
-
 class MergeMode(Enum):
     """How a bot's list of user turn strategies combines with a service's.
 
@@ -96,6 +69,10 @@ class UserTurnStrategiesParams(BaseModel):
             service recommends. Defaults to ``MergeMode.REPLACE``.
         stop_merge_mode: How the bot's stop strategies combine with the ones a
             service recommends. Defaults to ``MergeMode.REPLACE``.
+        start_mode: Whether the turn starts on the first start strategy that
+            decides the user started, or once every start strategy has.
+            Defaults to ``StrategyMode.FIRST``, so speech or a transcript
+            starts a turn on its own.
         stop_mode: Whether the turn ends once every stop strategy has decided the
             user is done, or on the first one that does. With
             ``StrategyMode.ALL``, the user speaking again clears the decisions
@@ -104,6 +81,7 @@ class UserTurnStrategiesParams(BaseModel):
 
     start_merge_mode: MergeMode = MergeMode.REPLACE
     stop_merge_mode: MergeMode = MergeMode.REPLACE
+    start_mode: StrategyMode = StrategyMode.FIRST
     stop_mode: StrategyMode = StrategyMode.ALL
 
     @property
@@ -345,3 +323,30 @@ class EagerUserTurnStrategies(ExternalUserTurnStrategies):
                 speculation_timeout=self.speculation_timeout,
             )
         ]
+
+
+def default_user_turn_start_strategies() -> list[BaseUserTurnStartStrategy]:
+    """Return the default user turn start strategies.
+
+    Returns ``[VADUserTurnStartStrategy, TranscriptionUserTurnStartStrategy]``.
+    Useful when building a custom strategy list that extends the defaults.
+
+    Example::
+
+        start_strategies = [
+            WakePhraseUserTurnStartStrategy(phrases=["hey pipecat"]),
+            *default_user_turn_start_strategies(),
+        ]
+    """
+    return [VADUserTurnStartStrategy(), TranscriptionUserTurnStartStrategy()]
+
+
+def default_user_turn_stop_strategies() -> list[BaseUserTurnStopStrategy]:
+    """Return the default user turn stop strategies.
+
+    Returns ``[TurnAnalyzerUserTurnStopStrategy(LocalSmartTurnAnalyzerV3)]``.
+    Useful when building a custom strategy list that extends the defaults.
+    """
+    from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
+
+    return [TurnAnalyzerUserTurnStopStrategy(turn_analyzer=LocalSmartTurnAnalyzerV3())]

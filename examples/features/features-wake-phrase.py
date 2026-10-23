@@ -28,10 +28,11 @@ from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.livekit.transport import LiveKitParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
-from pipecat.turns.user_start import WakePhraseUserTurnStartStrategy
+from pipecat.turns.user_start import VADUserTurnStartStrategy, WakePhraseUserTurnStartStrategy
 from pipecat.turns.user_turn_strategies import (
+    StrategyMode,
     UserTurnStrategies,
-    default_user_turn_start_strategies,
+    UserTurnStrategiesParams,
 )
 from pipecat.workers.runner import WorkerRunner
 
@@ -93,14 +94,17 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         user_params=LLMUserAggregatorParams(
             user_turn_strategies=UserTurnStrategies(
                 start=[
+                    VADUserTurnStartStrategy(),
                     WakePhraseUserTurnStartStrategy(
                         phrases=["pipecat"],
                         # Timeout before wake phrase must be spoken again
                         timeout=5.0,
                     ),
-                    *default_user_turn_start_strategies(),
                 ]
             ),
+            # A turn starts only once both agree: the user is speaking, and
+            # the wake phrase was heard.
+            user_turn_strategies_params=UserTurnStrategiesParams(start_mode=StrategyMode.ALL),
             vad_analyzer=SileroVADAnalyzer(),
         ),
     )
