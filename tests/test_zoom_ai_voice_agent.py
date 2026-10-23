@@ -848,6 +848,75 @@ async def test_extra_listen_fields_are_left_out_once_the_session_is_configured()
 
 
 @pytest.mark.asyncio
+async def test_your_own_provider_is_sent_with_the_model_in_the_first_update_only():
+    service = _service(
+        model="gpt-4.1-mini",
+        provider=events.Provider(type="openai", headers={"X-Api-Key": "k"}),
+    )
+    (first,) = await _session_updates(service)
+    assert first["think"]["provider"] == {
+        "type": "openai",
+        "model": "gpt-4.1-mini",
+        "headers": {"X-Api-Key": "k"},
+    }
+    (later,) = await _session_updates(service)
+    assert "provider" not in later["think"]
+
+
+@pytest.mark.asyncio
+async def test_a_providers_own_model_is_kept_and_a_dict_is_accepted():
+    service = _service(
+        provider={"type": "anthropic", "model": "claude-x", "headers": {"X-Api-Key": "k"}}
+    )
+    (session,) = await _session_updates(service)
+    assert session["think"]["provider"] == {
+        "type": "anthropic",
+        "model": "claude-x",
+        "headers": {"X-Api-Key": "k"},
+    }
+
+
+def test_provider_keys_are_left_out_of_reprs():
+    provider = events.Provider(type="openai", headers={"X-Api-Key": "secret-key"})
+    assert "secret-key" not in repr(provider)
+    assert "secret-key" not in repr(ZoomAIVoiceAgentLLMService.Settings(provider=provider))
+
+
+@pytest.mark.asyncio
+async def test_a_rejected_provider_key_ends_the_session_without_reconnecting():
+    service = _service()
+    service.push_error = errors = _ErrorRecorder()  # type: ignore[method-assign]
+    connects: list[int] = []
+
+    async def _connect():
+        connects.append(1)
+
+    async def _on_error(error, event_ids):
+        pass
+
+    service._connect = _connect  # type: ignore[method-assign]
+    service._websocket = _ZoomAIVoiceAgentWebSocket(
+        _FakeWebSocket(
+            [
+                {
+                    "type": "error",
+                    "error": {
+                        "type": "invalid_connection_credentials",
+                        "message": "Provider rejected the BYOK credentials at setup",
+                    },
+                }
+            ]
+        ),
+        on_error=_on_error,
+    )
+    await service._receive_task_handler()
+    assert connects == []
+    assert errors.messages == [
+        "Zoom Voice Agent session ended: Provider rejected the BYOK credentials at setup"
+    ]
+
+
+@pytest.mark.asyncio
 async def test_enveloped_events_are_unwrapped():
     adapted, _ = await _adapt(
         [{"type": "session.updated", "payload": {"type": "session.updated", "session": {}}}]

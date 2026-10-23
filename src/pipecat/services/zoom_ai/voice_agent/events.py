@@ -23,7 +23,7 @@ See https://developers.zoom.us/docs/ai-services/voice-agent/live-mode/
 
 from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class _ZoomModel(BaseModel):
@@ -90,14 +90,16 @@ class Provider(_ZoomModel):
             to use your own key for that provider's model.
         model: Model ID, for example ``"gemma-4"``.
         headers: Headers for the provider, such as ``{"X-Api-Key": "..."}`` with
-            your own provider key.
+            your own provider key. Required for ``"openai"`` and
+            ``"anthropic"``. Left out of the model's ``repr``, so the key isn't
+            logged.
         metadata: The provider model's limits, such as ``context_window`` and
             ``max_output_tokens``.
     """
 
     type: Literal["zoom", "openai", "anthropic"] = "zoom"
     model: str | None = None
-    headers: dict[str, str] | None = None
+    headers: dict[str, str] | None = Field(default=None, repr=False)
     metadata: dict[str, Any] | None = None
 
 

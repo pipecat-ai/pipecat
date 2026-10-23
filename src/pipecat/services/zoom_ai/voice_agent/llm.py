@@ -41,6 +41,9 @@ from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
 from . import events
 
+# The default model, hosted by Zoom.
+_ZOOM_MODEL = "gemma-4"
+
 # The OpenAI Realtime service plays agent audio at 24 kHz; the Voice Agent speaks at 16 kHz.
 _PLAYBACK_SAMPLE_RATE = 24000
 _VOICE_AGENT_OUTPUT_RATE = 16000
@@ -49,6 +52,10 @@ _VOICE_AGENT_OUTPUT_RATE = 16000
 # cancelling a response that already finished, a response requested while another
 # runs).
 _EXPECTED_ERRORS = ("no active response", "already has an active response")
+
+# Errors that end the session for good, though the server doesn't mark them fatal:
+# the provider refused your own provider key, which no new session would change.
+_TERMINAL_ERROR_TYPES = ("invalid_connection_credentials",)
 
 # Client messages must stay small; audio is appended in chunks well under the limit.
 _MAX_APPEND_BYTES = 16384
@@ -73,6 +80,12 @@ class ZoomAIVoiceAgentLLMSettings(OpenAIRealtimeLLMService.Settings):
     model (``think``), as for other realtime services.
 
     Parameters:
+        provider: Where the model runs: Zoom's own models (``None``, the
+            default), or your own OpenAI or Anthropic account, with your
+            provider key in ``headers``, e.g. ``Provider(type="openai",
+            headers={"X-Api-Key": "..."})``. ``model`` names the provider's
+            model unless the provider sets its own. Fixed once the session is
+            configured.
         listen: How the agent listens: the caller's language and vocabulary.
             Fixed once the session is configured. ``None`` takes the server's
             defaults.
@@ -80,16 +93,18 @@ class ZoomAIVoiceAgentLLMSettings(OpenAIRealtimeLLMService.Settings):
             default voice.
 
     ``extra`` holds Voice Agent session fields this class has no setting for,
-    shaped like the ``session`` of ``session.update`` (e.g.
-    ``{"think": {"provider": {"type": "openai", ...}}}``). It is merged into each
+    shaped like the ``session`` of ``session.update``. It is merged into each
     session update over the settings above.
     """
 
+    provider: events.Provider | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     listen: events.Listen | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     speak: events.Speak | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
     def __post_init__(self):
         # Accept the settings as plain dicts too, e.g. a Voice Agent session's JSON.
+        if isinstance(self.provider, Mapping):
+            self.provider = events.Provider.model_validate(self.provider)
         if isinstance(self.listen, Mapping):
             self.listen = events.Listen.model_validate(self.listen)
         if isinstance(self.speak, Mapping):
@@ -142,8 +157,9 @@ class _ZoomAIVoiceAgentWebSocket:
       ``response.status_details``, the usage details, ``error.type``).
     - Event types the models don't know are ignored.
     - Non-terminal errors go to ``on_error`` instead of ending the session; only
-      errors marked ``fatal``, and failed ``conversation.item.retrieve`` requests
-      (which the OpenAI service settles itself), are passed on.
+      terminal errors (marked ``fatal``, or a rejected provider key), and failed
+      ``conversation.item.retrieve`` requests (which the OpenAI service settles
+      itself), are passed on.
     - Agent audio is resampled to 24 kHz as one stream per reply: a reply's audio
       arrives in bursts with gaps of up to half a second, so the resampler is never
       cleared between deltas (that would drop audio and restart its filter mid-word,
@@ -198,7 +214,7 @@ class _ZoomAIVoiceAgentWebSocket:
             error = event["error"] = event.get("error") or {}
             error.setdefault("type", "server_error")
             error.setdefault("message", str(error.get("code") or "Zoom Voice Agent error"))
-            if error.get("fatal"):
+            if error.get("fatal") or error["type"] in _TERMINAL_ERROR_TYPES:
                 self.terminal_error = error
             elif str(error.get("event_id") or "").startswith("rci_"):
                 # The error correlates to retrieve_conversation_item(), whose
@@ -286,12 +302,16 @@ class ZoomAIVoiceAgentLLMService(OpenAIRealtimeLLMService):
     output is created right after the call in the conversation, where the Voice
     Agent's model reads it.
 
-    The model and the listen settings are sent in the first session update
-    only; later updates change the instructions, tools and voice. Errors the
-    Voice Agent reports without ending the session are pushed as non-fatal
-    errors. If the session ends unexpectedly (the connection closing, or a
-    session reaching its time limit), the service reconnects and restores the
-    conversation; otherwise it pushes a permanent error.
+    The model runs on Zoom (``gemma-4`` by default), or on your own OpenAI or
+    Anthropic account with ``Settings.provider``. The model, provider and listen
+    settings are sent in the first session update only; later updates change the
+    instructions, tools and voice.
+
+    Errors the Voice Agent reports without ending the session are pushed as
+    non-fatal errors. If the session ends unexpectedly (the connection closing,
+    or a session reaching its time limit), the service reconnects and restores
+    the conversation; otherwise, as when the provider rejects your provider key,
+    it pushes a permanent error.
 
     Example::
 
@@ -330,14 +350,25 @@ class ZoomAIVoiceAgentLLMService(OpenAIRealtimeLLMService):
                 :class:`~pipecat.services.openai.realtime.llm.OpenAIRealtimeLLMService`.
         """
         default_settings = self.Settings(
-            model="gemma-4",
+            model=_ZOOM_MODEL,
             session_properties=openai_events.SessionProperties(),
+            provider=None,
             listen=None,
             speak=None,
         )
         if settings is not None:
             default_settings.apply_update(settings)
         super().__init__(api_key=api_key, base_url=url, settings=default_settings, **kwargs)
+        provider = default_settings.provider
+        if (
+            isinstance(provider, events.Provider)
+            and provider.type != "zoom"
+            and not provider.model
+            and default_settings.model == _ZOOM_MODEL
+        ):
+            logger.warning(
+                f"{self}: set `model` to a {provider.type} model; {_ZOOM_MODEL!r} is Zoom's own"
+            )
         # The model is part of the session configuration, not the URL.
         self.base_url = url
         self._input_sample_rate = 16000
@@ -577,11 +608,19 @@ class ZoomAIVoiceAgentLLMService(OpenAIRealtimeLLMService):
         # The OpenAI service's own handling covers OpenAI-only fields; the session
         # update below is built from this service's settings.
         changed = await super(OpenAIRealtimeLLMService, self)._update_settings(delta)
-        handled = {"session_properties", "system_instruction", "model", "listen", "speak", "extra"}
+        handled = {
+            "session_properties",
+            "system_instruction",
+            "model",
+            "provider",
+            "listen",
+            "speak",
+            "extra",
+        }
         if self._listen_configured:
             if "listen" in changed:
                 logger.warning(f"{self}: listen settings apply to the next session, not this one")
-            if "model" in changed:
+            if changed.keys() & {"model", "provider"}:
                 logger.warning(f"{self}: the model applies to the next session, not this one")
         if changed.keys() & handled:
             await self._send_session_update()
@@ -623,8 +662,15 @@ class ZoomAIVoiceAgentLLMService(OpenAIRealtimeLLMService):
         # only; later updates may not change them.
         first = not self._listen_configured
         think: dict[str, Any] = {}
-        if first and self._settings.model:
-            think["provider"] = events.Provider(model=self._settings.model)
+        if first:
+            provider = self._settings.provider
+            provider = provider.model_copy() if isinstance(provider, events.Provider) else None
+            if provider is None and self._settings.model:
+                provider = events.Provider(model=self._settings.model)
+            elif provider is not None and not provider.model and self._settings.model:
+                provider.model = self._settings.model
+            if provider is not None:
+                think["provider"] = provider
         if instructions is not None:
             think["instructions"] = instructions
         if tools is not None:
