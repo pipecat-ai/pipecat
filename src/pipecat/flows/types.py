@@ -28,8 +28,8 @@ from typing import (
     TypedDict,
 )
 
-from pipecat.adapters.schemas.direct_function import BaseDirectFunctionWrapper, tool_options
-from pipecat.adapters.schemas.function_schema import FunctionSchema
+from pipecat.adapters.llm.schemas.direct_function import BaseDirectFunctionWrapper, tool_options
+from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
 from pipecat.flows.exceptions import InvalidFunctionError
 from pipecat.utils.deprecation import deprecated
 

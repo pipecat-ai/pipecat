@@ -40,7 +40,7 @@ from openai.types.responses import (
 from pydantic import BaseModel
 from websockets.exceptions import ConnectionClosed
 
-from pipecat.adapters.services.open_ai_responses_adapter import (
+from pipecat.adapters.llm.services.open_ai_responses_adapter import (
     OpenAIResponsesLLMAdapter,
     OpenAIResponsesLLMInvocationParams,
 )

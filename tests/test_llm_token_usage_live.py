@@ -35,7 +35,7 @@ from typing import Any
 import pytest
 from dotenv import dotenv_values
 
-from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
+from pipecat.adapters.llm.schemas.tools_schema import AdapterType, ToolsSchema
 from pipecat.frames.frames import ErrorFrame, LLMContextFrame, MetricsFrame
 from pipecat.metrics.metrics import LLMTokenUsage, LLMUsageMetricsData
 from pipecat.pipeline.worker import PipelineParams

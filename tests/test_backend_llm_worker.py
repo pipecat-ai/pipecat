@@ -18,7 +18,7 @@ from typing import Any
 
 import pytest
 
-from pipecat.adapters.schemas.direct_function import tool_options
+from pipecat.adapters.llm.schemas.direct_function import tool_options
 from pipecat.bus.messages import BusJobRequestMessage
 from pipecat.frames.frames import (
     Frame,
