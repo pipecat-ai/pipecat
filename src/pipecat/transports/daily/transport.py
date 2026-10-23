@@ -1860,8 +1860,14 @@ class DailyTransportClient(EventHandler):
             # Wait to process any callback until we are joined.
             await self._joined_event.wait()
             (callback, *args) = await queue.get()
-            await callback(*args)
-            queue.task_done()
+            # A failing callback must not end this task, or every later
+            # callback on this queue would be dropped.
+            try:
+                await callback(*args)
+            except Exception:
+                logger.exception(f"{self} uncaught exception in callback {callback.__name__}")
+            finally:
+                queue.task_done()
 
     async def _flush_join_messages(self):
         """Send any messages that were queued before join completed."""
