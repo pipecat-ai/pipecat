@@ -784,6 +784,7 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
         await self._ws_send(event.model_dump(exclude_none=True))
 
     async def _auth_headers(self) -> dict[str, str]:
+        """Return the headers that authenticate the WebSocket connection."""
         return {"Authorization": f"Bearer {self.api_key}"}
 
     async def _connect(self):
@@ -1095,6 +1096,7 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
             input_details = usage.input_token_details
             output_details = usage.output_token_details
             cached_details = input_details.cached_tokens_details if input_details else None
+            cached_audio_tokens = cached_details.audio_tokens if cached_details else None
             tokens = LLMTokenUsage(
                 prompt_tokens=usage.input_tokens or 0,
                 completion_tokens=usage.output_tokens or 0,
@@ -1102,9 +1104,7 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
                 cache_read_input_tokens=input_details.cached_tokens if input_details else None,
                 input_audio_tokens=input_details.audio_tokens if input_details else None,
                 output_audio_tokens=output_details.audio_tokens if output_details else None,
-                cache_read_input_audio_tokens=cached_details.audio_tokens
-                if cached_details
-                else None,
+                cache_read_input_audio_tokens=cached_audio_tokens,
             )
             await self.start_llm_usage_metrics(tokens)
         await self.stop_processing_metrics()
