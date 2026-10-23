@@ -269,6 +269,11 @@ class KrispSTTService(WebsocketSTTService):
 
         await self._connect_websocket()
 
+        # A receive loop that has ended (e.g. after a permanent error closed the
+        # socket) can't serve the new connection.
+        if self._receive_task and self._receive_task.done():
+            await self.cancel_task(self._receive_task)
+            self._receive_task = None
         if self._websocket and not self._receive_task:
             self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
@@ -299,9 +304,15 @@ class KrispSTTService(WebsocketSTTService):
         return await super()._reconnect_websocket(attempt_number)
 
     async def _do_reconnect(self):
-        """Push the turn's finals so far, then reconnect with the new settings."""
+        """Push the turn's finals so far, then reconnect with the new settings.
+
+        An open turn stays open across the reconnect, so the new connection's
+        turn event still ends it.
+        """
         await self._push_pending_finals()
+        in_turn = self._in_turn
         await super()._do_reconnect()
+        self._in_turn = in_turn
 
     async def _push_pending_finals(self):
         """Push the finals received so far, keeping an open turn open.

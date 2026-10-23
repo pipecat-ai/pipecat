@@ -723,3 +723,41 @@ async def test_tts_new_connection_resets_the_count_and_finishes_a_flushed_reply(
     assert service._pending_texts == 0
     ((ctx, frame),) = _appended(service)
     assert ctx == "ctx" and isinstance(frame, TTSStoppedFrame)
+
+
+@pytest.mark.asyncio
+async def test_stt_settings_reconnect_keeps_an_open_turn_open(monkeypatch):
+    service = _stt([_partial(" hello")])
+    await service._receive_messages()
+    assert service._in_turn
+
+    async def base_do_reconnect(self):
+        self._reset_stream_state()  # what _disconnect() does
+
+    monkeypatch.setattr(
+        "pipecat.services.stt_service.WebsocketSTTService._do_reconnect", base_do_reconnect
+    )
+    await service._do_reconnect()
+    assert service._in_turn
+
+    service._websocket._messages = [json.dumps(_final(" hello")), json.dumps({"type": "turn"})]
+    await service._receive_messages()
+    assert _broadcast(service) == [ProposedUserStoppedSpeakingFrame]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("make", [_stt, _tts])
+async def test_connect_replaces_a_finished_receive_task(make):
+    service = make()
+    finished = AsyncMock()
+    finished.done = lambda: True
+    service._receive_task = finished
+    service.cancel_task = AsyncMock()
+    service._connect_websocket = AsyncMock()
+    new_task = object()
+    service.create_task = lambda coro, *a, **kw: (coro.close(), new_task)[1]
+
+    await service._connect()
+
+    service.cancel_task.assert_awaited_once_with(finished)
+    assert service._receive_task is new_task

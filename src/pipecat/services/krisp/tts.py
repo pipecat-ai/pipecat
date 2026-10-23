@@ -221,6 +221,11 @@ class KrispTTSService(InterruptibleTTSService):
 
         await self._connect_websocket()
 
+        # A receive loop that has ended (e.g. after a permanent error closed the
+        # socket) can't serve the new connection.
+        if self._receive_task and self._receive_task.done():
+            await self.cancel_task(self._receive_task)
+            self._receive_task = None
         if self._websocket and not self._receive_task:
             self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
