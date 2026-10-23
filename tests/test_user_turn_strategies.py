@@ -12,7 +12,6 @@ from pipecat.turns.user_start import (
     VADUserTurnStartStrategy,
 )
 from pipecat.turns.user_stop import (
-    DeferredUserTurnStopStrategy,
     ExternalUserTurnStopStrategy,
     LLMTurnCompletionUserTurnStopStrategy,
     SpeechTimeoutUserTurnStopStrategy,
@@ -92,10 +91,10 @@ class TestFilterIncompleteMerge(unittest.TestCase):
             ExternalUserTurnStrategies(), UserTurnStrategiesParams()
         )
 
-        default, gate = merged.stop or []
-        assert isinstance(default, DeferredUserTurnStopStrategy)
-        self.assertIsInstance(default.inner, TurnAnalyzerUserTurnStopStrategy)
-        self.assertIsInstance(gate, LLMTurnCompletionUserTurnStopStrategy)
+        self.assertEqual(
+            [type(s) for s in merged.stop or []],
+            [TurnAnalyzerUserTurnStopStrategy, LLMTurnCompletionUserTurnStopStrategy],
+        )
 
     def test_extending_adds_only_the_llm_gate(self):
         merged = FilterIncompleteUserTurnStrategies().merge_with(
@@ -116,7 +115,7 @@ class TestFilterIncompleteMerge(unittest.TestCase):
             [type(s) for s in merged.stop or []],
             [
                 ExternalUserTurnStopStrategy,
-                DeferredUserTurnStopStrategy,
+                SpeechTimeoutUserTurnStopStrategy,
                 LLMTurnCompletionUserTurnStopStrategy,
             ],
         )
