@@ -352,7 +352,7 @@
       <div class="consumers">
         <div class="card"><h3>Context <span class="help" data-tip="The assistant message the LLMAssistantAggregator committed to the LLMContext at the end of the turn, and the per-segment parts it was concatenated from. Parts come from the frames’ raw_text, so markup stripped for speech is still recorded." tabindex="0">?</span></h3><div id="ctx"></div></div>
         <div class="card"><h3>Client (RTVI) <span class="help" data-tip="Messages the RTVIObserver sent to the client: a bot-output per segment, with spoken progress as its words play, and, when enabled in the setup, the bot-llm and bot-tts lifecycle and deprecated text messages." tabindex="0">?</span></h3><div id="client"></div></div>
-        <div class="card"><h3>TTS provider <span class="help" data-tip="Each synthesis request the stand-in provider received, after the TTS service’s filters and transforms, with the word timestamps it reported back. Segments that were never sent say why." tabindex="0">?</span></h3><div id="provider"></div></div>
+        <div class="card"><h3>TTS provider <span class="help" data-tip="Each synthesis request the provider received, after the TTS service’s filters and transforms, with the word timestamps it reported back. The provider is the stand-in, or the bot’s own when the service runs live. Segments that were never sent say why." tabindex="0">?</span></h3><div id="provider"></div></div>
       </div>
     </section>
 
@@ -680,7 +680,7 @@
         chips,
         ...(b.notes || []).map((n) => el("div", { class: "hint", style: "color:var(--skipped)", text: n })),
         el("div", { class: "hint", style: "margin-top:6px", text: "The sections below describe what the bot built. The file is imported again on every run, so edits to it show up here." })),
-        { tip: "The bot’s pipeline, in order. Highlighted processors are the bot’s own objects, traced as they are; the LLM, the TTS provider and the transport are stand-ins." }));
+        { tip: "The bot’s pipeline, in order. Highlighted processors are the bot’s own objects, traced as they are; the LLM and the transport are stand-ins, and so is the TTS provider unless the service runs live." }));
     }
 
     // LLMTextProcessor
@@ -701,15 +701,23 @@
     // TTS
     const t = s.tts;
     t.tokenization = t.tokenization || {};
-    const ttsBody = el("div", {},
+    const ttsName = (fromBot && state.bot && state.bot.tts_service) || "TTS service";
+    if (fromBot && t.live == null) t.live = !!(state.bot && state.bot.tts_service);
+    const standIn = el("div", {},
       checkbox(t, "word_timestamps", "provider reports word timestamps"),
+      field("delivery", selectInput(t, "delivery", ["http", "websocket"])));
+    const liveRow = fromBot ? checkbox(t, "live", `run ${ttsName} live, calling its provider`, () => { standIn.hidden = !!t.live; tokBox.hidden = !!t.live; scheduleRun(); }) : null;
+    if (liveRow) liveRow.dataset.tip = "Runs the bot’s own TTS service in the pipeline, so what its provider does with the text is what you see: its word timestamps and tokenization, its rewriting, its audio timing. On by default with a bot. It calls the provider for real and plays the audio at its real pace; turn it off for a quick offline run with the stand-in provider and the bot’s text handling.";
+    const ttsBody = el("div", {},
+      liveRow,
+      standIn,
       el("div", { class: "row" },
-        field("delivery", selectInput(t, "delivery", ["http", "websocket"])),
         fromBot ? ro("aggregation", t.aggregation_mode) : field("aggregation", selectInput(t, "aggregation_mode", ["sentence", "token"]))),
       fromBot ? ro("skip text types", t.skip_text_types) : listInput(t, "skip_text_types", "skip text types", "Comma-separated. Never spoken, e.g. code."),
       fromBot ? ro("transforms (speech only)", tfDesc(t.transforms)) : transformsEditor(t.transforms = t.transforms || [], "transforms (speech only)"),
       fromBot ? ro("filters", t.markdown_filter ? "MarkdownTextFilter" : null) : checkbox(t, "markdown_filter", "deprecated MarkdownTextFilter"),
-      fromBot ? ro("append trailing space", String(!!t.append_trailing_space)) : checkbox(t, "append_trailing_space", "append trailing space"),
+      fromBot ? ro("append trailing space", String(!!t.append_trailing_space)) : checkbox(t, "append_trailing_space", "append trailing space"));
+    const tokBox = el("div", {},
       el("div", { class: "hint", text: "Stand-in provider tokenization" }),
       el("div", { class: "row" },
         field("style", selectInput(t.tokenization, "style", ["words", "split_punctuation", "characters"])),
@@ -717,6 +725,8 @@
       checkbox(t.tokenization, "pre_merge_tokens", "pre-merge punctuation tokens"),
       checkbox(t.tokenization, "includes_inter_frame_spaces", "tokens include their spaces"),
       listInput(t.tokenization, "drop_words", "words the provider never reports"));
+    ttsBody.append(tokBox);
+    standIn.hidden = tokBox.hidden = !!t.live;
     // Own aggregator when no LLMTextProcessor
     const ownAgg = el("div");
     const drawOwn = () => {
@@ -726,7 +736,7 @@
     };
     drawOwn();
     ttsBody.append(ownAgg);
-    form.append(section("TTS service", ttsBody, { tip: "How the real TTSService base class treats each segment: aggregation mode, word timestamps, text types it skips, filters and transforms, and how the stand-in provider tokenizes what it is asked to speak." }));
+    form.append(section("TTS service", ttsBody, { tip: "How the real TTSService base class treats each segment: aggregation mode, word timestamps, text types it skips, filters and transforms, and how the stand-in provider tokenizes what it is asked to speak. With a bot, the service can run live instead, calling its provider." }));
 
     // RTVI
     const r = s.rtvi;
@@ -916,7 +926,7 @@
   function renderWords(tr) {
     const box = $("words"); box.replaceChildren();
     const segs = tr.segments.filter((s) => (s.words || []).length);
-    if (!segs.length) { box.append(el("div", { class: "empty", text: tr.setup && tr.setup.tts && tr.setup.tts.word_timestamps === false ? "The provider reports no word timestamps, so each segment arrives whole after synthesis." : "No word events." })); return; }
+    if (!segs.length) { box.append(el("div", { class: "empty", text: tr.setup && tr.setup.tts && !tr.setup.tts.live && tr.setup.tts.word_timestamps === false ? "The provider reports no word timestamps, so each segment arrives whole after synthesis." : tr.setup && tr.setup.tts && tr.setup.tts.live ? "The live service reported no word timestamps, so each segment arrives whole after synthesis." : "No word events." })); return; }
     segs.forEach((s) => {
       const w = el("div", { class: "words-seg" });
       w.append(el("div", { style: "display:flex;gap:6px;align-items:center;margin-bottom:4px" }, typeBadge(s.text_type), el("span", { class: "tiny", text: `segment ${s.segment_id} · "${s.segment_text}"` })));
@@ -940,13 +950,13 @@
     llm_text_processor: ["LLMTextProcessor", "",
       "The real LLMTextProcessor. Feeds each chunk character by character into its text aggregator; when the aggregator cuts (a sentence, a pattern pair…) it applies its transforms and pushes an AggregatedTextFrame. This is the first split: the frame’s raw_text goes to the context, its text to everyone else."],
     tts: ["TTSService", "",
-      "The real TTSService base class with a stand-in provider. Takes a segment, trims it, skips configured text types, applies its own transforms (the second split: only the provider hears them), sends it to the provider and relays the reported words as TTSTextFrames with timestamps."],
+      "The real TTSService base class with a stand-in provider, or the bot’s own service when run live. Takes a segment, trims it, skips configured text types, applies its own transforms (the second split: only the provider hears them), sends it to the provider and relays the reported words as TTSTextFrames with timestamps."],
     transport: ["Output transport", "plays audio, releases words on time",
       "Output transport. Receives the audio and the timestamped TTSTextFrames, holds each word until its timestamp comes due on the audio clock, then releases it downstream with an AggregatedTextProgressFrame. Also reports when the bot starts and stops speaking."],
     context: ["Context aggregator", "LLMAssistantAggregator",
       "LLMAssistantAggregator. Collects the released words, as their LLM spans, into the assistant turn and commits the message to the LLMContext when the turn ends."],
     provider: ["TTS provider", "stand-in",
-      "Stand-in TTS provider. Answers each request with silent audio and word timestamps, tokenized as the setup describes and offset by the audio already generated in the same context."],
+      "The TTS provider. The stand-in answers each request with silent audio and word timestamps, tokenized as the setup describes and offset by the audio already generated in the same context. When the bot’s service runs live, this is its real provider."],
     client: ["Client", "via RTVIObserver",
       "The RTVI client as the RTVIObserver sees it: the messages it would receive, built from frames the output transport pushed."],
   };
@@ -1124,7 +1134,7 @@
       if (!n.cut && n.ended && !n.buffer) body.append(el("div", { class: "tiny", style: "margin-top:6px", text: `done: ${n.count} segment${n.count === 1 ? "" : "s"}` }));
     } else if (name === "tts") {
       const n = st.tts, t = s.tts;
-      sub = `${t.aggregation_mode} mode · ${t.word_timestamps ? "word timestamps" : "no word timestamps"} · ${t.delivery}` + ((t.skip_text_types || []).length ? ` · skips ${t.skip_text_types.join(", ")}` : "") + ((t.transforms || []).length ? ` · transforms: ${t.transforms.map((x) => x.name).join(", ")}` : "") + (t.markdown_filter ? " · markdown filter" : "");
+      sub = `${t.aggregation_mode} mode · ` + (t.live ? `live ${(tr.bot && tr.bot.tts_service) || "service"}` : `${t.word_timestamps ? "word timestamps" : "no word timestamps"} · ${t.delivery}`) + ((t.skip_text_types || []).length ? ` · skips ${t.skip_text_types.join(", ")}` : "") + ((t.transforms || []).length ? ` · transforms: ${t.transforms.map((x) => x.name).join(", ")}` : "") + (t.markdown_filter ? " · markdown filter" : "");
       if (n.aggregates || !s.llm_text_processor) aggregatorView(n, body, hot && cur.kind === "aggregate", false);
       if (n.segment) {
         if (!n.segment.own) body.append(lab("segment in", "The AggregatedTextFrame the TTS service received."), frameChip("AggregatedTextFrame", n.segment.text, n.segment.type, hot && cur.label === "AggregatedTextFrame" && cur.destination === "tts"));
@@ -1145,7 +1155,7 @@
         if (r.tokens.length) { const t = el("div", { class: "tokens" }); r.tokens.forEach((tk) => t.append(el("span", { class: "tok" }, tk[0], el("span", { class: "t", text: Number(tk[1]).toFixed(2) })))); box.append(t); }
         body.append(box);
       });
-      sub = `${n.requests.length} request${n.requests.length === 1 ? "" : "s"}` + (s.tts.word_timestamps ? " · reports word timestamps" : " · no word timestamps");
+      sub = `${n.requests.length} request${n.requests.length === 1 ? "" : "s"}` + (s.tts.live ? ` · live, behind ${(tr.bot && tr.bot.tts_service) || "the bot’s service"}` : s.tts.word_timestamps ? " · reports word timestamps" : " · no word timestamps");
     } else if (name === "transport") {
       const n = st.transport;
       body.append(el("div", {}, el("span", { class: "dot" + (n.speaking ? " on" : "") }), n.speaking ? "bot speaking" : "silent", el("span", { class: "tiny", text: ` · ${n.audio.toFixed(2)}s of audio received` })));

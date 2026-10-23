@@ -176,7 +176,16 @@ def render_trace(
             if i:
                 pipeline.append(" → ", style="dim")
             pipeline.append(name, style="bold green" if i in trace.bot.traced else "")
-        body = Group(pipeline, *(Text(f"note: {n}", style="yellow") for n in trace.bot.notes))
+        lines: list[Text] = []
+        if trace.bot.tts_service is not None:
+            how = (
+                "live, calling its provider"
+                if trace.setup.tts.live
+                else "its parts on the stand-in"
+            )
+            lines.append(Text(f"TTS: {trace.bot.tts_service}, {how}", style="dim"))
+        lines.extend(Text(f"note: {n}", style="yellow") for n in trace.bot.notes)
+        body = Group(pipeline, *lines)
         console.print(Panel(body, title=f"Bot: {trace.bot.path}"))
     console.print(Panel(Text(trace.text), title=f"LLM response · setup: {trace.setup.name}"))
     chunks = Text(" | ".join(repr(c) for c in trace.chunks), style="dim")

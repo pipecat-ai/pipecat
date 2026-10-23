@@ -23,7 +23,7 @@ from rich.table import Table
 from pipecat.textflow.capture import TextFlowCaptureError
 from pipecat.textflow.render import render_trace
 from pipecat.textflow.setup import TextFlowSetup, presets
-from pipecat.textflow.trace import run_textflow
+from pipecat.textflow.trace import TextFlowRunError, run_textflow
 from pipecat.textflow.transforms import registered_transforms
 
 textflow_app = typer.Typer(
@@ -63,6 +63,12 @@ def run(
         "-b",
         help="A bot file whose own processors to run. Overrides --setup and --preset.",
     ),
+    live_tts: bool | None = typer.Option(
+        None,
+        "--live-tts/--stand-in-tts",
+        help="With --bot: run the bot's TTS service itself, calling its provider (the "
+        "default), or keep the stand-in with the bot's text handling.",
+    ),
     setup_path: Path | None = typer.Option(
         None, "--setup", "-s", help="A setup YAML file. Overrides --preset."
     ),
@@ -81,6 +87,11 @@ def run(
         logger.remove()
         logger.add(sys.stderr, level="ERROR")
     setup = _load_setup(setup_path, preset, bot)
+    if live_tts is not None:
+        if bot is None:
+            _console.print("[red]--live-tts and --stand-in-tts need --bot.[/red]")
+            raise typer.Exit(2)
+        setup.tts.live = live_tts
     if text_file is not None:
         if text is not None:
             _console.print("[red]Give the response as text or as --text-file, not both.[/red]")
@@ -88,7 +99,7 @@ def run(
         text = text_file.read_text(encoding="utf-8").rstrip("\n")
     try:
         trace = asyncio.run(run_textflow(setup, text))
-    except TextFlowCaptureError as e:
+    except (TextFlowCaptureError, TextFlowRunError) as e:
         _console.print(f"[red]{e}[/red]")
         raise typer.Exit(1) from e
     if json_output:

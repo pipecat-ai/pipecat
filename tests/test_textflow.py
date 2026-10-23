@@ -17,6 +17,7 @@ from pipecat.textflow import (
     LLMTextProcessorSpec,
     PatternSpec,
     RTVISpec,
+    TextFlowRunError,
     TextFlowSetup,
     TransformSpec,
     TTSSpec,
@@ -322,8 +323,11 @@ async def test_steps_place_stage_actions_and_releases_in_order():
 @pytest.mark.asyncio
 async def test_capture_bot_finds_the_text_path():
     """The bot's own processors come back, with what the trace will not run noted."""
-    captured = await capture_bot(BOT_PATH)
+    async with await capture_bot(BOT_PATH) as captured:
+        _check_capture(captured)
 
+
+def _check_capture(captured):
     assert captured.summary.pipeline == [
         "RTVIProcessor",
         "FrameProcessor",
@@ -355,13 +359,14 @@ async def test_capture_bot_finds_the_text_path():
 
 @pytest.mark.asyncio
 async def test_bot_setup_runs_the_bots_own_objects():
-    """A run with ``bot`` set uses the bot's aggregator, transforms and RTVI parameters."""
-    setup = TextFlowSetup(bot=str(BOT_PATH), tts=TTSSpec(word_timestamps=True))
+    """A stand-in run with ``bot`` set uses the bot's aggregator, transforms and RTVI parameters."""
+    setup = TextFlowSetup(bot=str(BOT_PATH), tts=TTSSpec(word_timestamps=True, live=False))
     trace = await run_textflow(setup, "Dr. Smith wrote <code>x = 1</code>. Bye.")
 
     assert trace.bot is not None and "PassThrough" in trace.bot.pipeline
     assert trace.setup.bot == str(BOT_PATH.resolve())
     assert trace.setup.tts.word_timestamps is True
+    assert trace.setup.tts.live is False
 
     first = trace.segments[0]
     assert first.events[0].stage == "llm_text_processor" and first.events[0].name == "replace_text"
@@ -372,6 +377,41 @@ async def test_bot_setup_runs_the_bots_own_objects():
     code = next(s for s in trace.segments if s.text_type == "code")
     assert code.outcome == "skipped"
     assert code.rtvi_messages == []
+
+
+@pytest.mark.asyncio
+async def test_live_tts_runs_the_bots_own_service():
+    """With a bot the TTS service runs itself by default and its provider is called."""
+    setup = TextFlowSetup(bot=str(BOT_PATH))
+    trace = await run_textflow(setup, "Dr. Smith wrote <code>x = 1</code>. Bye.")
+
+    assert trace.setup.tts.live is True
+    assert trace.bot is not None and trace.bot.tts_service == "SilentTTS"
+    assert [r["text"] for r in trace.provider_requests] == ["DOCTOR SMITH WROTE", ".", "BYE."]
+    first = trace.segments[0]
+    assert first.outcome == "spoken"
+    assert [e.name for e in first.events if e.stage == "tts"] == ["shout"]
+    # SilentTTS reports no word timestamps, so each segment reaches the context whole.
+    assert [w.text for w in first.words] == ["Doctor Smith wrote"]
+    assert "Doctor Smith wrote" in trace.context_messages[0]["content"]
+    assert trace.errors == []
+
+
+@pytest.mark.asyncio
+async def test_live_tts_needs_a_bot():
+    with pytest.raises(TextFlowRunError, match="needs a bot"):
+        await run_textflow(TextFlowSetup(tts=TTSSpec(live=True)), "Hi.")
+
+
+@pytest.mark.asyncio
+async def test_capture_holds_the_bot_until_closed():
+    """``bot()`` waits at its runner's ``run()`` and returns once the capture is closed."""
+    captured = await capture_bot(BOT_PATH)
+    hold = captured._hold
+    assert hold is not None and hold.task is not None and not hold.task.done()
+    assert await captured.close() is None
+    assert hold.task.done()
+    assert await captured.close() is None
 
 
 @pytest.mark.asyncio

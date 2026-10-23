@@ -195,7 +195,7 @@ context should record as well, such as a habit the LLM keeps repeating.
 
 To see the split points act on a response of your own, `pipecat textflow run -p code-helper
 "<your text>"` prints the three texts of every segment and what reached each consumer, and
-`pipecat textflow serve` does the same on an interactive page that steps through the run, showing the aggregator buffers fill and cut and the frames move from processor to processor (see `pipecat.textflow`). Either command takes `--bot bot.py` to trace a bot's own `LLMTextProcessor`, TTS service and `RTVIObserver` instead of a setup.
+`pipecat textflow serve` does the same on an interactive page that steps through the run, showing the aggregator buffers fill and cut and the frames move from processor to processor (see `pipecat.textflow`). Either command takes `--bot bot.py` to trace a bot's own `LLMTextProcessor`, TTS service and `RTVIObserver` instead of a setup. The bot's TTS service runs itself, so the words come from its real provider; `--stand-in-tts` keeps it offline.
 
 Three properties fall out of this shape:
 

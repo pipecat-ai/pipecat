@@ -14,6 +14,7 @@ attributed to the segment it happened to.
 """
 
 import asyncio
+import contextlib
 import dataclasses
 import itertools
 import json
@@ -29,6 +30,7 @@ from pipecat.frames.frames import (
     AggregatedTextProgressFrame,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
+    EndFrame,
     ErrorFrame,
     Frame,
     LLMContextAssistantTurnFrame,
@@ -45,6 +47,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.pipeline.pipeline import Pipeline
+from pipecat.pipeline.worker import PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import LLMAssistantAggregator
 from pipecat.processors.aggregators.llm_text_processor import LLMTextProcessor
@@ -58,15 +61,16 @@ from pipecat.processors.frameworks.rtvi.observer import RTVIObserver, RTVIObserv
 from pipecat.processors.frameworks.rtvi.processor import RTVIProcessor
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TextAggregationMode, TTSService
-from pipecat.tests.utils import run_test
+from pipecat.tests.utils import SleepFrame
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import TransportParams
 from pipecat.utils.string import TextPartForConcatenation, concatenate_aggregated_text
 from pipecat.utils.text.base_text_aggregator import Aggregation, BaseTextAggregator, TextType
 from pipecat.utils.text.base_text_filter import BaseTextFilter
 from pipecat.utils.text.transforms.text_transform import TextTransform
+from pipecat.workers.runner import WorkerRunner
 
-from .capture import BotSummary, callable_label, capture_bot, mirror_setup
+from .capture import BotSummary, CapturedBot, callable_label, capture_bot, mirror_setup
 from .mocks import SAMPLE_RATE, ProviderRequest, TextFlowTTSService, llm_response_frames
 from .setup import (
     TextFlowSetup,
@@ -76,6 +80,17 @@ from .setup import (
 )
 
 Stage = Literal["llm_text_processor", "tts", "rtvi"]
+
+
+START_TIMEOUT_S = 30.0
+"""How long a live TTS service may take to connect."""
+RUN_TIMEOUT_S = 120.0
+LIVE_RUN_TIMEOUT_S = 900.0
+"""How long a run may take; a live run plays its audio at real pace."""
+
+
+class TextFlowRunError(Exception):
+    """The run could not be made; the message says why."""
 
 
 class StageEvent(BaseModel):
@@ -328,6 +343,9 @@ class _Tracer:
         self.requests: dict[int, ProviderRequest] = {}
         self.rtvi_messages: list[dict[str, Any]] = []
         self.errors: list[str] = []
+        # A provider's audio comes in many frames; the timeline shows one entry
+        # per request, grown as the frames arrive.
+        self.audio_entry: TimelineEntry | None = None
 
     def see_frame(self, frame: AggregatedTextFrame, produced_by: str):
         if frame.id not in self.frames:
@@ -564,20 +582,105 @@ class _TracingLLMTextProcessor(LLMTextProcessor):
         await super().push_error(error_msg, *args, **kwargs)
 
 
-class _TracingTTSService(TextFlowTTSService):
-    """A stand-in TTS that attributes filters, transforms, skips and requests to segments."""
+class _TTSTracing:
+    """Attaches to a ``TTSService`` and attributes what it does to segments.
 
-    def __init__(self, tracer: _Tracer, transforms: Transforms, **kwargs):
+    Every service, the stand-in included, goes through the base class's text
+    hooks, so wrapping them on the instance traces a real service and the
+    stand-in alike. The instance's transforms, filters and aggregator are
+    replaced with recording ones.
+    """
+
+    def __init__(self, tts: TTSService, tracer: _Tracer, transforms: Transforms):
         self._tracer = tracer
         self._current: int | None = None
-        aggregator = kwargs.pop("text_aggregator", None)
-        super().__init__(text_transforms=_recording_transforms(transforms, self._step), **kwargs)
-        if aggregator is not None:
-            self._text_aggregator = aggregator
-        self._text_filters = [
-            _RecordingFilter(f, self._filter_step) for f in list(self._text_filters)
+        self.requests: list[ProviderRequest] = []
+
+        tts._text_transforms = _recording_transforms(transforms, self._step)
+        tts._text_filters = [
+            _RecordingFilter(f, self._filter_step) for f in list(tts._text_filters)
         ]
-        self._text_aggregator = _RecordingAggregator(self._text_aggregator, tracer, "tts")
+        tts._text_aggregator = _RecordingAggregator(tts._text_aggregator, tracer, "tts")  # type: ignore[assignment]
+
+        handle = tts._handle_aggregated_text
+        skipped = tts._push_skipped_text
+        trim = tts._trim_text
+        transform = tts._transform_text
+        push_error = tts.push_error
+        run_tts = tts.run_tts
+        add_word_timestamps = tts.add_word_timestamps
+
+        async def _handle_aggregated_text(src_frame: AggregatedTextFrame, context_id=None):
+            tracer.see_frame(src_frame, "tts")
+            self._current = src_frame.id
+            try:
+                await handle(src_frame, context_id)
+            finally:
+                self._current = None
+
+        async def _push_skipped_text(frame: AggregatedTextFrame, context_id: str):
+            self._event(kind="skip", before=frame.text, after=None, detail=str(frame.text_type))
+            await skipped(frame, context_id)
+
+        def _trim_text(text: str) -> str | None:
+            trimmed = trim(text)
+            if trimmed is None:
+                self._event(kind="trim", before=text, after=None)
+            return trimmed
+
+        async def _transform_text(text: str, text_type: str) -> str | None:
+            result = await transform(text, text_type)
+            if result is None and self._current is not None:
+                events = tracer.events.get(self._current, [])
+                if not any(e.kind == "error" for e in events):
+                    self._event(kind="drop", before=text, after=None)
+            return result
+
+        async def _push_error(error_msg: str, *args, **kwargs):
+            self._event(kind="error", detail=error_msg, after=None)
+            await push_error(error_msg, *args, **kwargs)
+
+        async def _run_tts(text: str, context_id: str):
+            request = ProviderRequest(context_id=context_id, text=text)
+            self.requests.append(request)
+            if self._current is not None and self._current not in tracer.requests:
+                tracer.requests[self._current] = request
+            tracer.audio_entry = None
+            # The request's tokens list is shared with the entry, so the words
+            # the provider reports later show up on it.
+            tracer.record(
+                TimelineEntry(
+                    seq=next(tracer.seq),
+                    kind="provider",
+                    source="tts",
+                    destination="provider",
+                    label="run_tts",
+                    summary=repr(text),
+                    segment_id=self._current,
+                    data={"text": text, "context_id": context_id, "tokens": request.tokens},
+                )
+            )
+            async for frame in run_tts(text, context_id):
+                yield frame
+
+        async def _add_word_timestamps(word_times, context_id=None, *args, **kwargs):
+            request = next((r for r in reversed(self.requests) if r.context_id == context_id), None)
+            if request is not None:
+                request.tokens.extend((word, t) for word, t in word_times)
+            await add_word_timestamps(word_times, context_id, *args, **kwargs)
+
+        # Set on the instance, so they shadow the class's methods for this one service.
+        hooks = {
+            "_handle_aggregated_text": _handle_aggregated_text,
+            "_push_skipped_text": _push_skipped_text,
+            "_trim_text": _trim_text,
+            "_transform_text": _transform_text,
+            "push_error": _push_error,
+            "run_tts": _run_tts,
+            "add_word_timestamps": _add_word_timestamps,
+        }
+        for name, hook in hooks.items():
+            setattr(tts, name, hook)
 
     def _event(self, **fields):
         if self._current is not None:
@@ -590,62 +693,6 @@ class _TracingTTSService(TextFlowTTSService):
 
     def _filter_step(self, name: str, before: str, after: str):
         self._event(kind="filter", name=name, before=before, after=after)
-
-    async def _handle_aggregated_text(
-        self, src_frame: AggregatedTextFrame, context_id: str | None = None
-    ):
-        self._tracer.see_frame(src_frame, "tts")
-        self._current = src_frame.id
-        try:
-            await super()._handle_aggregated_text(src_frame, context_id)
-        finally:
-            self._current = None
-
-    async def _push_skipped_text(self, frame: AggregatedTextFrame, context_id: str):
-        self._event(kind="skip", before=frame.text, after=None, detail=str(frame.text_type))
-        await super()._push_skipped_text(frame, context_id)
-
-    def _trim_text(self, text: str) -> str | None:
-        trimmed = super()._trim_text(text)
-        if trimmed is None:
-            self._event(kind="trim", before=text, after=None)
-        return trimmed
-
-    async def _transform_text(self, text: str, text_type: str) -> str | None:
-        result = await super()._transform_text(text, text_type)
-        if result is None and self._current is not None:
-            events = self._tracer.events.get(self._current, [])
-            if not any(e.kind == "error" for e in events):
-                self._event(kind="drop", before=text, after=None)
-        return result
-
-    async def push_error(self, error_msg: str, *args, **kwargs):
-        self._event(kind="error", detail=error_msg, after=None)
-        await super().push_error(error_msg, *args, **kwargs)
-
-    async def run_tts(self, text: str, context_id: str):
-        before = len(self.requests)
-        async for frame in super().run_tts(text, context_id):
-            yield frame
-        for request in self.requests[before:]:
-            if self._current is not None and self._current not in self._tracer.requests:
-                self._tracer.requests[self._current] = request
-            self._tracer.record(
-                TimelineEntry(
-                    seq=next(self._tracer.seq),
-                    kind="provider",
-                    source="tts",
-                    destination="provider",
-                    label="run_tts",
-                    summary=repr(request.text),
-                    segment_id=self._current,
-                    data={
-                        "text": request.text,
-                        "context_id": request.context_id,
-                        "tokens": request.tokens,
-                    },
-                )
-            )
 
 
 class _SilentOutputTransport(BaseOutputTransport):
@@ -709,7 +756,12 @@ class _Recorder(BaseObserver):
             or (isinstance(frame, LLMContextAssistantTurnFrame) and source != "context")
             or (isinstance(frame, TTSAudioRawFrame) and destination != "transport")
         )
-        if isinstance(frame, _TIMELINE_FRAMES) and destination is not None and not once:
+        if isinstance(frame, TTSAudioRawFrame) and tracer.audio_entry is not None and not once:
+            grown = tracer.audio_entry
+            grown.data["frames"] = grown.data.get("frames", 1) + 1
+            grown.data["duration_s"] += _frame_data(frame)["duration_s"]
+            grown.summary = f"{grown.data['frames']} frames, {grown.data['duration_s']:.2f}s"
+        elif isinstance(frame, _TIMELINE_FRAMES) and destination is not None and not once:
             entry = TimelineEntry(
                 seq=next(tracer.seq),
                 kind="frame",
@@ -721,6 +773,8 @@ class _Recorder(BaseObserver):
                 data=_frame_data(frame),
             )
             tracer.record(entry)
+            if isinstance(frame, TTSAudioRawFrame):
+                tracer.audio_entry = entry
 
         if isinstance(frame, TextFrame) and data.destination is self._assistant:
             if frame.append_to_context and frame.text:
@@ -834,19 +888,30 @@ def _rtvi_transforms(specs: list[TransformSpec]) -> list[tuple[str, Any]] | None
 
 def _build_tts(
     setup: TextFlowSetup, tracer: _Tracer, bot_tts: TTSService | None = None
-) -> _TracingTTSService:
-    """The stand-in TTS: the setup's knobs, with the bot's processing parts when given."""
+) -> tuple[TTSService, _TTSTracing]:
+    """The TTS service to run, traced.
+
+    The bot's own service when the setup says to run it live; otherwise the
+    stand-in with the setup's knobs, and the bot's processing parts when given.
+    """
     tts = setup.tts
+    if tts.live:
+        if bot_tts is None:
+            raise TextFlowRunError("tts.live runs the bot's TTS service, so the setup needs a bot")
+        return bot_tts, _TTSTracing(
+            bot_tts, tracer, _bot_transforms(list(bot_tts._text_transforms))
+        )
     kwargs: dict[str, Any] = dict(
         word_timestamps=tts.word_timestamps,
         delivery=tts.delivery,
         tokenization=tts.tokenization,
         settings=TTSSettings(model=None, voice=None, language=None),
     )
+    aggregator: BaseTextAggregator | None = None
     if bot_tts is not None:
+        aggregator = bot_tts._text_aggregator
         kwargs.update(
             text_aggregation_mode=bot_tts._text_aggregation_mode,
-            text_aggregator=bot_tts._text_aggregator,
             skip_text_types=list(bot_tts._skip_text_types),
             text_filters=list(bot_tts._text_filters),
             append_trailing_space=bot_tts._append_trailing_space,
@@ -859,7 +924,7 @@ def _build_tts(
             append_trailing_space=tts.append_trailing_space,
         )
         if tts.aggregator is not None:
-            kwargs["text_aggregator"] = build_aggregator(tts.aggregator)
+            aggregator = build_aggregator(tts.aggregator)
         if tts.markdown_filter:
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore", DeprecationWarning)
@@ -869,7 +934,50 @@ def _build_tts(
         transforms = _spec_transforms(tts.transforms)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", DeprecationWarning)
-        return _TracingTTSService(tracer, transforms, **kwargs)
+        stand_in = TextFlowTTSService(**kwargs)
+    if aggregator is not None:
+        stand_in._text_aggregator = aggregator  # type: ignore[assignment]
+    return stand_in, _TTSTracing(stand_in, tracer, transforms)
+
+
+async def _run(
+    pipeline: Pipeline,
+    frames: list[Frame],
+    observers: list[BaseObserver],
+    *,
+    start_timeout_s: float,
+    timeout_s: float,
+):
+    """Run the pipeline over the frames, as a test does, and wait for it to end."""
+    worker = PipelineWorker(pipeline, cancel_on_idle_timeout=False, observers=observers)
+    started = asyncio.Event()
+
+    @worker.event_handler("on_pipeline_started")
+    async def _on_pipeline_started(worker, frame):
+        started.set()
+
+    async def push_frames():
+        await started.wait()
+        for frame in frames:
+            if isinstance(frame, SleepFrame):
+                await asyncio.sleep(frame.sleep)
+            else:
+                await worker.queue_frame(frame)
+        await worker.queue_frame(EndFrame())
+
+    runner = WorkerRunner(handle_sigint=False, handle_sigterm=False)
+    await runner.add_workers(worker)
+    running = asyncio.ensure_future(runner.run())
+    try:
+        await asyncio.wait_for(started.wait(), start_timeout_s)
+        await asyncio.wait_for(asyncio.gather(asyncio.shield(running), push_frames()), timeout_s)
+    except TimeoutError as e:
+        await runner.cancel(reason="textflow timeout")
+        with contextlib.suppress(Exception):
+            await running
+        what = "start" if not started.is_set() else "finish"
+        limit = start_timeout_s if not started.is_set() else timeout_s
+        raise TextFlowRunError(f"the pipeline did not {what} within {limit:.0f}s") from e
 
 
 async def run_textflow(setup: TextFlowSetup, text: str | None = None) -> TextFlowTrace:
@@ -883,14 +991,25 @@ async def run_textflow(setup: TextFlowSetup, text: str | None = None) -> TextFlo
         What happened to every segment of the response.
     """
     text = setup.sample_text if text is None else text
-    tracer = _Tracer()
-
-    captured = None
-    if setup.bot is not None:
-        # The bot is imported afresh each run, so edits to it show up.
-        captured = await capture_bot(setup.bot)
+    if setup.bot is None:
+        if setup.tts.live:
+            raise TextFlowRunError("tts.live runs the bot's TTS service, so the setup needs a bot")
+        return await _run_textflow(setup, text, None)
+    # The bot is imported afresh each run, so edits to it show up.
+    async with await capture_bot(setup.bot) as captured:
         setup = mirror_setup(captured, setup)
+        if setup.tts.live is None:
+            setup.tts.live = captured.tts is not None
+        if setup.tts.live and captured.tts is None:
+            raise TextFlowRunError(f"{setup.bot} has no TTSService to run live")
+        trace = await _run_textflow(setup, text, captured)
+        if (problem := await captured.close()) is not None:
+            trace.errors.append(problem)
+        return trace
 
+
+async def _run_textflow(setup: TextFlowSetup, text: str, captured: CapturedBot | None):
+    tracer = _Tracer()
     processors: list[FrameProcessor] = []
     names: dict[int, str] = {}
     processor = None
@@ -909,7 +1028,7 @@ async def run_textflow(setup: TextFlowSetup, text: str | None = None) -> TextFlo
         names[id(processor)] = "llm_text_processor"
         processors.append(processor)
 
-    tts = _build_tts(setup, tracer, captured.tts if captured is not None else None)
+    tts, tts_tracing = _build_tts(setup, tracer, captured.tts if captured is not None else None)
     names[id(tts)] = "tts"
     processors.append(tts)
 
@@ -943,7 +1062,15 @@ async def run_textflow(setup: TextFlowSetup, text: str | None = None) -> TextFlo
 
     chunks, frames = llm_response_frames(text, setup.chunking)
     pipeline = Pipeline(processors)
-    await run_test(pipeline, frames_to_send=frames, observers=observers)
+    # A live service connects at start and takes the time its provider takes.
+    live = setup.tts.live
+    await _run(
+        pipeline,
+        frames,
+        observers,
+        start_timeout_s=START_TIMEOUT_S if live else 5.0,
+        timeout_s=LIVE_RUN_TIMEOUT_S if live else RUN_TIMEOUT_S,
+    )
 
     return TextFlowTrace(
         setup=setup,
@@ -954,7 +1081,8 @@ async def run_textflow(setup: TextFlowSetup, text: str | None = None) -> TextFlo
         context_messages=json.loads(json.dumps(context.messages, default=str)),
         rtvi_messages=tracer.rtvi_messages,
         provider_requests=[
-            {"context_id": r.context_id, "text": r.text, "tokens": r.tokens} for r in tts.requests
+            {"context_id": r.context_id, "text": r.text, "tokens": r.tokens}
+            for r in tts_tracing.requests
         ],
         timeline=tracer.timeline,
         errors=tracer.errors,

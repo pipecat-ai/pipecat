@@ -48,6 +48,7 @@ from pipecat.textflow.setup import (
 )
 from pipecat.textflow.trace import (
     StageEvent,
+    TextFlowRunError,
     TextFlowSegment,
     TextFlowTrace,
     TimelineEntry,
@@ -66,6 +67,7 @@ __all__ = [
     "StageEvent",
     "TTSSpec",
     "TextFlowCaptureError",
+    "TextFlowRunError",
     "TextFlowSegment",
     "TextFlowSetup",
     "TextFlowTrace",

@@ -129,6 +129,12 @@ class TTSSpec(BaseModel):
         markdown_filter: Add the deprecated ``MarkdownTextFilter`` as a text filter.
         append_trailing_space: Add a trailing space to each segment sent to the provider.
         tokenization: How the stand-in provider reports words.
+        live: Run the bot's own TTS service, calling its provider, instead of the
+            stand-in. None does so whenever the setup names a ``bot``; False keeps
+            the stand-in, with the bot's text handling, for a quick offline run.
+            Live needs the bot's keys and the time the provider takes: the run
+            plays the audio at its real pace. ``word_timestamps``, ``delivery``
+            and ``tokenization`` describe the stand-in and do not apply.
     """
 
     word_timestamps: bool = True
@@ -140,6 +146,7 @@ class TTSSpec(BaseModel):
     markdown_filter: bool = False
     append_trailing_space: bool = False
     tokenization: TokenizationSpec = Field(default_factory=TokenizationSpec)
+    live: bool | None = None
 
 
 class RTVISpec(BaseModel):

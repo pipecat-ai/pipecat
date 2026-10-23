@@ -23,7 +23,7 @@ from pydantic import BaseModel
 
 from .capture import BotSummary, TextFlowCaptureError, setup_for_bot
 from .setup import TextFlowSetup, presets
-from .trace import TextFlowTrace, run_textflow
+from .trace import TextFlowRunError, TextFlowTrace, run_textflow
 from .transforms import registered_transforms
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -131,7 +131,7 @@ def create_app(bot: str | None = None):
     async def trace(request: TraceRequest) -> TextFlowTrace:
         try:
             return await run_textflow(request.setup, request.text)
-        except (KeyError, TextFlowCaptureError) as e:
+        except (KeyError, TextFlowCaptureError, TextFlowRunError) as e:
             raise HTTPException(status_code=400, detail=str(e)) from e
 
     return app

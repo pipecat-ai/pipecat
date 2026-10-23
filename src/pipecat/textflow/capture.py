@@ -19,7 +19,7 @@ import contextlib
 import dataclasses
 import importlib.util
 import sys
-from collections.abc import Awaitable, Callable, Generator, Iterator
+from collections.abc import Callable, Coroutine, Generator, Iterator
 from pathlib import Path
 from typing import Any, cast
 
@@ -62,8 +62,9 @@ class BotSummary(BaseModel):
         path: The bot file.
         pipeline: The pipeline's processors, in order, by class name.
         traced: Positions in ``pipeline`` of the processors the trace runs as the
-            bot's own: its ``LLMTextProcessor`` and the TTS service whose parts the
-            stand-in takes over.
+            bot's own: its ``LLMTextProcessor`` and its TTS service, run live or
+            with its parts taken over by the stand-in.
+        tts_service: The class name of the bot's TTS service, or None without one.
         notes: What the trace models differently from the bot, such as a processor
             between the LLM and the TTS it does not run.
     """
@@ -71,12 +72,17 @@ class BotSummary(BaseModel):
     path: str
     pipeline: list[str] = Field(default_factory=list)
     traced: list[int] = Field(default_factory=list)
+    tts_service: str | None = None
     notes: list[str] = Field(default_factory=list)
 
 
 @dataclasses.dataclass
 class CapturedBot:
     """A bot's text path, as live objects.
+
+    The bot's ``bot()`` coroutine is held at its runner's ``run()`` until
+    :meth:`close` releases it, so resources it opened around the run, such as an
+    HTTP session its services share, stay open while its objects are used.
 
     Parameters:
         summary: What was found, for display.
@@ -91,6 +97,43 @@ class CapturedBot:
     llm_text_processor: LLMTextProcessor | None
     tts: TTSService | None
     rtvi_params: RTVIObserverParams | None
+    _hold: "_Hold | None" = dataclasses.field(default=None, repr=False)
+
+    async def close(self, *, timeout_s: float = CAPTURE_TIMEOUT_S) -> str | None:
+        """Let ``bot()`` return and wait for it.
+
+        Args:
+            timeout_s: How long the bot may take to finish once released.
+
+        Returns:
+            What went wrong while it finished, or None.
+        """
+        hold, self._hold = self._hold, None
+        if hold is None or hold.task is None:
+            return None
+        hold.release.set()
+        try:
+            await asyncio.wait_for(hold.task, timeout_s)
+        except TimeoutError:
+            return f"bot() did not finish within {timeout_s:.0f}s of being released"
+        except Exception as e:
+            return f"bot() failed after the run: {e!r}"
+        return None
+
+    async def __aenter__(self) -> "CapturedBot":
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        await self.close()
+
+
+class _Hold:
+    """Where ``bot()`` waits while its objects are in use."""
+
+    def __init__(self):
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+        self.task: asyncio.Task[None] | None = None
 
 
 def callable_label(func: Any) -> str:
@@ -127,11 +170,14 @@ class _StubTransport(BaseTransport):
 
 
 @contextlib.contextmanager
-def _intercept(workers: list[PipelineWorker], observers: list[RTVIObserver]) -> Generator[None]:
+def _intercept(
+    workers: list[PipelineWorker], observers: list[RTVIObserver], hold: _Hold
+) -> Generator[None]:
     """Keep the bot from connecting or running while it builds its pipeline.
 
     Patched before the bot module is imported, so a ``from ... import
-    create_transport`` in the bot binds the stub.
+    create_transport`` in the bot binds the stub. The runner's ``run()`` parks
+    the bot until the hold is released.
     """
     import pipecat.runner.utils as runner_utils
 
@@ -139,7 +185,8 @@ def _intercept(workers: list[PipelineWorker], observers: list[RTVIObserver]) -> 
         return _StubTransport()
 
     async def run(self: WorkerRunner, *args: Any, **kwargs: Any) -> None:
-        return None
+        hold.started.set()
+        await hold.release.wait()
 
     worker_init = PipelineWorker.__init__
     observer_init = RTVIObserver.__init__
@@ -202,17 +249,19 @@ def _flatten(processor: FrameProcessor) -> Iterator[FrameProcessor]:
 async def capture_bot(path: str | Path, *, timeout_s: float = CAPTURE_TIMEOUT_S) -> CapturedBot:
     """Import a bot file and capture its text path.
 
-    The bot's ``bot(runner_args)`` runs with a stub transport and a runner that
-    returns at once, so its services are constructed as in the bot but nothing
-    connects. The bot's own imports and environment apply: a service that needs
-    an API key at construction needs it here too.
+    The bot's ``bot(runner_args)`` runs with a stub transport and a runner whose
+    ``run()`` waits instead of running, so its services are constructed as in the
+    bot but nothing connects. The bot's own imports and environment apply: a
+    service that needs an API key at construction needs it here too. The bot is
+    held there until the result is closed (``async with`` does it), so what it
+    set up around the run stays usable in the meantime.
 
     Args:
         path: The bot file, with a ``bot(runner_args)`` coroutine.
         timeout_s: How long ``bot()`` may take to build its pipeline.
 
     Returns:
-        The bot's text path.
+        The bot's text path. Close it once its objects are no longer needed.
 
     Raises:
         TextFlowCaptureError: If the file cannot be imported, has no ``bot``
@@ -224,28 +273,42 @@ async def capture_bot(path: str | Path, *, timeout_s: float = CAPTURE_TIMEOUT_S)
 
     workers: list[PipelineWorker] = []
     observers: list[RTVIObserver] = []
-    with _intercept(workers, observers):
+    hold = _Hold()
+    with _intercept(workers, observers, hold):
         module = _import_bot(path)
         entry = getattr(module, "bot", None)
         if not callable(entry):
             raise TextFlowCaptureError(f"{path.name} has no bot(runner_args) function")
-        bot = cast(Callable[[RunnerArguments], Awaitable[None]], entry)
-        try:
-            await asyncio.wait_for(bot(RunnerArguments()), timeout_s)
-        except TimeoutError as e:
+        bot = cast(Callable[[RunnerArguments], Coroutine[Any, Any, None]], entry)
+        task = asyncio.create_task(bot(RunnerArguments()))
+        started = asyncio.ensure_future(hold.started.wait())
+        done, _ = await asyncio.wait(
+            {task, started}, timeout=timeout_s, return_when=asyncio.FIRST_COMPLETED
+        )
+        if not done:
+            task.cancel()
+            started.cancel()
             raise TextFlowCaptureError(
                 f"bot() in {path.name} did not build its pipeline within {timeout_s:.0f}s"
-            ) from e
-        except TextFlowCaptureError:
-            raise
-        except KeyError as e:
-            raise TextFlowCaptureError(
-                f"bot() in {path.name} failed: {e!r}. The bot runs its own setup code, "
-                f"so the variables it reads must be set, as they are when it runs for real."
-            ) from e
-        except Exception as e:
-            raise TextFlowCaptureError(f"bot() in {path.name} failed: {e!r}") from e
+            )
+        if task in done:
+            # bot() returned or failed without reaching run().
+            started.cancel()
+            try:
+                task.result()
+            except TextFlowCaptureError:
+                raise
+            except KeyError as e:
+                raise TextFlowCaptureError(
+                    f"bot() in {path.name} failed: {e!r}. The bot runs its own setup code, "
+                    f"so the variables it reads must be set, as they are when it runs for real."
+                ) from e
+            except Exception as e:
+                raise TextFlowCaptureError(f"bot() in {path.name} failed: {e!r}") from e
+        else:
+            hold.task = task
     if not workers:
+        hold.release.set()
         raise TextFlowCaptureError(f"bot() in {path.name} created no PipelineWorker")
 
     processors = [
@@ -261,6 +324,7 @@ async def capture_bot(path: str | Path, *, timeout_s: float = CAPTURE_TIMEOUT_S)
     tts = next((p for p in processors if isinstance(p, TTSService)), None)
     ltp = next((p for p in processors if isinstance(p, LLMTextProcessor)), None)
     summary.traced = [processors.index(p) for p in (ltp, tts) if p is not None]
+    summary.tts_service = type(tts).__name__ if tts is not None else None
     if tts is None:
         summary.notes.append("No TTSService in the pipeline; the stand-in's defaults apply.")
     if llm is not None and tts is not None:
@@ -282,6 +346,7 @@ async def capture_bot(path: str | Path, *, timeout_s: float = CAPTURE_TIMEOUT_S)
         llm_text_processor=ltp,
         tts=tts,
         rtvi_params=rtvi._params if rtvi is not None else None,
+        _hold=hold,
     )
 
 
@@ -359,6 +424,7 @@ def mirror_setup(captured: CapturedBot, base: TextFlowSetup | None = None) -> Te
             markdown_filter=any(type(f).__name__ == "MarkdownTextFilter" for f in filters),
             append_trailing_space=tts._append_trailing_space,
             tokenization=base_tts.tokenization if base_tts is not None else TTSSpec().tokenization,
+            live=base_tts.live if base_tts is not None else None,
         )
         other_filters = [
             type(f).__name__ for f in filters if type(f).__name__ != "MarkdownTextFilter"
@@ -409,5 +475,5 @@ async def setup_for_bot(path: str | Path) -> tuple[TextFlowSetup, BotSummary]:
     Returns:
         The mirrored setup, with ``bot`` set, and the summary of what was found.
     """
-    captured = await capture_bot(path)
-    return mirror_setup(captured), captured.summary
+    async with await capture_bot(path) as captured:
+        return mirror_setup(captured), captured.summary

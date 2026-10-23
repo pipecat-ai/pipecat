@@ -8,7 +8,7 @@
 
 from collections.abc import AsyncGenerator
 
-from pipecat.frames.frames import Frame
+from pipecat.frames.frames import Frame, TTSAudioRawFrame, TTSStartedFrame, TTSStoppedFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -31,11 +31,17 @@ transport_params = {
 
 
 class SilentTTS(TTSService):
-    """A TTS service with no provider behind it."""
+    """A TTS service with no provider behind it: every request gets a short silence."""
 
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
-        return
-        yield
+        yield TTSStartedFrame()
+        yield TTSAudioRawFrame(
+            audio=b"\x00\x00" * (self.sample_rate // 10),
+            sample_rate=self.sample_rate,
+            num_channels=1,
+            context_id=context_id,
+        )
+        yield TTSStoppedFrame()
 
 
 class PassThrough(FrameProcessor):
