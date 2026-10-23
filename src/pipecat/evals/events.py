@@ -610,7 +610,7 @@ class EvalEventStream:
 
     def _bot_backchannel_event(self, data: dict) -> dict | None:
         """The bot's backchannel, from the ``bot-output`` reporting it was spoken to the end."""
-        if data.get("text_type") != "backchannel" or data.get("spoken_status") != "completed":
+        if data.get("output_type") != "backchannel" or data.get("spoken_status") != "completed":
             return None
         progress = data.get("spoken_progress") or {}
         return {
