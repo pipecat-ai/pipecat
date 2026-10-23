@@ -15,7 +15,7 @@ import random
 import string
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
-from typing import Any, Literal, cast
+from typing import Any, ClassVar, Literal, cast
 
 from loguru import logger
 from websockets import Subprotocol
@@ -27,7 +27,6 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     InterimTranscriptionFrame,
-    TranscriptionFrame,
 )
 from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.aws.utils import (
@@ -56,11 +55,25 @@ class AWSTranscribeSTTSettings(STTSettings):
             the fastest. AWS binds this to a connection, so updating it at
             runtime triggers a reconnect. See
             https://docs.aws.amazon.com/transcribe/latest/dg/streaming.html#streaming-partial-result-stabilization.
+        show_speaker_label: Enable speaker diarization. Each contiguous speaker
+            run of a final result is emitted as its own frame with AWS's speaker
+            label (``"0"``, ``"1"``, ...) as ``speaker.label``. Interim results
+            are not labelled. Updating it at runtime triggers a reconnect.
+        speaker_format: Optional format string for diarized speaker runs. Use ``{speaker}`` for the
+            speaker label, ``{text}`` for the transcript text, and ``{speaker_number}`` for the
+            speaker's order of first appearance in the session (``1``, ``2``, ...), e.g.
+            ``"{speaker}: {text}"``. If ``None``, transcript text is not modified. Applied locally,
+            so changing it does not reconnect.
     """
 
     partial_results_stability: Literal["high", "medium", "low"] | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
+    show_speaker_label: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speaker_format: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+    #: Fields applied locally to transcripts — changing them needs no reconnect.
+    LOCAL_FIELDS: ClassVar[frozenset[str]] = frozenset({"speaker_format"})
 
 
 class AWSTranscribeSTTService(WebsocketSTTService):
@@ -128,6 +141,8 @@ class AWSTranscribeSTTService(WebsocketSTTService):
             model=None,
             language=Language.EN,
             partial_results_stability="high",
+            show_speaker_label=False,
+            speaker_format=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -151,7 +166,6 @@ class AWSTranscribeSTTService(WebsocketSTTService):
         # Init-only connection config (not runtime-updatable).
         self._media_encoding = "linear16"
         self._number_of_channels = 1
-        self._show_speaker_label = False
         self._enable_channel_identification = False
 
         # Explicit or environment keys. Without them, each connection is signed
@@ -188,11 +202,25 @@ class AWSTranscribeSTTService(WebsocketSTTService):
         }
         return encoding_map.get(encoding, encoding)
 
+    def _speaker_words(self, alternative: dict[str, Any]) -> list[tuple[str, Any]] | None:
+        """Return a diarized alternative's ``(word, speaker)`` pairs, or ``None``.
+
+        Punctuation items carry no speaker; they stay in the transcript and end
+        up in the run of the word before them.
+        """
+        if not self._settings.show_speaker_label:
+            return None
+        return [
+            (item.get("Content", ""), item.get("Speaker"))
+            for item in alternative.get("Items") or []
+            if item.get("Type") == "pronunciation"
+        ]
+
     async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
-        """Apply a settings delta and reconnect if anything changed."""
+        """Apply a settings delta and reconnect if a connection setting changed."""
         changed = await super()._update_settings(delta)
 
-        if changed and self._websocket:
+        if changed.keys() - self.Settings.LOCAL_FIELDS and self._websocket:
             await self._disconnect()
             await self._connect()
 
@@ -369,7 +397,7 @@ class AWSTranscribeSTTService(WebsocketSTTService):
                 number_of_channels=self._number_of_channels,
                 enable_partial_results_stabilization=True,
                 partial_results_stability=assert_given(self._settings.partial_results_stability),
-                show_speaker_label=self._show_speaker_label,
+                show_speaker_label=assert_given(self._settings.show_speaker_label),
                 enable_channel_identification=self._enable_channel_identification,
             )
 
@@ -721,18 +749,15 @@ class AWSTranscribeSTTService(WebsocketSTTService):
                                     "Language | None", assert_given(self._settings.language)
                                 )
                                 if is_final:
+                                    runs = self._diarized_runs(
+                                        transcript, self._speaker_words(alternatives[0])
+                                    )
                                     # Report usage before the transcription
                                     # frame so tracing can attach it to the
                                     # STT span the frame closes.
                                     await self.emit_stt_usage_metrics()
-                                    await self.push_frame(
-                                        TranscriptionFrame(
-                                            transcript,
-                                            self._user_id,
-                                            time_now_iso8601(),
-                                            language,
-                                            result=result,
-                                        )
+                                    await self._push_transcription_runs(
+                                        runs, language=language, result=result
                                     )
                                     await self._handle_transcription(
                                         transcript,

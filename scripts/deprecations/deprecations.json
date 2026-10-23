@@ -1708,6 +1708,17 @@
       "location": "pipecat/services/assemblyai/stt.py"
     },
     {
+      "subject": "AssemblyAISTTService.speaker_format",
+      "module": "pipecat.services.assemblyai.stt",
+      "kind": "parameter",
+      "deprecated_in": "1.14.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "settings=AssemblyAISTTService.Settings(speaker_format=...)",
+      "message": "Use ``settings=AssemblyAISTTService.Settings(speaker_format=...)`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/services/assemblyai/stt.py"
+    },
+    {
       "subject": "AsyncAIHttpTTSService.InputParams",
       "module": "pipecat.services.asyncai.tts",
       "kind": "class",
@@ -3743,6 +3754,17 @@
       "location": "pipecat/services/nvidia/stt.py"
     },
     {
+      "subject": "_NvidiaBaseSTTSettings.diarization_max_speakers",
+      "module": "pipecat.services.nvidia.stt",
+      "kind": "parameter",
+      "deprecated_in": "1.14.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "max_speakers",
+      "message": "Use ``max_speakers`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/services/nvidia/stt.py"
+    },
+    {
       "subject": "NvidiaTTSService.InputParams",
       "module": "pipecat.services.nvidia.tts",
       "kind": "class",
@@ -4565,6 +4587,17 @@
       "relation": "use_existing",
       "replacement": "model",
       "message": "Use ``model`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/services/speechmatics/stt.py"
+    },
+    {
+      "subject": "SpeechmaticsSTTSettings.speaker_active_format",
+      "module": "pipecat.services.speechmatics.stt",
+      "kind": "parameter",
+      "deprecated_in": "1.14.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "speaker_format",
+      "message": "Use ``speaker_format`` instead. Will be removed in 2.0.0.",
       "location": "pipecat/services/speechmatics/stt.py"
     },
     {

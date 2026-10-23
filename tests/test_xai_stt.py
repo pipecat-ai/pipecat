@@ -9,7 +9,7 @@
 import asyncio
 from urllib.parse import parse_qs, urlparse
 
-from pipecat.frames.frames import Frame, TranscriptionFrame
+from pipecat.frames.frames import Frame, TranscriptionFrame, TranscriptionSpeaker
 from pipecat.services.xai.stt import XAISTTService
 from pipecat.utils.asyncio.task_manager import TaskManager
 from tests.frame_processor_helpers import frame_processor_setup
@@ -177,3 +177,45 @@ def test_transcript_done_with_text_is_a_transcription_frame():
 
     assert _describe(pushed) == [("TranscriptionFrame", "trailing words")]
     assert pushed[0].finalized is True
+
+
+def test_diarized_utterance_final_emits_one_frame_per_speaker_run():
+    service = XAISTTService(
+        api_key="test-key",
+        settings=XAISTTService.Settings(diarize=True, speaker_format="{speaker}: {text}"),
+    )
+    service._user_id = "session-user"
+    pushed = _collect_frames(service)
+    message = _partial("Hi there. Hello.", is_final=True, speech_final=True)
+    message["words"] = [
+        {"text": "Hi", "speaker": 0},
+        {"text": "there.", "speaker": 0},
+        {"text": "Hello.", "speaker": 1},
+    ]
+
+    _feed(service, [message])
+
+    frames = [f for f in pushed if isinstance(f, TranscriptionFrame)]
+    assert [(f.speaker, f.text, f.finalized) for f in frames] == [
+        (TranscriptionSpeaker("0", 1), "0: Hi there.", False),
+        (TranscriptionSpeaker("1", 2), "1: Hello.", True),
+    ]
+    assert all(f.user_id == "session-user" for f in frames)
+
+
+def test_speaker_format_update_does_not_reconnect():
+    service = XAISTTService(api_key="test-key")
+    reconnects = []
+
+    async def fake_disconnect():
+        reconnects.append("disconnect")
+
+    service._disconnect = fake_disconnect
+
+    changed = asyncio.run(
+        service._update_settings(XAISTTService.Settings(speaker_format="{speaker}: {text}"))
+    )
+
+    assert "speaker_format" in changed
+    assert reconnects == []
+    assert "speaker_format" not in _query(service)

@@ -36,7 +36,6 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     InterimTranscriptionFrame,
-    TranscriptionFrame,
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
@@ -168,6 +167,7 @@ class DeepgramSageMakerSTTService(STTService):
             smart_format=False,
             utterance_end_ms=None,
             version=None,
+            speaker_format=None,
         )
 
         # 2. Apply live_options overrides — only if settings not provided
@@ -264,7 +264,7 @@ class DeepgramSageMakerSTTService(STTService):
         # await self._disconnect()
         # await self._connect()
 
-        self._warn_unhandled_updated_settings(changed)
+        self._warn_unhandled_updated_settings(changed.keys() - self.Settings.LOCAL_FIELDS)
 
         return changed
 
@@ -327,6 +327,8 @@ class DeepgramSageMakerSTTService(STTService):
         # Declared Deepgram-specific fields from settings
         for f in fields(s):
             if f.name in ("model", "language", "extra") or f.name.startswith("_"):
+                continue
+            if f.name in self.Settings.LOCAL_FIELDS:
                 continue
             value = getattr(s, f.name)
             if not is_given(value) or value is None:
@@ -529,18 +531,17 @@ class DeepgramSageMakerSTTService(STTService):
             from_finalize = parsed.get("from_finalize", False)
             if from_finalize:
                 self.confirm_finalize()
+            words = None
+            if self._settings.diarize:
+                words = [
+                    (word.get("punctuated_word") or word.get("word", ""), word.get("speaker"))
+                    for word in alternatives[0].get("words") or []
+                ]
+            runs = self._diarized_runs(transcript, words)
             # Report usage before the transcription frame so tracing can
             # attach it to the STT span the frame closes.
             await self.emit_stt_usage_metrics()
-            await self.push_frame(
-                TranscriptionFrame(
-                    transcript,
-                    self._user_id,
-                    time_now_iso8601(),
-                    language,
-                    result=parsed,
-                )
-            )
+            await self._push_transcription_runs(runs, language=language, result=parsed)
             await self._handle_transcription(transcript, is_final, language)
         else:
             # Interim transcription

@@ -180,11 +180,20 @@ class ElevenLabsSTTSettings(STTSettings):
         keyterms: List of key terms or phrases to bias transcription towards.
         no_verbatim: Whether to drop filler words, false starts and non-speech
             sounds from the transcript. Supported by ``scribe_v2`` only.
+        diarize: Whether to annotate which speaker is talking. Each contiguous
+            speaker run of a segment is emitted as its own frame with ElevenLabs'
+            speaker id (e.g. ``"speaker_0"``) as ``speaker.label``.
+        speaker_format: Optional format string for diarized speaker runs. Use ``{speaker}`` for the
+            speaker label, ``{text}`` for the transcript text, and ``{speaker_number}`` for the
+            speaker's order of first appearance in the session (``1``, ``2``, ...), e.g.
+            ``"{speaker}: {text}"``. If ``None``, transcript text is not modified.
     """
 
     tag_audio_events: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     keyterms: list[str] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     no_verbatim: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    diarize: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speaker_format: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 @dataclass
@@ -288,6 +297,8 @@ class ElevenLabsSTTService(SegmentedSTTService):
             tag_audio_events=None,
             keyterms=None,
             no_verbatim=None,
+            diarize=None,
+            speaker_format=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -374,6 +385,9 @@ class ElevenLabsSTTService(SegmentedSTTService):
         no_verbatim = self._settings.no_verbatim
         if is_given(no_verbatim) and no_verbatim is not None:
             data.add_field("no_verbatim", str(no_verbatim).lower())
+        diarize = self._settings.diarize
+        if is_given(diarize) and diarize is not None:
+            data.add_field("diarize", str(diarize).lower())
 
         async with self._session.post(url, data=data, headers=headers) as response:
             if response.status != 200:
@@ -419,13 +433,24 @@ class ElevenLabsSTTService(SegmentedSTTService):
                 await self._handle_transcription(text, True, detected_language)
                 logger.debug(f"Transcription: [{text}]")
 
-                yield TranscriptionFrame(
-                    text,
-                    self._user_id,
-                    time_now_iso8601(),
-                    detected_language,
-                    result=result,
-                )
+                words = None
+                if self._settings.diarize:
+                    # Spacing and audio events carry no speaker of their own.
+                    words = [
+                        (word.get("text", ""), word.get("speaker_id"))
+                        for word in result.get("words") or []
+                        if word.get("type") == "word"
+                    ]
+                timestamp = time_now_iso8601()
+                for speaker, run_text in self._diarized_runs(text, words):
+                    yield TranscriptionFrame(
+                        run_text,
+                        self._user_id,
+                        timestamp,
+                        detected_language,
+                        result=result,
+                        speaker=speaker,
+                    )
 
         except Exception as e:
             yield ErrorFrame(error=f"Unknown error occurred: {e}")

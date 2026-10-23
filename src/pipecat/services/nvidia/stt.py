@@ -15,8 +15,8 @@ https://docs.nvidia.com/nim/speech/latest/asr/
 import asyncio
 from collections.abc import AsyncGenerator, Mapping
 from concurrent.futures import CancelledError as FuturesCancelledError
-from dataclasses import dataclass, field
-from typing import Any, ClassVar, cast
+from dataclasses import dataclass, field, replace
+from typing import Any, ClassVar, TypeVar, cast
 
 from loguru import logger
 from pydantic import BaseModel
@@ -35,10 +35,10 @@ from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import NVIDIA_TTFS_P99
 from pipecat.services.stt_service import SegmentedSTTService, STTService
 from pipecat.transcriptions.language import Language, resolve_language
-from pipecat.utils.deprecation import deprecated
+from pipecat.utils.deprecation import deprecated, warn_deprecated
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
-from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 
 try:
     import grpc
@@ -106,6 +106,16 @@ def language_to_nvidia_nemotron_speech_language(language: Language) -> str:
     return resolve_language(language, LANGUAGE_MAP, use_base_code=False)
 
 
+def _speaker_tagged_words(alternative) -> list[tuple[str, int | None]]:
+    """Return an alternative's ``(word, speaker_tag)`` pairs, ``None`` for untagged words."""
+    # NVIDIA numbers speakers from 1; 0 is the protobuf default for a word the
+    # server did not tag.
+    return [
+        (getattr(word, "word", ""), getattr(word, "speaker_tag", 0) or None)
+        for word in getattr(alternative, "words", None) or []
+    ]
+
+
 @dataclass
 class _NvidiaBaseSTTSettings(STTSettings):
     """Shared settings for NVIDIA Nemotron Speech STT services.
@@ -118,8 +128,21 @@ class _NvidiaBaseSTTSettings(STTSettings):
         boosted_lm_score: Score boost for specified words.
         max_alternatives: Maximum number of recognition alternatives.
         word_time_offsets: Whether to include word-level time offsets.
-        speaker_diarization: Whether to enable speaker diarization.
+        speaker_diarization: Whether to enable speaker diarization. Each
+            contiguous speaker run of a final result is emitted as its own frame
+            with NVIDIA's speaker tag (numbered from ``1``) as ``speaker.label``.
+            A result with an untagged word, no word information, or words that
+            can't be located in its transcript is emitted whole, with no label.
+        max_speakers: Maximum number of speakers for diarization.
         diarization_max_speakers: Maximum number of speakers for diarization.
+
+            .. deprecated:: 1.14.0
+                Use ``max_speakers`` instead. Will be removed in 2.0.0.
+
+        speaker_format: Optional format string for diarized speaker runs. Use ``{speaker}`` for the
+            speaker tag, ``{text}`` for the transcript text, and ``{speaker_number}`` for the
+            speaker's order of first appearance in the session (``1``, ``2``, ...). If ``None``,
+            transcript text is not modified.
     """
 
     profanity_filter: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -130,7 +153,33 @@ class _NvidiaBaseSTTSettings(STTSettings):
     max_alternatives: int | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     word_time_offsets: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     speaker_diarization: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    diarization_max_speakers: int | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    max_speakers: int | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    diarization_max_speakers: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speaker_format: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+
+_STTSettingsT = TypeVar("_STTSettingsT", bound=STTSettings)
+
+
+def _migrate_diarization_max_speakers(settings: _STTSettingsT) -> _STTSettingsT:
+    """Move the deprecated ``diarization_max_speakers`` into ``max_speakers``.
+
+    An explicit ``max_speakers`` in the same settings takes precedence.
+    """
+    value = getattr(settings, "diarization_max_speakers", NOT_GIVEN)
+    if not is_given(value) or value is None:
+        return settings
+    warn_deprecated(
+        "`diarization_max_speakers` is deprecated since 1.14.0 and will be removed in 2.0.0. "
+        "Use `max_speakers` instead.",
+        stacklevel=3,
+    )
+    max_speakers = getattr(settings, "max_speakers", NOT_GIVEN)
+    return replace(
+        settings,
+        max_speakers=max_speakers if is_given(max_speakers) else value,
+        diarization_max_speakers=NOT_GIVEN,
+    )
 
 
 @dataclass
@@ -138,18 +187,11 @@ class NvidiaSTTSettings(_NvidiaBaseSTTSettings):
     """Settings for NvidiaSTTService.
 
     Parameters:
-        interim_results: Whether to return interim (partial) results.
-        speaker_format: Optional format string for diarized speaker runs. Use
-            ``{speaker}`` for the speaker tag and ``{text}`` for the transcript text.
-            If ``None``, transcript text is not modified. NVIDIA numbers speakers
-            from ``1``. A result with an untagged word, no word information, or
-            words that can't be located in its transcript is emitted unsplit and
-            unformatted, with the transport ``user_id``. Interim results carry no
-            word information, so they are always emitted that way.
+        interim_results: Whether to return interim (partial) results. They
+            carry no word information, so they are never split by speaker.
     """
 
     interim_results: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    speaker_format: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
     #: Fields that are purely local (formatting templates) — no reconnect needed.
     LOCAL_FIELDS: ClassVar[frozenset[str]] = frozenset({"speaker_format"})
@@ -244,7 +286,7 @@ class NvidiaSTTService(STTService):
     through streaming recognition. Supports interim results and continuous audio
     processing for low-latency applications. When speaker diarization is enabled, each
     contiguous speaker run of a final result is emitted as a separate frame with its speaker
-    tag in ``user_id``.
+    tag as ``speaker.label``.
     """
 
     Settings = NvidiaSTTSettings
@@ -339,7 +381,8 @@ class NvidiaSTTService(STTService):
             interim_results=True,
             word_time_offsets=False,
             speaker_diarization=False,
-            diarization_max_speakers=0,
+            max_speakers=0,
+            diarization_max_speakers=None,
             speaker_format=None,
         )
 
@@ -353,7 +396,7 @@ class NvidiaSTTService(STTService):
 
         # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
-            default_settings.apply_update(settings)
+            default_settings.apply_update(_migrate_diarization_max_speakers(settings))
 
         super().__init__(
             sample_rate=sample_rate,
@@ -434,7 +477,7 @@ class NvidiaSTTService(STTService):
         speaker_diarization = assert_given(s.speaker_diarization)
         if speaker_diarization:
             riva.client.add_speaker_diarization_to_config(
-                config, speaker_diarization, assert_given(s.diarization_max_speakers)
+                config, speaker_diarization, assert_given(s.max_speakers)
             )
 
         return config
@@ -456,7 +499,7 @@ class NvidiaSTTService(STTService):
         Returns:
             Dict mapping changed field names to their previous values.
         """
-        changed = await super()._update_settings(delta)
+        changed = await super()._update_settings(_migrate_diarization_max_speakers(delta))
 
         if not changed:
             return changed
@@ -647,58 +690,6 @@ class NvidiaSTTService(STTService):
         """Handle a transcription result with tracing."""
         pass
 
-    @staticmethod
-    def _speaker_runs(
-        transcript: str, words: list[tuple[str, int | None]]
-    ) -> list[tuple[int, str]]:
-        """Split a transcript into contiguous speaker runs.
-
-        Each word is located in ``transcript`` in order, and the transcript is cut
-        where the speaker changes, so each run keeps the provider's text and
-        punctuation. Runs are stripped of surrounding whitespace.
-
-        Args:
-            transcript: The full transcript of one result.
-            words: ``(text, speaker)`` pairs in transcript order.
-
-        Returns:
-            ``(speaker, text)`` runs, or an empty list if any word has no speaker
-            or cannot be located in the transcript.
-        """
-        if not transcript or not words:
-            return []
-
-        tagged_spans: list[tuple[int, int]] = []
-        cursor = 0
-        for text, speaker in words:
-            if speaker is None or not text:
-                return []
-            start = transcript.find(text, cursor)
-            if start < 0:
-                return []
-            tagged_spans.append((speaker, start))
-            cursor = start + len(text)
-
-        boundaries: list[tuple[int, int]] = [(tagged_spans[0][0], 0)]
-        for speaker, start in tagged_spans[1:]:
-            if speaker != boundaries[-1][0]:
-                boundaries.append((speaker, start))
-
-        runs: list[tuple[int, str]] = []
-        for index, (speaker, start) in enumerate(boundaries):
-            end = boundaries[index + 1][1] if index + 1 < len(boundaries) else len(transcript)
-            text = transcript[start:end].strip()
-            if text:
-                runs.append((speaker, text))
-        return runs
-
-    def _format_speaker_text(self, speaker_tag: int | None, text: str) -> str:
-        """Apply the configured speaker format to a tagged transcript."""
-        speaker_format = assert_given(self._settings.speaker_format)
-        if speaker_format and speaker_tag is not None:
-            return speaker_format.format(speaker=speaker_tag, text=text)
-        return text
-
     async def _push_result_frames(
         self,
         result,
@@ -708,45 +699,25 @@ class NvidiaSTTService(STTService):
     ) -> None:
         """Push one frame per speaker run, or one frame for the full result."""
         alternative = result.alternatives[0]
-        transcripts: list[tuple[int | None, str]] = []
-        # NVIDIA sends word information, and so speaker tags, only on final results.
-        if speaker_diarization and result.is_final:
-            # NVIDIA numbers speakers from 1; 0 is the protobuf default for a
-            # word the server did not tag.
-            words = [
-                (getattr(word, "word", ""), getattr(word, "speaker_tag", 0) or None)
-                for word in getattr(alternative, "words", None) or []
-            ]
-            transcripts.extend(self._speaker_runs(alternative.transcript, words))
-            if not transcripts:
-                logger.debug(f"{self} could not split result by speaker, emitting it unsplit")
-        if not transcripts:
-            transcripts = [(None, alternative.transcript)]
+        if not alternative.transcript:
+            return
 
-        timestamp = time_now_iso8601()
-        for index, (speaker_tag, transcript) in enumerate(transcripts):
-            if not transcript:
-                continue
-            text = self._format_speaker_text(speaker_tag, transcript)
-            user_id = str(speaker_tag) if speaker_tag is not None else self._user_id
-            if result.is_final:
-                frame = TranscriptionFrame(
-                    text,
-                    user_id,
-                    timestamp,
-                    language,
-                    result=result,
-                    finalized=index == len(transcripts) - 1,
-                )
-            else:
-                frame = InterimTranscriptionFrame(
-                    text,
-                    user_id,
-                    timestamp,
+        # NVIDIA sends word information, and so speaker tags, only on final results.
+        if not result.is_final:
+            await self.push_frame(
+                InterimTranscriptionFrame(
+                    alternative.transcript,
+                    self._user_id,
+                    time_now_iso8601(),
                     language,
                     result=result,
                 )
-            await self.push_frame(frame)
+            )
+            return
+
+        words = _speaker_tagged_words(alternative) if speaker_diarization else None
+        runs = self._diarized_runs(alternative.transcript, words)
+        await self._push_transcription_runs(runs, language=language, result=result, finalized=True)
 
     async def _handle_response(self, response, *, speaker_diarization: bool = False):
         for result in response.results:
@@ -802,6 +773,13 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
     By default, this service uses NVIDIA's Nemotron Speech Canary ASR API to perform speech-to-text
     transcription on audio segments. It inherits from SegmentedSTTService to handle
     audio buffering and speech detection.
+
+    Speaker diarization needs a model that returns word-level results. The
+    default ``canary-1b-asr`` returns none, so with it every segment is emitted
+    whole, with no ``speaker``. ``parakeet-ctc-1.1b-asr`` does: pass its
+    ``model_name`` and ``function_id`` (from
+    https://build.nvidia.com/nvidia/parakeet-ctc-1_1b-asr) in
+    ``model_function_map``.
     """
 
     Settings = NvidiaSegmentedSTTSettings
@@ -891,7 +869,9 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
             max_alternatives=1,
             word_time_offsets=False,
             speaker_diarization=False,
-            diarization_max_speakers=0,
+            max_speakers=0,
+            diarization_max_speakers=None,
+            speaker_format=None,
         )
 
         # 2. (no deprecated direct args for this service)
@@ -909,7 +889,7 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
 
         # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
-            default_settings.apply_update(settings)
+            default_settings.apply_update(_migrate_diarization_max_speakers(settings))
 
         super().__init__(
             sample_rate=sample_rate,
@@ -983,6 +963,12 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
         if self._custom_configuration:
             riva.client.add_custom_configuration_to_config(config, self._custom_configuration)
 
+        speaker_diarization = assert_given(s.speaker_diarization)
+        if speaker_diarization:
+            riva.client.add_speaker_diarization_to_config(
+                config, speaker_diarization, assert_given(s.max_speakers)
+            )
+
         return config
 
     def can_generate_metrics(self) -> bool:
@@ -1013,7 +999,7 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
         Returns:
             Dict mapping changed field names to their previous values.
         """
-        changed = await super()._update_settings(delta)
+        changed = await super()._update_settings(_migrate_diarization_max_speakers(delta))
 
         if changed:
             self._config = self._create_recognition_config()
@@ -1070,15 +1056,22 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
                         # Technically `_settings.language` could be a raw string, but
                         # Language is a StrEnum so downstream handles either.
                         language = cast("Language | None", assert_given(self._settings.language))
-                        yield TranscriptionFrame(
-                            text,
-                            self._user_id,
-                            time_now_iso8601(),
-                            language,
-                        )
-                        transcription_found = True
-
                         await self._handle_transcription(text, True, language)
+                        words = (
+                            _speaker_tagged_words(alternatives[0])
+                            if self._settings.speaker_diarization
+                            else None
+                        )
+                        timestamp = time_now_iso8601()
+                        for speaker, run_text in self._diarized_runs(text, words):
+                            yield TranscriptionFrame(
+                                run_text,
+                                self._user_id,
+                                timestamp,
+                                language,
+                                speaker=speaker,
+                            )
+                        transcription_found = True
 
             if not transcription_found:
                 logger.debug(

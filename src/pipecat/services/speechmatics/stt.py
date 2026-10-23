@@ -154,6 +154,14 @@ def _resolve_model(
     return resolved.value if isinstance(resolved, Model) else resolved
 
 
+def _warn_speaker_active_format(stacklevel: int) -> None:
+    warn_deprecated(
+        "`speaker_active_format` is deprecated since 1.14.0 and will be removed in 2.0.0. "
+        "Use `speaker_format` instead.",
+        stacklevel=stacklevel,
+    )
+
+
 class TurnDetectionMode(StrEnum):
     """How turn boundaries (end of speech) are detected.
 
@@ -193,7 +201,18 @@ class SpeechmaticsSTTSettings(STTSettings):
     Parameters:
         domain: Domain for Speechmatics API.
         turn_detection_mode: Endpoint handling mode.
-        speaker_active_format: Formatter for speaker ID.
+        speaker_format: Optional format string for diarized transcripts. Use ``{speaker}`` for the
+            speaker label, ``{text}`` for the transcript text, and ``{speaker_number}`` for the
+            speaker's order of first appearance in the session (``1``, ``2``, ...), e.g.
+            ``"{speaker}: {text}"``. If None, transcript text is not modified. Applied locally, so
+            changing it does not reconnect.
+        speaker_active_format: Formatter for speaker ID, with the ``text``,
+            ``speaker_id``, ``ts`` and ``lang`` attributes. Takes precedence over
+            ``speaker_format``.
+
+            .. deprecated:: 1.14.0
+                Use ``speaker_format`` instead. Will be removed in 2.0.0.
+
         known_speakers: List of known speaker labels and identifiers.
         additional_vocab: List of additional vocabulary entries.
         model: Resolved transcription model (operating point). See ``_resolve_model``.
@@ -207,7 +226,9 @@ class SpeechmaticsSTTSettings(STTSettings):
             the turn, so each sentence is emitted as its own final transcription.
         punctuation_overrides: Punctuation overrides.
         transcript_filtering_config: Post-processing applied to the transcript.
-        enable_diarization: Enable speaker diarization.
+        enable_diarization: Enable speaker diarization. Transcripts carry the
+            Speechmatics speaker label (e.g. ``"S1"``, or the label you assigned in
+            ``known_speakers``) as ``speaker.label``.
         speaker_sensitivity: Diarization sensitivity.
         max_speakers: Maximum number of speakers to detect.
         prefer_current_speaker: Prefer current speaker ID.
@@ -215,7 +236,8 @@ class SpeechmaticsSTTSettings(STTSettings):
 
     domain: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     turn_detection_mode: TurnDetectionMode | NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    speaker_active_format: str | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speaker_format: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speaker_active_format: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     known_speakers: list[SpeakerIdentifier] | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     additional_vocab: list[AdditionalVocabEntry] | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
@@ -236,7 +258,7 @@ class SpeechmaticsSTTSettings(STTSettings):
 
     #: Fields that are purely local (formatting templates) — no reconnect
     #: and no API call needed.
-    LOCAL_FIELDS: ClassVar[frozenset[str]] = frozenset({"speaker_active_format"})
+    LOCAL_FIELDS: ClassVar[frozenset[str]] = frozenset({"speaker_format", "speaker_active_format"})
 
 
 def _build_diarization_config(s: SpeechmaticsSTTSettings) -> SpeakerDiarizationConfig | None:
@@ -266,7 +288,8 @@ class SpeechmaticsSTTService(STTService):
 
     This service provides real-time speech-to-text transcription using the Speechmatics API.
     It supports partial and final transcriptions, multiple languages, various audio formats,
-    and speaker diarization.
+    and speaker diarization. With diarization enabled, each transcript carries its speaker
+    as ``speaker.label``; ``speaker_format`` optionally labels the text.
 
     Event handlers available (in addition to STTService events):
 
@@ -473,7 +496,8 @@ class SpeechmaticsSTTService(STTService):
             language=Language.EN,
             domain=None,
             turn_detection_mode=_DEFAULT_TURN_DETECTION_MODE,
-            speaker_active_format="{text}",
+            speaker_format=None,
+            speaker_active_format=None,
             known_speakers=[],
             additional_vocab=[],
             operating_point=None,
@@ -502,6 +526,9 @@ class SpeechmaticsSTTService(STTService):
         # --- 4. Settings delta (canonical API, always wins) ---
         if settings is not None:
             default_settings.apply_update(settings)
+
+        if default_settings.speaker_active_format is not None:
+            _warn_speaker_active_format(stacklevel=3)
 
         # Reconcile the preferred `model` with the deprecated `operating_point` alias
         # (model preferred, both-differ raises, default = DEFAULT_MODEL) before building
@@ -541,10 +568,9 @@ class SpeechmaticsSTTService(STTService):
     def _apply_legacy_params(settings: Settings, params: InputParams) -> AudioEncoding | None:
         """Fold the deprecated ``InputParams`` into canonical ``Settings``.
 
-        Every field the two shapes share by name is copied straight across. Two are
-        special-cased and excluded from the generic copy: ``speaker_active_format`` has a
-        diarization-aware default, and ``audio_encoding`` has no ``Settings`` field (it
-        reaches the client via the separate ``encoding`` argument).
+        Every field the two shapes share by name is copied straight across, except
+        ``audio_encoding``, which has no ``Settings`` field (it reaches the client via
+        the separate ``encoding`` argument).
 
         Args:
             settings: The canonical settings to populate in place.
@@ -556,14 +582,8 @@ class SpeechmaticsSTTService(STTService):
             the ``encoding`` argument.
         """
         shared = type(settings).__dataclass_fields__.keys() & type(params).model_fields.keys()
-        for name in shared - {"speaker_active_format"}:
+        for name in shared:
             setattr(settings, name, getattr(params, name))
-
-        # Output formatting default — prefix the speaker when diarizing.
-        fmt = params.speaker_active_format
-        if fmt is None:
-            fmt = "@{speaker_id}: {text}" if params.enable_diarization else "{text}"
-        settings.speaker_active_format = fmt
 
         return params.audio_encoding if "audio_encoding" in params.model_fields_set else None
 
@@ -627,6 +647,9 @@ class SpeechmaticsSTTService(STTService):
 
         if not changed:
             return changed
+
+        if "speaker_active_format" in changed and self._settings.speaker_active_format is not None:
+            _warn_speaker_active_format(stacklevel=3)
 
         # A runtime change to `model` or the deprecated `operating_point` alias must be
         # re-reconciled into `model` (the only field `_build_config` reads); resolve from
@@ -1102,20 +1125,25 @@ class SpeechmaticsSTTService(STTService):
         # The stored language may be a plain code rather than a Language; the frame
         # carries it as-is.
         language = cast(Language, assert_given(self._settings.language))
-        active_format = assert_given(self._settings.speaker_active_format)
-        text = active_format.format(
-            speaker_id=segment.speaker or "UU",
-            text=segment.transcript,
-            ts=segment.start_time,
-            lang=language,
-        )
+        speaker = self._speaker(segment.speaker or None)
+        active_format = self._settings.speaker_active_format
+        if isinstance(active_format, str):
+            text = active_format.format(
+                speaker_id=segment.speaker or "UU",
+                text=segment.transcript,
+                ts=segment.start_time,
+                lang=language,
+            )
+        else:
+            text = self._apply_speaker_format(segment.transcript, speaker)
 
         frame_cls = TranscriptionFrame if finalized else InterimTranscriptionFrame
         return frame_cls(
             text=text,
-            user_id=segment.speaker or "",
+            user_id=self._user_id,
             timestamp=time_now_iso8601(),
             language=language,
+            speaker=speaker,
         )
 
     async def _send_frame(self, segment: Segment, *, finalized: bool) -> None:

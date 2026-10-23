@@ -15,8 +15,18 @@ from urllib.parse import parse_qs, urlparse
 import pytest
 from loguru import logger
 
-from pipecat.frames.frames import ProposedUserStartedSpeakingFrame
-from pipecat.services.assemblyai.models import AssemblyAIConnectionParams, TerminationMessage
+from pipecat.frames.frames import (
+    InterimTranscriptionFrame,
+    ProposedUserStartedSpeakingFrame,
+    TranscriptionFrame,
+    TranscriptionSpeaker,
+)
+from pipecat.services.assemblyai.models import (
+    AssemblyAIConnectionParams,
+    TerminationMessage,
+    TurnMessage,
+    Word,
+)
 from pipecat.services.assemblyai.stt import AssemblyAISTTService, is_u3_pro_model
 from pipecat.transcriptions.language import Language
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
@@ -1150,6 +1160,221 @@ def test_should_interrupt_rides_on_recommended_strategies():
         strategies = service.service_metadata_frame().user_turn_strategies
         assert isinstance(strategies, ExternalUserTurnStrategies)
         assert strategies.enable_interruptions is should_interrupt
+
+
+# --- Speaker diarization ---
+
+
+def _turn(
+    transcript: str,
+    *,
+    end_of_turn: bool,
+    speaker: str | None = None,
+    words: list[tuple[str, str | None]] | None = None,
+) -> TurnMessage:
+    return TurnMessage(
+        turn_order=0,
+        turn_is_formatted=end_of_turn,
+        end_of_turn=end_of_turn,
+        transcript=transcript,
+        end_of_turn_confidence=1.0,
+        words=[
+            Word(start=0, end=1, text=text, confidence=1.0, word_is_final=True, speaker=label)
+            for text, label in words or []
+        ],
+        speaker=speaker,
+    )
+
+
+def _transcription_frames(service: AssemblyAISTTService, message: TurnMessage) -> list:
+    """Run one Turn message through the service and return the pushed frames."""
+    pushed = []
+
+    async def fake_push_frame(frame, direction=None):
+        pushed.append(frame)
+
+    service.push_frame = fake_push_frame
+    asyncio.run(service._handle_transcription(message))
+    return [f for f in pushed if isinstance(f, (TranscriptionFrame, InterimTranscriptionFrame))]
+
+
+@pytest.mark.parametrize("vad_force_turn_endpoint", [True, False])
+def test_final_turn_carries_speaker_and_keeps_user_id(vad_force_turn_endpoint):
+    service = AssemblyAISTTService(
+        api_key="test-key",
+        vad_force_turn_endpoint=vad_force_turn_endpoint,
+        settings=AssemblyAISTTService.Settings(speaker_labels=True),
+    )
+    service._user_id = "session-user"
+
+    frames = _transcription_frames(service, _turn("Hello", end_of_turn=True, speaker="A"))
+
+    assert len(frames) == 1
+    assert isinstance(frames[0], TranscriptionFrame)
+    assert frames[0].text == "Hello"
+    assert frames[0].speaker.label == "A"
+    assert frames[0].user_id == "session-user"
+
+
+def test_interim_turn_without_speaker_has_no_label():
+    service = AssemblyAISTTService(
+        api_key="test-key",
+        settings=AssemblyAISTTService.Settings(
+            speaker_labels=True, speaker_format="{speaker}: {text}"
+        ),
+    )
+
+    frames = _transcription_frames(service, _turn("Hel", end_of_turn=False))
+
+    assert isinstance(frames[0], InterimTranscriptionFrame)
+    assert frames[0].text == "Hel"
+    assert frames[0].speaker is None
+
+
+def test_speaker_format_setting_labels_text():
+    service = AssemblyAISTTService(
+        api_key="test-key",
+        settings=AssemblyAISTTService.Settings(
+            speaker_labels=True, speaker_format="{speaker}: {text}"
+        ),
+    )
+
+    frames = _transcription_frames(service, _turn("Hello", end_of_turn=True, speaker="B"))
+
+    assert frames[0].text == "B: Hello"
+    assert frames[0].speaker.label == "B"
+
+
+def test_deprecated_speaker_format_arg_moves_to_settings():
+    with pytest.warns(DeprecationWarning, match="speaker_format"):
+        service = AssemblyAISTTService(api_key="test-key", speaker_format="{speaker}: {text}")
+
+    assert service._settings.speaker_format == "{speaker}: {text}"
+
+
+def test_speaker_format_not_sent_to_assemblyai():
+    service = AssemblyAISTTService(
+        api_key="test-key",
+        settings=AssemblyAISTTService.Settings(speaker_format="{speaker}: {text}"),
+    )
+
+    assert "speaker_format" not in _query(service)
+
+
+def test_update_settings_speaker_format_does_not_reconnect():
+    service = AssemblyAISTTService(api_key="test-key")
+    sent, reconnects = _stub_connection(service)
+
+    delta = AssemblyAISTTService.Settings(speaker_format="{speaker}: {text}")
+    changed = asyncio.run(service._update_settings(delta))
+
+    assert "speaker_format" in changed
+    assert sent == []
+    assert reconnects == []
+
+
+@pytest.mark.parametrize("placeholder", ["PENDING", "UNKNOWN"])
+def test_unassigned_speaker_is_not_a_label(placeholder):
+    service = AssemblyAISTTService(
+        api_key="test-key",
+        settings=AssemblyAISTTService.Settings(
+            speaker_labels=True, speaker_format="{speaker}: {text}"
+        ),
+    )
+
+    frames = _transcription_frames(service, _turn("Hello", end_of_turn=True, speaker=placeholder))
+
+    assert frames[0].speaker is None
+    assert frames[0].text == "Hello"
+
+
+def test_speaker_revision_is_not_an_error():
+    service = AssemblyAISTTService(
+        api_key="test-key", settings=AssemblyAISTTService.Settings(speaker_labels=True)
+    )
+    errors = []
+
+    async def fake_push_error(*args, **kwargs):
+        errors.append((args, kwargs))
+
+    service.push_error = fake_push_error
+    message = {
+        "type": "SpeakerRevision",
+        "revisions": [{"turn_order": 0, "speaker_label": "B", "words": []}],
+    }
+
+    asyncio.run(service._handle_message(message))
+
+    assert errors == []
+
+
+def test_final_turn_is_split_by_word_speakers():
+    """A turn holding two speakers becomes one frame per speaker run."""
+    service = AssemblyAISTTService(
+        api_key="test-key",
+        vad_force_turn_endpoint=False,
+        settings=AssemblyAISTTService.Settings(
+            speaker_labels=True, speaker_format="{speaker}: {text}"
+        ),
+    )
+    message = _turn(
+        "Mine is the banana. I take the train.",
+        end_of_turn=True,
+        speaker="B",
+        words=[
+            ("Mine", "B"),
+            ("is", "B"),
+            ("the", "B"),
+            ("banana.", "B"),
+            ("I", "A"),
+            ("take", "A"),
+            ("the", "A"),
+            ("train.", "A"),
+        ],
+    )
+
+    frames = _transcription_frames(service, message)
+
+    assert [(f.speaker, f.text, f.finalized) for f in frames] == [
+        (TranscriptionSpeaker("B", 1), "B: Mine is the banana.", False),
+        (TranscriptionSpeaker("A", 2), "A: I take the train.", True),
+    ]
+
+
+def test_unassigned_word_takes_the_turn_speaker():
+    service = AssemblyAISTTService(
+        api_key="test-key", settings=AssemblyAISTTService.Settings(speaker_labels=True)
+    )
+    message = _turn(
+        "Yeah. Different.",
+        end_of_turn=True,
+        speaker="A",
+        words=[("Yeah.", "PENDING"), ("Different.", "A")],
+    )
+
+    frames = _transcription_frames(service, message)
+
+    assert [(f.speaker, f.text) for f in frames] == [
+        (TranscriptionSpeaker("A", 1), "Yeah. Different."),
+    ]
+
+
+def test_turn_speaker_is_used_when_words_do_not_match_the_transcript():
+    service = AssemblyAISTTService(
+        api_key="test-key", settings=AssemblyAISTTService.Settings(speaker_labels=True)
+    )
+    message = _turn(
+        "It takes 40 minutes.",
+        end_of_turn=True,
+        speaker="A",
+        words=[("It", "A"), ("takes", "A"), ("forty", "B"), ("minutes.", "B")],
+    )
+
+    frames = _transcription_frames(service, message)
+
+    assert [(f.speaker, f.text) for f in frames] == [
+        (TranscriptionSpeaker("A", 1), "It takes 40 minutes."),
+    ]
 
 
 if __name__ == "__main__":

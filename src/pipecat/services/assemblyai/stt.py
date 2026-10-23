@@ -34,6 +34,7 @@ from pipecat.frames.frames import (
     StartFrame,
     STTMetadataFrame,
     TranscriptionFrame,
+    TranscriptionSpeaker,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
@@ -51,6 +52,7 @@ from .models import (
     AssemblyAIConnectionParams,
     BaseMessage,
     BeginMessage,
+    SpeakerRevisionMessage,
     SpeechStartedMessage,
     TerminationMessage,
     TurnMessage,
@@ -72,6 +74,12 @@ U3_PRO_MODEL_PREFIXES = ("u3-rt-pro", "universal-3-5-pro", "universal-3-6-pro")
 # them applies to the live session. Every other setting is a connect-time query
 # parameter and only takes effect on a new connection.
 HOT_UPDATABLE_SETTINGS = frozenset({"agent_context", "language_codes"})
+
+# Settings applied locally to the transcripts AssemblyAI returns; never sent.
+LOCAL_SETTINGS = frozenset({"speaker_format"})
+
+# Labels AssemblyAI gives a turn whose speaker is not assigned yet.
+UNASSIGNED_SPEAKER_LABELS = frozenset({"PENDING", "UNKNOWN"})
 
 # Longest declared-language list the streaming API accepts. The Sync API sets no
 # such limit, so it prepares its codes without a cap.
@@ -240,7 +248,16 @@ class AssemblyAISTTSettings(STTSettings):
             without reconnecting; pass an empty list to clear steering back to the
             model default. Defaults to None (not sent; no steering).
         format_turns: Whether to format transcript turns.
-        speaker_labels: Enable speaker diarization.
+        speaker_labels: Enable speaker diarization. Final transcripts carry
+            AssemblyAI's speaker label (e.g. ``"A"``, ``"B"``) as ``speaker.label``;
+            interim transcripts, and turns whose speaker is not assigned yet, have
+            none. Labels AssemblyAI later revises are not applied to frames
+            already sent.
+        speaker_format: Optional format string for diarized transcripts. Use ``{speaker}`` for the
+            speaker label, ``{text}`` for the transcript text, and ``{speaker_number}`` for the
+            speaker's order of first appearance in the session (``1``, ``2``, ...), e.g.
+            ``"{speaker}: {text}"``. If None, transcript text is not modified. Applied locally, so
+            changing it does not reconnect.
         vad_threshold: VAD confidence threshold (0.0–1.0) for classifying
             audio frames as silence. Only applicable to U3 Pro models.
         domain: Optional domain for specialized recognition modes. For example,
@@ -298,6 +315,7 @@ class AssemblyAISTTSettings(STTSettings):
     language_codes: list[Language] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     format_turns: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     speaker_labels: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speaker_format: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     vad_threshold: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     domain: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     continuous_partials: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -389,9 +407,11 @@ class AssemblyAISTTService(WebsocketSTTService):
                 interruption; a user-supplied ``user_turn_strategies`` overrides the
                 recommendation and this setting with it. Defaults to True.
             speaker_format: Optional format string for speaker labels when diarization is enabled.
-                Use {speaker} for speaker label and {text} for transcript text.
-                Example: "<{speaker}>{text}</{speaker}>" or "{speaker}: {text}"
-                If None, transcript text is not modified. Defaults to None.
+
+                .. deprecated:: 1.14.0
+                    Use ``settings=AssemblyAISTTService.Settings(speaker_format=...)``
+                    instead. Will be removed in 2.0.0.
+
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
@@ -414,6 +434,7 @@ class AssemblyAISTTService(WebsocketSTTService):
             language_codes=None,
             format_turns=True,
             speaker_labels=None,
+            speaker_format=None,
             vad_threshold=None,
             domain=None,
             continuous_partials=True,
@@ -429,6 +450,12 @@ class AssemblyAISTTService(WebsocketSTTService):
         if language is not None:
             self._warn_init_param_moved_to_settings("language", "language")
             default_settings.language = language
+
+        if speaker_format is not None:
+            self._warn_init_param_moved_to_settings(
+                "speaker_format", "speaker_format", deprecated_since="1.14.0"
+            )
+            default_settings.speaker_format = speaker_format
 
         # 3. Apply connection_params overrides (deprecated) — only if settings not provided
         if connection_params is not None:
@@ -584,7 +611,6 @@ class AssemblyAISTTService(WebsocketSTTService):
         self._api_endpoint_base_url = api_endpoint_base_url
         self._vad_force_turn_endpoint = vad_force_turn_endpoint
         self._should_interrupt = should_interrupt
-        self._speaker_format = speaker_format
 
         # Init-only audio config (not runtime-updatable)
         self._encoding = encoding
@@ -687,7 +713,8 @@ class AssemblyAISTTService(WebsocketSTTService):
         Most settings are connection-time WebSocket query parameters, so changing
         them reconnects. The fields in ``HOT_UPDATABLE_SETTINGS`` are the
         exception: they are applied live via an ``UpdateConfiguration`` message
-        and do not require a reconnect.
+        and do not require a reconnect. ``LOCAL_SETTINGS`` only affect how
+        transcripts are formatted, so they need neither.
 
         Args:
             delta: A settings delta with updated values.
@@ -710,7 +737,7 @@ class AssemblyAISTTService(WebsocketSTTService):
         if not changed:
             return changed
 
-        if set(changed) - HOT_UPDATABLE_SETTINGS:
+        if set(changed) - HOT_UPDATABLE_SETTINGS - LOCAL_SETTINGS:
             # A connect-time-only field changed (they become WS query params,
             # which can only be set when the connection is opened). Reconnect;
             # the new connection's URL re-seeds the hot-updatable fields too.
@@ -1107,6 +1134,8 @@ class AssemblyAISTTService(WebsocketSTTService):
             return SpeechStartedMessage.model_validate(message)
         elif msg_type == "Termination":
             return TerminationMessage.model_validate(message)
+        elif msg_type == "SpeakerRevision":
+            return SpeakerRevisionMessage.model_validate(message)
         else:
             raise ValueError(f"Unknown message type: {msg_type}")
 
@@ -1125,6 +1154,11 @@ class AssemblyAISTTService(WebsocketSTTService):
                 await self._handle_speech_started(parsed_message)
             elif isinstance(parsed_message, TerminationMessage):
                 await self._handle_termination(parsed_message)
+            elif isinstance(parsed_message, SpeakerRevisionMessage):
+                # The revised turns were already pushed, so their frames keep the
+                # labels they were sent with.
+                turns = [revision.get("turn_order") for revision in parsed_message.revisions]
+                logger.debug(f"{self} speaker labels revised for turns {turns}")
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
 
@@ -1182,22 +1216,14 @@ class AssemblyAISTTService(WebsocketSTTService):
                     f"for language '{message.language_code}', falling back to English"
                 )
 
-        # Handle speaker diarization
-        speaker_id = self._user_id
-        transcript_text = message.transcript
-
-        if message.speaker:
-            speaker_id = message.speaker
-            # Format transcript with speaker labels if format string provided
-            if self._speaker_format:
-                transcript_text = self._speaker_format.format(
-                    speaker=message.speaker, text=message.transcript
-                )
-
         # Determine if this is a final turn from AssemblyAI
         is_final_turn = message.end_of_turn and (
             not self._settings.format_turns or message.turn_is_formatted
         )
+
+        # Only final turns carry speakers, so only they are split and formatted.
+        runs = self._turn_runs(message) if is_final_turn else []
+        transcript_text = " ".join(text for _, text in runs) or message.transcript
 
         if self._vad_force_turn_endpoint:
             # --- Pipecat turn detection mode ---
@@ -1210,22 +1236,14 @@ class AssemblyAISTTService(WebsocketSTTService):
                 # Report usage before the transcription frame so tracing can
                 # attach it to the STT span the frame closes.
                 await self.emit_stt_usage_metrics()
-                await self.push_frame(
-                    TranscriptionFrame(
-                        transcript_text,
-                        speaker_id,
-                        time_now_iso8601(),
-                        language,
-                        message,
-                    )
-                )
+                await self._push_transcription_runs(runs, language=language, result=message)
                 await self._trace_transcription(transcript_text, True, language)
                 await self._call_event_handler("on_end_of_turn", transcript_text)
             else:
                 await self.push_frame(
                     InterimTranscriptionFrame(
                         transcript_text,
-                        speaker_id,
+                        self._user_id,
                         time_now_iso8601(),
                         language,
                         message,
@@ -1240,15 +1258,8 @@ class AssemblyAISTTService(WebsocketSTTService):
                 # Report usage before the transcription frame so tracing can
                 # attach it to the STT span the frame closes.
                 await self.emit_stt_usage_metrics()
-                await self.push_frame(
-                    TranscriptionFrame(
-                        transcript_text,
-                        speaker_id,
-                        time_now_iso8601(),
-                        language,
-                        message,
-                        finalized=True,
-                    )
+                await self._push_transcription_runs(
+                    runs, language=language, result=message, finalized=True
                 )
                 await self._trace_transcription(transcript_text, True, language)
                 # Propose the turn stop immediately. broadcast_frame pushes
@@ -1261,12 +1272,37 @@ class AssemblyAISTTService(WebsocketSTTService):
                 await self.push_frame(
                     InterimTranscriptionFrame(
                         transcript_text,
-                        speaker_id,
+                        self._user_id,
                         time_now_iso8601(),
                         language,
                         message,
                     )
                 )
+
+    def _turn_runs(self, message: TurnMessage) -> list[tuple[TranscriptionSpeaker | None, str]]:
+        """Split a turn's transcript into runs by speaker, with formatted text.
+
+        A turn can hold more than one speaker, so it is split by the speaker of
+        each final word. A word whose speaker is not assigned yet takes the
+        turn's label. Without word speakers, or when the words can't be matched
+        to the transcript, the whole turn goes to the turn's label.
+        """
+        turn_label = message.speaker if message.speaker not in UNASSIGNED_SPEAKER_LABELS else None
+        if any(word.speaker for word in message.words):
+            words = [
+                (
+                    word.text,
+                    word.speaker
+                    if word.speaker and word.speaker not in UNASSIGNED_SPEAKER_LABELS
+                    else turn_label,
+                )
+                for word in message.words
+            ]
+            runs = self._diarized_runs(message.transcript, words)
+            if runs[0][0] is not None:
+                return runs
+        speaker = self._speaker(turn_label or None)
+        return [(speaker, self._apply_speaker_format(message.transcript, speaker))]
 
 
 # Default host for the Sync speech-to-text API.

@@ -52,6 +52,10 @@ from pipecat.utils.tracing.service_decorators import traced_stt
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
 
+def _is_diarization_model(model: str) -> bool:
+    return "diarize" in model
+
+
 @dataclass
 class OpenAISTTSettings(BaseWhisperSTTService.Settings):
     """Settings for the OpenAI STT service.
@@ -59,9 +63,14 @@ class OpenAISTTSettings(BaseWhisperSTTService.Settings):
     Parameters:
         keywords: Words or phrases that guide transcription of the input audio, such
             as product names or acronyms. Supported by ``"gpt-transcribe"``.
+        speaker_format: Optional format string for diarized speaker runs. Use ``{speaker}`` for the
+            speaker label, ``{text}`` for the transcript text, and ``{speaker_number}`` for the
+            speaker's order of first appearance in the session (``1``, ``2``, ...), e.g.
+            ``"{speaker}: {text}"``. If ``None``, transcript text is not modified.
     """
 
     keywords: list[str] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speaker_format: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class OpenAISTTService(BaseWhisperSTTService):
@@ -73,6 +82,10 @@ class OpenAISTTService(BaseWhisperSTTService):
     With ``include_prob_metrics=True``, GPT transcription models report per-token
     logprobs and Whisper models report per-segment logprobs. Diarization models
     support neither, so they report no probabilities.
+
+    Diarization models (e.g. ``"gpt-4o-transcribe-diarize"``) label each speaker:
+    every contiguous speaker run of a segment is emitted as its own frame with
+    OpenAI's speaker label (e.g. ``"A"``) as ``speaker.label``.
     """
 
     Settings = OpenAISTTSettings
@@ -134,6 +147,7 @@ class OpenAISTTService(BaseWhisperSTTService):
             prompt=None,
             temperature=None,
             keywords=None,
+            speaker_format=None,
         )
 
         # --- 2. Deprecated direct-arg overrides ---
@@ -178,13 +192,19 @@ class OpenAISTTService(BaseWhisperSTTService):
             "language": self._settings.language,
         }
 
+        if _is_diarization_model(model):
+            # Speakers come back only in "diarized_json", and diarization models
+            # require a chunking strategy for audio longer than 30 seconds.
+            kwargs["response_format"] = "diarized_json"
+            kwargs["chunking_strategy"] = "auto"
+
         if self._include_prob_metrics:
             # GPT transcription models return logprobs alongside a "json" response;
             # Whisper models carry per-segment logprobs in "verbose_json" instead.
             # Diarization models support neither and reject the logprobs request.
             if model.startswith("whisper"):
                 kwargs["response_format"] = "verbose_json"
-            elif "diarize" in model:
+            elif _is_diarization_model(model):
                 if self._prob_metrics_warned_model != model:
                     self._prob_metrics_warned_model = model
                     logger.warning(
@@ -205,6 +225,16 @@ class OpenAISTTService(BaseWhisperSTTService):
             kwargs["keywords"] = self._settings.keywords
 
         return await self._client.audio.transcriptions.create(**kwargs)
+
+    def _speaker_words(self, response: Transcription) -> list[tuple[str, Any]] | None:
+        """Return a diarized response's ``(segment text, speaker)`` pairs."""
+        # A diarized response's segments carry a speaker; Whisper's verbose
+        # segments don't. Read it by attribute so older openai releases, which
+        # lack the diarized response type, still work.
+        segments = getattr(response, "segments", None)
+        if not segments or getattr(segments[0], "speaker", None) is None:
+            return None
+        return [(segment.text.strip(), getattr(segment, "speaker", None)) for segment in segments]
 
 
 @dataclass
