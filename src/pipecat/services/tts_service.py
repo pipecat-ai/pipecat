@@ -10,7 +10,7 @@ import asyncio
 import uuid
 from abc import abstractmethod
 from collections.abc import AsyncGenerator, AsyncIterator, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import (
     Any,
@@ -111,11 +111,15 @@ class TTSContext:
             speaking, forcing the assistant aggregator to commit its current
             text buffer to the conversation context.
         interruptible: Whether an interruption may discard this synthesis.
+        spoken_expression: The modes and events of the words the service
+            reports speaking in this context. Part of expressive conversation
+            (alpha).
     """
 
     append_to_context: bool = True
     push_assistant_aggregation: bool = False
     interruptible: bool = True
+    spoken_expression: SpokenExpression = field(default_factory=SpokenExpression)
 
 
 @dataclass
@@ -430,8 +434,6 @@ class TTSService(AIService):
         # Renders the expression tags an LLM writes, when the pipeline has
         # expressive conversation on.
         self._expression_renderer: ExpressionRenderer | None = None
-        # The modes and events of the words the service reports speaking.
-        self._spoken_expression = SpokenExpression()
 
     @property
     def sample_rate(self) -> int:
@@ -1197,7 +1199,6 @@ class TTSService(AIService):
         if isinstance(frame, TTSStoppedFrame):
             await self._finish_tts_context(frame)
             await self._push_stop_silence(frame)
-            self._spoken_expression.remove(frame.context_id)
         if isinstance(frame, (TTSStartedFrame, TTSStoppedFrame, TTSAudioRawFrame, TTSTextFrame)):
             frame.transport_destination = self._transport_destination
         if isinstance(frame, AggregatedTextFrame):
@@ -1222,22 +1223,25 @@ class TTSService(AIService):
             A frame for each event or pause performed before the text, and
             whether the frame itself is pushed.
         """
-        if isinstance(frame, AggregatedTextProgressFrame):
-            frame.modes = self._spoken_expression.current_modes(frame.context_id)
-            return [], True
-        if not isinstance(frame, TTSTextFrame) or frame.text_type in (
-            TextType.EXPRESSION_EVENT,
-            TextType.EXPRESSION_PAUSE,
+        if not isinstance(frame, (TTSTextFrame, AggregatedTextProgressFrame)) or (
+            frame.text_type in (TextType.EXPRESSION_EVENT, TextType.EXPRESSION_PAUSE)
         ):
             return [], True
+        context = self._tts_contexts.get(frame.context_id) if frame.context_id else None
+        spoken = context.spoken_expression if context else None
+        if isinstance(frame, AggregatedTextProgressFrame):
+            frame.modes = spoken.modes if spoken else None
+            return [], True
         if frame.raw_text is None and _is_markup(frame.text):
-            event = self._spoken_expression.spoken_markup(frame.context_id)
+            event = spoken.spoken_markup() if spoken else None
             if event is None:
                 return [], False
             frame.text_type, frame.text = event
             frame.append_to_context = False
             return [], True
-        modes, events = self._spoken_expression.spoken(frame.context_id, frame.raw_text)
+        if spoken is None:
+            return [], True
+        modes, events = spoken.spoken(frame.raw_text)
         if modes is not None:
             frame.modes = modes
         reported = []
@@ -1490,7 +1494,6 @@ class TTSService(AIService):
                 logger.warning(f"{self} on_audio_context_interrupted failed for {context_id}: {e}")
             self._audio_context_manager.remove(context_id)
             self._tts_contexts.pop(context_id, None)
-            self._spoken_expression.remove(context_id)
 
         if interrupt_playing:
             self.reset_active_audio_context()
@@ -1671,11 +1674,11 @@ class TTSService(AIService):
         if self.supports_processing_metrics and not self._is_streaming_tokens:
             await self.start_processing_metrics()
 
+        spans = None
         if segments is not None and self._expression_renderer:
             prepared_text, spans = await self._expression_renderer.render(
                 segments, src_frame.text_type, self._transform_text, self._trim_text
             )
-            self._spoken_expression.add(context_id, src_frame.raw_text or "", spans)
         else:
             prepared_text = await self._transform_text(text, src_frame.text_type)
         if prepared_text:
@@ -1683,6 +1686,8 @@ class TTSService(AIService):
             context = self._tts_contexts.setdefault(
                 context_id, TTSContext(interruptible=src_frame.interruptible)
             )
+            if spans is not None:
+                context.spoken_expression.add(src_frame.raw_text or "", spans)
             await self._announce_text(src_frame, context_id)
             await self._call_event_handler("on_tts_request", context_id, prepared_text)
             await self._start_audio_context(context_id)
