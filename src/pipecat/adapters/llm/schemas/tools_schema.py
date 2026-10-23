@@ -14,8 +14,8 @@ from collections.abc import Sequence
 from enum import Enum
 from typing import Any
 
-from pipecat.adapters.schemas.direct_function import DirectFunction, DirectFunctionWrapper
-from pipecat.adapters.schemas.function_schema import FunctionSchema
+from pipecat.adapters.llm.schemas.direct_function import DirectFunction, DirectFunctionWrapper
+from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
 
 
 class AdapterType(Enum):

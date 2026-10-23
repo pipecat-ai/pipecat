@@ -16,8 +16,8 @@ from openai.types.chat import (
     ChatCompletionToolParam,
 )
 
-from pipecat.adapters.base_llm_adapter import BaseLLMAdapter, LLMContextConversionError
-from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
+from pipecat.adapters.llm.base_llm_adapter import BaseLLMAdapter, LLMContextConversionError
+from pipecat.adapters.llm.schemas.tools_schema import AdapterType, ToolsSchema
 from pipecat.processors.aggregators.llm_context import (
     LLMContext,
     LLMContextMessage,

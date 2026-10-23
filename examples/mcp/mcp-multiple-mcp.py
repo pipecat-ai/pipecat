@@ -13,7 +13,7 @@ from loguru import logger
 from mcp import StdioServerParameters
 from mcp.client.session_group import StreamableHttpParameters
 
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame

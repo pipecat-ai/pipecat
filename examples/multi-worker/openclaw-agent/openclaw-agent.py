@@ -46,7 +46,7 @@ from dotenv import load_dotenv
 from loguru import logger
 from openclaw_worker import WORKER_NAME, build_openclaw_worker
 
-from pipecat.adapters.schemas.direct_function import tool_options
+from pipecat.adapters.llm.schemas.direct_function import tool_options
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.bus.messages import BusJobResponseMessage, BusJobUpdateMessage
 from pipecat.evals.transport import EvalTransportParams

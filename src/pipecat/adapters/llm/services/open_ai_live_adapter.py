@@ -10,9 +10,9 @@ from typing import Any, TypedDict, cast
 
 from loguru import logger
 
-from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
-from pipecat.adapters.services.open_ai_responses_adapter import OpenAIResponsesLLMAdapter
+from pipecat.adapters.llm.base_llm_adapter import BaseLLMAdapter
+from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
+from pipecat.adapters.llm.services.open_ai_responses_adapter import OpenAIResponsesLLMAdapter
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.services.openai.live import events
 from pipecat.utils.types import NotGiven, is_given

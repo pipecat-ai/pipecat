@@ -30,7 +30,10 @@ from typing import Any, cast
 
 from openai.types.chat import ChatCompletionMessageParam
 
-from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter, OpenAILLMInvocationParams
+from pipecat.adapters.llm.services.open_ai_adapter import (
+    OpenAILLMAdapter,
+    OpenAILLMInvocationParams,
+)
 from pipecat.processors.aggregators.llm_context import LLMContext
 
 

@@ -138,7 +138,7 @@ Runnable examples live in `examples/multi-worker/` (local handoff, distributed h
 | `src/pipecat/observers/`   | Pipeline observers for monitoring frame flow       |
 | `src/pipecat/audio/`       | VAD, filters, mixers, turn detection, DTMF         |
 | `src/pipecat/turns/`       | User turn management                               |
-| `src/pipecat/adapters/`    | LLM provider adapters (context/tools conversion)   |
+| `src/pipecat/adapters/`    | LLM adapters (`llm/`): context/tools conversion    |
 | `src/pipecat/runner/`      | Development runner (multi-transport bot hosting)   |
 | `src/pipecat/cli/`         | `pipecat` CLI (`init`, `eval`)                     |
 | `src/pipecat/evals/`       | Behavioral eval framework (run via `pipecat eval`) |

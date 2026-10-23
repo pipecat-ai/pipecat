@@ -8,7 +8,7 @@
 
 from typing import Any, cast
 
-from pipecat.adapters.services.gemini_adapter import GeminiLLMAdapter, GeminiLLMInvocationParams
+from pipecat.adapters.llm.services.gemini_adapter import GeminiLLMAdapter, GeminiLLMInvocationParams
 from pipecat.processors.aggregators.llm_context import (
     NOT_GIVEN,
     LLMContext,

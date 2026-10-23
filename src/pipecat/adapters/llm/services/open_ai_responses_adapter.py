@@ -12,9 +12,9 @@ from typing import Any, Required, TypedDict, cast
 from openai._types import NotGiven as OpenAINotGiven
 from openai.types.responses import FunctionToolParam, ResponseInputItemParam, ToolParam
 
-from pipecat.adapters.base_llm_adapter import BaseLLMAdapter, LLMContextConversionError
-from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
-from pipecat.adapters.services.open_ai_adapter import openai_from_llm_context_tools
+from pipecat.adapters.llm.base_llm_adapter import BaseLLMAdapter, LLMContextConversionError
+from pipecat.adapters.llm.schemas.tools_schema import AdapterType, ToolsSchema
+from pipecat.adapters.llm.services.open_ai_adapter import openai_from_llm_context_tools
 from pipecat.processors.aggregators.llm_context import (
     LLMContext,
     LLMContextMessage,

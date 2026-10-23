@@ -4,11 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Azure Voice Live LLM adapter for Pipecat.
-
-Converts Pipecat's tool schemas and context into the format required by
-Azure's Voice Live API.
-"""
+"""OpenAI Realtime LLM adapter for Pipecat."""
 
 import copy
 import json
@@ -17,20 +13,17 @@ from typing import Any, TypedDict, cast
 
 from loguru import logger
 
-from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
-from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.adapters.llm.base_llm_adapter import BaseLLMAdapter
+from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
+from pipecat.adapters.llm.schemas.tools_schema import AdapterType, ToolsSchema
 from pipecat.processors.aggregators.llm_context import LLMContext, LLMContextMessage
-from pipecat.services.azure.voice_live import events
+from pipecat.services.openai.realtime import events
 
 
-class AzureVoiceLiveLLMInvocationParams(TypedDict):
-    """Context-based parameters for invoking the Voice Live API.
+class OpenAIRealtimeLLMInvocationParams(TypedDict):
+    """Context-based parameters for invoking OpenAI Realtime API.
 
-    Parameters:
-        system_instruction: System prompt/instructions for the session.
-        messages: List of conversation items formatted for Voice Live.
-        tools: List of tool definitions.
+    This is a placeholder until support for universal LLMContext machinery is added for OpenAI Realtime.
     """
 
     system_instruction: str | None
@@ -38,17 +31,17 @@ class AzureVoiceLiveLLMInvocationParams(TypedDict):
     tools: list[dict[str, Any]]
 
 
-class AzureVoiceLiveLLMAdapter(BaseLLMAdapter):
-    """LLM adapter for the Azure Voice Live API.
+class OpenAIRealtimeLLMAdapter(BaseLLMAdapter):
+    """LLM adapter for OpenAI Realtime API function calling.
 
-    Converts Pipecat's universal context and tool schemas into the specific
-    format required by Azure's Voice Live API.
+    Converts Pipecat's tool schemas into the specific format required by
+    OpenAI's Realtime API for function calling capabilities.
     """
 
     @property
     def id_for_llm_specific_messages(self) -> str:
-        """Get the identifier used in LLMSpecificMessage instances for Voice Live."""
-        return "azure-voice-live"
+        """Get the identifier used in LLMSpecificMessage instances for OpenAI Realtime."""
+        return "openai-realtime"
 
     async def get_llm_invocation_params(
         self,
@@ -56,8 +49,8 @@ class AzureVoiceLiveLLMAdapter(BaseLLMAdapter):
         *,
         system_instruction: str | None = None,
         service_tools: Any = None,
-    ) -> AzureVoiceLiveLLMInvocationParams:
-        """Get Voice Live-specific LLM invocation parameters from a universal LLM context.
+    ) -> OpenAIRealtimeLLMInvocationParams:
+        """Get OpenAI Realtime-specific LLM invocation parameters from a universal LLM context.
 
         The ``tools`` returned are the set the session should carry: the
         context's own when it has any, else the init-provided ones. Built-in
@@ -72,7 +65,7 @@ class AzureVoiceLiveLLMAdapter(BaseLLMAdapter):
                 provider-native tool list, or ``None``.
 
         Returns:
-            Dictionary of parameters for invoking Azure's Voice Live API.
+            Dictionary of parameters for invoking OpenAI Realtime's API.
         """
         messages = self._from_universal_context_messages(self.get_messages(context))
         effective_system = self._resolve_system_instruction(
@@ -87,24 +80,23 @@ class AzureVoiceLiveLLMAdapter(BaseLLMAdapter):
         }
 
     def get_messages_for_logging(self, context) -> list[dict[str, Any]]:
-        """Get messages from context in a format safe for logging.
+        """Get messages from a universal LLM context in a format ready for logging about OpenAI Realtime.
 
         Binary data (images, audio) is replaced with short placeholders.
+
+        This is a placeholder until support for universal LLMContext machinery is added for OpenAI Realtime.
 
         Args:
             context: The LLM context containing messages.
 
         Returns:
-            List of messages with sensitive data redacted.
+            List of messages in a format ready for logging about OpenAI Realtime.
         """
-        return cast(
-            list[dict[str, Any]],
-            self.get_messages(context, truncate_large_values=True),
-        )
+        return cast(list[dict[str, Any]], self.get_messages(context, truncate_large_values=True))
 
     @dataclass
     class ConvertedMessages:
-        """Container for Voice Live-formatted messages converted from universal context."""
+        """Container for OpenAI-formatted messages converted from universal context."""
 
         messages: list[events.ConversationItem]
         system_instruction: str | None = None
@@ -112,25 +104,22 @@ class AzureVoiceLiveLLMAdapter(BaseLLMAdapter):
     def _from_universal_context_messages(
         self, universal_context_messages: list[LLMContextMessage]
     ) -> ConvertedMessages:
-        """Convert universal context messages to Voice Live format.
+        # We can't load a long conversation history into the openai realtime api yet. (The API/model
+        # forgets that it can do audio, if you do a series of `conversation.item.create` calls.) So
+        # our general strategy until this is fixed is just to put everything into a first "user"
+        # message as a single input.
 
-        Conversation history is packed into a single user message, since the
-        realtime API doesn't support loading long histories.
-
-        Args:
-            universal_context_messages: List of messages in universal format.
-
-        Returns:
-            ConvertedMessages with Voice Live-formatted messages and system instruction.
-        """
         if not universal_context_messages:
             return self.ConvertedMessages(messages=[])
 
-        # NOTE: This adapter does not yet handle ``LLMSpecificMessage`` —
-        # those are filtered out below. Other adapters (e.g. Anthropic)
-        # dispatch LLMSpecific items through a per-provider passthrough.
-        # The pack-into-single-text-message strategy here doesn't compose
-        # with opaque per-provider payloads.
+        # NOTE: This adapter does not yet handle ``LLMSpecificMessage`` — those
+        # are filtered out below. Other adapters (e.g. Anthropic) dispatch
+        # LLMSpecific items through a per-provider passthrough. For OpenAI
+        # Realtime, the strategy here packs a multi-message history into a
+        # single text message (see comment further down), which doesn't
+        # compose with opaque per-provider payloads. If/when this adapter
+        # adopts the per-message strategy, LLMSpecific items can flow
+        # through `_from_universal_context_message` like in other adapters.
         messages: list[dict[str, Any]] = [
             cast(dict[str, Any], m)
             for m in copy.deepcopy(universal_context_messages)
@@ -138,7 +127,8 @@ class AzureVoiceLiveLLMAdapter(BaseLLMAdapter):
         ]
         system_instruction = None
 
-        # Extract system message as session instructions
+        # If we have a "system" message as our first message,
+        # pull that out into session "instructions"
         if messages and messages[0].get("role") == "system":
             self._warn_context_system_message()
             system = messages.pop(0)
@@ -155,7 +145,7 @@ class AzureVoiceLiveLLMAdapter(BaseLLMAdapter):
             if msg.get("role") in ("system", "developer"):
                 msg["role"] = "user"
 
-        # Single user message can be sent normally
+        # If we have just a single "user" item, we can just send it normally
         if len(messages) == 1 and messages[0].get("role") == "user":
             return self.ConvertedMessages(
                 messages=[
@@ -164,7 +154,8 @@ class AzureVoiceLiveLLMAdapter(BaseLLMAdapter):
                 system_instruction=system_instruction,
             )
 
-        # Pack multiple messages into a single user message
+        # Otherwise, let's pack everything into a single "user" message with a bit of
+        # explanation for the LLM
         intro_text = """
         This is a previously saved conversation. Please treat this conversation history as a
         starting point for the current conversation."""
@@ -172,7 +163,7 @@ class AzureVoiceLiveLLMAdapter(BaseLLMAdapter):
         trailing_text = """
         This is the end of the previously saved conversation. Please continue the conversation
         from here. If the last message is a user instruction or question, act on that instruction
-        or answer the question. If the last message is an assistant response, simply say that you
+        or answer the question. If the last message is an assistant response, simple say that you
         are ready to continue the conversation."""
 
         return self.ConvertedMessages(
@@ -200,35 +191,25 @@ class AzureVoiceLiveLLMAdapter(BaseLLMAdapter):
     def _from_universal_context_message(
         self, message: LLMContextMessage
     ) -> events.ConversationItem:
-        """Convert a single universal context message to Voice Live format.
-
-        Args:
-            message: Message in universal format.
-
-        Returns:
-            ConversationItem formatted for the Voice Live API.
-        """
         # NOTE: ``LLMSpecificMessage`` is not yet handled here — see the
         # corresponding note in `_from_universal_context_messages`.
         msg = cast(dict[str, Any], message)
         if msg.get("role") == "user":
             content = msg.get("content")
             if isinstance(content, list):
-                text_parts = []
-                for c in content:
+                content = ""
+                for c in msg.get("content", []):
                     if c.get("type") == "text":
-                        text_parts.append(c.get("text"))
+                        content += " " + c.get("text")
                     else:
                         logger.error(
                             f"Unhandled content type in context message: {c.get('type')} - {msg}"
                         )
-                content = " ".join(t for t in text_parts if t).strip()
             return events.ConversationItem(
                 role="user",
                 type="message",
                 content=[events.ItemContent(type="input_text", text=content)],
             )
-
         if msg.get("role") == "assistant" and msg.get("tool_calls"):
             tc = msg["tool_calls"][0]
             return events.ConversationItem(
@@ -237,18 +218,17 @@ class AzureVoiceLiveLLMAdapter(BaseLLMAdapter):
                 name=tc["function"]["name"],
                 arguments=tc["function"]["arguments"],
             )
-
         raise ValueError(f"Unhandled message type in _from_universal_context_message: {msg}")
 
     @staticmethod
-    def _to_voice_live_function_format(function: FunctionSchema) -> dict[str, Any]:
-        """Convert a function schema to Voice Live function format.
+    def _to_openai_realtime_function_format(function: FunctionSchema) -> dict[str, Any]:
+        """Convert a function schema to OpenAI Realtime format.
 
         Args:
             function: The function schema to convert.
 
         Returns:
-            Dictionary in Voice Live function format.
+            Dictionary in OpenAI Realtime function format.
         """
         return {
             "type": "function",
@@ -262,13 +242,19 @@ class AzureVoiceLiveLLMAdapter(BaseLLMAdapter):
         }
 
     def to_provider_tools_format(self, tools_schema: ToolsSchema) -> list[dict[str, Any]]:
-        """Convert tool schemas to Voice Live format.
+        """Convert tool schemas to OpenAI Realtime function-calling format.
 
         Args:
             tools_schema: The tools schema containing functions to convert.
 
         Returns:
-            List of tool definitions in Voice Live format.
+            List of function definitions in OpenAI Realtime format.
         """
         functions_schema = tools_schema.standard_tools
-        return [self._to_voice_live_function_format(func) for func in functions_schema]
+        formatted_standard_tools = [
+            self._to_openai_realtime_function_format(func) for func in functions_schema
+        ]
+        custom_openai_tools = []
+        if tools_schema.custom_tools:
+            custom_openai_tools = tools_schema.custom_tools.get(AdapterType.OPENAI, [])
+        return formatted_standard_tools + custom_openai_tools

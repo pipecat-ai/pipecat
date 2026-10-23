@@ -4,10 +4,10 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Inworld Realtime LLM adapter for Pipecat.
+"""Grok Realtime LLM adapter for Pipecat.
 
 Converts Pipecat's tool schemas and context into the format required by
-Inworld's Realtime API.
+Grok's Voice Agent API.
 """
 
 import copy
@@ -17,20 +17,20 @@ from typing import Any, TypedDict, cast
 
 from loguru import logger
 
-from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
-from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.adapters.llm.base_llm_adapter import BaseLLMAdapter
+from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
+from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
 from pipecat.processors.aggregators.llm_context import LLMContext, LLMContextMessage
-from pipecat.services.inworld.realtime import events
+from pipecat.services.xai.realtime import events
 
 
-class InworldRealtimeLLMInvocationParams(TypedDict):
-    """Context-based parameters for invoking Inworld Realtime API.
+class GrokRealtimeLLMInvocationParams(TypedDict):
+    """Context-based parameters for invoking Grok Realtime API.
 
     Parameters:
         system_instruction: System prompt/instructions for the session.
-        messages: List of conversation items formatted for Inworld Realtime.
-        tools: List of tool definitions.
+        messages: List of conversation items formatted for Grok Realtime.
+        tools: List of tool definitions (function, web_search, x_search, file_search).
     """
 
     system_instruction: str | None
@@ -38,17 +38,17 @@ class InworldRealtimeLLMInvocationParams(TypedDict):
     tools: list[dict[str, Any]]
 
 
-class InworldRealtimeLLMAdapter(BaseLLMAdapter):
-    """LLM adapter for Inworld Realtime API.
+class GrokRealtimeLLMAdapter(BaseLLMAdapter):
+    """LLM adapter for Grok Voice Agent API.
 
     Converts Pipecat's universal context and tool schemas into the specific
-    format required by Inworld's Realtime API.
+    format required by Grok's Voice Agent Realtime API.
     """
 
     @property
     def id_for_llm_specific_messages(self) -> str:
-        """Get the identifier used in LLMSpecificMessage instances for Inworld Realtime."""
-        return "inworld-realtime"
+        """Get the identifier used in LLMSpecificMessage instances for Grok Realtime."""
+        return "grok-realtime"
 
     async def get_llm_invocation_params(
         self,
@@ -56,8 +56,8 @@ class InworldRealtimeLLMAdapter(BaseLLMAdapter):
         *,
         system_instruction: str | None = None,
         service_tools: Any = None,
-    ) -> InworldRealtimeLLMInvocationParams:
-        """Get Inworld Realtime-specific LLM invocation parameters from a universal LLM context.
+    ) -> GrokRealtimeLLMInvocationParams:
+        """Get Grok Realtime-specific LLM invocation parameters from a universal LLM context.
 
         The ``tools`` returned are the set the session should carry: the
         context's own when it has any, else the init-provided ones. Built-in
@@ -72,7 +72,7 @@ class InworldRealtimeLLMAdapter(BaseLLMAdapter):
                 provider-native tool list, or ``None``.
 
         Returns:
-            Dictionary of parameters for invoking Inworld's Realtime API.
+            Dictionary of parameters for invoking Grok's Voice Agent API.
         """
         messages = self._from_universal_context_messages(self.get_messages(context))
         effective_system = self._resolve_system_instruction(
@@ -104,7 +104,7 @@ class InworldRealtimeLLMAdapter(BaseLLMAdapter):
 
     @dataclass
     class ConvertedMessages:
-        """Container for Inworld-formatted messages converted from universal context."""
+        """Container for Grok-formatted messages converted from universal context."""
 
         messages: list[events.ConversationItem]
         system_instruction: str | None = None
@@ -112,7 +112,7 @@ class InworldRealtimeLLMAdapter(BaseLLMAdapter):
     def _from_universal_context_messages(
         self, universal_context_messages: list[LLMContextMessage]
     ) -> ConvertedMessages:
-        """Convert universal context messages to Inworld Realtime format.
+        """Convert universal context messages to Grok Realtime format.
 
         Similar to OpenAI Realtime, we pack conversation history into a single
         user message since the realtime API doesn't support loading long histories.
@@ -121,7 +121,7 @@ class InworldRealtimeLLMAdapter(BaseLLMAdapter):
             universal_context_messages: List of messages in universal format.
 
         Returns:
-            ConvertedMessages with Inworld-formatted messages and system instruction.
+            ConvertedMessages with Grok-formatted messages and system instruction.
         """
         if not universal_context_messages:
             return self.ConvertedMessages(messages=[])
@@ -200,13 +200,13 @@ class InworldRealtimeLLMAdapter(BaseLLMAdapter):
     def _from_universal_context_message(
         self, message: LLMContextMessage
     ) -> events.ConversationItem:
-        """Convert a single universal context message to Inworld format.
+        """Convert a single universal context message to Grok format.
 
         Args:
             message: Message in universal format.
 
         Returns:
-            ConversationItem formatted for Inworld Realtime API.
+            ConversationItem formatted for Grok Realtime API.
         """
         # NOTE: ``LLMSpecificMessage`` is not yet handled here — see the
         # corresponding note in `_from_universal_context_messages`.
@@ -241,14 +241,14 @@ class InworldRealtimeLLMAdapter(BaseLLMAdapter):
         raise ValueError(f"Unhandled message type in _from_universal_context_message: {msg}")
 
     @staticmethod
-    def _to_inworld_function_format(function: FunctionSchema) -> dict[str, Any]:
-        """Convert a function schema to Inworld Realtime function format.
+    def _to_grok_function_format(function: FunctionSchema) -> dict[str, Any]:
+        """Convert a function schema to Grok Realtime function format.
 
         Args:
             function: The function schema to convert.
 
         Returns:
-            Dictionary in Inworld Realtime function format.
+            Dictionary in Grok Realtime function format.
         """
         return {
             "type": "function",
@@ -262,13 +262,17 @@ class InworldRealtimeLLMAdapter(BaseLLMAdapter):
         }
 
     def to_provider_tools_format(self, tools_schema: ToolsSchema) -> list[dict[str, Any]]:
-        """Convert tool schemas to Inworld Realtime format.
+        """Convert tool schemas to Grok Realtime format.
+
+        Supports both standard function tools and Grok-specific tools
+        (web_search, x_search, file_search).
 
         Args:
             tools_schema: The tools schema containing functions to convert.
 
         Returns:
-            List of tool definitions in Inworld Realtime format.
+            List of tool definitions in Grok Realtime format.
         """
+        # Convert standard function tools
         functions_schema = tools_schema.standard_tools
-        return [self._to_inworld_function_format(func) for func in functions_schema]
+        return [self._to_grok_function_format(func) for func in functions_schema]

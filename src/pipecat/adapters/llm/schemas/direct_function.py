@@ -28,7 +28,7 @@ from typing import (
 
 import docstring_parser
 
-from pipecat.adapters.schemas.function_schema import FunctionSchema
+from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
 
 if TYPE_CHECKING:
     from pipecat.services.llm_service import FunctionCallParams
