@@ -1461,8 +1461,19 @@
       "deprecated_in": "1.13.0",
       "removed_in": "2.0.0",
       "relation": "use_existing",
-      "replacement": "text_type",
-      "message": "Use ``text_type`` instead. Will be removed in 2.0.0.",
+      "replacement": "output_type",
+      "message": "Use ``output_type`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/processors/frameworks/rtvi/models.py"
+    },
+    {
+      "subject": "BotOutputMessageData.text_type",
+      "module": "pipecat.processors.frameworks.rtvi.models",
+      "kind": "parameter",
+      "deprecated_in": "1.14.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "output_type",
+      "message": "Use ``output_type`` instead. Will be removed in 2.0.0.",
       "location": "pipecat/processors/frameworks/rtvi/models.py"
     },
     {

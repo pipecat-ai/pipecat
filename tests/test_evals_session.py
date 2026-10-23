@@ -243,12 +243,12 @@ class TestFramesToEvents(unittest.TestCase):
                 message={"label": RTVI.MESSAGE_LABEL, "type": msg_type, "data": data}
             )
 
-        def bot_output(text_type, status, accumulated="Mm-hmm."):
+        def bot_output(output_type, status, accumulated="Mm-hmm."):
             return msg(
                 "bot-output",
                 {
                     "text": "Mm-hmm.",
-                    "text_type": text_type,
+                    "output_type": output_type,
                     "spoken_status": status,
                     "spoken_progress": {"accumulated_text": accumulated, "remaining_text": ""},
                 },
