@@ -48,7 +48,7 @@ WRITTEN = "<<cheerful>> It's [[laugh]] ^^back up^^ now. [[pause 400]] Bye!"
 
 
 class BracketAdapter(BaseExpressionAdapter):
-    """Renders modes as <modes> where they change, events as <name>, pauses as <Nms>, set apart."""
+    """Formats modes as <modes> where they change, events as <name>, pauses as <Nms>, set apart."""
 
     def capabilities(self):
         return ExpressionCapabilities(
@@ -58,14 +58,14 @@ class BracketAdapter(BaseExpressionAdapter):
             emphasis=True,
         )
 
-    def render_text(self, text, modes, previous_modes):
+    def format_text(self, text, modes, previous_modes):
         changed = modes != (previous_modes or [])
         return f"<{','.join(modes)}> {text}" if changed and modes else text
 
-    def render_event(self, name):
+    def format_event(self, name):
         return f" <{name}> "
 
-    def render_pause(self, duration_ms):
+    def format_pause(self, duration_ms):
         return f" <{duration_ms}ms> "
 
 
@@ -118,7 +118,7 @@ async def context_after(tts: TTSService, frames: list[Frame]) -> str:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("service", SERVICES)
-async def test_the_tts_is_sent_the_words_with_their_rendered_expression(service):
+async def test_the_tts_is_sent_the_words_with_their_formatted_expression(service):
     tts = service()
     requests = record_requests(tts)
     await run_test(tts, frames_to_send=response(*REPLY), pipeline_params=EXPRESSIVE)
@@ -433,7 +433,7 @@ async def test_a_request_is_spoken_in_the_modes_its_words_start_in():
 
 
 class MarkupAdapter(BaseExpressionAdapter):
-    """Renders tags as bracketed markup, which its service reports back with its words."""
+    """Formats tags as bracketed markup, which its service reports back with its words."""
 
     def capabilities(self):
         return ExpressionCapabilities(
@@ -442,14 +442,14 @@ class MarkupAdapter(BaseExpressionAdapter):
             pause_range_ms=(100, 1000),
         )
 
-    def render_text(self, text, modes, previous_modes):
+    def format_text(self, text, modes, previous_modes):
         changed = modes and modes != (previous_modes or [])
         return f"[{' '.join(modes)}] {text}" if changed else text
 
-    def render_event(self, name):
+    def format_event(self, name):
         return f" [{name}] "
 
-    def render_pause(self, duration_ms):
+    def format_pause(self, duration_ms):
         return " [pause] "
 
 

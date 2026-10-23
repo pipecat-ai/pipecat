@@ -17,7 +17,7 @@ is spoken in and the events performed before it.
 
 from dataclasses import dataclass
 
-from pipecat.expressive.renderer import ExpressionSpan
+from pipecat.expressive.formatter import ExpressionSpan
 from pipecat.frames.frames import TextType
 
 

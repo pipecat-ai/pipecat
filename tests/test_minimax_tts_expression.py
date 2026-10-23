@@ -49,9 +49,9 @@ def _service(session, **settings) -> MiniMaxHttpTTSService:
 class TestMiniMaxExpressionAdapter:
     def test_events_and_pauses(self):
         adapter = MiniMaxExpressionAdapter()
-        assert adapter.render_event("laughs") == "(laughs)"
-        assert adapter.render_pause(600) == "<#0.6#>"
-        assert adapter.render_text("Hi.", ["happy"], None) == "Hi."
+        assert adapter.format_event("laughs") == "(laughs)"
+        assert adapter.format_pause(600) == "<#0.6#>"
+        assert adapter.format_text("Hi.", ["happy"], None) == "Hi."
 
     def test_vocabulary_is_fixed(self):
         # MiniMax reads an interjection outside its list aloud.

@@ -77,7 +77,7 @@ _AUDIO_TAG_MODES = [
 
 
 class ElevenLabsAudioTagExpressionAdapter(BaseExpressionAdapter):
-    """Renders expression tags as Eleven v3 and v4 audio tags.
+    """Formats expression tags as Eleven v3 and v4 audio tags.
 
     Part of expressive conversation (alpha). Modes and events are both audio
     tags, such as ``[excited]`` or ``[laughs]``, written in free text: the
@@ -100,7 +100,7 @@ class ElevenLabsAudioTagExpressionAdapter(BaseExpressionAdapter):
             emphasis=True,
         )
 
-    def render_text(self, text: str, modes: list[str], previous_modes: list[str] | None) -> str:
+    def format_text(self, text: str, modes: list[str], previous_modes: list[str] | None) -> str:
         """Prefix audio tags where the modes change, and capitalize emphasis."""
         if EMPHASIS_MODE in modes:
             text = text.upper()
@@ -110,10 +110,10 @@ class ElevenLabsAudioTagExpressionAdapter(BaseExpressionAdapter):
             text = " ".join(f"[{tag}]" for tag in tags) + " " + text
         return text
 
-    def render_event(self, name: str) -> str:
-        """Render an audio tag, set apart so its alignment times it as a word of its own."""
+    def format_event(self, name: str) -> str:
+        """Format an audio tag, set apart so its alignment times it as a word of its own."""
         return f" [{name}] "
 
-    def render_pause(self, duration_ms: int) -> str:
-        """Render a short pause under a second, otherwise a long one, set apart like an event."""
+    def format_pause(self, duration_ms: int) -> str:
+        """Format a short pause under a second, otherwise a long one, set apart like an event."""
         return " [short pause] " if duration_ms < 1000 else " [long pause] "

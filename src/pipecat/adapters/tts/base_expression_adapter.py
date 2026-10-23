@@ -8,7 +8,7 @@
 
 Part of expressive conversation (alpha). Each TTS service has an expression
 adapter, a :class:`BaseExpressionAdapter`, the way each LLM service has an LLM
-adapter. The adapter declares what the service can perform and renders it into the text
+adapter. The adapter declares what the service can perform and formats it into the text
 sent to the service: words in their modes, and events and pauses. The base
 adapter performs nothing, so a service without one speaks only the words.
 
@@ -19,12 +19,12 @@ from pipecat.expressive.expression import ExpressionCapabilities
 
 
 class BaseExpressionAdapter:
-    """Renders expression for one TTS service. The base performs nothing.
+    """Formats expression for one TTS service. The base performs nothing.
 
     Its capabilities are what the service can perform: the service broadcasts
-    them at start, and reads and renders tags by them. The service calls the
+    them at start, and reads and formats tags by them. The service calls the
     adapter only with what they say it supports: other modes are taken off
-    the words first, and other events are never rendered.
+    the words first, and other events are never formatted.
 
     Markup is set apart from the words by spaces, so the words a service with
     word timestamps reports line up with the text it was sent.
@@ -38,8 +38,8 @@ class BaseExpressionAdapter:
         """
         return None
 
-    def render_text(self, text: str, modes: list[str], previous_modes: list[str] | None) -> str:
-        """Render words to speak in their modes.
+    def format_text(self, text: str, modes: list[str], previous_modes: list[str] | None) -> str:
+        """Format words to speak in their modes.
 
         Args:
             text: The words, as prepared for the service.
@@ -54,8 +54,8 @@ class BaseExpressionAdapter:
         """
         return text
 
-    def render_event(self, name: str) -> str:
-        """Render a supported event, such as a laugh, at its place in the text.
+    def format_event(self, name: str) -> str:
+        """Format a supported event, such as a laugh, at its place in the text.
 
         Args:
             name: The event, as written between the brackets.
@@ -65,8 +65,8 @@ class BaseExpressionAdapter:
         """
         return ""
 
-    def render_pause(self, duration_ms: int) -> str:
-        """Render a pause at its place in the text.
+    def format_pause(self, duration_ms: int) -> str:
+        """Format a pause at its place in the text.
 
         Args:
             duration_ms: How long, in milliseconds, within the service's

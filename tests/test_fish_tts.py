@@ -157,24 +157,24 @@ class TestS2ExpressionAdapter:
 
     def test_tags_where_modes_change(self):
         adapter = FishAudioS2ExpressionAdapter()
-        assert adapter.render_text("Hi.", ["excited"], None) == "[excited] Hi."
-        assert adapter.render_text("Hi.", ["excited"], ["excited"]) == "Hi."
-        assert adapter.render_text("Hi.", ["sad", "whispering"], None) == "[sad][whispering] Hi."
+        assert adapter.format_text("Hi.", ["excited"], None) == "[excited] Hi."
+        assert adapter.format_text("Hi.", ["excited"], ["excited"]) == "Hi."
+        assert adapter.format_text("Hi.", ["sad", "whispering"], None) == "[sad][whispering] Hi."
 
     def test_return_to_baseline_writes_no_tag(self):
         # Fish reads a [neutral] tag as a delivery of its own.
-        assert FishAudioS2ExpressionAdapter().render_text("Hi.", [], ["excited"]) == "Hi."
+        assert FishAudioS2ExpressionAdapter().format_text("Hi.", [], ["excited"]) == "Hi."
 
     def test_emphasis(self):
         adapter = FishAudioS2ExpressionAdapter()
-        assert adapter.render_text("now", ["emphasis"], None) == "[emphasis] now"
-        assert adapter.render_text("now", ["excited", "emphasis"], ["excited"]) == "[emphasis] now"
+        assert adapter.format_text("now", ["emphasis"], None) == "[emphasis] now"
+        assert adapter.format_text("now", ["excited", "emphasis"], ["excited"]) == "[emphasis] now"
 
     def test_events_and_pauses(self):
         adapter = FishAudioS2ExpressionAdapter()
-        assert adapter.render_event("clear throat") == "[clear throat]"
-        assert adapter.render_pause(600) == "[break]"
-        assert adapter.render_pause(1200) == "[long-break]"
+        assert adapter.format_event("clear throat") == "[clear throat]"
+        assert adapter.format_pause(600) == "[break]"
+        assert adapter.format_pause(1200) == "[long-break]"
 
 
 @pytest.mark.parametrize(

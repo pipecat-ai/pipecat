@@ -79,10 +79,10 @@ class CartesiaEmotion(StrEnum):
 
 
 class CartesiaExpressionAdapter(BaseExpressionAdapter):
-    """Renders expression tags as Cartesia's inline markup.
+    """Formats expression tags as Cartesia's inline markup.
 
     Part of expressive conversation (alpha). Modes are Cartesia's emotions,
-    rendered as ``<emotion>`` tags; Cartesia supports them in English only.
+    formatted as ``<emotion>`` tags; Cartesia supports them in English only.
     Cartesia changes emotion reliably only between generations, so a mode can
     change only between sentences, and a sentence written in several modes is
     spoken in the first. The one event is ``[laughter]``, and pauses are
@@ -102,7 +102,7 @@ class CartesiaExpressionAdapter(BaseExpressionAdapter):
             mode_scope=ModeScope.SENTENCE,
         )
 
-    def render_text(self, text: str, modes: list[str], previous_modes: list[str] | None) -> str:
+    def format_text(self, text: str, modes: list[str], previous_modes: list[str] | None) -> str:
         """Prefix an emotion tag, set apart from the words, where the emotion changes."""
         emotion = modes[0] if modes else None
         previous = previous_modes[0] if previous_modes else None
@@ -110,10 +110,10 @@ class CartesiaExpressionAdapter(BaseExpressionAdapter):
             return text
         return f'<emotion value="{emotion or CartesiaEmotion.NEUTRAL.value}"/> {text}'
 
-    def render_event(self, name: str) -> str:
-        """Render laughter, set apart so Cartesia times it as a word of its own."""
+    def format_event(self, name: str) -> str:
+        """Format laughter, set apart so Cartesia times it as a word of its own."""
         return f" [{name}] "
 
-    def render_pause(self, duration_ms: int) -> str:
-        """Render a break, set apart from the words."""
+    def format_pause(self, duration_ms: int) -> str:
+        """Format a break, set apart from the words."""
         return f' <break time="{duration_ms}ms"/> '

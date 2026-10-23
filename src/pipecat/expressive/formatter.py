@@ -4,9 +4,9 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Reads the expression tags an LLM writes, and renders them for a TTS service.
+"""Reads the expression tags an LLM writes, and formats them for a TTS service.
 
-Part of expressive conversation (alpha). :class:`ExpressionRenderer` splits
+Part of expressive conversation (alpha). :class:`ExpressionFormatter` splits
 each unit of text a TTS service is given into the words to speak, with the
 modes they are spoken in, and the events between them:
 
@@ -25,12 +25,12 @@ keeps its declared kind in the other kind's brackets: ``[[cheerful]]`` still
 sets a mode when ``cheerful`` is a declared mode. LLMs make that slip, so it is
 logged as a warning.
 
-The renderer reads whole units: an aggregator such as
+The formatter reads whole units: an aggregator such as
 :class:`~pipecat.utils.text.skip_tags_aggregator.SkipTagsAggregator`, given
 :data:`EXPRESSION_TAGS`, keeps each tag in one unit as text streams. A tag
 left unfinished at the end of a unit is removed, never spoken.
 
-It then renders a unit's request through the service's
+It then formats a unit's request through the service's
 :class:`~pipecat.adapters.tts.base_expression_adapter.BaseExpressionAdapter`,
 leaving out what the service can't perform.
 
@@ -140,21 +140,21 @@ class ExpressionSpan:
     event: tuple[TextType, str] | None = None
 
 
-class ExpressionRenderer:
-    """Reads a TTS service's expression tags and renders its requests.
+class ExpressionFormatter:
+    """Reads a TTS service's expression tags and formats its requests.
 
     Parse each unit of a response in turn with :meth:`parse`, and call
     :meth:`reset` when the response ends or is interrupted. The modes last
     until the next mode tag, and the end of a response returns them to the
-    baseline. :meth:`render` builds a unit's request: the words, transformed
-    and rendered in the modes the service can perform, and its events and
+    baseline. :meth:`format` builds a unit's request: the words, transformed
+    and formatted in the modes the service can perform, and its events and
     pauses. What the service can't perform is left out, with one warning per
     tag.
 
     Example::
 
-        renderer = ExpressionRenderer(lambda: adapter, owner=tts)
-        renderer.parse("<<cheerful>> It's ^^back^^ [[laugh]]!")
+        formatter = ExpressionFormatter(lambda: adapter, owner=tts)
+        formatter.parse("<<cheerful>> It's ^^back^^ [[laugh]]!")
         # [Text(" It's ", ("cheerful",), 12, 18),
         #  Text("back", ("cheerful", "emphasis"), 20, 24),
         #  Text(" ", ("cheerful",), 26, 27),
@@ -163,7 +163,7 @@ class ExpressionRenderer:
     """
 
     def __init__(self, adapter: Callable[[], BaseExpressionAdapter], owner: object):
-        """Initialize the renderer.
+        """Initialize the formatter.
 
         Args:
             adapter: Returns the service's adapter, which may depend on its
@@ -174,8 +174,8 @@ class ExpressionRenderer:
         self._owner = owner
         # The modes the next words of the response are spoken in.
         self._active_modes: tuple[str, ...] = ()
-        # The modes of the words last rendered, so markup marks only changes.
-        self._rendered_modes: list[str] | None = None
+        # The modes of the words last formatted, so markup marks only changes.
+        self._formatted_modes: list[str] | None = None
         self._unperformed: set[str] = set()
         self._modes: list[str] = []
 
@@ -234,12 +234,12 @@ class ExpressionRenderer:
 
         For text spoken in a context of its own, such as a ``TTSSpeakFrame``'s.
         """
-        self._rendered_modes = None
+        self._formatted_modes = None
 
     def reset(self):
         """Return to the baseline, as at the end of a response or an interruption."""
         self._active_modes = ()
-        self._rendered_modes = None
+        self._formatted_modes = None
 
     @staticmethod
     def shown_text(segments: list[Segment], text_type: TextType | str) -> str:
@@ -256,7 +256,7 @@ class ExpressionRenderer:
         words = _SPACES.sub(" ", "".join(s.text for s in segments if isinstance(s, Text)))
         return words if text_type == TextType.TOKEN else words.strip()
 
-    async def render(
+    async def format(
         self,
         segments: list[Segment],
         text_type: TextType | str,
@@ -265,8 +265,8 @@ class ExpressionRenderer:
     ) -> tuple[str, list[ExpressionSpan]]:
         """Build the request for a unit.
 
-        Each run of words is transformed, then rendered in the modes the
-        service can perform. Events and pauses are rendered at their places.
+        Each run of words is transformed, then formatted in the modes the
+        service can perform. Events and pauses are formatted at their places.
         A sentence's request is trimmed at both ends; a streamed token keeps
         its spacing.
 
@@ -286,7 +286,7 @@ class ExpressionRenderer:
         if text_type != TextType.TOKEN:
             # A sentence's request states its modes from its start, since not
             # every service keeps modes from one request to the next.
-            self._rendered_modes = None
+            self._formatted_modes = None
         parts: list[str] = []
         spans: list[ExpressionSpan] = []
         first_modes: list[str] | None = None
@@ -313,11 +313,11 @@ class ExpressionRenderer:
                     trimmed = True
                 words = await transform(words_text, text_type) if words_text is not None else None
                 if words is not None:
-                    parts.append(self._render(words, modes))
+                    parts.append(self._format(words, modes))
             elif _performs(segment, capabilities):
                 event = _event_text(segment, capabilities)
                 spans.append(ExpressionSpan(segment.start, segment.end, event=event))
-                parts.append(self._render_event(segment, capabilities))
+                parts.append(self._format_event(segment, capabilities))
             else:
                 self._warn_unperformed(_tag(segment))
         if first_modes is not None:
@@ -369,13 +369,13 @@ class ExpressionRenderer:
         modes = tuple(content.split())
         self._active_modes = () if modes == (NEUTRAL_MODE,) else modes
 
-    def _render(self, text: str, modes: list[str]) -> str:
-        """Render words to send to the TTS in their modes."""
+    def _format(self, text: str, modes: list[str]) -> str:
+        """Format words to send to the TTS in their modes."""
         # Leading spacing stays outside the markup, between the words.
         words = text.lstrip()
-        rendered = self._adapter().render_text(words, modes, self._rendered_modes)
-        self._rendered_modes = modes
-        return text[: len(text) - len(words)] + rendered
+        formatted = self._adapter().format_text(words, modes, self._formatted_modes)
+        self._formatted_modes = modes
+        return text[: len(text) - len(words)] + formatted
 
     def _performed_modes(
         self, modes: list[str], capabilities: ExpressionCapabilities | None
@@ -399,14 +399,14 @@ class ExpressionRenderer:
                 self._warn_unperformed("^^emphasis^^" if mode == EMPHASIS_MODE else f"<<{mode}>>")
         return performed
 
-    def _render_event(
+    def _format_event(
         self, segment: Event | Pause, capabilities: ExpressionCapabilities | None
     ) -> str:
-        """Render an event or pause the service can perform."""
+        """Format an event or pause the service can perform."""
         if isinstance(segment, Pause):
             assert capabilities
-            return self._adapter().render_pause(_pause_ms(segment, capabilities))
-        return self._adapter().render_event(segment.name)
+            return self._adapter().format_pause(_pause_ms(segment, capabilities))
+        return self._adapter().format_event(segment.name)
 
     def _warn_unperformed(self, tag: str):
         if tag not in self._unperformed:

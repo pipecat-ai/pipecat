@@ -14,7 +14,7 @@ import pytest
 from websockets.protocol import State
 
 from pipecat.adapters.tts.services.elevenlabs_adapter import ElevenLabsAudioTagExpressionAdapter
-from pipecat.expressive.renderer import ExpressionRenderer
+from pipecat.expressive.formatter import ExpressionFormatter
 from pipecat.services.elevenlabs.dialogue.tts import (
     _KEEPALIVE_CONTEXT_ID,
     ElevenLabsDialogueTTSService,
@@ -528,7 +528,7 @@ async def test_dialogue_word_timestamps_report_audio_tags_as_words():
         reported.extend(word for word, _ in word_times)
 
     service.add_word_timestamps = _record
-    service._expression_renderer = ExpressionRenderer(service.get_expression_adapter, service)
+    service._expression_formatter = ExpressionFormatter(service.get_expression_adapter, service)
 
     for chunk in ("[exci", "ted] Good news [clear th", "roat] it's ", "back."):
         alignment = _alignment(chunk)
@@ -560,25 +560,25 @@ class TestAudioTagExpressionAdapter:
         capabilities = ElevenLabsAudioTagExpressionAdapter().capabilities()
         assert all(len(term.name.split()) == 1 for term in capabilities.modes)
 
-    def test_tags_rendered_where_modes_change(self):
+    def test_tags_formatted_where_modes_change(self):
         adapter = ElevenLabsAudioTagExpressionAdapter()
-        assert adapter.render_text("Hi.", ["excited"], None) == "[excited] Hi."
-        assert adapter.render_text("Hi.", ["excited"], ["excited"]) == "Hi."
-        assert adapter.render_text("Hi.", ["sad", "whispers"], None) == "[sad] [whispers] Hi."
+        assert adapter.format_text("Hi.", ["excited"], None) == "[excited] Hi."
+        assert adapter.format_text("Hi.", ["excited"], ["excited"]) == "Hi."
+        assert adapter.format_text("Hi.", ["sad", "whispers"], None) == "[sad] [whispers] Hi."
 
-    def test_return_to_baseline_renders_nothing(self):
+    def test_return_to_baseline_formats_nothing(self):
         adapter = ElevenLabsAudioTagExpressionAdapter()
-        assert adapter.render_text("Hi.", [], ["excited"]) == "Hi."
+        assert adapter.format_text("Hi.", [], ["excited"]) == "Hi."
 
     def test_emphasis_is_capitalized(self):
         adapter = ElevenLabsAudioTagExpressionAdapter()
-        assert adapter.render_text("back up", ["emphasis"], None) == "BACK UP"
-        assert adapter.render_text("back up", ["excited", "emphasis"], ["excited"]) == "BACK UP"
+        assert adapter.format_text("back up", ["emphasis"], None) == "BACK UP"
+        assert adapter.format_text("back up", ["excited", "emphasis"], ["excited"]) == "BACK UP"
 
     def test_events(self):
-        assert ElevenLabsAudioTagExpressionAdapter().render_event("laughs") == " [laughs] "
+        assert ElevenLabsAudioTagExpressionAdapter().format_event("laughs") == " [laughs] "
 
     def test_pauses_are_short_or_long(self):
         adapter = ElevenLabsAudioTagExpressionAdapter()
-        assert adapter.render_pause(500) == " [short pause] "
-        assert adapter.render_pause(1500) == " [long pause] "
+        assert adapter.format_pause(500) == " [short pause] "
+        assert adapter.format_pause(1500) == " [long pause] "

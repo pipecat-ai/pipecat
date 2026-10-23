@@ -44,7 +44,7 @@ _S2_MODES = [
 
 
 class FishAudioS2ExpressionAdapter(BaseExpressionAdapter):
-    """Renders expression tags as Fish Audio S2 bracket tags.
+    """Formats expression tags as Fish Audio S2 bracket tags.
 
     Part of expressive conversation (alpha). Modes and events are both tags,
     such as ``[excited]`` or ``[laughing]``, written in free text: the terms
@@ -67,7 +67,7 @@ class FishAudioS2ExpressionAdapter(BaseExpressionAdapter):
             emphasis=True,
         )
 
-    def render_text(self, text: str, modes: list[str], previous_modes: list[str] | None) -> str:
+    def format_text(self, text: str, modes: list[str], previous_modes: list[str] | None) -> str:
         """Prefix tags where the modes change, and emphasis before stressed words."""
         tags = [mode for mode in modes if mode != EMPHASIS_MODE]
         previous = [mode for mode in previous_modes or [] if mode != EMPHASIS_MODE]
@@ -76,10 +76,10 @@ class FishAudioS2ExpressionAdapter(BaseExpressionAdapter):
             prefix += "[emphasis]"
         return f"{prefix} {text}" if prefix else text
 
-    def render_event(self, name: str) -> str:
-        """Render a tag."""
+    def format_event(self, name: str) -> str:
+        """Format a tag."""
         return f"[{name}]"
 
-    def render_pause(self, duration_ms: int) -> str:
-        """Render a break under a second, otherwise a long break."""
+    def format_pause(self, duration_ms: int) -> str:
+        """Format a break under a second, otherwise a long break."""
         return "[break]" if duration_ms < 1000 else "[long-break]"

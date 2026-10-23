@@ -38,10 +38,10 @@ class MiniMaxExpressionAdapter(BaseExpressionAdapter):
             mode_scope=ModeScope.SENTENCE,
         )
 
-    def render_event(self, name: str) -> str:
-        """Render an interjection."""
+    def format_event(self, name: str) -> str:
+        """Format an interjection."""
         return f"({name})"
 
-    def render_pause(self, duration_ms: int) -> str:
-        """Render a pause marker."""
+    def format_pause(self, duration_ms: int) -> str:
+        """Format a pause marker."""
         return f"<#{duration_ms / 1000:g}#>"

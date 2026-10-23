@@ -389,7 +389,7 @@ class ElevenLabsDialogueTTSService(ElevenLabsTTSBase):
             )
             context.alignment_started = True
             joined = alignment
-            if self._expression_renderer:
+            if self._expression_formatter:
                 # The audio tags expressive conversation sends mark when its events
                 # are performed.
                 joined, context.in_audio_tag = _join_audio_tags(

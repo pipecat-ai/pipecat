@@ -18,7 +18,7 @@ from websockets.protocol import State
 
 from pipecat.adapters.tts.base_expression_adapter import BaseExpressionAdapter
 from pipecat.adapters.tts.services.elevenlabs_adapter import ElevenLabsAudioTagExpressionAdapter
-from pipecat.expressive.renderer import ExpressionRenderer
+from pipecat.expressive.formatter import ExpressionFormatter
 from pipecat.services.elevenlabs.tts import (
     ElevenLabsHttpTTSService,
     ElevenLabsTTSService,
@@ -612,7 +612,7 @@ async def test_http_word_timestamps_report_audio_tags_as_words():
         reported.extend(word for word, _ in word_times)
 
     service.add_word_timestamps = _record
-    service._expression_renderer = ExpressionRenderer(service.get_expression_adapter, service)
+    service._expression_formatter = ExpressionFormatter(service.get_expression_adapter, service)
 
     async for _ in service.run_tts("It's [excited] back [short pause] up.", "ctx-1"):
         pass

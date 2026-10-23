@@ -6,7 +6,7 @@
 
 """Tests for telling the expression of the words a TTS service reports speaking."""
 
-from pipecat.expressive.renderer import ExpressionSpan
+from pipecat.expressive.formatter import ExpressionSpan
 from pipecat.expressive.spoken import SpokenExpression
 from pipecat.frames.frames import TextType
 

@@ -21,10 +21,10 @@ from websockets.protocol import State
 
 from pipecat.adapters.tts.base_expression_adapter import BaseExpressionAdapter
 from pipecat.audio.utils import create_stream_resampler
-from pipecat.expressive.renderer import (
+from pipecat.expressive.formatter import (
     EXPRESSION_TAG_PATTERN,
     EXPRESSION_TAGS,
-    ExpressionRenderer,
+    ExpressionFormatter,
     Segment,
 )
 from pipecat.expressive.spoken import SpokenExpression
@@ -169,7 +169,7 @@ class TTSService(AIService):
 
     _settings: TTSSettings
 
-    # Renders expressive conversation's tags for this service (alpha). The base
+    # Formats expressive conversation's tags for this service (alpha). The base
     # adapter performs nothing.
     expression_adapter_class: type[BaseExpressionAdapter] = BaseExpressionAdapter
 
@@ -431,9 +431,9 @@ class TTSService(AIService):
         self._is_yielding_frames_synchronously = False
 
         self._expression_adapter = self.expression_adapter_class()
-        # Renders the expression tags an LLM writes, when the pipeline has
+        # Formats the expression tags an LLM writes, when the pipeline has
         # expressive conversation on.
-        self._expression_renderer: ExpressionRenderer | None = None
+        self._expression_formatter: ExpressionFormatter | None = None
 
     @property
     def sample_rate(self) -> int:
@@ -480,11 +480,11 @@ class TTSService(AIService):
         return True
 
     def get_expression_adapter(self) -> BaseExpressionAdapter:
-        """The adapter that renders this service's expression tags.
+        """The adapter that formats this service's expression tags.
 
         Part of expressive conversation (alpha). Its capabilities are what the
         service can perform: what it broadcasts at start, and what it reads
-        and renders. A service whose expression depends on its settings, such
+        and formats. A service whose expression depends on its settings, such
         as its model, overrides this to choose an adapter for them.
 
         Returns:
@@ -503,7 +503,7 @@ class TTSService(AIService):
         Returns:
             The modes, empty for the voice's baseline.
         """
-        return self._expression_renderer.modes if self._expression_renderer else []
+        return self._expression_formatter.modes if self._expression_formatter else []
 
     def service_metadata_frame(self) -> TTSMetadataFrame | None:
         """Build the TTS metadata frame broadcast at start.
@@ -516,7 +516,7 @@ class TTSService(AIService):
         Returns:
             The metadata frame, or None when expressive conversation is off.
         """
-        if not self._expression_renderer:
+        if not self._expression_formatter:
             return None
         return TTSMetadataFrame(
             service_name=self.name, expression=self.get_expression_adapter().capabilities()
@@ -596,7 +596,7 @@ class TTSService(AIService):
         await super().setup(setup)
         self._sample_rate = self._init_sample_rate or setup.audio_out_sample_rate
         if setup.enable_expressive_conversation:
-            self._expression_renderer = ExpressionRenderer(self.get_expression_adapter, self)
+            self._expression_formatter = ExpressionFormatter(self.get_expression_adapter, self)
             self._aggregated_frame_sequencer.llm_markup = EXPRESSION_TAG_PATTERN
             # Each tag reaches the parser whole, however the text streams in.
             self._text_aggregator = SkipTagsAggregator(
@@ -1203,7 +1203,7 @@ class TTSService(AIService):
             frame.transport_destination = self._transport_destination
         if isinstance(frame, AggregatedTextFrame):
             self._stamp_segment_announcement(frame)
-        if self._expression_renderer:
+        if self._expression_formatter:
             events, keep = self._report_expression(frame)
             for event in events:
                 await self.push_frame(event, direction)
@@ -1326,8 +1326,8 @@ class TTSService(AIService):
         await self.stop_text_aggregation_metrics()
         if remaining:
             await self._handle_aggregated_text(self._aggregated_text_frame(remaining))
-        if self._expression_renderer:
-            self._expression_renderer.reset()
+        if self._expression_formatter:
+            self._expression_formatter.reset()
 
         # Force-promote any sentence still pending in the sequencer (streaming
         # mode only; a no-op otherwise) — handles a response that ends with no
@@ -1402,11 +1402,11 @@ class TTSService(AIService):
         await self.on_turn_context_created(speak_context_id)
         text_frame = AggregatedTextFrame(frame.text, frame.text_type, raw_text=frame.text)
         text_frame.interruptible = frame.interruptible
-        if self._expression_renderer and frame.text_type in _EXPRESSIVE_TEXT_TYPES:
+        if self._expression_formatter and frame.text_type in _EXPRESSIVE_TEXT_TYPES:
             # Text of its own, apart from any response it is spoken in the middle of.
-            self._expression_renderer.restate_modes()
+            self._expression_formatter.restate_modes()
             await self._speak_expression(text_frame, speak_context_id, whole=True)
-            self._expression_renderer.restate_modes()
+            self._expression_formatter.restate_modes()
         else:
             await self._handle_aggregated_text(text_frame, speak_context_id)
         # Force-promote the utterance's pending sentence into a real slot (streaming
@@ -1453,8 +1453,8 @@ class TTSService(AIService):
 
         await self._text_aggregator.handle_interruption()
         await self._skipped_text_aggregator.handle_interruption()
-        if self._expression_renderer:
-            self._expression_renderer.reset()
+        if self._expression_formatter:
+            self._expression_formatter.reset()
         for filter in self._text_filters:
             await filter.handle_interruption()
 
@@ -1600,7 +1600,7 @@ class TTSService(AIService):
         context_id = context_id or self.create_context_id()
         if src_frame.text_type in self._skip_text_types:
             await self._push_skipped_text(src_frame, context_id)
-        elif self._expression_renderer and src_frame.text_type in _EXPRESSIVE_TEXT_TYPES:
+        elif self._expression_formatter and src_frame.text_type in _EXPRESSIVE_TEXT_TYPES:
             await self._speak_expression(src_frame, context_id)
         elif (text := self._trim_text(src_frame.text)) is not None:
             await self._speak_text(src_frame, text, context_id)
@@ -1620,16 +1620,16 @@ class TTSService(AIService):
             whole: Whether the text stands on its own, apart from the response,
                 such as a ``TTSSpeakFrame``'s.
         """
-        if not self._expression_renderer:
+        if not self._expression_formatter:
             return
         text = src_frame.text
         if src_frame.text_type != TextType.TOKEN:
             text = text.strip()
-        segments = self._expression_renderer.parse(text, whole=whole)
+        segments = self._expression_formatter.parse(text, whole=whole)
         if not segments:
             return
         frame = AggregatedTextFrame(
-            ExpressionRenderer.shown_text(segments, src_frame.text_type),
+            ExpressionFormatter.shown_text(segments, src_frame.text_type),
             src_frame.text_type,
             raw_text=text,
         )
@@ -1660,7 +1660,7 @@ class TTSService(AIService):
 
         With expressive conversation on, ``segments`` are the unit's words and
         tags, and the request is built from them: the words transformed, and
-        the tags rendered in the service's markup.
+        the tags formatted in the service's markup.
         """
         # Accumulate text for a single debug log at flush time when streaming tokens.
         if self._is_streaming_tokens:
@@ -1675,8 +1675,8 @@ class TTSService(AIService):
             await self.start_processing_metrics()
 
         spans = None
-        if segments is not None and self._expression_renderer:
-            prepared_text, spans = await self._expression_renderer.render(
+        if segments is not None and self._expression_formatter:
+            prepared_text, spans = await self._expression_formatter.format(
                 segments, src_frame.text_type, self._transform_text, self._trim_text
             )
         else:
