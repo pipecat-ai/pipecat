@@ -1,6 +1,6 @@
 # Zoom Cafe Shop returns knowledge base
 
-The example store's return policy, refunds and FAQ, one topic per `##` section. `realtime-zoom-ai-voice-agent-decisions.py` searches these sections.
+The example store's return policy, refunds and FAQ, one topic per `##` section. `realtime-zoom-ai-decisions.py` searches these sections.
 
 ## Return window
 

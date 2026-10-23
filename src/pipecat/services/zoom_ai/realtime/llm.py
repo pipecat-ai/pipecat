@@ -8,10 +8,10 @@
 
 The Zoom Voice Agent runs the whole voice loop on Zoom's side: turn detection,
 speech recognition, the model and speech synthesis. Its events follow the
-OpenAI Realtime protocol, so :class:`ZoomAIVoiceAgentLLMService` builds on
+OpenAI Realtime protocol, so :class:`ZoomAIRealtimeLLMService` builds on
 :class:`~pipecat.services.openai.realtime.llm.OpenAIRealtimeLLMService` for
 interruptions, function calling and transcripts. The session configuration is
-Zoom's own (see :mod:`pipecat.services.zoom_ai.voice_agent.events`).
+Zoom's own (see :mod:`pipecat.services.zoom_ai.realtime.events`).
 
 See https://developers.zoom.us/docs/ai-services/voice-agent/live-mode/
 """
@@ -73,8 +73,8 @@ _RECONNECT_BACKOFF_SECS = 0.5  # doubled for each attempt in a row
 
 
 @dataclass
-class ZoomAIVoiceAgentLLMSettings(OpenAIRealtimeLLMService.Settings):
-    """Settings for :class:`ZoomAIVoiceAgentLLMService`.
+class ZoomAIRealtimeLLMSettings(OpenAIRealtimeLLMService.Settings):
+    """Settings for :class:`ZoomAIRealtimeLLMService`.
 
     ``model``, ``system_instruction`` and the ``session_properties`` fields for
     tools, ``tool_choice``, ``max_output_tokens`` and ``reasoning`` configure the
@@ -145,7 +145,7 @@ def _describe_refusal(exception: Exception) -> str | None:
     return None
 
 
-class _ZoomAIVoiceAgentWebSocket:
+class _ZoomAIRealtimeWebSocket:
     """The Voice Agent connection, presented as the OpenAI Realtime service expects.
 
     Incoming events are passed on unchanged except where the Voice Agent differs
@@ -287,7 +287,7 @@ class _ZoomAIVoiceAgentWebSocket:
             response["usage"] = usage
 
 
-class ZoomAIVoiceAgentLLMService(OpenAIRealtimeLLMService):
+class ZoomAIRealtimeLLMService(OpenAIRealtimeLLMService):
     """Zoom Voice Agent speech-to-speech service.
 
     Replaces speech-to-text, the LLM and text-to-speech in a pipeline: the
@@ -318,18 +318,18 @@ class ZoomAIVoiceAgentLLMService(OpenAIRealtimeLLMService):
 
     Example::
 
-        from pipecat.services.zoom_ai.voice_agent.events import Speak
+        from pipecat.services.zoom_ai.realtime.events import Speak
 
-        llm = ZoomAIVoiceAgentLLMService(
+        llm = ZoomAIRealtimeLLMService(
             api_key=os.getenv("ZOOM_AI_API_KEY"),
-            settings=ZoomAIVoiceAgentLLMService.Settings(
+            settings=ZoomAIRealtimeLLMService.Settings(
                 system_instruction="You are a helpful assistant.",
                 speak=Speak(voice="jenna"),
             ),
         )
     """
 
-    Settings = ZoomAIVoiceAgentLLMSettings
+    Settings = ZoomAIRealtimeLLMSettings
     _settings: Settings
 
     def __init__(
@@ -428,7 +428,7 @@ class ZoomAIVoiceAgentLLMService(OpenAIRealtimeLLMService):
             self._call_items = {}
             self._pending_response_create = None
             self._terminal_message = None
-            self._websocket = _ZoomAIVoiceAgentWebSocket(
+            self._websocket = _ZoomAIRealtimeWebSocket(
                 websocket, on_error=self._handle_server_error
             )
             self._receive_task = self.create_task(self._receive_task_handler())

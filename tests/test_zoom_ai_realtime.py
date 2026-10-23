@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Tests for ZoomAIVoiceAgentLLMService and its session models.
+"""Tests for ZoomAIRealtimeLLMService and its session models.
 
 The service is driven without a network: session updates are captured from
 ``_ws_send``, and server events are fed through the connection adapter that
@@ -22,11 +22,11 @@ import pytest
 from pipecat.frames.frames import InputAudioRawFrame
 from pipecat.services.openai.realtime import events as openai_events
 from pipecat.services.openai.realtime.llm import OpenAIRealtimeLLMService
-from pipecat.services.zoom_ai.voice_agent import events
-from pipecat.services.zoom_ai.voice_agent import llm as llm_module
-from pipecat.services.zoom_ai.voice_agent.llm import (
-    ZoomAIVoiceAgentLLMService,
-    _ZoomAIVoiceAgentWebSocket,
+from pipecat.services.zoom_ai.realtime import events
+from pipecat.services.zoom_ai.realtime import llm as llm_module
+from pipecat.services.zoom_ai.realtime.llm import (
+    ZoomAIRealtimeLLMService,
+    _ZoomAIRealtimeWebSocket,
 )
 from pipecat.utils.errors import ErrorCategory
 
@@ -49,14 +49,14 @@ class _ErrorRecorder:
         self.kwargs.append(kwargs)
 
 
-def _service(**settings) -> ZoomAIVoiceAgentLLMService:
-    return ZoomAIVoiceAgentLLMService(
+def _service(**settings) -> ZoomAIRealtimeLLMService:
+    return ZoomAIRealtimeLLMService(
         api_key="test-key",
-        settings=ZoomAIVoiceAgentLLMService.Settings(**settings) if settings else None,
+        settings=ZoomAIRealtimeLLMService.Settings(**settings) if settings else None,
     )
 
 
-async def _session_updates(service: ZoomAIVoiceAgentLLMService) -> list[dict[str, Any]]:
+async def _session_updates(service: ZoomAIRealtimeLLMService) -> list[dict[str, Any]]:
     sent: list[dict[str, Any]] = []
 
     async def _ws_send(message):
@@ -92,7 +92,7 @@ async def _adapt(messages: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], 
     async def _on_error(error: dict[str, Any], event_ids: set[str]):
         errors.append(error["message"])
 
-    ws = _ZoomAIVoiceAgentWebSocket(_FakeWebSocket(messages), on_error=_on_error)
+    ws = _ZoomAIRealtimeWebSocket(_FakeWebSocket(messages), on_error=_on_error)
     return [json.loads(m) async for m in ws], errors
 
 
@@ -245,7 +245,7 @@ async def test_a_speak_update_sends_a_session_update():
 
     service._ws_send = _ws_send  # type: ignore[method-assign]
     await service._update_settings(
-        ZoomAIVoiceAgentLLMService.Settings(speak=events.Speak(voice="alex"))
+        ZoomAIRealtimeLLMService.Settings(speak=events.Speak(voice="alex"))
     )
     assert sent and sent[-1]["session"]["speak"]["voice"] == "alex"
 
@@ -444,7 +444,7 @@ async def test_events_reach_the_openai_realtime_handlers():
     async def _on_error(error: dict[str, Any], event_ids: set[str]):
         seen.append(f"error: {error['message']}")
 
-    service._websocket = _ZoomAIVoiceAgentWebSocket(
+    service._websocket = _ZoomAIRealtimeWebSocket(
         _FakeWebSocket(
             [
                 {"type": "session.created", "session": {"listen": {}, "think": {}, "speak": {}}},
@@ -578,7 +578,7 @@ async def test_a_terminal_error_ends_the_session_with_one_error():
     async def _on_error(error, event_ids):
         pass
 
-    service._websocket = _ZoomAIVoiceAgentWebSocket(
+    service._websocket = _ZoomAIRealtimeWebSocket(
         _FakeWebSocket([{"type": "error", "error": {"code": "session_expired", "fatal": True}}]),
         on_error=_on_error,
     )
@@ -594,7 +594,7 @@ async def test_an_error_names_its_client_event_in_the_error_or_the_event():
     async def _on_error(error, event_ids):
         ids.append(event_ids)
 
-    ws = _ZoomAIVoiceAgentWebSocket(
+    ws = _ZoomAIRealtimeWebSocket(
         _FakeWebSocket(
             [
                 {"type": "error", "event_id": "c1", "error": {"message": "x"}},
@@ -644,7 +644,7 @@ async def test_a_retryable_end_reconnects_and_restores_the_conversation(monkeypa
     service._connect = _connect  # type: ignore[method-assign]
     service.push_frame = _push_frame  # type: ignore[method-assign]
     service._response_active = True
-    service._websocket = _ZoomAIVoiceAgentWebSocket(
+    service._websocket = _ZoomAIRealtimeWebSocket(
         _FakeWebSocket(
             [{"type": "error", "error": {"code": "idle_timeout", "fatal": True, "retryable": True}}]
         ),
@@ -724,7 +724,7 @@ async def test_reconnecting_gives_up_with_a_permanent_error(monkeypatch):
 
     monkeypatch.setattr(llm_module, "_RECONNECT_BACKOFF_SECS", 0.0)
     service._connect = _connect  # type: ignore[method-assign]
-    service._websocket = _ZoomAIVoiceAgentWebSocket(_FakeWebSocket([]), on_error=_on_error)
+    service._websocket = _ZoomAIRealtimeWebSocket(_FakeWebSocket([]), on_error=_on_error)
     await service._receive_task_handler()
     assert len(connects) == 3
     assert errors.messages == [
@@ -805,7 +805,7 @@ async def test_bursty_16khz_audio_is_resampled_without_losing_any(monkeypatch):
     async def _on_error(error, event_ids):
         pass
 
-    ws = _ZoomAIVoiceAgentWebSocket(_ClockedWebSocket(messages), on_error=_on_error)
+    ws = _ZoomAIRealtimeWebSocket(_ClockedWebSocket(messages), on_error=_on_error)
     out = [json.loads(m) async for m in ws]
     audio = b"".join(
         base64.b64decode(e["delta"]) for e in out if e["type"] == "response.output_audio.delta"
@@ -882,7 +882,7 @@ async def test_a_providers_own_model_is_kept_and_a_dict_is_accepted():
 def test_provider_keys_are_left_out_of_reprs():
     provider = events.Provider(type="openai", headers={"X-Api-Key": "secret-key"})
     assert "secret-key" not in repr(provider)
-    assert "secret-key" not in repr(ZoomAIVoiceAgentLLMService.Settings(provider=provider))
+    assert "secret-key" not in repr(ZoomAIRealtimeLLMService.Settings(provider=provider))
 
 
 @pytest.mark.asyncio
@@ -898,7 +898,7 @@ async def test_a_rejected_provider_key_ends_the_session_without_reconnecting():
         pass
 
     service._connect = _connect  # type: ignore[method-assign]
-    service._websocket = _ZoomAIVoiceAgentWebSocket(
+    service._websocket = _ZoomAIRealtimeWebSocket(
         _FakeWebSocket(
             [
                 {
@@ -952,7 +952,7 @@ async def test_rejected_session_settings_end_the_session_without_reconnecting():
 
     service._connect = _connect  # type: ignore[method-assign]
     service._configuring = True  # the first session update awaits session.updated
-    service._websocket = _ZoomAIVoiceAgentWebSocket(
+    service._websocket = _ZoomAIRealtimeWebSocket(
         _FakeWebSocket(
             [{"type": "error", "error": {"type": "invalid_request_error", "message": "bad"}}]
         ),
