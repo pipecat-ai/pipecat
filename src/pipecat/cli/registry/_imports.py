@@ -117,6 +117,7 @@ IMPORTS = {
     "sarvam_llm": ["from pipecat.services.sarvam.llm import SarvamLLMService"],
     "together_llm": ["from pipecat.services.together.llm import TogetherLLMService"],
     # TTS Services
+    "assemblyai_tts": ["from pipecat.services.assemblyai.tts import AssemblyAITTSService"],
     "asyncai_tts": ["from pipecat.services.asyncai.tts import AsyncAITTSService"],
     "aws_polly_tts": ["from pipecat.services.aws.tts import AWSPollyTTSService"],
     "azure_tts": ["from pipecat.services.azure.tts import AzureTTSService"],
