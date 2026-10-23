@@ -77,8 +77,8 @@ def test_unset_params_are_omitted(service_factory):
 
 
 @pytest.mark.asyncio
-async def test_developer_messages_are_sent_as_is(service_factory):
-    """Electron is a drop-in OpenAI Chat Completions replacement, including the developer role."""
+async def test_developer_messages_are_converted_to_user(service_factory):
+    """Electron doesn't support the "developer" role, so it's sent as "user"."""
     service = service_factory()
     context = LLMContext(
         messages=[
@@ -91,4 +91,4 @@ async def test_developer_messages_are_sent_as_is(service_factory):
         context, convert_developer_to_user=not service.supports_developer_role
     )
 
-    assert params["messages"][0]["role"] == "developer"
+    assert params["messages"][0]["role"] == "user"

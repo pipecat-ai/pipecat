@@ -35,6 +35,10 @@ class SmallestLLMService(OpenAILLMService):
     functionality.
     """
 
+    # Electron doesn't support the "developer" message role.
+    # This value is used by BaseOpenAILLMService when calling the adapter.
+    supports_developer_role = False
+
     Settings = SmallestLLMSettings
     _settings: Settings
     _requires_api_key = True
