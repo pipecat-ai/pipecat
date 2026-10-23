@@ -355,6 +355,11 @@ class KrispTTSService(InterruptibleTTSService):
                 error = KrispServiceError.from_message(msg)
                 await self.stop_all_metrics()
                 await self.push_error(error_msg=f"Krisp TTS error: {error}", exception=error)
+                if error.is_permanent:
+                    # The error marks the service unusable, so the receive loop
+                    # won't reconnect; close the session client-side.
+                    await self._get_websocket().close()
+                    return
             # "all_processed", "info" and "Done" carry nothing the service needs.
 
     @traced_tts

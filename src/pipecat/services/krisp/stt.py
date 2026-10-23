@@ -378,6 +378,11 @@ class KrispSTTService(WebsocketSTTService):
             elif msg_type == "error":
                 error = KrispServiceError.from_message(msg)
                 await self.push_error(error_msg=f"Krisp STT error: {error}", exception=error)
+                if error.is_permanent:
+                    # The error marks the service unusable, so the receive loop
+                    # won't reconnect; close the session client-side.
+                    await self._get_websocket().close()
+                    return
 
     async def _on_transcript(self, transcript: dict):
         words = transcript.get("words") or []

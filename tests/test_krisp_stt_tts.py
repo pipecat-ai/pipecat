@@ -42,6 +42,14 @@ from pipecat.turns.user_stop import ExternalUserTurnStopStrategy
 from pipecat.utils.errors import ErrorCategory, classify_http_exception
 
 
+@pytest.fixture(autouse=True)
+def _clear_token_cache():
+    """Session tokens are cached per process; start every test without one."""
+    krisp_common._token_cache.clear()
+    yield
+    krisp_common._token_cache.clear()
+
+
 class _FakeWebsocket:
     def __init__(self, messages=()):
         self.state = State.OPEN
@@ -220,6 +228,62 @@ async def test_connect_session_closes_the_socket_when_the_handshake_fails(monkey
 
     assert connect.call_args.kwargs["additional_headers"] == {"Authorization": "api-key tok"}
     ws.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_connect_session_reuses_the_session_token(monkeypatch):
+    create_token = AsyncMock(return_value="tok")
+    monkeypatch.setattr(krisp_common, "create_session_token", create_token)
+    connect = AsyncMock(side_effect=lambda *a, **kw: _FakeWebsocket([{"type": "ready"}]))
+
+    for _ in range(3):
+        await connect_session(
+            connect,
+            "wss://x",
+            api_key="k",
+            usage_type="tts",
+            rest_base_url="https://r",
+            handshake={},
+        )
+
+    create_token.assert_awaited_once()
+    assert create_token.call_args.kwargs["expiration_ttl"] == 60
+    assert connect.await_count == 3
+
+
+@pytest.mark.asyncio
+async def test_connect_session_replaces_a_rejected_cached_token(monkeypatch):
+    create_token = AsyncMock(side_effect=["old", "new"])
+    monkeypatch.setattr(krisp_common, "create_session_token", create_token)
+    rejected = {"type": "error", "error": {"code": "unauthorized", "status_code": 403}}
+    sockets = [
+        _FakeWebsocket([{"type": "ready"}]),  # first connect caches "old"
+        _FakeWebsocket([rejected]),  # "old" is rejected later
+        _FakeWebsocket([{"type": "ready"}]),  # retried with "new"
+    ]
+    connect = AsyncMock(side_effect=sockets)
+    kwargs = dict(api_key="k", usage_type="stt", rest_base_url="https://r", handshake={})
+
+    await connect_session(connect, "wss://x", **kwargs)
+    ws, _ = await connect_session(connect, "wss://x", **kwargs)
+
+    assert ws is sockets[2]
+    tokens = [c.kwargs["additional_headers"]["Authorization"] for c in connect.call_args_list]
+    assert tokens == ["api-key old", "api-key old", "api-key new"]
+    sockets[1].close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_stt_permanent_error_mid_session_closes_the_socket():
+    rejected = {"type": "error", "error": {"code": "unauthorized", "status_code": 403}}
+    service = _stt([rejected, _final(" never read")])
+    service.push_error = AsyncMock()
+
+    await service._receive_messages()
+
+    service.push_error.assert_awaited_once()
+    service._websocket.close.assert_awaited_once()
+    service.push_frame.assert_not_called()
 
 
 # --- STT --------------------------------------------------------------------

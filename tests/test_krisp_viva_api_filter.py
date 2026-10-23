@@ -18,6 +18,7 @@ from aiohttp.test_utils import TestServer
 from pipecat.audio.filters import krisp_viva_api_filter
 from pipecat.audio.filters.krisp_viva_api_filter import KrispVivaApiFilter
 from pipecat.frames.frames import FilterEnableFrame
+from pipecat.services.krisp import common as krisp_common
 
 
 @dataclass
@@ -38,6 +39,14 @@ class FakeKrisp:
 def _clean(frame: bytes) -> bytes:
     """What the fake server returns for a frame, so cleaned audio is recognizable."""
     return bytes(255 - b for b in frame)
+
+
+@pytest.fixture(autouse=True)
+def _clear_token_cache():
+    """Session tokens are cached per process; start every test without one."""
+    krisp_common._token_cache.clear()
+    yield
+    krisp_common._token_cache.clear()
 
 
 @pytest_asyncio.fixture
@@ -114,7 +123,7 @@ async def test_connects_with_a_viva_session_token_and_hello(krisp):
     await _until(lambda: filt._websocket is not None)
     await filt.stop()
 
-    assert fake.token_requests == [{"usage_type": "viva"}]
+    assert fake.token_requests == [{"usage_type": "viva", "expiration_ttl": 60}]
     assert fake.auth_headers == ["api-key sess-viva"]
     assert fake.hellos == [{"model": "VIVA-tel", "sample_rate": 16000, "suppression_level": 80}]
 
@@ -227,7 +236,8 @@ async def test_reconnects_after_the_connection_drops(krisp, monkeypatch):
     await _until(lambda: len(fake.frame_sizes) == 2)
     await filt.stop()
 
-    assert [r["usage_type"] for r in fake.token_requests] == ["viva", "viva"]
+    # The reconnect reuses the cached session token.
+    assert [r["usage_type"] for r in fake.token_requests] == ["viva"]
 
 
 @pytest.mark.asyncio

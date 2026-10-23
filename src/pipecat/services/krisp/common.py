@@ -14,6 +14,7 @@ and both open a session with a JSON handshake that the server answers with
 
 import asyncio
 import json
+import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -23,6 +24,13 @@ KRISP_REST_BASE_URL = "https://api.developers.krisp.ai"
 SESSION_TOKEN_PATH = "/v2/sdk/tokens/session"
 
 HANDSHAKE_TIMEOUT = 10.0
+
+# A session token can open any number of WebSocket sessions until it expires,
+# so connections reuse one per (API key, product, REST base URL) instead of
+# requesting a token for every connect, e.g. reconnects after an interruption.
+_CACHED_TOKEN_TTL_MINUTES = 60
+_CACHED_TOKEN_REUSE_SECS = (_CACHED_TOKEN_TTL_MINUTES - 1) * 60
+_token_cache: dict[tuple[str, str, str], tuple[str, float]] = {}
 
 
 class KrispServiceError(Exception):
@@ -179,6 +187,25 @@ async def open_session(websocket, handshake: dict[str, Any]) -> dict[str, Any]:
                 raise KrispServiceError.from_message(msg)
 
 
+async def _session_token(
+    api_key: str, usage_type: str, rest_base_url: str, *, refresh: bool = False
+) -> tuple[str, bool]:
+    """Return a session token, reusing a cached one until shortly before it expires.
+
+    Returns:
+        The token and whether it came from the cache.
+    """
+    key = (api_key, usage_type, rest_base_url)
+    cached = _token_cache.get(key)
+    if cached and not refresh and time.monotonic() < cached[1]:
+        return cached[0], True
+    token = await create_session_token(
+        api_key, usage_type, expiration_ttl=_CACHED_TOKEN_TTL_MINUTES, base_url=rest_base_url
+    )
+    _token_cache[key] = (token, time.monotonic() + _CACHED_TOKEN_REUSE_SECS)
+    return token, False
+
+
 async def connect_session(
     connect: Callable[..., Awaitable[Any]],
     url: str,
@@ -188,7 +215,11 @@ async def connect_session(
     rest_base_url: str,
     handshake: dict[str, Any],
 ) -> tuple[Any, dict[str, Any]]:
-    """Create a session token, open the WebSocket and complete the handshake.
+    """Open the WebSocket with a session token and complete the handshake.
+
+    The session token is cached and reused across connections. If the server
+    rejects a cached token, a fresh one is requested and the connect retried
+    once.
 
     Args:
         connect: Coroutine function opening the WebSocket, called as
@@ -203,11 +234,18 @@ async def connect_session(
         The WebSocket, ready for streaming, and the server's ``ready`` message.
         The WebSocket is closed if the handshake fails.
     """
-    token = await create_session_token(api_key, usage_type, base_url=rest_base_url)
-    websocket = await connect(url, additional_headers=session_headers(token))
-    try:
-        ready = await open_session(websocket, handshake)
-    except BaseException:
-        await websocket.close()
-        raise
-    return websocket, ready
+    refresh = False
+    while True:
+        token, cached = await _session_token(api_key, usage_type, rest_base_url, refresh=refresh)
+        websocket = await connect(url, additional_headers=session_headers(token))
+        try:
+            return websocket, await open_session(websocket, handshake)
+        except KrispServiceError as e:
+            await websocket.close()
+            if cached and e.status_code in (401, 403):
+                refresh = True
+                continue
+            raise
+        except BaseException:
+            await websocket.close()
+            raise
