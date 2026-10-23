@@ -955,6 +955,8 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
             setup: Configuration object containing setup parameters.
         """
         await super().setup(setup)
+        # Connecting tags tools by their handlers, so register the constructor tools' first.
+        self._sync_registered_tool_handlers(None)
         await self._connect()
 
     async def stop(self, frame: EndFrame):
