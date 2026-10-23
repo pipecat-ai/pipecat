@@ -9,7 +9,7 @@
 from enum import StrEnum
 
 from pipecat.adapters.tts.base_expression_adapter import BaseExpressionAdapter
-from pipecat.expressive.expression import ExpressionCapabilities, ExpressionTerm, ModeScope
+from pipecat.expressive.expression import ExpressionCapabilities, ExpressionTerm, ToneScope
 
 
 class CartesiaEmotion(StrEnum):
@@ -81,10 +81,10 @@ class CartesiaEmotion(StrEnum):
 class CartesiaExpressionAdapter(BaseExpressionAdapter):
     """Formats expression tags as Cartesia's inline markup.
 
-    Part of expressive conversation (alpha). Modes are Cartesia's emotions,
+    Part of expressive conversation (alpha). Tones are Cartesia's emotions,
     formatted as ``<emotion>`` tags; Cartesia supports them in English only.
-    Cartesia changes emotion reliably only between generations, so a mode can
-    change only between sentences, and a sentence written in several modes is
+    Cartesia changes emotion reliably only between generations, so a tone can
+    change only between sentences, and a sentence written in several tones is
     spoken in the first. The one event is ``[laughter]``, and pauses are
     ``<break>`` tags. Cartesia has no emphasis.
     """
@@ -93,19 +93,19 @@ class CartesiaExpressionAdapter(BaseExpressionAdapter):
         """Cartesia's emotions, laughter and pauses."""
         return ExpressionCapabilities(
             events=[ExpressionTerm("laughter")],
-            modes=[
+            tones=[
                 ExpressionTerm(emotion.value)
                 for emotion in CartesiaEmotion
                 if emotion not in (CartesiaEmotion.NEUTRAL, CartesiaEmotion.JOKING_COMEDIC)
             ],
             pause_range_ms=(100, 5000),
-            mode_scope=ModeScope.SENTENCE,
+            tone_scope=ToneScope.SENTENCE,
         )
 
-    def format_text(self, text: str, modes: list[str], previous_modes: list[str] | None) -> str:
+    def format_text(self, text: str, tones: list[str], previous_tones: list[str] | None) -> str:
         """Prefix an emotion tag, set apart from the words, where the emotion changes."""
-        emotion = modes[0] if modes else None
-        previous = previous_modes[0] if previous_modes else None
+        emotion = tones[0] if tones else None
+        previous = previous_tones[0] if previous_tones else None
         if emotion == previous:
             return text
         return f'<emotion value="{emotion or CartesiaEmotion.NEUTRAL.value}"/> {text}'

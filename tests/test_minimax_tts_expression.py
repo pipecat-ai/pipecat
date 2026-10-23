@@ -56,7 +56,7 @@ class TestMiniMaxExpressionAdapter:
     def test_vocabulary_is_fixed(self):
         # MiniMax reads an interjection outside its list aloud.
         capabilities = MiniMaxExpressionAdapter().capabilities()
-        assert not capabilities.free_text_events and not capabilities.free_text_modes
+        assert not capabilities.free_text_events and not capabilities.free_text_tones
 
 
 @pytest.mark.parametrize(
@@ -73,7 +73,7 @@ def test_expression_adapter_follows_the_model(model, adapter):
 
 
 @pytest.mark.asyncio
-async def test_each_request_sends_the_emotion_of_its_modes():
+async def test_each_request_sends_the_emotion_of_its_tones():
     session = _RecordingSession()
     await run_test(
         _service(session, emotion="calm"),

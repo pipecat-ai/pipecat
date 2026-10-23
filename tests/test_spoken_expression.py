@@ -14,9 +14,9 @@ LAUGH = (TextType.EXPRESSION_EVENT, "laugh")
 
 TEXT = "<<calm>> Hi. [[laugh]] Bye."
 SPANS = [
-    ExpressionSpan(8, 13, modes=["calm"]),
+    ExpressionSpan(8, 13, tones=["calm"]),
     ExpressionSpan(13, 22, event=LAUGH),
-    ExpressionSpan(22, 27, modes=["calm", "emphasis"]),
+    ExpressionSpan(22, 27, tones=["calm", "emphasis"]),
 ]
 
 
@@ -31,12 +31,12 @@ def test_a_word_is_given_its_modes_and_the_events_before_it():
 
     assert spoken.spoken("Hi.") == (["calm"], [])
     assert spoken.spoken("[[laugh]] Bye.") == (["calm", "emphasis"], [LAUGH])
-    assert spoken.modes == ["calm", "emphasis"]
+    assert spoken.tones == ["calm", "emphasis"]
 
 
 def test_units_added_follow_one_another():
     spoken = spoken_expression()
-    spoken.add(" Again.", [ExpressionSpan(0, 7, modes=[])])
+    spoken.add(" Again.", [ExpressionSpan(0, 7, tones=[])])
 
     spoken.spoken("Bye.")
 
@@ -60,7 +60,7 @@ def test_an_event_after_the_last_word_is_left_for_what_follows():
     spoken = SpokenExpression()
     # "Bye [[laugh]]!", spoken as one word that covers the tag.
     spoken.add(
-        "Bye [[laugh]]!", [ExpressionSpan(0, 4, modes=[]), ExpressionSpan(4, 13, event=LAUGH)]
+        "Bye [[laugh]]!", [ExpressionSpan(0, 4, tones=[]), ExpressionSpan(4, 13, event=LAUGH)]
     )
 
     assert spoken.spoken("Bye [[laugh]]!") == ([], [])
@@ -70,7 +70,7 @@ def test_an_event_after_the_last_word_is_left_for_what_follows():
 def test_events_no_text_reported_are_unreported_at_the_end():
     spoken = SpokenExpression()
     spoken.add(
-        "Bye [[laugh]]", [ExpressionSpan(0, 4, modes=[]), ExpressionSpan(4, 13, event=LAUGH)]
+        "Bye [[laugh]]", [ExpressionSpan(0, 4, tones=[]), ExpressionSpan(4, 13, event=LAUGH)]
     )
 
     spoken.spoken("Bye")
@@ -79,8 +79,8 @@ def test_events_no_text_reported_are_unreported_at_the_end():
     assert spoken.unreported() == []
 
 
-def test_text_spoken_before_any_was_added_has_no_modes():
+def test_text_spoken_before_any_was_added_has_no_tones():
     spoken = SpokenExpression()
 
     assert spoken.spoken("Hi.") == (None, [])
-    assert spoken.modes is None
+    assert spoken.tones is None

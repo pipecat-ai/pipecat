@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from pipecat.adapters.tts.services.cartesia_adapter import CartesiaExpressionAdapter
-from pipecat.expressive.expression import ModeScope
+from pipecat.expressive.expression import ToneScope
 from pipecat.frames.frames import (
     AggregatedTextFrame,
     AggregatedTextProgressFrame,
@@ -259,11 +259,11 @@ def test_cartesia_laughter_token_is_kept():
 class TestCartesiaExpressionAdapter:
     def test_capabilities(self):
         capabilities = CartesiaExpressionAdapter().capabilities()
-        modes = [term.name for term in capabilities.modes]
-        assert "excited" in modes
-        assert "neutral" not in modes
+        tones = [term.name for term in capabilities.tones]
+        assert "excited" in tones
+        assert "neutral" not in tones
         assert [term.name for term in capabilities.events] == ["laughter"]
-        assert capabilities.mode_scope == ModeScope.SENTENCE
+        assert capabilities.tone_scope == ToneScope.SENTENCE
         assert not capabilities.emphasis
 
     def test_emotion_formatted_where_it_changes(self):

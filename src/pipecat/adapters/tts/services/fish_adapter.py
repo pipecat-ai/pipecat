@@ -7,11 +7,11 @@
 """Fish Audio expression adapter for Pipecat."""
 
 from pipecat.adapters.tts.base_expression_adapter import BaseExpressionAdapter
-from pipecat.expressive.expression import EMPHASIS_MODE, ExpressionCapabilities, ExpressionTerm
+from pipecat.expressive.expression import EMPHASIS_TONE, ExpressionCapabilities, ExpressionTerm
 
 # The tags in Fish Audio's S2 emotion reference, sorted into sounds made at one
-# point and deliveries that last. Modes are single words, since a mode tag
-# separates modes by spaces, so multi-word tones such as "soft tone" aren't
+# point and deliveries that last. Tones are single words, since a tone tag
+# separates tones by spaces, so multi-word tones such as "soft tone" aren't
 # listed.
 _S2_EVENTS = [
     ExpressionTerm("laughing"),
@@ -30,7 +30,7 @@ _S2_EVENTS = [
     ExpressionTerm("crowd laughing", "sound effect"),
 ]
 
-_S2_MODES = [
+_S2_TONES = [
     ExpressionTerm(name)
     for name in (
         "happy sad angry excited calm nervous confident surprised satisfied delighted "
@@ -46,11 +46,11 @@ _S2_MODES = [
 class FishAudioS2ExpressionAdapter(BaseExpressionAdapter):
     """Formats expression tags as Fish Audio S2 bracket tags.
 
-    Part of expressive conversation (alpha). Modes and events are both tags,
+    Part of expressive conversation (alpha). Tones and events are both tags,
     such as ``[excited]`` or ``[laughing]``, written in free text: the terms
     listed are Fish Audio's S2 emotion reference, and others described in a
     few words work too. A tag applies within the input it is sent in, so each
-    sentence states its modes from its start. There is no tag for the voice's
+    sentence states its tones from its start. There is no tag for the voice's
     baseline, so a return to it writes none. Emphasis is an ``[emphasis]`` tag
     before the stressed words, and a pause is a break or a long break, which
     is approximate.
@@ -60,19 +60,19 @@ class FishAudioS2ExpressionAdapter(BaseExpressionAdapter):
         """Free-text tags, emphasis and approximate pauses."""
         return ExpressionCapabilities(
             events=list(_S2_EVENTS),
-            modes=list(_S2_MODES),
+            tones=list(_S2_TONES),
             free_text_events=True,
-            free_text_modes=True,
+            free_text_tones=True,
             pause_range_ms=(100, 1500),
             emphasis=True,
         )
 
-    def format_text(self, text: str, modes: list[str], previous_modes: list[str] | None) -> str:
-        """Prefix tags where the modes change, and emphasis before stressed words."""
-        tags = [mode for mode in modes if mode != EMPHASIS_MODE]
-        previous = [mode for mode in previous_modes or [] if mode != EMPHASIS_MODE]
+    def format_text(self, text: str, tones: list[str], previous_tones: list[str] | None) -> str:
+        """Prefix tags where the tones change, and emphasis before stressed words."""
+        tags = [tone for tone in tones if tone != EMPHASIS_TONE]
+        previous = [tone for tone in previous_tones or [] if tone != EMPHASIS_TONE]
         prefix = "".join(f"[{tag}]" for tag in tags) if tags and tags != previous else ""
-        if EMPHASIS_MODE in modes:
+        if EMPHASIS_TONE in tones:
             prefix += "[emphasis]"
         return f"{prefix} {text}" if prefix else text
 

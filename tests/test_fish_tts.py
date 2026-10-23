@@ -149,11 +149,11 @@ async def test_short_audio_chunks_are_kept():
 class TestS2ExpressionAdapter:
     def test_capabilities(self):
         capabilities = FishAudioS2ExpressionAdapter().capabilities()
-        assert capabilities.free_text_modes and capabilities.free_text_events
+        assert capabilities.free_text_tones and capabilities.free_text_events
         assert capabilities.emphasis
         assert "laughing" in [term.name for term in capabilities.events]
-        # A mode tag separates modes by spaces.
-        assert all(len(term.name.split()) == 1 for term in capabilities.modes)
+        # A tone tag separates tones by spaces.
+        assert all(len(term.name.split()) == 1 for term in capabilities.tones)
 
     def test_tags_where_modes_change(self):
         adapter = FishAudioS2ExpressionAdapter()

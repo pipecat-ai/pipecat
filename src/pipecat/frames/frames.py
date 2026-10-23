@@ -523,14 +523,14 @@ class TTSTextFrame(AggregatedTextFrame):
         segment_id: ID of the AggregatedTextFrame this text is part of, when the
             TTS service built it from one. A word reported by the TTS carries the
             ID of the sentence or other segment it was spoken in.
-        modes: The modes this text is spoken in, such as ``["cheerful"]``, and
+        tones: The tones this text is spoken in, such as ``["cheerful"]``, and
             ``"emphasis"`` for stressed words; empty for the voice's baseline.
             None when the text carries no delivery. Part of expressive
             conversation (alpha).
     """
 
     segment_id: int | None = None
-    modes: list[str] | None = field(default=None, kw_only=True)
+    tones: list[str] | None = field(default=None, kw_only=True)
 
 
 @renamed_init_field(
@@ -555,7 +555,7 @@ class AggregatedTextProgressFrame(DataFrame):
         text_type: Text type of the source AggregatedTextFrame.
         accumulated_text: Text already spoken in this slot (including the current word).
         remaining_text: Text not yet spoken in this slot.
-        modes: The modes of the word just spoken, which change within the
+        tones: The tones of the word just spoken, which change within the
             text where its delivery does. Part of expressive conversation (alpha).
     """
 
@@ -565,7 +565,7 @@ class AggregatedTextProgressFrame(DataFrame):
     text_type: TextType | str
     accumulated_text: str
     remaining_text: str
-    modes: list[str] | None = field(default=None, kw_only=True)
+    tones: list[str] | None = field(default=None, kw_only=True)
 
     @property
     @deprecated(

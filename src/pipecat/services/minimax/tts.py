@@ -387,8 +387,8 @@ class MiniMaxHttpTTSService(TTSService):
             "vol": self._settings.volume,
             "pitch": self._settings.pitch,
         }
-        # In expressive conversation, the request's modes choose its emotion.
-        emotion = self.expression_modes[0] if self.expression_modes else self._settings.emotion
+        # In expressive conversation, the request's tones choose its emotion.
+        emotion = self.expression_tones[0] if self.expression_tones else self._settings.emotion
         if emotion is not None:
             voice_setting["emotion"] = emotion
         if self._settings.text_normalization is not None:

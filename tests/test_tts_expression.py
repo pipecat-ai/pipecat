@@ -14,7 +14,7 @@ import pytest
 from loguru import logger
 
 from pipecat.adapters.tts.base_expression_adapter import BaseExpressionAdapter
-from pipecat.expressive.expression import ExpressionCapabilities, ExpressionTerm, ModeScope
+from pipecat.expressive.expression import ExpressionCapabilities, ExpressionTerm, ToneScope
 from pipecat.frames.frames import (
     AggregatedTextFrame,
     AggregatedTextProgressFrame,
@@ -48,19 +48,19 @@ WRITTEN = "<<cheerful>> It's [[laugh]] ^^back up^^ now. [[pause 400]] Bye!"
 
 
 class BracketAdapter(BaseExpressionAdapter):
-    """Formats modes as <modes> where they change, events as <name>, pauses as <Nms>, set apart."""
+    """Formats tones as <tones> where they change, events as <name>, pauses as <Nms>, set apart."""
 
     def capabilities(self):
         return ExpressionCapabilities(
             events=[ExpressionTerm("laugh")],
-            modes=[ExpressionTerm("cheerful"), ExpressionTerm("calm")],
+            tones=[ExpressionTerm("cheerful"), ExpressionTerm("calm")],
             pause_range_ms=(100, 1000),
             emphasis=True,
         )
 
-    def format_text(self, text, modes, previous_modes):
-        changed = modes != (previous_modes or [])
-        return f"<{','.join(modes)}> {text}" if changed and modes else text
+    def format_text(self, text, tones, previous_tones):
+        changed = tones != (previous_tones or [])
+        return f"<{','.join(tones)}> {text}" if changed and tones else text
 
     def format_event(self, name):
         return f" <{name}> "
@@ -141,8 +141,8 @@ async def test_without_word_timestamps_a_sentence_carries_its_modes_and_events()
         PushTextTTSService(), frames_to_send=response(*REPLY), pipeline_params=EXPRESSIVE
     )
 
-    # Each sentence is reported whole, in the modes it starts in, after its events.
-    written = [(f.text_type, f.text, f.modes) for f in down if isinstance(f, TTSTextFrame)]
+    # Each sentence is reported whole, in the tones it starts in, after its events.
+    written = [(f.text_type, f.text, f.tones) for f in down if isinstance(f, TTSTextFrame)]
     assert written == [
         (TextType.EXPRESSION_EVENT, "laugh", None),
         (TextType.SENTENCE, "It's back up now.", ["cheerful"]),
@@ -159,7 +159,7 @@ async def test_word_timestamps_report_each_words_modes_and_the_events_between():
         pipeline_params=EXPRESSIVE,
     )
 
-    words = [(f.text_type, f.text, f.modes) for f in down if isinstance(f, TTSTextFrame)]
+    words = [(f.text_type, f.text, f.tones) for f in down if isinstance(f, TTSTextFrame)]
     assert words == [
         (TextType.WORD, "It's", ["cheerful"]),
         (TextType.EXPRESSION_EVENT, "laugh", None),
@@ -183,9 +183,9 @@ async def test_a_sentence_is_one_segment_shown_without_its_tags():
         (f.text, f.raw_text) for f in down if type(f) is AggregatedTextFrame and f.will_be_spoken
     ]
     assert segments == [("It's back up now.", "<<calm>> It's ^^back up^^ now.")]
-    # Its progress carries the modes of each word as it is spoken.
+    # Its progress carries the tones of each word as it is spoken.
     progress = [
-        (f.accumulated_text, f.modes) for f in down if isinstance(f, AggregatedTextProgressFrame)
+        (f.accumulated_text, f.tones) for f in down if isinstance(f, AggregatedTextProgressFrame)
     ]
     assert progress == [
         ("It's", ["calm"]),
@@ -265,8 +265,8 @@ async def test_a_service_without_an_adapter_speaks_only_the_words():
     down, _ = await run_test(tts, frames_to_send=response(*REPLY), pipeline_params=EXPRESSIVE)
 
     assert requests == ["It's back up now.", "Bye!"]
-    # What clients see matches what was spoken: no modes, and no events.
-    assert [(f.text, f.modes) for f in down if isinstance(f, TTSTextFrame)] == [
+    # What clients see matches what was spoken: no tones, and no events.
+    assert [(f.text, f.tones) for f in down if isinstance(f, TTSTextFrame)] == [
         ("It's back up now.", []),
         ("Bye!", []),
     ]
@@ -275,7 +275,7 @@ async def test_a_service_without_an_adapter_speaks_only_the_words():
 
 
 @pytest.mark.asyncio
-async def test_a_mode_the_service_cant_perform_is_left_out():
+async def test_a_tone_the_service_cant_perform_is_left_out():
     tts = PushTextTTSService()
     requests = record_requests(tts)
     down, _ = await run_test(
@@ -283,7 +283,7 @@ async def test_a_mode_the_service_cant_perform_is_left_out():
     )
 
     assert requests == ["<calm> Shh."]
-    assert [f.modes for f in down if isinstance(f, TTSTextFrame)] == [["calm"]]
+    assert [f.tones for f in down if isinstance(f, TTSTextFrame)] == [["calm"]]
 
 
 @pytest.mark.asyncio
@@ -328,17 +328,17 @@ async def test_a_pause_is_kept_within_the_services_range():
 
 
 class StyleAdapter(BaseExpressionAdapter):
-    """For a service that takes modes with each request."""
+    """For a service that takes tones with each request."""
 
     def capabilities(self):
         return ExpressionCapabilities(
-            modes=[ExpressionTerm("calm"), ExpressionTerm("cheerful")],
-            mode_scope=ModeScope.SENTENCE,
+            tones=[ExpressionTerm("calm"), ExpressionTerm("cheerful")],
+            tone_scope=ToneScope.SENTENCE,
         )
 
 
 class StyleTTSService(MockHttpPushTextTTSService):
-    """Records the modes each request is spoken in, as a style."""
+    """Records the tones each request is spoken in, as a style."""
 
     expression_adapter_class = StyleAdapter
 
@@ -347,7 +347,7 @@ class StyleTTSService(MockHttpPushTextTTSService):
         self.styles: list[tuple[str, str]] = []
 
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
-        self.styles.append((text, " ".join(self.expression_modes) or "plain"))
+        self.styles.append((text, " ".join(self.expression_tones) or "plain"))
         async for frame in super().run_tts(text, context_id):
             yield frame
 
@@ -375,8 +375,8 @@ async def test_each_request_is_given_the_modes_it_is_spoken_in():
 
 
 @pytest.mark.asyncio
-async def test_each_sentence_states_its_modes():
-    # Not every service keeps modes from one request to the next.
+async def test_each_sentence_states_its_tones():
+    # Not every service keeps tones from one request to the next.
     tts = PushTextTTSService()
     requests = record_requests(tts)
     await run_test(
@@ -424,9 +424,9 @@ async def test_a_request_is_spoken_in_the_modes_its_words_start_in():
         pipeline_params=EXPRESSIVE,
     )
 
-    # The change takes effect from the next request, as a mode lasts until the next tag.
+    # The change takes effect from the next request, as a tone lasts until the next tag.
     assert tts.styles == [("The code is four two.", "plain"), ("Anything else?", "calm")]
-    assert [(f.text, f.modes) for f in down if isinstance(f, TTSTextFrame)] == [
+    assert [(f.text, f.tones) for f in down if isinstance(f, TTSTextFrame)] == [
         ("The code is four two.", []),
         ("Anything else?", ["calm"]),
     ]
@@ -438,13 +438,13 @@ class MarkupAdapter(BaseExpressionAdapter):
     def capabilities(self):
         return ExpressionCapabilities(
             events=[ExpressionTerm("laugh")],
-            modes=[ExpressionTerm("calm")],
+            tones=[ExpressionTerm("calm")],
             pause_range_ms=(100, 1000),
         )
 
-    def format_text(self, text, modes, previous_modes):
-        changed = modes and modes != (previous_modes or [])
-        return f"[{' '.join(modes)}] {text}" if changed else text
+    def format_text(self, text, tones, previous_tones):
+        changed = tones and tones != (previous_tones or [])
+        return f"[{' '.join(tones)}] {text}" if changed else text
 
     def format_event(self, name):
         return f" [{name}] "
@@ -481,7 +481,7 @@ async def test_an_event_is_timed_by_the_markup_its_service_reports():
 
 
 @pytest.mark.asyncio
-async def test_reported_mode_markup_is_not_spoken():
+async def test_reported_tone_markup_is_not_spoken():
     words, warnings = await spoken_words(ReportingTTSService(), "<<calm>> It's [[laugh]] back.")
 
     assert [text for text, _ in words] == ["It's", "laugh", "back."]
@@ -556,7 +556,7 @@ async def test_spacing_between_pieces_is_sent_as_written_when_streaming_tokens()
 
 
 @pytest.mark.asyncio
-async def test_a_response_after_a_tts_speak_frame_states_its_modes():
+async def test_a_response_after_a_tts_speak_frame_states_its_tones():
     tts = PushTextTTSService(text_aggregation_mode=TextAggregationMode.TOKEN)
     requests = record_requests(tts)
     await run_test(
@@ -622,5 +622,5 @@ async def test_uninterruptible_speech_keeps_its_modes_through_an_interruption():
         pipeline_params=EXPRESSIVE,
     )
 
-    words = [(f.text, f.modes) for f in down if isinstance(f, TTSTextFrame)]
+    words = [(f.text, f.tones) for f in down if isinstance(f, TTSTextFrame)]
     assert words == [(word, ["calm"]) for word in ["One", "two", "three", "four", "five", "six."]]

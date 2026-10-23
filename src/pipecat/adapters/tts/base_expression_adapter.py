@@ -9,7 +9,7 @@
 Part of expressive conversation (alpha). Each TTS service has an expression
 adapter, a :class:`BaseExpressionAdapter`, the way each LLM service has an LLM
 adapter. The adapter declares what the service can perform and formats it into the text
-sent to the service: words in their modes, and events and pauses. The base
+sent to the service: words in their tones, and events and pauses. The base
 adapter performs nothing, so a service without one speaks only the words.
 
 **Alpha.** The tag syntax and these types are likely to change between releases.
@@ -23,7 +23,7 @@ class BaseExpressionAdapter:
 
     Its capabilities are what the service can perform: the service broadcasts
     them at start, and reads and formats tags by them. The service calls the
-    adapter only with what they say it supports: other modes are taken off
+    adapter only with what they say it supports: other tones are taken off
     the words first, and other events are never formatted.
 
     Markup is set apart from the words by spaces, so the words a service with
@@ -38,16 +38,16 @@ class BaseExpressionAdapter:
         """
         return None
 
-    def format_text(self, text: str, modes: list[str], previous_modes: list[str] | None) -> str:
-        """Format words to speak in their modes.
+    def format_text(self, text: str, tones: list[str], previous_tones: list[str] | None) -> str:
+        """Format words to speak in their tones.
 
         Args:
             text: The words, as prepared for the service.
-            modes: The supported modes to speak them in, empty for the voice's
+            tones: The supported tones to speak them in, empty for the voice's
                 baseline.
-            previous_modes: The modes of the words before them in the response,
+            previous_tones: The tones of the words before them in the response,
                 or None for its first words, so markup can be emitted only
-                where the modes change.
+                where the tones change.
 
         Returns:
             The text to send to the service.

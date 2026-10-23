@@ -527,7 +527,7 @@ class BotOutputMessageData(TextMessageData):
             with word timestamps; ``"completed"`` once its last word is spoken.
         spoken_progress: **(v2+)** Accumulated / remaining text breakdown.
             Present when ``will_be_spoken`` is ``True``.
-        modes: **(v2+)** The modes of the text just spoken, such as
+        tones: **(v2+)** The tones of the text just spoken, such as
             ``["cheerful", "emphasis"]``, empty for the voice's baseline. They
             change within a segment where its delivery does, so a segment's
             ``"new"`` message has none. Present in expressive conversation (alpha).
@@ -543,7 +543,7 @@ class BotOutputMessageData(TextMessageData):
     will_be_spoken: bool | None = None
     spoken_status: SpokenStatus | None = None
     spoken_progress: SpokenProgressData | None = None
-    modes: list[str] | None = None
+    tones: list[str] | None = None
 
     @model_validator(mode="before")
     @classmethod

@@ -7,15 +7,15 @@
 """MiniMax expression adapter for Pipecat."""
 
 from pipecat.adapters.tts.base_expression_adapter import BaseExpressionAdapter
-from pipecat.expressive.expression import ExpressionCapabilities, ExpressionTerm, ModeScope
+from pipecat.expressive.expression import ExpressionCapabilities, ExpressionTerm, ToneScope
 
 
 class MiniMaxExpressionAdapter(BaseExpressionAdapter):
     """Performs expression tags with MiniMax speech-2.8 models.
 
-    Part of expressive conversation (alpha). Modes are MiniMax's emotions, sent
-    with each request, so a mode can change only between sentences, and a
-    sentence written in several modes is spoken in the first. Events are its
+    Part of expressive conversation (alpha). Tones are MiniMax's emotions, sent
+    with each request, so a tone can change only between sentences, and a
+    sentence written in several tones is spoken in the first. Events are its
     interjections, such as ``(laughs)``, and pauses are ``<#s#>`` markers. Its
     vocabulary is fixed: an interjection outside it is read aloud.
     """
@@ -30,12 +30,12 @@ class MiniMaxExpressionAdapter(BaseExpressionAdapter):
                     "sniffs sighs snorts burps lip-smacking humming hissing emm sneezes"
                 ).split()
             ],
-            modes=[
+            tones=[
                 ExpressionTerm(name)
                 for name in ("happy", "sad", "angry", "fearful", "disgusted", "surprised", "calm")
             ],
             pause_range_ms=(10, 99990),
-            mode_scope=ModeScope.SENTENCE,
+            tone_scope=ToneScope.SENTENCE,
         )
 
     def format_event(self, name: str) -> str:

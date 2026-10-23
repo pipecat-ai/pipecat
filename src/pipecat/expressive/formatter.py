@@ -11,7 +11,7 @@ conversation on is given its text a unit at a time: a sentence, or a token when
 it streams tokens. :class:`ExpressionFormatter` handles each unit in three steps:
 
 1. :meth:`~ExpressionFormatter.parse` splits the unit into segments: the words
-   to speak, with the modes they are spoken in, and the events and pauses
+   to speak, with the tones they are spoken in, and the events and pauses
    between them.
 2. :meth:`~ExpressionFormatter.shown_text` gives the words without the tags,
    which clients are shown.
@@ -28,19 +28,19 @@ With ElevenLabs' audio tags, one sentence goes::
 
 The tags are:
 
-- ``<<name ...>>`` sets the modes the words after it are spoken in, until the
-  next mode tag or the end of the response: ``<<cheerful>>``, or several
+- ``<<name ...>>`` sets the tones the words after it are spoken in, until the
+  next tone tag or the end of the response: ``<<cheerful>>``, or several
   separated by spaces, ``<<cheerful calm>>``. ``<<neutral>>`` returns to the
-  voice's baseline. Mode tags aren't segments of their own; the modes travel
+  voice's baseline. Tone tags aren't segments of their own; the tones travel
   with the :class:`Text` they apply to.
-- ``^^words^^`` stresses words. Stress is a mode too: the words are
-  :class:`Text` with ``emphasis`` added to the modes.
+- ``^^words^^`` stresses words. Stress is a tone too: the words are
+  :class:`Text` with ``emphasis`` added to the tones.
 - ``[[name]]`` is an :class:`Event`, a sound at one point (``[[laugh]]``), or a
   :class:`Pause`, ``[[pause N]]`` for N milliseconds.
 
 The brackets decide a tag's kind, except that a name the TTS service declares
 keeps its declared kind in the other kind's brackets: ``[[cheerful]]`` still
-sets a mode when ``cheerful`` is a declared mode. LLMs make that slip, so it is
+sets a tone when ``cheerful`` is a declared tone. LLMs make that slip, so it is
 logged as a warning.
 
 The formatter reads whole units: an aggregator such as
@@ -65,10 +65,10 @@ from loguru import logger
 
 from pipecat.adapters.tts.base_expression_adapter import BaseExpressionAdapter
 from pipecat.expressive.expression import (
-    EMPHASIS_MODE,
-    NEUTRAL_MODE,
+    EMPHASIS_TONE,
+    NEUTRAL_TONE,
     ExpressionCapabilities,
-    ModeScope,
+    ToneScope,
 )
 from pipecat.frames.frames import TextType
 from pipecat.utils.string import SENTENCE_ENDING_PUNCTUATION, StartEndTags
@@ -77,7 +77,7 @@ from pipecat.utils.string import SENTENCE_ENDING_PUNCTUATION, StartEndTags
 # keep each tag in one unit.
 EXPRESSION_TAGS: list[StartEndTags] = [("<<", ">>"), ("[[", "]]"), ("^^", "^^")]
 
-# The mode and event tags in the LLM's text, which word tracking passes over so
+# The tone and event tags in the LLM's text, which word tracking passes over so
 # their names aren't matched against spoken words. Emphasis has no letters in
 # its delimiters, so it needs none.
 EXPRESSION_TAG_PATTERN = re.compile(r"<<[^<>\n]*>>|\[\[[^\[\]\n]*\]\]")
@@ -105,7 +105,7 @@ _CLOSING_PUNCTUATION = re.compile(
 
 @dataclass(frozen=True)
 class Text:
-    """Words to speak, and the modes to speak them in.
+    """Words to speak, and the tones to speak them in.
 
     ``start`` and ``end`` are offsets into the unit as the LLM wrote it, tags
     included. In ``"<<calm>> Hi."``, the words are
@@ -113,14 +113,14 @@ class Text:
 
     Parameters:
         text: The words, with the spacing around them.
-        modes: The modes the words are spoken in, empty for the voice's
+        tones: The tones the words are spoken in, empty for the voice's
             baseline.
         start: Where the words start in the unit.
         end: Where they end.
     """
 
     text: str
-    modes: tuple[str, ...]
+    tones: tuple[str, ...]
     start: int
     end: int
 
@@ -162,24 +162,24 @@ Segment = Text | Event | Pause
 
 @dataclass(frozen=True)
 class ExpressionSpan:
-    """What a stretch of a unit performs: words in their modes, or an event.
+    """What a stretch of a unit performs: words in their tones, or an event.
 
     :meth:`ExpressionFormatter.format` returns one for each segment the
-    service performs, with what it actually performs: a mode or emphasis the
-    service can't perform is left out of ``modes``, and an event it can't
+    service performs, with what it actually performs: a tone or emphasis the
+    service can't perform is left out of ``tones``, and an event it can't
     perform has no span. Offsets are into the unit as the LLM wrote it, so
     :class:`~pipecat.expressive.spoken.SpokenExpression` can find which spans
     the text of each word the service reports covers.
 
     For ``"<<calm>> Hi [[laughs]]"`` on a service that performs both::
 
-        ExpressionSpan(8, 12, modes=["calm"])
+        ExpressionSpan(8, 12, tones=["calm"])
         ExpressionSpan(12, 22, event=(TextType.EXPRESSION_EVENT, "laughs"))
 
     Parameters:
         start: Where the stretch starts in the unit.
         end: Where it ends.
-        modes: The modes its words are spoken in, empty for the voice's
+        tones: The tones its words are spoken in, empty for the voice's
             baseline, or None for an event.
         event: The event or pause, as reported to clients: its text type,
             ``EXPRESSION_EVENT`` or ``EXPRESSION_PAUSE``, and its text, the
@@ -188,7 +188,7 @@ class ExpressionSpan:
 
     start: int
     end: int
-    modes: list[str] | None = None
+    tones: list[str] | None = None
     event: tuple[TextType, str] | None = None
 
 
@@ -196,8 +196,8 @@ class ExpressionFormatter:
     """Reads a TTS service's expression tags and formats its requests.
 
     A TTS service has one formatter, which follows a response from unit to
-    unit. A mode set in one sentence carries on into the next, until the next
-    mode tag or :meth:`reset`, which the service calls when the response ends
+    unit. A tone set in one sentence carries on into the next, until the next
+    tone tag or :meth:`reset`, which the service calls when the response ends
     or is interrupted. Call :meth:`parse` on each unit in order, then
     :meth:`format` to build its request. What the service can't perform is
     left out of the request, with one warning per tag.
@@ -235,22 +235,22 @@ class ExpressionFormatter:
         """
         self._adapter = adapter
         self._owner = owner
-        # The modes the next words of the response are spoken in.
-        self._active_modes: tuple[str, ...] = ()
-        # The modes of the words last formatted, so markup marks only changes.
-        self._formatted_modes: list[str] | None = None
+        # The tones the next words of the response are spoken in.
+        self._active_tones: tuple[str, ...] = ()
+        # The tones of the words last formatted, so markup marks only changes.
+        self._formatted_tones: list[str] | None = None
         self._unperformed: set[str] = set()
-        self._modes: list[str] = []
+        self._tones: list[str] = []
 
     @property
-    def modes(self) -> list[str]:
-        """The modes the latest request is spoken in, empty for the voice's baseline.
+    def tones(self) -> list[str]:
+        """The tones the latest request is spoken in, empty for the voice's baseline.
 
-        These are the modes its first words are spoken in. A service that
-        takes modes with each request, as a setting rather than as markup in
+        These are the tones its first words are spoken in. A service that
+        takes tones with each request, as a setting rather than as markup in
         the text, sends these.
         """
-        return self._modes
+        return self._tones
 
     def capabilities(self) -> ExpressionCapabilities | None:
         """The expression the service can perform now.
@@ -263,7 +263,7 @@ class ExpressionFormatter:
     def parse(self, text: str, *, whole: bool = False) -> list[Segment]:
         """Split a unit of text into segments.
 
-        Words take the modes in effect where they are written, which may have
+        Words take the tones in effect where they are written, which may have
         been set by an earlier unit of the response::
 
             formatter.parse("<<calm>> All set.")
@@ -273,7 +273,7 @@ class ExpressionFormatter:
 
         Text that stands on its own, such as a ``TTSSpeakFrame``'s spoken in
         the middle of a response, is parsed with ``whole=True``: it starts in
-        the voice's baseline, and the response's modes carry on after it::
+        the voice's baseline, and the response's tones carry on after it::
 
             formatter.parse("<<excited>> One moment.", whole=True)
             # [Text(" One moment.", ("excited",), 11, 23)]
@@ -289,45 +289,45 @@ class ExpressionFormatter:
             Its segments, in order. Spacing alone between two tags is a
             :class:`Text` of its own, so the request keeps it.
         """
-        response_modes = self._active_modes
+        response_tones = self._active_tones
         if whole:
-            self._active_modes = ()
+            self._active_tones = ()
         # The names the service declares keep their kind in either brackets.
         capabilities = self.capabilities()
         declared = capabilities or ExpressionCapabilities()
         events = {term.name for term in declared.events}
-        modes = {NEUTRAL_MODE, *(term.name for term in declared.modes)}
+        tones = {NEUTRAL_TONE, *(term.name for term in declared.tones)}
         segments: list[Segment] = []
         position = 0
         for match in _TAG.finditer(text):
             self._add_text(segments, text, position, match.start())
-            mode_tag, event_tag, stressed = match.groups()
+            tone_tag, event_tag, stressed = match.groups()
             if stressed is not None:
-                stressed_modes = (*self._active_modes, EMPHASIS_MODE)
-                segments.append(Text(stressed, stressed_modes, match.start(3), match.end(3)))
+                stressed_tones = (*self._active_tones, EMPHASIS_TONE)
+                segments.append(Text(stressed, stressed_tones, match.start(3), match.end(3)))
             else:
-                self._add_tag(segments, mode_tag, event_tag, match, events, modes)
+                self._add_tag(segments, tone_tag, event_tag, match, events, tones)
             position = match.end()
         self._add_text(segments, text, position, len(text))
         if whole:
-            self._active_modes = response_modes
+            self._active_tones = response_tones
         return segments
 
-    def restate_modes(self):
-        """Have the next request state its modes from its start.
+    def restate_tones(self):
+        """Have the next request state its tones from its start.
 
-        Markup marks only where the modes change, so a request continuing
+        Markup marks only where the tones change, so a request continuing
         the one before it doesn't repeat them. Text spoken in an audio context
         of its own, such as a ``TTSSpeakFrame``'s, follows no earlier request
         there, nor does the response's next request follow it, so the
         service calls this before and after it.
         """
-        self._formatted_modes = None
+        self._formatted_tones = None
 
     def reset(self):
         """Return to the baseline, as at the end of a response or an interruption."""
-        self._active_modes = ()
-        self._formatted_modes = None
+        self._active_tones = ()
+        self._formatted_tones = None
 
     @staticmethod
     def shown_text(segments: list[Segment], text_type: TextType | str) -> str:
@@ -377,7 +377,7 @@ class ExpressionFormatter:
 
         Each run of words goes through ``transform`` first, so text
         transforms such as markdown stripping never see markup, and is then
-        formatted by the adapter in the modes the service can perform. Events
+        formatted by the adapter in the tones the service can perform. Events
         and pauses are formatted at their places, except that punctuation
         written after one stays with the words before it, where the service
         reports it: ``"Hi [[laughs]], there."`` asks for ``"Hi, [laughs]
@@ -391,11 +391,11 @@ class ExpressionFormatter:
                 segments, TextType.SENTENCE, transform, trim
             )
             # request: '<emotion value="happy"/> It's [laughter] back up.'
-            # spans:   [ExpressionSpan(9, 15, modes=["happy"]),
+            # spans:   [ExpressionSpan(9, 15, tones=["happy"]),
             #           ExpressionSpan(15, 27, event=(EXPRESSION_EVENT, "laughter")),
-            #           ExpressionSpan(27, 28, modes=["happy"]),
-            #           ExpressionSpan(30, 34, modes=["happy"]),  # no emphasis
-            #           ExpressionSpan(36, 40, modes=["happy"])]
+            #           ExpressionSpan(27, 28, tones=["happy"]),
+            #           ExpressionSpan(30, 34, tones=["happy"]),  # no emphasis
+            #           ExpressionSpan(36, 40, tones=["happy"])]
 
         Args:
             segments: The unit's segments.
@@ -411,12 +411,12 @@ class ExpressionFormatter:
         """
         capabilities = self.capabilities()
         if text_type != TextType.TOKEN:
-            # A sentence's request states its modes from its start, since not
-            # every service keeps modes from one request to the next.
-            self._formatted_modes = None
+            # A sentence's request states its tones from its start, since not
+            # every service keeps tones from one request to the next.
+            self._formatted_tones = None
         parts: list[str] = []
         spans: list[ExpressionSpan] = []
-        first_modes: list[str] | None = None
+        first_tones: list[str] | None = None
         trimmed = False
         # Where the request's last words are, and whether an event or pause
         # was written after them.
@@ -424,14 +424,14 @@ class ExpressionFormatter:
         event_since_words = False
         for segment in segments:
             if isinstance(segment, Text):
-                modes = self._performed_modes(list(segment.modes), capabilities)
-                if first_modes is None and segment.text.strip():
-                    first_modes = modes
-                if capabilities and capabilities.mode_scope == ModeScope.SENTENCE:
-                    # One request takes one set of modes: the ones its words
-                    # start in. Clients are told the modes that were requested.
-                    modes = first_modes if first_modes is not None else modes
-                spans.append(ExpressionSpan(segment.start, segment.end, modes=modes))
+                tones = self._performed_tones(list(segment.tones), capabilities)
+                if first_tones is None and segment.text.strip():
+                    first_tones = tones
+                if capabilities and capabilities.tone_scope == ToneScope.SENTENCE:
+                    # One request takes one set of tones: the ones its words
+                    # start in. Clients are told the tones that were requested.
+                    tones = first_tones if first_tones is not None else tones
+                spans.append(ExpressionSpan(segment.start, segment.end, tones=tones))
                 if not segment.text.strip():
                     parts.append(segment.text)
                     continue
@@ -450,7 +450,7 @@ class ExpressionFormatter:
                 words = await transform(words_text, text_type) if words_text is not None else None
                 if words is not None:
                     words_at = len(parts)
-                    parts.append(self._format(words, modes))
+                    parts.append(self._format(words, tones))
             else:
                 event_since_words = True
                 if _performs(segment, capabilities):
@@ -459,8 +459,8 @@ class ExpressionFormatter:
                     parts.append(self._format_event(segment, capabilities))
                 else:
                     self._warn_unperformed(_tag(segment))
-        if first_modes is not None:
-            self._modes = first_modes
+        if first_tones is not None:
+            self._tones = first_tones
         request = _SPACES.sub(" ", "".join(parts))
         return (request if text_type == TextType.TOKEN else request.strip()), spans
 
@@ -475,67 +475,67 @@ class ExpressionFormatter:
             end = start + len(words)
         words = words.replace(_UNCLOSED_EMPHASIS, "")
         if words:
-            segments.append(Text(words, self._active_modes, start, end))
+            segments.append(Text(words, self._active_tones, start, end))
 
     def _add_tag(
         self,
         segments: list[Segment],
-        mode_tag: str | None,
+        tone_tag: str | None,
         event_tag: str | None,
         match: re.Match[str],
         events: set[str],
-        modes: set[str],
+        tones: set[str],
     ):
-        content = (mode_tag if mode_tag is not None else event_tag or "").strip()
-        if mode_tag is None:
+        content = (tone_tag if tone_tag is not None else event_tag or "").strip()
+        if tone_tag is None:
             pause = _PAUSE.fullmatch(content)
             if pause:
                 segments.append(Pause(int(pause.group(1)), match.start(), match.end()))
                 return
-            if content in modes and content not in events:
-                logger.warning(f"Reading a mode written in event brackets as a mode: {match[0]!r}")
-                self._set_modes(content)
+            if content in tones and content not in events:
+                logger.warning(f"Reading a tone written in event brackets as a tone: {match[0]!r}")
+                self._set_tones(content)
                 return
             segments.append(Event(content, match.start(), match.end()))
             return
-        if content in events and content not in modes:
-            logger.warning(f"Reading an event written in mode brackets as an event: {match[0]!r}")
+        if content in events and content not in tones:
+            logger.warning(f"Reading an event written in tone brackets as an event: {match[0]!r}")
             segments.append(Event(content, match.start(), match.end()))
             return
-        self._set_modes(content)
+        self._set_tones(content)
 
-    def _set_modes(self, content: str):
-        modes = tuple(content.split())
-        self._active_modes = () if modes == (NEUTRAL_MODE,) else modes
+    def _set_tones(self, content: str):
+        tones = tuple(content.split())
+        self._active_tones = () if tones == (NEUTRAL_TONE,) else tones
 
-    def _format(self, text: str, modes: list[str]) -> str:
-        """Format words to send to the TTS in their modes."""
+    def _format(self, text: str, tones: list[str]) -> str:
+        """Format words to send to the TTS in their tones."""
         # Leading spacing stays outside the markup, between the words.
         words = text.lstrip()
-        formatted = self._adapter().format_text(words, modes, self._formatted_modes)
-        self._formatted_modes = modes
+        formatted = self._adapter().format_text(words, tones, self._formatted_tones)
+        self._formatted_tones = tones
         return text[: len(text) - len(words)] + formatted
 
-    def _performed_modes(
-        self, modes: list[str], capabilities: ExpressionCapabilities | None
+    def _performed_tones(
+        self, tones: list[str], capabilities: ExpressionCapabilities | None
     ) -> list[str]:
-        """The modes the service can perform, warning once about each it can't."""
+        """The tones the service can perform, warning once about each it can't."""
         performed = []
-        for mode in modes:
-            if mode == EMPHASIS_MODE:
+        for tone in tones:
+            if tone == EMPHASIS_TONE:
                 supported = bool(capabilities and capabilities.emphasis)
             else:
                 supported = bool(
                     capabilities
                     and (
-                        capabilities.free_text_modes
-                        or any(term.name == mode for term in capabilities.modes)
+                        capabilities.free_text_tones
+                        or any(term.name == tone for term in capabilities.tones)
                     )
                 )
             if supported:
-                performed.append(mode)
+                performed.append(tone)
             else:
-                self._warn_unperformed("^^emphasis^^" if mode == EMPHASIS_MODE else f"<<{mode}>>")
+                self._warn_unperformed("^^emphasis^^" if tone == EMPHASIS_TONE else f"<<{tone}>>")
         return performed
 
     def _format_event(

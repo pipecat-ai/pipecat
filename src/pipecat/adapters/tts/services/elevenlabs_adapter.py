@@ -7,11 +7,11 @@
 """ElevenLabs expression adapter for Pipecat."""
 
 from pipecat.adapters.tts.base_expression_adapter import BaseExpressionAdapter
-from pipecat.expressive.expression import EMPHASIS_MODE, ExpressionCapabilities, ExpressionTerm
+from pipecat.expressive.expression import EMPHASIS_TONE, ExpressionCapabilities, ExpressionTerm
 
 # The audio tags in ElevenLabs' prompting guide for Eleven v3 and v4, sorted
 # into sounds made at one point and deliveries that last. Their guide doesn't
-# draw that line. Modes are single words, since a mode tag separates modes by
+# draw that line. Tones are single words, since a tone tag separates tones by
 # spaces, so multi-word deliveries such as accents aren't listed.
 _AUDIO_TAG_EVENTS = [
     ExpressionTerm("laughs"),
@@ -39,7 +39,7 @@ _AUDIO_TAG_EVENTS = [
     ExpressionTerm("fart", "sound effect"),
 ]
 
-_AUDIO_TAG_MODES = [
+_AUDIO_TAG_TONES = [
     ExpressionTerm("happy"),
     ExpressionTerm("excited"),
     ExpressionTerm("delighted"),
@@ -79,11 +79,11 @@ _AUDIO_TAG_MODES = [
 class ElevenLabsAudioTagExpressionAdapter(BaseExpressionAdapter):
     """Formats expression tags as Eleven v3 and v4 audio tags.
 
-    Part of expressive conversation (alpha). Modes and events are both audio
+    Part of expressive conversation (alpha). Tones and events are both audio
     tags, such as ``[excited]`` or ``[laughs]``, written in free text: the
     terms listed are the ones in ElevenLabs' prompting guide, and others
-    described in a few words work too. Emphasis is written in capitals. A mode
-    tag is written where the modes change; Eleven v3 and v4 have no tag for
+    described in a few words work too. Emphasis is written in capitals. A tone
+    tag is written where the tones change; Eleven v3 and v4 have no tag for
     the voice's baseline, so a return to it writes none. They don't support
     ``<break>``, so a pause is written as a short or long pause cue, which is
     approximate.
@@ -93,19 +93,19 @@ class ElevenLabsAudioTagExpressionAdapter(BaseExpressionAdapter):
         """Free-text audio tags, emphasis and approximate pauses."""
         return ExpressionCapabilities(
             events=list(_AUDIO_TAG_EVENTS),
-            modes=list(_AUDIO_TAG_MODES),
+            tones=list(_AUDIO_TAG_TONES),
             free_text_events=True,
-            free_text_modes=True,
+            free_text_tones=True,
             pause_range_ms=(100, 3000),
             emphasis=True,
         )
 
-    def format_text(self, text: str, modes: list[str], previous_modes: list[str] | None) -> str:
-        """Prefix audio tags where the modes change, and capitalize emphasis."""
-        if EMPHASIS_MODE in modes:
+    def format_text(self, text: str, tones: list[str], previous_tones: list[str] | None) -> str:
+        """Prefix audio tags where the tones change, and capitalize emphasis."""
+        if EMPHASIS_TONE in tones:
             text = text.upper()
-        tags = [mode for mode in modes if mode != EMPHASIS_MODE]
-        previous = [mode for mode in previous_modes or [] if mode != EMPHASIS_MODE]
+        tags = [tone for tone in tones if tone != EMPHASIS_TONE]
+        previous = [tone for tone in previous_tones or [] if tone != EMPHASIS_TONE]
         if tags and tags != previous:
             text = " ".join(f"[{tag}]" for tag in tags) + " " + text
         return text

@@ -77,7 +77,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         # Teach the LLM the expression tags the TTS can perform. MiniMax's
         # vocabulary is fixed, so the prompt lists all of it.
         capabilities = tts.get_expression_adapter().capabilities()
-        emotions = ", ".join(term.name for term in capabilities.modes)
+        emotions = ", ".join(term.name for term in capabilities.tones)
         sounds = ", ".join(f"[[{term.name}]]" for term in capabilities.events)
         system_instruction = f"""You are a warm, expressive assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Keep your responses brief.
 

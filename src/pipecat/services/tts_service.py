@@ -111,7 +111,7 @@ class TTSContext:
             speaking, forcing the assistant aggregator to commit its current
             text buffer to the conversation context.
         interruptible: Whether an interruption may discard this synthesis.
-        spoken_expression: The modes and events of the words the service
+        spoken_expression: The tones and events of the words the service
             reports speaking in this context. Part of expressive conversation
             (alpha).
     """
@@ -493,17 +493,17 @@ class TTSService(AIService):
         return self._expression_adapter
 
     @property
-    def expression_modes(self) -> list[str]:
-        """The modes the request being synthesized is spoken in.
+    def expression_tones(self) -> list[str]:
+        """The tones the request being synthesized is spoken in.
 
         Part of expressive conversation (alpha). Set before each request, for
-        a service that takes modes with the request, such as a style
+        a service that takes tones with the request, such as a style
         instruction, rather than as markup in its text.
 
         Returns:
-            The modes, empty for the voice's baseline.
+            The tones, empty for the voice's baseline.
         """
-        return self._expression_formatter.modes if self._expression_formatter else []
+        return self._expression_formatter.tones if self._expression_formatter else []
 
     def service_metadata_frame(self) -> TTSMetadataFrame | None:
         """Build the TTS metadata frame broadcast at start.
@@ -1226,10 +1226,10 @@ class TTSService(AIService):
             await self.push_frame(event, direction)
 
     def _report_expression(self, frame: Frame) -> tuple[list[TTSTextFrame], bool]:
-        """Give spoken text the modes it is spoken in, and report the events before it.
+        """Give spoken text the tones it is spoken in, and report the events before it.
 
         The text the service reports speaking covers part of the text the LLM
-        wrote, tags included, which tells its modes and the events performed
+        wrote, tags included, which tells its tones and the events performed
         since the text before it. Markup the service reports as a word stands
         for the event it performs, or isn't spoken.
 
@@ -1244,7 +1244,7 @@ class TTSService(AIService):
         context = self._tts_contexts.get(frame.context_id) if frame.context_id else None
         spoken = context.spoken_expression if context else None
         if isinstance(frame, AggregatedTextProgressFrame):
-            frame.modes = spoken.modes if spoken else None
+            frame.tones = spoken.tones if spoken else None
             return [], True
         if spoken is None:
             return [], not (frame.raw_text is None and _is_markup(frame.text))
@@ -1261,9 +1261,9 @@ class TTSService(AIService):
             return self._expression_event_frames(frame, events), True
         if frame.raw_text is None and _is_markup(frame.text):
             return [], False
-        modes, events = spoken.spoken(frame.raw_text)
-        if modes is not None:
-            frame.modes = modes
+        tones, events = spoken.spoken(frame.raw_text)
+        if tones is not None:
+            frame.tones = tones
         return self._expression_event_frames(frame, events), True
 
     def _expression_event_frames(
@@ -1430,9 +1430,9 @@ class TTSService(AIService):
         text_frame.interruptible = frame.interruptible
         if self._expression_formatter and frame.text_type in _EXPRESSIVE_TEXT_TYPES:
             # Text of its own, apart from any response it is spoken in the middle of.
-            self._expression_formatter.restate_modes()
+            self._expression_formatter.restate_tones()
             await self._speak_expression(text_frame, speak_context_id, whole=True)
-            self._expression_formatter.restate_modes()
+            self._expression_formatter.restate_tones()
         else:
             await self._handle_aggregated_text(text_frame, speak_context_id)
         # Force-promote the utterance's pending sentence into a real slot (streaming

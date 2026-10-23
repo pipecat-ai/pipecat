@@ -269,12 +269,12 @@ class TestFramesToEvents(unittest.TestCase):
         )
 
     def test_expression_from_messages(self):
-        # Expressive conversation reports what the TTS performed: where the modes
+        # Expressive conversation reports what the TTS performed: where the tones
         # of the spoken text change, and each event and pause.
         s = _stream(bot_audio=True)
 
         def bot_output(
-            segment_id, text_type="sentence", text="words", modes=None, status="in-progress"
+            segment_id, text_type="sentence", text="words", tones=None, status="in-progress"
         ):
             data = {
                 "text": text,
@@ -283,8 +283,8 @@ class TestFramesToEvents(unittest.TestCase):
                 "will_be_spoken": True,
                 "spoken_status": status,
             }
-            if modes is not None:
-                data["modes"] = modes
+            if tones is not None:
+                data["tones"] = tones
             return InputTransportMessageFrame(
                 message={"label": RTVI.MESSAGE_LABEL, "type": "bot-output", "data": data}
             )
@@ -295,14 +295,14 @@ class TestFramesToEvents(unittest.TestCase):
 
         s.frame_to_event(LLMFullResponseStartFrame())
         # Spoken text counts as it is spoken, not when it is announced.
-        self.assertIsNone(expression(bot_output(1, modes=["excited"], status="new")))
-        self.assertEqual(expression(bot_output(1, modes=["excited"])), "<<excited>>")
-        self.assertIsNone(expression(bot_output(1, modes=["excited"], status="completed")))
+        self.assertIsNone(expression(bot_output(1, tones=["excited"], status="new")))
+        self.assertEqual(expression(bot_output(1, tones=["excited"])), "<<excited>>")
+        self.assertIsNone(expression(bot_output(1, tones=["excited"], status="completed")))
         self.assertEqual(
-            expression(bot_output(2, modes=["excited", "emphasis"])), "<<excited emphasis>>"
+            expression(bot_output(2, tones=["excited", "emphasis"])), "<<excited emphasis>>"
         )
-        # Modes can change within a segment, word by word.
-        self.assertEqual(expression(bot_output(2, modes=["calm"])), "<<calm>>")
+        # Tones can change within a segment, word by word.
+        self.assertEqual(expression(bot_output(2, tones=["calm"])), "<<calm>>")
         # An event counts when it is heard, once.
         self.assertIsNone(expression(bot_output(3, "expression_event", "laughter", status="new")))
         self.assertEqual(
@@ -316,14 +316,14 @@ class TestFramesToEvents(unittest.TestCase):
             expression(bot_output(4, "expression_pause", "600", status="completed")),
             "[[pause 600]]",
         )
-        self.assertEqual(expression(bot_output(5, modes=["excited"])), "<<excited>>")
-        self.assertIsNone(expression(bot_output(6, modes=["excited"])))
-        self.assertEqual(expression(bot_output(7, modes=[])), "<<neutral>>")
-        # Without expressive conversation, spoken text carries no modes.
+        self.assertEqual(expression(bot_output(5, tones=["excited"])), "<<excited>>")
+        self.assertIsNone(expression(bot_output(6, tones=["excited"])))
+        self.assertEqual(expression(bot_output(7, tones=[])), "<<neutral>>")
+        # Without expressive conversation, spoken text carries no tones.
         self.assertIsNone(expression(bot_output(8)))
         # Each response starts from the baseline.
         s.frame_to_event(LLMFullResponseStartFrame())
-        self.assertIsNone(expression(bot_output(9, modes=[])))
+        self.assertIsNone(expression(bot_output(9, tones=[])))
 
     def test_transcription_frame_is_ignored_by_the_sink(self):
         # The user aggregator consumes the STT's TranscriptionFrames to build the

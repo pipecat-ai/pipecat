@@ -23,23 +23,23 @@ from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
 
 
 class DeclaredAdapter(BaseExpressionAdapter):
-    """Declares events and modes, and formats modes as <modes> where they change."""
+    """Declares events and tones, and formats tones as <tones> where they change."""
 
-    def __init__(self, events=(), modes=()):
+    def __init__(self, events=(), tones=()):
         self.events = list(events)
-        self.modes = list(modes)
+        self.tones = list(tones)
 
     def capabilities(self):
         return ExpressionCapabilities(
             events=[ExpressionTerm(name) for name in self.events],
-            modes=[ExpressionTerm(name) for name in self.modes],
+            tones=[ExpressionTerm(name) for name in self.tones],
             pause_range_ms=(100, 1000),
             emphasis=True,
         )
 
-    def format_text(self, text, modes, previous_modes):
-        changed = modes != (previous_modes or [])
-        return f"<{','.join(modes)}> {text}" if changed and modes else text
+    def format_text(self, text, tones, previous_tones):
+        changed = tones != (previous_tones or [])
+        return f"<{','.join(tones)}> {text}" if changed and tones else text
 
     def format_event(self, name):
         return f" <{name}> "
@@ -50,14 +50,14 @@ def formatter(**kwargs) -> ExpressionFormatter:
     return ExpressionFormatter(lambda: adapter, owner="tts")
 
 
-def words(text: str, modes: tuple[str, ...]):
+def words(text: str, tones: tuple[str, ...]):
     """A Text segment, compared without its position."""
-    return ("text", text, modes)
+    return ("text", text, tones)
 
 
 def shape(segment: Segment):
     if isinstance(segment, Text):
-        return words(segment.text, segment.modes)
+        return words(segment.text, segment.tones)
     if isinstance(segment, Event):
         return ("event", segment.name)
     return ("pause", segment.duration_ms)
@@ -104,7 +104,7 @@ def test_several_modes_are_separated_by_spaces():
     assert parse("<<cheerful calm>>Hi") == [words("Hi", ("cheerful", "calm"))]
 
 
-def test_a_mode_lasts_until_the_next_mode_tag_across_units():
+def test_a_tone_lasts_until_the_next_tone_tag_across_units():
     parser = formatter()
 
     assert [shape(s) for s in parser.parse("<<calm>>One. ")] == [words("One. ", ("calm",))]
@@ -126,7 +126,7 @@ def test_the_modes_end_with_the_response():
     assert [shape(s) for s in parser.parse("Two")] == [words("Two", ())]
 
 
-def test_text_that_stands_on_its_own_leaves_the_responses_modes():
+def test_text_that_stands_on_its_own_leaves_the_responses_tones():
     parser = formatter()
     parser.parse("<<calm>>One. ")
 
@@ -134,7 +134,7 @@ def test_text_that_stands_on_its_own_leaves_the_responses_modes():
     assert [shape(s) for s in parser.parse("Two.")] == [words("Two.", ("calm",))]
 
 
-def test_a_mode_tag_ending_the_text_says_nothing():
+def test_a_tone_tag_ending_the_text_says_nothing():
     assert parse("Bye! <<warm>>") == [words("Bye! ", ())]
 
 
@@ -156,11 +156,11 @@ def test_anything_else_between_the_brackets_is_passed_on_as_written(text, segmen
     assert parse(text)[0] == segment
 
 
-def test_a_declared_mode_in_event_brackets_sets_the_mode():
-    assert parse("[[cheerful]] Hi", modes=["cheerful"]) == [words(" Hi", ("cheerful",))]
+def test_a_declared_tone_in_event_brackets_sets_the_tone():
+    assert parse("[[cheerful]] Hi", tones=["cheerful"]) == [words(" Hi", ("cheerful",))]
 
 
-def test_a_declared_event_in_mode_brackets_stays_an_event():
+def test_a_declared_event_in_tone_brackets_stays_an_event():
     assert parse("<<laugh>> Hi", events=["laugh"]) == [("event", "laugh"), words(" Hi", ())]
 
 
@@ -176,7 +176,7 @@ def test_a_declared_event_in_mode_brackets_stays_an_event():
     ],
 )
 def test_text_that_only_looks_like_a_tag_is_spoken(text):
-    assert parse(text, modes=["cheerful"]) == [words(text, ())]
+    assert parse(text, tones=["cheerful"]) == [words(text, ())]
 
 
 def test_a_tag_left_unfinished_is_removed():
@@ -184,7 +184,7 @@ def test_a_tag_left_unfinished_is_removed():
     assert parse("Thanks for calling. [[") == [words("Thanks for calling. ", ())]
 
 
-def test_emphasis_is_added_to_the_active_modes():
+def test_emphasis_is_added_to_the_active_tones():
     assert parse("<<calm>>It's ^^fixed^^ now.") == [
         words("It's ", ("calm",)),
         words("fixed", ("calm", "emphasis")),
@@ -222,9 +222,9 @@ def test_emphasis_that_never_closes_is_spoken_plainly():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("mode", [TextType.TOKEN, TextType.SENTENCE])
-async def test_an_aggregator_keeps_each_tag_in_one_unit(mode):
-    aggregator = SkipTagsAggregator(EXPRESSION_TAGS, aggregation_type=mode)
+@pytest.mark.parametrize("tone", [TextType.TOKEN, TextType.SENTENCE])
+async def test_an_aggregator_keeps_each_tag_in_one_unit(tone):
+    aggregator = SkipTagsAggregator(EXPRESSION_TAGS, aggregation_type=tone)
     units = []
     for chunk in ["<<chee", "rful>> It's [[la", "ugh]] ^^back", " up^", "^ now."]:
         units += [a.text async for a in aggregator.aggregate(chunk)]
@@ -242,7 +242,7 @@ def test_names_declared_after_the_formatter_is_made_are_known():
     expression = ExpressionFormatter(lambda: adapter, owner="tts")
     adapter.events = ["laugh"]
 
-    # A declared event keeps its kind in mode brackets.
+    # A declared event keeps its kind in tone brackets.
     segments = expression.parse("<<laugh>> Hi.")
 
     assert isinstance(segments[0], Event) and segments[0].name == "laugh"
@@ -262,7 +262,7 @@ async def same(words, text_type):
 
 @pytest.mark.asyncio
 async def test_a_request_formats_what_the_service_performs_and_says_where():
-    expression = formatter(events=["laugh"], modes=["calm"])
+    expression = formatter(events=["laugh"], tones=["calm"])
     text = "<<calm>> Hi. [[laugh]] [[pause 50]]"
 
     request, spans = await expression.format(
@@ -271,9 +271,9 @@ async def test_a_request_formats_what_the_service_performs_and_says_where():
 
     assert request == "<calm> Hi. <laugh>"
     assert spans == [
-        ExpressionSpan(8, 13, modes=["calm"]),
+        ExpressionSpan(8, 13, tones=["calm"]),
         ExpressionSpan(13, 22, event=(TextType.EXPRESSION_EVENT, "laugh")),
-        ExpressionSpan(22, 23, modes=["calm"]),
+        ExpressionSpan(22, 23, tones=["calm"]),
         ExpressionSpan(23, 35, event=(TextType.EXPRESSION_PAUSE, "100")),
     ]
 
@@ -311,4 +311,4 @@ async def test_a_request_leaves_out_what_the_service_cant_perform():
     request, spans = await expression.format(segments, TextType.SENTENCE, same, lambda w: w)
 
     assert request == "Hi."
-    assert spans == [ExpressionSpan(8, 13, modes=[])]
+    assert spans == [ExpressionSpan(8, 13, tones=[])]

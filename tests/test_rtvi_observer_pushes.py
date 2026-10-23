@@ -357,9 +357,9 @@ class TestRTVIObserverSegments(unittest.IsolatedAsyncioTestCase):
     async def test_a_segment_reports_the_modes_of_each_word_as_it_is_spoken(self):
         segment = self._segment("I'm back", TextType.SENTENCE)
         first = self._progress(segment, "I'm", " back")
-        first.modes = ["calm"]
+        first.tones = ["calm"]
         second = self._progress(segment, "I'm back", "")
-        second.modes = ["excited", "emphasis"]
+        second.tones = ["excited", "emphasis"]
         await self._push(segment)
         await self._push(self._word("I'm", segment))
         await self._push(first)
@@ -367,7 +367,7 @@ class TestRTVIObserverSegments(unittest.IsolatedAsyncioTestCase):
         await self._push(second)
 
         self.assertEqual(
-            [(data.spoken_status, data.modes) for data in self._sent_outputs()],
+            [(data.spoken_status, data.tones) for data in self._sent_outputs()],
             [("new", None), ("in-progress", ["calm"]), ("completed", ["excited", "emphasis"])],
         )
 
@@ -378,7 +378,7 @@ class TestRTVIObserverSegments(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             [
-                (d.text, d.text_type, d.spoken_status, d.segment_id, d.modes)
+                (d.text, d.text_type, d.spoken_status, d.segment_id, d.tones)
                 for d in self._sent_outputs()
             ],
             [("laugh", TextType.EXPRESSION_EVENT, "completed", laugh.id, None)],

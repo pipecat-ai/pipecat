@@ -550,15 +550,15 @@ async def test_dialogue_word_timestamps_report_audio_tags_as_words():
 class TestAudioTagExpressionAdapter:
     def test_capabilities(self):
         capabilities = ElevenLabsAudioTagExpressionAdapter().capabilities()
-        assert capabilities.free_text_modes
+        assert capabilities.free_text_tones
         assert capabilities.free_text_events
         assert capabilities.emphasis
         assert capabilities.pause_range_ms == (100, 3000)
 
     def test_modes_are_single_words(self):
-        # A mode tag separates modes by spaces.
+        # A tone tag separates tones by spaces.
         capabilities = ElevenLabsAudioTagExpressionAdapter().capabilities()
-        assert all(len(term.name.split()) == 1 for term in capabilities.modes)
+        assert all(len(term.name.split()) == 1 for term in capabilities.tones)
 
     def test_tags_formatted_where_modes_change(self):
         adapter = ElevenLabsAudioTagExpressionAdapter()
